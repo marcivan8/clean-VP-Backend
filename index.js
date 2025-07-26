@@ -1,4 +1,3 @@
-// index.js
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
@@ -18,27 +17,36 @@ app.use(express.json());
 const upload = multer({ dest: 'uploads/' });
 
 app.post('/analyze', upload.single('video'), async (req, res) => {
-  try {
-    const filePath = req.file.path;
+  if (!req.file) {
+    return res.status(400).json({ error: 'No video file uploaded.' });
+  }
 
-    // 1. Transcrire la vidéo
+  const filePath = req.file.path;
+  const { title = '', description = '' } = req.body;
+
+  try {
+    console.log('🔁 Transcription en cours...');
     const transcript = await transcribeAudio(filePath);
 
-    // 2. Analyser la transcription
+    console.log('📊 Analyse en cours...');
     const result = analyzeVideo({
-      title: req.body.title,
-      description: req.body.description,
+      title,
+      description,
       transcript,
     });
 
-    // 3. Supprimer la vidéo temporaire
-    fs.unlink(filePath, () => {});
+    console.log('✅ Analyse terminée');
 
     res.json(result);
   } catch (err) {
-    console.error(err);
+    console.error('❌ Erreur pendant l’analyse :', err);
     res.status(500).json({ error: 'Video analysis failed.' });
+  } finally {
+    // Nettoyage du fichier temporaire même en cas d’erreur
+    fs.unlink(filePath, (unlinkErr) => {
+      if (unlinkErr) console.error('Erreur suppression fichier:', unlinkErr);
+    });
   }
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

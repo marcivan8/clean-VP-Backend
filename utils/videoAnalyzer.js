@@ -1,39 +1,54 @@
-// utils/videoAnalyzer.js
-
 function analyzeVideo({ title, description, transcript }) {
   const insights = [];
+  const wordCount = transcript.split(' ').length;
+  const lowerTranscript = transcript.toLowerCase();
+  const lowerTitle = title.toLowerCase();
+  const lowerDescription = description.toLowerCase();
 
-  const length = transcript.split(' ').length;
-
-  // Analyse de la longueur
-  if (length < 100) {
+  // 1. Analyse de la longueur
+  if (wordCount < 100) {
     insights.push("Essayez d’ajouter plus de contenu pour améliorer l'engagement.");
-  } else if (length > 300) {
-    insights.push("La vidéo semble longue — pensez à garder l’attention de l’audience.");
+  } else if (wordCount > 300) {
+    insights.push("La vidéo semble longue — pensez à maintenir l’attention de l’audience.");
+  } else {
+    insights.push("Bonne longueur pour capter l’attention.");
   }
 
-  // Vérification d’un appel à l’action (CTA)
-  const hasCTA = /(abonnez|like|comment|follow|clique|share|regarde jusqu’à la fin)/i.test(transcript);
+  // 2. Vérification d’un appel à l’action (CTA)
+  const hasCTA = /(abonnez|like|comment|follow|clique|partage|share|regarde jusqu’à la fin|découvre|swipe)/i.test(lowerTranscript);
   if (!hasCTA) {
     insights.push("Ajoutez un appel à l'action pour encourager l'engagement.");
+  } else {
+    insights.push("Présence d’un appel à l’action détectée ✅");
   }
 
-  // Déduction de la meilleure plateforme
+  // 3. Thématique/plateforme
   let platform = "TikTok";
-  if (length > 200) platform = "YouTube Shorts";
-  if (title.toLowerCase().includes("business") || description.toLowerCase().includes("linkedin")) {
+  if (wordCount > 200) platform = "YouTube Shorts";
+
+  if (lowerTitle.includes("business") || lowerDescription.includes("linkedin") || lowerTranscript.includes("réseau")) {
     platform = "LinkedIn";
+  } else if (lowerTitle.includes("startup") || lowerDescription.includes("founder") || lowerTranscript.includes("entrepreneur")) {
+    platform = "X (Twitter)";
+  } else if (lowerTranscript.includes("musique") || lowerTranscript.includes("mode")) {
+    platform = "Instagram Reels";
   }
 
-  // Calcul d’un score de viralité simple
-  let score = 50;
+  // 4. Score de viralité
+  let score = 40;
+
   if (hasCTA) score += 20;
-  if (length >= 100 && length <= 300) score += 30;
+  if (wordCount >= 100 && wordCount <= 300) score += 30;
+  if (platform === "TikTok") score += 5;
+  if (platform === "Instagram Reels") score += 5;
+
+  if (score > 100) score = 100;
 
   return {
-    platformSuggestion: platform,
     viralityScore: score,
+    platformSuggestion: platform,
     insights,
+    wordCount,
   };
 }
 
