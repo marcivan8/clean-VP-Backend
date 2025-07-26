@@ -2,7 +2,8 @@ const path = require("path");
 const fs = require("fs");
 const analyzeVideo = require("../utils/videoAnalyzer");
 
-exports.analyze = async (req, res) => {
+// Contrôleur pour analyser une vidéo
+const analyzeVideoHandler = async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: "No video file uploaded." });
@@ -11,22 +12,28 @@ exports.analyze = async (req, res) => {
     const videoPath = req.file.path;
     const { title, description } = req.body;
 
-    console.log("Analyzing video:", videoPath);
-    console.log("Title:", title);
-    console.log("Description:", description);
+    console.log("🎬 Analyzing video:", videoPath);
+    console.log("📝 Title:", title);
+    console.log("📝 Description:", description);
 
     const results = await analyzeVideo(videoPath, title, description);
 
-    // Optionally delete the uploaded video after analysis
+    // Supprimer la vidéo après analyse
     fs.unlink(videoPath, (err) => {
-      if (err) console.warn("Failed to delete uploaded file:", err);
+      if (err) console.warn("⚠️ Failed to delete uploaded file:", err);
     });
 
     return res.json(results);
 
   } catch (error) {
     console.error("❌ Error during video analysis:", error.message || error);
-    console.error(error.stack); // full error stack trace
+    console.error(error.stack); // Stack trace pour debug
     return res.status(500).json({ error: "Video analysis failed." });
   }
 };
+
+// Exporter sous le bon nom attendu par analyzeRoutes.js
+module.exports = {
+  analyzeVideo: analyzeVideoHandler
+};
+
