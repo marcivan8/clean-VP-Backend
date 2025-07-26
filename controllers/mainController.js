@@ -3,58 +3,60 @@ const fs = require("fs");
 const { OpenAI } = require("openai");
 const { analyzeVideo } = require("../utils/videoAnalyzer");
 
+// Instancier OpenAI avec clé API
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
 const analyzeVideoHandler = async (req, res) => {
   try {
+    // ✅ Vérifier la présence du fichier vidéo
     if (!req.file) {
-      return res.status(400).json({ error: "No video file uploaded." });
+      return res.status(400).json({ error: "Aucun fichier vidéo envoyé." });
     }
 
     const videoPath = req.file.path;
     const { title = "", description = "" } = req.body;
 
-    console.log("🎬 Analyzing video:", videoPath);
-    console.log("📝 Title:", title);
-    console.log("📝 Description:", description);
+    console.log("🎬 Analyse vidéo :", videoPath);
+    console.log("📝 Titre :", title);
+    console.log("📝 Description :", description);
 
-    // Transcrire audio/vidéo avec OpenAI Whisper
+    // ✅ Transcription via Whisper API
     console.log("🔁 Transcription en cours...");
-    const transcription = await openai.audio.transcriptions.create({
-      file: fs.createReadStream(videoPath),
-      model: "whisper-1",
-    });
+    let transcript = "";
 
-    const transcript = transcription.text;
-    console.log("📄 Transcription terminée :", transcript);
+    try {
+      const transcription = await openai.audio.transcriptions.create({
+        file: fs.createReadStream(videoPath),
+        model: "whisper-1",
+      });
+      transcript = transcription.text;
+      console.log("📄 Transcription terminée :", transcript);
+    } catch (transcriptionError) {
+      console.error("❌ Erreur de transcription :", transcriptionError.message);
+      throw new Error("Erreur de connexion à l'API OpenAI pour la transcription.");
+    }
 
-    // Analyser la transcription
-    const results = analyzeVideo({
-      title,
-      description,
-      transcript,
-    });
+    // ✅ Analyse de la vidéo
+    const results = analyzeVideo({ title, description, transcript });
 
-    // Supprimer fichier temporaire
+    // ✅ Supprimer le fichier temporaire
     fs.unlink(videoPath, (err) => {
-      if (err) console.warn("⚠️ Failed to delete uploaded file:", err);
+      if (err) console.warn("⚠️ Impossible de supprimer le fichier temporaire :", err);
     });
 
-    // Retourner la transcription + l’analyse
+    // ✅ Retourner la réponse
     return res.json({
       transcript,
       analysis: results,
     });
   } catch (error) {
-    console.error("❌ Error during video analysis:", error.message || error);
-    console.error(error.stack);
-    return res.status(500).json({ error: "Video analysis failed." });
+    console.error("❌ Erreur d'analyse vidéo :", error.message || error);
+    return res.status(500).json({ error: error.message || "Échec de l'analyse vidéo." });
   }
 };
 
 module.exports = {
   analyzeVideoHandler,
 };
-
