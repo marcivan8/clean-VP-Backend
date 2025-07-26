@@ -1,38 +1,40 @@
-// videoAnalyzer.js
-const transcribeAudio = require('./transcribe');
+// utils/videoAnalyzer.js
 
-async function analyzeVideo(filePath, { title, description }) {
-  // 1. Transcription
-  const transcript = await transcribeAudio(filePath);
+function analyzeVideo({ title, description, transcript }) {
+  const insights = [];
 
-  // 2. Analyse simple (tu pourras enrichir plus tard)
-  const wordCount = transcript.split(' ').length;
-  const hasCallToAction = /(subscribe|like|comment|follow|partage)/i.test(transcript);
-  const hasQuestions = /(\?|how|why|what|comment|pourquoi|qui|où|quand)/i.test(transcript);
+  const length = transcript.split(' ').length;
 
-  // 3. Scoring basique
+  // Analyse de la longueur
+  if (length < 100) {
+    insights.push("Essayez d’ajouter plus de contenu pour améliorer l'engagement.");
+  } else if (length > 300) {
+    insights.push("La vidéo semble longue — pensez à garder l’attention de l’audience.");
+  }
+
+  // Vérification d’un appel à l’action (CTA)
+  const hasCTA = /(abonnez|like|comment|follow|clique|share|regarde jusqu’à la fin)/i.test(transcript);
+  if (!hasCTA) {
+    insights.push("Ajoutez un appel à l'action pour encourager l'engagement.");
+  }
+
+  // Déduction de la meilleure plateforme
+  let platform = "TikTok";
+  if (length > 200) platform = "YouTube Shorts";
+  if (title.toLowerCase().includes("business") || description.toLowerCase().includes("linkedin")) {
+    platform = "LinkedIn";
+  }
+
+  // Calcul d’un score de viralité simple
   let score = 50;
-  if (hasCallToAction) score += 15;
-  if (hasQuestions) score += 15;
-  if (wordCount > 150) score += 10;
+  if (hasCTA) score += 20;
+  if (length >= 100 && length <= 300) score += 30;
 
   return {
-    title,
-    description,
-    transcript,
-    wordCount,
-    hasCallToAction,
-    hasQuestions,
-    score: Math.min(score, 100),
-    platformInsights: {
-      tiktok: {
-        tips: hasCallToAction
-          ? 'Parfait, tu encourages l’engagement.'
-          : 'Ajoute un appel à l’action pour booster l’engagement.',
-        optimalLength: '15–60 secondes',
-      },
-    },
+    platformSuggestion: platform,
+    viralityScore: score,
+    insights,
   };
 }
 
-module.exports = analyzeVideo;
+module.exports = { analyzeVideo };
