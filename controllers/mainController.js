@@ -1,34 +1,32 @@
-const fs = require('fs');
-const { transcribeAudio } = require('../utils/transcribe');
-const { analyzeVideo: analyzeCore } = require('../utils/videoAnalyzer');
+const path = require("path");
+const fs = require("fs");
+const analyzeVideo = require("../utils/videoAnalyzer");
 
-exports.analyzeVideo = async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No video file uploaded.' });
-  }
-
-  const filePath = req.file.path;
-  const { title = '', description = '' } = req.body;
-
+exports.analyze = async (req, res) => {
   try {
-    console.log('🔁 Transcription en cours...');
-    const transcript = await transcribeAudio(filePath);
+    if (!req.file) {
+      return res.status(400).json({ error: "No video file uploaded." });
+    }
 
-    console.log('📊 Analyse en cours...');
-    const result = analyzeCore({
-      title,
-      description,
-      transcript,
+    const videoPath = req.file.path;
+    const { title, description } = req.body;
+
+    console.log("Analyzing video:", videoPath);
+    console.log("Title:", title);
+    console.log("Description:", description);
+
+    const results = await analyzeVideo(videoPath, title, description);
+
+    // Optionally delete the uploaded video after analysis
+    fs.unlink(videoPath, (err) => {
+      if (err) console.warn("Failed to delete uploaded file:", err);
     });
 
-    console.log('✅ Analyse terminée');
-    res.json(result);
-  } catch (err) {
-    console.error('❌ Erreur pendant l’analyse :', err);
-    res.status(500).json({ error: 'Video analysis failed.' });
-  } finally {
-    fs.unlink(filePath, (err) => {
-      if (err) console.error('Erreur suppression fichier:', err);
-    });
+    return res.json(results);
+
+  } catch (error) {
+    console.error("❌ Error during video analysis:", error.message || error);
+    console.error(error.stack); // full error stack trace
+    return res.status(500).json({ error: "Video analysis failed." });
   }
 };
