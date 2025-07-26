@@ -1,25 +1,21 @@
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
-require('dotenv').config();
-
-const analyzeRoutes = require('./routes/analyzeRoutes');
+const express = require("express");
+const cors = require("cors");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-app.use(cors());
+app.use(cors({
+  origin: "https://viral-pilot-production.up.railway.app", // frontend origin
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type"],
+}));
+
+// other middlewares
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Servir les fichiers uploadés (optionnel)
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// your routes
+app.use("/analyze", require("./routes/analyzeRoutes"));
 
-// Route pour l’analyse vidéo
-app.use('/api/analyze', analyzeRoutes);
-
-// Route test de base
-app.get('/', (req, res) => {
-  res.send('✅ Backend is up and running.');
-});
-
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+// start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
