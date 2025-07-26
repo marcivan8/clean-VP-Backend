@@ -1,18 +1,22 @@
 const fs = require('fs');
-const path = require('path');
 const { OpenAI } = require('openai');
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 async function transcribeAudio(filePath) {
-  const file = fs.createReadStream(path.resolve(filePath));
-  const response = await openai.audio.transcriptions.create({
-    file,
-    model: 'whisper-1',
-    response_format: 'text',
-  });
+  try {
+    const transcription = await openai.audio.transcriptions.create({
+      file: fs.createReadStream(filePath),
+      model: 'whisper-1',
+    });
 
-  return response;
+    return transcription.text;
+  } catch (error) {
+    console.error('Erreur transcription:', error);
+    throw new Error('Transcription failed');
+  }
 }
 
 module.exports = { transcribeAudio };

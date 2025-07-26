@@ -1,70 +1,34 @@
-const path = require('path');
 const fs = require('fs');
-const { OpenAI } = require('openai');
-const { analyzeVideo } = require('../utils/videoAnalyzer');
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const { transcribeAudio } = require('../utils/transcribe');
+const { analyzeVideo: analyzeCore } = require('../utils/videoAnalyzer');
 
 exports.analyzeVideo = async (req, res) => {
   if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
+    return res.status(400).json({ error: 'No video file uploaded.' });
   }
 
-  if (!process.env.OPENAI_API_KEY) {
-    return res.status(500).json({ error: 'OpenAI API key is missing in environment variables.' });
-  }
-
-  const filePath = path.join(__dirname, '../uploads', req.file.filename);
-  const mimeType = req.file.mimetype;
-
-  // Only allow audio or video files
-  if (!mimeType.startsWith('video/') && !mimeType.startsWith('audio/')) {
-    // Clean uploaded file if invalid type
-    fs.unlink(filePath, (err) => {
-      if (err) console.warn(`Failed to delete uploaded file: ${filePath}`);
-    });
-    return res.status(400).json({ error: 'Only audio or video files are allowed.' });
-  }
+  const filePath = req.file.path;
+  const { title = '', description = '' } = req.body;
 
   try {
-    console.log(`Analyzing file: ${req.file.originalname} (${mimeType})`);
+    console.log('🔁 Transcription en cours...');
+    const transcript = await transcribeAudio(filePath);
 
-    // Transcribe audio/video using OpenAI Whisper API
-    const transcription = await openai.audio.transcriptions.create({
-      file: fs.createReadStream(filePath),
-      model: 'whisper-1',
+    console.log('📊 Analyse en cours...');
+    const result = analyzeCore({
+      title,
+      description,
+      transcript,
     });
 
-    const transcriptText = transcription.text;
-    console.log('Transcription complete.');
-
-    // Analyze transcription using your video analyzer
-    const analysis = analyzeVideo({
-      transcript: transcriptText,
-      title: req.body.title || '',
-      description: req.body.description || '',
-    });
-
-    // Delete uploaded file after processing
+    console.log('✅ Analyse terminée');
+    res.json(result);
+  } catch (err) {
+    console.error('❌ Erreur pendant l’analyse :', err);
+    res.status(500).json({ error: 'Video analysis failed.' });
+  } finally {
     fs.unlink(filePath, (err) => {
-      if (err) console.warn(`Failed to delete uploaded file: ${filePath}`);
+      if (err) console.error('Erreur suppression fichier:', err);
     });
-
-    // Return analysis + transcription
-    res.status(200).json({
-      success: true,
-      transcript: transcriptText,
-      analysis,
-    });
-
-  } catch (error) {
-    console.error('Error analyzing video:', error);
-
-    // Attempt to clean uploaded file on error
-    fs.unlink(filePath, (err) => {
-      if (err) console.warn(`Failed to delete uploaded file: ${filePath}`);
-    });
-
-    res.status(500).json({ error: 'Failed to analyze video' });
   }
 };
