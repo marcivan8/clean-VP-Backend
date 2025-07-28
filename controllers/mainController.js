@@ -4,7 +4,7 @@ const { OpenAI } = require("openai");
 const { analyzeVideo } = require("../utils/videoAnalyzer");
 
 // Instancier OpenAI avec clé API
-const openai = new OpenAI({
+const OpenAI = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
