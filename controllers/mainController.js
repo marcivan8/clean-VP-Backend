@@ -1,6 +1,6 @@
 const path = require("path");
 const fs = require("fs");
-const { OpenAI } = require("openai");
+const  OpenAI  = require("openai");
 const { analyzeVideo } = require("../utils/videoAnalyzer");
 
 // Instancier OpenAI avec clé API
