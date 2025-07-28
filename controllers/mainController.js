@@ -1,10 +1,11 @@
 const path = require("path");
 const fs = require("fs");
-const  OpenAI  = require("openai");
+const OpenAI = require("openai"); // ✅ Corrigé ici
+
 const { analyzeVideo } = require("../utils/videoAnalyzer");
 
-// Instancier OpenAI avec clé API
-const OpenAI = new OpenAI({
+// ✅ Instancier OpenAI avec clé API
+const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
