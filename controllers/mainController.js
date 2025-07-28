@@ -1,6 +1,6 @@
 const path = require("path");
 const fs = require("fs");
-const OpenAI = require("openai"); // ✅ Corrigé ici
+const OpenAI = require("openai");
 
 const { analyzeVideo } = require("../utils/videoAnalyzer");
 
@@ -22,6 +22,7 @@ const analyzeVideoHandler = async (req, res) => {
     console.log("🎬 Analyse vidéo :", videoPath);
     console.log("📝 Titre :", title);
     console.log("📝 Description :", description);
+    console.log("🔐 Clé API chargée (partielle) :", process.env.OPENAI_API_KEY?.slice(0, 8) + "...");
 
     // ✅ Transcription via Whisper API
     console.log("🔁 Transcription en cours...");
@@ -35,7 +36,7 @@ const analyzeVideoHandler = async (req, res) => {
       transcript = transcription.text;
       console.log("📄 Transcription terminée :", transcript);
     } catch (transcriptionError) {
-      console.error("❌ Erreur de transcription :", transcriptionError.message);
+      console.error("❌ Erreur de transcription détaillée :", transcriptionError.response?.data || transcriptionError.message);
       throw new Error("Erreur de connexion à l'API OpenAI pour la transcription.");
     }
 
@@ -52,6 +53,7 @@ const analyzeVideoHandler = async (req, res) => {
       transcript,
       analysis: results,
     });
+
   } catch (error) {
     console.error("❌ Erreur d'analyse vidéo :", error.message || error);
     return res.status(500).json({ error: error.message || "Échec de l'analyse vidéo." });
