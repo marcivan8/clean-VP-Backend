@@ -1,3 +1,5 @@
+require("dotenv").config(); // ← Charge les variables d'environnement depuis .env
+
 const express = require("express");
 const cors = require("cors");
 
@@ -18,4 +20,4 @@ app.use("/analyze", require("./routes/analyzeRoutes"));
 
 // start server
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
