@@ -1,3 +1,9 @@
+const path = require("path");
+const fs = require("fs");
+const openai = require("openai");
+const { extractAudio } = require("../utils/extractAudio");
+const { analyzeVideo } = require("../utils/videoAnalyzer");
+
 const analyzeVideoHandler = async (req, res) => {
   try {
     if (!req.file) {
@@ -54,5 +60,6 @@ const analyzeVideoHandler = async (req, res) => {
     console.error("❌ Erreur lors de l'analyse :", err.message);
     res.status(500).json({ error: "Erreur lors de l'analyse" });
   }
-  module.exports = { analyzeVideoHandler };
 };
+
+module.exports = { analyzeVideoHandler };
