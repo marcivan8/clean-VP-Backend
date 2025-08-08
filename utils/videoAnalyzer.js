@@ -1,3 +1,10 @@
+// ✅ API key validation at runtime
+if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY.startsWith('=')) {
+  console.error('❌ Invalid or missing OPENAI_API_KEY detected at startup.');
+  console.error('Loaded value (partially):', process.env.OPENAI_API_KEY?.slice(0, 8) + '...');
+  throw new Error('Missing or invalid OpenAI API key. Check Railway environment variables.');
+}
+
 function analyzeVideo({ title, description, transcript }) {
   const insights = [];
 
