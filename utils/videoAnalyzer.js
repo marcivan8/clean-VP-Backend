@@ -1,97 +1,46 @@
-function analyzeVideo({ title, description, transcript, duration }) {
+function analyzeVideo({ title, description, transcript, durationSeconds = 60 }) {
   const insights = [];
-  const text = transcript.toLowerCase();
-  const wordCount = transcript.split(/\s+/).filter(Boolean).length;
+  const text = [title, description, transcript].join(" ").toLowerCase();
 
-  // Calculate speech rate (words per second)
-  const speechRate = duration > 0 ? wordCount / duration : 0;
+  // Video length categories
+  const isVeryShort = durationSeconds < 30;
+  const isShort = durationSeconds <= 60;
+  const isMedium = durationSeconds <= 180;
 
-  // Hook detection (first 10 words)
-  const firstWords = transcript.split(/\s+/).slice(0, 10).join(" ");
-  const hasHook = /(imagine|saviez-vous|breaking|attention|incroyable|vous ne croirez pas|breaking news|alert)/i.test(firstWords);
+  // Keywords for platforms
+  const hasBusinessKeywords = /business|career|growth|linkedin/.test(text);
+  const hasTrendKeywords = /dance|funny|viral|challenge/.test(text);
+  const hasNewsKeywords = /news|breaking|update|trending/.test(text);
 
-  // Emotional words detection
-  const emotionalWords = ["incroyable", "puissant", "urgent", "secret", "nouveau", "choc", "révélé"];
-  const emotionalCount = emotionalWords.filter(word => text.includes(word)).length;
+  // Platform suggestion default
+  let platform = "TikTok";
+  if (hasBusinessKeywords) platform = "LinkedIn";
+  else if (hasNewsKeywords && isVeryShort) platform = "X (Twitter)";
+  else if (hasTrendKeywords && (isShort || isVeryShort)) platform = "Instagram Reels";
+  else if (isMedium) platform = "YouTube Shorts";
 
-  // Call to action detection
-  const hasCTA = /(abonnez|like|comment|follow|clique|share|retweet|regarde jusqu’à la fin)/i.test(text);
+  // Simple scoring
+  let score = 50;
 
-  // Keyword analysis for tone
-  const businessKeywords = /(business|linkedin|management|b2b|entreprise|stratégie)/i.test(text);
-  const trendingKeywords = /(tendance|viral|trend|nouveau challenge|challenge)/i.test(text);
+  if (platform === "LinkedIn" && text.length > 200) score += 30;
+  if ((platform === "TikTok" || platform === "Instagram Reels") && isShort) score += 30;
+  if (platform === "X (Twitter)" && isVeryShort) score += 30;
+  if (platform === "YouTube Shorts" && isMedium) score += 30;
 
-  // Platform scoring profiles including optimal speech rate (words/sec)
-  const platforms = {
-    TikTok: { lengthRange: [60, 120], speechRateRange: [3, 5], hookWeight: 0.3, ctaWeight: 0.3, emotionWeight: 0.3, keywordBoost: trendingKeywords ? 5 : 0 },
-    InstagramReels: { lengthRange: [80, 150], speechRateRange: [2.5, 4.5], hookWeight: 0.25, ctaWeight: 0.3, emotionWeight: 0.35, keywordBoost: trendingKeywords ? 5 : 0 },
-    YouTubeShorts: { lengthRange: [150, 250], speechRateRange: [1.5, 3], hookWeight: 0.3, ctaWeight: 0.2, emotionWeight: 0.2, keywordBoost: 0 },
-    X: { lengthRange: [50, 100], speechRateRange: [4, 6], hookWeight: 0.25, ctaWeight: 0.25, emotionWeight: 0.2, keywordBoost: trendingKeywords ? 10 : 0 },
-    LinkedIn: { lengthRange: [150, 300], speechRateRange: [1, 2.5], hookWeight: 0.1, ctaWeight: 0.2, emotionWeight: 0.1, keywordBoost: businessKeywords ? 15 : 0 }
-  };
-
-  // Calculate scores per platform
-  const platformScores = {};
-  for (const [platform, cfg] of Object.entries(platforms)) {
-    let score = 0;
-
-    // Length match
-    if (wordCount >= cfg.lengthRange[0] && wordCount <= cfg.lengthRange[1]) score += 30;
-
-    // Speech rate match (score out of 30)
-    if (speechRate >= cfg.speechRateRange[0] && speechRate <= cfg.speechRateRange[1]) {
-      score += 30;
-    } else {
-      // Penalize the further speechRate is from the range
-      const dist = Math.min(
-        Math.abs(speechRate - cfg.speechRateRange[0]),
-        Math.abs(speechRate - cfg.speechRateRange[1])
-      );
-      const penalty = Math.min(dist * 10, 30);
-      score += 30 - penalty;
-    }
-
-    // Hook score
-    if (hasHook) score += cfg.hookWeight * 30;
-
-    // CTA score
-    if (hasCTA) score += cfg.ctaWeight * 30;
-
-    // Emotion score
-    score += Math.min(emotionalCount * 5, cfg.emotionWeight * 30);
-
-    // Keyword boost
-    score += cfg.keywordBoost;
-
-    platformScores[platform] = Math.min(Math.round(score), 100);
+  // Improvement suggestions
+  if (score < 70) {
+    insights.push("Essayez d'adapter la durée et le contenu pour mieux correspondre à la plateforme suggérée.");
+  }
+  if (!/(like|comment|share|follow|subscribe)/i.test(text)) {
+    insights.push("Ajoutez un appel à l'action pour encourager l'engagement.");
   }
 
-  // Sort platforms by score
-  const sortedPlatforms = Object.entries(platformScores)
-    .sort((a, b) => b[1] - a[1])
-    .map(([platform, score]) => ({ platform, score }));
-
-  const bestPlatform = sortedPlatforms[0].platform;
-  const topPlatforms = sortedPlatforms.slice(0, 3);
-
-  // Insights
-  if (!hasHook) insights.push("Ajoutez un 'hook' fort dans les premières secondes.");
-  if (!hasCTA) insights.push("Ajoutez un appel à l'action.");
-  if (emotionalCount === 0) insights.push("Utilisez plus de mots émotionnels.");
-  if (wordCount < 50) insights.push("Contenu trop court — développez un peu.");
-  if (wordCount > 300) insights.push("Contenu long — condensez pour plus d'impact.");
-  if (speechRate < 1) insights.push("La parole est trop lente, essayez de parler plus rapidement.");
-  if (speechRate > 6) insights.push("La parole est trop rapide, pensez à ralentir un peu.");
-
   return {
-    bestPlatform,
-    topPlatforms,
-    platformScores,
+    platformSuggestion: platform,
+    viralityScore: score,
     insights,
-    speechRate: speechRate.toFixed(2),
-    wordCount,
-    duration: Math.round(duration),
   };
 }
 
 module.exports = { analyzeVideo };
+
