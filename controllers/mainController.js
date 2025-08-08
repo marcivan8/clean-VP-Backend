@@ -54,4 +54,5 @@ const analyzeVideoHandler = async (req, res) => {
     console.error("❌ Erreur lors de l'analyse :", err.message);
     res.status(500).json({ error: "Erreur lors de l'analyse" });
   }
+  module.exports = { analyzeVideoHandler };
 };
