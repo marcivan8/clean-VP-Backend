@@ -49,22 +49,9 @@ function analyzeVideo({ title, description, transcript }) {
     platformScores[platform] = Math.min(score, 100);
   }
 
-  // Determine best platform by score
-  const bestPlatform = Object.entries(platformScores)
-    .sort((a, b) => b[1] - a[1])[0][0];
+  const bestPlatform = Object.keys(platformScores).reduce((a, b) => platformScores[a] > platformScores[b] ? a : b);
 
-  // Insights for improvements
-  if (!hasHook) insights.push("Ajoutez un 'hook' fort dans les premières secondes.");
-  if (!hasCTA) insights.push("Ajoutez un appel à l'action.");
-  if (emotionalCount === 0) insights.push("Utilisez plus de mots émotionnels.");
-  if (wordCount < 50) insights.push("Contenu trop court — développez un peu.");
-  if (wordCount > 300) insights.push("Contenu long — condensez pour plus d'impact.");
-
-  return {
-    bestPlatform,
-    platformScores,
-    insights,
-  };
+  return { bestPlatform, platformScores, insights };
 }
 
 module.exports = { analyzeVideo };
