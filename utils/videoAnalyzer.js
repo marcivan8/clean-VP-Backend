@@ -1,7 +1,10 @@
-function analyzeVideo({ title, description, transcript }) {
+function analyzeVideo({ title, description, transcript, duration }) {
   const insights = [];
   const text = transcript.toLowerCase();
-  const wordCount = transcript.split(/\s+/).length;
+  const wordCount = transcript.split(/\s+/).filter(Boolean).length;
+
+  // Calculate speech rate (words per second)
+  const speechRate = duration > 0 ? wordCount / duration : 0;
 
   // Hook detection (first 10 words)
   const firstWords = transcript.split(/\s+/).slice(0, 10).join(" ");
@@ -18,13 +21,13 @@ function analyzeVideo({ title, description, transcript }) {
   const businessKeywords = /(business|linkedin|management|b2b|entreprise|stratégie)/i.test(text);
   const trendingKeywords = /(tendance|viral|trend|nouveau challenge|challenge)/i.test(text);
 
-  // Platform scoring profiles
+  // Platform scoring profiles including optimal speech rate (words/sec)
   const platforms = {
-    TikTok: { lengthRange: [60, 120], hookWeight: 0.3, ctaWeight: 0.3, emotionWeight: 0.3, keywordBoost: trendingKeywords ? 5 : 0 },
-    InstagramReels: { lengthRange: [80, 150], hookWeight: 0.25, ctaWeight: 0.3, emotionWeight: 0.35, keywordBoost: trendingKeywords ? 5 : 0 },
-    YouTubeShorts: { lengthRange: [150, 250], hookWeight: 0.3, ctaWeight: 0.2, emotionWeight: 0.2, keywordBoost: 0 },
-    X: { lengthRange: [50, 100], hookWeight: 0.25, ctaWeight: 0.25, emotionWeight: 0.2, keywordBoost: trendingKeywords ? 10 : 0 },
-    LinkedIn: { lengthRange: [150, 300], hookWeight: 0.1, ctaWeight: 0.2, emotionWeight: 0.1, keywordBoost: businessKeywords ? 15 : 0 }
+    TikTok: { lengthRange: [60, 120], speechRateRange: [3, 5], hookWeight: 0.3, ctaWeight: 0.3, emotionWeight: 0.3, keywordBoost: trendingKeywords ? 5 : 0 },
+    InstagramReels: { lengthRange: [80, 150], speechRateRange: [2.5, 4.5], hookWeight: 0.25, ctaWeight: 0.3, emotionWeight: 0.35, keywordBoost: trendingKeywords ? 5 : 0 },
+    YouTubeShorts: { lengthRange: [150, 250], speechRateRange: [1.5, 3], hookWeight: 0.3, ctaWeight: 0.2, emotionWeight: 0.2, keywordBoost: 0 },
+    X: { lengthRange: [50, 100], speechRateRange: [4, 6], hookWeight: 0.25, ctaWeight: 0.25, emotionWeight: 0.2, keywordBoost: trendingKeywords ? 10 : 0 },
+    LinkedIn: { lengthRange: [150, 300], speechRateRange: [1, 2.5], hookWeight: 0.1, ctaWeight: 0.2, emotionWeight: 0.1, keywordBoost: businessKeywords ? 15 : 0 }
   };
 
   // Calculate scores per platform
@@ -34,6 +37,19 @@ function analyzeVideo({ title, description, transcript }) {
 
     // Length match
     if (wordCount >= cfg.lengthRange[0] && wordCount <= cfg.lengthRange[1]) score += 30;
+
+    // Speech rate match (score out of 30)
+    if (speechRate >= cfg.speechRateRange[0] && speechRate <= cfg.speechRateRange[1]) {
+      score += 30;
+    } else {
+      // Penalize the further speechRate is from the range
+      const dist = Math.min(
+        Math.abs(speechRate - cfg.speechRateRange[0]),
+        Math.abs(speechRate - cfg.speechRateRange[1])
+      );
+      const penalty = Math.min(dist * 10, 30);
+      score += 30 - penalty;
+    }
 
     // Hook score
     if (hasHook) score += cfg.hookWeight * 30;
@@ -64,12 +80,17 @@ function analyzeVideo({ title, description, transcript }) {
   if (emotionalCount === 0) insights.push("Utilisez plus de mots émotionnels.");
   if (wordCount < 50) insights.push("Contenu trop court — développez un peu.");
   if (wordCount > 300) insights.push("Contenu long — condensez pour plus d'impact.");
+  if (speechRate < 1) insights.push("La parole est trop lente, essayez de parler plus rapidement.");
+  if (speechRate > 6) insights.push("La parole est trop rapide, pensez à ralentir un peu.");
 
   return {
     bestPlatform,
     topPlatforms,
     platformScores,
-    insights
+    insights,
+    speechRate: speechRate.toFixed(2),
+    wordCount,
+    duration: Math.round(duration),
   };
 }
 
