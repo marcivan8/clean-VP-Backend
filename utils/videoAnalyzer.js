@@ -1,46 +1,103 @@
-function analyzeVideo({ title, description, transcript, durationSeconds = 60 }) {
+function analyzeVideo({ title, description, transcript }) {
   const insights = [];
-  const text = [title, description, transcript].join(" ").toLowerCase();
+  const text = transcript.toLowerCase();
+  const wordCount = transcript.split(/\s+/).length;
 
-  // Video length categories
-  const isVeryShort = durationSeconds < 30;
-  const isShort = durationSeconds <= 60;
-  const isMedium = durationSeconds <= 180;
+  // Hook detection
+  const firstWords = transcript.split(/\s+/).slice(0, 10).join(" ");
+  const hasHook = /(imagine|saviez-vous|breaking|attention|incroyable|vous ne croirez pas|breaking news|alert)/i.test(firstWords);
 
-  // Keywords for platforms
-  const hasBusinessKeywords = /business|career|growth|linkedin/.test(text);
-  const hasTrendKeywords = /dance|funny|viral|challenge/.test(text);
-  const hasNewsKeywords = /news|breaking|update|trending/.test(text);
+  // Emotional words detection
+  const emotionalWords = ["incroyable", "puissant", "urgent", "secret", "nouveau", "choc", "révélé"];
+  const emotionalCount = emotionalWords.filter(word => text.includes(word)).length;
 
-  // Platform suggestion default
-  let platform = "TikTok";
-  if (hasBusinessKeywords) platform = "LinkedIn";
-  else if (hasNewsKeywords && isVeryShort) platform = "X (Twitter)";
-  else if (hasTrendKeywords && (isShort || isVeryShort)) platform = "Instagram Reels";
-  else if (isMedium) platform = "YouTube Shorts";
+  // Call to action
+  const hasCTA = /(abonnez|like|comment|follow|clique|share|retweet|regarde jusqu’à la fin)/i.test(text);
 
-  // Simple scoring
-  let score = 50;
+  // Keyword analysis for tone
+  const businessKeywords = /(business|linkedin|management|b2b|entreprise|stratégie)/i.test(text);
+  const trendingKeywords = /(tendance|viral|trend|nouveau challenge|challenge)/i.test(text);
 
-  if (platform === "LinkedIn" && text.length > 200) score += 30;
-  if ((platform === "TikTok" || platform === "Instagram Reels") && isShort) score += 30;
-  if (platform === "X (Twitter)" && isVeryShort) score += 30;
-  if (platform === "YouTube Shorts" && isMedium) score += 30;
+  // Define platform profiles
+  const platforms = {
+    TikTok: {
+      lengthRange: [60, 120],
+      hookWeight: 0.3,
+      ctaWeight: 0.3,
+      emotionWeight: 0.3,
+      keywordBoost: trendingKeywords ? 5 : 0
+    },
+    InstagramReels: {
+      lengthRange: [80, 150],
+      hookWeight: 0.25,
+      ctaWeight: 0.3,
+      emotionWeight: 0.35,
+      keywordBoost: trendingKeywords ? 5 : 0
+    },
+    YouTubeShorts: {
+      lengthRange: [150, 250],
+      hookWeight: 0.3,
+      ctaWeight: 0.2,
+      emotionWeight: 0.2,
+      keywordBoost: 0
+    },
+    X: {
+      lengthRange: [50, 100],
+      hookWeight: 0.25,
+      ctaWeight: 0.25,
+      emotionWeight: 0.2,
+      keywordBoost: trendingKeywords ? 10 : 0
+    },
+    LinkedIn: {
+      lengthRange: [150, 300],
+      hookWeight: 0.1,
+      ctaWeight: 0.2,
+      emotionWeight: 0.1,
+      keywordBoost: businessKeywords ? 15 : 0
+    }
+  };
 
-  // Improvement suggestions
-  if (score < 70) {
-    insights.push("Essayez d'adapter la durée et le contenu pour mieux correspondre à la plateforme suggérée.");
+  // Score calculation per platform
+  const platformScores = {};
+  for (const [platform, config] of Object.entries(platforms)) {
+    let score = 0;
+
+    // Length score
+    if (wordCount >= config.lengthRange[0] && wordCount <= config.lengthRange[1]) {
+      score += 30;
+    }
+
+    // Hook score
+    if (hasHook) score += config.hookWeight * 30;
+
+    // CTA score
+    if (hasCTA) score += config.ctaWeight * 30;
+
+    // Emotion score
+    score += Math.min(emotionalCount * 5, config.emotionWeight * 30);
+
+    // Keyword boost
+    score += config.keywordBoost;
+
+    platformScores[platform] = Math.min(Math.round(score), 100);
   }
-  if (!/(like|comment|share|follow|subscribe)/i.test(text)) {
-    insights.push("Ajoutez un appel à l'action pour encourager l'engagement.");
-  }
+
+  // Best platform suggestion
+  const bestPlatform = Object.entries(platformScores)
+    .sort((a, b) => b[1] - a[1])[0][0];
+
+  // Insights
+  if (!hasHook) insights.push("Ajoutez un 'hook' fort dans les premières secondes.");
+  if (!hasCTA) insights.push("Ajoutez un appel à l'action.");
+  if (emotionalCount === 0) insights.push("Utilisez plus de mots émotionnels.");
+  if (wordCount < 50) insights.push("Contenu trop court — développez un peu.");
+  if (wordCount > 300) insights.push("Contenu long — condensez pour plus d'impact.");
 
   return {
-    platformSuggestion: platform,
-    viralityScore: score,
-    insights,
+    bestPlatform,
+    platformScores,
+    insights
   };
 }
 
 module.exports = { analyzeVideo };
-
