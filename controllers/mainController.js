@@ -1,7 +1,7 @@
 const path = require("path");
 const fs = require("fs");
 const openai = require("openai");
-const { extractAudio } = require("../utils/extractAudio");
+const { extractAudio } = require("../utils/compressVideo");
 const { analyzeVideo } = require("../utils/videoAnalyzer");
 
 const analyzeVideoHandler = async (req, res) => {
