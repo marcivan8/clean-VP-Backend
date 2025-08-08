@@ -1,13 +1,3 @@
-const path = require("path");
-const fs = require("fs");
-const OpenAI = require("openai");
-const { analyzeVideo } = require("../utils/videoAnalyzer");
-const { extractAudio } = require("../utils/compressVideo");
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 const analyzeVideoHandler = async (req, res) => {
   try {
     if (!req.file) {
@@ -44,6 +34,7 @@ const analyzeVideoHandler = async (req, res) => {
 
     // Analyse
     const results = analyzeVideo({ title, description, transcript });
+    console.log("📊 Résultats de l'analyse :", results);
 
     // Clean up uploaded and extracted files
     [videoPath, audioPath].forEach((file) =>
@@ -59,11 +50,8 @@ const analyzeVideoHandler = async (req, res) => {
       platformScores: results.platformScores,
       insights: results.insights,
     });
-
-  } catch (error) {
-    console.error("❌ Erreur d'analyse vidéo :", error.message || error);
-    res.status(500).json({ error: error.message || "Échec de l'analyse vidéo." });
+  } catch (err) {
+    console.error("❌ Erreur lors de l'analyse :", err.message);
+    res.status(500).json({ error: "Erreur lors de l'analyse" });
   }
 };
-
-module.exports = { analyzeVideoHandler };
