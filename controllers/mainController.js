@@ -45,16 +45,19 @@ const analyzeVideoHandler = async (req, res) => {
     // Analyse
     const results = analyzeVideo({ title, description, transcript });
 
-    // Clean up
+    // Clean up uploaded and extracted files
     [videoPath, audioPath].forEach((file) =>
       fs.unlink(file, (err) => {
         if (err) console.warn(`⚠️ Impossible de supprimer ${file}:`, err);
       })
     );
 
+    // Return transcription and detailed analysis including platform and scores
     res.json({
       transcript,
-      analysis: results,
+      bestPlatform: results.bestPlatform,
+      platformScores: results.platformScores,
+      insights: results.insights,
     });
 
   } catch (error) {
