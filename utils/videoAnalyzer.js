@@ -1,47 +1,75 @@
-// ✅ API key validation at runtime
-if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY.startsWith('=')) {
-  console.error('❌ Invalid or missing OPENAI_API_KEY detected at startup.');
-  console.error('Loaded value (partially):', process.env.OPENAI_API_KEY?.slice(0, 8) + '...');
-  throw new Error('Missing or invalid OpenAI API key. Check Railway environment variables.');
-}
-
 function analyzeVideo({ title, description, transcript }) {
   const insights = [];
+  const text = transcript.toLowerCase();
+  const wordCount = transcript.split(/\s+/).length;
 
-  const wordCount = transcript.split(' ').length;
+  // Hook detection (first 10 words)
+  const firstWords = transcript.split(/\s+/).slice(0, 10).join(" ");
+  const hasHook = /(imagine|saviez-vous|breaking|attention|incroyable|vous ne croirez pas|breaking news|alert)/i.test(firstWords);
 
-  // Analyse de la longueur
-  if (wordCount < 100) {
-    insights.push("Essayez d’ajouter plus de contenu pour améliorer l'engagement.");
-  } else if (wordCount > 300) {
-    insights.push("La vidéo semble longue — pensez à garder l’attention de l’audience.");
+  // Emotional words detection
+  const emotionalWords = ["incroyable", "puissant", "urgent", "secret", "nouveau", "choc", "révélé"];
+  const emotionalCount = emotionalWords.filter(word => text.includes(word)).length;
+
+  // Call to action detection
+  const hasCTA = /(abonnez|like|comment|follow|clique|share|retweet|regarde jusqu’à la fin)/i.test(text);
+
+  // Keyword analysis for tone
+  const businessKeywords = /(business|linkedin|management|b2b|entreprise|stratégie)/i.test(text);
+  const trendingKeywords = /(tendance|viral|trend|nouveau challenge|challenge)/i.test(text);
+
+  // Platform scoring profiles
+  const platforms = {
+    TikTok: { lengthRange: [60, 120], hookWeight: 0.3, ctaWeight: 0.3, emotionWeight: 0.3, keywordBoost: trendingKeywords ? 5 : 0 },
+    InstagramReels: { lengthRange: [80, 150], hookWeight: 0.25, ctaWeight: 0.3, emotionWeight: 0.35, keywordBoost: trendingKeywords ? 5 : 0 },
+    YouTubeShorts: { lengthRange: [150, 250], hookWeight: 0.3, ctaWeight: 0.2, emotionWeight: 0.2, keywordBoost: 0 },
+    X: { lengthRange: [50, 100], hookWeight: 0.25, ctaWeight: 0.25, emotionWeight: 0.2, keywordBoost: trendingKeywords ? 10 : 0 },
+    LinkedIn: { lengthRange: [150, 300], hookWeight: 0.1, ctaWeight: 0.2, emotionWeight: 0.1, keywordBoost: businessKeywords ? 15 : 0 }
+  };
+
+  // Calculate scores per platform
+  const platformScores = {};
+  for (const [platform, cfg] of Object.entries(platforms)) {
+    let score = 0;
+
+    // Length match
+    if (wordCount >= cfg.lengthRange[0] && wordCount <= cfg.lengthRange[1]) score += 30;
+
+    // Hook score
+    if (hasHook) score += cfg.hookWeight * 30;
+
+    // CTA score
+    if (hasCTA) score += cfg.ctaWeight * 30;
+
+    // Emotion score
+    score += Math.min(emotionalCount * 5, cfg.emotionWeight * 30);
+
+    // Keyword boost
+    score += cfg.keywordBoost;
+
+    platformScores[platform] = Math.min(Math.round(score), 100);
   }
 
-  // Vérification d’un appel à l’action (CTA)
-  const hasCTA = /(abonnez|like|comment|follow|clique|share|regarde jusqu’à la fin)/i.test(transcript);
-  if (!hasCTA) {
-    insights.push("Ajoutez un appel à l'action pour encourager l'engagement.");
-  }
+  // Sort platforms by score
+  const sortedPlatforms = Object.entries(platformScores)
+    .sort((a, b) => b[1] - a[1])
+    .map(([platform, score]) => ({ platform, score }));
 
-  // Déduction de la meilleure plateforme
-  let platform = "TikTok";
-  if (wordCount > 200) platform = "YouTube Shorts";
-  if (
-    title.toLowerCase().includes("business") ||
-    description.toLowerCase().includes("linkedin")
-  ) {
-    platform = "LinkedIn";
-  }
+  const bestPlatform = sortedPlatforms[0].platform;
+  const topPlatforms = sortedPlatforms.slice(0, 3);
 
-  // Calcul d’un score de viralité simple
-  let score = 50;
-  if (hasCTA) score += 20;
-  if (wordCount >= 100 && wordCount <= 300) score += 30;
+  // Insights
+  if (!hasHook) insights.push("Ajoutez un 'hook' fort dans les premières secondes.");
+  if (!hasCTA) insights.push("Ajoutez un appel à l'action.");
+  if (emotionalCount === 0) insights.push("Utilisez plus de mots émotionnels.");
+  if (wordCount < 50) insights.push("Contenu trop court — développez un peu.");
+  if (wordCount > 300) insights.push("Contenu long — condensez pour plus d'impact.");
 
   return {
-    platformSuggestion: platform,
-    viralityScore: score,
-    insights,
+    bestPlatform,
+    topPlatforms,
+    platformScores,
+    insights
   };
 }
 
