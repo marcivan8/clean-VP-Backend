@@ -1,8 +1,14 @@
 const path = require("path");
 const fs = require("fs");
 const OpenAI = require("openai");
-
 const { analyzeVideo } = require("../utils/videoAnalyzer");
+
+// ✅ Check API key at startup
+if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY.startsWith('=')) {
+  console.error("❌ Invalid or missing OPENAI_API_KEY detected at startup.");
+  console.error("Loaded value (partially):", process.env.OPENAI_API_KEY?.slice(0, 8) + "...");
+  throw new Error("Missing or invalid OpenAI API key. Check Railway environment variables.");
+}
 
 // ✅ Instancier OpenAI avec clé API
 const openai = new OpenAI({
