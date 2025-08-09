@@ -22,12 +22,12 @@ const analyzeVideoHandler = async (req, res) => {
     console.log("📝 Titre :", title);
     console.log("📝 Description :", description);
 
-    // Extract audio from video
+    // Extract audio
     console.log("🎧 Extraction audio en cours...");
     await extractAudio(videoPath, audioPath);
     console.log("✅ Audio extrait :", audioPath);
 
-    // Transcription with Whisper
+    // Transcription
     console.log("🔁 Transcription en cours...");
     let transcript = "";
     try {
@@ -42,27 +42,27 @@ const analyzeVideoHandler = async (req, res) => {
       throw new Error("Erreur de connexion à l'API OpenAI pour la transcription.");
     }
 
-    // Analyze transcript + metadata
+    // Analyse
     const results = analyzeVideo({ title, description, transcript });
     console.log("📊 Résultats de l'analyse :", results);
 
-    // Clean up files
+    // Clean up
     [videoPath, audioPath].forEach((file) =>
       fs.unlink(file, (err) => {
         if (err) console.warn(`⚠️ Impossible de supprimer ${file}:`, err);
       })
     );
 
-    // Send the response with consistent keys expected by frontend
+    // Return simplified results with matching keys
     res.json({
       transcript,
-      viralityScore: results.platformScores ? results.platformScores[results.bestPlatform] || 0 : 0,
-      platformSuggestion: results.bestPlatform || "Unknown",
-      insights: results.insights || [],
+      viralityScore: results.viralityScore,
+      bestPlatform: results.bestPlatform,
+      insights: results.insights,
     });
 
   } catch (err) {
-    console.error("❌ Erreur lors de l'analyse :", err.message || err);
+    console.error("❌ Erreur lors de l'analyse :", err.message);
     res.status(500).json({ error: "Erreur lors de l'analyse" });
   }
 };
