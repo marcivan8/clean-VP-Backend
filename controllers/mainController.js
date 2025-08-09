@@ -1,4 +1,3 @@
-// controllers/videoController.js
 const path = require("path");
 const fs = require("fs");
 const OpenAI = require("openai");
@@ -23,12 +22,12 @@ const analyzeVideoHandler = async (req, res) => {
     console.log("📝 Titre :", title);
     console.log("📝 Description :", description);
 
-    // Extract audio
+    // Extract audio from video
     console.log("🎧 Extraction audio en cours...");
     await extractAudio(videoPath, audioPath);
     console.log("✅ Audio extrait :", audioPath);
 
-    // Transcription
+    // Transcription with Whisper
     console.log("🔁 Transcription en cours...");
     let transcript = "";
     try {
@@ -36,34 +35,34 @@ const analyzeVideoHandler = async (req, res) => {
         file: fs.createReadStream(audioPath),
         model: "whisper-1",
       });
-      transcript = transcription.text || "";
+      transcript = transcription.text;
       console.log("📄 Transcription terminée :", transcript);
     } catch (err) {
       console.error("❌ Erreur de transcription :", err.message);
       throw new Error("Erreur de connexion à l'API OpenAI pour la transcription.");
     }
 
-    // Analyse
-    const { bestPlatform, platformScores, insights } = analyzeVideo({ title, description, transcript });
-    console.log("📊 Résultats de l'analyse :", { bestPlatform, platformScores, insights });
+    // Analyze transcript + metadata
+    const results = analyzeVideo({ title, description, transcript });
+    console.log("📊 Résultats de l'analyse :", results);
 
-    // Clean up uploaded and extracted files
+    // Clean up files
     [videoPath, audioPath].forEach((file) =>
       fs.unlink(file, (err) => {
         if (err) console.warn(`⚠️ Impossible de supprimer ${file}:`, err);
       })
     );
 
-    // Send complete analysis to frontend
+    // Send the response with consistent keys expected by frontend
     res.json({
       transcript,
-      bestPlatform,
-      platformScores,
-      insights,
+      viralityScore: results.platformScores ? results.platformScores[results.bestPlatform] || 0 : 0,
+      platformSuggestion: results.bestPlatform || "Unknown",
+      insights: results.insights || [],
     });
 
   } catch (err) {
-    console.error("❌ Erreur lors de l'analyse :", err.message);
+    console.error("❌ Erreur lors de l'analyse :", err.message || err);
     res.status(500).json({ error: "Erreur lors de l'analyse" });
   }
 };
