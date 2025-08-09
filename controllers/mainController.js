@@ -1,10 +1,9 @@
 const path = require("path");
 const fs = require("fs");
-const OpenAI = require("openai"); // ✅ Use correct constructor
+const OpenAI = require("openai");
 const { extractAudio } = require("../utils/compressVideo");
 const { analyzeVideo } = require("../utils/videoAnalyzer");
 
-// ✅ Initialize OpenAI client with API key
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -40,7 +39,6 @@ const analyzeVideoHandler = async (req, res) => {
       console.log("📄 Transcription terminée :", transcript);
     } catch (err) {
       console.error("❌ Erreur de transcription :", err.message);
-      // ✅ Return partial result instead of crashing
       return res.status(500).json({
         error: "Erreur de transcription audio.",
         details: err.message,
@@ -58,12 +56,15 @@ const analyzeVideoHandler = async (req, res) => {
       })
     );
 
-    // ✅ Send complete response with all fields
+    // ✅ Return in the original structure expected by frontend
     res.json({
       transcript,
-      bestPlatform: results.bestPlatform,
-      platformScores: results.platformScores,
-      insights: results.insights,
+      analysis: {
+        platformSuggestion: results.bestPlatform,
+        viralityScore: results.viralityScore,
+        insights: results.insights,
+        platformScores: results.platformScores, // Optional extra data
+      },
     });
   } catch (err) {
     console.error("❌ Erreur lors de l'analyse :", err.message);
