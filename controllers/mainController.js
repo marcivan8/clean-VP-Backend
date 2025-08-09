@@ -1,12 +1,17 @@
+// controllers/mainController.js
 const path = require("path");
 const fs = require("fs");
 const OpenAI = require("openai");
-const { extractAudio } = require("../utils/compressVideo");
+const { extractAudio } = require("../utils/compressVideo"); // garde ce fichier
 const { analyzeVideo } = require("../utils/videoAnalyzer");
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
+
+async function safeUnlink(file) {
+  try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch (e) { console.warn("Cannot delete file:", file, e); }
+}
 
 const analyzeVideoHandler = async (req, res) => {
   try {
@@ -22,48 +27,69 @@ const analyzeVideoHandler = async (req, res) => {
     console.log("📝 Titre :", title);
     console.log("📝 Description :", description);
 
-    // Extract audio
-    console.log("🎧 Extraction audio en cours...");
-    await extractAudio(videoPath, audioPath);
-    console.log("✅ Audio extrait :", audioPath);
-
-    // Transcription
-    console.log("🔁 Transcription en cours...");
-    let transcript = "";
+    // 1) Extract audio (ffmpeg)
     try {
-      const transcription = await openai.audio.transcriptions.create({
-        file: fs.createReadStream(audioPath),
-        model: "whisper-1",
-      });
-      transcript = transcription.text;
-      console.log("📄 Transcription terminée :", transcript);
+      console.log("🎧 Extraction audio en cours...");
+      await extractAudio(videoPath, audioPath);
+      console.log("✅ Audio extrait :", audioPath);
     } catch (err) {
-      console.error("❌ Erreur de transcription :", err.message);
-      throw new Error("Erreur de connexion à l'API OpenAI pour la transcription.");
+      console.error("⚠️ Échec extraction audio :", err);
+      // fallback : continue without audio (will analyze title/description only)
     }
 
-    // Analyse
-    const results = analyzeVideo({ title, description, transcript });
-    console.log("📊 Résultats de l'analyse :", results);
+    // 2) Transcription (Whisper) — si audio disponible
+    let transcript = "";
+    if (fs.existsSync(audioPath)) {
+      try {
+        console.log("🔁 Transcription en cours...");
+        const transcription = await openai.audio.transcriptions.create({
+          file: fs.createReadStream(audioPath),
+          model: "whisper-1",
+        });
+        transcript = transcription?.text || "";
+        console.log("📄 Transcription terminée, length:", (transcript || "").length);
+      } catch (err) {
+        // Log détaillé et on continue avec fallback
+        console.error("❌ Erreur de transcription (OpenAI) :", err?.response?.status || err?.status || err?.message || err);
+        // si réponse contient data, affiche pour debug
+        if (err?.response?.data) console.error("OpenAI response data:", err.response.data);
+        transcript = ""; // fallback -> analyse avec title/description
+      }
+    } else {
+      console.warn("⚠️ Aucun audio trouvé, saut de la transcription.");
+      transcript = "";
+    }
 
-    // Clean up
-    [videoPath, audioPath].forEach((file) =>
-      fs.unlink(file, (err) => {
-        if (err) console.warn(`⚠️ Impossible de supprimer ${file}:`, err);
-      })
-    );
+    // 3) Analyse (toujours appelée — accepte transcript vide)
+    let results = { bestPlatform: "Unknown", viralityScore: 0, platformScores: {}, insights: [] };
+    try {
+      results = analyzeVideo({ title, description, transcript });
+    } catch (err) {
+      console.error("❌ Erreur lors de l'analyse du transcript :", err);
+      // fallback safe values (already set)
+    }
 
-    // Return simplified results with matching keys
-    res.json({
-      transcript,
-      viralityScore: results.viralityScore,
-      bestPlatform: results.bestPlatform,
-      insights: results.insights,
+    // 4) Cleanup (toujours tenter)
+    await Promise.all([safeUnlink(videoPath), safeUnlink(audioPath)]);
+
+    // 5) Retourne un objet JSON constant et complet (frontend ne breakera pas)
+    return res.json({
+      transcript: transcript || "No transcript available",
+      viralityScore: typeof results.viralityScore === "number" ? results.viralityScore : 0,
+      bestPlatform: results.bestPlatform || "Unknown",
+      platformScores: results.platformScores || {},
+      insights: results.insights || [],
     });
-
   } catch (err) {
-    console.error("❌ Erreur lors de l'analyse :", err.message);
-    res.status(500).json({ error: "Erreur lors de l'analyse" });
+    console.error("❌ Erreur inattendue analyse :", err);
+    return res.status(500).json({
+      transcript: "",
+      viralityScore: 0,
+      bestPlatform: "Unknown",
+      platformScores: {},
+      insights: ["Erreur interne pendant l'analyse. Voir logs serveur."],
+      error: err?.message || "Internal server error"
+    });
   }
 };
 
