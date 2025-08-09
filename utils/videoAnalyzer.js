@@ -1,57 +1,54 @@
+// utils/videoAnalyzer.js
 function analyzeVideo({ title, description, transcript }) {
-  const insights = [];
-  const text = transcript.toLowerCase();
-  const wordCount = transcript.trim().split(/\s+/).length;
+  // Combine all text for easier scoring
+  const fullText = `${title} ${description} ${transcript}`.toLowerCase();
 
-  // Check for hook in first 10 words
-  const firstWords = transcript.split(/\s+/).slice(0, 10).join(" ");
-  const hasHook = /(imagine|saviez-vous|breaking|attention|incroyable|vous ne croirez pas|breaking news|alert)/i.test(firstWords);
-
-  // Emotional words count
-  const emotionalWords = ["incroyable", "puissant", "urgent", "secret", "nouveau", "choc", "révélé"];
-  const emotionalCount = emotionalWords.filter(word => text.includes(word)).length;
-
-  // Call to action check
-  const hasCTA = /(abonnez|like|comment|follow|clique|share|retweet|regarde jusqu’à la fin)/i.test(text);
-
-  // Keywords to help platform choice
-  const businessKeywords = /(business|linkedin|management|b2b|entreprise|stratégie)/i.test(text);
-  const trendingKeywords = /(tendance|viral|trend|challenge)/i.test(text);
-
-  // Platform length preference (in word count)
-  const platformLengthRanges = {
-    TikTok: [60, 120],
-    InstagramReels: [80, 150],
-    YouTubeShorts: [150, 250],
-    X: [50, 100],
-    LinkedIn: [150, 300],
+  // Define platform characteristics
+  const platforms = {
+    TikTok: { keywords: ["trend", "viral", "challenge", "short", "funny", "meme"], weight: 1.2 },
+    Instagram: { keywords: ["aesthetic", "lifestyle", "fashion", "beautiful", "photo", "reel"], weight: 1.0 },
+    YouTubeShorts: { keywords: ["tutorial", "how to", "guide", "explainer", "review"], weight: 1.1 },
+    X: { keywords: ["opinion", "news", "update", "thread", "commentary"], weight: 0.9 },
+    LinkedIn: { keywords: ["career", "business", "leadership", "professional", "networking"], weight: 0.8 },
   };
 
-  const platformScores = {};
-
-  for (const platform in platformLengthRanges) {
-    const [minLen, maxLen] = platformLengthRanges[platform];
+  // Score calculation
+  let platformScores = {};
+  Object.keys(platforms).forEach(platform => {
+    const { keywords, weight } = platforms[platform];
     let score = 0;
+    keywords.forEach(kw => {
+      const occurrences = (fullText.match(new RegExp(`\\b${kw}\\b`, "g")) || []).length;
+      score += occurrences * 10; // 10 points per keyword match
+    });
+    platformScores[platform] = Math.min(100, Math.round(score * weight));
+  });
 
-    // Score length match (max 40 pts)
-    if (wordCount >= minLen && wordCount <= maxLen) score += 40;
+  // Pick best platform
+  let bestPlatform = Object.keys(platformScores).reduce((a, b) =>
+    platformScores[a] > platformScores[b] ? a : b
+  );
 
-    // Add points for hook, CTA, emotional words (max 60 pts total)
-    if (hasHook) score += 15;
-    if (hasCTA) score += 20;
-    score += Math.min(emotionalCount * 5, 25);
-
-    // Boost score based on keywords
-    if (platform === "LinkedIn" && businessKeywords) score += 10;
-    if ((platform === "TikTok" || platform === "InstagramReels" || platform === "X") && trendingKeywords) score += 10;
-
-    // Cap score at 100
-    platformScores[platform] = Math.min(score, 100);
+  // Generate insights
+  let insights = [];
+  if (platformScores[bestPlatform] < 50) {
+    insights.push(
+      `Your content for ${bestPlatform} could be stronger — try adding more platform-specific elements.`
+    );
+  } else {
+    insights.push(`Strong potential for ${bestPlatform}!`);
   }
+  insights.push("Make the opening 3 seconds very engaging.");
+  insights.push("Use captions to retain viewers.");
+  insights.push("Add a strong call-to-action at the end.");
 
-  const bestPlatform = Object.keys(platformScores).reduce((a, b) => platformScores[a] > platformScores[b] ? a : b);
-
-  return { bestPlatform, platformScores, insights };
+  // Return consistent object
+  return {
+    bestPlatform,
+    viralityScore: platformScores[bestPlatform],
+    platformScores,
+    insights,
+  };
 }
 
 module.exports = { analyzeVideo };
