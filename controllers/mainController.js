@@ -1,8 +1,13 @@
 const path = require("path");
 const fs = require("fs");
-const openai = require("openai");
+const OpenAI = require("openai"); // ✅ Use correct constructor
 const { extractAudio } = require("../utils/compressVideo");
 const { analyzeVideo } = require("../utils/videoAnalyzer");
+
+// ✅ Initialize OpenAI client with API key
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 const analyzeVideoHandler = async (req, res) => {
   try {
@@ -24,18 +29,22 @@ const analyzeVideoHandler = async (req, res) => {
     console.log("✅ Audio extrait :", audioPath);
 
     // Transcription
-    console.log("🔁 Transcription en cours...");
     let transcript = "";
     try {
+      console.log("🔁 Transcription en cours...");
       const transcription = await openai.audio.transcriptions.create({
         file: fs.createReadStream(audioPath),
         model: "whisper-1",
       });
-      transcript = transcription.text;
+      transcript = transcription.text || "";
       console.log("📄 Transcription terminée :", transcript);
     } catch (err) {
       console.error("❌ Erreur de transcription :", err.message);
-      throw new Error("Erreur de connexion à l'API OpenAI pour la transcription.");
+      // ✅ Return partial result instead of crashing
+      return res.status(500).json({
+        error: "Erreur de transcription audio.",
+        details: err.message,
+      });
     }
 
     // Analyse
@@ -49,7 +58,7 @@ const analyzeVideoHandler = async (req, res) => {
       })
     );
 
-    // Return transcription and detailed analysis including platform and scores
+    // ✅ Send complete response with all fields
     res.json({
       transcript,
       bestPlatform: results.bestPlatform,
