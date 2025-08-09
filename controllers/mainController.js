@@ -1,3 +1,4 @@
+// controllers/videoController.js
 const path = require("path");
 const fs = require("fs");
 const OpenAI = require("openai");
@@ -28,9 +29,9 @@ const analyzeVideoHandler = async (req, res) => {
     console.log("✅ Audio extrait :", audioPath);
 
     // Transcription
+    console.log("🔁 Transcription en cours...");
     let transcript = "";
     try {
-      console.log("🔁 Transcription en cours...");
       const transcription = await openai.audio.transcriptions.create({
         file: fs.createReadStream(audioPath),
         model: "whisper-1",
@@ -39,15 +40,12 @@ const analyzeVideoHandler = async (req, res) => {
       console.log("📄 Transcription terminée :", transcript);
     } catch (err) {
       console.error("❌ Erreur de transcription :", err.message);
-      return res.status(500).json({
-        error: "Erreur de transcription audio.",
-        details: err.message,
-      });
+      throw new Error("Erreur de connexion à l'API OpenAI pour la transcription.");
     }
 
     // Analyse
-    const results = analyzeVideo({ title, description, transcript });
-    console.log("📊 Résultats de l'analyse :", results);
+    const { bestPlatform, platformScores, insights } = analyzeVideo({ title, description, transcript });
+    console.log("📊 Résultats de l'analyse :", { bestPlatform, platformScores, insights });
 
     // Clean up uploaded and extracted files
     [videoPath, audioPath].forEach((file) =>
@@ -56,16 +54,14 @@ const analyzeVideoHandler = async (req, res) => {
       })
     );
 
-    // ✅ Return in the original structure expected by frontend
+    // Send complete analysis to frontend
     res.json({
       transcript,
-      analysis: {
-        platformSuggestion: results.bestPlatform,
-        viralityScore: results.viralityScore,
-        insights: results.insights,
-        platformScores: results.platformScores, // Optional extra data
-      },
+      bestPlatform,
+      platformScores,
+      insights,
     });
+
   } catch (err) {
     console.error("❌ Erreur lors de l'analyse :", err.message);
     res.status(500).json({ error: "Erreur lors de l'analyse" });
