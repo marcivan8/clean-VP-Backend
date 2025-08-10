@@ -2,7 +2,7 @@
 const path = require("path");
 const fs = require("fs");
 const OpenAI = require("openai");
-const { extractAudio } = require("../utils/compressVideo"); // garde ce fichier
+const { extractAudio } = require("../utils/compressVideo");
 const { analyzeVideo } = require("../utils/videoAnalyzer");
 
 const openai = new OpenAI({
@@ -10,7 +10,11 @@ const openai = new OpenAI({
 });
 
 async function safeUnlink(file) {
-  try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch (e) { console.warn("Cannot delete file:", file, e); }
+  try { 
+    if (fs.existsSync(file)) fs.unlinkSync(file); 
+  } catch (e) { 
+    console.warn("Cannot delete file:", file, e); 
+  }
 }
 
 const analyzeVideoHandler = async (req, res) => {
@@ -21,11 +25,12 @@ const analyzeVideoHandler = async (req, res) => {
 
     const videoPath = req.file.path;
     const audioPath = path.join("uploads", `${Date.now()}-audio.mp3`);
-    const { title = "", description = "" } = req.body;
+    const { title = "", description = "", language = "en" } = req.body;
 
     console.log("🎬 Analyse vidéo :", videoPath);
     console.log("📝 Titre :", title);
     console.log("📝 Description :", description);
+    console.log("🌐 Langue :", language);
 
     // 1) Extract audio (ffmpeg)
     try {
@@ -49,36 +54,35 @@ const analyzeVideoHandler = async (req, res) => {
         transcript = transcription?.text || "";
         console.log("📄 Transcription terminée, length:", (transcript || "").length);
       } catch (err) {
-        // Log détaillé et on continue avec fallback
         console.error("❌ Erreur de transcription (OpenAI) :", err?.response?.status || err?.status || err?.message || err);
-        // si réponse contient data, affiche pour debug
         if (err?.response?.data) console.error("OpenAI response data:", err.response.data);
-        transcript = ""; // fallback -> analyse avec title/description
+        transcript = "";
       }
     } else {
       console.warn("⚠️ Aucun audio trouvé, saut de la transcription.");
       transcript = "";
     }
 
-    // 3) Analyse (toujours appelée — accepte transcript vide)
+    // 3) Analyse avec langue utilisateur
     let results = { bestPlatform: "Unknown", viralityScore: 0, platformScores: {}, insights: [] };
     try {
-      results = analyzeVideo({ title, description, transcript });
+      results = analyzeVideo({ title, description, transcript, language });
     } catch (err) {
       console.error("❌ Erreur lors de l'analyse du transcript :", err);
-      // fallback safe values (already set)
     }
 
-    // 4) Cleanup (toujours tenter)
+    // 4) Cleanup
     await Promise.all([safeUnlink(videoPath), safeUnlink(audioPath)]);
 
-    // 5) Retourne un objet JSON constant et complet (frontend ne breakera pas)
+    // 5) Retourne un objet JSON complet avec traductions
     return res.json({
       transcript: transcript || "No transcript available",
       viralityScore: typeof results.viralityScore === "number" ? results.viralityScore : 0,
       bestPlatform: results.bestPlatform || "Unknown",
       platformScores: results.platformScores || {},
       insights: results.insights || [],
+      language: language, // Confirme la langue utilisée
+      metadata: results.metadata || {}
     });
   } catch (err) {
     console.error("❌ Erreur inattendue analyse :", err);
