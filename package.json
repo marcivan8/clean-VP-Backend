@@ -1,21 +1,46 @@
 {
   "name": "viral-pilot-backend",
-  "version": "1.0.0",
+  "version": "2.0.0",
+  "description": "AI-powered video virality analysis platform",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "jest",
+    "setup:supabase": "node scripts/setup-database.js",
+    "cleanup:expired": "node scripts/cleanup-expired-videos.js"
   },
   "dependencies": {
+    "@google-cloud/storage": "^7.16.0",
+    "@supabase/storage-js": "^2.10.4",
+    "@supabase/supabase-js": "^2.55.0",
     "cors": "^2.8.5",
-    "dotenv": "^16.6.1",
-    "express": "^4.21.2",
+    "crypto": "^1.0.1",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
     "ffmpeg-static": "^5.2.0",
-    "fluent-ffmpeg": "^2.1.3",
+    "fluent-ffmpeg": "^2.1.2",
+    "fs": "^0.0.1-security",
     "multer": "^1.4.5-lts.1",
-    "openai": "^4.104.0"
+    "node-cron": "^3.0.2",
+    "openai": "^4.20.1",
+    "paddle-sdk": "^2.1.1",
+    "path": "^0.12.7"
   },
-  "description": "Node.js backend to analyze viral potential of videos.",
-  "keywords": [],
-  "author": "",
-  "license": "ISC"
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "ai",
+    "video-analysis",
+    "virality",
+    "social-media",
+    "content-creation"
+  ],
+  "author": "Viral Pilot Team",
+  "license": "MIT"
 }
