@@ -1,15 +1,15 @@
 const express = require('express');
 const { supabaseAdmin } = require('../config/database');
-const authenticateUser = require('../middleware/auth'); // Assuming authenticateUser is in a separate file
+const { authenticateUser } = require('../middleware/auth'); // ✅ Correct import
 const router = express.Router();
 
-// Créer le profil utilisateur après inscription
+// Create user profile after signup
 router.post('/profile', async (req, res) => {
   try {
     const { userId, email, fullName } = req.body;
     
     const { data: profile, error } = await supabaseAdmin
-      .from('profiles') // Assuming table name is 'profiles'; adjust if different
+      .from('profiles')
       .insert({
         id: userId,
         email: email,
@@ -19,9 +19,7 @@ router.post('/profile', async (req, res) => {
       .select()
       .single();
     
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     
     res.json({ success: true, profile });
   } catch (error) {
@@ -30,12 +28,11 @@ router.post('/profile', async (req, res) => {
   }
 });
 
-// Example route with authentication (stub; complete the handler as needed)
+// Authenticated route to get analysis history
 router.get('/analyze/history', authenticateUser, async (req, res) => {
   try {
-    // Add your history logic here, e.g., fetch from Supabase
     const { data, error } = await supabaseAdmin
-      .from('analysis_history') // Assuming table name; adjust accordingly
+      .from('analysis_history')
       .select('*')
       .eq('user_id', req.user.id);
     
