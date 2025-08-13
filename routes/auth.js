@@ -31,7 +31,7 @@ router.post('/profile', async (req, res) => {
 });
 
 // Example route with authentication (stub; complete the handler as needed)
-router.get('/analyze/history', auth, async (req, res) => {
+router.get('/analyze/history', authenticateUser, async (req, res) => {
   try {
     // Add your history logic here, e.g., fetch from Supabase
     const { data, error } = await supabaseAdmin
