@@ -1,9 +1,22 @@
 const { Storage } = require('@google-cloud/storage');
 
-const storage = new Storage({
-  projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
-  credentials: JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON)  // Parse the full JSON from env var
-});
+let storage;
+try {
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+    throw new Error('GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable is not set');
+  }
+  
+  const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+  
+  storage = new Storage({
+    projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
+    credentials: credentials
+  });
+} catch (error) {
+  console.error('Error initializing Google Cloud Storage:', error);
+  // Optionally, throw or handle gracefully depending on your app needs
+  throw error;
+}
 
 const bucketName = process.env.GOOGLE_CLOUD_BUCKET_NAME;
 const bucket = storage.bucket(bucketName);
