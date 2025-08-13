@@ -6,7 +6,7 @@ const path = require('path');
 // Initialize Supabase Admin client
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY // Service role key, not anon key
+  process.env.SUPABASE_SERVICE_ROLE_KEY // Service role key, not anon key
 );
 
 class StorageService {
