@@ -2,7 +2,7 @@ const { Storage } = require('@google-cloud/storage');
 
 const storage = new Storage({
   projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
-  keyFilename: process.env.GOOGLE_CLOUD_KEY_FILE, // Chemin vers service account JSON
+  credentials: JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON)  // Parse the full JSON from env var
 });
 
 const bucketName = process.env.GOOGLE_CLOUD_BUCKET_NAME;
