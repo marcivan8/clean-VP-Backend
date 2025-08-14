@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google-cloud/storage": "^7.16.0",
+    "@paddle/paddle-node-sdk": "^3.2.0",
     "@supabase/storage-js": "^2.10.4",
     "@supabase/supabase-js": "^2.55.0",
     "cors": "^2.8.5",
