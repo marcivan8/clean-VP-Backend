@@ -1,10 +1,8 @@
-const paddle = require('paddle-sdk');
+const { Paddle, Environment } = require('@paddle/paddle-node-sdk');
 
-const paddleInstance = new paddle.PaddleSDK(
-  process.env.PADDLE_VENDOR_ID,
-  process.env.PADDLE_API_KEY,
-  process.env.NODE_ENV === 'production' // Use sandbox for development
-);
+const paddleInstance = new Paddle(process.env.PADDLE_API_KEY, {
+  environment: process.env.PADDLE_ENVIRONMENT === 'sandbox' ? Environment.sandbox : Environment.production,
+});
 
 const PRICING_PLANS = {
   pro: {
