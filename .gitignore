@@ -1,4 +1,5 @@
 node_modules
 .env
 uploads
-backend/credentials/
+credentials/
+*.json  # Optional: Ignore all JSON files, or specify gcs-service-account.json
