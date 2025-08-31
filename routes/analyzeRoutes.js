@@ -169,7 +169,7 @@ router.post('/',
         await VideoAnalysis.updateResults(analysisRecord.id, analysisResults);
         
         // 6. Mise à jour de l'usage utilisateur
-        await User.updateUsage(userId, { analyses: 1 });
+        await User.updateUsage(userId);
         
         console.log('✅ Analysis complete for user:', userId);
         

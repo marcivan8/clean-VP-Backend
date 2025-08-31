@@ -1,6 +1,7 @@
 const express = require('express');
 const { supabaseAdmin } = require('../config/database');
-const { authenticateUser } = require('../middleware/auth'); // ✅ Correct import
+const { authenticateUser } = require('../middleware/auth');
+const User = require('../models/User');
 const router = express.Router();
 
 // Create user profile after signup
@@ -14,7 +15,8 @@ router.post('/profile', async (req, res) => {
         id: userId,
         email: email,
         full_name: fullName || null,
-        subscription_tier: 'free'
+        monthly_usage: { analyses: 0 },
+        usage_reset_at: new Date().toISOString()
       })
       .select()
       .single();
@@ -28,13 +30,26 @@ router.post('/profile', async (req, res) => {
   }
 });
 
-// Authenticated route to get analysis history
-router.get('/analyze/history', authenticateUser, async (req, res) => {
+// Get current usage (NEW ENDPOINT)
+router.get('/usage', authenticateUser, async (req, res) => {
+  try {
+    const usage = await User.getUsage(req.user.id);
+    res.json(usage);
+  } catch (error) {
+    console.error('Usage fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch usage' });
+  }
+});
+
+// Get analysis history
+router.get('/history', authenticateUser, async (req, res) => {
   try {
     const { data, error } = await supabaseAdmin
-      .from('analysis_history')
+      .from('video_analyses')
       .select('*')
-      .eq('user_id', req.user.id);
+      .eq('user_id', req.user.id)
+      .order('created_at', { ascending: false })
+      .limit(20);
     
     if (error) throw error;
     

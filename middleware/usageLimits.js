@@ -3,21 +3,28 @@ const User = require('../models/User');
 const checkUsageLimits = async (req, res, next) => {
   try {
     const userId = req.user.id;
+    
+    // Check if user needs monthly reset
+    await User.checkAndResetIfNeeded(userId);
+    
+    // Check current usage
     const usageCheck = await User.checkUsageLimits(userId);
     
     if (!usageCheck.canAnalyze) {
       return res.status(403).json({
-        error: 'Monthly analysis limit reached',
+        error: 'Monthly limit reached',
+        message: 'You have reached your monthly limit of 20 video analyses. Your limit will reset in 30 days from your last reset.',
         usage: usageCheck.usage,
-        limits: usageCheck.limits,
-        upgrade_url: `${process.env.FRONTEND_URL}/pricing`
+        limit: usageCheck.limit,
+        remaining: 0
       });
     }
     
     req.usageCheck = usageCheck;
     next();
   } catch (error) {
-    res.status(500).json({ error: 'Usage check failed' });
+    console.error('Usage check error:', error);
+    res.status(500).json({ error: 'Failed to check usage limits' });
   }
 };
 
