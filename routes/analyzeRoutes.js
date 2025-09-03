@@ -1,4 +1,4 @@
-// ===== routes/analyzeRoutes.js =====
+// ===== routes/analyzeRoutes.js - FIXED VERSION =====
 const express = require('express');
 const multer = require('multer');
 const { authenticateUser } = require('../middleware/auth');
@@ -12,11 +12,37 @@ const { translateError, validateLanguage } = require('../utils/translations');
 const OpenAI = require('openai');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const router = express.Router();
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Configuration Multer améliorée
+// Initialize OpenAI with proper error handling
+let openai = null;
+try {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('⚠️ OPENAI_API_KEY not found in environment variables');
+  } else {
+    openai = new OpenAI({ 
+      apiKey: process.env.OPENAI_API_KEY,
+      maxRetries: 2,
+      timeout: 30000 // 30 second timeout
+    });
+    console.log('✅ OpenAI client initialized');
+  }
+} catch (error) {
+  console.error('❌ Failed to initialize OpenAI client:', error.message);
+}
+
+// Ensure temp directory exists
+const getTempDir = () => {
+  const tempDir = process.env.TEMP_DIR || path.join(os.tmpdir(), 'video-analyzer');
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+  }
+  return tempDir;
+};
+
+// Enhanced Multer configuration
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { 
@@ -24,57 +50,75 @@ const upload = multer({
     files: 1
   },
   fileFilter: (req, file, cb) => {
-    // Vérifier le type MIME
+    // Log incoming file details
+    console.log('📁 Incoming file:', {
+      originalname: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size
+    });
+    
+    // Check MIME type
     if (!file.mimetype.startsWith('video/')) {
       return cb(new Error('Only video files are allowed'), false);
     }
     
-    // Vérifier l'extension
-    const allowedExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv'];
+    // Check extension
+    const allowedExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.m4v', '.mpeg'];
     const fileExtension = path.extname(file.originalname).toLowerCase();
     
     if (!allowedExtensions.includes(fileExtension)) {
-      return cb(new Error('Unsupported video format'), false);
+      console.warn(`⚠️ Unsupported video format: ${fileExtension}`);
+      return cb(new Error(`Unsupported video format: ${fileExtension}`), false);
     }
     
     cb(null, true);
   }
 });
 
-// Middleware de validation des données
+// Data validation middleware
 const validateAnalysisData = (req, res, next) => {
   const { title, description, language = 'en' } = req.body;
+  
+  console.log('📝 Validating analysis data:', { 
+    title: title?.substring(0, 50), 
+    descriptionLength: description?.length,
+    language 
+  });
   
   if (!title || title.trim().length < 3) {
     return res.status(400).json({ 
       error: translateError('missing_title', language),
-      field: 'title' 
+      field: 'title',
+      code: 'VALIDATION_ERROR'
     });
   }
   
   if (!description || description.trim().length < 10) {
     return res.status(400).json({ 
       error: translateError('missing_description', language),
-      field: 'description' 
+      field: 'description',
+      code: 'VALIDATION_ERROR'
     });
   }
   
-  // Valider et normaliser la langue
+  // Validate and normalize language
   req.body.language = validateLanguage(language);
   
   next();
 };
 
-// Route principale d'analyse
+// Main analysis route with enhanced error handling
 router.post('/', 
   authenticateUser,
   checkUsageLimits, 
   upload.single('video'),
   validateAnalysisData,
   async (req, res) => {
+    const startTime = Date.now();
     let tempVideoPath = null;
     let tempAudioPath = null;
     let analysisRecord = null;
+    const tempDir = getTempDir();
 
     try {
       const { title, description, language, ai_training_consent = 'false' } = req.body;
@@ -82,28 +126,34 @@ router.post('/',
       const hasConsent = ai_training_consent === 'true';
       
       if (!req.file) {
+        console.error('❌ No file in request');
         return res.status(400).json({ 
-          error: translateError('no_file', language) 
+          error: translateError('no_file', language),
+          code: 'NO_FILE'
         });
       }
 
-      console.log(`🎬 Starting analysis for user ${userId}, file: ${req.file.originalname}`);
+      console.log(`🎬 Starting analysis for user ${userId}`);
+      console.log(`📊 File details: ${req.file.originalname} (${(req.file.size / 1024 / 1024).toFixed(2)}MB)`);
       
-      // 1. Upload vers Google Cloud Storage
+      // 1. Upload to storage (GCS or local)
       let uploadResult;
       try {
+        console.log('📤 Uploading video to storage...');
         uploadResult = await StorageService.uploadVideo(req.file, userId, hasConsent);
-        console.log('✅ Video uploaded to GCS:', uploadResult.path);
+        console.log('✅ Video uploaded successfully:', uploadResult.path);
       } catch (uploadError) {
-        console.error('❌ Upload failed:', uploadError);
+        console.error('❌ Storage upload failed:', uploadError.message);
         return res.status(500).json({ 
           error: translateError('internal_error', language),
-          details: 'Upload failed' 
+          details: 'Storage upload failed',
+          code: 'STORAGE_UPLOAD_FAILED'
         });
       }
       
-      // 2. Créer l'enregistrement d'analyse
+      // 2. Create analysis record in database
       try {
+        console.log('💾 Creating analysis record...');
         analysisRecord = await VideoAnalysis.create({
           user_id: userId,
           title: title.trim(),
@@ -117,67 +167,119 @@ router.post('/',
         });
         console.log('✅ Analysis record created:', analysisRecord.id);
       } catch (dbError) {
-        console.error('❌ Database error:', dbError);
-        // Nettoyer le fichier uploadé
-        await StorageService.deleteVideo(uploadResult.path);
+        console.error('❌ Database error:', dbError.message);
+        // Clean up uploaded file
+        await StorageService.deleteVideo(uploadResult.path).catch(e => 
+          console.warn('Failed to cleanup uploaded file:', e.message)
+        );
         return res.status(500).json({ 
           error: translateError('internal_error', language),
-          details: 'Database error' 
+          details: 'Database error',
+          code: 'DATABASE_ERROR'
         });
       }
       
-      // 3. Traitement du fichier vidéo
+      // 3. Process video for analysis
       try {
-        // Télécharger temporairement pour traitement
-        const videoBuffer = await StorageService.downloadVideo(uploadResult.path);
-        tempVideoPath = path.join('/tmp', `${Date.now()}-${req.file.originalname}`);
-        fs.writeFileSync(tempVideoPath, videoBuffer);
+        console.log('🎥 Starting video processing...');
         
-        // Extraction audio et transcription
-        tempAudioPath = path.join('/tmp', `${Date.now()}-audio.mp3`);
-        let transcript = '';
-        
+        // Download video for processing
+        let videoBuffer;
         try {
-          await extractAudio(tempVideoPath, tempAudioPath);
-          console.log('✅ Audio extracted');
-          
-          if (fs.existsSync(tempAudioPath)) {
-            const transcription = await openai.audio.transcriptions.create({
-              file: fs.createReadStream(tempAudioPath),
-              model: 'whisper-1',
-              language: language === 'fr' ? 'fr' : language === 'tr' ? 'tr' : 'en'
-            });
-            transcript = transcription.text || '';
-            console.log(`✅ Transcription completed: ${transcript.length} chars`);
-          }
-        } catch (transcriptError) {
-          console.warn('⚠️ Transcription failed:', transcriptError.message);
-          // Continuer sans transcription
+          videoBuffer = await StorageService.downloadVideo(uploadResult.path);
+          console.log(`✅ Video downloaded (${(videoBuffer.length / 1024 / 1024).toFixed(2)}MB)`);
+        } catch (downloadError) {
+          console.error('❌ Video download failed:', downloadError.message);
+          throw new Error('Failed to download video for processing');
         }
         
-        // 4. Analyse IA du contenu
+        // Save to temp file for ffmpeg processing
+        const timestamp = Date.now();
+        const safeFilename = req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+        tempVideoPath = path.join(tempDir, `${timestamp}-${safeFilename}`);
+        
+        fs.writeFileSync(tempVideoPath, videoBuffer);
+        console.log('💾 Temp video saved:', tempVideoPath);
+        
+        // Extract audio and transcribe
+        let transcript = '';
+        
+        if (openai) {
+          tempAudioPath = path.join(tempDir, `${timestamp}-audio.mp3`);
+          
+          try {
+            console.log('🎧 Extracting audio...');
+            await extractAudio(tempVideoPath, tempAudioPath);
+            console.log('✅ Audio extracted successfully');
+            
+            if (fs.existsSync(tempAudioPath)) {
+              const audioSize = fs.statSync(tempAudioPath).size;
+              console.log(`📊 Audio file size: ${(audioSize / 1024 / 1024).toFixed(2)}MB`);
+              
+              // Check audio file size (Whisper API limit is 25MB)
+              if (audioSize > 25 * 1024 * 1024) {
+                console.warn('⚠️ Audio file too large for Whisper API (>25MB)');
+              } else {
+                try {
+                  console.log('🔄 Starting transcription with Whisper...');
+                  const transcription = await openai.audio.transcriptions.create({
+                    file: fs.createReadStream(tempAudioPath),
+                    model: 'whisper-1',
+                    language: language === 'fr' ? 'fr' : language === 'tr' ? 'tr' : 'en',
+                    response_format: 'text'
+                  });
+                  
+                  transcript = transcription || '';
+                  console.log(`✅ Transcription completed: ${transcript.length} characters`);
+                } catch (transcriptError) {
+                  console.error('❌ Transcription error:', {
+                    message: transcriptError.message,
+                    status: transcriptError.response?.status,
+                    data: transcriptError.response?.data
+                  });
+                  
+                  // Continue without transcript
+                  console.warn('⚠️ Continuing without transcript - will analyze title/description only');
+                }
+              }
+            }
+          } catch (audioError) {
+            console.warn('⚠️ Audio extraction failed:', audioError.message);
+            console.log('📝 Continuing with text-only analysis');
+          }
+        } else {
+          console.warn('⚠️ OpenAI client not initialized - skipping transcription');
+        }
+        
+        // 4. Perform AI analysis
+        console.log('🤖 Starting AI analysis...');
         const analysisResults = analyzeVideo({
           title: title.trim(),
           description: description.trim(), 
-          transcript,
+          transcript: transcript || '',
           language
         });
         
-        console.log('✅ AI analysis completed:', analysisResults.bestPlatform, analysisResults.viralityScore);
+        console.log('✅ AI analysis completed:', {
+          platform: analysisResults.bestPlatform,
+          score: analysisResults.viralityScore,
+          insights: analysisResults.insights.length
+        });
         
-        // 5. Mise à jour des résultats dans la DB
+        // 5. Update database with results
         await VideoAnalysis.updateResults(analysisRecord.id, analysisResults);
         
-        // 6. Mise à jour de l'usage utilisateur
+        // 6. Update user usage
         await User.updateUsage(userId);
         
-        console.log('✅ Analysis complete for user:', userId);
+        const processingTime = Date.now() - startTime;
+        console.log(`✅ Analysis complete for user ${userId} (${processingTime}ms)`);
         
-        // 7. Réponse avec résultats complets
+        // 7. Send successful response
         res.json({
           success: true,
           analysis_id: analysisRecord.id,
-          transcript: transcript || '',
+          transcript: transcript || 'No transcript available',
           viralityScore: analysisResults.viralityScore,
           bestPlatform: analysisResults.bestPlatform,
           platformScores: analysisResults.platformScores,
@@ -186,7 +288,7 @@ router.post('/',
           metadata: {
             ...analysisResults.metadata,
             fileSize: req.file.size,
-            processingTime: Date.now() - parseInt(analysisRecord.id.split('-')[0]) // Approximation
+            processingTime: processingTime
           },
           consent_given: hasConsent
         });
@@ -194,48 +296,62 @@ router.post('/',
       } catch (processingError) {
         console.error('❌ Processing error:', processingError);
         
-        // Marquer l'analyse comme échouée
+        // Mark analysis as failed in database
         if (analysisRecord) {
           await VideoAnalysis.updateStatus(analysisRecord.id, 'failed', {
             error: processingError.message,
             timestamp: new Date().toISOString()
-          });
+          }).catch(e => console.error('Failed to update analysis status:', e));
         }
           
         res.status(500).json({ 
           error: translateError('analysis_failed', language),
-          details: process.env.NODE_ENV === 'development' ? processingError.message : undefined
+          details: process.env.NODE_ENV === 'development' ? processingError.message : 'Processing failed',
+          code: 'PROCESSING_ERROR'
         });
       }
       
     } catch (error) {
-      console.error('❌ Analysis endpoint error:', error);
+      console.error('❌ Unexpected error in analysis endpoint:', error);
       
-      // Cleanup en cas d'erreur générale
+      // Update analysis status if record exists
       if (analysisRecord) {
         await VideoAnalysis.updateStatus(analysisRecord.id, 'failed', {
           error: error.message,
           timestamp: new Date().toISOString()
-        });
+        }).catch(e => console.error('Failed to update analysis status:', e));
       }
       
       res.status(500).json({ 
-        error: translateError('internal_error', language),
-        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        error: translateError('internal_error', language || 'en'),
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined,
+        code: 'INTERNAL_ERROR'
       });
+      
     } finally {
-      // Nettoyage des fichiers temporaires
-      if (tempVideoPath) {
-        try { fs.unlinkSync(tempVideoPath); } catch (e) { console.warn('Temp video cleanup failed:', e); }
+      // Cleanup temporary files
+      if (tempVideoPath && fs.existsSync(tempVideoPath)) {
+        try { 
+          fs.unlinkSync(tempVideoPath); 
+          console.log('🗑️ Temp video cleaned up');
+        } catch (e) { 
+          console.warn('Failed to cleanup temp video:', e.message); 
+        }
       }
-      if (tempAudioPath) {
-        try { fs.unlinkSync(tempAudioPath); } catch (e) { console.warn('Temp audio cleanup failed:', e); }
+      
+      if (tempAudioPath && fs.existsSync(tempAudioPath)) {
+        try { 
+          fs.unlinkSync(tempAudioPath); 
+          console.log('🗑️ Temp audio cleaned up');
+        } catch (e) { 
+          console.warn('Failed to cleanup temp audio:', e.message); 
+        }
       }
     }
   }
 );
 
-// Récupérer l'historique des analyses
+// Get analysis history
 router.get('/history', authenticateUser, async (req, res) => {
   try {
     const { limit = 10, offset = 0 } = req.query;
@@ -253,86 +369,160 @@ router.get('/history', authenticateUser, async (req, res) => {
     });
   } catch (error) {
     console.error('History fetch error:', error);
-    res.status(500).json({ error: 'Failed to fetch history' });
+    res.status(500).json({ 
+      error: 'Failed to fetch history',
+      code: 'HISTORY_ERROR'
+    });
   }
 });
 
-// Récupérer une analyse spécifique
+// Get specific analysis
 router.get('/:analysisId', authenticateUser, async (req, res) => {
   try {
     const { analysisId } = req.params;
     const analysis = await VideoAnalysis.findById(analysisId);
     
     if (!analysis) {
-      return res.status(404).json({ error: 'Analysis not found' });
+      return res.status(404).json({ 
+        error: 'Analysis not found',
+        code: 'NOT_FOUND'
+      });
     }
     
-    // Vérifier que l'utilisateur a accès à cette analyse
     if (analysis.user_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
+      return res.status(403).json({ 
+        error: 'Access denied',
+        code: 'ACCESS_DENIED'
+      });
     }
     
     res.json({ analysis });
   } catch (error) {
     console.error('Analysis fetch error:', error);
-    res.status(500).json({ error: 'Failed to fetch analysis' });
+    res.status(500).json({ 
+      error: 'Failed to fetch analysis',
+      code: 'FETCH_ERROR'
+    });
   }
 });
 
-// Supprimer une analyse
+// Delete analysis
 router.delete('/:analysisId', authenticateUser, async (req, res) => {
   try {
     const { analysisId } = req.params;
     const analysis = await VideoAnalysis.findById(analysisId);
     
     if (!analysis) {
-      return res.status(404).json({ error: 'Analysis not found' });
+      return res.status(404).json({ 
+        error: 'Analysis not found',
+        code: 'NOT_FOUND'
+      });
     }
     
     if (analysis.user_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
+      return res.status(403).json({ 
+        error: 'Access denied',
+        code: 'ACCESS_DENIED'
+      });
     }
     
-    // Supprimer le fichier vidéo de GCS
+    // Delete video file from storage
     if (analysis.video_path) {
-      await StorageService.deleteVideo(analysis.video_path);
+      await StorageService.deleteVideo(analysis.video_path)
+        .catch(e => console.warn('Failed to delete video file:', e));
     }
     
-    // Supprimer l'enregistrement de la DB
+    // Delete database record
     await VideoAnalysis.delete(analysisId);
     
-    res.json({ success: true, message: 'Analysis deleted successfully' });
+    res.json({ 
+      success: true, 
+      message: 'Analysis deleted successfully' 
+    });
   } catch (error) {
     console.error('Analysis deletion error:', error);
-    res.status(500).json({ error: 'Failed to delete analysis' });
+    res.status(500).json({ 
+      error: 'Failed to delete analysis',
+      code: 'DELETE_ERROR'
+    });
   }
 });
 
-// Health check pour l'endpoint d'analyse
+// Enhanced health check endpoint
 router.get('/health/check', async (req, res) => {
+  const health = {
+    status: 'checking',
+    timestamp: new Date().toISOString(),
+    services: {}
+  };
+
   try {
-    // Vérifier la connexion DB
-    const { data, error } = await require('../config/database').supabaseAdmin
-      .from('profiles')
-      .select('count')
-      .limit(1);
+    // Check database connection
+    try {
+      const { supabaseAdmin } = require('../config/database');
+      const { error } = await supabaseAdmin
+        .from('profiles')
+        .select('count')
+        .limit(1)
+        .single();
+      
+      if (error) throw error;
+      health.services.database = 'connected';
+    } catch (dbError) {
+      console.error('Database health check failed:', dbError.message);
+      health.services.database = 'error';
+      health.errors = health.errors || [];
+      health.errors.push(`Database: ${dbError.message}`);
+    }
     
-    if (error) throw error;
-    
-    // Vérifier la connexion GCS
-    const { bucket } = require('../config/storage');
-    await bucket.getMetadata();
-    
-    res.json({ 
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-      services: {
-        database: 'connected',
-        storage: 'connected',
-        openai: !!process.env.OPENAI_API_KEY
+    // Check storage health
+    try {
+      const storageHealth = await StorageService.checkStorageHealth();
+      health.services.storage = storageHealth.healthy ? 'connected' : 'error';
+      health.services.storageType = storageHealth.type;
+      
+      if (!storageHealth.healthy) {
+        health.errors = health.errors || [];
+        health.errors.push(`Storage: ${storageHealth.error}`);
       }
-    });
+    } catch (storageError) {
+      console.error('Storage health check failed:', storageError.message);
+      health.services.storage = 'error';
+      health.errors = health.errors || [];
+      health.errors.push(`Storage: ${storageError.message}`);
+    }
+    
+    // Check OpenAI
+    health.services.openai = openai ? 'configured' : 'not_configured';
+    if (!openai && process.env.OPENAI_API_KEY) {
+      health.warnings = health.warnings || [];
+      health.warnings.push('OpenAI API key present but client initialization failed');
+    }
+    
+    // Check temp directory
+    try {
+      const tempDir = getTempDir();
+      health.services.tempDir = fs.existsSync(tempDir) ? 'available' : 'missing';
+    } catch (tempError) {
+      health.services.tempDir = 'error';
+      health.errors = health.errors || [];
+      health.errors.push(`Temp directory: ${tempError.message}`);
+    }
+    
+    // Determine overall health status
+    if (health.errors && health.errors.length > 0) {
+      health.status = 'unhealthy';
+      res.status(503).json(health);
+    } else if (health.warnings && health.warnings.length > 0) {
+      health.status = 'degraded';
+      res.status(200).json(health);
+    } else {
+      health.status = 'healthy';
+      res.status(200).json(health);
+    }
+    
   } catch (error) {
+    console.error('Health check error:', error);
     res.status(503).json({ 
       status: 'unhealthy',
       error: error.message,
