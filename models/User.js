@@ -2,33 +2,91 @@ const { supabaseAdmin } = require('../config/database');
 
 class User {
   static async findById(userId) {
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+    
     const { data, error } = await supabaseAdmin
       .from('profiles')
       .select('*')
       .eq('id', userId)
       .single();
       
-    if (error) throw error;
+    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
+      throw error;
+    }
+    
     return data;
   }
   
   static async create(userData) {
+    if (!userData || !userData.id || !userData.email) {
+      throw new Error('Missing required user data: id and email are required');
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(userData.email)) {
+      throw new Error('Invalid email format');
+    }
+
+    const profileData = {
+      id: userData.id,
+      email: userData.email.trim().toLowerCase(),
+      full_name: userData.full_name ? userData.full_name.trim() : null,
+      monthly_usage: { analyses: 0 },
+      usage_reset_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
     const { data, error } = await supabaseAdmin
       .from('profiles')
-      .insert([{
-        ...userData,
-        monthly_usage: { analyses: 0 },
-        usage_reset_at: new Date().toISOString()
-      }])
+      .insert([profileData])
       .select()
       .single();
       
-    if (error) throw error;
+    if (error) {
+      console.error('User creation error:', {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        userData: { ...userData, email: userData.email?.substring(0, 5) + '***' }
+      });
+      throw error;
+    }
+    
     return data;
+  }
+
+  static async findOrCreate(userData) {
+    try {
+      // Try to find existing user first
+      const existingUser = await this.findById(userData.id);
+      if (existingUser) {
+        console.log(`User ${userData.id} already exists`);
+        return existingUser;
+      }
+      
+      // Create new user if not found
+      console.log(`Creating new user: ${userData.id}`);
+      return await this.create(userData);
+    } catch (error) {
+      console.error('Find or create user error:', error);
+      throw error;
+    }
   }
   
   static async updateUsage(userId) {
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+
     const user = await this.findById(userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
     const currentUsage = user.monthly_usage || { analyses: 0 };
     
     const newUsage = {
@@ -39,18 +97,31 @@ class User {
       .from('profiles')
       .update({ 
         monthly_usage: newUsage,
-        last_analysis_at: new Date().toISOString()
+        last_analysis_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       })
       .eq('id', userId)
       .select()
       .single();
       
-    if (error) throw error;
+    if (error) {
+      console.error('Usage update error:', error);
+      throw error;
+    }
+    
     return data;
   }
   
   static async checkUsageLimits(userId) {
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+
     const user = await this.findById(userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
     const usage = user.monthly_usage || { analyses: 0 };
     
     // FIXED LIMIT: 20 analyses per month for ALL users
@@ -65,7 +136,15 @@ class User {
   }
   
   static async getUsage(userId) {
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+
     const user = await this.findById(userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
     const usage = user.monthly_usage || { analyses: 0 };
     
     return {
@@ -73,7 +152,8 @@ class User {
       limit: 20,
       remaining: Math.max(0, 20 - usage.analyses),
       lastAnalysisAt: user.last_analysis_at,
-      resetAt: user.usage_reset_at
+      resetAt: user.usage_reset_at,
+      createdAt: user.created_at
     };
   }
   
@@ -83,18 +163,31 @@ class User {
       .from('profiles')
       .update({ 
         monthly_usage: { analyses: 0 },
-        usage_reset_at: new Date().toISOString()
+        usage_reset_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       })
       .not('id', 'is', null);
       
-    if (error) throw error;
+    if (error) {
+      console.error('Reset all usage error:', error);
+      throw error;
+    }
+    
     console.log('✅ Monthly usage reset for all users');
     return true;
   }
   
   // Check if user needs reset (if it's been > 30 days)
   static async checkAndResetIfNeeded(userId) {
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+
     const user = await this.findById(userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
     const resetDate = user.usage_reset_at ? new Date(user.usage_reset_at) : new Date(0);
     const now = new Date();
     const daysSinceReset = (now - resetDate) / (1000 * 60 * 60 * 24);
@@ -104,13 +197,18 @@ class User {
         .from('profiles')
         .update({ 
           monthly_usage: { analyses: 0 },
-          usage_reset_at: now.toISOString()
+          usage_reset_at: now.toISOString(),
+          updated_at: now.toISOString()
         })
         .eq('id', userId)
         .select()
         .single();
         
-      if (error) throw error;
+      if (error) {
+        console.error('Usage reset error:', error);
+        throw error;
+      }
+      
       console.log(`✅ Usage reset for user ${userId}`);
       return data;
     }
