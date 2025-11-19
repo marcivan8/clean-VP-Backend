@@ -225,7 +225,16 @@ const PLATFORM_CRITERIA = {
   }
 };
 
-function analyzeVideo({ title = "", description = "", transcript = "", language = "en", metadata = {} }) {
+function analyzeVideo({ 
+  title = "", 
+  description = "", 
+  transcript = "", 
+  language = "en", 
+  metadata = {},
+  emotionAnalysis = null,
+  sceneAnalysis = null,
+  audioClassification = null
+}) {
   const text = `${title} ${description} ${transcript}`.toLowerCase();
   const words = transcript.trim().split(/\s+/).filter(Boolean);
   const wordCount = words.length;
@@ -234,6 +243,17 @@ function analyzeVideo({ title = "", description = "", transcript = "", language 
   const estimatedDuration = Math.max(30, Math.round(wordCount / 2.5));
 
   console.log(`📊 Analyse avancée - Mots: ${wordCount}, Durée estimée: ${estimatedDuration}s, Langue: ${language}`);
+  
+  // Log des nouvelles analyses
+  if (emotionAnalysis) {
+    console.log(`😊 Analyse émotions: ${emotionAnalysis.totalFacesDetected || 0} visages détectés`);
+  }
+  if (sceneAnalysis) {
+    console.log(`🎬 Analyse scènes: ${sceneAnalysis.framesAnalyzed || 0} frames analysées`);
+  }
+  if (audioClassification) {
+    console.log(`🎵 Classification audio: ${audioClassification.dominantCategory || 'unknown'}`);
+  }
 
   const platformScores = {};
   const detailedAnalysis = {};
@@ -245,7 +265,10 @@ function analyzeVideo({ title = "", description = "", transcript = "", language 
       estimatedDuration,
       title,
       description,
-      transcript
+      transcript,
+      emotionAnalysis,
+      sceneAnalysis,
+      audioClassification
     });
     
     platformScores[platform] = analysis.score;
@@ -263,7 +286,7 @@ function analyzeVideo({ title = "", description = "", transcript = "", language 
   const insights = generateAdvancedInsights(
     bestPlatform, 
     detailedAnalysis[bestPlatform], 
-    { text, wordCount, estimatedDuration, title, description, platformScores },
+    { text, wordCount, estimatedDuration, title, description, platformScores, emotionAnalysis, sceneAnalysis, audioClassification },
     language
   );
 
@@ -273,6 +296,9 @@ function analyzeVideo({ title = "", description = "", transcript = "", language 
     platformScores,
     insights,
     detailedAnalysis,
+    emotionAnalysis,
+    sceneAnalysis,
+    audioClassification,
     metadata: {
       wordCount,
       estimatedDuration,
@@ -283,7 +309,7 @@ function analyzeVideo({ title = "", description = "", transcript = "", language 
 }
 
 function analyzeForPlatform(platform, criteria, data) {
-  const { text, wordCount, estimatedDuration, title, description, transcript } = data;
+  const { text, wordCount, estimatedDuration, title, description, transcript, emotionAnalysis, sceneAnalysis, audioClassification } = data;
   let score = 20;
   const details = { breakdown: {} };
 
@@ -314,6 +340,27 @@ function analyzeForPlatform(platform, criteria, data) {
   const contentQuality = analyzeContentQuality(title, description);
   score += contentQuality.points;
   details.breakdown.contentQuality = contentQuality;
+
+  // 6. Bonus basé sur l'analyse des émotions
+  if (emotionAnalysis && emotionAnalysis.totalFacesDetected > 0) {
+    const emotionBonus = calculateEmotionBonus(platform, emotionAnalysis);
+    score += emotionBonus.points;
+    details.breakdown.emotionAnalysis = emotionBonus;
+  }
+
+  // 7. Bonus basé sur l'analyse des scènes
+  if (sceneAnalysis && sceneAnalysis.framesAnalyzed > 0) {
+    const sceneBonus = calculateSceneBonus(platform, sceneAnalysis);
+    score += sceneBonus.points;
+    details.breakdown.sceneAnalysis = sceneBonus;
+  }
+
+  // 8. Bonus basé sur la classification audio
+  if (audioClassification && audioClassification.success) {
+    const audioBonus = calculateAudioBonus(platform, audioClassification);
+    score += audioBonus.points;
+    details.breakdown.audioClassification = audioBonus;
+  }
 
   return {
     score: Math.min(100, Math.max(0, Math.round(score))),
@@ -484,116 +531,224 @@ function analyzeContentQuality(title, description) {
   return { points: Math.min(15, points), details };
 }
 
+/**
+ * Calcule un bonus basé sur l'analyse des émotions
+ */
+function calculateEmotionBonus(platform, emotionAnalysis) {
+  let points = 0;
+  const details = {};
+
+  // Les plateformes visuelles bénéficient plus des émotions
+  const visualPlatforms = ['TikTok', 'Instagram', 'YouTubeShorts'];
+  const isVisualPlatform = visualPlatforms.includes(platform);
+
+  if (emotionAnalysis.totalFacesDetected > 0) {
+    points += 3; // Bonus pour présence de visages
+    details.hasFaces = true;
+
+    if (isVisualPlatform) {
+      points += 2; // Bonus supplémentaire pour plateformes visuelles
+    }
+
+    // Bonus pour émotions positives (happy, surprised)
+    const positiveEmotions = ['happy', 'surprised'];
+    if (emotionAnalysis.overallDominantEmotion && 
+        positiveEmotions.includes(emotionAnalysis.overallDominantEmotion)) {
+      points += 5;
+      details.positiveEmotion = true;
+    }
+  }
+
+  return { points: Math.min(10, points), details };
+}
+
+/**
+ * Calcule un bonus basé sur l'analyse des scènes
+ */
+function calculateSceneBonus(platform, sceneAnalysis) {
+  let points = 0;
+  const details = {};
+
+  if (sceneAnalysis.aggregated) {
+    // Bonus pour contenu visuellement riche
+    if (sceneAnalysis.aggregated.allObjects.length > 3) {
+      points += 3;
+      details.richContent = true;
+    }
+
+    // Bonus pour environnement adapté à la plateforme
+    const environment = sceneAnalysis.aggregated.dominantEnvironment;
+    if (environment) {
+      if (platform === 'Instagram' && environment.toLowerCase().includes('aesthetic')) {
+        points += 4;
+        details.aestheticMatch = true;
+      }
+      if (platform === 'LinkedIn' && environment.toLowerCase().includes('professional')) {
+        points += 4;
+        details.professionalMatch = true;
+      }
+    }
+
+    // Bonus pour tags pertinents
+    if (sceneAnalysis.aggregated.allTags.length > 0) {
+      points += 2;
+      details.hasTags = true;
+    }
+  }
+
+  return { points: Math.min(10, points), details };
+}
+
+/**
+ * Calcule un bonus basé sur la classification audio
+ */
+function calculateAudioBonus(platform, audioClassification) {
+  let points = 0;
+  const details = {};
+
+  if (audioClassification.contentType) {
+    const contentType = audioClassification.contentType;
+
+    // Bonus si le type audio correspond à la plateforme
+    if (contentType.suitableForPlatform && 
+        contentType.suitableForPlatform.includes(platform)) {
+      points += 5;
+      details.audioMatch = true;
+    }
+
+    // Bonus pour énergie élevée (bon pour engagement)
+    if (contentType.energyLevel === 'high') {
+      points += 3;
+      details.highEnergy = true;
+    }
+
+    // Bonus pour musique (bon pour TikTok, Instagram)
+    if (contentType.isMusic && ['TikTok', 'Instagram'].includes(platform)) {
+      points += 4;
+      details.musicMatch = true;
+    }
+
+    // Bonus pour parole (bon pour YouTube, LinkedIn)
+    if (contentType.isSpeech && ['YouTube', 'LinkedIn', 'X'].includes(platform)) {
+      points += 4;
+      details.speechMatch = true;
+    }
+  }
+
+  return { points: Math.min(10, points), details };
+}
+
+/**
+ * Génère des insights avancés et des recommandations basées sur l'analyse approfondie.
+ * La logique se concentre sur les points faibles détectés pour fournir des conseils exploitables.
+ * @param {string} bestPlatform - La meilleure plateforme identifiée.
+ * @param {Object} analysis - L'objet d'analyse détaillé pour la meilleure plateforme.
+ * @param {Object} data - Les données complètes de la vidéo (texte, métadonnées, analyses avancées).
+ * @param {string} language - La langue pour les traductions.
+ * @returns {string[]} - Un tableau d'insights et de recommandations.
+ */
 function generateAdvancedInsights(bestPlatform, analysis, data, language = "en") {
   const insights = [];
-  const { wordCount, estimatedDuration, title, description, platformScores } = data;
+  const { wordCount, estimatedDuration, title, description, platformScores, emotionAnalysis, sceneAnalysis, audioClassification } = data;
+  const details = analysis?.details?.breakdown || {};
 
   // Insights sur la durée
-  if (estimatedDuration < 30) {
-    insights.push(getTranslation("very_short_video", language));
-  } else if (estimatedDuration > 300) {
-    insights.push(getTranslation("long_video", language));
+  if (details.duration?.score < 0.6) {
+    const optimalDuration = PLATFORM_CRITERIA[bestPlatform]?.optimal.duration;
+    if (optimalDuration) {
+      if (estimatedDuration < optimalDuration.min) {
+        insights.push(getTranslation("very_short_video", language));
+      } else if (estimatedDuration > optimalDuration.max) {
+        insights.push(getTranslation("long_video", language));
+      }
+    }
   }
 
   // Insights spécifiques à la meilleure plateforme
-  const platformDetails = analysis?.details || {};
-  
   switch (bestPlatform) {
     case 'TikTok':
-      if (!platformDetails.hook) {
-        insights.push(getTranslation("tiktok_hook", language));
-      }
-      if (!platformDetails.trending) {
-        insights.push(getTranslation("tiktok_trending", language));
-      }
-      if (!platformDetails.engagementBait) {
-        insights.push(getTranslation("tiktok_engagement", language));
-      }
+      if (!details.platformSpecific?.details?.hook) insights.push(getTranslation("tiktok_hook", language));
+      if (!details.platformSpecific?.details?.trending) insights.push(getTranslation("tiktok_trending", language));
+      if (!details.platformSpecific?.details?.engagementBait) insights.push(getTranslation("tiktok_engagement", language));
       insights.push(getTranslation("tiktok_format", language));
       break;
 
     case 'Instagram':
-      if (!platformDetails.aesthetic) {
-        insights.push(getTranslation("instagram_aesthetic", language));
-      }
-      if (!platformDetails.personal) {
-        insights.push(getTranslation("instagram_personal", language));
-      }
+      if (!details.platformSpecific?.details?.aesthetic) insights.push(getTranslation("instagram_aesthetic", language));
+      if (!details.platformSpecific?.details?.personal) insights.push(getTranslation("instagram_personal", language));
       insights.push(getTranslation("instagram_hashtags", language));
-      if (estimatedDuration > 90) {
-        insights.push(getTranslation("instagram_carousel", language));
-      }
+      if (estimatedDuration > 90) insights.push(getTranslation("instagram_carousel", language));
       break;
 
     case 'YouTubeShorts':
       insights.push(getTranslation("youtubeshorts_tips", language));
-      if (estimatedDuration > 60) {
-        insights.push(getTranslation("very_short_video", language));
-      }
+      if (estimatedDuration > 60) insights.push(getTranslation("very_short_video", language));
       break;
 
     case 'YouTube':
-      if (!platformDetails.structure?.intro) {
-        insights.push(getTranslation("youtube_intro", language));
-      }
-      if (!platformDetails.structure?.conclusion) {
-        insights.push(getTranslation("youtube_cta", language));
-      }
-      if (!platformDetails.educational) {
-        insights.push(getTranslation("youtube_educational", language));
-      }
+      if (!details.platformSpecific?.details?.structure?.intro) insights.push(getTranslation("youtube_intro", language));
+      if (!details.platformSpecific?.details?.structure?.conclusion) insights.push(getTranslation("youtube_cta", language));
+      if (!details.platformSpecific?.details?.educational) insights.push(getTranslation("youtube_educational", language));
       insights.push(getTranslation("youtube_seo", language));
-      if (estimatedDuration < 300) {
-        insights.push(getTranslation("youtube_length", language));
-      }
+      if (estimatedDuration < 300) insights.push(getTranslation("youtube_length", language));
       break;
 
     case 'LinkedIn':
-      if (!platformDetails.professional) {
-        insights.push(getTranslation("linkedin_business", language));
-      }
-      if (!platformDetails.personalStory) {
-        insights.push(getTranslation("linkedin_story", language));
-      }
-      if (!platformDetails.businessValue) {
-        insights.push(getTranslation("linkedin_data", language));
-      }
+      if (!details.platformSpecific?.details?.professional) insights.push(getTranslation("linkedin_business", language));
+      if (!details.platformSpecific?.details?.personalStory) insights.push(getTranslation("linkedin_story", language));
+      if (!details.platformSpecific?.details?.businessValue) insights.push(getTranslation("linkedin_data", language));
       insights.push(getTranslation("linkedin_question", language));
       break;
 
     case 'X':
-      if (!platformDetails.timely) {
-        insights.push(getTranslation("x_timely", language));
-      }
-      if (!platformDetails.opinion) {
-        insights.push(getTranslation("x_opinion", language));
-      }
-      if (estimatedDuration > 60) {
-        insights.push(getTranslation("x_thread", language));
-      }
+      if (!details.platformSpecific?.details?.timely) insights.push(getTranslation("x_timely", language));
+      if (!details.platformSpecific?.details?.opinion) insights.push(getTranslation("x_opinion", language));
+      if (estimatedDuration > 60) insights.push(getTranslation("x_thread", language));
       insights.push(getTranslation("x_punchy", language));
       break;
   }
 
   // Insights sur le contenu global
-  if (!title || title.length < 10) {
+  if (details.contentQuality?.details?.titleLength === 'too_short') {
     insights.push(getTranslation("title_short", language));
   }
-  
-  if (!description || description.length < 50) {
+  if (details.contentQuality?.details?.descriptionLength === 'too_short') {
     insights.push(getTranslation("description_short", language));
   }
 
   // Suggestions cross-platform
   const secondBest = Object.entries(platformScores).sort(([,a], [,b]) => b - a)[1];
-  if (secondBest && secondBest[1] > 60) {
+  if (secondBest && secondBest[0] !== bestPlatform && secondBest[1] > 70) {
     insights.push(getTranslation("multiplatform", language, {
       platform: secondBest[0],
       score: secondBest[1]
     }));
   }
 
-  return insights;
+  // Insights basés sur les analyses avancées (émotion, scène, audio)
+  if (emotionAnalysis) {
+    if (emotionAnalysis.totalFacesDetected === 0 && ['TikTok', 'Instagram', 'YouTube'].includes(bestPlatform)) {
+      insights.push("Visage non détecté. Envisagez de vous montrer pour créer une connexion plus personnelle.");
+    } else if (emotionAnalysis.overallDominantEmotion === 'neutral' || emotionAnalysis.overallDominantEmotion === 'sad') {
+      insights.push("L'émotion dominante est neutre ou triste. Essayez de montrer plus d'enthousiasme pour captiver votre audience.");
+    }
+  }
+
+  if (sceneAnalysis?.aggregated?.allObjects.length < 3) {
+    insights.push("La scène semble visuellement simple. Pensez à ajouter des éléments visuels ou à changer de décor pour la rendre plus dynamique.");
+  }
+
+  if (audioClassification?.contentType) {
+    if (audioClassification.contentType.energyLevel === 'low' && ['TikTok', 'YouTubeShorts'].includes(bestPlatform)) {
+      insights.push("L'énergie audio est faible. Pour une plateforme dynamique comme " + bestPlatform + ", ajoutez une musique de fond entraînante.");
+    }
+    if (!audioClassification.contentType.isMusic && !audioClassification.contentType.isSpeech) {
+      insights.push("L'audio principal n'est ni de la musique ni de la parole. Assurez-vous que la qualité sonore est bonne et compréhensible.");
+    }
+  }
+
+  // Retourne un ensemble unique d'insights pour éviter les doublons
+  return [...new Set(insights)];
 }
 
 module.exports = { analyzeVideo };

@@ -15,6 +15,11 @@
     "@paddle/paddle-node-sdk": "^3.2.0",
     "@supabase/storage-js": "^2.10.4",
     "@supabase/supabase-js": "^2.55.0",
+    "@tensorflow/tfjs-node": "^4.15.0",
+    "@tensorflow-models/face-landmarks-detection": "^1.0.6",
+    "@tensorflow-models/face-detection": "^1.0.3",
+    "@tensorflow-models/coco-ssd": "^2.2.3",
+    "canvas": "^2.11.2",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
     "dotenv": "^16.3.1",
@@ -26,7 +31,8 @@
     "node-cron": "^3.0.2",
     "openai": "^4.20.1",
     "paddle-sdk": "^2.1.1",
-    "path": "^0.12.7"
+    "path": "^0.12.7",
+    "sharp": "^0.33.2"
   },
   "devDependencies": {
     "jest": "^29.7.0",

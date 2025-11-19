@@ -1,7 +1,7 @@
 const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { authenticateUser } = require('../middleware/auth');
-const User = require('../models/User');
+const UsageBasedPricingService = require('../services/UsageBasedPricingService');
 const router = express.Router();
 
 // Create user profile after signup
@@ -45,12 +45,18 @@ router.post('/profile', async (req, res) => {
       });
     }
 
+    const explorerTier = UsageBasedPricingService.tiers.explorer;
+    const defaultResetDate = new Date(Date.now() + explorerTier.resetPeriod).toISOString();
+
     // Create new profile with proper data validation
     const profileData = {
       id: userId,
       email: email.trim().toLowerCase(),
       full_name: fullName ? fullName.trim() : null,
       monthly_usage: { analyses: 0 },
+      subscription_tier: 'explorer',
+      tier_expires_at: defaultResetDate,
+      usage_data: {},
       usage_reset_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -127,8 +133,8 @@ router.post('/profile', async (req, res) => {
 // Get current usage
 router.get('/usage', authenticateUser, async (req, res) => {
   try {
-    const usage = await User.getUsage(req.user.id);
-    res.json(usage);
+    const stats = await UsageBasedPricingService.getUsageStatistics(req.user.id);
+    res.json(stats);
   } catch (error) {
     console.error('Usage fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch usage' });

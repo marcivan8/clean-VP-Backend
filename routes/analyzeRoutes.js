@@ -5,10 +5,14 @@ const { authenticateUser } = require('../middleware/auth');
 const { checkUsageLimits } = require('../middleware/usageLimits');
 const StorageService = require('../services/StorageService');
 const VideoAnalysis = require('../models/VideoAnalysis');
-const User = require('../models/User');
 const { analyzeVideo } = require('../utils/videoAnalyzer');
 const { extractAudio } = require('../utils/compressVideo');
 const { translateError, validateLanguage } = require('../utils/translations');
+const { extractFrames } = require('../utils/extractFrames');
+const { analyzeEmotionsBatch } = require('../utils/emotionAnalyzer');
+const { analyzeScenesBatch } = require('../utils/sceneAnalyzer');
+const { classifyAudio } = require('../utils/audioClassifier');
+const UsageBasedPricingService = require('../services/UsageBasedPricingService');
 const OpenAI = require('openai');
 const fs = require('fs');
 const path = require('path');
@@ -251,13 +255,66 @@ router.post('/',
           console.warn('⚠️ OpenAI client not initialized - skipping transcription');
         }
         
-        // 4. Perform AI analysis
+        // 4. Extract frames for visual analysis
+        let emotionAnalysis = null;
+        let sceneAnalysis = null;
+        let audioClassification = null;
+        let framesDir = null;
+        
+        try {
+          console.log('🎬 Extracting video frames...');
+          framesDir = path.join(tempDir, `${timestamp}-frames`);
+          const framePaths = await extractFrames(tempVideoPath, framesDir, 5);
+          console.log(`✅ ${framePaths.length} frames extracted`);
+          
+          // 4a. Analyze emotions from frames
+          if (framePaths.length > 0) {
+            try {
+              console.log('😊 Analyzing emotions...');
+              emotionAnalysis = await analyzeEmotionsBatch(framePaths);
+              console.log(`✅ Emotion analysis complete: ${emotionAnalysis.totalFacesDetected || 0} faces detected`);
+            } catch (emotionError) {
+              console.warn('⚠️ Emotion analysis failed:', emotionError.message);
+            }
+            
+            // 4b. Analyze scenes with GPT-4o-mini-vision
+            if (openai) {
+              try {
+                console.log('🎨 Analyzing scenes with GPT-4o-mini-vision...');
+                sceneAnalysis = await analyzeScenesBatch(framePaths, language);
+                console.log(`✅ Scene analysis complete: ${sceneAnalysis.framesAnalyzed} frames analyzed`);
+              } catch (sceneError) {
+                console.warn('⚠️ Scene analysis failed:', sceneError.message);
+              }
+            }
+          }
+        } catch (frameError) {
+          console.warn('⚠️ Frame extraction failed:', frameError.message);
+        }
+        
+        // 4c. Classify audio
+        if (tempAudioPath && fs.existsSync(tempAudioPath)) {
+          try {
+            console.log('🎵 Classifying audio...');
+            audioClassification = await classifyAudio(tempAudioPath);
+            if (audioClassification.success) {
+              console.log(`✅ Audio classification complete: ${audioClassification.dominantCategory}`);
+            }
+          } catch (audioClassError) {
+            console.warn('⚠️ Audio classification failed:', audioClassError.message);
+          }
+        }
+        
+        // 5. Perform AI analysis with all data
         console.log('🤖 Starting AI analysis...');
         const analysisResults = analyzeVideo({
           title: title.trim(),
           description: description.trim(), 
           transcript: transcript || '',
-          language
+          language,
+          emotionAnalysis,
+          sceneAnalysis,
+          audioClassification
         });
         
         console.log('✅ AI analysis completed:', {
@@ -266,16 +323,24 @@ router.post('/',
           insights: analysisResults.insights.length
         });
         
-        // 5. Update database with results
+        // 6. Update database with results
         await VideoAnalysis.updateResults(analysisRecord.id, analysisResults);
         
-        // 6. Update user usage
-        await User.updateUsage(userId);
+        // 7. Track usage via pricing service (non-blocking)
+        try {
+          await UsageBasedPricingService.trackUsage(userId, 'videoAnalysis', {
+            analysisId: analysisRecord.id,
+            bestPlatform: analysisResults.bestPlatform,
+            viralityScore: analysisResults.viralityScore
+          });
+        } catch (usageError) {
+          console.warn('⚠️ Failed to track usage:', usageError.message);
+        }
         
         const processingTime = Date.now() - startTime;
         console.log(`✅ Analysis complete for user ${userId} (${processingTime}ms)`);
         
-        // 7. Send successful response
+        // 8. Send successful response
         res.json({
           success: true,
           analysis_id: analysisRecord.id,
@@ -285,6 +350,9 @@ router.post('/',
           platformScores: analysisResults.platformScores,
           insights: analysisResults.insights,
           language: language,
+          emotionAnalysis: emotionAnalysis,
+          sceneAnalysis: sceneAnalysis,
+          audioClassification: audioClassification,
           metadata: {
             ...analysisResults.metadata,
             fileSize: req.file.size,
@@ -345,6 +413,23 @@ router.post('/',
           console.log('🗑️ Temp audio cleaned up');
         } catch (e) { 
           console.warn('Failed to cleanup temp audio:', e.message); 
+        }
+      }
+      
+      // Cleanup frames directory
+      if (framesDir && fs.existsSync(framesDir)) {
+        try {
+          const frameFiles = fs.readdirSync(framesDir);
+          frameFiles.forEach(file => {
+            const filePath = path.join(framesDir, file);
+            if (fs.statSync(filePath).isFile()) {
+              fs.unlinkSync(filePath);
+            }
+          });
+          fs.rmdirSync(framesDir);
+          console.log('🗑️ Frames directory cleaned up');
+        } catch (e) {
+          console.warn('Failed to cleanup frames directory:', e.message);
         }
       }
     }
