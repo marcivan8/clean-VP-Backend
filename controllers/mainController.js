@@ -4,6 +4,8 @@ const fs = require("fs");
 const OpenAI = require("openai");
 const { extractAudio } = require("../utils/compressVideo");
 const { analyzeVideo } = require("../utils/videoAnalyzer");
+const User = require("../models/User");
+const VideoAnalysis = require("../models/VideoAnalysis");
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -11,88 +13,195 @@ const openai = new OpenAI({
 
 async function safeUnlink(file) {
   try { 
-    if (fs.existsSync(file)) fs.unlinkSync(file); 
+    if (fs.existsSync(file)) {
+      fs.unlinkSync(file); 
+      console.log(`🗑️ Fichier supprimé: ${file}`);
+    }
   } catch (e) { 
-    console.warn("Cannot delete file:", file, e); 
+    console.warn("⚠️ Cannot delete file:", file, e); 
   }
 }
 
 const analyzeVideoHandler = async (req, res) => {
+  let videoPath = null;
+  let audioPath = null;
+  let analysisId = null;
+
   try {
+    // Vérifier le fichier
     if (!req.file) {
-      return res.status(400).json({ error: "Aucun fichier vidéo envoyé." });
+      console.error('❌ No file uploaded');
+      return res.status(400).json({ 
+        error: "No video file provided.",
+        viralityScore: 0,
+        bestPlatform: "Unknown",
+        platformScores: {},
+        insights: ["Please upload a video file to analyze."]
+      });
     }
 
-    const videoPath = req.file.path;
-    const audioPath = path.join("uploads", `${Date.now()}-audio.mp3`);
-    const { title = "", description = "", language = "en" } = req.body;
+    // Récupérer les données du formulaire
+    const { title = "", description = "", language = "en", ai_training_consent = "false" } = req.body;
+    const userId = req.user.id;
 
-    console.log("🎬 Analyse vidéo :", videoPath);
-    console.log("📝 Titre :", title);
-    console.log("📝 Description :", description);
-    console.log("🌐 Langue :", language);
+    console.log("🎬 Starting video analysis:", {
+      userId,
+      title: title.substring(0, 50),
+      fileSize: req.file.size,
+      language
+    });
 
-    // 1) Extract audio (ffmpeg)
-    try {
-      console.log("🎧 Extraction audio en cours...");
-      await extractAudio(videoPath, audioPath);
-      console.log("✅ Audio extrait :", audioPath);
-    } catch (err) {
-      console.error("⚠️ Échec extraction audio :", err);
-      // fallback : continue without audio (will analyze title/description only)
+    // Valider les champs requis
+    if (!title || !description) {
+      console.error('❌ Missing title or description');
+      return res.status(400).json({ 
+        error: "Title and description are required.",
+        viralityScore: 0,
+        bestPlatform: "Unknown",
+        platformScores: {},
+        insights: ["Please provide both title and description."]
+      });
     }
 
-    // 2) Transcription (Whisper) — si audio disponible
+    // Sauvegarder temporairement le fichier vidéo
+    const uploadsDir = path.join(__dirname, '..', 'uploads', 'temp');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    const timestamp = Date.now();
+    const sanitizedFilename = req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    videoPath = path.join(uploadsDir, `${timestamp}-${sanitizedFilename}`);
+    audioPath = path.join(uploadsDir, `${timestamp}-audio.mp3`);
+
+    // Écrire le buffer dans un fichier
+    fs.writeFileSync(videoPath, req.file.buffer);
+    console.log(`✅ Video saved to: ${videoPath}`);
+
+    // Créer l'enregistrement d'analyse dans la DB
+    const analysisRecord = await VideoAnalysis.create({
+      user_id: userId,
+      title: title.trim(),
+      description: description.trim(),
+      language: language,
+      video_path: videoPath,
+      file_size: req.file.size,
+      ai_training_consent: ai_training_consent === 'true'
+    });
+    analysisId = analysisRecord.id;
+    console.log(`📊 Analysis record created: ${analysisId}`);
+
+    // 1) Extraire l'audio
     let transcript = "";
-    if (fs.existsSync(audioPath)) {
-      try {
-        console.log("🔁 Transcription en cours...");
-        const transcription = await openai.audio.transcriptions.create({
-          file: fs.createReadStream(audioPath),
-          model: "whisper-1",
-        });
-        transcript = transcription?.text || "";
-        console.log("📄 Transcription terminée, length:", (transcript || "").length);
-      } catch (err) {
-        console.error("❌ Erreur de transcription (OpenAI) :", err?.response?.status || err?.status || err?.message || err);
-        if (err?.response?.data) console.error("OpenAI response data:", err.response.data);
-        transcript = "";
+    try {
+      console.log("🎧 Extracting audio...");
+      await extractAudio(videoPath, audioPath);
+      console.log("✅ Audio extracted successfully");
+
+      // 2) Transcription avec Whisper
+      if (fs.existsSync(audioPath) && fs.statSync(audioPath).size > 0) {
+        try {
+          console.log("🔁 Transcribing audio with Whisper...");
+          const transcription = await openai.audio.transcriptions.create({
+            file: fs.createReadStream(audioPath),
+            model: "whisper-1",
+          });
+          transcript = transcription?.text || "";
+          console.log(`✅ Transcription completed, length: ${transcript.length}`);
+        } catch (transcriptionError) {
+          console.error("❌ Transcription error:", transcriptionError?.message);
+          transcript = "";
+        }
       }
-    } else {
-      console.warn("⚠️ Aucun audio trouvé, saut de la transcription.");
+    } catch (audioError) {
+      console.error("⚠️ Audio extraction failed:", audioError?.message);
       transcript = "";
     }
 
-    // 3) Analyse avec langue utilisateur
-    let results = { bestPlatform: "Unknown", viralityScore: 0, platformScores: {}, insights: [] };
+    // 3) Analyser avec le videoAnalyzer
+    console.log("🔍 Analyzing video content...");
+    let results = {
+      viralityScore: 0,
+      bestPlatform: "Unknown",
+      platformScores: {},
+      insights: []
+    };
+
     try {
-      results = analyzeVideo({ title, description, transcript, language });
-    } catch (err) {
-      console.error("❌ Erreur lors de l'analyse du transcript :", err);
+      results = analyzeVideo({ 
+        title, 
+        description, 
+        transcript, 
+        language 
+      });
+      console.log(`✅ Analysis completed - Score: ${results.viralityScore}, Platform: ${results.bestPlatform}`);
+    } catch (analysisError) {
+      console.error("❌ Analysis error:", analysisError);
+      results.insights = ["Analysis completed with limited data. Try adding more details."];
     }
 
-    // 4) Cleanup
-    await Promise.all([safeUnlink(videoPath), safeUnlink(audioPath)]);
+    // 4) Mettre à jour l'enregistrement avec les résultats
+    await VideoAnalysis.updateResults(analysisId, results);
+    console.log(`✅ Results saved to database`);
 
-    // 5) Retourne un objet JSON complet avec traductions
-    return res.json({
+    // 5) Mettre à jour l'usage utilisateur
+    await User.updateUsage(userId);
+    console.log(`✅ User usage updated`);
+
+    // 6) Nettoyer les fichiers temporaires
+    await Promise.allSettled([
+      safeUnlink(videoPath),
+      safeUnlink(audioPath)
+    ]);
+
+    // 7) Retourner les résultats
+    const response = {
+      success: true,
+      analysisId: analysisId,
       transcript: transcript || "No transcript available",
-      viralityScore: typeof results.viralityScore === "number" ? results.viralityScore : 0,
+      viralityScore: results.viralityScore || 0,
       bestPlatform: results.bestPlatform || "Unknown",
       platformScores: results.platformScores || {},
       insights: results.insights || [],
-      language: language, // Confirme la langue utilisée
-      metadata: results.metadata || {}
+      language: language,
+      metadata: results.metadata || {
+        wordCount: transcript.split(/\s+/).length,
+        analysisTimestamp: new Date().toISOString()
+      }
+    };
+
+    console.log("✅ Analysis completed successfully:", {
+      analysisId,
+      score: response.viralityScore,
+      platform: response.bestPlatform
     });
+
+    return res.json(response);
+
   } catch (err) {
-    console.error("❌ Erreur inattendue analyse :", err);
+    console.error("❌ Analysis error:", err);
+
+    // Nettoyer les fichiers en cas d'erreur
+    if (videoPath) await safeUnlink(videoPath);
+    if (audioPath) await safeUnlink(audioPath);
+
+    // Mettre à jour le statut en erreur
+    if (analysisId) {
+      try {
+        await VideoAnalysis.updateStatus(analysisId, 'failed', err.message);
+      } catch (updateError) {
+        console.error("❌ Failed to update error status:", updateError);
+      }
+    }
+
     return res.status(500).json({
+      success: false,
+      error: err?.message || "Internal server error",
       transcript: "",
       viralityScore: 0,
       bestPlatform: "Unknown",
       platformScores: {},
-      insights: ["Erreur interne pendant l'analyse. Voir logs serveur."],
-      error: err?.message || "Internal server error"
+      insights: ["Analysis failed. Please try again."]
     });
   }
 };
