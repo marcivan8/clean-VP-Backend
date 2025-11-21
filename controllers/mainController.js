@@ -12,13 +12,13 @@ const openai = new OpenAI({
 });
 
 async function safeUnlink(file) {
-  try { 
+  try {
     if (fs.existsSync(file)) {
-      fs.unlinkSync(file); 
+      fs.unlinkSync(file);
       console.log(`🗑️ Fichier supprimé: ${file}`);
     }
-  } catch (e) { 
-    console.warn("⚠️ Cannot delete file:", file, e); 
+  } catch (e) {
+    console.warn("⚠️ Cannot delete file:", file, e);
   }
 }
 
@@ -31,7 +31,7 @@ const analyzeVideoHandler = async (req, res) => {
     // Vérifier le fichier
     if (!req.file) {
       console.error('❌ No file uploaded');
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: "No video file provided.",
         viralityScore: 0,
         bestPlatform: "Unknown",
@@ -54,7 +54,7 @@ const analyzeVideoHandler = async (req, res) => {
     // Valider les champs requis
     if (!title || !description) {
       console.error('❌ Missing title or description');
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: "Title and description are required.",
         viralityScore: 0,
         bestPlatform: "Unknown",
@@ -128,13 +128,55 @@ const analyzeVideoHandler = async (req, res) => {
     };
 
     try {
-      results = analyzeVideo({ 
-        title, 
-        description, 
-        transcript, 
-        language 
+      results = analyzeVideo({
+        title,
+        description,
+        transcript,
+        language
       });
       console.log(`✅ Analysis completed - Score: ${results.viralityScore}, Platform: ${results.bestPlatform}`);
+
+      // Generate AI-powered specific insights
+      if (transcript && results.bestPlatform !== "Unknown") {
+        try {
+          console.log("🧠 Generating AI insights...");
+          const prompt = `
+            You are a professional video content strategist.
+            Analyze the following video content and provide 3-5 specific, actionable, and detailed insights on how to improve this specific video for better performance on **${results.bestPlatform}**.
+            
+            Context:
+            - Title: "${title}"
+            - Description: "${description}"
+            - Transcript (excerpt): "${transcript.substring(0, 1500)}..."
+            - Current Virality Score: ${results.viralityScore}/100
+            
+            Your insights must be:
+            1. Specific to the content (quote specific parts if needed).
+            2. Actionable (tell exactly what to change or add).
+            3. Tailored to ${results.bestPlatform}'s algorithm and audience.
+            4. Not generic advice like "improve lighting" unless specifically relevant to the content description.
+            
+            Format the output as a JSON object with a single key "insights" containing an array of strings. Example: { "insights": ["Insight 1", "Insight 2"] }
+          `;
+
+          const completion = await openai.chat.completions.create({
+            messages: [{ role: "user", content: prompt }],
+            model: "gpt-3.5-turbo",
+            response_format: { type: "json_object" },
+          });
+
+          const aiContent = JSON.parse(completion.choices[0].message.content);
+          if (aiContent && Array.isArray(aiContent.insights)) {
+            if (aiContent.insights.length > 0) {
+              results.insights = aiContent.insights;
+              console.log("✅ AI insights generated successfully");
+            }
+          }
+        } catch (aiError) {
+          console.error("⚠️ Failed to generate AI insights, falling back to static ones:", aiError.message);
+          // Fallback is already in results.insights from analyzeVideo
+        }
+      }
     } catch (analysisError) {
       console.error("❌ Analysis error:", analysisError);
       results.insights = ["Analysis completed with limited data. Try adding more details."];
