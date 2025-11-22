@@ -1,4 +1,6 @@
 // services/UsageBasedPricingService.js
+const User = require('../models/User');
+const VideoAnalysis = require('../models/VideoAnalysis');
 
 class UsageBasedPricingService {
   constructor() {
@@ -7,13 +9,16 @@ class UsageBasedPricingService {
         id: 'explorer',
         name: 'Explorer',
         limits: {
-          videoAnalyses: 5,
+          videoAnalyses: 20, // Match the limit in User.js
         },
+        period: 'monthly'
       },
     };
   }
 
   async getUserTier(userId) {
+    // For now, everyone is on the Explorer tier
+    // In the future, we can fetch this from the User profile
     return {
       tier: this.tiers.explorer,
       expiresAt: null,
@@ -22,73 +27,76 @@ class UsageBasedPricingService {
   }
 
   async getCurrentUsage(userId) {
+    const userUsage = await User.getUsage(userId);
     return {
-      videoAnalyses: 1,
+      videoAnalyses: userUsage.analyses,
     };
   }
 
   async getUsageStatistics(userId) {
-    return {
-      tier: {
-        name: 'Explorer',
-        id: 'explorer',
-        period: 'weekly',
-      },
-      usage: {
-        videoAnalyses: {
-          used: 1,
-          limit: 5,
-          remaining: 4,
-          percentage: 20,
+    try {
+      // 1. Get User Usage & Limits
+      const userUsage = await User.getUsage(userId);
+      const tier = this.tiers.explorer;
+
+      // 2. Get Recent History
+      const history = await VideoAnalysis.findByUser(userId, 5); // Get last 5 analyses
+
+      // 3. Calculate percentages
+      const limit = userUsage.limit || tier.limits.videoAnalyses;
+      const used = userUsage.analyses;
+      const percentage = limit > 0 ? Math.round((used / limit) * 100) : 0;
+
+      return {
+        tier: {
+          name: tier.name,
+          id: tier.id,
+          period: tier.period,
         },
-      },
-      recommendations: [],
-      history: [],
-      projections: {},
-    };
+        usage: {
+          videoAnalyses: {
+            used: used,
+            limit: limit,
+            remaining: userUsage.remaining,
+            percentage: percentage,
+          },
+        },
+        recommendations: [], // Can be added later
+        history: history.map(analysis => ({
+          id: analysis.id,
+          date: analysis.created_at,
+          title: analysis.title,
+          score: analysis.virality_score,
+          platform: analysis.best_platform
+        })),
+        projections: {},
+      };
+    } catch (error) {
+      console.error('Error in getUsageStatistics:', error);
+      throw error;
+    }
   }
 
   async trackUsage(userId, action, metadata) {
     console.log('Tracking usage:', { userId, action, metadata });
+    // Usage is currently tracked in the controller via User.updateUsage
     return { success: true };
   }
 
   async checkUsageLimit(userId, feature) {
-    const tierData = await this.getUserTier(userId);
-    const currentUsage = await this.getCurrentUsage(userId);
-
-    // Map feature name to internal key if needed
-    const featureMap = {
-      'videoAnalysis': 'videoAnalyses'
-    };
-    const internalFeatureKey = featureMap[feature] || feature;
-
-    const limit = tierData.tier.limits[internalFeatureKey];
-
-    if (limit === undefined) {
+    // Delegate to User model which has the logic
+    if (feature === 'videoAnalysis' || feature === 'videoAnalyses') {
+      const check = await User.checkUsageLimits(userId);
       return {
-        allowed: false,
-        reason: 'not_available_in_plan'
+        allowed: check.canAnalyze,
+        limit: check.limit,
+        used: check.usage,
+        remaining: check.remaining,
+        reason: check.canAnalyze ? null : 'limit_reached'
       };
     }
 
-    const used = currentUsage[internalFeatureKey] || 0;
-
-    if (used >= limit) {
-      return {
-        allowed: false,
-        reason: 'limit_reached',
-        limit,
-        used
-      };
-    }
-
-    return {
-      allowed: true,
-      limit,
-      used,
-      remaining: limit - used
-    };
+    return { allowed: true };
   }
 }
 
