@@ -92,27 +92,7 @@ class User {
     }
   }
 
-  static async updateUsage(userId) {
-    if (!userId) {
-      throw new Error('User ID is required');
-    }
 
-    try {
-      // Use the new secure RPC function
-      const { error } = await supabaseAdmin
-        .rpc('increment_usage', { user_id_param: userId });
-
-      if (error) {
-        console.error('Usage update error:', error);
-        throw error;
-      }
-
-      return { success: true };
-    } catch (error) {
-      console.error('Error in updateUsage:', error);
-      throw error;
-    }
-  }
 
   static async checkUsageLimits(userId) {
     if (!userId) {

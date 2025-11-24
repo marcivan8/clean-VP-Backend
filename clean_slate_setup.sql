@@ -14,7 +14,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- =================================================
 -- 2. TABLE UPDATES
 -- =================================================
--- Ensure profiles has the tracker column
+-- Ensure profiles has the tracker column (kept for legacy or other metadata, but not used for counting anymore)
 ALTER TABLE public.profiles 
   ADD COLUMN IF NOT EXISTS monthly_usage JSONB DEFAULT '{"analyses": 0}'::jsonb,
   ADD COLUMN IF NOT EXISTS subscription_tier TEXT DEFAULT 'explorer';
@@ -30,6 +30,7 @@ ALTER TABLE public.profiles
 
 -- Function A: Check Limits (Frontend calls this)
 -- Returns TRUE if user is under the limit of 20
+-- UPDATED: Counts directly from video_analyses table
 CREATE OR REPLACE FUNCTION public.check_usage_limits(user_id_param UUID)
 RETURNS TABLE(can_analyze BOOLEAN, current_usage INT, max_limit INT) 
 AS $$
@@ -42,10 +43,12 @@ BEGIN
       RAISE EXCEPTION 'Unauthorized check';
   END IF;
 
-  SELECT COALESCE((monthly_usage->>'analyses')::int, 0)
+  -- Count analyses created in the current month
+  SELECT COUNT(*)::int
   INTO usage_val
-  FROM public.profiles 
-  WHERE id = user_id_param;
+  FROM public.video_analyses 
+  WHERE user_id = user_id_param
+    AND created_at >= date_trunc('month', now());
 
   RETURN QUERY SELECT 
     (usage_val < limit_val), -- True/False
@@ -54,33 +57,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
--- Function B: Increment Usage (Backend/Edge Function calls this)
--- This adds +1 to the counter
-CREATE OR REPLACE FUNCTION public.increment_usage(user_id_param UUID)
-RETURNS void AS $$
-BEGIN
-  UPDATE public.profiles
-  SET 
-    monthly_usage = jsonb_set(
-      monthly_usage,
-      '{analyses}',
-      to_jsonb(COALESCE((monthly_usage->>'analyses')::int, 0) + 1)
-    ),
-    updated_at = timezone('utc'::text, now())
-  WHERE id = user_id_param;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+-- Function B: Increment Usage - DEPRECATED/REMOVED
+-- We no longer need to manually increment usage as we count rows.
 
--- Function C: Monthly Reset (Cron Job calls this)
-CREATE OR REPLACE FUNCTION public.reset_monthly_usage()
-RETURNS void AS $$
-BEGIN
-  -- Resets EVERYONE to 0
-  UPDATE public.profiles
-  SET monthly_usage = '{"analyses": 0}'::jsonb,
-      updated_at = timezone('utc'::text, now());
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+-- Function C: Monthly Reset - DEPRECATED/REMOVED
+-- We no longer need to reset usage as the query filters by current month.
 
 -- =================================================
 -- 4. SECURITY & PERMISSIONS
@@ -89,19 +70,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 -- Allow frontend to check limits
 GRANT EXECUTE ON FUNCTION public.check_usage_limits(UUID) TO anon, authenticated;
 
--- CRITICAL: Prevent frontend from faking usage
-REVOKE EXECUTE ON FUNCTION public.increment_usage(UUID) FROM anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.reset_monthly_usage() FROM anon, authenticated;
-
 -- =================================================
 -- 5. AUTOMATION (The Monthly Reset)
 -- =================================================
--- Unschedule previous jobs to prevent duplicates
+-- Unschedule previous jobs as they are no longer needed
 SELECT cron.unschedule('monthly-reset');
-
--- Schedule: Run at 00:00 on the 1st of every month
-SELECT cron.schedule(
-  'monthly-reset',
-  '0 0 1 * *', 
-  $$SELECT public.reset_monthly_usage()$$
-);
