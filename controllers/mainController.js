@@ -187,9 +187,14 @@ const analyzeVideoHandler = async (req, res) => {
     await VideoAnalysis.updateResults(analysisId, results);
     console.log(`✅ Results saved to database`);
 
-    // 5) Mettre à jour l'usage utilisateur
-    await User.updateUsage(userId);
-    console.log(`✅ User usage updated`);
+    // 5) Mettre à jour l'usage utilisateur via RPC
+    try {
+      await User.updateUsage(userId);
+      console.log(`✅ User usage incremented via RPC (User model)`);
+    } catch (usageError) {
+      console.error('❌ Failed to increment usage:', usageError);
+      // We don't fail the request here, but we log the error
+    }
 
     // 5.5) Log usage to user_logs
     await UsageBasedPricingService.trackUsage(userId, 'VIDEO_ANALYSIS', {
