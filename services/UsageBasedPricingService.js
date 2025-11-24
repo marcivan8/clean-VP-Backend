@@ -1,6 +1,7 @@
 // services/UsageBasedPricingService.js
 const User = require('../models/User');
 const VideoAnalysis = require('../models/VideoAnalysis');
+const { supabaseAdmin } = require('../config/database');
 
 class UsageBasedPricingService {
   constructor() {
@@ -79,8 +80,28 @@ class UsageBasedPricingService {
 
   async trackUsage(userId, action, metadata) {
     console.log('Tracking usage:', { userId, action, metadata });
-    // Usage is currently tracked in the controller via User.updateUsage
-    return { success: true };
+
+    try {
+      const { error } = await supabaseAdmin
+        .from('usage_logs')
+        .insert({
+          user_id: userId,
+          action: action,
+          details: metadata,
+          created_at: new Date().toISOString()
+        });
+
+      if (error) {
+        console.error('Error logging usage:', error);
+        // Don't throw error to avoid disrupting the main flow
+        return { success: false, error };
+      }
+
+      return { success: true };
+    } catch (err) {
+      console.error('Exception in trackUsage:', err);
+      return { success: false, error: err };
+    }
   }
 
   async checkUsageLimit(userId, feature) {

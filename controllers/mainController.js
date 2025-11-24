@@ -6,6 +6,7 @@ const { extractAudio } = require("../utils/compressVideo");
 const { analyzeVideo } = require("../utils/videoAnalyzer");
 const User = require("../models/User");
 const VideoAnalysis = require("../models/VideoAnalysis");
+const UsageBasedPricingService = require("../services/UsageBasedPricingService");
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -189,6 +190,14 @@ const analyzeVideoHandler = async (req, res) => {
     // 5) Mettre à jour l'usage utilisateur
     await User.updateUsage(userId);
     console.log(`✅ User usage updated`);
+
+    // 5.5) Log usage to user_logs
+    await UsageBasedPricingService.trackUsage(userId, 'VIDEO_ANALYSIS', {
+      analysisId: analysisId,
+      title: title,
+      viralityScore: results.viralityScore,
+      platform: results.bestPlatform
+    });
 
     // 6) Nettoyer les fichiers temporaires
     await Promise.allSettled([
