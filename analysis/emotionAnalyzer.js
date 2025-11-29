@@ -10,6 +10,7 @@ if (!global.navigator) {
 // utils/emotionAnalyzer.js - Analyse des émotions avec TensorFlow.js
 let tf, faceDetection, faceLandmarkDetectorModel;
 let tfAvailable = false;
+let transformErrorLogged = false;
 
 try {
   tf = require('@tensorflow/tfjs-node');
@@ -141,7 +142,10 @@ async function analyzeEmotions(imagePath) {
     };
   } catch (error) {
     if (error.message.includes("Kernel 'Transform' not registered")) {
-      console.warn('⚠️ TensorFlow Transform kernel missing. Emotion analysis skipped for this frame.');
+      if (!transformErrorLogged) {
+        console.warn('⚠️ TensorFlow Transform kernel missing. Emotion analysis skipped for frames (suppressing further warnings).');
+        transformErrorLogged = true;
+      }
     } else {
       console.error('❌ Erreur analyse émotions:', error);
     }
