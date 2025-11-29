@@ -78,6 +78,7 @@ app.get('/api/analyze/test', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/analyze', analyzeRoutes);
 app.use('/api/v2/analyze', analyzeRoutes); // Support V2 endpoint
+app.use('/analyze', analyzeRoutes); // Support root-level calls (legacy/proxy)
 
 // API documentation endpoint
 app.get('/api', (req, res) => {
