@@ -140,7 +140,11 @@ async function analyzeEmotions(imagePath) {
       dominantEmotion: dominantEmotion
     };
   } catch (error) {
-    console.error('❌ Erreur analyse émotions:', error);
+    if (error.message.includes("Kernel 'Transform' not registered")) {
+      console.warn('⚠️ TensorFlow Transform kernel missing. Emotion analysis skipped for this frame.');
+    } else {
+      console.error('❌ Erreur analyse émotions:', error);
+    }
     return {
       facesDetected: 0,
       emotions: [],

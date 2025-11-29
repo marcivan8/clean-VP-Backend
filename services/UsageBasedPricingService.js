@@ -87,7 +87,7 @@ class UsageBasedPricingService {
         .insert({
           user_id: userId,
           action: action,
-          details: metadata,
+          metadata: metadata, // Changed from 'details' to 'metadata' to match schema
           created_at: new Date().toISOString()
         });
 
