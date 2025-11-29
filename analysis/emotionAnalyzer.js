@@ -1,7 +1,15 @@
 // utils/emotionAnalyzer.js - Analyse des émotions avec TensorFlow.js
-const tf = require('@tensorflow/tfjs-node');
-const faceDetection = require('@tensorflow-models/face-detection');
-const faceLandmarks = require('@tensorflow-models/face-landmarks-detection');
+let tf, faceDetection, faceLandmarkDetectorModel;
+let tfAvailable = false;
+
+try {
+  tf = require('@tensorflow/tfjs-node');
+  faceDetection = require('@tensorflow-models/face-detection');
+  faceLandmarkDetectorModel = require('@tensorflow-models/face-landmarks-detection');
+  tfAvailable = true;
+} catch (e) {
+  console.warn('⚠️ TensorFlow dependencies not available. Emotion analysis will be disabled.', e.message);
+}
 const { createCanvas, loadImage } = require('canvas');
 const fs = require('fs');
 const path = require('path');
@@ -15,6 +23,8 @@ let faceLandmarkDetector = null;
  * Initialise les modèles de détection de visages
  */
 async function initializeModels() {
+  if (!tfAvailable) return;
+
   try {
     if (!faceDetector) {
       console.log('🔄 Initialisation du détecteur de visages...');
@@ -30,8 +40,8 @@ async function initializeModels() {
 
     if (!faceLandmarkDetector) {
       console.log('🔄 Initialisation du détecteur de landmarks...');
-      faceLandmarkDetector = await faceLandmarks.createDetector(
-        faceLandmarks.SupportedModels.MediaPipeFaceMesh,
+      faceLandmarkDetector = await faceLandmarkDetectorModel.createDetector(
+        faceLandmarkDetectorModel.SupportedModels.MediaPipeFaceMesh,
         {
           runtime: 'tfjs',
           refineLandmarks: true,
@@ -42,7 +52,8 @@ async function initializeModels() {
     }
   } catch (error) {
     console.error('❌ Erreur initialisation modèles:', error);
-    throw error;
+    // Don't throw, just log and continue without emotion analysis
+    tfAvailable = false;
   }
 }
 
@@ -55,6 +66,16 @@ async function analyzeEmotions(imagePath) {
   try {
     if (!fs.existsSync(imagePath)) {
       throw new Error(`Image non trouvée: ${imagePath}`);
+    }
+
+    if (!tfAvailable) {
+      return {
+        facesDetected: 0,
+        emotions: [],
+        averageEmotion: null,
+        dominantEmotion: 'neutral',
+        note: 'Emotion analysis disabled due to missing dependencies'
+      };
     }
 
     // Initialiser les modèles si nécessaire
@@ -80,7 +101,7 @@ async function analyzeEmotions(imagePath) {
 
     // Analyser les landmarks pour chaque visage
     const landmarks = await faceLandmarkDetector.estimateFaces(canvas);
-    
+
     // Analyser les émotions basées sur les expressions faciales
     const emotions = faces.map((face, index) => {
       const emotion = analyzeFacialExpression(face, landmarks[index]);
@@ -99,7 +120,7 @@ async function analyzeEmotions(imagePath) {
       emotionCounts[emo] = (emotionCounts[emo] || 0) + 1;
     });
 
-    const dominantEmotion = Object.keys(emotionCounts).reduce((a, b) => 
+    const dominantEmotion = Object.keys(emotionCounts).reduce((a, b) =>
       emotionCounts[a] > emotionCounts[b] ? a : b
     );
 
@@ -147,11 +168,11 @@ function analyzeFacialExpression(face, landmarks) {
 
   // Analyser la position des points clés pour déterminer l'émotion
   // Cette logique est simplifiée - une vraie implémentation utiliserait un modèle ML
-  
+
   // Points pour les yeux
   const leftEye = keypoints.find(kp => kp.name === 'leftEye');
   const rightEye = keypoints.find(kp => kp.name === 'rightEye');
-  
+
   // Points pour la bouche
   const mouth = keypoints.find(kp => kp.name === 'mouth');
   const upperLip = keypoints.find(kp => kp.name === 'upperLip');
@@ -166,7 +187,7 @@ function analyzeFacialExpression(face, landmarks) {
   }
 
   // Déterminer l'émotion dominante
-  const dominant = Object.keys(scores).reduce((a, b) => 
+  const dominant = Object.keys(scores).reduce((a, b) =>
     scores[a] > scores[b] ? a : b
   );
 
@@ -203,7 +224,7 @@ function calculateAverageEmotion(emotions) {
     avgScores[emotion] /= emotions.length;
   });
 
-  const dominant = Object.keys(avgScores).reduce((a, b) => 
+  const dominant = Object.keys(avgScores).reduce((a, b) =>
     avgScores[a] > avgScores[b] ? a : b
   );
 
@@ -220,7 +241,7 @@ function calculateAverageEmotion(emotions) {
  */
 async function analyzeEmotionsBatch(framePaths) {
   const results = [];
-  
+
   for (const framePath of framePaths) {
     try {
       const result = await analyzeEmotions(framePath);
@@ -233,14 +254,14 @@ async function analyzeEmotionsBatch(framePaths) {
   // Agréger les résultats
   const totalFaces = results.reduce((sum, r) => sum + r.facesDetected, 0);
   const allEmotions = results.flatMap(r => r.emotions);
-  
+
   const emotionCounts = {};
   allEmotions.forEach(e => {
     const emo = e.emotion.dominant;
     emotionCounts[emo] = (emotionCounts[emo] || 0) + 1;
   });
 
-  const overallDominant = Object.keys(emotionCounts).reduce((a, b) => 
+  const overallDominant = Object.keys(emotionCounts).reduce((a, b) =>
     emotionCounts[a] > emotionCounts[b] ? a : b, 'neutral'
   );
 
@@ -253,9 +274,9 @@ async function analyzeEmotionsBatch(framePaths) {
   };
 }
 
-module.exports = { 
-  analyzeEmotions, 
+module.exports = {
+  analyzeEmotions,
   analyzeEmotionsBatch,
-  initializeModels 
+  initializeModels
 };
 

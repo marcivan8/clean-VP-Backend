@@ -2,7 +2,7 @@
 FROM node:20-alpine
 
 # Install dependencies for canvas
-RUN apk add --no-cache build-base cairo-dev jpeg-dev pango-dev giflib-dev python3
+RUN apk add --no-cache build-base cairo-dev jpeg-dev pango-dev giflib-dev python3 libc6-compat
 
 # Set the working directory
 WORKDIR /usr/src/app
