@@ -57,7 +57,7 @@ try {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ 
+  res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
@@ -68,7 +68,7 @@ app.get('/health', (req, res) => {
 
 // Test endpoint for analyze
 app.get('/api/analyze/test', (req, res) => {
-  res.json({ 
+  res.json({
     message: 'Analyze endpoint is reachable',
     timestamp: new Date().toISOString()
   });
@@ -77,6 +77,7 @@ app.get('/api/analyze/test', (req, res) => {
 // Mount API routes (NO subscription or webhook routes)
 app.use('/api/auth', authRoutes);
 app.use('/api/analyze', analyzeRoutes);
+app.use('/api/v2/analyze', analyzeRoutes); // Support V2 endpoint
 
 // API documentation endpoint
 app.get('/api', (req, res) => {
@@ -97,7 +98,7 @@ app.get('/api', (req, res) => {
 // 404 handler
 app.use((req, res) => {
   console.log(`❌ 404 - Route not found: ${req.method} ${req.path}`);
-  res.status(404).json({ 
+  res.status(404).json({
     error: 'Route not found',
     path: req.path,
     method: req.method
@@ -107,7 +108,7 @@ app.use((req, res) => {
 // Error handler
 app.use((err, req, res, next) => {
   console.error('💥 Error:', err.message);
-  res.status(err.status || 500).json({ 
+  res.status(err.status || 500).json({
     error: err.message || 'Internal server error'
   });
 });

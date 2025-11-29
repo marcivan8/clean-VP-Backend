@@ -49,6 +49,16 @@ router.get('/health/check', (req, res) => {
   });
 });
 
+// Vision analysis endpoint (placeholder for now, as requested by frontend)
+router.post('/vision', authenticateUser, (req, res) => {
+  res.status(200).json({
+    message: 'Vision analysis endpoint',
+    objects: [],
+    scenes: [],
+    context: 'Vision analysis not yet implemented'
+  });
+});
+
 // Main video analysis endpoint
 router.post('/',
   authenticateUser,           // Vérifier l'authentification
