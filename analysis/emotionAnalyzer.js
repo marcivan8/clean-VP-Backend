@@ -1,3 +1,12 @@
+// Polyfill for TensorFlow.js in Node environment
+if (!global.navigator) {
+  global.navigator = {
+    userAgent: 'node',
+    product: 'ReactNative', // Helps avoid some browser checks
+    platform: 'NodeJS'
+  };
+}
+
 // utils/emotionAnalyzer.js - Analyse des émotions avec TensorFlow.js
 let tf, faceDetection, faceLandmarkDetectorModel;
 let tfAvailable = false;

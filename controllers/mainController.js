@@ -29,9 +29,10 @@ const analyzeVideoHandler = async (req, res) => {
     const { title = "", description = "", language = "en", ai_training_consent = "false" } = req.body;
     const userId = req.user.id;
 
-    if (!title || !description) {
-      return res.status(400).json({ error: "Title and description are required." });
-    }
+    // Optional: Title and description are no longer strictly required
+    // if (!title || !description) {
+    //   return res.status(400).json({ error: "Title and description are required." });
+    // }
 
     videoPath = req.file.path; // Multer diskStorage provides this
     console.log(`🎬 Starting analysis for user ${userId}: ${videoPath}`);
