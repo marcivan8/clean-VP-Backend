@@ -14,7 +14,7 @@ if (!util.isNullOrUndefined) {
 // Configuration
 const DATASET_PATH = path.join(__dirname, '../ML_Dataset/viral_shorts_reels_performance_dataset.csv');
 const MODEL_DIR = path.join(__dirname, '../ML_Models/virality_predictor');
-const MODEL_PATH = `file://${path.join(MODEL_DIR, 'model.json')}`;
+const MODEL_PATH = `file://${MODEL_DIR}`;
 
 // Supabase Setup
 const supabaseUrl = process.env.SUPABASE_URL;
