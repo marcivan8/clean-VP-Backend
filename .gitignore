@@ -2,4 +2,8 @@ node_modules
 .env
 uploads
 credentials/
-*.json  # Optional: Ignore all JSON files, or specify gcs-service-account.json
+ML_Dataset/
+*.json
+!package.json
+!package-lock.json
+!ML_Models/**/*.json

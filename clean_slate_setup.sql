@@ -24,6 +24,11 @@ ALTER TABLE public.profiles
   ALTER COLUMN subscription_tier SET DEFAULT 'explorer',
   ALTER COLUMN monthly_usage SET DEFAULT '{"analyses": 0}'::jsonb;
 
+-- Add tracking for actual performance (ML Feedback Loop)
+ALTER TABLE public.video_analyses
+  ADD COLUMN IF NOT EXISTS actual_views INTEGER DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS actual_likes INTEGER DEFAULT NULL;
+
 -- =================================================
 -- 3. SECURE BACKEND LOGIC
 -- =================================================

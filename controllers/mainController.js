@@ -4,6 +4,7 @@ const fs = require("fs");
 const { analyzeVideo } = require("../utils/videoAnalyzer");
 const VideoAnalysis = require("../models/VideoAnalysis");
 const UsageBasedPricingService = require("../services/UsageBasedPricingService");
+const ViralityModelService = require("../services/ViralityModelService");
 
 async function safeUnlink(file) {
   try {
@@ -59,6 +60,23 @@ const analyzeVideoHandler = async (req, res) => {
       userId
     });
 
+    // Generate Machine Learning Prediction
+    const mlFeatures = {
+      duration: results.metadata.duration,
+      hookScore: results.scores.hook,
+      pacingScore: results.scores.pacing,
+      emotionScore: results.scores.emotion
+    };
+
+    // Non-blocking prediction
+    let mlPrediction = { predictedViews: 0, viralityAssessment: 'N/A' };
+    try {
+      mlPrediction = await ViralityModelService.predict(mlFeatures);
+      console.log('🤖 ML Prediction:', mlPrediction);
+    } catch (e) {
+      console.error('⚠️ ML Prediction failed:', e.message);
+    }
+
     // 4. Save Results to DB
     // Map the new V2 results structure to what the DB/Frontend expects
     // The frontend likely expects: viralityScore, bestPlatform, platformScores, insights
@@ -71,7 +89,9 @@ const analyzeVideoHandler = async (req, res) => {
         results.suggestions.ctaRewrite,
         ...results.suggestions.editingTips
       ],
-      detailedAnalysis: results // Store the full V2 object for future use
+      detailedAnalysis: results, // Store the full V2 object for future use
+      predicted_views: mlPrediction.predictedViews,
+      virality_assessment: mlPrediction.viralityAssessment
     };
 
     // Ensure viralityScore is set correctly from the best platform
@@ -101,7 +121,11 @@ const analyzeVideoHandler = async (req, res) => {
       insights: dbResults.insights,
       suggestions: results.suggestions, // Send full suggestions object too
       details: results.details,
-      metadata: results.metadata
+      metadata: results.metadata,
+      prediction: {
+        views: dbResults.predicted_views,
+        assessment: dbResults.virality_assessment
+      }
     });
 
   } catch (err) {
