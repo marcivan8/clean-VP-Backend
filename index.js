@@ -37,7 +37,7 @@ app.use((req, res, next) => {
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Import routes - ONLY auth and analyze (no payment routes)
-let authRoutes, analyzeRoutes;
+let authRoutes, analyzeRoutes, exportRoutes, audioRoutes;
 
 try {
   authRoutes = require('./routes/auth');
@@ -53,6 +53,22 @@ try {
 } catch (e) {
   console.error('❌ Failed to load analyze routes:', e.message);
   analyzeRoutes = express.Router();
+}
+
+try {
+  exportRoutes = require('./routes/exportRoutes');
+  console.log('✅ Export routes loaded');
+} catch (e) {
+  console.error('❌ Failed to load export routes:', e.message);
+  exportRoutes = express.Router();
+}
+
+try {
+  audioRoutes = require('./routes/audioRoutes');
+  console.log('✅ Audio routes loaded');
+} catch (e) {
+  console.error('❌ Failed to load audio routes:', e.message);
+  audioRoutes = express.Router();
 }
 
 // Health check endpoint
@@ -79,6 +95,13 @@ app.use('/api/auth', authRoutes);
 app.use('/api/analyze', analyzeRoutes);
 app.use('/api/v2/analyze', analyzeRoutes); // Support V2 endpoint
 app.use('/analyze', analyzeRoutes); // Support root-level calls (legacy/proxy)
+app.use('/api/render', exportRoutes); // New Export API
+app.use('/api/audio', audioRoutes); // Audio Processing API
+app.use('/api/silence', require('./routes/silenceRoutes')); // Silence Detection API
+app.use('/api/ai', require('./routes/aiRoutes')); // Real AI Integration
+app.use('/api/effects', require('./routes/effectsRoutes')); // Effects Engine API
+app.use('/api/proxy', require('./routes/proxyRoutes')); // Proxy Generation API
+app.use('/api/revideo', require('./routes/revideoRenderRoutes')); // Revideo Render API
 
 // API documentation endpoint
 app.get('/api', (req, res) => {

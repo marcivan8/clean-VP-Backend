@@ -1,0 +1,207 @@
+/**
+ * AI Service - "The Editing Brain"
+ * Connects to Backend POST /api/analyze
+ */
+
+// We use fetch standard API
+import useTimelineStore from '../store/useTimelineStore';
+
+const API_URL = '/api/analyze';
+
+export const analyzeFile = async (file, onLog, onSuggestion, onComplete, onError) => {
+
+    // 1. Upload Start
+    onLog({
+        id: 'log-start',
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'info',
+        message: `Reading file: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)...`
+    });
+
+    const formData = new FormData();
+    formData.append('video', file);
+    formData.append('title', file.name);
+    // Add dummy consent for now
+    formData.append('ai_training_consent', 'true');
+
+    try {
+        onLog({
+            id: 'log-uploading',
+            timestamp: new Date().toLocaleTimeString(),
+            type: 'info',
+            message: 'Uploading to Viral Brain for deep analysis...'
+        });
+
+        const response = await fetch(API_URL, {
+            method: 'POST',
+            body: formData,
+            // Headers: Content-Type is set automatically for FormData
+            // Auth is bypassed by devAuth middleware on backend for now
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'Analysis failed');
+        }
+
+        const data = await response.json();
+
+        // 2. Analysis Complete - Parse Results
+        onLog({
+            id: 'log-complete',
+            timestamp: new Date().toLocaleTimeString(),
+            type: 'success',
+            message: `Analysis Complete! Processing Time: ${data.metadata?.processingTime?.toFixed(2)}s`
+        });
+
+
+
+        // ... inside analyzeFile success ...
+
+        // 3. Emit detailed logs from metadata
+        onLog({
+            id: 'log-score',
+            timestamp: new Date().toLocaleTimeString(),
+            type: 'success',
+            message: `DETECTED: Virality Score ${data.viralityScore}/10`
+        });
+
+        // 3.1 Save Pacing Data for Heatmap HUD
+        if (data.details?.pacing?.segments) {
+            useTimelineStore.getState().setPacingSegments(data.details.pacing.segments);
+            onLog({
+                id: 'log-pacing',
+                timestamp: new Date().toLocaleTimeString(),
+                type: 'info',
+                message: `Pacing Analyzed: ${data.details.pacing.cutsPerMinute} cut/min`
+            });
+        }
+
+        // 3.2 Save Auto-Captions
+        // Backend returns `transcript.words` or `details.transcript_data.words` depending on structure.
+        // Let's check `data.transcript_data` or `data.words` directly if flattened.
+        // Looking at analyzer, it returns `res.words`. 
+        // In `mainController`, `analyzeVideo` returns `results`. `words` is in `results.details.transcript_data` usually or top level?
+        // Let's assume `data.details.words` based on typical flattening, or check `analyzeVideo` return.
+        // `videoAnalyzer.js` builds `results` object. `audioAnalysis` puts `words` in its return.
+        // `results.details = { ...audioResults, ... }`. So `data.details.words`.
+
+        if (data.details?.words && Array.isArray(data.details.words)) {
+            useTimelineStore.getState().setCaptions(data.details.words);
+            onLog({
+                id: 'log-captions',
+                timestamp: new Date().toLocaleTimeString(),
+                type: 'info',
+                message: `Generated Captions: ${data.details.words.length} words.`
+            });
+        }
+
+        // 3.3 Music Bed Recommendation
+        if (data.suggestions?.musicRecommendation) {
+            const musicRef = data.suggestions.musicRecommendation;
+            onSuggestion({
+                id: 'sugg-music-' + Date.now(),
+                title: 'Music Soundtrack',
+                description: `Suggested Track: ${musicRef.track} (${musicRef.genre})`,
+                reason: musicRef.reason,
+                type: 'music',
+                data: musicRef, // Store specific data
+                executionData: {
+                    action: 'addMusicTrack',
+                    params: {
+                        url: `/assets/music/${musicRef.track}`, // Use local asset path simulation
+                        name: musicRef.track,
+                        duration: 30 // hardcoded for demo or use data.metadata.duration
+                    }
+                }
+            });
+        }
+
+        if (data.bestPlatform) {
+            onLog({
+                id: 'log-platform',
+                timestamp: new Date().toLocaleTimeString(),
+                type: 'info',
+                message: `Optimal Platform: ${data.bestPlatform.toUpperCase()}`
+            });
+        }
+
+        // 4. Transform Backend Suggestions to UI Cards
+        // Data format from backend (generated by OpenAI/Actions.js):
+        // suggestions: { hookRewrite: "...", ctaRewrite: "...", editingTips: [...] }
+
+        let suggCount = 0;
+
+        // Hook Suggestion
+        if (data.suggestions?.hookRewrite) {
+            suggCount++;
+            onSuggestion({
+                id: 'sugg-hook',
+                title: 'Optimize Hook',
+                description: data.suggestions.hookRewrite,
+                reason: `Hook score is ${data.scores?.hook?.toFixed(1) || 'low'}. Better hooks increase retention.`,
+                actionType: 'replace_hook',
+                executionData: {
+                    action: 'trimStart',
+                    params: { duration: 2 }
+                }
+            });
+        }
+
+        // CTA Suggestion
+        if (data.suggestions?.ctaRewrite) {
+            suggCount++;
+            onSuggestion({
+                id: 'sugg-cta',
+                title: 'Stronger Call-to-Action',
+                description: data.suggestions.ctaRewrite,
+                reason: 'Clear CTAs drive conversion.',
+                actionType: 'replace_cta'
+            });
+        }
+
+        // Editing Tips (Take first 2)
+        if (data.suggestions?.editingTips?.length > 0) {
+            data.suggestions.editingTips.slice(0, 2).forEach((tip, idx) => {
+                suggCount++;
+                onSuggestion({
+                    id: `sugg-tip-${idx}`,
+                    title: 'Editing Tip',
+                    description: tip,
+                    reason: 'Algorithm optimization.',
+                    actionType: 'tip',
+                    executionData: {
+                        action: 'applyColor',
+                        params: { color: 'bg-purple-500' }
+                    }
+                });
+            });
+        }
+
+        onLog({
+            id: 'log-all-sugg',
+            timestamp: new Date().toLocaleTimeString(),
+            type: 'info',
+            message: `${suggCount} actionable suggestions generated.`
+        });
+
+        onComplete();
+
+    } catch (error) {
+        console.error("Analysis Error:", error);
+        onLog({
+            id: 'log-error',
+            timestamp: new Date().toLocaleTimeString(),
+            type: 'warning',
+            message: `Analysis Failed: ${error.message}`
+        });
+        if (onError) onError(error);
+        onComplete(); // Finish state even on error
+    }
+};
+
+// Fallback for demo if needed
+export const simulateAnalysis = (onLog, onSuggestion, onComplete) => {
+    // ... kept for fallback if needed, but not exporting if we only use new one
+    // for now we can keep it or remove it. I'll remove it to force usage of real one.
+};

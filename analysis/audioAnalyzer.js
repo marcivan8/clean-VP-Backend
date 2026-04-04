@@ -26,7 +26,21 @@ async function analyzeAudio(videoPath) {
                 fillerCount: 2,
                 silences: [],
                 segments: [{ start: 0, end: 5, text: "This is a mock transcript for testing purposes." }],
-                words: []
+                words: [
+                    { word: "This", start: 0.0, end: 0.4 },
+                    { word: "is", start: 0.4, end: 0.6 },
+                    { word: "a", start: 0.6, end: 0.7 },
+                    { word: "mock", start: 0.7, end: 1.2 },
+                    { word: "transcript", start: 1.2, end: 1.8 },
+                    { word: "for", start: 1.8, end: 2.0 },
+                    { word: "testing", start: 2.0, end: 2.5 },
+                    { word: "purposes.", start: 2.5, end: 3.2 },
+                    { word: "The", start: 3.5, end: 3.7 },
+                    { word: "video", start: 3.7, end: 4.1 },
+                    { word: "contains", start: 4.1, end: 4.6 },
+                    { word: "some", start: 4.6, end: 4.8 },
+                    { word: "speech.", start: 4.8, end: 5.0 }
+                ]
             };
         }
 

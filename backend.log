@@ -1,0 +1,47 @@
+
+> viral-pilot-backend@2.0.0 dev
+> nodemon index.js
+
+[33m[nodemon] 3.1.10[39m
+[33m[nodemon] to restart at any time, enter `rs`[39m
+[33m[nodemon] watching path(s): *.*[39m
+[33m[nodemon] watching extensions: js,mjs,cjs,json[39m
+[32m[nodemon] starting `node index.js`[39m
+✅ Auth routes loaded
+Platform node has already been set. Overwriting the platform with node.
+✅ Analyze routes loaded
+✅ Export routes loaded
+✅ Audio routes loaded
+ℹ️ Google Cloud Storage credentials not configured
+ℹ️ Using local file storage instead
+📁 Using local storage at: /Users/marcivanstevienguidjol/Documents/clean-VP-Backend/uploads
+
+╔═══════════════════════════════════════════════╗
+║                                               ║
+║      🚀 Viral Pilot Backend Server v2.0      ║
+║           (Simplified - No Payments)          ║
+║                                               ║
+╠═══════════════════════════════════════════════╣
+║  Status:     Running                          ║
+║  Port:       3000                            ║
+║  Mode:       development                   ║
+║  API URL:    http://localhost:3000/api        ║
+║  Health:     http://localhost:3000/health     ║
+╚═══════════════════════════════════════════════╝
+  
+node:events:486
+      throw er; // Unhandled 'error' event
+      ^
+
+Error: read EIO
+    at TTY.onStreamRead (node:internal/stream_base_commons:216:20)
+Emitted 'error' event on ReadStream instance at:
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:89:21) {
+  errno: -5,
+  code: 'EIO',
+  syscall: 'read'
+}
+
+Node.js v25.1.0

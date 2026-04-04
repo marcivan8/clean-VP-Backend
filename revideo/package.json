@@ -1,0 +1,15 @@
+{
+    "name": "viral-pilot-revideo",
+    "version": "1.0.0",
+    "type": "module",
+    "scripts": {
+        "dev": "revideo serve",
+        "render": "node render.mjs"
+    },
+    "dependencies": {
+        "@revideo/2d": "^0.4.0",
+        "@revideo/cli": "^0.10.4",
+        "@revideo/core": "^0.4.0",
+        "@revideo/vite-plugin": "^0.4.0"
+    }
+}

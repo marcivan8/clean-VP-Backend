@@ -61,6 +61,48 @@ const analyzeVideoHandler = async (req, res) => {
     });
 
     // Generate Machine Learning Prediction
+    // ... (logic handled below)
+
+    // 🆕 Audio Intelligence: Music Bed Suggestion
+    const pacingScore = results.scores.pacing || 0;
+    const emotionScores = results.scores.emotion || {};
+
+    let suggestedMusic = {
+      genre: 'Corporate / Ambient',
+      track: 'Modern_Tech_Vibes.mp3',
+      mood: 'Neutral',
+      reason: 'Balanced pacing detected.'
+    };
+
+    // Logic: High Energy / Fast Cuts
+    if (pacingScore > 7) {
+      suggestedMusic = {
+        genre: 'Upbeat / Phonk',
+        track: 'High_Energy_Drift.mp3',
+        mood: 'Energetic',
+        reason: 'Fast pacing detected (> 7/10). Needs high BPM.'
+      };
+    }
+    // Logic: Emotional / Slow
+    else if (emotionScores.sad > 0.3 || emotionScores.fearful > 0.3) {
+      suggestedMusic = {
+        genre: 'Cinematic / Tense',
+        track: 'Deep_Atmosphere.mp3',
+        mood: 'Dramatic',
+        reason: 'Emotional content detected.'
+      };
+    }
+    // Logic: Happy / Vlog
+    else if (emotionScores.happy > 0.5) {
+      suggestedMusic = {
+        genre: 'Lo-Fi / Chill',
+        track: 'Summer_Vibes.mp3',
+        mood: 'Happy',
+        reason: 'Positive sentiment detected.'
+      };
+    }
+
+    results.suggestions.musicRecommendation = suggestedMusic;
     const mlFeatures = {
       duration: results.metadata.duration,
       hookScore: results.scores.hook,

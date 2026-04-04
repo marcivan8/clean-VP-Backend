@@ -11,20 +11,20 @@ function analyzeHook(data) {
 
     // 2. Analyze Audio in Hook
     // Check if there is speech in the first few seconds
-    const speechInHook = audioAnalysis.segments.some(s => s.start < hookDuration && s.text.length > 0);
+    const speechInHook = audioAnalysis?.segments?.some(s => s.start < hookDuration && s.text && s.text.length > 0) || false;
 
     // Check volume/energy (mock logic if detailed energy not available)
-    const highEnergyStart = audioAnalysis.wpm > 150; // Fast speech often implies energy
+    const highEnergyStart = (audioAnalysis?.wpm || 0) > 150; // Fast speech often implies energy
 
     // 3. Analyze Visuals in Hook
     // Check for face presence
-    const faceInHook = visualAnalysis.frames.some(f => f.time < hookDuration && f.facesDetected > 0);
+    const faceInHook = visualAnalysis?.frames?.some(f => f.time < hookDuration && f.facesDetected > 0) || false;
 
     // Check for scene changes (fast cuts in hook)
-    const cutsInHook = visualAnalysis.sceneBoundaries.filter(t => t < hookDuration).length;
+    const cutsInHook = (visualAnalysis?.sceneBoundaries || []).filter(t => t < hookDuration).length;
 
     // 4. Analyze Content (Keywords)
-    const hookTranscript = transcript.slice(0, 100).toLowerCase();
+    const hookTranscript = (transcript || "").slice(0, 100).toLowerCase();
     const hookKeywords = ['wait', 'stop', 'secret', 'you need', 'listen', 'watch this', 'attention', 'did you know', 'tu savais', 'regarde', 'attends'];
     const hasHookKeyword = hookKeywords.some(kw => hookTranscript.includes(kw));
 
