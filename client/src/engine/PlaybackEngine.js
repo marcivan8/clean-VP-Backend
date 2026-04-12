@@ -23,6 +23,7 @@ const PlaybackState = {
 // Preload thresholds
 const PRELOAD_AUDIO_MS = 300;    // Minimum 300ms audio buffered
 const PRELOAD_VIDEO_FRAMES = 1;  // At least 1 video frame decoded
+const LOOKAHEAD = 2.0;           // Audio lookahead in seconds
 
 /**
  * PlaybackEngine.js
@@ -569,7 +570,7 @@ class PlaybackEngine {
         console.warn("[PlaybackEngine] setFilter is deprecated for WebGL engine. Use setGrading.");
     }
 
-    setVolume(value) {
+    setMasterVolume(value) {
         if (this.gainNode) {
             // value 0.0 to 2.0+
             this.gainNode.gain.value = value;
@@ -792,7 +793,7 @@ class PlaybackEngine {
         }
     }
 
-    setVolume(trackId, volume) {
+    setTrackVolume(trackId, volume) {
         if (this.audioNode) {
             this.audioNode.port.postMessage({ type: 'SET_VOLUME', payload: { trackId, volume } });
         }

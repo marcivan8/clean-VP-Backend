@@ -876,17 +876,24 @@ export class TimelineStateManager {
                 clips: placements.map(placement => {
                     const clip = this.state.entities.clips[placement.clipId] || {};
                     return {
-                        id: placement.id,  // Use placement ID for timeline operations
+                        id: placement.id,
                         clipId: placement.clipId,
                         name: clip.name || 'Untitled',
                         type: clip.type,
                         sourceUrl: clip.sourceUrl,
+                        url: clip.sourceUrl,          // ← ADD THIS LINE (VideoPlayer reads .url)
                         start: placement.startTime,
                         duration: placement.duration,
                         offset: placement.offset,
                         speed: placement.speed,
-                        volume: placement.volume,
-                        sourceDuration: clip.sourceDuration
+                        volume: placement.volume ?? 1.0,
+                        sourceDuration: clip.sourceDuration,
+                        grading: clip.grading,        // ← also needed for color grading
+                        filter: clip.filter,
+                        filterIntensity: clip.filterIntensity,
+                        transition: clip.transition,
+                        keyframes: clip.keyframes,
+                        color: clip.color,
                     };
                 })
             };

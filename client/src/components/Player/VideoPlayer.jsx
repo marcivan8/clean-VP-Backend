@@ -101,7 +101,7 @@ const VideoPlayer = () => {
                     engineRef.current.setGrading({});
                 }
                 // Set Volume
-                engineRef.current.setVolume(activeClip.volume !== undefined ? activeClip.volume : 1.0);
+                engineRef.current.setMasterVolume(activeClip.volume !== undefined ? activeClip.volume : 1.0);
             } else {
                 console.warn('[VideoPlayer] Playing without Active Clip URL');
                 engineRef.current.resumeAudio();
@@ -127,7 +127,7 @@ const VideoPlayer = () => {
             }
             // Update Volume Real-time
             if (activeClip) {
-                engineRef.current.setVolume(activeClip.volume !== undefined ? activeClip.volume : 1.0);
+                engineRef.current.setMasterVolume(activeClip.volume !== undefined ? activeClip.volume : 1.0);
             }
         }
 
@@ -141,7 +141,7 @@ const VideoPlayer = () => {
         tracks.forEach(track => {
             // Update Track Mixer State
             if (track.type === 'audio' || track.type === 'video') {
-                engineRef.current.setVolume(track.id, track.volume);
+                engineRef.current.setTrackVolume(track.id, track.volume);
                 engineRef.current.setMute(track.id, track.muted);
                 engineRef.current.setSolo(track.id, track.solo);
 

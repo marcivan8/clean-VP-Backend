@@ -75,7 +75,7 @@ self.onmessage = async (e) => {
 };
 
 function initializePipeline(url) {
-    if (decoder && demuxer && demuxer.url === url) {
+    if (decoder && demuxer && demuxer.fileUri === url) {
         console.log('[Worker] Pipeline already initialized for:', url);
         return;
     }
@@ -119,6 +119,8 @@ function initializePipeline(url) {
             const channels = audioData.numberOfChannels;
             const count = audioData.numberOfFrames;
             const timestamp = audioData.timestamp / 1000000; // seconds
+            const sRate = audioData.sampleRate;              // capture before close()
+            const dur = audioData.duration;                  // capture before close()
 
             const buffers = [];
 
@@ -187,15 +189,15 @@ function initializePipeline(url) {
 
             audioData.close();
 
-            // Transfer buffers to main thread
+            // Transfer buffers to main thread (use captured values — audioData is closed)
             self.postMessage({
                 type: 'AUDIO_DATA',
                 payload: {
                     buffers,
                     peaks, // <--- New Waveform Data
-                    sampleRate: audioData.sampleRate,
+                    sampleRate: sRate,
                     timestamp,
-                    duration: audioData.duration / 1000000
+                    duration: dur / 1000000
                 }
             }, [peaks.buffer, ...buffers.map(b => b.buffer)]);
         },

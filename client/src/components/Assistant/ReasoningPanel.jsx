@@ -125,6 +125,40 @@ const AgentPlanCard = ({ suggestion, onAccept, onReject }) => {
 };
 
 
+const SuggestionCard = ({ suggestion, onAccept, onReject }) => {
+    return (
+        <div className="bg-secondary/50 rounded-lg p-3 border border-border shadow-sm mb-3 opacity-0 animate-in fade-in zoom-in-95 duration-500">
+            <div className="flex items-center gap-2 mb-2">
+                <div className="bg-blue-500/20 p-1 rounded">
+                    <Sparkles className="w-3 h-3 text-blue-400" />
+                </div>
+                <span className="text-xs font-semibold text-foreground/80 capitalize">
+                    {suggestion.type || 'Suggestion'}
+                </span>
+            </div>
+
+            <p className="text-xs text-muted-foreground leading-relaxed mb-3">
+                {suggestion.message || suggestion.label || 'Apply this suggestion?'}
+            </p>
+
+            <div className="flex gap-2">
+                <button
+                    onClick={() => onAccept(suggestion)}
+                    className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground text-xs py-1.5 rounded-md transition-colors font-medium flex items-center justify-center gap-1"
+                >
+                    <Check className="w-3 h-3" /> Apply
+                </button>
+                <button
+                    onClick={() => onReject(suggestion.id)}
+                    className="flex-1 bg-secondary hover:bg-secondary/80 text-xs py-1.5 rounded-md transition-colors border border-white/5 flex items-center justify-center gap-1"
+                >
+                    <X className="w-3 h-3" /> Dismiss
+                </button>
+            </div>
+        </div>
+    );
+};
+
 
 // --- Main Panel ---
 
