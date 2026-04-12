@@ -414,6 +414,12 @@ class PlaybackEngine {
         if (url) this.currentUrl = url;
         const targetUrl = url || this.currentUrl;
 
+        // Guard: no URL available → nothing to play
+        if (!targetUrl) {
+            console.warn('[PlaybackEngine] play() called without URL and no currentUrl cached. Ignoring.');
+            return;
+        }
+
         // Ensure Audio is Initialized (User Interaction Context)
         if (!this.audioInitialized) {
             try {
@@ -428,7 +434,7 @@ class PlaybackEngine {
 
         // Resume audio context (required for user gesture)
         if (this.clock.audioCtx.state === 'suspended') {
-            await this.clock.audioCtx.resume();
+            await this.clock.audioCtx.resume(); // ← attendre AVANT clock.play()
         }
 
         // If already playing, do nothing
@@ -472,7 +478,7 @@ class PlaybackEngine {
 
         // Now start playback
         this.setState(PlaybackState.PLAYING);
-        this.clock.play();
+        await this.clock.play(); // maintenant l'ancre sera correcte
         this.startLoop();
         console.log('[PlaybackEngine] Playing from', this.clock.getCurrentTime().toFixed(2) + 's');
     }
@@ -482,7 +488,6 @@ class PlaybackEngine {
 
         this.setState(PlaybackState.PAUSED);
         this.clock.pause();
-        this.clock.audioCtx.suspend(); // Freeze audio hardware time
         this.stopLoop();
         this.worker.postMessage({ type: 'STOP' });
     }
@@ -1016,6 +1021,8 @@ class PlaybackEngine {
     // --- Render Loop (Consumer) ---
 
     startLoop() {
+        if (this.rafId) return; // évite le double démarrage
+        this.rafId = requestAnimationFrame(this.loop.bind(this));
     }
 
     stopLoop() {
