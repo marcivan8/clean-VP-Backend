@@ -73,6 +73,10 @@ const useTimelineStore = create(
             // Preview
             previewQuality: 'high',
 
+            // Video native dimensions (set by PlaybackEngine.onMetadata)
+            videoWidth: 1920,
+            videoHeight: 1080,
+
             // Audio
             audioLevels: {},
             waveforms: {},

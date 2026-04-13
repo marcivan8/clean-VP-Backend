@@ -39,6 +39,18 @@ const VideoTimeDisplay = () => {
     return <span ref={timeRef} className="font-mono text-xs text-primary">0.00</span>;
 };
 
+const getPlayerDimensions = (ratio) => {
+    switch (ratio) {
+        case '9:16': return { width: 1080, height: 1920 };
+        case '1:1': return { width: 1080, height: 1080 };
+        case '4:3': return { width: 1440, height: 1080 };
+        case '4:5': return { width: 1080, height: 1350 };
+        case '21:9': return { width: 2560, height: 1080 };
+        case '16:9':
+        default: return { width: 1920, height: 1080 };
+    }
+};
+
 const IDELayout = ({ children, mode = 'editor' }) => {
     // Keyboard Shortcuts
     useEffect(() => {
@@ -220,7 +232,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             console.log("📂 Files Selected:", files.length);
 
             const processedAssets = [];
-            let ratioSet = false; // only auto-set once per import batch
+            // Auto-set aspect ratio only if the timeline is completely empty
+            const hasExistingClips = useTimelineStore.getState().tracks.some(t => t.clips && t.clips.length > 0);
+            let ratioSet = hasExistingClips;
 
             for (const file of files) {
                 const url = URL.createObjectURL(file);
@@ -1053,20 +1067,40 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 )}
                             >
                                 <ErrorBoundary>
-                                    <Player
-                                        key={`player-${aspectRatio}-${tracks.reduce((acc, t) => acc + t.clips.length, 0)}`}
-                                        onPlayerReady={handlePlayerReady}
-                                        playing={isPlaying}
-                                        controls={false}
-                                        currentTime={currentTime}
-                                        onTimeUpdate={(time) => {
-                                            useTimelineStore.setState({ currentTime: time });
-                                        }}
-                                        project={project}
-                                        variables={playerVariables}
-                                        className="w-full h-full"
-                                        style={{ width: '100%', height: '100%', display: 'block' }}
-                                    />
+                                    {(() => {
+                                        // CRUCIAL: Prevent browser squashing
+                                        // The native <canvas> buffer must match the DOM container proportions.
+                                        // By mutating the backend project settings before mount, Revideo generates the correct buffer size.
+                                        const dims = getPlayerDimensions(aspectRatio);
+                                        if (project && project.settings && project.settings.shared) {
+                                            const v = project.settings.shared.size;
+                                            if (v) {
+                                                v.x = dims.width;
+                                                v.y = dims.height;
+                                            } else {
+                                                project.settings.shared.size = { x: dims.width, y: dims.height };
+                                            }
+                                        }
+
+                                        return (
+                                            <Player
+                                                key={`player-${aspectRatio}-${tracks.reduce((acc, t) => acc + t.clips.length, 0)}`}
+                                                onPlayerReady={handlePlayerReady}
+                                                playing={isPlaying}
+                                                controls={false}
+                                                currentTime={currentTime}
+                                                onTimeUpdate={(time) => {
+                                                    useTimelineStore.setState({ currentTime: time });
+                                                }}
+                                                project={project}
+                                                variables={playerVariables}
+                                                width={dims.width}
+                                                height={dims.height}
+                                                className="w-full h-full"
+                                                style={{ width: '100%', height: '100%', display: 'block' }}
+                                            />
+                                        );
+                                    })()}
                                 </ErrorBoundary>
                             </div>
 

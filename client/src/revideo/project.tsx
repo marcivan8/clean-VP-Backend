@@ -50,7 +50,6 @@ const timelineScene = makeScene2D('timeline', function* (view) {
     const tracksSignal = vars.get('tracks', []);
     const tracks: any[] = (tracksSignal ? typeof tracksSignal === 'function' ? tracksSignal() : tracksSignal : []) as any[];
 
-    // Dynamic canvas size based on aspect ratio
     const arSignal = vars.get('aspectRatio', '16:9');
     const ar: string = (typeof arSignal === 'function' ? arSignal() : arSignal) as string;
     const SIZE_MAP: Record<string, [number, number]> = {
@@ -64,6 +63,7 @@ const timelineScene = makeScene2D('timeline', function* (view) {
     const [cw, ch] = SIZE_MAP[ar] ?? SIZE_MAP['16:9'];
     view.size([cw, ch]);
 
+    // Canvas dimensions (from project or default)
     const canvasWidth = cw;
     const canvasHeight = ch;
 
@@ -95,15 +95,15 @@ const timelineScene = makeScene2D('timeline', function* (view) {
 
     /**
      * Compute fit-to-canvas scale for a media element.
-     * Returns { w, h } that makes the media fill the canvas while preserving aspect ratio (cover mode).
+     * Returns { w, h } that makes the media fit inside the canvas (contain mode).
      * If clip has explicit scaleX/scaleY those are applied on top.
      */
     function fitSize(mediaW: number, mediaH: number): { w: number; h: number } {
         if (!mediaW || !mediaH) return { w: canvasWidth, h: canvasHeight };
         const scaleW = canvasWidth / mediaW;
         const scaleH = canvasHeight / mediaH;
-        // "cover" — fill canvas entirely (crop overflow)
-        const s = Math.max(scaleW, scaleH);
+        // "contain" — fit inside canvas (letterbox/pillarbox)
+        const s = Math.min(scaleW, scaleH);
         return { w: Math.round(mediaW * s), h: Math.round(mediaH * s) };
     }
 
@@ -122,8 +122,8 @@ const timelineScene = makeScene2D('timeline', function* (view) {
 
                     // Determine video native size for fitting
                     // clip.sourceWidth / sourceHeight come from mediaProbe or asset metadata
-                    const srcW = clip.sourceWidth || 1920;
-                    const srcH = clip.sourceHeight || 1080;
+                    const srcW = clip.metadata?.resolution?.w || clip.sourceWidth || 1920;
+                    const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || 1080;
                     const fitted = fitSize(srcW, srcH);
 
                     layerRefs[track.id]().add(
@@ -158,8 +158,8 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     clipRef = createRef<Img>();
                     const kf = clip.keyframes || {};
 
-                    const srcW = clip.sourceWidth || 1920;
-                    const srcH = clip.sourceHeight || 1080;
+                    const srcW = clip.metadata?.resolution?.w || clip.sourceWidth || 1920;
+                    const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || 1080;
                     const fitted = fitSize(srcW, srcH);
 
                     layerRefs[track.id]().add(

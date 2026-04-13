@@ -97,11 +97,13 @@ function initializePipeline(url) {
 
                 const bitmap = await self.createImageBitmap(frame, resizeOptions);
                 const timestamp = frame.timestamp / 1000000;
+                const frameWidth = frame.displayWidth;
+                const frameHeight = frame.displayHeight;
                 frame.close();
 
                 self.postMessage({
                     type: 'NEW_FRAME',
-                    payload: { data: bitmap, timestamp }
+                    payload: { data: bitmap, timestamp, width: frameWidth, height: frameHeight }
                 }, [bitmap]);
             } catch (err) {
                 console.error('[Worker] Bitmap creation failed', err);

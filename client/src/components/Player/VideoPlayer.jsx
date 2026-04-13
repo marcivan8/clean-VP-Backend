@@ -37,6 +37,16 @@ const VideoPlayer = () => {
             },
             onWaveformUpdate: (peaks, timestamp, duration, trackId) => {
                 useTimelineStore.getState().addWaveform(trackId, peaks, duration);
+            },
+            onMetadata: (videoWidth, videoHeight) => {
+                // Sync canvas internal resolution to video's native dimensions
+                if (canvasRef.current) {
+                    canvasRef.current.width = videoWidth;
+                    canvasRef.current.height = videoHeight;
+                }
+                // Update store so Timeline and Engine know the true dimensions
+                useTimelineStore.setState({ videoWidth, videoHeight });
+                console.log(`[VideoPlayer] Video metadata: ${videoWidth}x${videoHeight}`);
             }
         });
 
@@ -252,12 +262,32 @@ const VideoPlayer = () => {
     // Show debug overlay in development only
     const showDebug = import.meta.env.DEV;
 
+    // Pull global project aspect ratio so the container matches the layout perfectly
+    const aspectRatio = useTimelineStore(state => state.aspectRatio);
+    
+    const getPlayerRatioString = (ratio) => {
+        switch (ratio) {
+            case '9:16': return '1080 / 1920';
+            case '1:1': return '1 / 1';
+            case '4:3': return '4 / 3';
+            case '4:5': return '4 / 5';
+            case '21:9': return '21 / 9';
+            case '16:9':
+            default: return '16 / 9';
+        }
+    };
+    const dynamicRatio = getPlayerRatioString(aspectRatio);
     return (
-        <div ref={containerRef} className="w-full h-full bg-black relative flex items-center justify-center overflow-hidden">
+        <div
+            ref={containerRef}
+            className="relative w-full h-full flex items-center justify-center bg-black overflow-hidden"
+            style={{ aspectRatio: dynamicRatio }}
+        >
             {/* The Custom Rendering Surface */}
             <canvas
                 ref={canvasRef}
-                className="w-full h-full object-contain transition-all duration-300"
+                className="transition-all duration-300"
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
             />
         </div>
     );

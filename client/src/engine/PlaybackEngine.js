@@ -64,6 +64,8 @@ class PlaybackEngine {
         this.onAudioLevels = options.onAudioLevels || (() => { }); // Volume Metering
         this.onWaveformUpdate = options.onWaveformUpdate || (() => { }); // Waveform Data
         this.onError = options.onError || (() => { }); // Error callback
+        this.onMetadata = options.onMetadata || (() => { }); // Video dimensions callback
+        this._metadataEmitted = false; // Fire onMetadata only once per media load
 
         // Loop State
         this.rafId = null;
@@ -412,7 +414,10 @@ class PlaybackEngine {
      * @param {string} url - Optional media URL
      */
     async play(url) {
-        if (url) this.currentUrl = url;
+        if (url) {
+            this.currentUrl = url;
+            this._metadataEmitted = false; // Reset so onMetadata fires for new media
+        }
         const targetUrl = url || this.currentUrl;
 
         // Guard: no URL available → nothing to play
@@ -500,6 +505,7 @@ class PlaybackEngine {
     load(url) {
         if (!url || url === this.currentUrl) return;
         this.currentUrl = url;
+        this._metadataEmitted = false; // Reset so onMetadata fires for new media
 
         console.log('[PlaybackEngine] Loading URL (Paused):', url);
         // We use START_GENERATING to serve the frame at current time, 
@@ -642,6 +648,11 @@ class PlaybackEngine {
     handleWorkerMessage(e) {
         const { type, payload } = e.data;
         if (type === 'NEW_FRAME') {
+            // Fire onMetadata once when we get the first frame with dimensions
+            if (!this._metadataEmitted && payload.width && payload.height) {
+                this._metadataEmitted = true;
+                this.onMetadata(payload.width, payload.height);
+            }
             this.pushFrame(payload.data, payload.timestamp);
         } else if (type === 'AUDIO_DATA') {
             // Forward Waveform Data if present
