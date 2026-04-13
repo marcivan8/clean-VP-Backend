@@ -39,12 +39,33 @@ function clipLocalTime(playbackTime: number, clipStart: number): number {
 }
 
 const timelineScene = makeScene2D('timeline', function* (view) {
-    const vars = useScene().variables;
+    // ── Capture scene reference ONCE (safe inside generator body) ──
+    const scene = useScene();
+    const playback = scene.playback;
+    const vars = scene.variables;
+
     const durationSignal = vars.get('duration', 10);
     const totalDuration: number = (durationSignal ? typeof durationSignal === 'function' ? durationSignal() : durationSignal : 10) as number;
 
     const tracksSignal = vars.get('tracks', []);
     const tracks: any[] = (tracksSignal ? typeof tracksSignal === 'function' ? tracksSignal() : tracksSignal : []) as any[];
+
+    // Dynamic canvas size based on aspect ratio
+    const arSignal = vars.get('aspectRatio', '16:9');
+    const ar: string = (typeof arSignal === 'function' ? arSignal() : arSignal) as string;
+    const SIZE_MAP: Record<string, [number, number]> = {
+        '16:9':  [1920, 1080],
+        '9:16':  [1080, 1920],
+        '1:1':   [1080, 1080],
+        '4:3':   [1440, 1080],
+        '4:5':   [1080, 1350],
+        '21:9':  [2560, 1080],
+    };
+    const [cw, ch] = SIZE_MAP[ar] ?? SIZE_MAP['16:9'];
+    view.size([cw, ch]);
+
+    const canvasWidth = cw;
+    const canvasHeight = ch;
 
     // Simple placeholder text when no tracks/clips
     const hasClips = tracks.some(t => t.clips && t.clips.length > 0);
@@ -72,6 +93,20 @@ const timelineScene = makeScene2D('timeline', function* (view) {
         view.add(<Node ref={ref} />);
     });
 
+    /**
+     * Compute fit-to-canvas scale for a media element.
+     * Returns { w, h } that makes the media fill the canvas while preserving aspect ratio (cover mode).
+     * If clip has explicit scaleX/scaleY those are applied on top.
+     */
+    function fitSize(mediaW: number, mediaH: number): { w: number; h: number } {
+        if (!mediaW || !mediaH) return { w: canvasWidth, h: canvasHeight };
+        const scaleW = canvasWidth / mediaW;
+        const scaleH = canvasHeight / mediaH;
+        // "cover" — fill canvas entirely (crop overflow)
+        const s = Math.max(scaleW, scaleH);
+        return { w: Math.round(mediaW * s), h: Math.round(mediaH * s) };
+    }
+
     // Play all clips at their respective start times
     const runningClips: any[] = [];
     sortedTracks.forEach((track: any) => {
@@ -84,21 +119,28 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                 if (clip.type === 'video') {
                     clipRef = createRef<Video>();
                     const kf = clip.keyframes || {};
+
+                    // Determine video native size for fitting
+                    // clip.sourceWidth / sourceHeight come from mediaProbe or asset metadata
+                    const srcW = clip.sourceWidth || 1920;
+                    const srcH = clip.sourceHeight || 1080;
+                    const fitted = fitSize(srcW, srcH);
+
                     layerRefs[track.id]().add(
                         <Video
                             ref={clipRef}
                             src={clip.url}
-                            width={"100%"}
-                            height={"100%"}
-                            time={() => useScene().playback.time - clip.start + (clip.offset || 0)}
+                            width={fitted.w}
+                            height={fitted.h}
+                            time={() => playback.time - clip.start + (clip.offset || 0)}
                             play={true}
                             volume={(clip.volume ?? 1) * (clip.globalVolume ?? 1)}
-                            x={() => evaluateKF(kf.x, clipLocalTime(useScene().playback.time, clip.start), clip.x || 0)}
-                            y={() => evaluateKF(kf.y, clipLocalTime(useScene().playback.time, clip.start), clip.y || 0)}
-                            scaleX={() => evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(useScene().playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
-                            scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(useScene().playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
-                            rotation={() => evaluateKF(kf.rotation, clipLocalTime(useScene().playback.time, clip.start), clip.rotation || 0)}
-                            opacity={() => evaluateKF(kf.opacity, clipLocalTime(useScene().playback.time, clip.start), clip.opacity ?? 1)}
+                            x={() => evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0)}
+                            y={() => evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0)}
+                            scaleX={() => evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
+                            scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
+                            rotation={() => evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
+                            opacity={() => evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
                         />
                     );
                 } else if (clip.type === 'audio') {
@@ -107,7 +149,7 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                         <Audio
                             ref={clipRef}
                             src={clip.url}
-                            time={() => useScene().playback.time - clip.start + (clip.offset || 0)}
+                            time={() => playback.time - clip.start + (clip.offset || 0)}
                             play={true}
                             volume={(clip.volume ?? 1) * (clip.globalVolume ?? 1)}
                         />
@@ -115,18 +157,23 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                 } else if (clip.type === 'image') {
                     clipRef = createRef<Img>();
                     const kf = clip.keyframes || {};
+
+                    const srcW = clip.sourceWidth || 1920;
+                    const srcH = clip.sourceHeight || 1080;
+                    const fitted = fitSize(srcW, srcH);
+
                     layerRefs[track.id]().add(
                         <Img
                             ref={clipRef}
                             src={clip.url}
-                            width={"100%"}
-                            height={"100%"}
-                            x={() => evaluateKF(kf.x, clipLocalTime(useScene().playback.time, clip.start), clip.x || 0)}
-                            y={() => evaluateKF(kf.y, clipLocalTime(useScene().playback.time, clip.start), clip.y || 0)}
-                            scaleX={() => evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(useScene().playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
-                            scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(useScene().playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
-                            rotation={() => evaluateKF(kf.rotation, clipLocalTime(useScene().playback.time, clip.start), clip.rotation || 0)}
-                            opacity={() => evaluateKF(kf.opacity, clipLocalTime(useScene().playback.time, clip.start), clip.opacity ?? 1)}
+                            width={fitted.w}
+                            height={fitted.h}
+                            x={() => evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0)}
+                            y={() => evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0)}
+                            scaleX={() => evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
+                            scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
+                            rotation={() => evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
+                            opacity={() => evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
                         />
                     );
                 } else if (clip.type === 'text') {
@@ -139,12 +186,12 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             fill={clip.color || '#ffffff'}
                             fontSize={clip.fontSize || 48}
                             fontFamily={clip.fontFamily || 'Inter'}
-                            x={() => evaluateKF(kf.x, clipLocalTime(useScene().playback.time, clip.start), clip.x || 0)}
-                            y={() => evaluateKF(kf.y, clipLocalTime(useScene().playback.time, clip.start), clip.y || 0)}
-                            scaleX={() => evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(useScene().playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
-                            scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(useScene().playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
-                            rotation={() => evaluateKF(kf.rotation, clipLocalTime(useScene().playback.time, clip.start), clip.rotation || 0)}
-                            opacity={() => evaluateKF(kf.opacity, clipLocalTime(useScene().playback.time, clip.start), clip.opacity ?? 1)}
+                            x={() => evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0)}
+                            y={() => evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0)}
+                            scaleX={() => evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
+                            scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
+                            rotation={() => evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
+                            opacity={() => evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
                         />
                     );
                 }

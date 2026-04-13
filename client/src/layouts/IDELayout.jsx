@@ -25,16 +25,16 @@ import ProxyService from '../services/proxyService';
 const VideoTimeDisplay = () => {
     const timeRef = useRef(null);
     useEffect(() => {
-       let r;
-       const update = () => {
-           const state = useTimelineStore.getState();
-           const player = state.playerRef;
-           const time = (state.isPlaying && player && player.playback) ? player.playback.time : state.currentTime;
-           if (timeRef.current) timeRef.current.innerText = (time || 0).toFixed(2);
-           r = requestAnimationFrame(update);
-       };
-       r = requestAnimationFrame(update);
-       return () => cancelAnimationFrame(r);
+        let r;
+        const update = () => {
+            const state = useTimelineStore.getState();
+            const player = state.playerRef;
+            const time = (state.isPlaying && player && player.playback) ? player.playback.time : state.currentTime;
+            if (timeRef.current) timeRef.current.innerText = (time || 0).toFixed(2);
+            r = requestAnimationFrame(update);
+        };
+        r = requestAnimationFrame(update);
+        return () => cancelAnimationFrame(r);
     }, []);
     return <span ref={timeRef} className="font-mono text-xs text-primary">0.00</span>;
 };
@@ -196,18 +196,36 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         { id: 'fx-brightness', name: 'Bright', icon: '☀️', filter: 'brightness(150%)' },
         { id: 'fx-contrast', name: 'Contrast', icon: '🌓', filter: 'contrast(150%)' },
     ];
-
+    const detectAspectRatio = (width, height) => {
+        if (!width || !height) return null;
+        const r = width / height;
+        const ratios = [
+            { label: '9:16', value: 9 / 16 },
+            { label: '1:1', value: 1 },
+            { label: '4:3', value: 4 / 3 },
+            { label: '4:5', value: 4 / 5 },
+            { label: '21:9', value: 21 / 9 },
+            { label: '16:9', value: 16 / 9 },
+        ];
+        let closest = '16:9', minDiff = Infinity;
+        ratios.forEach(({ label, value }) => {
+            const diff = Math.abs(r - value);
+            if (diff < minDiff) { minDiff = diff; closest = label; }
+        });
+        return closest;
+    };
     const handleFileImport = async (e) => {
         const files = Array.from(e.target.files);
         if (files.length > 0) {
             console.log("📂 Files Selected:", files.length);
 
             const processedAssets = [];
+            let ratioSet = false; // only auto-set once per import batch
 
             for (const file of files) {
                 const url = URL.createObjectURL(file);
                 let metadata = { duration: 0, fps: 30, width: 0, height: 0, thumbnail: null };
-                
+
                 try {
                     // Probe the file for metadata and thumbnails
                     const probeResult = await probeMedia(file);
@@ -217,6 +235,16 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 }
 
                 const isVideo = file.type.startsWith('video');
+
+                // Auto-detect aspect ratio from first video in the batch
+                if (isVideo && !ratioSet && metadata.width && metadata.height) {
+                    const detected = detectAspectRatio(metadata.width, metadata.height);
+                    if (detected) {
+                        useTimelineStore.getState().setAspectRatio(detected);
+                        ratioSet = true;
+                    }
+                }
+
                 const assetId = `asset-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
                 processedAssets.push({
@@ -1026,7 +1054,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             >
                                 <ErrorBoundary>
                                     <Player
-                                        key={`player-${tracks.reduce((acc, t) => acc + t.clips.length, 0)}`}
+                                        key={`player-${aspectRatio}-${tracks.reduce((acc, t) => acc + t.clips.length, 0)}`}
                                         onPlayerReady={handlePlayerReady}
                                         playing={isPlaying}
                                         controls={false}
@@ -1036,6 +1064,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         }}
                                         project={project}
                                         variables={playerVariables}
+                                        className="w-full h-full"
+                                        style={{ width: '100%', height: '100%', display: 'block' }}
                                     />
                                 </ErrorBoundary>
                             </div>
