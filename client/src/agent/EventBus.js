@@ -56,6 +56,18 @@ export const EVENT_TYPES = {
     AI_UNAVAILABLE: 'ai:unavailable',
     FALLBACK_USED: 'fallback:used',
 
+    // Phase 7: Autonomous Editing Mode
+    AUTONOMOUS_PLAN_READY:     'autonomous:plan_ready',
+    AUTONOMOUS_STEP_READY:     'autonomous:step_ready',
+    AUTONOMOUS_STEPS_UPDATED:  'autonomous:steps_updated',
+    AUTONOMOUS_STATUS:         'autonomous:status',
+    AUTONOMOUS_SESSION_ENDED:  'autonomous:session_ended',
+
+    // Phase 7: A/B Iteration System
+    ITERATION_STARTED:         'iteration:started',
+    ITERATION_COMPLETE:        'iteration:complete',
+    VARIATION_LOADED:          'iteration:variation_loaded',
+
     // System
     SYSTEM_ERROR: 'system:error',
     DEBUG: 'debug'

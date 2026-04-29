@@ -433,13 +433,13 @@ export class MediaExecutionEngine {
             let result;
             switch (action) {
                 case 'splitMedia':
-                    result = await mediaBunnyService.splitMedia(sourceFile, args.splitTime);
+                    result = await mediaBunnyService.splitMedia(sourceFile, Number(args.splitTime));
                     break;
                 case 'changeSpeed':
-                    result = await mediaBunnyService.changeSpeed(sourceFile, args.speed);
+                    result = await mediaBunnyService.changeSpeed(sourceFile, Number(args.speed));
                     break;
                 case 'trimMedia':
-                    result = await mediaBunnyService.trimMedia(sourceFile, args.start, args.end);
+                    result = await mediaBunnyService.trimMedia(sourceFile, Number(args.start), Number(args.end));
                     break;
                 case 'convertFormat':
                     result = await mediaBunnyService.convertFormat(sourceFile, args.format);
@@ -487,7 +487,8 @@ export class MediaExecutionEngine {
 
             case 'splitClip': {
                 this._callStore(store, 'splitClip', args.trackId, args.clipId, args.splitTime);
-                return { action, success: true, message: `Split at ${args.splitTime?.toFixed(2)}s` };
+                const numTime = Number(args.splitTime);
+                return { action, success: true, message: `Split at ${!isNaN(numTime) ? numTime.toFixed(2) : args.splitTime}s` };
             }
 
             case 'removeClip': {
@@ -678,6 +679,37 @@ export class MediaExecutionEngine {
             }
 
             const result = await response.json();
+
+            // Special handling for silence detection - auto cut the timeline
+            if (command.action === 'silenceDetect' && result.activeSegments) {
+                console.log(`[MediaExecutionEngine] ✂️ Applying silence cuts. Segments: ${result.activeSegments.length}`);
+                
+                // Import useTimelineStore dynamically to avoid circular dependencies if any
+                const { default: useTimelineStore } = await import('../store/useTimelineStore.js');
+                const store = useTimelineStore.getState();
+                const videoTrack = store.tracks?.find(t => t.type === 'video');
+                
+                if (videoTrack && videoTrack.clips.length > 0) {
+                    const baseClip = videoTrack.clips[0]; // Assuming first clip is the raw import
+                    
+                    // Remove the uncut original clip
+                    store.removeClip(videoTrack.id, baseClip.id);
+                    
+                    let currentStartTime = 0;
+                    result.activeSegments.forEach((seg, i) => {
+                        const newClip = {
+                            ...baseClip,
+                            id: `clip_silence_${Date.now()}_${i}`,
+                            start: currentStartTime,
+                            duration: seg.duration,
+                            offset: seg.start, // Trims the source video to start exactly at the segment start
+                            name: `${baseClip.name || 'Clip'} (Cut ${i+1})`
+                        };
+                        store.addClip(videoTrack.id, newClip);
+                        currentStartTime += seg.duration; // Ripple edit: next clip starts immediately after
+                    });
+                }
+            }
 
             return {
                 engine: 'api',

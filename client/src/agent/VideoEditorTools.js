@@ -1,5 +1,7 @@
 import useTimelineStore from '../store/useTimelineStore.js';
-import { performSilenceRemoval, performAudioDenoise, performAudioNormalization } from '../services/autoEditService.js';
+import { performSilenceRemoval, performFillerRemoval, performAudioDenoise, performAudioNormalization } from '../services/autoEditService.js';
+import { ContentAnalyzer } from './ContentAnalyzer.js';
+import { LongFormEditPlanner } from './LongFormEditPlanner.js';
 
 /**
  * VideoEditorTools
@@ -71,6 +73,11 @@ export const TOOL_DEFINITIONS = [
                 threshold: { type: "string", description: "Silence threshold (default: -30dB)" }
             }
         }
+    },
+    {
+        name: "remove_filler_words",
+        description: "Automatically detects and removes filler words (ums, uhs) from the video.",
+        parameters: { type: "object", properties: {} }
     },
     {
         name: "denoise_audio",
@@ -169,6 +176,44 @@ export const TOOL_DEFINITIONS = [
         name: "undo_action",
         description: "Undoes the last action.",
         parameters: { type: "object", properties: {} }
+    },
+
+    // --- Long-Form Intelligence Engine Tools ---
+    {
+        name: "analyze_structure",
+        description: "Analyzes video content semantically — detects content type, segments the video by topic, finds the best hook, and identifies key narrative sections (Intro, Body, Outro). Does NOT execute any edits. Returns a full content analysis for user approval.",
+        parameters: {
+            type: "object",
+            properties: {
+                platform: { type: "string", enum: ["youtube", "podcast", "tiktok", "instagram", null], description: "Target platform (affects edit mode selection)" },
+                targetDuration: { type: "number", description: "Desired output duration in seconds (optional)" }
+            }
+        }
+    },
+    {
+        name: "long_form_edit",
+        description: "Generates and executes a full long-form edit plan based on prior content analysis. Includes silence removal, hook placement, segment reordering, repetition removal, and transitions. Always requires user approval before executing.",
+        parameters: {
+            type: "object",
+            properties: {
+                editMode: { type: "string", enum: ["FULL_BUILD", "CLEAN_EDIT", "YOUTUBE_OPTIMIZED"], description: "Edit mode to apply" },
+                platform: { type: "string", description: "Target platform" },
+                targetDuration: { type: "number", description: "Desired output duration in seconds" }
+            }
+        }
+    },
+    {
+        name: "reorder_segment",
+        description: "Moves a clip or segment to a new position in the timeline for structural rebuilding (e.g., moving the hook to position 0).",
+        parameters: {
+            type: "object",
+            properties: {
+                clipId: { type: "string", description: "ID of the clip/placement to move" },
+                trackId: { type: "string", description: "ID of the track containing the clip" },
+                targetPosition: { type: "number", description: "Target start time in seconds (0 = beginning of timeline)" }
+            },
+            required: ["clipId", "trackId", "targetPosition"]
+        }
     }
 ];
 
@@ -242,6 +287,7 @@ export class VideoEditorTools {
 
             // AI / Audio
             case 'silence_removal': return await performSilenceRemoval(getFilename(), action.args?.threshold);
+            case 'remove_filler_words': return await performFillerRemoval(getFilename());
             case 'denoise_audio': return await performAudioDenoise(getFilename());
             case 'normalize_audio': return await performAudioNormalization(getFilename());
             case 'sync_clips_to_beat': return this.syncClipsToBeats();
@@ -258,6 +304,14 @@ export class VideoEditorTools {
             // Playback
             case 'seek_to': return this.seekTo(action.args);
             case 'undo_action': return this.undo();
+
+            // Long-Form Intelligence Engine
+            case 'analyze_structure': return await this.analyzeStructure(action.args);
+            case 'long_form_edit': return await this.longFormEdit(action.args);
+            case 'find_hook': return this.findHook();
+            case 'remove_repetition': return await this.removeRepetition(action.args);
+            case 'reorder_segment': return this.reorderSegment(action.args);
+            case 'cut_segment': return this.cutSegment(action.args);
 
             default:
                 throw new Error(`Unknown tool: ${action.name}`);
@@ -386,5 +440,177 @@ export class VideoEditorTools {
     undo() {
         this.store.undo();
         return { success: true, message: "Undid last action." };
+    }
+
+    // ── Long-Form Tool Implementations ───────────────────────────────────────
+
+    /**
+     * Run ContentAnalyzer and return the full analysis for approval.
+     */
+    async analyzeStructure({ platform = null, targetDuration = null } = {}) {
+        console.log('[VideoEditorTools] Running ContentAnalyzer...');
+        const result = await ContentAnalyzer.analyze({ platform, targetDuration });
+        return {
+            success: result.success,
+            message: result.success
+                ? `Content analysis complete: ${result.segments?.length || 0} segments detected.`
+                : `Analysis failed: ${result.error}`,
+            analysisResult: result,
+            requiresApproval: true,
+        };
+    }
+
+    /**
+     * Generate LongFormEditPlanner plan from cached ContentAnalyzer result.
+     * Returns the plan for approval — does NOT execute it.
+     */
+    async longFormEdit({ editMode, platform, targetDuration } = {}) {
+        console.log('[VideoEditorTools] Building LongFormEditPlanner plan...');
+
+        // Get cached analysis from store
+        let analysis = ContentAnalyzer.getCachedAnalysis();
+
+        // If no cached analysis, run it now
+        if (!analysis?.success) {
+            console.log('[VideoEditorTools] No cached analysis. Running ContentAnalyzer first...');
+            analysis = await ContentAnalyzer.analyze({ platform, targetDuration });
+        }
+
+        // Override editMode if specified
+        if (editMode && analysis) {
+            analysis = { ...analysis, editMode };
+        }
+
+        const plan = LongFormEditPlanner.generatePlan(analysis, { platform, targetDuration });
+
+        return {
+            success: true,
+            message: plan.error || `Long-form edit plan ready: ${plan.step_count} steps.`,
+            editPlan: plan,
+            approvalMessage: plan.approvalMessage,
+            requiresApproval: true,
+        };
+    }
+
+    /**
+     * Find the best hook from the cached content analysis.
+     */
+    findHook() {
+        const analysis = ContentAnalyzer.getCachedAnalysis();
+        const hook = analysis?.structure?.hookCandidate || analysis?.structure?.hook || null;
+
+        if (hook) {
+            this.store.seek(hook.start);
+            return {
+                success: true,
+                message: `Hook found at ${hook.start.toFixed(0)}s–${hook.end.toFixed(0)}s`,
+                hookCandidate: hook,
+            };
+        }
+
+        return {
+            success: false,
+            message: 'No hook candidate found. Run content analysis first.',
+            hookCandidate: null,
+        };
+    }
+
+    /**
+     * Remove repetitive / low-value segments from the timeline.
+     */
+    async removeRepetition({ importance_threshold = 0.3 } = {}) {
+        const analysis = ContentAnalyzer.getCachedAnalysis();
+        if (!analysis?.segments) {
+            return { success: false, message: 'No content analysis available. Run analyze_structure first.' };
+        }
+
+        const lowValueSegs = analysis.segments.filter(
+            s => s.importance_score < importance_threshold || s.type === 'filler'
+        );
+
+        let removedCount = 0;
+        for (const seg of lowValueSegs) {
+            try {
+                this.cutSegment({ start: seg.start, end: seg.end });
+                removedCount++;
+            } catch (e) {
+                console.warn(`[VideoEditorTools] Could not cut segment ${seg.start}–${seg.end}:`, e.message);
+            }
+        }
+
+        return {
+            success: true,
+            message: `Removed ${removedCount} low-value segment(s).`,
+            removedCount,
+        };
+    }
+
+    /**
+     * Move a clip to a new timeline position (for narrative reordering).
+     */
+    reorderSegment({ clipId, trackId, targetPosition }) {
+        const store = this.store;
+        store._saveHistory();
+
+        const { track, clip } = this.resolveTrackAndClip(trackId, clipId);
+
+        // Shift all clips that were at or after targetPosition to make room
+        const shiftAmount = clip.duration;
+        const clipsToShift = track.clips
+            .filter(c => c.id !== clip.id && c.start >= targetPosition)
+            .sort((a, b) => a.start - b.start);
+
+        // Move the target clip to the front
+        store.updateClip(track.id, clip.id, { start: targetPosition }, { skipHistory: true });
+
+        // Ripple shift other clips
+        clipsToShift.forEach(c => {
+            store.updateClip(track.id, c.id, { start: c.start + shiftAmount }, { skipHistory: true });
+        });
+
+        return {
+            success: true,
+            message: `Moved clip "${clip.name}" to position ${targetPosition.toFixed(1)}s`,
+        };
+    }
+
+    /**
+     * Cut out a time range from the timeline.
+     */
+    cutSegment({ start, end }) {
+        const store = this.store;
+        const videoTrack = store.tracks.find(t => t.type === 'video');
+        if (!videoTrack) return { success: false, message: 'No video track found' };
+
+        // Find clips that overlap with [start, end]
+        const overlapping = videoTrack.clips.filter(c =>
+            c.start < end && (c.start + c.duration) > start
+        );
+
+        overlapping.forEach(clip => {
+            const clipEnd = clip.start + clip.duration;
+
+            if (clip.start >= start && clipEnd <= end) {
+                // Clip is fully inside the segment — remove it
+                store.removeClip(videoTrack.id, clip.id);
+            } else if (clip.start < start && clipEnd > end) {
+                // Clip spans the entire segment — split twice
+                store.splitClip(videoTrack.id, clip.id, start);
+                // Find the new clip after split
+                const newTracks = useTimelineStore.getState().tracks;
+                const newTrack = newTracks.find(t => t.id === videoTrack.id);
+                const middleClip = newTrack?.clips.find(c => c.start >= start && (c.start + c.duration) <= end + 0.5);
+                if (middleClip) store.removeClip(videoTrack.id, middleClip.id);
+            } else if (clip.start < start) {
+                // Clip overlaps at end — trim end
+                store.updateClip(videoTrack.id, clip.id, { duration: start - clip.start });
+            } else {
+                // Clip overlaps at start — trim start
+                const newStart = end;
+                store.updateClip(videoTrack.id, clip.id, { start: newStart, duration: clipEnd - newStart });
+            }
+        });
+
+        return { success: true, message: `Cut segment ${start.toFixed(1)}s–${end.toFixed(1)}s` };
     }
 }

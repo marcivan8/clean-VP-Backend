@@ -257,6 +257,9 @@ export class EditPlanner {
             // === AUDIO ===
             case 'silence_removal':
                 return this.planSilenceRemoval(planId, constraints);
+                
+            case 'remove_filler_words':
+                return this.planFillerRemoval(planId);
 
             case 'adjust_volume':
                 return this.planVolumeAdjust(planId, clip, constraints);
@@ -288,6 +291,25 @@ export class EditPlanner {
 
             case 'redo_action':
                 return this.planRedo(planId);
+
+            // === LONG-FORM INTELLIGENCE ENGINE ===
+            case 'analyze_structure':
+                return this.planAnalyzeStructure(planId, constraints);
+
+            case 'long_form_edit':
+                return this.planLongFormEdit(planId, constraints);
+
+            case 'build_from_rushes':
+                return this.planLongFormEdit(planId, { ...constraints, editMode: 'FULL_BUILD' });
+
+            case 'find_hook':
+                return this.planFindHook(planId);
+
+            case 'remove_repetition':
+                return this.planRemoveRepetition(planId);
+
+            case 'reorder_segment':
+                return this.planReorderSegment(planId, constraints);
 
             default:
                 return null; // Needs API for complex operations
@@ -569,6 +591,17 @@ export class EditPlanner {
         return this.buildPlan(planId, 'silence_removal', steps);
     }
 
+    static planFillerRemoval(planId) {
+        const steps = [
+            {
+                step_id: 'step_1',
+                action: 'remove_filler_words'
+            }
+        ];
+
+        return this.buildPlan(planId, 'remove_filler_words', steps);
+    }
+
     static planVolumeAdjust(planId, clip, constraints) {
         const steps = [
             {
@@ -698,6 +731,119 @@ export class EditPlanner {
         return this.buildPlan(planId, 'redo', [
             { step_id: 'step_1', action: ACTIONS.REDO_ACTION }
         ]);
+    }
+
+    // ==================== LONG-FORM PLAN GENERATORS ====================
+
+    /**
+     * ANALYZE_STRUCTURE: Trigger ContentAnalyzer and return the result as a plan.
+     * The plan itself is informational — the real execution comes after user approval
+     * in the subsequent long_form_edit plan.
+     */
+    static planAnalyzeStructure(planId, constraints) {
+        return {
+            plan_id: planId,
+            operation: 'analyze_structure',
+            step_count: 1,
+            requiresApproval: true,
+            steps: [
+                {
+                    step_id: 'step_1',
+                    action: 'analyze_structure',
+                    platform: constraints?.platform || null,
+                    targetDuration: constraints?.targetDuration || null,
+                    reason: 'Semantic content analysis — results will be shown for approval before any edits are made'
+                }
+            ]
+        };
+    }
+
+    /**
+     * LONG_FORM_EDIT: Delegates to LongFormEditPlanner which reads cached ContentAnalyzer result.
+     * Always returns requiresApproval:true.
+     */
+    static planLongFormEdit(planId, constraints) {
+        return {
+            plan_id: planId,
+            operation: 'long_form_edit',
+            step_count: 1,
+            requiresApproval: true,
+            constraints: constraints || {},
+            steps: [
+                {
+                    step_id: 'step_1',
+                    action: 'long_form_edit',
+                    editMode: constraints?.editMode || 'CLEAN_EDIT',
+                    platform: constraints?.platform || null,
+                    targetDuration: constraints?.targetDuration || null,
+                    reason: 'Long-form edit plan will be generated and shown for approval'
+                }
+            ]
+        };
+    }
+
+    /**
+     * FIND_HOOK: Read cached ContentAnalyzer result and extract the hook timestamp.
+     */
+    static planFindHook(planId) {
+        return {
+            plan_id: planId,
+            operation: 'find_hook',
+            step_count: 1,
+            requiresApproval: true,
+            steps: [
+                {
+                    step_id: 'step_1',
+                    action: 'find_hook',
+                    reason: 'Scan content analysis for the highest-energy opening segment'
+                }
+            ]
+        };
+    }
+
+    /**
+     * REMOVE_REPETITION: Flag and remove low-importance duplicate segments.
+     */
+    static planRemoveRepetition(planId) {
+        return {
+            plan_id: planId,
+            operation: 'remove_repetition',
+            step_count: 1,
+            requiresApproval: true,
+            steps: [
+                {
+                    step_id: 'step_1',
+                    action: 'remove_repetition',
+                    importance_threshold: 0.3,
+                    reason: 'Remove segments flagged as low-value or repetitive'
+                }
+            ]
+        };
+    }
+
+    /**
+     * REORDER_SEGMENT: Move a clip/segment to a new timeline position.
+     */
+    static planReorderSegment(planId, constraints) {
+        if (!constraints?.clipId && !constraints?.segmentIndex) {
+            return this.errorPlan(planId, 'No segment specified for reorder');
+        }
+        return {
+            plan_id: planId,
+            operation: 'reorder_segment',
+            step_count: 1,
+            requiresApproval: true,
+            steps: [
+                {
+                    step_id: 'step_1',
+                    action: 'reorder_segment',
+                    clip_id: constraints.clipId,
+                    track_id: constraints.trackId,
+                    target_position: constraints.targetPosition ?? 0,
+                    reason: constraints.reason || 'Reorder segment for narrative structure'
+                }
+            ]
+        };
     }
 
     // ==================== HELPERS ====================

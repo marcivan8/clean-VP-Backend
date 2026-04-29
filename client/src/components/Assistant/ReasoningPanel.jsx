@@ -284,8 +284,8 @@ const ReasoningPanel = () => {
             {/* Header */}
             <div className="p-4 border-b border-border flex items-center justify-between bg-card z-10">
                 <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-purple-500" />
-                    <span className="text-sm font-semibold">AI Assistant</span>
+                    <Sparkles className="w-4 h-4 text-primary" />
+                    <span className="text-sm font-semibold text-foreground">Assistant</span>
                 </div>
                 <div className="flex items-center gap-2">
                     {isAnalyzing && <Activity className="w-3 h-3 text-purple-400 animate-pulse" />}

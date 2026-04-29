@@ -24,6 +24,7 @@ Your goal is to parse user commands into structured JSON actions that the video 
 
 AVAILABLE ACTIONS:
 1. "silence_removal" -> Remove silent parts.
+2. "remove_filler_words" -> Remove um, ah, and filler words.
 2. "set_aspect_ratio" -> Params: ratio ("16:9", "9:16", "1:1").
 3. "cut_clip" -> Params: clipId, time, trackId.
 4. "remove_clip" -> Params: clipId, trackId.
@@ -240,7 +241,98 @@ When intent is complete and safe:
   "intent": { ...fully structured intent with all fields populated... }
 }
 
-DIRECT EDITING COMMANDS — parse them directly:
+DIRECT EDITING COMMANDS — parse them directly. You MUST understand professional video editing jargon.
+
+══════════════════════════════════════════════════
+🎬 HIGH-LEVEL / PRODUCTION COMMANDS
+══════════════════════════════════════════════════
+
+These commands mean the user wants a FULL EDIT of their video. Map them to operation: "long_form_edit":
+- "fully edit this", "edit this clip", "edit my video", "edit this for me"
+- "you're a pro editor / act like a pro editor / be a pro editor"
+- "make it professional", "make it look professional", "put it together"
+- "make it a banger", "make it cinematic", "cinematic edit"
+- "make it like MrBeast / Casey Neistat / MKBHD"
+- "vlog edit", "documentary style", "film it", "final cut"
+- "assemble this", "do a full edit", "complete edit"
+→ editMode: infer from platform (TikTok→"CLEAN_EDIT", YouTube→"YOUTUBE_OPTIMIZED", raw rushes→"FULL_BUILD")
+
+══════════════════════════════════════════════════
+📱 PLATFORM / FORMAT COMMANDS
+══════════════════════════════════════════════════
+
+- "make it vertical / portrait / for TikTok / for Reels / for Instagram" → set_aspect_ratio ratio:"9:16"
+- "make it horizontal / landscape / for YouTube / widescreen" → set_aspect_ratio ratio:"16:9"
+- "make it square / for Instagram feed" → set_aspect_ratio ratio:"1:1"
+- "optimize for YouTube", "YouTube long form", "build a YouTube video" → long_form_edit, editMode:"YOUTUBE_OPTIMIZED"
+- "TikTok version / make a TikTok / short form / shorts" → long_form_edit, editMode:"CLEAN_EDIT", targetDuration:60
+- "podcast edit / interview edit / clean the podcast / clean the interview / tighten it up" → long_form_edit, editMode:"CLEAN_EDIT", platform:"podcast"
+
+══════════════════════════════════════════════════
+✂️ PRO CUTTING JARGON
+══════════════════════════════════════════════════
+
+- "J-cut / audio lead / let the audio run first" → add_transition, type:"j_cut"
+- "L-cut / audio tail / continue the audio" → add_transition, type:"l_cut"
+- "jump cut / YouTube jump cuts / quick cuts / rapid cuts" → silence_removal, style:"jump_cut", threshold:"-25dB"
+- "match cut / smash cut" → add_transition, type:"match_cut"
+- "cutaway / B-roll / insert shot / reaction shot / overlay footage" → add_clip, clipType:"broll"
+- "montage / highlight reel / best moments / compilation / recap" → long_form_edit, editMode:"FULL_BUILD", style:"montage"
+- "split / cut / divide / chop" → split_clip
+- "trim / shorten / cut the end / cut the beginning" → trim_clip
+
+══════════════════════════════════════════════════
+🔊 AUDIO JARGON
+══════════════════════════════════════════════════
+
+- "denoise / de-noise / clean audio / remove hiss / background noise / room noise / hum" → audio_denoise
+- "normalize / level the audio / fix the volume / balance audio / even out the audio / loudness" → normalize_audio
+- "duck the music / audio ducking / lower background music / fade music under voice" → adjust_volume, target:"music_track", volume:0.2
+- "sync to beat / beat sync / cut to the beat / edit to the music / match the beat" → sync_clips_to_beat
+- "voiceover / narration / add a voice" → add_clip, clipType:"voiceover"
+- "remove filler / remove ums / take out the ums / clean up speech" → remove_filler_words
+- "remove silences / remove dead air / remove pauses / cut out the pauses" → silence_removal
+
+══════════════════════════════════════════════════
+🎨 COLOR / VISUAL JARGON
+══════════════════════════════════════════════════
+
+- "color grade / colour grade / grade the footage / apply a LUT" → color_grade
+  - "cinematic / moody / dark" → preset:"cinematic"
+  - "warm / golden hour / vintage / retro / film grain" → preset:"warm"
+  - "cool / cold / blue tone" → preset:"cool"
+  - "vibrant / saturated / pop / punchy colors" → preset:"vibrant"
+  - "black and white / B&W / desaturate" → preset:"bw"
+
+══════════════════════════════════════════════════
+📝 TEXT / GRAPHICS JARGON
+══════════════════════════════════════════════════
+
+- "add captions / add subtitles / auto captions / transcribe / closed captions / CC" → auto_captions
+- "lower third / name tag / title card / credit" → add_text_overlay, position:"lower_third"
+- "add title / add text / overlay text" → add_text_overlay
+
+══════════════════════════════════════════════════
+⏱ PACING JARGON
+══════════════════════════════════════════════════
+
+- "improve pacing / fix pacing / too slow / snappier / more dynamic / more energy" → long_form_edit, actions:["remove_silences","improve_pacing"]
+- "let it breathe / slower pacing / more relaxed / more natural" → set_clip_speed, speed:0.85
+- "speed up / faster / time-lapse / timelapse" → set_clip_speed, speed:2.0
+- "slow down / slo-mo / slow motion" → set_clip_speed, speed:0.5
+
+══════════════════════════════════════════════════
+🔍 ANALYSIS COMMANDS
+══════════════════════════════════════════════════
+
+- "analyze / analyse / understand the video / segment / structure / what's in this" → analyze_structure
+- "find the hook / best opening / strongest moment / hook me" → find_hook
+- "remove repetition / cut out duplicates / it repeats itself" → remove_repetition
+- "build from rushes / assemble from raw footage / build from raw" → build_from_rushes
+
+══════════════════════════════════════════════════
+📋 STANDARD OPERATIONS
+══════════════════════════════════════════════════
 
 OPERATIONS:
 - split_clip: Split a clip. Params: { mode: "midpoint" | "playhead" | "timestamp", timestamp?: number }
@@ -249,14 +341,28 @@ OPERATIONS:
 - set_clip_speed: Change playback speed. Params: { speed: number }
 - set_aspect_ratio: Change canvas ratio. Params: { ratio: "16:9" | "9:16" | "1:1" }
 - silence_removal: Remove silent parts. Params: { threshold: string }
+- remove_filler_words: Remove ums, uhs, and filler words. Params: {}
+- audio_denoise: Clean background noise. Params: {}
+- normalize_audio: Fix volume levels. Params: {}
+- sync_clips_to_beat: Sync to music beats. Params: {}
+- color_grade: Apply color look. Params: { preset: "cinematic"|"warm"|"cool"|"vibrant"|"bw" }
+- add_text_overlay: Add text. Params: { text, position, duration }
+- add_transition: Add a cut transition. Params: { type: "fade"|"dissolve"|"j_cut"|"l_cut"|"match_cut" }
+- auto_captions: Generate captions. Params: {}
+- adjust_volume: Volume adjustment. Params: { volume: 0.0-1.0, target?: string }
 - export_video: Export. Params: { format: string, quality: string }
 - undo_action: Undo last action
+- long_form_edit: Full video edit. Params: { editMode: "FULL_BUILD"|"CLEAN_EDIT"|"YOUTUBE_OPTIMIZED", platform?, targetDuration? }
+- analyze_structure: Analyze content semantically. Params: { platform?, targetDuration? }
+- find_hook: Find best hook moment. Params: {}
+- remove_repetition: Remove repeated segments. Params: {}
+- build_from_rushes: Build video from raw rushes. Params: { platform?, targetDuration? }
 
 For direct commands with valid duration logic, return:
 {
   "type": "READY",
   "intent": {
-    "intent": "edit",
+    "intent": "edit" | "apply_effect" | "export" | "analyze" | "long_form_build" | "undo" | "redo",
     "operation": "operation_name",
     "target_clip_id": "clip_id or null",
     "target_track_id": "track_id or null",
@@ -266,10 +372,11 @@ For direct commands with valid duration logic, return:
   }
 }
 
-TONE: Professional, calm, helpful, concise. No jargon, no overconfidence.
+TONE: Professional, calm, helpful, concise. Understand creative direction and production language.
 STRICT: Never generate FFmpeg commands. Never modify timeline state. Never skip clarification for destructive edits. Never assume durations.
 Your job is to converge toward execution grounded in real media state.
 Output ONLY valid JSON. Include the word "json" in your response.`;
+
 
         // Attach spaCy analysis to the context for better LLM grounding
         const enrichedContext = {
@@ -284,18 +391,96 @@ USER REQUEST:
 "${prompt}"`;
 
 
+        const tools = [
+            {
+                type: "function",
+                function: {
+                    name: "execute_video_edit",
+                    description: "Processes a user's video editing request into a structured intent.",
+                    parameters: {
+                        type: "object",
+                        properties: {
+                            type: {
+                                type: "string",
+                                enum: ["READY", "CLARIFICATION"],
+                                description: "Whether the intent is fully understood (READY) or requires follow-up (CLARIFICATION)."
+                            },
+                            message: {
+                                type: "string",
+                                description: "Optional friendly response to the user, or the clarification question."
+                            },
+                            intent: {
+                                type: "object",
+                                description: "The structured intent object (Required if type is READY)",
+                                properties: {
+                                    intent: {
+                                        type: "string",
+                                        enum: ["edit", "cut", "apply_effect", "export", "creative_edit", "optimize", "undo", "redo", "analyze", "long_form_build"]
+                                    },
+                                    operation: {
+                                        type: "string",
+                                        enum: [
+                                            // Standard editing
+                                            "split_clip", "remove_clip", "trim_clip", "set_clip_speed",
+                                            "set_aspect_ratio", "silence_removal", "remove_filler_words",
+                                            "export_video", "undo_action", "redo_action",
+                                            // Transitions & effects
+                                            "add_transition", "add_filter", "add_text_overlay",
+                                            "color_grade", "adjust_volume", "mute_clip", "add_clip",
+                                            // Audio processing
+                                            "audio_denoise", "normalize_audio", "sync_clips_to_beat",
+                                            "auto_captions",
+                                            // Long-form intelligence engine
+                                            "long_form_edit", "analyze_structure", "find_hook",
+                                            "remove_repetition", "build_from_rushes", "reorder_segment"
+                                        ]
+                                    },
+                                    target_clip_id: { type: ["string", "null"] },
+                                    target_track_id: { type: ["string", "null"] },
+                                    parameters: {
+                                        type: "object",
+                                        description: "Action-specific parameters (e.g. { ratio: '9:16' }, { editMode: 'YOUTUBE_OPTIMIZED' }, { preset: 'cinematic' })"
+                                    },
+                                    confidence: {
+                                        type: "string",
+                                        enum: ["LOW", "MEDIUM", "HIGH"]
+                                    },
+                                    missingParameters: {
+                                        type: "array",
+                                        items: { type: "string" }
+                                    }
+                                },
+                                required: ["intent", "operation", "parameters"]
+                            },
+                            intentDraft: {
+                                type: "object",
+                                description: "A draft of the intent when clarifying (Required if type is CLARIFICATION)."
+                            }
+                        },
+                        required: ["type"]
+                    }
+                }
+            }
+        ];
+
         const completion = await openai.chat.completions.create({
             messages: [
                 { role: "system", content: systemPrompt },
                 { role: "user", content: userMessage }
             ],
             model: "gpt-4-1106-preview",
-            response_format: { type: "json_object" },
+            tools: tools,
+            tool_choice: { type: "function", function: { name: "execute_video_edit" } },
             temperature: 0.15
         }, { timeout: 15000 }); // 15s strict timeout to trigger fallback fast on network errors
 
-        const raw = JSON.parse(completion.choices[0].message.content);
-        console.log("✅ [CRL] Raw response:", raw);
+        const toolCall = completion.choices[0].message.tool_calls?.[0];
+        if (!toolCall) {
+            throw new Error("Model failed to call the execute_video_edit function.");
+        }
+
+        const raw = JSON.parse(toolCall.function.arguments);
+        console.log("✅ [CRL] Structured Function Call response:", raw);
 
         // Normalize CRL envelope to existing pipeline format
         if (raw.type === 'CLARIFICATION') {
@@ -310,7 +495,7 @@ USER REQUEST:
             return res.json(raw.intent);
         }
 
-        // Legacy fallback: if the model returns flat intent (no envelope)
+        // Fallback catch-all
         res.json(raw);
 
     } catch (error) {
@@ -329,83 +514,433 @@ USER REQUEST:
 };
 
 /**
- * Local intent parser fallback
+ * Local intent parser fallback — Production-grade jargon engine
+ *
+ * Handles pro editor vocabulary, high-level commands, platform jargon,
+ * and natural language aliases so the AI never says "I don't understand"
+ * for a legitimate editing command.
  */
 function localParseIntent(prompt, context) {
-    const cmd = (prompt || '').toLowerCase().trim();
-    const clips = context?.clips || [];
-    const activeClip = clips.find(c => c.isActive) || clips[0];
+    try {
+        const cmd = (prompt || '').toLowerCase().trim();
+        const clips = context?.clips || [];
+        const activeClip = clips.find(c => c.isActive) || clips[0];
+        const duration = context?.MediaMetadata?.sourceDuration ||
+                         context?.TimelineState?.totalTimelineDuration || 0;
 
-    // Split detection
-    if (cmd.includes('split') || cmd.includes('cut in ')) {
-        let mode = 'midpoint';
-        if (cmd.includes('half') || cmd.includes('middle') || cmd.includes('in 2')) {
-            mode = 'midpoint';
-        } else if (cmd.includes('playhead') || cmd.includes('current')) {
-            mode = 'playhead';
+        // ── Helper: multi-keyword match ──────────────────────────────────────
+        const has = (...words) => words.some(w => cmd.includes(w));
+
+        // ──────────────────────────────────────────────────────────────────────
+        // 1. HIGH-LEVEL PRODUCTION COMMANDS
+        //    "fully edit this", "you're a pro editor", "edit this clip", etc.
+        // ──────────────────────────────────────────────────────────────────────
+        const highLevelEditPhrases = [
+            'fully edit', 'edit this clip', 'edit the clip', 'edit my clip',
+            'edit it', 'edit this video', 'edit my video', 'you\'re a pro editor',
+            'you are a pro editor', 'be a pro editor', 'act like a pro editor',
+            'act as a pro editor', 'act as an editor', 'edit this for me',
+            'edit this professionally', 'make it professional', 'make it look professional',
+            'put it together', 'assemble this', 'make it a final cut',
+            'final cut', 'do a full edit', 'full edit', 'complete edit',
+            'make it cinematic', 'cinematic edit', 'make it a banger',
+            'like a movie', 'movie edit', 'cinematic video',
+            'make it like mrbeast', 'mrbeast style', 'like casey neistat',
+            'neistat style', 'vlog edit', 'documentary style',
+        ];
+        if (has(...highLevelEditPhrases)) {
+            return {
+                intent: 'long_form_build',
+                operation: 'long_form_edit',
+                target_clip_id: activeClip?.id || null,
+                target_track_id: activeClip?.trackId || null,
+                parameters: {
+                    editMode: 'YOUTUBE_OPTIMIZED',
+                    platform: has('tiktok', 'reel', 'reels', 'shorts') ? 'tiktok' :
+                               has('youtube') ? 'youtube' : null,
+                    targetDuration: null,
+                    reason: 'High-level edit command — ContentAnalyzer will structure the clip',
+                },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
         }
 
+        // ──────────────────────────────────────────────────────────────────────
+        // 2. PLATFORM / FORMAT COMMANDS
+        // ──────────────────────────────────────────────────────────────────────
+        if (has('tiktok', 'make it vertical', 'reels', 'for reels', 'for instagram',
+                'make it short', 'short form', 'shorts')) {
+            return {
+                intent: 'long_form_build',
+                operation: 'long_form_edit',
+                parameters: {
+                    editMode: 'CLEAN_EDIT',
+                    platform: has('youtube', 'shorts') ? 'tiktok' : 'tiktok',
+                    targetDuration: 60,
+                },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+        if (has('youtube video', 'youtube long', 'long form youtube',
+                'optimize for youtube', 'youtube edit', 'build a youtube')) {
+            return {
+                intent: 'long_form_build',
+                operation: 'long_form_edit',
+                parameters: { editMode: 'YOUTUBE_OPTIMIZED', platform: 'youtube' },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+        if (has('podcast', 'interview', 'clean the podcast', 'clean the interview',
+                'tighten', 'tighten up', 'clean up the audio')) {
+            return {
+                intent: 'long_form_build',
+                operation: 'long_form_edit',
+                parameters: { editMode: 'CLEAN_EDIT', platform: 'podcast' },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // 3. PRO CUTTING JARGON
+        // ──────────────────────────────────────────────────────────────────────
+
+        // J-cut: audio from next clip starts before the video cuts
+        if (has('j-cut', 'j cut', 'audio lead', 'audio first', 'let the audio run')) {
+            return {
+                intent: 'apply_effect',
+                operation: 'add_transition',
+                parameters: { type: 'j_cut', reason: 'J-cut: audio precedes video transition' },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+        // L-cut: audio from current clip continues over next video
+        if (has('l-cut', 'l cut', 'audio tail', 'let the audio breathe', 'continue audio')) {
+            return {
+                intent: 'apply_effect',
+                operation: 'add_transition',
+                parameters: { type: 'l_cut', reason: 'L-cut: audio continues over next clip' },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+        // Jump cut
+        if (has('jump cut', 'jump cuts', 'youtube jump', 'quick cut', 'rapid cut')) {
+            return {
+                intent: 'edit',
+                operation: 'silence_removal',
+                parameters: { threshold: '-25dB', min_duration: 0.3, style: 'jump_cut' },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+        // Match cut
+        if (has('match cut', 'smash cut')) {
+            return {
+                intent: 'apply_effect',
+                operation: 'add_transition',
+                parameters: { type: 'match_cut' },
+                confidence: 'MEDIUM',
+                missingParameters: []
+            };
+        }
+        // Cutaway / B-roll
+        if (has('cutaway', 'b-roll', 'b roll', 'broll', 'insert shot', 'reaction shot',
+                'overlay footage', 'overlay clip')) {
+            return {
+                intent: 'edit',
+                operation: 'add_clip',
+                parameters: { clipType: 'broll', reason: 'B-roll / cutaway insert requested' },
+                confidence: 'MEDIUM',
+                missingParameters: ['clipSource']
+            };
+        }
+        // Montage
+        if (has('montage', 'highlight reel', 'best moments', 'compilation',
+                'make a montage', 'recap')) {
+            return {
+                intent: 'long_form_build',
+                operation: 'long_form_edit',
+                parameters: {
+                    editMode: 'FULL_BUILD',
+                    style: 'montage',
+                    reason: 'Montage / highlight reel',
+                },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // 4. AUDIO / SOUND JARGON
+        // ──────────────────────────────────────────────────────────────────────
+        if (has('room tone', 'room noise', 'background hiss', 'hiss', 'hum',
+                'background noise', 'denoise', 'de-noise', 'clean audio', 'audio cleanup')) {
+            return { intent: 'edit', operation: 'audio_denoise', parameters: {}, confidence: 'HIGH', missingParameters: [] };
+        }
+        if (has('normalize', 'level the audio', 'fix the volume', 'even out',
+                'balance audio', 'master volume', 'loudness')) {
+            return { intent: 'edit', operation: 'normalize_audio', parameters: {}, confidence: 'HIGH', missingParameters: [] };
+        }
+        if (has('voice over', 'voiceover', 'narration', 'record a voice')) {
+            return {
+                intent: 'edit',
+                operation: 'add_clip',
+                parameters: { clipType: 'voiceover' },
+                confidence: 'MEDIUM',
+                missingParameters: ['audioSource']
+            };
+        }
+        if (has('duck the music', 'duck music', 'audio ducking', 'lower the music',
+                'lower background music', 'fade music under voice')) {
+            return {
+                intent: 'edit',
+                operation: 'adjust_volume',
+                parameters: { target: 'music_track', volume: 0.2, reason: 'Ducking music under voice' },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+        if (has('sync to beat', 'sync to music', 'beat sync', 'cut to the beat',
+                'edit to the music', 'match the beat')) {
+            return { intent: 'edit', operation: 'sync_clips_to_beat', parameters: {}, confidence: 'HIGH', missingParameters: [] };
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // 5. PACING / FLOW JARGON
+        // ──────────────────────────────────────────────────────────────────────
+        if (has('pacing', 'too slow', 'too fast', 'speed up the edit', 'faster edit',
+                'tighten the pacing', 'improve pacing', 'fix pacing', 'snappier',
+                'punchy', 'more dynamic', 'more energy')) {
+            return {
+                intent: 'long_form_build',
+                operation: 'long_form_edit',
+                parameters: {
+                    editMode: 'CLEAN_EDIT',
+                    actions: ['remove_silences', 'improve_pacing'],
+                    reason: 'Pacing improvement requested'
+                },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+        if (has('breathing room', 'let it breathe', 'slow it down', 'more natural',
+                'more relaxed', 'slower pacing', 'slow edit')) {
+            return {
+                intent: 'edit',
+                operation: 'set_clip_speed',
+                parameters: { speed: 0.85, reason: 'Relaxed pacing requested' },
+                confidence: 'MEDIUM',
+                missingParameters: []
+            };
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // 6. COLOR / VISUAL JARGON
+        // ──────────────────────────────────────────────────────────────────────
+        if (has('color grade', 'colour grade', 'grade this', 'grade the footage',
+                'color correct', 'colour correct', 'lut', 'apply a lut')) {
+            const preset = has('cinematic') ? 'cinematic' :
+                           has('warm') ? 'warm' :
+                           has('cool', 'cold') ? 'cool' :
+                           has('vibrant', 'saturated', 'pop') ? 'vibrant' :
+                           has('black and white', 'bw', 'b&w', 'desaturate') ? 'bw' : 'cinematic';
+            return {
+                intent: 'apply_effect',
+                operation: 'color_grade',
+                target_clip_id: activeClip?.id || null,
+                parameters: { preset },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+        if (has('moody', 'dark and moody', 'dark mood', 'dark tone')) {
+            return {
+                intent: 'apply_effect', operation: 'color_grade',
+                target_clip_id: activeClip?.id || null,
+                parameters: { preset: 'cinematic' }, confidence: 'HIGH', missingParameters: []
+            };
+        }
+        if (has('vintage', 'retro', 'film grain', 'old school', '70s', '80s', '90s')) {
+            return {
+                intent: 'apply_effect', operation: 'color_grade',
+                target_clip_id: activeClip?.id || null,
+                parameters: { preset: 'warm', style: 'vintage' }, confidence: 'MEDIUM', missingParameters: []
+            };
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // 7. TEXT / CAPTION JARGON
+        // ──────────────────────────────────────────────────────────────────────
+        if (has('caption', 'captions', 'auto caption', 'transcribe', 'subtitle', 'subtitles',
+                'add subtitles', 'add captions', 'closed captions', 'cc')) {
+            return { intent: 'edit', operation: 'auto_captions', parameters: {}, confidence: 'HIGH', missingParameters: [] };
+        }
+        if (has('lower third', 'name tag', 'title card', 'title text', 'credit')) {
+            return {
+                intent: 'apply_effect',
+                operation: 'add_text_overlay',
+                parameters: { position: 'lower_third', style: 'lower_third' },
+                confidence: 'MEDIUM',
+                missingParameters: ['text']
+            };
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // 8. STANDARD OPERATIONS (kept from original, extended)
+        // ──────────────────────────────────────────────────────────────────────
+        if (has('split', 'cut in ', 'divide', 'chop')) {
+            let mode = 'midpoint';
+            if (has('half', 'middle', 'in 2', 'in two')) mode = 'midpoint';
+            else if (has('third', 'in 3')) mode = 'thirds';
+            else if (has('quarter', 'in 4')) mode = 'quarters';
+            else if (has('playhead', 'current', 'here')) mode = 'playhead';
+            return {
+                intent: 'edit',
+                operation: 'split_clip',
+                target_clip_id: activeClip?.id || null,
+                target_track_id: activeClip?.trackId || null,
+                parameters: { mode },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+        if (has('filler', 'um ', 'uh ', 'remove filler', 'remove ums',
+                'take out the ums', 'clean up speech')) {
+            return {
+                intent: 'edit',
+                operation: 'remove_filler_words',
+                target_clip_id: activeClip?.id || null,
+                parameters: {},
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+        if (has('remove', 'delete', 'trash', 'get rid of', 'cut out', 'erase', 'drop')) {
+            if (has('silence', 'dead air', 'quiet parts', 'gaps')) {
+                return {
+                    intent: 'edit',
+                    operation: 'silence_removal',
+                    parameters: { threshold: '-30dB' },
+                    confidence: 'HIGH',
+                    missingParameters: []
+                };
+            }
+            if (has('repetition', 'repeated', 'duplicate', 'says it twice', 'repeats')) {
+                return {
+                    intent: 'long_form_build',
+                    operation: 'remove_repetition',
+                    parameters: {},
+                    confidence: 'HIGH',
+                    missingParameters: []
+                };
+            }
+            return {
+                intent: 'edit',
+                operation: 'remove_clip',
+                target_clip_id: activeClip?.id || null,
+                target_track_id: activeClip?.trackId || null,
+                parameters: {},
+                confidence: activeClip ? 'HIGH' : 'MEDIUM',
+                missingParameters: activeClip ? [] : ['clipId']
+            };
+        }
+        if (has('speed', 'faster', 'slower', '2x', '0.5x', '1.5x', 'time-lapse', 'timelapse', 'slo-mo', 'slow motion', 'slow-mo')) {
+            let speed = 1.0;
+            if (has('2x', 'double', 'twice as fast')) speed = 2.0;
+            else if (has('0.5', 'half speed')) speed = 0.5;
+            else if (has('1.5')) speed = 1.5;
+            else if (has('4x')) speed = 4.0;
+            else if (has('0.25')) speed = 0.25;
+            else if (has('time-lapse', 'timelapse')) speed = 8.0;
+            else if (has('slo-mo', 'slow motion', 'slow-mo', 'slower')) speed = 0.5;
+            else if (has('faster', 'speed up')) speed = 2.0;
+            return {
+                intent: 'edit',
+                operation: 'set_clip_speed',
+                target_clip_id: activeClip?.id || null,
+                parameters: { speed },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+        if (has('vertical', '9:16', 'portrait', 'tiktok', 'reel')) {
+            return { intent: 'edit', operation: 'set_aspect_ratio', parameters: { ratio: '9:16' }, confidence: 'HIGH', missingParameters: [] };
+        }
+        if (has('horizontal', '16:9', 'landscape', 'widescreen')) {
+            return { intent: 'edit', operation: 'set_aspect_ratio', parameters: { ratio: '16:9' }, confidence: 'HIGH', missingParameters: [] };
+        }
+        if (has('square', '1:1', 'instagram')) {
+            return { intent: 'edit', operation: 'set_aspect_ratio', parameters: { ratio: '1:1' }, confidence: 'HIGH', missingParameters: [] };
+        }
+        if (has('undo', 'go back', 'revert', 'take that back')) {
+            return { intent: 'undo', operation: 'undo_action', parameters: {}, confidence: 'HIGH', missingParameters: [] };
+        }
+        if (has('redo', 'redo that', 'do it again', 'put it back')) {
+            return { intent: 'redo', operation: 'redo_action', parameters: {}, confidence: 'HIGH', missingParameters: [] };
+        }
+        if (has('silence', 'silent', 'dead air', 'quiet parts', 'remove pauses', 'cut out pauses')) {
+            return {
+                intent: 'edit',
+                operation: 'silence_removal',
+                parameters: { threshold: '-30dB' },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+        if (has('export', 'render', 'download', 'save', 'output')) {
+            return { intent: 'export', operation: 'export_video', parameters: { format: 'mp4', quality: '1080p' }, confidence: 'HIGH', missingParameters: [] };
+        }
+        if (has('analyze', 'analyse', 'understand the video', 'what\'s in this',
+                'break it down', 'segment', 'structure')) {
+            return {
+                intent: 'analyze',
+                operation: 'analyze_structure',
+                parameters: {},
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+        if (has('hook', 'find the hook', 'best opening', 'strongest moment')) {
+            return {
+                intent: 'analyze',
+                operation: 'find_hook',
+                parameters: {},
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // 9. SMART FALLBACK — contextual, never generic
+        // ──────────────────────────────────────────────────────────────────────
+        const durationStr = duration > 0 ? `${Math.round(duration / 60)}m ${Math.round(duration % 60)}s` : null;
+        const clipHint = activeClip ? `I can see clip "${activeClip.name || 'your clip'}"${durationStr ? ` (${durationStr})` : ''} on the timeline.` : '';
+
         return {
-            intent: 'edit',
-            operation: 'split_clip',
-            target_clip_id: activeClip?.id || null,
-            target_track_id: activeClip?.trackId || null,
-            parameters: { mode }
+            intent: 'clarification_required',
+            message: [
+                `Got it — you want to work on this clip. ${clipHint}`,
+                `As your AI editor, I can:`,
+                `🎬 **Full edit** — Analyze + structure the video for YouTube, TikTok, or Podcast`,
+                `✂️ **Cut & trim** — Split, trim, remove silences, cut out filler words`,
+                `🎨 **Style** — Color grade (cinematic, warm, cool, B&W), transitions (J-cut, L-cut, match cut)`,
+                `🔊 **Audio** — Denoise, normalize, duck music, sync to beat`,
+                `📐 **Format** — 16:9, 9:16 (TikTok), 1:1 (Instagram)`,
+                `\nWhat do you want to do? You can describe it naturally — I understand pro editing language.`
+            ].join('\n')
+        };
+    } catch (e) {
+        console.error('❌ [LocalParser] Crash prevented:', e);
+        return {
+            intent: 'clarification_required',
+            message: 'Something went wrong parsing that. Could you try rephrasing?'
         };
     }
-
-    // Remove detection
-    if (cmd.includes('remove') || cmd.includes('delete')) {
-        return {
-            intent: 'edit',
-            operation: 'remove_clip',
-            target_clip_id: activeClip?.id || null,
-            target_track_id: activeClip?.trackId || null,
-            parameters: {}
-        };
-    }
-
-    // Speed detection
-    if (cmd.includes('speed') || cmd.includes('faster') || cmd.includes('slower')) {
-        let speed = 1.0;
-        if (cmd.includes('2x') || cmd.includes('double')) speed = 2.0;
-        else if (cmd.includes('0.5') || cmd.includes('half')) speed = 0.5;
-        else if (cmd.includes('1.5')) speed = 1.5;
-
-        return {
-            intent: 'edit',
-            operation: 'set_clip_speed',
-            target_clip_id: activeClip?.id || null,
-            target_track_id: activeClip?.trackId || null,
-            parameters: { speed }
-        };
-    }
-
-    // Aspect ratio
-    if (cmd.includes('vertical') || cmd.includes('9:16') || cmd.includes('tiktok')) {
-        return { intent: 'edit', operation: 'set_aspect_ratio', parameters: { ratio: '9:16' } };
-    }
-    if (cmd.includes('horizontal') || cmd.includes('16:9') || cmd.includes('youtube')) {
-        return { intent: 'edit', operation: 'set_aspect_ratio', parameters: { ratio: '16:9' } };
-    }
-    if (cmd.includes('square') || cmd.includes('1:1')) {
-        return { intent: 'edit', operation: 'set_aspect_ratio', parameters: { ratio: '1:1' } };
-    }
-
-    // Undo
-    if (cmd.includes('undo')) {
-        return { intent: 'edit', operation: 'undo_action', parameters: {} };
-    }
-
-    // Silence
-    if (cmd.includes('silence')) {
-        return { intent: 'edit', operation: 'silence_removal', parameters: { threshold: '-30dB' } };
-    }
-
-    return {
-        intent: 'clarification_required',
-        message: `I didn't understand "${prompt}". Try: "split the clip in 2", "remove this clip", or "make it vertical".`
-    };
 }
 
 /**
@@ -523,6 +1058,10 @@ function generateLocalPlan(intent, context, planId) {
             steps = [{ step_id: 'silence', action: 'silence_removal', threshold: params.threshold }];
             break;
 
+        case 'remove_filler_words':
+            steps = [{ step_id: 'filler', action: 'remove_filler_words' }];
+            break;
+
         case 'undo_action':
             steps = [{ step_id: 'undo', action: 'undo_action' }];
             break;
@@ -607,10 +1146,258 @@ USER PROMPT:
     }
 };
 
+/**
+ * Analyze Content Handler — Long-Form Intelligence Engine
+ *
+ * POST /api/ai/analyze-content
+ * Body: {
+ *   transcript: { text: string, segments: Array<{id,start,end,text,words}> },
+ *   clips: Array<{id,name,start,duration,trackId}>,
+ *   duration: number,
+ *   platform?: string,
+ *   targetDuration?: number
+ * }
+ *
+ * Returns: {
+ *   contentType, editMode, segments[], structure, editPlan, requiresApproval: true
+ * }
+ */
+const analyzeContentHandler = async (req, res) => {
+    try {
+        const { transcript, clips = [], duration = 0, platform = null, targetDuration = null } = req.body;
+
+        if (!transcript || !transcript.text) {
+            return res.status(400).json({ success: false, error: 'Transcript is required for content analysis.' });
+        }
+
+        console.log(`🧠 [ContentAnalysis] Analyzing ${duration.toFixed(1)}s of content. Segments: ${transcript.segments?.length || 0}`);
+
+        // ── Step 1: Detect content type from heuristics ────────────────────
+        const contentType = _detectContentType(transcript.text, clips, duration);
+        const editMode = _selectEditMode(contentType, duration, platform);
+
+        // ── Step 2: Ask GPT-4 to semantically cluster segments ─────────────
+        let gptAnalysis = null;
+
+        if (openai && transcript.segments && transcript.segments.length > 0) {
+            gptAnalysis = await _gptAnalyzeSegments(transcript, duration, contentType, platform, targetDuration);
+        }
+
+        // ── Step 3: Build structural output ───────────────────────────────
+        const { analyzeStructure } = require('../viralEngine/structure.js');
+        const structureAnalysis = analyzeStructure({
+            duration,
+            transcript: transcript.text,
+            segments: transcript.segments || []
+        });
+
+        // ── Step 4: Merge GPT analysis with heuristic structure ────────────
+        const segments = gptAnalysis?.segments || _buildFallbackSegments(transcript.segments || [], duration);
+        const structure = {
+            ...structureAnalysis,
+            hookCandidate: structureAnalysis.hookCandidate,
+            sections: gptAnalysis?.structure?.sections || structureAnalysis.detectedSections || []
+        };
+
+        const editPlan = gptAnalysis?.editPlan || _buildFallbackEditPlan(contentType, editMode, duration, targetDuration);
+
+        const response = {
+            success: true,
+            contentType,
+            editMode,
+            duration,
+            platform: platform || _inferPlatformFromMode(editMode, duration),
+            segments,
+            structure,
+            editPlan,
+            requiresApproval: true,  // Always require user approval before execution
+            summary: _buildSummary(contentType, editMode, segments, structure, editPlan)
+        };
+
+        console.log(`✅ [ContentAnalysis] Done. Mode: ${editMode}, Segments: ${segments.length}, Hook: ${structure.hookCandidate ? 'found' : 'not found'}`);
+        res.json(response);
+
+    } catch (error) {
+        console.error('❌ [ContentAnalysis] Error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// ── Content Analysis Helpers ─────────────────────────────────────────────────
+
+function _detectContentType(text, clips, duration) {
+    const lower = text.toLowerCase();
+    const clipNames = clips.map(c => (c.name || '').toLowerCase()).join(' ');
+
+    if (lower.includes('podcast') || clipNames.includes('podcast')) return 'podcast';
+    if (lower.includes('interview') || lower.includes('guest') || lower.includes('host')) return 'interview';
+    if (duration > 600 && clips.length <= 2) return 'long_form_raw';
+    if (clips.length > 5) return 'rushes';
+    if (duration < 180) return 'short_form';
+    return 'youtube_long';
+}
+
+function _selectEditMode(contentType, duration, platform) {
+    if (contentType === 'rushes' || contentType === 'long_form_raw') return 'FULL_BUILD';
+    if (contentType === 'podcast' || contentType === 'interview') return 'CLEAN_EDIT';
+    if (platform === 'youtube' || (duration > 300 && contentType === 'youtube_long')) return 'YOUTUBE_OPTIMIZED';
+    return 'CLEAN_EDIT';
+}
+
+function _inferPlatformFromMode(editMode, duration) {
+    if (editMode === 'CLEAN_EDIT') return 'podcast';
+    if (editMode === 'YOUTUBE_OPTIMIZED') return 'youtube';
+    if (duration < 60) return 'tiktok';
+    return 'youtube';
+}
+
+async function _gptAnalyzeSegments(transcript, duration, contentType, platform, targetDuration) {
+    // Build a condensed segment list for GPT (max 50 segments to stay within token limits)
+    const whisperSegs = (transcript.segments || []).slice(0, 50).map(s => ({
+        id: s.id,
+        start: parseFloat(s.start.toFixed(1)),
+        end: parseFloat(s.end.toFixed(1)),
+        text: s.text.slice(0, 200) // Truncate to save tokens
+    }));
+
+    const systemPrompt = `You are an expert long-form video editor and content strategist.
+Your job is to analyze video transcript segments and produce a professional edit plan.
+
+Content type: ${contentType}
+Total duration: ${duration.toFixed(0)} seconds
+Target platform: ${platform || 'unspecified'}
+Target output duration: ${targetDuration ? targetDuration + 's' : 'unspecified (keep coherent)'}
+
+You MUST respond with valid JSON only. No markdown, no explanation.`;
+
+    const userMessage = `Transcript segments:
+${JSON.stringify(whisperSegs, null, 2)}
+
+Tasks:
+1. Group segments into 20-90 second logical chunks (topic-based)
+2. Assign each chunk: topic, type (value|intro|hook|filler|transition|outro), energy (low|medium|high), importance_score (0.0-1.0)
+3. Identify the best hook candidate (most engaging 15-30s window in first 40% of video)
+4. Detect main sections by topic
+5. Generate an edit plan
+
+Respond with this exact JSON structure:
+{
+  "segments": [
+    { "start": 0, "end": 45, "topic": "Introduction", "type": "intro", "energy": "medium", "importance_score": 0.6 }
+  ],
+  "structure": {
+    "hook": { "start": 0, "end": 25, "reason": "strong opening statement" },
+    "sections": [
+      { "start": 0, "end": 120, "topic": "Opening", "type": "intro" }
+    ]
+  },
+  "editPlan": {
+    "videoType": "${contentType}",
+    "duration_target": ${targetDuration || Math.min(duration, 600)},
+    "editMode": "CLEAN_EDIT",
+    "structure": [
+      { "type": "hook", "source_range": [0, 25] },
+      { "type": "intro", "source_range": [0, 45] }
+    ],
+    "actions": ["remove_silences", "remove_repetition", "improve_pacing"]
+  }
+}`;
+
+    try {
+        const completion = await openai.chat.completions.create({
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userMessage }
+            ],
+            model: 'gpt-4-1106-preview',
+            response_format: { type: 'json_object' },
+            temperature: 0.2
+        }, { timeout: 30000 });
+
+        const result = JSON.parse(completion.choices[0].message.content);
+        console.log(`🤖 [GPT] Segments: ${result.segments?.length}, Sections: ${result.structure?.sections?.length}`);
+        return result;
+    } catch (err) {
+        console.warn('⚠️ [GPT] Content analysis failed, using fallback:', err.message);
+        return null;
+    }
+}
+
+function _buildFallbackSegments(whisperSegments, duration) {
+    if (whisperSegments.length === 0) {
+        return [{ start: 0, end: duration, topic: 'Full Video', type: 'value', energy: 'medium', importance_score: 0.5 }];
+    }
+
+    // Group whisper segments into ~45s chunks
+    const chunks = [];
+    let chunkStart = whisperSegments[0].start;
+    let chunkText = '';
+    let chunkWords = 0;
+
+    for (const seg of whisperSegments) {
+        chunkText += ' ' + seg.text;
+        chunkWords += (seg.words || []).length || seg.text.split(' ').length;
+        const chunkDuration = seg.end - chunkStart;
+
+        if (chunkDuration >= 45 || seg === whisperSegments[whisperSegments.length - 1]) {
+            const energy = chunkWords / chunkDuration > 2.5 ? 'high' : chunkWords / chunkDuration > 1.5 ? 'medium' : 'low';
+            chunks.push({
+                start: parseFloat(chunkStart.toFixed(2)),
+                end: parseFloat(seg.end.toFixed(2)),
+                topic: 'Content',
+                type: 'value',
+                energy,
+                importance_score: parseFloat(Math.min(1, (chunkWords / chunkDuration) / 3).toFixed(2))
+            });
+            chunkStart = seg.end;
+            chunkText = '';
+            chunkWords = 0;
+        }
+    }
+
+    return chunks;
+}
+
+function _buildFallbackEditPlan(contentType, editMode, duration, targetDuration) {
+    const actions = ['remove_silences'];
+    if (editMode === 'CLEAN_EDIT') actions.push('remove_filler_words', 'improve_pacing');
+    if (editMode === 'YOUTUBE_OPTIMIZED') actions.push('remove_repetition', 'add_transitions', 'improve_pacing');
+    if (editMode === 'FULL_BUILD') actions.push('remove_repetition', 'reorder_for_narrative', 'add_transitions');
+
+    return {
+        videoType: contentType,
+        duration_target: targetDuration || Math.min(duration, 600),
+        editMode,
+        structure: [
+            { type: 'hook', source_range: [0, Math.min(30, duration * 0.1)] },
+            { type: 'intro', source_range: [0, Math.min(60, duration * 0.15)] },
+            { type: 'main', source_range: [duration * 0.15, duration * 0.85] },
+            { type: 'outro', source_range: [duration * 0.85, duration] }
+        ],
+        actions
+    };
+}
+
+function _buildSummary(contentType, editMode, segments, structure, editPlan) {
+    const fillerSegments = segments.filter(s => s.type === 'filler').length;
+    const highValueSegments = segments.filter(s => s.importance_score >= 0.7).length;
+    return {
+        contentType,
+        editMode,
+        totalSegments: segments.length,
+        fillerSegments,
+        highValueSegments,
+        hookFound: !!structure.hookCandidate,
+        hookTimestamp: structure.hookCandidate?.start,
+        plannedActions: editPlan.actions,
+        estimatedOutputDuration: editPlan.duration_target
+    };
+}
+
 module.exports = {
     chatAgentHandler,
     agentPlanHandler,
     parseIntentHandler,
-    generatePlanHandler
+    generatePlanHandler,
+    analyzeContentHandler
 };
-

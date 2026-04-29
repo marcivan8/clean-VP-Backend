@@ -86,11 +86,19 @@ export class AgentFeedbackService {
             }
 
             case 'silence_removal': {
-                message = '✓ Silence detection complete.';
+                message = '✓ Silence detection and removal complete.';
                 suggestions = [
-                    'Review detected silences',
-                    'Adjust sensitivity threshold',
-                    'Apply removal'
+                    'Review the cuts in the timeline',
+                    'Undo if pacing feels too tight'
+                ];
+                break;
+            }
+
+            case 'remove_filler_words': {
+                message = '✓ Filler words removed from the timeline.';
+                suggestions = [
+                    'Review the cuts',
+                    'Undo if it removed too much'
                 ];
                 break;
             }
@@ -101,6 +109,78 @@ export class AgentFeedbackService {
                     'Continue editing',
                     'Redo if needed',
                     'Start fresh'
+                ];
+                break;
+            }
+
+            // ── Long-Form Intelligence Engine feedback ──────────────────────
+
+            case 'analyze_structure': {
+                const analysisData = execution?.analysisResult;
+                if (analysisData?.success) {
+                    message = AgentFeedbackService.formatAnalysisResult(analysisData);
+                } else {
+                    message = '✓ Content analysis complete. Review the plan below.';
+                }
+                suggestions = [
+                    'Approve the edit plan to proceed',
+                    'Request a different edit mode',
+                    'Ask me to find the best hook'
+                ];
+                break;
+            }
+
+            case 'long_form_edit':
+            case 'build_from_rushes': {
+                const planData = execution?.editPlan;
+                if (planData) {
+                    message = AgentFeedbackService.formatEditPlanResult(planData);
+                } else {
+                    message = '✓ Long-form edit plan generated.';
+                }
+                suggestions = [
+                    'Approve to execute the plan',
+                    'Ask to adjust pacing or structure',
+                    'Preview the hook first'
+                ];
+                break;
+            }
+
+            case 'find_hook': {
+                const hook = execution?.hookCandidate;
+                if (hook) {
+                    message = `✓ **Hook found:** ${hook.start.toFixed(0)}s – ${hook.end.toFixed(0)}s\n\n`;
+                    message += `📍 **Why:** ${hook.reason || 'Highest speech energy in the opening 40%'}\n`;
+                    if (hook.segmentText) message += `💬 *"${hook.segmentText.slice(0, 120)}..."*`;
+                } else {
+                    message = '⚠️ No strong hook detected in the first 40% of the video. Consider recording a dedicated opening.';
+                }
+                suggestions = [
+                    'Move hook to the beginning',
+                    'Choose a different hook segment',
+                    'Preview the hook'
+                ];
+                break;
+            }
+
+            case 'remove_repetition': {
+                const removed = execution?.removedCount ?? 0;
+                message = removed > 0
+                    ? `✓ Removed ${removed} repetitive segment${removed !== 1 ? 's' : ''} from the timeline.`
+                    : '✓ No significant repetitions detected.';
+                suggestions = [
+                    'Review the cleaned timeline',
+                    'Undo if anything was removed incorrectly'
+                ];
+                break;
+            }
+
+            case 'reorder_segment': {
+                message = '✓ Segment moved to new position in the timeline.';
+                suggestions = [
+                    'Preview the result',
+                    'Undo if order doesn\'t feel right',
+                    'Continue structural editing'
                 ];
                 break;
             }
@@ -121,6 +201,59 @@ export class AgentFeedbackService {
             success: true,
             operation
         };
+    }
+
+    // ── Long-Form Specific Formatters ────────────────────────────────────────
+
+    /**
+     * Renders a rich content analysis result for the chat UI.
+     */
+    static formatAnalysisResult(analysis) {
+        const { contentType, editMode, summary, structure, segments } = analysis;
+        const hook = structure?.hookCandidate;
+
+        let msg = `🎬 **Content Analysis Complete**\n\n`;
+        msg += `| Field | Value |\n|---|---|\n`;
+        msg += `| Content type | ${(contentType || '').replace(/_/g, ' ')} |\n`;
+        msg += `| Edit mode | **${(editMode || '').replace(/_/g, ' ')}** |\n`;
+        msg += `| Total segments | ${summary?.totalSegments || segments?.length || '—'} |\n`;
+        if ((summary?.fillerSegments || 0) > 0) {
+            msg += `| Filler segments | ${summary.fillerSegments} (will be removed) |\n`;
+        }
+        msg += `| High-value segments | ${summary?.highValueSegments || '—'} |\n`;
+        msg += `| Est. output duration | ~${Math.round((summary?.estimatedOutputDuration || 0) / 60)}m ${Math.round((summary?.estimatedOutputDuration || 0) % 60)}s |\n\n`;
+
+        if (hook) {
+            msg += `✅ **Hook candidate:** ${hook.start.toFixed(0)}s – ${hook.end.toFixed(0)}s\n`;
+            if (hook.reason) msg += `_${hook.reason}_\n`;
+        } else {
+            msg += `⚠️ No strong hook detected in first 40% of video.\n`;
+        }
+
+        if (analysis.requiresApproval) {
+            msg += `\n---\n⚠️ **Approval required.** Type "approve" to execute the edit plan, or describe changes you'd like.`;
+        }
+
+        return msg;
+    }
+
+    /**
+     * Renders a structural edit plan summary for the chat UI.
+     */
+    static formatEditPlanResult(editPlan) {
+        let msg = `📋 **Long-Form Edit Plan Ready**\n\n`;
+        msg += `**Mode:** ${(editPlan.editMode || '').replace(/_/g, ' ')}\n`;
+        msg += `**Target duration:** ~${Math.round((editPlan.duration_target || 0) / 60)}m ${Math.round((editPlan.duration_target || 0) % 60)}s\n\n`;
+        msg += `**Actions to be performed:**\n`;
+        (editPlan.actions || []).forEach(a => {
+            msg += `  • ${a.replace(/_/g, ' ')}\n`;
+        });
+
+        if (editPlan.requiresApproval) {
+            msg += `\n---\n⚠️ **Ready to execute.** Type "approve" to proceed, or request changes.`;
+        }
+
+        return msg;
     }
 
     /**

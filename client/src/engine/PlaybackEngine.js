@@ -39,10 +39,10 @@ class PlaybackEngine {
         this.onStateChange = options.onStateChange || (() => { });
 
         // --- Texture Store for Video Frames ---
-        this.gl = canvas.getContext('webgl2', { alpha: false });
+        this.gl = canvas.getContext('webgl2', { alpha: false, preserveDrawingBuffer: true });
         if (!this.gl) {
             console.error('[PlaybackEngine] WebGL2 not supported, falling back to experimental-webgl');
-            this.gl = canvas.getContext('experimental-webgl');
+            this.gl = canvas.getContext('experimental-webgl', { alpha: false, preserveDrawingBuffer: true });
         }
 
         if (!this.gl) {
@@ -888,56 +888,47 @@ class PlaybackEngine {
         }
 
 
-        if (this.decodedTracks.size === 0) return; // No separate audio tracks to process below?
         if (this.tracksMetadata) {
             this.tracksMetadata.forEach(track => {
                 if (track.type !== 'audio' && track.type !== 'video') return;
 
-                // Find Active Clip
-                const clip = track.clips.find(c => masterTime >= c.start && masterTime < c.start + c.duration);
-                let gain = 1.0;
-                let denoise = false;
-                let enhance = false;
+                track.clips.forEach(clip => {
+                    let gain = 0;
+                    let denoise = false;
+                    let enhance = false;
 
-                if (clip) {
-                    const relativeTime = masterTime - clip.start;
-                    const duration = clip.duration;
+                    if (masterTime >= clip.start && masterTime < clip.start + clip.duration) {
+                        const relativeTime = masterTime - clip.start;
+                        const duration = clip.duration;
 
-                    // Fade In
-                    if (clip.fadeIn > 0 && relativeTime < clip.fadeIn) {
-                        gain = relativeTime / clip.fadeIn;
+                        gain = 1.0;
+                        // Fade In
+                        if (clip.fadeIn > 0 && relativeTime < clip.fadeIn) {
+                            gain = relativeTime / clip.fadeIn;
+                        }
+                        // Fade Out
+                        else if (clip.fadeOut > 0 && relativeTime > (duration - clip.fadeOut)) {
+                            gain = (duration - relativeTime) / clip.fadeOut;
+                        }
+
+                        gain *= (clip.volume !== undefined ? clip.volume : 1.0);
+                        denoise = !!clip.denoise;
+                        enhance = !!clip.enhance;
                     }
-                    // Fade Out
-                    else if (clip.fadeOut > 0 && relativeTime > (duration - clip.fadeOut)) {
-                        gain = (duration - relativeTime) / clip.fadeOut;
+
+                    const cacheKey = `gain-${clip.id}`;
+                    if (this.paramCache[cacheKey] !== gain) {
+                        this.audioNode.port.postMessage({ type: 'SET_CLIP_GAIN', payload: { trackId: clip.id, gain } });
+                        this.paramCache[cacheKey] = gain;
                     }
 
-                    // Apply Clip Base Volume
-                    gain *= (clip.volume !== undefined ? clip.volume : 1.0);
-
-                    denoise = !!clip.denoise;
-                    enhance = !!clip.enhance;
-                } else {
-                    gain = 0; // No clip = Silence
-                }
-
-                // Send Updates (Debounce or optimize?)
-                // Worklet handles message overhead well, 60msg/sec per track is fine.
-                // Or check if changed?
-
-                // We use a cache to avoid spamming messages if values unchanged
-                const cacheKey = `gain-${track.id}`;
-                if (this.paramCache[cacheKey] !== gain) {
-                    this.audioNode.port.postMessage({ type: 'SET_CLIP_GAIN', payload: { trackId: track.id, gain } });
-                    this.paramCache[cacheKey] = gain;
-                }
-
-                const effectKey = `fx-${track.id}`;
-                const effectHash = `${denoise}-${enhance}`;
-                if (this.paramCache[effectKey] !== effectHash) {
-                    this.audioNode.port.postMessage({ type: 'SET_EFFECTS', payload: { trackId: track.id, denoise, enhance } });
-                    this.paramCache[effectKey] = effectHash;
-                }
+                    const effectKey = `fx-${clip.id}`;
+                    const effectHash = `${denoise}-${enhance}`;
+                    if (this.paramCache[effectKey] !== effectHash) {
+                        this.audioNode.port.postMessage({ type: 'SET_EFFECTS', payload: { trackId: clip.id, denoise, enhance } });
+                        this.paramCache[effectKey] = effectHash;
+                    }
+                });
             });
         }
 

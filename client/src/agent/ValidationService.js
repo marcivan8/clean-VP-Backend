@@ -196,6 +196,8 @@ export class ValidationService {
 
             case 'silence_removal':
                 return this.validateSilenceRemoval(plan, executionResult);
+            case 'remove_filler_words':
+                return { isValid: true }; // Thresholds/params have defaults
 
             default:
                 // Generic validation for unknown operations

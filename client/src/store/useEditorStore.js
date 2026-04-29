@@ -42,6 +42,14 @@ const useEditorStore = create((set, get) => ({
     beatMarkers: [], // Array of timestamps for music beats
     captions: [], // Array of { word, start, end }
 
+    // Phase 7: Viral Intelligence
+    viralAnalysis: null, // Full analysis result from viralEngine
+    isAnalyzing: false,  // Analysis in progress flag
+
+    // Phase 7: A/B Iteration Variations (max 3)
+    variations: [],          // Array of { id, name, description, snapshot, engagementScore }
+    activeVariationId: null, // Currently previewed variation
+
     // Asset Library (Phase 10)
     assets: [], // { id, name, type, url, thumbnail }
 
@@ -49,6 +57,19 @@ const useEditorStore = create((set, get) => ({
     setCaptions: (captions) => set({ captions: captions }),
     setBeatMarkers: (markers) => set({ beatMarkers: markers }),
     setPacingSegments: (segments) => set({ pacingSegments: segments }),
+
+    // Phase 7: Viral Intelligence actions
+    setViralAnalysis: (data) => set({ viralAnalysis: data, isAnalyzing: false }),
+    setIsAnalyzing: (v) => set({ isAnalyzing: v }),
+    clearViralAnalysis: () => set({ viralAnalysis: null }),
+
+    // Phase 7: A/B Variation actions
+    setVariations: (variations) => set({ variations: variations.slice(0, 3) }),
+    addVariation: (variation) => set((state) => ({
+        variations: [...state.variations, variation].slice(0, 3)
+    })),
+    setActiveVariation: (id) => set({ activeVariationId: id }),
+    clearVariations: () => set({ variations: [], activeVariationId: null }),
 
     // Assets Actions
     addAssets: (newAssets) => set((state) => ({

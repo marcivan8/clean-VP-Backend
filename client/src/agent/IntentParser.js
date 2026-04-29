@@ -139,6 +139,77 @@ export class IntentParser {
         const lowerPrompt = prompt.toLowerCase();
         const clips = context?.clips || [];
         const activeClip = clips.find(c => c.isActive);
+        const duration = context?.duration || 0;
+
+        // === LONG-FORM INTELLIGENCE ENGINE (checked first — specific compound intents) ===
+
+        // ANALYZE STRUCTURE / CONTENT
+        if (this.matchesPattern(lowerPrompt, [
+            'analyze my video', 'analyze this video', 'analyze the content', 'analyze structure',
+            'analyse', 'segment the video', 'what is in this video',
+            'understand this content', 'break down the video'
+        ])) {
+            const platform = this.inferPlatform(lowerPrompt);
+            return this.createIntent(INTENT_TYPES.ANALYZE, OPERATIONS.ANALYZE_STRUCTURE, {
+                constraints: { platform, targetDuration: this._extractTargetDuration(lowerPrompt) }
+            });
+        }
+
+        // FIND HOOK
+        if (this.matchesPattern(lowerPrompt, [
+            'find the hook', 'find hook', 'best opening', 'strongest moment',
+            'most engaging part', 'what should i use as hook'
+        ])) {
+            return this.createIntent(INTENT_TYPES.ANALYZE, OPERATIONS.FIND_HOOK, {
+                constraints: {}
+            });
+        }
+
+        // FULL BUILD — from raw rushes
+        if (this.matchesPattern(lowerPrompt, [
+            'build a full video', 'build from rushes', 'build from raw',
+            'assemble the video', 'edit my rushes', 'edit the rushes',
+            'compile the footage', 'put together a video', 'build me a video'
+        ])) {
+            const platform = this.inferPlatform(lowerPrompt);
+            const targetDuration = this._extractTargetDuration(lowerPrompt);
+            return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.BUILD_FROM_RUSHES, {
+                constraints: { platform, targetDuration, editMode: 'FULL_BUILD' }
+            });
+        }
+
+        // CLEAN EDIT — podcast/interview
+        if (this.matchesPattern(lowerPrompt, [
+            'clean this podcast', 'clean the podcast', 'edit the podcast',
+            'clean up the interview', 'edit this interview', 'clean up the recording',
+            'tighten up the interview', 'tighten the podcast', 'clean up this recording'
+        ])) {
+            return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.LONG_FORM_EDIT, {
+                constraints: { editMode: 'CLEAN_EDIT', platform: this.inferPlatform(lowerPrompt) || 'podcast' }
+            });
+        }
+
+        // YOUTUBE OPTIMIZED — long-form YouTube
+        if (this.matchesPattern(lowerPrompt, [
+            'optimize for youtube', 'make a youtube video', 'edit for youtube',
+            'youtube long form', 'make it youtube ready', 'build a youtube video',
+            'create a youtube video', 'make a full youtube video'
+        ])) {
+            const targetDuration = this._extractTargetDuration(lowerPrompt);
+            return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.LONG_FORM_EDIT, {
+                constraints: { editMode: 'YOUTUBE_OPTIMIZED', platform: 'youtube', targetDuration }
+            });
+        }
+
+        // REMOVE REPETITION
+        if (this.matchesPattern(lowerPrompt, [
+            'remove repetition', 'remove repetitions', 'cut out repetitions',
+            'remove duplicate parts', 'cut repeated content'
+        ])) {
+            return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.REMOVE_REPETITION, {
+                constraints: {}
+            });
+        }
 
         // === UNDO / REDO ===
         if (this.matchesPattern(lowerPrompt, ['undo'])) {
@@ -147,6 +218,7 @@ export class IntentParser {
         if (this.matchesPattern(lowerPrompt, ['redo'])) {
             return this.createIntent(INTENT_TYPES.REDO, 'redo_action');
         }
+
 
         // === EXPORT ===
         if (this.matchesPattern(lowerPrompt, ['export', 'render', 'save as', 'download'])) {
@@ -632,6 +704,28 @@ export class IntentParser {
 
     static matchesPattern(text, patterns) {
         return patterns.some(p => text.includes(p));
+    }
+
+    /**
+     * Extracts a target output duration from natural language.
+     * e.g. "make a 10 minute video" → 600, "cut to 5 min" → 300
+     * @param {string} prompt
+     * @returns {number|null}
+     */
+    static _extractTargetDuration(prompt) {
+        // Match "X minutes" or "X min"
+        const minMatch = prompt.match(/(\d+(?:\.\d+)?)\s*(?:minute|min|minutes|mins)/i);
+        if (minMatch) return parseFloat(minMatch[1]) * 60;
+
+        // Match "X seconds" or "Xs"
+        const secMatch = prompt.match(/(\d+(?:\.\d+)?)\s*(?:seconds?|sec|s\b)/i);
+        if (secMatch) return parseFloat(secMatch[1]);
+
+        // Match "X hours"
+        const hourMatch = prompt.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hr)/i);
+        if (hourMatch) return parseFloat(hourMatch[1]) * 3600;
+
+        return null;
     }
 
     static createIntent(intent, operation, extras = {}) {

@@ -102,6 +102,7 @@ app.use('/api/ai', require('./routes/aiRoutes')); // Real AI Integration
 app.use('/api/effects', require('./routes/effectsRoutes')); // Effects Engine API
 app.use('/api/proxy', require('./routes/proxyRoutes')); // Proxy Generation API
 app.use('/api/revideo', require('./routes/revideoRenderRoutes')); // Revideo Render API
+app.use('/api/presets', require('./routes/presetRoutes')); // Phase 7: Preset Marketplace
 
 // API documentation endpoint
 app.get('/api', (req, res) => {

@@ -399,8 +399,22 @@ export function getPlacementClip(state, placementId) {
  * Get all layers sorted by order
  */
 export function getSortedLayers(state) {
+    const TYPE_ORDER = {
+        'text': 0,
+        'video': 1,
+        'audio': 2
+    };
+
     return Object.values(state.entities.layers)
-        .sort((a, b) => a.order - b.order);
+        .sort((a, b) => {
+            const typeA = TYPE_ORDER[a.type] !== undefined ? TYPE_ORDER[a.type] : 99;
+            const typeB = TYPE_ORDER[b.type] !== undefined ? TYPE_ORDER[b.type] : 99;
+            
+            if (typeA !== typeB) {
+                return typeA - typeB;
+            }
+            return a.order - b.order;
+        });
 }
 
 /**

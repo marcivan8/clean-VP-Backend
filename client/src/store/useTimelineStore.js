@@ -70,6 +70,9 @@ const useTimelineStore = create(
             beatMarkers: [],
             captions: [],
 
+            // Long-Form Intelligence Engine — stores ContentAnalyzer result
+            contentAnalysis: null,
+
             // Preview
             previewQuality: 'high',
 
@@ -191,6 +194,40 @@ const useTimelineStore = create(
             setBeatMarkers: (markers) => set({ beatMarkers: markers }),
             setPacingSegments: (segments) => set({ pacingSegments: segments }),
 
+            // Long-Form Intelligence Engine
+            setContentAnalysis: (analysis) => set({ contentAnalysis: analysis }),
+            clearContentAnalysis: () => set({ contentAnalysis: null }),
+
+            /**
+             * Move a clip to the front of its track (position 0).
+             * Ripple-shifts all other clips to make room.
+             * Used by LongFormEditPlanner to promote hook segments.
+             */
+            moveSegmentToFront: (trackId, clipId) => {
+                get()._saveHistory();
+                const state = get();
+                const track = state.tracks.find(t => t.id === trackId);
+                if (!track) return;
+                const clip = track.clips.find(c => c.id === clipId);
+                if (!clip) return;
+
+                const shiftAmount = clip.duration;
+
+                // Move target clip to 0
+                get().updateClip(trackId, clipId, { start: 0 }, { skipHistory: true });
+
+                // Ripple shift all other clips
+                const others = track.clips
+                    .filter(c => c.id !== clipId)
+                    .sort((a, b) => a.start - b.start);
+
+                others.forEach(c => {
+                    get().updateClip(trackId, c.id, { start: c.start + shiftAmount }, { skipHistory: true });
+                });
+
+                set({ tracks: timelineManager.toLegacyTracks() });
+            },
+
             // ==============================================================
             // CLIP MANAGEMENT (legacy-compatible API)
             // ==============================================================
@@ -272,6 +309,7 @@ const useTimelineStore = create(
                 if (updates.offset !== undefined) placementUpdates.offset = updates.offset;
                 if (updates.speed !== undefined) placementUpdates.speed = updates.speed;
                 if (updates.volume !== undefined) placementUpdates.volume = updates.volume;
+                if (updates.layerId !== undefined) placementUpdates.layerId = updates.layerId;
 
                 if (Object.keys(placementUpdates).length > 0) {
                     timelineManager.dispatch(
@@ -428,6 +466,7 @@ const useTimelineStore = create(
                     id, name, type, order
                 }));
                 set({ tracks: timelineManager.toLegacyTracks() });
+                return id;
             },
 
             addTextTrack: () => {

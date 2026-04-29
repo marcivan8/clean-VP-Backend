@@ -15,7 +15,11 @@ export const INTENT_TYPES = {
     UNDO: 'undo',
     REDO: 'redo',
     CREATIVE_EDIT: 'creative_edit',
-    OPTIMIZE: 'optimize'
+    OPTIMIZE: 'optimize',
+
+    // Long-Form Intelligence Engine
+    ANALYZE: 'analyze',
+    LONG_FORM_BUILD: 'long_form_build',
 };
 
 // Supported operations per intent
@@ -30,6 +34,7 @@ export const OPERATIONS = {
     SET_CLIP_SPEED: 'set_clip_speed',
     SET_ASPECT_RATIO: 'set_aspect_ratio',
     SILENCE_REMOVAL: 'silence_removal',
+    REMOVE_FILLER_WORDS: 'remove_filler_words',
     AUDIO_DENOISE: 'audio_denoise',
     NORMALIZE_AUDIO: 'normalize_audio',
     AUTO_CAPTIONS: 'auto_captions',
@@ -62,5 +67,14 @@ export const OPERATIONS = {
 
     // Creative / Optimization operations (CRL)
     CREATIVE_ENHANCE: 'creative_enhance',
-    PLATFORM_OPTIMIZE: 'platform_optimize'
+    PLATFORM_OPTIMIZE: 'platform_optimize',
+
+    // Long-Form Intelligence Engine operations
+    ANALYZE_STRUCTURE: 'analyze_structure',
+    LONG_FORM_EDIT: 'long_form_edit',
+    FIND_HOOK: 'find_hook',
+    REMOVE_REPETITION: 'remove_repetition',
+    BUILD_FROM_RUSHES: 'build_from_rushes',
+    REORDER_SEGMENT: 'reorder_segment',
 };
+

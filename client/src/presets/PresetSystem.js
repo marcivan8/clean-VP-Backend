@@ -188,14 +188,35 @@ const BUILT_IN_PRESETS = [
     }
 ];
 
+const STORAGE_KEY = 'vp_user_presets_v1';
+
 class PresetSystemClass {
     constructor() {
-        // User presets stored in memory (would be localStorage/DB in production)
         this.userPresets = new Map();
-
-        // Load built-in presets
         this.builtInPresets = new Map();
         BUILT_IN_PRESETS.forEach(p => this.builtInPresets.set(p.id, p));
+        this._loadFromStorage();
+    }
+
+    _loadFromStorage() {
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) return;
+            const saved = JSON.parse(raw);
+            saved.forEach(p => this.userPresets.set(p.id, p));
+            console.log(`[PresetSystem] Loaded ${saved.length} preset(s) from localStorage`);
+        } catch (e) {
+            console.warn('[PresetSystem] Could not load presets from localStorage:', e);
+        }
+    }
+
+    _saveToStorage() {
+        try {
+            const arr = Array.from(this.userPresets.values());
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
+        } catch (e) {
+            console.warn('[PresetSystem] Could not save presets to localStorage:', e);
+        }
     }
 
     /**
@@ -274,8 +295,8 @@ class PresetSystemClass {
         };
 
         this.userPresets.set(id, preset);
+        this._saveToStorage();
         console.log(`[PresetSystem] Created preset: ${name} (${id})`);
-
         return preset;
     }
 
@@ -289,8 +310,9 @@ class PresetSystemClass {
             console.warn('[PresetSystem] Cannot delete built-in preset');
             return false;
         }
-
-        return this.userPresets.delete(id);
+        const deleted = this.userPresets.delete(id);
+        if (deleted) this._saveToStorage();
+        return deleted;
     }
 
     /**
@@ -312,9 +334,47 @@ class PresetSystemClass {
         preset.importedAt = Date.now();
 
         this.userPresets.set(preset.id, preset);
+        this._saveToStorage();
         console.log(`[PresetSystem] Imported preset: ${preset.name}`);
-
         return preset;
+    }
+
+    /**
+     * Export ALL user presets as a bundle JSON
+     */
+    exportAll() {
+        const bundle = {
+            version: PRESET_SCHEMA_VERSION,
+            exportedAt: Date.now(),
+            presets: Array.from(this.userPresets.values())
+        };
+        return JSON.stringify(bundle, null, 2);
+    }
+
+    /**
+     * Import a bundle (exported from exportAll)
+     * @param {string|object} json
+     * @returns {number} count of imported presets
+     */
+    importBundle(json) {
+        const bundle = typeof json === 'string' ? JSON.parse(json) : json;
+        const presets = bundle.presets || (Array.isArray(bundle) ? bundle : []);
+        let count = 0;
+        presets.forEach(p => { this.import(p); count++; });
+        console.log(`[PresetSystem] Bundle imported: ${count} preset(s)`);
+        return count;
+    }
+
+    /**
+     * Get marketplace presets (static curated list for now, API later)
+     */
+    async getMarketplacePresets() {
+        try {
+            const res = await fetch('/api/presets/marketplace');
+            if (res.ok) return await res.json();
+        } catch (_) {}
+        // Fallback to built-ins
+        return Array.from(this.builtInPresets.values());
     }
 
     /**

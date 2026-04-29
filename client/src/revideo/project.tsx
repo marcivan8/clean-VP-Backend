@@ -63,7 +63,6 @@ const timelineScene = makeScene2D('timeline', function* (view) {
     const [cw, ch] = SIZE_MAP[ar] ?? SIZE_MAP['16:9'];
     view.size([cw, ch]);
 
-    // Canvas dimensions (from project or default)
     const canvasWidth = cw;
     const canvasHeight = ch;
 
@@ -94,16 +93,22 @@ const timelineScene = makeScene2D('timeline', function* (view) {
     });
 
     /**
-     * Compute fit-to-canvas scale for a media element.
-     * Returns { w, h } that makes the media fit inside the canvas (contain mode).
-     * If clip has explicit scaleX/scaleY those are applied on top.
+     * FIX: Cover-mode scaling — video fills the canvas completely.
+     * Uses max scale so the media covers every pixel (cropping overflow
+     * rather than leaving letterbox/pillarbox bars).
+     *
+     * When source dimensions are unknown we fall back to the canvas size
+     * directly (1:1 mapping) instead of the old 1920×1080 hard-code which
+     * was wrong for 9:16 canvases and caused the squeeze bug.
      */
     function fitSize(mediaW: number, mediaH: number): { w: number; h: number } {
+        // Unknown dimensions → assume the media already matches the canvas
         if (!mediaW || !mediaH) return { w: canvasWidth, h: canvasHeight };
         const scaleW = canvasWidth / mediaW;
         const scaleH = canvasHeight / mediaH;
-        // "contain" — fit inside canvas (letterbox/pillarbox)
-        const s = Math.min(scaleW, scaleH);
+        // "cover" — scale up so the smaller dimension fills its canvas axis;
+        // the larger dimension overflows and is cropped by the node boundary.
+        const s = Math.max(scaleW, scaleH);
         return { w: Math.round(mediaW * s), h: Math.round(mediaH * s) };
     }
 
@@ -120,10 +125,10 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     clipRef = createRef<Video>();
                     const kf = clip.keyframes || {};
 
-                    // Determine video native size for fitting
-                    // clip.sourceWidth / sourceHeight come from mediaProbe or asset metadata
-                    const srcW = clip.metadata?.resolution?.w || clip.sourceWidth || 1920;
-                    const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || 1080;
+                    // FIX: Fall back to canvasWidth/canvasHeight (not 1920×1080)
+                    // so 9:16 clips on a 9:16 canvas get the correct 1:1 mapping.
+                    const srcW = clip.metadata?.resolution?.w || clip.sourceWidth || canvasWidth;
+                    const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || canvasHeight;
                     const fitted = fitSize(srcW, srcH);
 
                     layerRefs[track.id]().add(
@@ -158,8 +163,9 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     clipRef = createRef<Img>();
                     const kf = clip.keyframes || {};
 
-                    const srcW = clip.metadata?.resolution?.w || clip.sourceWidth || 1920;
-                    const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || 1080;
+                    // FIX: Same canvas-relative fallback for images
+                    const srcW = clip.metadata?.resolution?.w || clip.sourceWidth || canvasWidth;
+                    const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || canvasHeight;
                     const fitted = fitSize(srcW, srcH);
 
                     layerRefs[track.id]().add(
@@ -202,16 +208,15 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     if (trans && trans.duration > 0) {
                         const tDur = Math.min(trans.duration, clip.duration);
                         const waitTime = clip.duration - tDur;
-                        
+
                         if (waitTime > 0) {
                             yield* waitFor(waitTime);
                         }
-                        
+
                         if (clipRef()) {
                             if (trans.type === 'fade' || trans.type === 'crossfade') {
                                 yield* clipRef().opacity(0, tDur);
                             } else if (trans.type === 'slide') {
-                                // Default slide left
                                 yield* clipRef().x(-1920, tDur);
                             } else if (trans.type === 'zoom') {
                                 yield* clipRef().scale(0, tDur);
@@ -231,8 +236,6 @@ const timelineScene = makeScene2D('timeline', function* (view) {
         });
     });
 
-    // Terminate when the duration is hit, OR all clips finish (whichever is sooner/exact duration is safer)
-    // Actually we want it to always hit totalDuration exactly. So:
     yield* any(
         waitFor(totalDuration),
         all(...runningClips)

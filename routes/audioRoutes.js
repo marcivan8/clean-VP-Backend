@@ -185,4 +185,74 @@ router.post('/normalize', devAuth, async (req, res) => {
     }
 });
 
+const { OpenAI } = require('openai');
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+/**
+ * POST /api/audio/transcribe
+ * Transcribes an audio file using OpenAI Whisper and returns word-level timestamps.
+ * Useful for filler word and bad-take detection.
+ */
+router.post('/transcribe', devAuth, async (req, res) => {
+    try {
+        const { filename, filePath } = req.body;
+
+        if (!filename && !filePath) {
+            return res.status(400).json({ error: 'Filename or filePath is required' });
+        }
+
+        // SECURITY: Sanitize filename and restrict to allowed directories
+        const uploadsDir = path.resolve(__dirname, '../uploads');
+        const publicDir = path.resolve(__dirname, '../client/public');
+        
+        let inputPath = filePath;
+        if (filename && !inputPath) {
+            const normalizedFilename = filename.startsWith('/') ? filename.slice(1) : filename;
+            inputPath = path.resolve(uploadsDir, normalizedFilename);
+            
+            if (!inputPath.startsWith(uploadsDir)) {
+                 inputPath = path.resolve(publicDir, normalizedFilename);
+                 if (!inputPath.startsWith(publicDir)) {
+                     return res.status(403).json({ error: 'Access denied: Invalid file path' });
+                 }
+            }
+        }
+
+        if (!fs.existsSync(inputPath)) {
+            return res.status(404).json({ error: `File not found: ${filename || filePath}` });
+        }
+
+        console.log(`🎙️ Transcribing with Whisper: ${inputPath}`);
+
+        // Check if the file is a video, we might need to extract audio first for Whisper 
+        // to save upload bandwidth and avoid 25MB limit on OpenAI.
+        // For now, we will send it directly, assuming files are small enough for testing,
+        // but we should ideally extract audio to a temp .mp3 first.
+        const stats = fs.statSync(inputPath);
+        if (stats.size > 25 * 1024 * 1024) {
+             return res.status(400).json({ error: 'File is larger than OpenAI 25MB limit. Audio extraction needed.' });
+        }
+
+        const transcription = await openai.audio.transcriptions.create({
+            file: fs.createReadStream(inputPath),
+            model: 'whisper-1',
+            response_format: 'verbose_json',
+            timestamp_granularities: ['word']
+        });
+
+        console.log(`✅ Transcription Complete. Words detected: ${transcription.words?.length || 0}`);
+
+        res.json({
+            success: true,
+            text: transcription.text,
+            words: transcription.words, // Array of { word, start, end }
+            message: "Transcription successful"
+        });
+
+    } catch (error) {
+        console.error("Transcription Failed:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 module.exports = router;

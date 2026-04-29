@@ -100,6 +100,87 @@ export const performSilenceRemoval = async (filename, threshold = '-30dB') => {
     }
 };
 
+export const performFillerRemoval = async (filename) => {
+    try {
+        const { tracks, updateClip, addClip, removeClip } = useTimelineStore.getState();
+        const videoTrack = tracks.find(t => t.type === 'video');
+        if (!videoTrack || videoTrack.clips.length === 0) throw new Error("No video clip to analyze");
+
+        console.log("🤖 Agent: Requesting Filler Word Analysis for", filename);
+
+        const response = await fetch('/api/audio/transcribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename })
+        });
+
+        if (!response.ok) throw new Error("Transcription failed on server");
+        const data = await response.json();
+
+        if (!data.words || data.words.length === 0) {
+            return { success: false, message: "No speech detected" };
+        }
+
+        const fillerWords = ['um', 'uh', 'like', 'you know', 'sort of', 'kind of', 'euh', 'ben', 'genre'];
+        const activeSegments = [];
+        let currentSegmentStart = 0;
+
+        data.words.forEach((w, i) => {
+            const wordText = w.word.toLowerCase().replace(/[^a-z\s]/g, '').trim();
+            if (fillerWords.includes(wordText)) {
+                // If we hit a filler word, close the current active segment
+                if (currentSegmentStart < w.start) {
+                    activeSegments.push({
+                        start: currentSegmentStart,
+                        duration: w.start - currentSegmentStart
+                    });
+                }
+                // Start the next segment AFTER the filler word
+                currentSegmentStart = w.end;
+            }
+        });
+
+        // Add the final segment if there's speech after the last filler
+        const lastWord = data.words[data.words.length - 1];
+        if (currentSegmentStart < lastWord.end) {
+            activeSegments.push({
+                start: currentSegmentStart,
+                duration: lastWord.end - currentSegmentStart
+            });
+        }
+
+        if (activeSegments.length === 1 && activeSegments[0].start === 0) {
+             return { success: true, count: 0, message: "No filler words found!" };
+        }
+
+        const parentClip = videoTrack.clips[0];
+        removeClip(videoTrack.id, parentClip.id);
+
+        let timelineCursor = 0;
+        activeSegments.forEach((seg, idx) => {
+            addClip(videoTrack.id, {
+                id: `auto-cut-filler-${Date.now()}-${idx}`,
+                name: `${parentClip.name} (Part ${idx + 1})`,
+                start: timelineCursor,
+                duration: seg.duration,
+                offset: seg.start,
+                url: parentClip.url,
+                assetId: parentClip.assetId,
+                color: parentClip.color
+            });
+            timelineCursor += seg.duration;
+        });
+
+        useTimelineStore.getState().setDuration(Math.ceil(timelineCursor + 5));
+
+        return { success: true, count: data.words.length - activeSegments.length, message: `Removed filler words!` };
+
+    } catch (error) {
+        console.error("Filler Removal Error:", error);
+        return { success: false, error: error.message };
+    }
+};
+
 const API_DENOISE = '/api/audio/denoise';
 
 export const performAudioDenoise = async (filename) => {
@@ -242,6 +323,10 @@ export const parseAgentCommand = async (command, filename) => {
                 switch (action.type) {
                     case 'silence_removal':
                         await performSilenceRemoval(filename);
+                        count++;
+                        break;
+                    case 'remove_filler_words':
+                        await performFillerRemoval(filename);
                         count++;
                         break;
                     case 'set_aspect_ratio':

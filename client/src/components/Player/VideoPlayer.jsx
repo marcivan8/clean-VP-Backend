@@ -17,7 +17,7 @@ const VideoPlayer = () => {
     // Determine Active Clip for Rendering & Logic
     const videoTrack = tracks.find(t => t.type === 'video');
     const activeClip = videoTrack?.clips.find(
-        clip => currentTime >= clip.start && currentTime < clip.start + clip.duration
+        clip => currentTime >= clip.start - 0.001 && currentTime < clip.start + clip.duration + 0.001
     );
 
     // Initialize Engine

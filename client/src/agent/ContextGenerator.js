@@ -144,9 +144,22 @@ export class ContextGenerator {
                 hasBeatMarkers: beatMarkers && beatMarkers.length > 0
             },
 
+            // Long-Form Intelligence Engine context (populated after ContentAnalyzer runs)
+            LongFormContext: state.contentAnalysis ? {
+                contentType: state.contentAnalysis.contentType,
+                editMode: state.contentAnalysis.editMode,
+                totalSegments: state.contentAnalysis.segments?.length || 0,
+                hookFound: !!state.contentAnalysis.structure?.hookCandidate,
+                hookTimestamp: state.contentAnalysis.structure?.hookCandidate?.start ?? null,
+                plannedActions: state.contentAnalysis.editPlan?.actions || [],
+                analysisTimestamp: state.contentAnalysis.timestamp,
+                requiresApproval: state.contentAnalysis.requiresApproval,
+            } : null,
+
             // Keep display string for backward compat
             display: this.getTimelineContext().display
         };
+
     }
 
     static getProjectMetadata() {

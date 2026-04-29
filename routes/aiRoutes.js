@@ -4,7 +4,8 @@ const {
     chatAgentHandler,
     agentPlanHandler,
     parseIntentHandler,
-    generatePlanHandler
+    generatePlanHandler,
+    analyzeContentHandler,
 } = require('../controllers/aiAgentController');
 const SpacyService = require('../services/SpacyService');
 
@@ -14,6 +15,11 @@ router.post('/agent-plan', agentPlanHandler);
 // New pipeline endpoints
 router.post('/parse-intent', parseIntentHandler);
 router.post('/generate-plan', generatePlanHandler);
+
+// Long-Form Intelligence Engine endpoint
+// Accepts: { transcript: { text, segments }, clips: [], duration: number, platform?: string }
+// Returns: { contentType, segments[], structure, editMode, editPlan }
+router.post('/analyze-content', analyzeContentHandler);
 
 // spaCy NLP direct endpoints (for debugging/testing)
 router.post('/analyze-prompt', async (req, res) => {
@@ -43,3 +49,4 @@ router.post('/analyze-transcript', async (req, res) => {
 });
 
 module.exports = router;
+

@@ -16,20 +16,20 @@ router.post('/detect', async (req, res) => {
     try {
         const { filename, threshold = '-30dB', duration = '0.5' } = req.body;
 
-        if (!filename) {
-            return res.status(400).json({ error: 'Filename is required' });
+        if (!filename || typeof filename !== 'string') {
+            return res.status(400).json({ error: 'Filename is required and must be a string' });
         }
 
-        // Locate file (assuming it's in uploads or imports)
-        // For the IDE demo, we might be using a temp file or the one uploaded to /uploads
-        // Let's assume standard path from uploadRoutes or similar.
-        // If it's "sample.mp4", let's check root or public. 
-        // For robustness, full path logic similar to exportRoutes:
+        // SECURITY: Resolve path and prevent Directory Traversal attacks
+        const uploadsDir = path.resolve(__dirname, '../uploads');
+        const publicDir = path.resolve(__dirname, '../client/public');
+        
+        // Remove leading slash if present so it resolves correctly
+        const normalizedFilename = filename.startsWith('/') ? filename.slice(1) : filename;
+        let filePath = path.resolve(__dirname, '..', normalizedFilename);
 
-        let filePath = path.join(__dirname, '../uploads', filename);
-        if (!fs.existsSync(filePath)) {
-            // Fallback for public assets in dev
-            filePath = path.join(__dirname, '../client/public', filename);
+        if (!filePath.startsWith(uploadsDir) && !filePath.startsWith(publicDir)) {
+            return res.status(403).json({ error: 'Access denied: Invalid file path' });
         }
 
         if (!fs.existsSync(filePath)) {
