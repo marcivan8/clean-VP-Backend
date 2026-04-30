@@ -607,6 +607,140 @@ function compileRedo(step) {
     ]);
 }
 
+// ── AI / Audio operations (Bug 4 fix) ─────────────────────────────────────────
+
+function compileRemoveFillerWords(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.API, 'fillerDetect', {
+            endpoint: '/api/filler/detect',
+            method: 'POST',
+            payload: {
+                filename: '$uploaded_file',
+                language: step.language || 'en',
+            },
+        }, {
+            source_step_id: step.step_id,
+            symbolic_refs: ['$uploaded_file'],
+            description: 'Remove filler words (ums, uhs)',
+        }),
+    ]);
+}
+
+function compileNormalizeAudio(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.API, 'audioNormalize', {
+            endpoint: '/api/audio/normalize',
+            method: 'POST',
+            payload: {
+                filename: '$uploaded_file',
+                target_lufs: step.target_lufs || -14,
+            },
+        }, {
+            source_step_id: step.step_id,
+            symbolic_refs: ['$uploaded_file'],
+            description: 'Normalize audio levels',
+        }),
+    ]);
+}
+
+function compileDenoiseAudio(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.API, 'audioDenoise', {
+            endpoint: '/api/audio/denoise',
+            method: 'POST',
+            payload: {
+                filename: '$uploaded_file',
+                strength: step.strength || 0.7,
+            },
+        }, {
+            source_step_id: step.step_id,
+            symbolic_refs: ['$uploaded_file'],
+            description: 'Remove background noise',
+        }),
+    ]);
+}
+
+// Long-Form AI operations route through ENGINE.STORE (VideoEditorTools handles them)
+
+function compileAnalyzeStructure(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'analyzeStructure', {
+            platform: step.platform || null,
+            targetDuration: step.targetDuration || null,
+        }, {
+            source_step_id: step.step_id,
+            description: 'Semantic content analysis',
+        }),
+    ]);
+}
+
+function compileLongFormEdit(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'longFormEdit', {
+            editMode: step.editMode || 'CLEAN_EDIT',
+            platform: step.platform || null,
+            targetDuration: step.targetDuration || null,
+        }, {
+            source_step_id: step.step_id,
+            description: `Long-form edit (${step.editMode || 'CLEAN_EDIT'})`,
+        }),
+    ]);
+}
+
+function compileFindHook(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'findHook', {}, {
+            source_step_id: step.step_id,
+            description: 'Find best hook moment',
+        }),
+    ]);
+}
+
+function compileRemoveRepetition(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'removeRepetition', {
+            importance_threshold: step.importance_threshold || 0.3,
+        }, {
+            source_step_id: step.step_id,
+            description: 'Remove repetitive / low-value segments',
+        }),
+    ]);
+}
+
+function compileReorderSegment(step, ctx) {
+    const clipRef = step.clip_id || '$first_clip';
+    const trackRef = step.track_id || `$track_of(${clipRef})`;
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'reorderSegment', {
+            clipId: clipRef,
+            trackId: trackRef,
+            targetPosition: step.targetPosition ?? 0,
+        }, {
+            source_step_id: step.step_id,
+            symbolic_refs: [clipRef, trackRef].filter(v => String(v).startsWith('$')),
+            description: `Reorder segment to ${step.targetPosition ?? 0}s`,
+        }),
+    ]);
+}
+
+function compileAutoCaptions(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.API, 'autoCaptions', {
+            endpoint: '/api/captions/generate',
+            method: 'POST',
+            payload: {
+                filename: '$uploaded_file',
+                language: step.language || 'en',
+                style: step.style || 'default',
+            },
+        }, {
+            source_step_id: step.step_id,
+            symbolic_refs: ['$uploaded_file'],
+            description: 'Generate auto-captions',
+        }),
+    ]);
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // §7  COMMAND REGISTRY
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -639,6 +773,11 @@ const COMMAND_REGISTRY = new Map([
     ['silence_removal', { compiler: compileSilenceRemoval }],
     ['adjust_volume', { compiler: compileAdjustVolume }],
     ['mute_clip', { compiler: compileMuteClip }],
+    // AI Audio (Bug 4 fix)
+    ['remove_filler_words', { compiler: compileRemoveFillerWords }],
+    ['normalize_audio',     { compiler: compileNormalizeAudio }],
+    ['denoise_audio',       { compiler: compileDenoiseAudio }],
+    ['audio_denoise',       { compiler: compileDenoiseAudio }],   // alias from IntentParser
 
     // Effect commands
     ['add_transition', { compiler: compileAddTransition }],
@@ -646,11 +785,19 @@ const COMMAND_REGISTRY = new Map([
     ['add_text_overlay', { compiler: compileAddText }],
     ['add_caption', { compiler: compileAddCaption }],
     ['color_grade', { compiler: compileColorGrade }],
+    ['auto_captions', { compiler: compileAutoCaptions }],
 
     // Export commands
     ['validate_export_settings', { compiler: compileValidateExportSettings }],
     ['prepare_export', { compiler: compilePrepareExport }],
     ['queue_export', { compiler: compileQueueExport }],
+
+    // Long-Form AI (Bug 4 fix)
+    ['analyze_structure',  { compiler: compileAnalyzeStructure }],
+    ['long_form_edit',     { compiler: compileLongFormEdit }],
+    ['find_hook',          { compiler: compileFindHook }],
+    ['remove_repetition',  { compiler: compileRemoveRepetition }],
+    ['reorder_segment',    { compiler: compileReorderSegment }],
 
     // Undo / Redo
     ['undo_action', { compiler: compileUndo }],

@@ -673,6 +673,9 @@ const useTimelineStore = create(
                 set({ past: newPast, future: [] });
             },
 
+            // Public alias used by TextOverlay and other UI components
+            saveToHistory: () => get()._saveHistory(),
+
             undo: () => set((state) => {
                 if (state.past.length === 0) return state;
 

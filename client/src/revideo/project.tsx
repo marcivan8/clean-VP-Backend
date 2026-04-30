@@ -229,6 +229,9 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     }
 
                     if (clipRef()) {
+                        if (typeof clipRef().pause === 'function') {
+                            clipRef().pause();
+                        }
                         clipRef().remove();
                     }
                 }

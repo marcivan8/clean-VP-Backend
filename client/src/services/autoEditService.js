@@ -12,6 +12,34 @@ function getSourceFile() {
     return state.uploadedFile || null;
 }
 
+export const performAutoCaptions = async (filename) => {
+    try {
+        const { setCaptions } = useTimelineStore.getState();
+        console.log("🤖 Agent: Requesting Transcription for", filename);
+
+        const response = await fetch('/api/audio/transcribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename })
+        });
+
+        if (!response.ok) throw new Error("Transcription failed on server");
+        const data = await response.json();
+
+        if (data.words && data.words.length > 0) {
+            // Note: The /api/audio/transcribe endpoint returns word-level timestamps via Whisper
+            // These serve as our text transcript AND our energy/speech markers.
+            setCaptions(data.words);
+            return { success: true, count: data.words.length, message: "Transcription complete. Energy markers and captions are now available." };
+        }
+
+        return { success: false, message: "No speech detected" };
+    } catch (error) {
+        console.error("Transcription Error:", error);
+        return { success: false, error: error.message };
+    }
+};
+
 /**
  * Extract audio from the uploaded video using mediabunny (client-side).
  * Returns an audio Blob that can be sent to backend for analysis,

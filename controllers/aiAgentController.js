@@ -59,7 +59,7 @@ User Command: "${command}"`;
                 { role: "system", content: systemPrompt },
                 { role: "user", content: userPrompt }
             ],
-            model: "gpt-4-1106-preview",
+            model: "gpt-4o",
             response_format: { type: "json_object" }
         });
 
@@ -468,7 +468,7 @@ USER REQUEST:
                 { role: "system", content: systemPrompt },
                 { role: "user", content: userMessage }
             ],
-            model: "gpt-4-1106-preview",
+            model: "gpt-4o",
             tools: tools,
             tool_choice: { type: "function", function: { name: "execute_video_edit" } },
             temperature: 0.15
@@ -1164,11 +1164,7 @@ USER PROMPT:
  */
 const analyzeContentHandler = async (req, res) => {
     try {
-        const { transcript, clips = [], duration = 0, platform = null, targetDuration = null } = req.body;
-
-        if (!transcript || !transcript.text) {
-            return res.status(400).json({ success: false, error: 'Transcript is required for content analysis.' });
-        }
+        const { transcript = { text: '', segments: [] }, clips = [], duration = 0, platform = null, targetDuration = null } = req.body;
 
         console.log(`🧠 [ContentAnalysis] Analyzing ${duration.toFixed(1)}s of content. Segments: ${transcript.segments?.length || 0}`);
 

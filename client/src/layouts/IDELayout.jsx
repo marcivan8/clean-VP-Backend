@@ -266,6 +266,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 proxyUrl: data.proxyUrl,
                                 isProxying: false
                             });
+                            // Store the backend path so AI commands can reference it
+                            useTimelineStore.getState().setUploadedFile({ 
+                                name: `uploads/${data.proxyPath}` 
+                            });
                         })
                         .catch(err => {
                             console.error(`[IDELayout] Proxy generation failed for ${file.name}`, err);

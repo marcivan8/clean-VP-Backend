@@ -472,7 +472,7 @@ export class MediaExecutionEngine {
         return store[methodName](...methodArgs);
     }
 
-    executeStoreAction(command, job) {
+    async executeStoreAction(command, job) {
         const store = useTimelineStore.getState();
         const action = command.action;
         const args = command.args || {};
@@ -554,6 +554,21 @@ export class MediaExecutionEngine {
             case 'redo': {
                 this._callStore(store, 'redo');
                 return { action, success: true, message: 'Redone' };
+            }
+
+            // ── Long-Form AI operations — delegate to VideoEditorTools ────────
+            case 'analyzeStructure':
+            case 'longFormEdit':
+            case 'findHook':
+            case 'removeRepetition':
+            case 'reorderSegment': {
+                // Lazy-import to avoid circular dependency
+                const { VideoEditorTools } = await import('./VideoEditorTools.js');
+                const tools = new VideoEditorTools();
+                // Map camelCase store action name → tool name (e.g. analyzeStructure → analyze_structure)
+                const toolName = action.replace(/([A-Z])/g, m => `_${m.toLowerCase()}`);
+                const result = await tools.execute({ name: toolName, args });
+                return { action, success: result.success !== false, message: result.message || action, result };
             }
 
             default:
@@ -649,7 +664,26 @@ export class MediaExecutionEngine {
     }
 
     async executeApiCall(command, job) {
-        const { endpoint, method, payload } = command;
+        // CommandCompiler v2 nests endpoint/method/payload inside args
+        // Older callers may put them at the top level — support both.
+        const args    = command.args || {};
+        const endpoint = args.endpoint || command.endpoint;
+        const method   = args.method   || command.method   || 'POST';
+        const payload  = args.payload  || command.payload  || {};
+
+        if (!endpoint) {
+            console.warn('[MediaExecutionEngine] executeApiCall: no endpoint provided', command);
+            return { action: command.action, success: true, message: 'API call skipped (no endpoint)', skipped: true };
+        }
+
+        // Resolve $uploaded_file in payload
+        const store = useTimelineStore.getState();
+        const resolvedPayload = { ...payload };
+        for (const [key, val] of Object.entries(resolvedPayload)) {
+            if (val === '$uploaded_file') {
+                resolvedPayload[key] = store.uploadedFile?.name || 'video.mp4';
+            }
+        }
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.API_CALL);
@@ -660,7 +694,7 @@ export class MediaExecutionEngine {
             const response = await fetch(endpoint, {
                 method: method || 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload || {}),
+                body: JSON.stringify(resolvedPayload),
                 signal: controller.signal
             });
 

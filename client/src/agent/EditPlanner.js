@@ -257,9 +257,20 @@ export class EditPlanner {
             // === AUDIO ===
             case 'silence_removal':
                 return this.planSilenceRemoval(planId, constraints);
-                
+
             case 'remove_filler_words':
                 return this.planFillerRemoval(planId);
+
+            // Bug 6 fix: these operations were not routed and fell through to null
+            case 'audio_denoise':
+            case 'denoise_audio':
+                return this.planAudioDenoise(planId, constraints);
+
+            case 'normalize_audio':
+                return this.planNormalizeAudio(planId, constraints);
+
+            case 'auto_captions':
+                return this.planAutoCaptions(planId, constraints);
 
             case 'adjust_volume':
                 return this.planVolumeAdjust(planId, clip, constraints);
@@ -600,6 +611,40 @@ export class EditPlanner {
         ];
 
         return this.buildPlan(planId, 'remove_filler_words', steps);
+    }
+
+    static planAudioDenoise(planId, constraints) {
+        const steps = [
+            {
+                step_id: 'step_1',
+                action: 'denoise_audio',
+                strength: constraints?.strength || 0.7,
+            }
+        ];
+        return this.buildPlan(planId, 'denoise_audio', steps);
+    }
+
+    static planNormalizeAudio(planId, constraints) {
+        const steps = [
+            {
+                step_id: 'step_1',
+                action: 'normalize_audio',
+                target_lufs: constraints?.target_lufs || -14,
+            }
+        ];
+        return this.buildPlan(planId, 'normalize_audio', steps);
+    }
+
+    static planAutoCaptions(planId, constraints) {
+        const steps = [
+            {
+                step_id: 'step_1',
+                action: 'auto_captions',
+                language: constraints?.language || 'en',
+                style: constraints?.style || 'default',
+            }
+        ];
+        return this.buildPlan(planId, 'auto_captions', steps);
     }
 
     static planVolumeAdjust(planId, clip, constraints) {

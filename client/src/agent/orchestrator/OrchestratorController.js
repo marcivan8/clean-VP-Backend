@@ -32,7 +32,7 @@ import {
 import { IntentParser } from '../IntentParser.js';
 import { EditPlanner } from '../EditPlanner.js';
 import { CommandCompiler } from '../CommandCompiler.js';
-import { MediaExecutionEngine } from '../MediaExecutionEngine.js';
+import { MediaExecutionEngine, mediaExecutionEngine } from '../MediaExecutionEngine.js';
 import { ValidationService } from '../ValidationService.js';
 import { VersionManager } from '../VersionManager.js';
 import useTimelineStore from '../../store/useTimelineStore.js';
@@ -364,7 +364,7 @@ export class OrchestratorController {
                 orchestratorEvents.emitAgentStart(jobId, 'MediaExecutionEngine', { commands: compileResult.commands });
                 console.log(`[AG_DEBUG] [Orchestrator] Executing media commands`);
 
-                const executionResult = await MediaExecutionEngine.execute(
+                const executionResult = await mediaExecutionEngine.execute(
                     compileResult.commands,
                     (progress) => {
                         // Map execution progress to 50-80% range

@@ -1,5 +1,5 @@
 import useTimelineStore from '../store/useTimelineStore.js';
-import { performSilenceRemoval, performFillerRemoval, performAudioDenoise, performAudioNormalization } from '../services/autoEditService.js';
+import { performSilenceRemoval, performFillerRemoval, performAudioDenoise, performAudioNormalization, performAutoCaptions } from '../services/autoEditService.js';
 import { ContentAnalyzer } from './ContentAnalyzer.js';
 import { LongFormEditPlanner } from './LongFormEditPlanner.js';
 
@@ -92,6 +92,11 @@ export const TOOL_DEFINITIONS = [
     {
         name: "sync_clips_to_beat",
         description: "Automatically cuts video clips at detected beat markers.",
+        parameters: { type: "object", properties: {} }
+    },
+    {
+        name: "auto_captions",
+        description: "Transcribes the video to generate word-level captions and energy markers. Use this first if a transcript is required for other tools.",
         parameters: { type: "object", properties: {} }
     },
 
@@ -291,6 +296,7 @@ export class VideoEditorTools {
             case 'denoise_audio': return await performAudioDenoise(getFilename());
             case 'normalize_audio': return await performAudioNormalization(getFilename());
             case 'sync_clips_to_beat': return this.syncClipsToBeats();
+            case 'auto_captions': return await performAutoCaptions(getFilename());
 
             // Visual / Project
             case 'set_aspect_ratio': return this.setAspectRatio(action.args);
@@ -550,7 +556,8 @@ export class VideoEditorTools {
      */
     reorderSegment({ clipId, trackId, targetPosition }) {
         const store = this.store;
-        store._saveHistory();
+        // Save history before mutating — use the live store method
+        useTimelineStore.getState()._saveHistory();
 
         const { track, clip } = this.resolveTrackAndClip(trackId, clipId);
 
