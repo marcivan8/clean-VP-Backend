@@ -1,9 +1,9 @@
 /**
  * EventBus - Decoupled Pub/Sub System for Viral Pilot
- * 
+ *
  * Core infrastructure for non-blocking, event-driven architecture.
  * All agents communicate through typed events, never direct calls.
- * 
+ *
  * Features:
  * - Typed event subscriptions
  * - Wildcard subscriptions (*) for debugging
@@ -56,28 +56,36 @@ export const EVENT_TYPES = {
     AI_UNAVAILABLE: 'ai:unavailable',
     FALLBACK_USED: 'fallback:used',
 
+    // ── Transcription & Analysis (NEW) ────────────────────────────────────────
+    // Emitted by TranscriptionManager during background processing.
+    // UI components subscribe to these to show progress indicators.
+    TRANSCRIPTION_PROGRESS: 'transcription:progress',  // { status, progress 0-100, filename }
+    TRANSCRIPTION_COMPLETE: 'transcription:complete',  // { filename, wordCount }
+    TRANSCRIPTION_FAILED: 'transcription:failed',    // { filename, error }
+    ANALYSIS_READY: 'analysis:ready',           // { filename, analysis, wordCount }
+
     // Phase 7: Autonomous Editing Mode
-    AUTONOMOUS_PLAN_READY:     'autonomous:plan_ready',
-    AUTONOMOUS_STEP_READY:     'autonomous:step_ready',
-    AUTONOMOUS_STEPS_UPDATED:  'autonomous:steps_updated',
-    AUTONOMOUS_STATUS:         'autonomous:status',
-    AUTONOMOUS_SESSION_ENDED:  'autonomous:session_ended',
+    AUTONOMOUS_PLAN_READY: 'autonomous:plan_ready',
+    AUTONOMOUS_STEP_READY: 'autonomous:step_ready',
+    AUTONOMOUS_STEPS_UPDATED: 'autonomous:steps_updated',
+    AUTONOMOUS_STATUS: 'autonomous:status',
+    AUTONOMOUS_SESSION_ENDED: 'autonomous:session_ended',
 
     // Phase 7: A/B Iteration System
-    ITERATION_STARTED:         'iteration:started',
-    ITERATION_COMPLETE:        'iteration:complete',
-    VARIATION_LOADED:          'iteration:variation_loaded',
+    ITERATION_STARTED: 'iteration:started',
+    ITERATION_COMPLETE: 'iteration:complete',
+    VARIATION_LOADED: 'iteration:variation_loaded',
 
     // System
     SYSTEM_ERROR: 'system:error',
-    DEBUG: 'debug'
+    DEBUG: 'debug',
 };
 
 // Subscription priority levels
 export const PRIORITY = {
-    HIGH: 0,    // Executed first (e.g., logging, metrics)
+    HIGH: 0,  // Executed first (e.g., logging, metrics)
     NORMAL: 1,  // Default
-    LOW: 2      // Executed last (e.g., cleanup)
+    LOW: 2,  // Executed last (e.g., cleanup)
 };
 
 class EventBusClass {
@@ -111,7 +119,6 @@ class EventBusClass {
         const id = ++this.subscriptionIdCounter;
 
         if (eventType === '*') {
-            // Wildcard subscription
             const sub = { callback, priority, id };
             this.wildcardSubscribers.add(sub);
             return () => this.wildcardSubscribers.delete(sub);
@@ -128,7 +135,6 @@ class EventBusClass {
             console.log(`[EventBus] Subscribed to "${eventType}" (id: ${id})`);
         }
 
-        // Return unsubscribe function
         return () => {
             const subs = this.subscribers.get(eventType);
             if (subs) {
@@ -142,9 +148,6 @@ class EventBusClass {
 
     /**
      * Subscribe to an event once (auto-unsubscribe after first call)
-     * @param {string} eventType - Event type
-     * @param {function} callback - Handler function
-     * @returns {function} Unsubscribe function
      */
     once(eventType, callback) {
         const unsubscribe = this.on(eventType, (payload) => {
@@ -156,47 +159,38 @@ class EventBusClass {
 
     /**
      * Emit an event to all subscribers
-     * @param {string} eventType - Event type
-     * @param {object} payload - Event data
      */
     emit(eventType, payload = {}) {
         const timestamp = Date.now();
         const event = { type: eventType, payload, timestamp };
 
-        // Record in history
         this.recordEvent(event);
 
         if (this.debugMode) {
             console.log(`[EventBus] Emit: ${eventType}`, payload);
         }
 
-        // Collect all subscribers (typed + wildcard)
         const allSubscribers = [];
 
-        // Typed subscribers
         const typedSubs = this.subscribers.get(eventType);
         if (typedSubs) {
             typedSubs.forEach(sub => allSubscribers.push({ ...sub, eventType }));
         }
 
-        // Wildcard subscribers
         this.wildcardSubscribers.forEach(sub => allSubscribers.push({ ...sub, eventType: '*' }));
 
-        // Sort by priority (lower = higher priority)
         allSubscribers.sort((a, b) => a.priority - b.priority);
 
-        // Dispatch to all subscribers
         for (const sub of allSubscribers) {
             try {
                 sub.callback(payload, eventType);
             } catch (error) {
                 console.error(`[EventBus] Error in subscriber for "${eventType}":`, error);
-                // Emit system error but prevent infinite loop
                 if (eventType !== EVENT_TYPES.SYSTEM_ERROR) {
                     this.emit(EVENT_TYPES.SYSTEM_ERROR, {
                         source: 'EventBus',
                         originalEvent: eventType,
-                        error: error.message
+                        error: error.message,
                     });
                 }
             }
@@ -205,9 +199,6 @@ class EventBusClass {
 
     /**
      * Emit an event and wait for all async handlers to complete
-     * @param {string} eventType - Event type
-     * @param {object} payload - Event data
-     * @returns {Promise<void>}
      */
     async emitAsync(eventType, payload = {}) {
         const timestamp = Date.now();
@@ -235,9 +226,6 @@ class EventBusClass {
         await Promise.all(promises);
     }
 
-    /**
-     * Record event in history (circular buffer)
-     */
     recordEvent(event) {
         this.history.push(event);
         if (this.history.length > this.maxHistorySize) {
@@ -245,11 +233,6 @@ class EventBusClass {
         }
     }
 
-    /**
-     * Get event history
-     * @param {string} eventType - Optional filter by type
-     * @returns {Array} Event history
-     */
     getHistory(eventType = null) {
         if (eventType) {
             return this.history.filter(e => e.type === eventType);
@@ -257,36 +240,21 @@ class EventBusClass {
         return [...this.history];
     }
 
-    /**
-     * Clear all subscriptions
-     */
     clear() {
         this.subscribers.clear();
         this.wildcardSubscribers.clear();
         console.log('[EventBus] All subscriptions cleared');
     }
 
-    /**
-     * Clear event history
-     */
     clearHistory() {
         this.history = [];
     }
 
-    /**
-     * Enable/disable debug mode
-     * @param {boolean} enabled
-     */
     setDebugMode(enabled) {
         this.debugMode = enabled;
         console.log(`[EventBus] Debug mode: ${enabled ? 'ON' : 'OFF'}`);
     }
 
-    /**
-     * Get subscriber count for an event type
-     * @param {string} eventType
-     * @returns {number}
-     */
     getSubscriberCount(eventType) {
         const subs = this.subscribers.get(eventType);
         return (subs ? subs.size : 0) + this.wildcardSubscribers.size;

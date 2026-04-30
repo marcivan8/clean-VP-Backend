@@ -1,20 +1,15 @@
 /**
  * AgentFeedbackService
  * Generates user-friendly feedback messages after edit operations.
- * 
- * Provides:
- * - Concise success/failure messages
- * - Next action suggestions
- * - Context-aware responses
+ *
+ * Added in this version:
+ * - generatePreExecutionBrief(plan, analysisResult) — shows the user exactly
+ *   what the AI is about to cut, with counts and reasoning, BEFORE execution.
+ *   This is the trust-building layer that converts skeptical creators.
  */
 export class AgentFeedbackService {
     /**
      * Generate feedback based on operation results
-     * @param {object} intent - Parsed intent
-     * @param {object} plan - Edit plan
-     * @param {object} executionResult - Result from execution
-     * @param {object} validationResult - Result from validation
-     * @returns {object} Feedback object with message and suggestions
      */
     static generateFeedback(intent, plan, executionResult, validationResult) {
         const operation = intent?.operation || plan?.intent_operation || 'unknown';
@@ -23,13 +18,120 @@ export class AgentFeedbackService {
         if (!success) {
             return this.generateFailureFeedback(operation, validationResult, executionResult);
         }
-
         return this.generateSuccessFeedback(operation, validationResult, executionResult);
     }
 
+    // ── Pre-Execution Brief (NEW) ─────────────────────────────────────────────
+
     /**
-     * Generate success feedback
+     * Generate a markdown brief of what the AI is about to do.
+     * Called BEFORE execution so the user can approve or adjust.
+     *
+     * @param {object} plan - The edit plan (has plan.steps[])
+     * @param {object|null} analysisResult - Cached ContentAnalyzer result (may be null)
+     * @returns {string} Markdown string
      */
+    static generatePreExecutionBrief(plan, analysisResult) {
+        const steps = plan?.steps || [];
+        const segments = analysisResult?.segments || [];
+        const structure = analysisResult?.structure || null;
+        const editMode = analysisResult?.editMode || null;
+
+        // Count what's being removed
+        const silenceSteps = steps.filter(s => s.action === 'silence_removal');
+        const fillerSteps = steps.filter(s => s.action === 'remove_filler_words');
+        const repeatSteps = steps.filter(s => s.action === 'remove_repeated_takes');
+        const cutSegSteps = steps.filter(s => s.action === 'cut_segment');
+        const reorderSteps = steps.filter(s => s.action === 'reorder_segment');
+        const normalizeSteps = steps.filter(s => s.action === 'normalize_audio' || s.action === 'denoise_audio');
+
+        // Segment-level stats from analysis
+        const fillerSegCount = segments.filter(s => s.type === 'filler').length;
+        const lowValueSegCount = segments.filter(s => (s.importance_score ?? 1) < 0.3 && s.type !== 'filler').length;
+
+        // Estimate total cut duration from cut_segment steps
+        const totalCutSec = cutSegSteps.reduce((sum, s) => sum + ((s.end || 0) - (s.start || 0)), 0);
+
+        // Hook info
+        const hook = structure?.hookCandidate;
+
+        let brief = `## Here's what I'm going to do\n\n`;
+
+        // ── What's being removed ──────────────────────────────────────────────
+        const removals = [];
+
+        if (silenceSteps.length > 0) {
+            removals.push(`Silent gaps and dead air (threshold: ${silenceSteps[0].threshold || '-30dB'}, min ${silenceSteps[0].min_duration || 0.5}s)`);
+        }
+
+        if (repeatSteps.length > 0) {
+            removals.push(`Repeated takes and restart moments`);
+        }
+
+        if (fillerSteps.length > 0) {
+            const density = fillerSegCount > 0 && segments.length > 0
+                ? ` (~${Math.round((fillerSegCount / segments.length) * 100)}% filler density)`
+                : '';
+            removals.push(`Filler words — ums, uhs, and filler phrases${density}`);
+        }
+
+        if (cutSegSteps.length > 0) {
+            const durStr = totalCutSec > 0 ? ` (~${this._formatSeconds(Math.round(totalCutSec))} total)` : '';
+            removals.push(`${cutSegSteps.length} low-value segment${cutSegSteps.length !== 1 ? 's' : ''}${durStr}`);
+        }
+
+        if (lowValueSegCount > 0 && cutSegSteps.length === 0) {
+            // Analysis found low-value segments but no explicit cut steps (e.g. clean edit)
+            removals.push(`${lowValueSegCount} low-importance segment${lowValueSegCount !== 1 ? 's' : ''} flagged by analysis`);
+        }
+
+        if (removals.length > 0) {
+            brief += `**Removing:**\n`;
+            removals.forEach(r => { brief += `- ${r}\n`; });
+            brief += '\n';
+        }
+
+        // ── What's being kept ─────────────────────────────────────────────────
+        const keepingParts = [];
+        if (segments.length > 0) {
+            const keptCount = segments.filter(s => (s.importance_score ?? 1) >= 0.3).length;
+            if (keptCount > 0) {
+                keepingParts.push(`${keptCount} segment${keptCount !== 1 ? 's' : ''} scoring ≥ 0.3 importance`);
+            }
+        }
+        if (keepingParts.length > 0) {
+            brief += `**Keeping:** ${keepingParts.join(', ')}\n\n`;
+        }
+
+        // ── Hook ─────────────────────────────────────────────────────────────
+        if (hook && reorderSteps.length > 0) {
+            brief += `**Hook:** Moving ${hook.start.toFixed(0)}s–${hook.end.toFixed(0)}s to the beginning`;
+            if (hook.reason) brief += ` _(${hook.reason})_`;
+            brief += '\n\n';
+        }
+
+        // ── Audio cleanup ─────────────────────────────────────────────────────
+        if (normalizeSteps.length > 0) {
+            brief += `**Audio:** Normalizing levels and removing background noise\n\n`;
+        }
+
+        // ── Mode label ────────────────────────────────────────────────────────
+        if (editMode) {
+            brief += `**Edit mode:** ${editMode.replace(/_/g, ' ')}\n\n`;
+        }
+
+        // ── Total steps ───────────────────────────────────────────────────────
+        brief += `**Total steps:** ${steps.length}\n\n`;
+
+        // ── CTA ──────────────────────────────────────────────────────────────
+        brief += `---\n`;
+        brief += `⚠️ This will modify your timeline. Type **approve** to proceed, or tell me what to change.`;
+
+        return brief;
+    }
+
+    // ── Success Feedback ─────────────────────────────────────────────────────
+
     static generateSuccessFeedback(operation, validation, execution) {
         let message = '';
         let suggestions = [];
@@ -45,75 +147,43 @@ export class AgentFeedbackService {
                 } else {
                     message = '✓ Clip split successfully.';
                 }
-                suggestions = [
-                    'Adjust the cut point',
-                    'Delete one of the clips',
-                    'Split again at another point'
-                ];
+                suggestions = ['Adjust the cut point', 'Delete one of the clips', 'Split again at another point'];
                 break;
             }
-
             case 'remove_clip': {
                 message = '✓ Clip removed from timeline.';
-                suggestions = [
-                    'Undo if that was a mistake',
-                    'Fill the gap with another clip',
-                    'Continue editing'
-                ];
+                suggestions = ['Undo if that was a mistake', 'Fill the gap with another clip', 'Continue editing'];
                 break;
             }
-
             case 'set_clip_speed': {
                 const speed = validation?.outputs?.[0]?.speed;
                 message = `✓ Clip speed set to ${speed}x.`;
-                suggestions = [
-                    'Adjust speed further',
-                    'Reset to normal speed (1x)',
-                    'Apply to other clips'
-                ];
+                suggestions = ['Adjust speed further', 'Reset to normal speed (1x)', 'Apply to other clips'];
                 break;
             }
-
             case 'set_aspect_ratio': {
                 const ratio = validation?.outputs?.[0]?.aspectRatio;
                 message = `✓ Aspect ratio changed to ${ratio}.`;
-                suggestions = [
-                    'Preview the result',
-                    'Try a different ratio',
-                    'Export the video'
-                ];
+                suggestions = ['Preview the result', 'Try a different ratio', 'Export the video'];
                 break;
             }
-
             case 'silence_removal': {
                 message = '✓ Silence detection and removal complete.';
-                suggestions = [
-                    'Review the cuts in the timeline',
-                    'Undo if pacing feels too tight'
-                ];
+                suggestions = ['Review the cuts in the timeline', 'Undo if pacing feels too tight'];
                 break;
             }
-
             case 'remove_filler_words': {
                 message = '✓ Filler words removed from the timeline.';
-                suggestions = [
-                    'Review the cuts',
-                    'Undo if it removed too much'
-                ];
+                suggestions = ['Review the cuts', 'Undo if it removed too much'];
                 break;
             }
-
             case 'undo_action': {
                 message = '✓ Last action undone.';
-                suggestions = [
-                    'Continue editing',
-                    'Redo if needed',
-                    'Start fresh'
-                ];
+                suggestions = ['Continue editing', 'Redo if needed', 'Start fresh'];
                 break;
             }
 
-            // ── Long-Form Intelligence Engine feedback ──────────────────────
+            // ── Long-Form Intelligence Engine ─────────────────────────────────
 
             case 'analyze_structure': {
                 const analysisData = execution?.analysisResult;
@@ -122,14 +192,9 @@ export class AgentFeedbackService {
                 } else {
                     message = '✓ Content analysis complete. Review the plan below.';
                 }
-                suggestions = [
-                    'Approve the edit plan to proceed',
-                    'Request a different edit mode',
-                    'Ask me to find the best hook'
-                ];
+                suggestions = ['Approve the edit plan to proceed', 'Request a different edit mode', 'Ask me to find the best hook'];
                 break;
             }
-
             case 'long_form_edit':
             case 'build_from_rushes': {
                 const planData = execution?.editPlan;
@@ -138,14 +203,9 @@ export class AgentFeedbackService {
                 } else {
                     message = '✓ Long-form edit plan generated.';
                 }
-                suggestions = [
-                    'Approve to execute the plan',
-                    'Ask to adjust pacing or structure',
-                    'Preview the hook first'
-                ];
+                suggestions = ['Approve to execute the plan', 'Ask to adjust pacing or structure', 'Preview the hook first'];
                 break;
             }
-
             case 'find_hook': {
                 const hook = execution?.hookCandidate;
                 if (hook) {
@@ -155,59 +215,34 @@ export class AgentFeedbackService {
                 } else {
                     message = '⚠️ No strong hook detected in the first 40% of the video. Consider recording a dedicated opening.';
                 }
-                suggestions = [
-                    'Move hook to the beginning',
-                    'Choose a different hook segment',
-                    'Preview the hook'
-                ];
+                suggestions = ['Move hook to the beginning', 'Choose a different hook segment', 'Preview the hook'];
                 break;
             }
-
             case 'remove_repetition': {
                 const removed = execution?.removedCount ?? 0;
                 message = removed > 0
                     ? `✓ Removed ${removed} repetitive segment${removed !== 1 ? 's' : ''} from the timeline.`
                     : '✓ No significant repetitions detected.';
-                suggestions = [
-                    'Review the cleaned timeline',
-                    'Undo if anything was removed incorrectly'
-                ];
+                suggestions = ['Review the cleaned timeline', 'Undo if anything was removed incorrectly'];
                 break;
             }
-
             case 'reorder_segment': {
                 message = '✓ Segment moved to new position in the timeline.';
-                suggestions = [
-                    'Preview the result',
-                    'Undo if order doesn\'t feel right',
-                    'Continue structural editing'
-                ];
+                suggestions = ['Preview the result', "Undo if order doesn't feel right", 'Continue structural editing'];
                 break;
             }
 
             default: {
                 message = '✓ Edit completed successfully.';
-                suggestions = [
-                    'Continue editing',
-                    'Preview changes',
-                    'Export when ready'
-                ];
+                suggestions = ['Continue editing', 'Preview changes', 'Export when ready'];
             }
         }
 
-        return {
-            message,
-            suggestions,
-            success: true,
-            operation
-        };
+        return { message, suggestions, success: true, operation };
     }
 
-    // ── Long-Form Specific Formatters ────────────────────────────────────────
+    // ── Long-Form Formatters ──────────────────────────────────────────────────
 
-    /**
-     * Renders a rich content analysis result for the chat UI.
-     */
     static formatAnalysisResult(analysis) {
         const { contentType, editMode, summary, structure, segments } = analysis;
         const hook = structure?.hookCandidate;
@@ -237,74 +272,63 @@ export class AgentFeedbackService {
         return msg;
     }
 
-    /**
-     * Renders a structural edit plan summary for the chat UI.
-     */
     static formatEditPlanResult(editPlan) {
         let msg = `📋 **Long-Form Edit Plan Ready**\n\n`;
         msg += `**Mode:** ${(editPlan.editMode || '').replace(/_/g, ' ')}\n`;
         msg += `**Target duration:** ~${Math.round((editPlan.duration_target || 0) / 60)}m ${Math.round((editPlan.duration_target || 0) % 60)}s\n\n`;
         msg += `**Actions to be performed:**\n`;
-        (editPlan.actions || []).forEach(a => {
-            msg += `  • ${a.replace(/_/g, ' ')}\n`;
-        });
-
+        (editPlan.actions || []).forEach(a => { msg += `  • ${a.replace(/_/g, ' ')}\n`; });
         if (editPlan.requiresApproval) {
             msg += `\n---\n⚠️ **Ready to execute.** Type "approve" to proceed, or request changes.`;
         }
-
         return msg;
     }
 
-    /**
-     * Generate failure feedback
-     */
+    // ── Failure Feedback ──────────────────────────────────────────────────────
+
     static generateFailureFeedback(operation, validation, execution) {
         const error = validation?.error || execution?.error || 'Unknown error';
         let message = '';
         let suggestions = [];
 
-        // Make error message user-friendly
         if (error.includes('not found')) {
-            message = `✗ Couldn't find the clip. Please select a clip first.`;
+            message = '✗ Couldn\'t find the clip. Please select a clip first.';
             suggestions = ['Select a clip in the timeline', 'Try again'];
         } else if (error.includes('outside clip bounds')) {
-            message = `✗ Split point is outside the clip. Try a different position.`;
+            message = '✗ Split point is outside the clip. Try a different position.';
             suggestions = ['Move playhead inside the clip', 'Use "split at midpoint"'];
         } else if (error.includes('cancelled')) {
-            message = `Operation was cancelled.`;
+            message = 'Operation was cancelled.';
             suggestions = ['Try again', 'Choose a different action'];
         } else if (error.includes('timeout')) {
-            message = `✗ Operation took too long and was stopped.`;
+            message = '✗ Operation took too long and was stopped.';
             suggestions = ['Try a simpler edit', 'Check your video file'];
         } else {
             message = `✗ Edit failed: ${error}`;
             suggestions = ['Try again', 'Rephrase your request'];
         }
 
-        return {
-            message,
-            suggestions,
-            success: false,
-            operation,
-            error
-        };
+        return { message, suggestions, success: false, operation, error };
     }
 
-    /**
-     * Format message for display in chat
-     */
+    // ── Chat Formatter ────────────────────────────────────────────────────────
+
     static formatForChat(feedback) {
         let formatted = feedback.message + '\n\n';
-
         if (feedback.suggestions && feedback.suggestions.length > 0) {
             formatted += 'What would you like to do next?\n';
-            feedback.suggestions.forEach((suggestion, i) => {
-                formatted += `• ${suggestion}\n`;
-            });
+            feedback.suggestions.forEach(s => { formatted += `• ${s}\n`; });
         }
-
         return formatted.trim();
+    }
+
+    // ── Internal helpers ──────────────────────────────────────────────────────
+
+    static _formatSeconds(totalSeconds) {
+        if (totalSeconds < 60) return `${totalSeconds}s`;
+        const m = Math.floor(totalSeconds / 60);
+        const s = totalSeconds % 60;
+        return s > 0 ? `${m}m ${s}s` : `${m}m`;
     }
 }
 

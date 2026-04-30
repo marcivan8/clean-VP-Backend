@@ -4,14 +4,14 @@
  * Extracted to prevent circular dependencies.
  */
 
-// Intent types - What the user wants to achieve
+// Intent types — what the user wants to achieve
 export const INTENT_TYPES = {
     EDIT: 'edit',
     CUT: 'cut',
     APPLY_EFFECT: 'apply_effect',
     EXPORT: 'export',
     COMPARE: 'compare',
-    QUERY: 'query',
+    QUERY: 'query',       // ← NEW: "what did you change?", session summary
     UNDO: 'undo',
     REDO: 'redo',
     CREATIVE_EDIT: 'creative_edit',
@@ -39,6 +39,14 @@ export const OPERATIONS = {
     NORMALIZE_AUDIO: 'normalize_audio',
     AUTO_CAPTIONS: 'auto_captions',
     APPLY_PRESET: 'apply_preset',
+
+    // New long-form operations
+    REMOVE_REPEATED_TAKES: 'remove_repeated_takes',       // ← NEW
+    IDENTIFY_QUOTABLE_MOMENTS: 'identify_quotable_moments',  // ← NEW
+    ADJUST_LAST_EDIT: 'adjust_last_edit',            // ← NEW (session memory)
+
+    // Query operations
+    QUERY_SESSION_SUMMARY: 'query_session_summary',           // ← NEW
 
     // Cut operations
     CUT_AT_PLAYHEAD: 'cut_at_playhead',
@@ -77,4 +85,3 @@ export const OPERATIONS = {
     BUILD_FROM_RUSHES: 'build_from_rushes',
     REORDER_SEGMENT: 'reorder_segment',
 };
-

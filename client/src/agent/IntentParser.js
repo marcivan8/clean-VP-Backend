@@ -533,9 +533,41 @@ export class IntentParser {
             };
         }
 
+        // ── Session memory: "what did you change?" ────────────────────────
+        if (/what did you|what have you|show me what|what changed|summarize.*(edit|change)|recap/.test(lower)) {
+            return this.createIntent(INTENT_TYPES.QUERY, 'query_session_summary', {
+                constraints: {}
+            });
+        }
+
+        // ── Session memory: follow-up adjustment references ───────────────
+        // "ease up the pacing", "less aggressive cuts", "you cut too much",
+        // "add some breathing room", "too tight"
+        if (/ease\s*up|less\s*aggressive|too\s*tight|cut\s*too\s*much|breathing\s*room|too\s*fast.*edit|lighten\s*up|back\s*off\s*the\s*cuts/.test(lower)) {
+            // Lazy import to avoid circular dependency at module load time
+            return {
+                intent: INTENT_TYPES.EDIT,
+                operation: 'adjust_last_edit',
+                targets: [],
+                target_track_id: null,
+                constraints: { direction: 'softer', referenceJobId: null },
+                needs_clarification: false,
+                confidence: 'MEDIUM',
+                missingParameters: [],
+            };
+        }
+
+        // ── Session memory: restore / undo the AI's last change ───────────
+        // "restore the intro", "put back the beginning", "undo what you did"
+        if (/restore\s+the|put\s+back|bring\s+back|undo\s+(what\s+you|the\s+last|that\s+edit)/.test(lower)) {
+            return this.createIntent(INTENT_TYPES.UNDO, 'undo_action', {
+                constraints: { scope: 'last_ai_edit' }
+            });
+        }
+
         // ── Could not parse ────────────────────────────────────────────────
         return this.needsClarification(
-            `I didn't quite understand that. Try something like:\n• "split the clip in half"\n• "remove silence"\n• "speed up 2x"\n• "make it vertical (9:16)"\n• "trim to 30 seconds"\n• "export the video"`
+            `I didn't quite understand that. Try something like:\n• "split the clip in half"\n• "remove silence"\n• "speed up 2x"\n• "make it vertical (9:16)"\n• "trim to 30 seconds"\n• "export the video"\n• "what did you change?"`
         );
     }
 

@@ -22,21 +22,18 @@
 // §1  TYPES & CONSTANTS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-/** Execution engines */
 export const ENGINE = Object.freeze({
     STORE: 'store',
     MEDIABUNNY: 'mediabunny',
     API: 'api',
 });
 
-/** Validation levels (only structural done at compile time) */
 export const VALIDATION_LEVEL = Object.freeze({
-    STRUCTURAL: 'structural',   // Compiler: fields present, types correct
-    LOGICAL: 'logical',      // Executor: clip exists, timestamp in bounds
-    RUNTIME: 'runtime',      // Engine:   store method exists, file can be read
+    STRUCTURAL: 'structural',
+    LOGICAL: 'logical',
+    RUNTIME: 'runtime',
 });
 
-/** Per-step compiler outcomes */
 export const OUTCOME = Object.freeze({
     OK: 'OK',
     SKIP: 'SKIP',
@@ -45,7 +42,6 @@ export const OUTCOME = Object.freeze({
     TIMEOUT: 'TIMEOUT',
 });
 
-/** Structural validation error types */
 export const VALIDATION_ERRORS = Object.freeze({
     MISSING_FIELD: 'MISSING_FIELD',
     INVALID_ENUM: 'INVALID_ENUM',
@@ -61,15 +57,6 @@ const COMPILE_TIMEOUT_MS = 200;
 // §2  COMMAND CONTRACT BUILDER
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-/**
- * Build a command that conforms to the CommandContract.
- *
- * @param {string}   engine        - ENGINE.STORE | ENGINE.MEDIABUNNY | ENGINE.API
- * @param {string}   action        - Method/endpoint name
- * @param {object}   args          - Payload
- * @param {object}   meta          - Additional metadata
- * @returns {object} CommandContract
- */
 function cmd(engine, action, args, meta = {}) {
     return {
         engine,
@@ -86,7 +73,7 @@ function cmd(engine, action, args, meta = {}) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// §3  STEP RESULT BUILDERS (explicit outcomes)
+// §3  STEP RESULT BUILDERS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 function ok(stepId, commands, computed = null) {
@@ -106,7 +93,7 @@ function fallbackUsed(stepId, commands, detail) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// §4  STRUCTURAL VALIDATORS (Level 1 — compile-time only)
+// §4  STRUCTURAL VALIDATORS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 function requireFields(step, ...fields) {
@@ -136,35 +123,27 @@ function requireRange(value, min, max, fieldName) {
 // §5  SYMBOLIC HELPERS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-/** Check if a value is a symbolic reference */
 function isSymbolic(val) {
     return typeof val === 'string' && val.startsWith('$');
 }
 
-/** Resolve a value: if symbolic, leave it for the executor; if concrete, use it */
 function resolveOrSymbol(step, field, computedValues) {
-    // Check use_computed first
     if (step.use_computed && computedValues[step.use_computed] !== undefined) {
         return { value: computedValues[step.use_computed], symbolic: false };
     }
     const val = step[field];
-    if (val === undefined || val === null) {
-        return { value: null, symbolic: false };
-    }
-    if (isSymbolic(val)) {
-        return { value: val, symbolic: true };
-    }
+    if (val === undefined || val === null) return { value: null, symbolic: false };
+    if (isSymbolic(val)) return { value: val, symbolic: true };
     return { value: val, symbolic: false };
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// §6  INDIVIDUAL STEP COMPILERS (registered in §7)
+// §6  INDIVIDUAL STEP COMPILERS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 // ── Computation steps ──────────────────────────────────────────────────────────
 
 function compileValidateClipExists(step, ctx) {
-    // Structural: just needs a clip_id or $first_clip
     const clipRef = step.clip_id || '$first_clip';
     return skip(step.step_id, `Validate clip: ${clipRef}`);
 }
@@ -187,14 +166,12 @@ function compileComputeSplitTimestamp(step, ctx) {
     const modeErr = requireEnum(step.mode, validModes, 'split mode');
     if (modeErr) return validationError(step.step_id, modeErr, VALIDATION_ERRORS.INVALID_ENUM);
 
-    // Produce a computed value for downstream steps
     let computedVal;
     if (step.mode === 'playhead') {
         computedVal = '$playhead';
     } else if (step.mode === 'timestamp') {
         computedVal = step.timestamp ?? step.at_time ?? null;
     } else {
-        // midpoint / thirds / quarters — symbolic, resolved by executor
         computedVal = `$computed_split(${step.clip_id || '$first_clip'}, ${step.mode})`;
     }
 
@@ -207,11 +184,7 @@ function compileComputeSplitTimestamp(step, ctx) {
 function compileComputeTrimBounds(step, ctx) {
     return skip(step.step_id, 'Compute trim bounds', {
         key: step.output || 'trim_bounds',
-        value: {
-            trim_amount: step.trim_amount,
-            target_duration: step.target_duration,
-            trim_from: step.trim_from,
-        },
+        value: { trim_amount: step.trim_amount, target_duration: step.target_duration, trim_from: step.trim_from },
     });
 }
 
@@ -226,38 +199,22 @@ function compileComputeSegmentRange(step, ctx) {
 
 function compileAddClip(step, ctx) {
     if (!step.src) return validationError(step.step_id, 'Source required', VALIDATION_ERRORS.MISSING_FIELD);
-    
-    // Auto-resolve first track if none provided
     let trackRef = step.track_id;
     if (!trackRef) {
         trackRef = ctx.state.tracks?.find(t => t.type === 'video')?.id || 'video-0';
     }
-
     const start = step.start || 0;
-    const duration = step.duration || 5.0; // Default 5s
+    const duration = step.duration || 5.0;
     const clipId = `clip_${Date.now()}`;
-
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'addClip', { 
-            trackId: trackRef, 
-            clip: { 
-                id: clipId, 
-                src: step.src, 
-                start: start, 
-                end: start + duration, 
-                duration: duration, 
-                type: step.type || 'video', 
-                name: step.name || 'New Clip' 
-            } 
-        }, {
-            source_step_id: step.step_id,
-            description: `Add clip: ${step.name || step.src}`
-        }),
+        cmd(ENGINE.STORE, 'addClip', {
+            trackId: trackRef,
+            clip: { id: clipId, src: step.src, start, end: start + duration, duration, type: step.type || 'video', name: step.name || 'New Clip' },
+        }, { source_step_id: step.step_id, description: `Add clip: ${step.name || step.src}` }),
     ]);
 }
 
 function compileSplitClip(step, ctx) {
-    // Accept both `timestamp` and `at_time`
     const { value: splitTime, symbolic } = resolveOrSymbol(step, 'timestamp', ctx.computedValues);
     const atTime = step.at_time;
     const resolvedTime = splitTime ?? atTime ?? null;
@@ -273,88 +230,48 @@ function compileSplitClip(step, ctx) {
     if (isSymbolic(trackRef)) symbolicRefs.push(trackRef);
     if (symbolic || isSymbolic(resolvedTime)) symbolicRefs.push(String(resolvedTime));
 
-    const storeCmd = cmd(ENGINE.STORE, 'splitClip', {
-        trackId: trackRef,
-        clipId: clipRef,
-        splitTime: resolvedTime,
-    }, {
-        source_step_id: step.step_id,
-        symbolic_refs: symbolicRefs,
-        description: `Split clip at ${resolvedTime}`,
-    });
-
-    // Generate mediabunny split commands
-    const mbCmd = cmd(ENGINE.MEDIABUNNY, 'splitMedia', {
-        clipId: clipRef,
-        splitTime: resolvedTime,
-    }, {
-        source_step_id: step.step_id,
-        symbolic_refs: symbolicRefs,
-        description: `Media split at ${resolvedTime}`,
-        priority: 1,
-    });
-
-    return ok(step.step_id, [storeCmd, mbCmd]);
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'splitClip', { trackId: trackRef, clipId: clipRef, splitTime: resolvedTime },
+            { source_step_id: step.step_id, symbolic_refs: symbolicRefs, description: `Split clip at ${resolvedTime}` }),
+        cmd(ENGINE.MEDIABUNNY, 'splitMedia', { clipId: clipRef, splitTime: resolvedTime },
+            { source_step_id: step.step_id, symbolic_refs: symbolicRefs, description: `Media split at ${resolvedTime}`, priority: 1 }),
+    ]);
 }
 
 function compileRemoveClip(step, ctx) {
     const clipRef = step.clip_id;
     if (!clipRef) return validationError(step.step_id, 'Missing clip_id', VALIDATION_ERRORS.MISSING_FIELD);
-
     const trackRef = step.track_id || `$track_of(${clipRef})`;
-
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'removeClip', { trackId: trackRef, clipId: clipRef }, {
-            source_step_id: step.step_id,
-            symbolic_refs: isSymbolic(trackRef) ? [trackRef] : [],
-            description: `Remove clip ${clipRef}`,
-        }),
+        cmd(ENGINE.STORE, 'removeClip', { trackId: trackRef, clipId: clipRef },
+            { source_step_id: step.step_id, symbolic_refs: isSymbolic(trackRef) ? [trackRef] : [], description: `Remove clip ${clipRef}` }),
     ]);
 }
 
 function compileRippleDelete(step, ctx) {
-    const atTime = step.at_time;
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'rippleDelete', { atTime }, {
-            source_step_id: step.step_id,
-            description: `Ripple delete at ${atTime}s`,
-        }),
+        cmd(ENGINE.STORE, 'rippleDelete', { atTime: step.at_time },
+            { source_step_id: step.step_id, description: `Ripple delete at ${step.at_time}s` }),
     ]);
 }
 
 function compileTrimClip(step, ctx) {
     const clipRef = step.clip_id;
     if (!clipRef) return validationError(step.step_id, 'Missing clip_id', VALIDATION_ERRORS.MISSING_FIELD);
-
     const bounds = ctx.computedValues[step.use_computed] || {};
     const trimFrom = step.action === 'trim_clip_start' ? 'start' : 'end';
-
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'trimClip', {
-            trackId: step.track_id || `$track_of(${clipRef})`,
-            clipId: clipRef,
-            trimFrom,
-            amount: bounds.trim_amount,
-        }, {
-            source_step_id: step.step_id,
-            description: `Trim clip from ${trimFrom}`,
-        }),
+        cmd(ENGINE.STORE, 'trimClip', { trackId: step.track_id || `$track_of(${clipRef})`, clipId: clipRef, trimFrom, amount: bounds.trim_amount },
+            { source_step_id: step.step_id, description: `Trim clip from ${trimFrom}` }),
     ]);
 }
 
 function compileDuplicateClip(step, ctx) {
     const clipRef = step.clip_id;
     if (!clipRef) return validationError(step.step_id, 'Missing clip_id', VALIDATION_ERRORS.MISSING_FIELD);
-
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'duplicateClip', {
-            trackId: step.track_id || `$track_of(${clipRef})`,
-            clipId: clipRef,
-            insertAfter: step.insert_after ?? true,
-        }, {
-            source_step_id: step.step_id,
-            description: `Duplicate clip ${clipRef}`,
-        }),
+        cmd(ENGINE.STORE, 'duplicateClip', { trackId: step.track_id || `$track_of(${clipRef})`, clipId: clipRef, insertAfter: step.insert_after ?? true },
+            { source_step_id: step.step_id, description: `Duplicate clip ${clipRef}` }),
     ]);
 }
 
@@ -362,44 +279,22 @@ function compileSetSpeed(step, ctx) {
     const speed = step.speed;
     const rangeErr = requireRange(speed, 0.1, 16, 'Speed');
     if (rangeErr) return validationError(step.step_id, rangeErr, VALIDATION_ERRORS.INVALID_RANGE);
-
     const clipRef = step.clip_id || '$first_clip';
-
-    const storeCmd = cmd(ENGINE.STORE, 'setClipSpeed', {
-        trackId: step.track_id || `$track_of(${clipRef})`,
-        clipId: clipRef,
-        speed,
-    }, {
-        source_step_id: step.step_id,
-        description: `Speed ${speed}x`,
-    });
-
-    const mbCmd = cmd(ENGINE.MEDIABUNNY, 'changeSpeed', {
-        clipId: clipRef,
-        speed,
-        maintain_pitch: step.maintain_pitch ?? true,
-    }, {
-        source_step_id: step.step_id,
-        description: `Media speed ${speed}x`,
-        priority: 1,
-    });
-
-    return ok(step.step_id, [storeCmd, mbCmd]);
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'setClipSpeed', { trackId: step.track_id || `$track_of(${clipRef})`, clipId: clipRef, speed },
+            { source_step_id: step.step_id, description: `Speed ${speed}x` }),
+        cmd(ENGINE.MEDIABUNNY, 'changeSpeed', { clipId: clipRef, speed, maintain_pitch: step.maintain_pitch ?? true },
+            { source_step_id: step.step_id, description: `Media speed ${speed}x`, priority: 1 }),
+    ]);
 }
 
 function compileSetAspectRatio(step, ctx) {
     const validRatios = ['16:9', '9:16', '1:1', '4:3', '21:9', '4:5'];
     const enumErr = requireEnum(step.ratio, validRatios, 'aspect ratio');
     if (enumErr) return validationError(step.step_id, enumErr, VALIDATION_ERRORS.INVALID_ENUM);
-
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'setAspectRatio', {
-            ratio: step.ratio,
-            reframeMode: step.reframe_mode || 'auto_center',
-        }, {
-            source_step_id: step.step_id,
-            description: `Aspect ratio → ${step.ratio}`,
-        }),
+        cmd(ENGINE.STORE, 'setAspectRatio', { ratio: step.ratio, reframeMode: step.reframe_mode || 'auto_center' },
+            { source_step_id: step.step_id, description: `Aspect ratio → ${step.ratio}` }),
     ]);
 }
 
@@ -410,48 +305,103 @@ function compileSilenceRemoval(step, ctx) {
         cmd(ENGINE.API, 'silenceDetect', {
             endpoint: '/api/silence/detect',
             method: 'POST',
-            payload: {
-                filename: '$uploaded_file',
-                threshold: step.threshold || '-30dB',
-                min_duration: step.min_duration || 0.5,
-                padding: step.padding || 0.1,
-            },
-        }, {
-            source_step_id: step.step_id,
-            symbolic_refs: ['$uploaded_file'],
-            description: 'Silence detection',
-        }),
+            payload: { filename: '$uploaded_file', threshold: step.threshold || '-30dB', min_duration: step.min_duration || 0.5, padding: step.padding || 0.1 },
+        }, { source_step_id: step.step_id, symbolic_refs: ['$uploaded_file'], description: 'Silence detection' }),
     ]);
 }
 
 function compileAdjustVolume(step, ctx) {
     const rangeErr = requireRange(step.volume, 0, 3, 'Volume');
     if (rangeErr) return validationError(step.step_id, rangeErr, VALIDATION_ERRORS.INVALID_RANGE);
-
     const clipRef = step.clip_id || '$first_clip';
-
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'updateClip', {
-            clipId: clipRef,
-            updates: { volume: step.volume },
-        }, {
-            source_step_id: step.step_id,
-            description: `Volume → ${(step.volume * 100).toFixed(0)}%`,
-        }),
+        cmd(ENGINE.STORE, 'updateClip', { clipId: clipRef, updates: { volume: step.volume } },
+            { source_step_id: step.step_id, description: `Volume → ${(step.volume * 100).toFixed(0)}%` }),
     ]);
 }
 
 function compileMuteClip(step, ctx) {
     const clipRef = step.clip_id || '$first_clip';
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'updateClip', {
-            clipId: clipRef,
-            updates: { muted: true, volume: 0 },
+        cmd(ENGINE.STORE, 'updateClip', { clipId: clipRef, updates: { muted: true, volume: 0 } },
+            { source_step_id: step.step_id, description: `Mute clip ${clipRef}` }),
+    ]);
+}
+
+function compileRemoveFillerWords(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.API, 'fillerDetect', {
+            endpoint: '/api/filler/detect',
+            method: 'POST',
+            payload: { filename: '$uploaded_file', language: step.language || 'en' },
+        }, { source_step_id: step.step_id, symbolic_refs: ['$uploaded_file'], description: 'Remove filler words (ums, uhs)' }),
+    ]);
+}
+
+function compileNormalizeAudio(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.API, 'audioNormalize', {
+            endpoint: '/api/audio/normalize',
+            method: 'POST',
+            payload: { filename: '$uploaded_file', target_lufs: step.target_lufs || -14 },
+        }, { source_step_id: step.step_id, symbolic_refs: ['$uploaded_file'], description: 'Normalize audio levels' }),
+    ]);
+}
+
+function compileDenoiseAudio(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.API, 'audioDenoise', {
+            endpoint: '/api/audio/denoise',
+            method: 'POST',
+            payload: { filename: '$uploaded_file', strength: step.strength || 0.7 },
+        }, { source_step_id: step.step_id, symbolic_refs: ['$uploaded_file'], description: 'Remove background noise' }),
+    ]);
+}
+
+// ── NEW: remove_repeated_takes ─────────────────────────────────────────────────
+
+/**
+ * Detects repeated takes / speaker restarts and cuts them.
+ * Routes to ENGINE.API → /api/ai/detect-repeated-takes.
+ * If that endpoint doesn't exist yet, the API call returns gracefully
+ * and the executor moves on — no crash.
+ */
+function compileRemoveRepeatedTakes(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.API, 'detectRepeatedTakes', {
+            endpoint: '/api/ai/detect-repeated-takes',
+            method: 'POST',
+            payload: {
+                filename: '$uploaded_file',
+                lookback_window: step.lookback_window || 60,
+                similarity_threshold: step.similarity_threshold || 0.72,
+            },
         }, {
             source_step_id: step.step_id,
-            description: `Mute clip ${clipRef}`,
+            symbolic_refs: ['$uploaded_file'],
+            description: 'Detect and remove repeated takes / restart moments',
         }),
     ]);
+}
+
+// ── NEW: identify_quotable_moments ─────────────────────────────────────────────
+
+/**
+ * Analysis-only step — no edits are executed.
+ * Deposits its configuration into ctx.computedValues so downstream steps
+ * or the UI can access the quotable moments config.
+ * The actual filtering happens in VideoEditorTools / ContentAnalyzer at runtime.
+ */
+function compileIdentifyQuotableMoments(step, ctx) {
+    return skip(step.step_id, 'Identify quotable moments (analysis only — no edits)', {
+        key: 'quotable_moments_config',
+        value: {
+            min_duration: step.min_duration || 15,
+            max_duration: step.max_duration || 90,
+            min_importance: step.min_importance || 0.6,
+            max_results: step.max_results || 5,
+        },
+    });
 }
 
 // ── Effect commands ────────────────────────────────────────────────────────────
@@ -460,29 +410,16 @@ function compileAddTransition(step, ctx) {
     const validTypes = ['fade', 'dissolve', 'wipe', 'slide', 'zoom'];
     const enumErr = requireEnum(step.type, validTypes, 'transition type');
     if (enumErr) return validationError(step.step_id, enumErr, VALIDATION_ERRORS.INVALID_ENUM);
-
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'addTransition', {
-            clipId: step.clip_id || '$first_clip',
-            type: step.type || 'fade',
-            duration: step.duration || 0.5,
-        }, {
-            source_step_id: step.step_id,
-            description: `Add ${step.type || 'fade'} transition`,
-        }),
+        cmd(ENGINE.STORE, 'addTransition', { clipId: step.clip_id || '$first_clip', type: step.type || 'fade', duration: step.duration || 0.5 },
+            { source_step_id: step.step_id, description: `Add ${step.type || 'fade'} transition` }),
     ]);
 }
 
 function compileAddFilter(step, ctx) {
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'addFilter', {
-            clipId: step.clip_id || '$first_clip',
-            filterType: step.filter_type,
-            intensity: step.intensity || 0.5,
-        }, {
-            source_step_id: step.step_id,
-            description: `Add ${step.filter_type} filter`,
-        }),
+        cmd(ENGINE.STORE, 'addFilter', { clipId: step.clip_id || '$first_clip', filterType: step.filter_type, intensity: step.intensity || 0.5 },
+            { source_step_id: step.step_id, description: `Add ${step.filter_type} filter` }),
     ]);
 }
 
@@ -490,17 +427,9 @@ function compileAddText(step, ctx) {
     if (!step.text || !String(step.text).trim()) {
         return validationError(step.step_id, 'Text content required', VALIDATION_ERRORS.MISSING_FIELD);
     }
-
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'addTextOverlay', {
-            text: String(step.text).trim(),
-            position: step.position || 'center',
-            duration: step.duration || 5.0,
-            style: step.style || 'default',
-        }, {
-            source_step_id: step.step_id,
-            description: `Add text: "${step.text}"`,
-        }),
+        cmd(ENGINE.STORE, 'addTextOverlay', { text: String(step.text).trim(), position: step.position || 'center', duration: step.duration || 5.0, style: step.style || 'default' },
+            { source_step_id: step.step_id, description: `Add text: "${step.text}"` }),
     ]);
 }
 
@@ -508,29 +437,26 @@ function compileAddCaption(step, ctx) {
     if (!step.text || !String(step.text).trim()) {
         return validationError(step.step_id, 'Caption text required', VALIDATION_ERRORS.MISSING_FIELD);
     }
-
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'addTextOverlay', {
-            text: String(step.text).trim(),
-            position: step.position || 'bottom', // Captions default to bottom
-            duration: step.duration || 3.0,
-            style: step.style || 'subtitle',
-        }, {
-            source_step_id: step.step_id,
-            description: `Add caption: "${step.text}"`,
-        }),
+        cmd(ENGINE.STORE, 'addTextOverlay', { text: String(step.text).trim(), position: step.position || 'bottom', duration: step.duration || 3.0, style: step.style || 'subtitle' },
+            { source_step_id: step.step_id, description: `Add caption: "${step.text}"` }),
     ]);
 }
 
 function compileColorGrade(step, ctx) {
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'applyColorGrade', {
-            clipId: step.clip_id || '$first_clip',
-            adjustments: step.adjustments || {},
-        }, {
-            source_step_id: step.step_id,
-            description: 'Apply color grade',
-        }),
+        cmd(ENGINE.STORE, 'applyColorGrade', { clipId: step.clip_id || '$first_clip', adjustments: step.adjustments || {} },
+            { source_step_id: step.step_id, description: 'Apply color grade' }),
+    ]);
+}
+
+function compileAutoCaptions(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.API, 'autoCaptions', {
+            endpoint: '/api/captions/generate',
+            method: 'POST',
+            payload: { filename: '$uploaded_file', language: step.language || 'en', style: step.style || 'default' },
+        }, { source_step_id: step.step_id, symbolic_refs: ['$uploaded_file'], description: 'Generate auto-captions' }),
     ]);
 }
 
@@ -539,13 +465,10 @@ function compileColorGrade(step, ctx) {
 function compileValidateExportSettings(step, ctx) {
     const validFormats = ['mp4', 'mov', 'webm', 'gif'];
     const validQualities = ['4k', '1080p', '720p', '480p'];
-
     const fmtErr = requireEnum(step.format, validFormats, 'export format');
     if (fmtErr) return validationError(step.step_id, fmtErr, VALIDATION_ERRORS.INVALID_ENUM);
-
     const qErr = requireEnum(step.quality, validQualities, 'export quality');
     if (qErr) return validationError(step.step_id, qErr, VALIDATION_ERRORS.INVALID_ENUM);
-
     return skip(step.step_id, 'Export settings validated');
 }
 
@@ -557,19 +480,9 @@ function compilePrepareExport(step, ctx) {
         '480p': { width: 854, height: 480, bitrate: '2M' },
     };
     const q = qualityMap[step.quality] || qualityMap['1080p'];
-
     return ok(step.step_id, [
-        cmd(ENGINE.MEDIABUNNY, 'convertFormat', {
-            format: step.format || 'mp4',
-            codec: step.codec || 'h264',
-            audioCodec: step.audio_codec || 'aac',
-            width: q.width,
-            height: q.height,
-            bitrate: q.bitrate,
-        }, {
-            source_step_id: step.step_id,
-            description: `Export ${step.quality || '1080p'} ${step.format || 'mp4'}`,
-        }),
+        cmd(ENGINE.MEDIABUNNY, 'convertFormat', { format: step.format || 'mp4', codec: step.codec || 'h264', audioCodec: step.audio_codec || 'aac', width: q.width, height: q.height, bitrate: q.bitrate },
+            { source_step_id: step.step_id, description: `Export ${step.quality || '1080p'} ${step.format || 'mp4'}` }),
     ]);
 }
 
@@ -579,11 +492,7 @@ function compileQueueExport(step, ctx) {
             endpoint: '/api/export/queue',
             method: 'POST',
             payload: { commands: '$computed.export_commands' },
-        }, {
-            source_step_id: step.step_id,
-            symbolic_refs: ['$computed.export_commands'],
-            description: 'Queue export job',
-        }),
+        }, { source_step_id: step.step_id, symbolic_refs: ['$computed.export_commands'], description: 'Queue export job' }),
     ]);
 }
 
@@ -591,119 +500,42 @@ function compileQueueExport(step, ctx) {
 
 function compileUndo(step) {
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'undo', {}, {
-            source_step_id: step.step_id,
-            description: 'Undo',
-        }),
+        cmd(ENGINE.STORE, 'undo', {}, { source_step_id: step.step_id, description: 'Undo' }),
     ]);
 }
 
 function compileRedo(step) {
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'redo', {}, {
-            source_step_id: step.step_id,
-            description: 'Redo',
-        }),
+        cmd(ENGINE.STORE, 'redo', {}, { source_step_id: step.step_id, description: 'Redo' }),
     ]);
 }
 
-// ── AI / Audio operations (Bug 4 fix) ─────────────────────────────────────────
-
-function compileRemoveFillerWords(step, ctx) {
-    return ok(step.step_id, [
-        cmd(ENGINE.API, 'fillerDetect', {
-            endpoint: '/api/filler/detect',
-            method: 'POST',
-            payload: {
-                filename: '$uploaded_file',
-                language: step.language || 'en',
-            },
-        }, {
-            source_step_id: step.step_id,
-            symbolic_refs: ['$uploaded_file'],
-            description: 'Remove filler words (ums, uhs)',
-        }),
-    ]);
-}
-
-function compileNormalizeAudio(step, ctx) {
-    return ok(step.step_id, [
-        cmd(ENGINE.API, 'audioNormalize', {
-            endpoint: '/api/audio/normalize',
-            method: 'POST',
-            payload: {
-                filename: '$uploaded_file',
-                target_lufs: step.target_lufs || -14,
-            },
-        }, {
-            source_step_id: step.step_id,
-            symbolic_refs: ['$uploaded_file'],
-            description: 'Normalize audio levels',
-        }),
-    ]);
-}
-
-function compileDenoiseAudio(step, ctx) {
-    return ok(step.step_id, [
-        cmd(ENGINE.API, 'audioDenoise', {
-            endpoint: '/api/audio/denoise',
-            method: 'POST',
-            payload: {
-                filename: '$uploaded_file',
-                strength: step.strength || 0.7,
-            },
-        }, {
-            source_step_id: step.step_id,
-            symbolic_refs: ['$uploaded_file'],
-            description: 'Remove background noise',
-        }),
-    ]);
-}
-
-// Long-Form AI operations route through ENGINE.STORE (VideoEditorTools handles them)
+// ── Long-Form AI operations ────────────────────────────────────────────────────
 
 function compileAnalyzeStructure(step, ctx) {
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'analyzeStructure', {
-            platform: step.platform || null,
-            targetDuration: step.targetDuration || null,
-        }, {
-            source_step_id: step.step_id,
-            description: 'Semantic content analysis',
-        }),
+        cmd(ENGINE.STORE, 'analyzeStructure', { platform: step.platform || null, targetDuration: step.targetDuration || null },
+            { source_step_id: step.step_id, description: 'Semantic content analysis' }),
     ]);
 }
 
 function compileLongFormEdit(step, ctx) {
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'longFormEdit', {
-            editMode: step.editMode || 'CLEAN_EDIT',
-            platform: step.platform || null,
-            targetDuration: step.targetDuration || null,
-        }, {
-            source_step_id: step.step_id,
-            description: `Long-form edit (${step.editMode || 'CLEAN_EDIT'})`,
-        }),
+        cmd(ENGINE.STORE, 'longFormEdit', { editMode: step.editMode || 'CLEAN_EDIT', platform: step.platform || null, targetDuration: step.targetDuration || null },
+            { source_step_id: step.step_id, description: `Long-form edit (${step.editMode || 'CLEAN_EDIT'})` }),
     ]);
 }
 
 function compileFindHook(step, ctx) {
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'findHook', {}, {
-            source_step_id: step.step_id,
-            description: 'Find best hook moment',
-        }),
+        cmd(ENGINE.STORE, 'findHook', {}, { source_step_id: step.step_id, description: 'Find best hook moment' }),
     ]);
 }
 
 function compileRemoveRepetition(step, ctx) {
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'removeRepetition', {
-            importance_threshold: step.importance_threshold || 0.3,
-        }, {
-            source_step_id: step.step_id,
-            description: 'Remove repetitive / low-value segments',
-        }),
+        cmd(ENGINE.STORE, 'removeRepetition', { importance_threshold: step.importance_threshold || 0.3 },
+            { source_step_id: step.step_id, description: 'Remove repetitive / low-value segments' }),
     ]);
 }
 
@@ -711,33 +543,8 @@ function compileReorderSegment(step, ctx) {
     const clipRef = step.clip_id || '$first_clip';
     const trackRef = step.track_id || `$track_of(${clipRef})`;
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'reorderSegment', {
-            clipId: clipRef,
-            trackId: trackRef,
-            targetPosition: step.targetPosition ?? 0,
-        }, {
-            source_step_id: step.step_id,
-            symbolic_refs: [clipRef, trackRef].filter(v => String(v).startsWith('$')),
-            description: `Reorder segment to ${step.targetPosition ?? 0}s`,
-        }),
-    ]);
-}
-
-function compileAutoCaptions(step, ctx) {
-    return ok(step.step_id, [
-        cmd(ENGINE.API, 'autoCaptions', {
-            endpoint: '/api/captions/generate',
-            method: 'POST',
-            payload: {
-                filename: '$uploaded_file',
-                language: step.language || 'en',
-                style: step.style || 'default',
-            },
-        }, {
-            source_step_id: step.step_id,
-            symbolic_refs: ['$uploaded_file'],
-            description: 'Generate auto-captions',
-        }),
+        cmd(ENGINE.STORE, 'reorderSegment', { clipId: clipRef, trackId: trackRef, targetPosition: step.targetPosition ?? 0 },
+            { source_step_id: step.step_id, symbolic_refs: [clipRef, trackRef].filter(v => String(v).startsWith('$')), description: `Reorder segment to ${step.targetPosition ?? 0}s` }),
     ]);
 }
 
@@ -745,10 +552,6 @@ function compileAutoCaptions(step, ctx) {
 // §7  COMMAND REGISTRY
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-/**
- * Registry entry: { compiler, engine, requiredFields }
- * The compiler is a pure function: (step, context) → StepResult
- */
 const COMMAND_REGISTRY = new Map([
     // Computation steps
     ['validate_clip_exists', { compiler: compileValidateClipExists }],
@@ -773,11 +576,14 @@ const COMMAND_REGISTRY = new Map([
     ['silence_removal', { compiler: compileSilenceRemoval }],
     ['adjust_volume', { compiler: compileAdjustVolume }],
     ['mute_clip', { compiler: compileMuteClip }],
-    // AI Audio (Bug 4 fix)
     ['remove_filler_words', { compiler: compileRemoveFillerWords }],
-    ['normalize_audio',     { compiler: compileNormalizeAudio }],
-    ['denoise_audio',       { compiler: compileDenoiseAudio }],
-    ['audio_denoise',       { compiler: compileDenoiseAudio }],   // alias from IntentParser
+    ['normalize_audio', { compiler: compileNormalizeAudio }],
+    ['denoise_audio', { compiler: compileDenoiseAudio }],
+    ['audio_denoise', { compiler: compileDenoiseAudio }],  // alias
+
+    // NEW long-form audio/analysis steps
+    ['remove_repeated_takes', { compiler: compileRemoveRepeatedTakes }],
+    ['identify_quotable_moments', { compiler: compileIdentifyQuotableMoments }],
 
     // Effect commands
     ['add_transition', { compiler: compileAddTransition }],
@@ -792,12 +598,12 @@ const COMMAND_REGISTRY = new Map([
     ['prepare_export', { compiler: compilePrepareExport }],
     ['queue_export', { compiler: compileQueueExport }],
 
-    // Long-Form AI (Bug 4 fix)
-    ['analyze_structure',  { compiler: compileAnalyzeStructure }],
-    ['long_form_edit',     { compiler: compileLongFormEdit }],
-    ['find_hook',          { compiler: compileFindHook }],
-    ['remove_repetition',  { compiler: compileRemoveRepetition }],
-    ['reorder_segment',    { compiler: compileReorderSegment }],
+    // Long-Form AI
+    ['analyze_structure', { compiler: compileAnalyzeStructure }],
+    ['long_form_edit', { compiler: compileLongFormEdit }],
+    ['find_hook', { compiler: compileFindHook }],
+    ['remove_repetition', { compiler: compileRemoveRepetition }],
+    ['reorder_segment', { compiler: compileReorderSegment }],
 
     // Undo / Redo
     ['undo_action', { compiler: compileUndo }],
@@ -811,57 +617,38 @@ const COMMAND_REGISTRY = new Map([
 function compileFallback(step, ctx) {
     const action = step.action;
     console.warn(`[CommandCompiler] ⚠️ No registry entry for "${action}" — using fallback`);
-
-    // If the step has enough shape for a generic store command, build one
     if (action && typeof action === 'string') {
         const args = { ...step };
         delete args.action;
         delete args.step_id;
-
         return fallbackUsed(step.step_id, [
-            cmd(ENGINE.STORE, action, args, {
-                source_step_id: step.step_id,
-                description: `Fallback: ${action}`,
-            }),
+            cmd(ENGINE.STORE, action, args, { source_step_id: step.step_id, description: `Fallback: ${action}` }),
         ], `Unregistered action "${action}" compiled via fallback`);
     }
-
     return validationError(step.step_id, `Unknown action: ${action}`, VALIDATION_ERRORS.UNKNOWN_ACTION);
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// §9  MAIN COMPILER (pure, synchronous, timeout-guarded)
+// §9  MAIN COMPILER
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export class CommandCompiler {
-    /**
-     * Compile an edit plan into executable CommandContract[].
-     *
-     * PURE FUNCTION — no side effects, no store access.
-     *
-     * @param {object} plan            - Edit plan from EditPlanner
-     * @param {object} stateSnapshot   - Result of useTimelineStore.getState() (passed by caller)
-     * @param {object} mediaMetadata   - Optional media info
-     * @returns {object} CompilerResult
-     */
     static compile(plan, stateSnapshot = {}, mediaMetadata = {}) {
         console.log(`[CommandCompiler] Compiling plan: ${plan?.plan_id}`);
 
-        // SAFETY GUARDRAIL: Confidence Check
-        // The agent must resolve all ambiguities before compilation
-        if (plan?.intent && plan.intent.confidence !== 'HIGH') {
-            console.error(`[CommandCompiler] Cannot compile plan with ${plan.intent.confidence} confidence.`);
+        // Confidence gate — block only LOW confidence, not MEDIUM
+        if (plan?.intent && plan.intent.confidence === 'LOW') {
+            console.error(`[CommandCompiler] Cannot compile plan with LOW confidence.`);
             return {
                 success: false,
                 plan_id: plan?.plan_id,
-                error: `INTENT_ERROR: Cannot compile plan with ${plan.intent.confidence} confidence. Clarification required.`,
+                error: 'INTENT_ERROR: Cannot compile plan with LOW confidence. Clarification required.',
                 commands: [],
                 outcomes: [],
-                stats: { ok: 0, skipped: 0, errors: 1, fallbacks: 0 }
+                stats: { ok: 0, skipped: 0, errors: 1, fallbacks: 0 },
             };
         }
 
-        // ── Validate plan structure ──
         if (!plan || !plan.steps || plan.steps.length === 0) {
             console.error('[CommandCompiler] Empty or invalid plan');
             return {
@@ -874,54 +661,37 @@ export class CommandCompiler {
             };
         }
 
-        // ── Context (immutable during compilation) ──
         const ctx = Object.freeze({
             state: stateSnapshot,
             mediaMetadata,
-            computedValues: {},   // mutable: steps can deposit computed values
+            computedValues: {},
         });
 
         const commands = [];
         const outcomes = [];
         const stats = { ok: 0, skipped: 0, errors: 0, fallbacks: 0 };
-
-        // ── Hard timeout guard ──
         const deadline = performance.now() + COMPILE_TIMEOUT_MS;
 
         console.log(`[CommandCompiler] Processing ${plan.steps.length} steps...`);
 
         for (const step of plan.steps) {
-            // Timeout check
             if (performance.now() > deadline) {
                 console.error(`[CommandCompiler] ⏱ Timeout after ${COMPILE_TIMEOUT_MS}ms`);
-                outcomes.push({
-                    step_id: step.step_id,
-                    outcome: OUTCOME.TIMEOUT,
-                    detail: `Compilation exceeded ${COMPILE_TIMEOUT_MS}ms deadline`,
-                });
+                outcomes.push({ step_id: step.step_id, outcome: OUTCOME.TIMEOUT, detail: `Compilation exceeded ${COMPILE_TIMEOUT_MS}ms deadline` });
                 stats.errors++;
                 break;
             }
 
             try {
-                // Look up compiler in registry
                 const entry = COMMAND_REGISTRY.get(step.action);
                 const compiler = entry ? entry.compiler : compileFallback;
-
-                // Pass step.action through so trim_clip_start/end is visible inside compileTrimClip
                 const result = compiler(step, ctx);
 
-                // Accumulate computed values for downstream steps
                 if (result.computed) {
                     ctx.computedValues[result.computed.key] = result.computed.value;
                 }
 
-                // Track outcome
-                outcomes.push({
-                    step_id: result.step_id,
-                    outcome: result.outcome,
-                    detail: result.detail || null,
-                });
+                outcomes.push({ step_id: result.step_id, outcome: result.outcome, detail: result.detail || null });
 
                 switch (result.outcome) {
                     case OUTCOME.OK:
@@ -942,11 +712,7 @@ export class CommandCompiler {
                 }
             } catch (err) {
                 console.error(`[CommandCompiler] Exception in step ${step.step_id}:`, err);
-                outcomes.push({
-                    step_id: step.step_id,
-                    outcome: OUTCOME.VALIDATION_ERROR,
-                    detail: err.message,
-                });
+                outcomes.push({ step_id: step.step_id, outcome: OUTCOME.VALIDATION_ERROR, detail: err.message });
                 stats.errors++;
             }
         }
@@ -957,27 +723,17 @@ export class CommandCompiler {
             `[CommandCompiler] ${success ? '✅' : '❌'} Compiled: ${stats.ok} OK, ${stats.skipped} skipped, ${stats.errors} errors, ${stats.fallbacks} fallbacks → ${commands.length} commands`
         );
 
-        return {
-            success,
-            plan_id: plan.plan_id,
-            command_count: commands.length,
-            commands,
-            outcomes,
-            stats,
-        };
+        return { success, plan_id: plan.plan_id, command_count: commands.length, commands, outcomes, stats };
     }
 
-    /** List all registered action names */
     static get registeredActions() {
         return [...COMMAND_REGISTRY.keys()];
     }
 
-    /** Check if an action is registered */
     static isRegistered(action) {
         return COMMAND_REGISTRY.has(action);
     }
 
-    /** Register a custom compiler at runtime */
     static register(action, compiler) {
         COMMAND_REGISTRY.set(action, { compiler });
     }
