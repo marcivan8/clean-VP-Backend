@@ -398,4 +398,16 @@ export class NLEExportService {
     }
 }
 
+export const exportToNLE = (format, tracks, opts = {}) => {
+    const duration = Math.max(...tracks.flatMap(t => t.clips || []).map(c => (c.start || 0) + (c.duration || 0)), 0);
+    const timelineState = {
+        tracks,
+        duration,
+        aspectRatio: opts.aspectRatio || '16:9'
+    };
+    return NLEExportService.export(format, timelineState);
+};
+
+export const getNLEFormats = () => NLEExportService.getSupportedFormats();
+
 export default NLEExportService;
