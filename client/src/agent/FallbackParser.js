@@ -1,196 +1,255 @@
 /**
- * FallbackParser - Regex-based Intent Parser for Offline Mode
- * 
- * When the AI/LLM is unavailable, this parser uses pattern matching
- * to handle common editing commands.
- * 
- * Features:
- * - Regex patterns for common commands
- * - Low-confidence intents (flagged for review)
- * - Graceful degradation
- * - Extensible pattern library
+ * FallbackParser — Enhanced
+ *
+ * Covers a much wider vocabulary of natural user speech,
+ * including casual, abbreviated, and domain-specific phrasings.
  */
 
 import { EventBus, EVENT_TYPES } from './EventBus.js';
 
-// Pattern definitions: regex -> intent generator
 const PATTERNS = [
-    // Time-based cuts
+    // ── SPLIT ──────────────────────────────────────────────────────────────
     {
-        regex: /^(?:cut|split)\s+(?:at\s+)?(\d+(?:\.\d+)?)\s*(?:s(?:ec(?:ond)?s?)?)?$/i,
-        intent: (match) => ({
-            type: 'split',
-            action: 'split_clip',
-            time: parseFloat(match[1]),
-            confidence: 'high'
-        })
+        regex: /^(?:split|cut in half|divide|chop|bisect|cut into (?:2|two))\s*(?:the\s+)?(?:clip|video)?$/i,
+        intent: () => ({ type: 'edit', action: 'split_clip', constraints: { mode: 'midpoint' }, confidence: 'high' })
     },
 
-    // Trim operations
     {
-        regex: /^trim\s+(?:from\s+)?(\d+(?:\.\d+)?)\s*(?:s(?:ec)?s?)?\s+(?:to\s+)?(\d+(?:\.\d+)?)\s*(?:s(?:ec)?s?)?$/i,
-        intent: (match) => ({
-            type: 'trim',
-            action: 'trim_clip',
-            startTime: parseFloat(match[1]),
-            endTime: parseFloat(match[2]),
-            confidence: 'high'
-        })
+        regex: /^(?:split|cut)\s+(?:at\s+)?(\d+(?:\.\d+)?)\s*(?:s(?:ec(?:ond)?s?)?)?$/i,
+        intent: (m) => ({ type: 'edit', action: 'split_clip', constraints: { mode: 'timestamp', timestamp: parseFloat(m[1]) }, confidence: 'high' })
     },
 
-    // Silence removal
     {
-        regex: /^(?:remove|delete|cut)\s+(?:the\s+)?silence(?:\s+from\s+.*)?$/i,
-        intent: () => ({
-            type: 'silence_removal',
-            action: 'silence_removal',
-            threshold: '-30dB',
-            confidence: 'medium'
-        })
+        regex: /^(?:split|cut)\s+(?:at\s+)?(\d{1,2}):(\d{2})$/i,
+        intent: (m) => ({ type: 'edit', action: 'split_clip', constraints: { mode: 'timestamp', timestamp: parseInt(m[1]) * 60 + parseInt(m[2]) }, confidence: 'high' })
     },
 
-    // Speed changes
     {
-        regex: /^(?:speed\s+up|faster)\s*(?:by\s+)?(\d+(?:\.\d+)?)?x?$/i,
-        intent: (match) => ({
-            type: 'speed_change',
-            action: 'change_speed',
-            speed: match[1] ? parseFloat(match[1]) : 2.0,
-            confidence: 'high'
-        })
-    },
-    {
-        regex: /^(?:slow\s+down|slower)\s*(?:by\s+)?(\d+(?:\.\d+)?)?x?$/i,
-        intent: (match) => ({
-            type: 'speed_change',
-            action: 'change_speed',
-            speed: match[1] ? 1 / parseFloat(match[1]) : 0.5,
-            confidence: 'high'
-        })
-    },
-    {
-        regex: /^(?:set\s+)?speed\s+(?:to\s+)?(\d+(?:\.\d+)?)x?$/i,
-        intent: (match) => ({
-            type: 'speed_change',
-            action: 'change_speed',
-            speed: parseFloat(match[1]),
-            confidence: 'high'
-        })
+        regex: /^(?:split|cut|divide)\s+(?:in(?:to)?\s+)?(?:thirds?|3|three)/i,
+        intent: () => ({ type: 'edit', action: 'split_clip', constraints: { mode: 'thirds' }, confidence: 'high' })
     },
 
-    // Aspect ratio
     {
-        regex: /^(?:change|set)\s+(?:aspect\s+)?ratio\s+(?:to\s+)?(\d+:\d+|vertical|horizontal|square|portrait|landscape)$/i,
-        intent: (match) => {
-            const ratioMap = {
-                'vertical': '9:16',
-                'portrait': '9:16',
-                'horizontal': '16:9',
-                'landscape': '16:9',
-                'square': '1:1'
-            };
-            const ratio = ratioMap[match[1].toLowerCase()] || match[1];
-            return {
-                type: 'aspect_ratio',
-                action: 'set_aspect_ratio',
-                ratio,
-                confidence: 'high'
-            };
+        regex: /^(?:split|cut|divide)\s+(?:in(?:to)?\s+)?(?:quarters?|4|four)/i,
+        intent: () => ({ type: 'edit', action: 'split_clip', constraints: { mode: 'quarters' }, confidence: 'high' })
+    },
+
+    // ── TRIM ───────────────────────────────────────────────────────────────
+    {
+        regex: /^(?:trim|cut|shorten)\s+(?:to\s+)?(\d+(?:\.\d+)?)\s*(?:s(?:ec(?:ond)?s?)?)/i,
+        intent: (m) => ({ type: 'edit', action: 'trim_clip', constraints: { targetDuration: parseFloat(m[1]), from: 'end' }, confidence: 'high' })
+    },
+
+    {
+        regex: /^(?:trim|cut|remove|chop|shorten)\s+(?:the\s+)?(?:first|start|beginning)\s+(\d+(?:\.\d+)?)\s*(?:s(?:ec)?s?)?/i,
+        intent: (m) => ({ type: 'edit', action: 'trim_clip', constraints: { duration: parseFloat(m[1]), from: 'start' }, confidence: 'high' })
+    },
+
+    {
+        regex: /^(?:trim|cut|remove|chop)\s+(?:the\s+)?(?:last|end|ending)\s+(\d+(?:\.\d+)?)\s*(?:s(?:ec)?s?)?/i,
+        intent: (m) => ({ type: 'edit', action: 'trim_clip', constraints: { duration: parseFloat(m[1]), from: 'end' }, confidence: 'high' })
+    },
+
+    {
+        regex: /^(?:trim|shorten|make\s+(?:it\s+)?shorter)(?:\s+(?:by\s+)?(\d+(?:\.\d+)?)\s*s(?:ec)?s?)?$/i,
+        intent: (m) => ({ type: 'edit', action: 'trim_clip', constraints: { duration: m[1] ? parseFloat(m[1]) : null, from: 'end' }, confidence: m[1] ? 'high' : 'medium' })
+    },
+
+    {
+        regex: /^(?:trim|cut|remove)\s+(?:from\s+)?(\d{1,2}:\d{2})\s+(?:to|-)\s+(\d{1,2}:\d{2})/i,
+        intent: (m) => {
+            const parseTC = (tc) => { const [a, b] = tc.split(':').map(Number); return a * 60 + b; };
+            return { type: 'cut', action: 'cut_segment', constraints: { start: parseTC(m[1]), end: parseTC(m[2]) }, confidence: 'high' };
         }
     },
 
-    // Delete/Remove clip
+    // ── SILENCE REMOVAL ────────────────────────────────────────────────────
     {
-        regex: /^(?:delete|remove)\s+(?:the\s+)?(?:current\s+)?(?:clip|selection)$/i,
-        intent: () => ({
-            type: 'delete',
-            action: 'delete_clip',
-            target: 'selected',
+        regex: /^(?:remove|delete|cut|eliminate|clean)\s+(?:the\s+)?(?:silence|silences|dead\s+air|pauses?|gaps?|quiet\s+parts?)(?:\s+.*)?$/i,
+        intent: () => ({ type: 'edit', action: 'silence_removal', constraints: { threshold: '-30dB' }, confidence: 'high' })
+    },
+
+    {
+        regex: /^(?:auto[\s-]?trim|tighten\s+(?:the\s+)?(?:audio|video|clip)|clean\s+up\s+(?:the\s+)?audio)$/i,
+        intent: () => ({ type: 'edit', action: 'silence_removal', constraints: { threshold: '-30dB' }, confidence: 'high' })
+    },
+
+    {
+        regex: /^(?:remove|cut|strip)\s+(?:filler|um+s?|uh+s?|erm+s?|like+s?)\s*(?:words?)?$/i,
+        intent: () => ({ type: 'edit', action: 'remove_filler_words', confidence: 'high' })
+    },
+
+    // ── SPEED ──────────────────────────────────────────────────────────────
+    {
+        regex: /^(?:speed\s+up|make\s+(?:it\s+)?faster?)\s*(?:(?:by\s+)?(\d+(?:\.\d+)?)x?)?$/i,
+        intent: (m) => ({ type: 'edit', action: 'set_clip_speed', constraints: { speed: m[1] ? parseFloat(m[1]) : 2.0 }, confidence: 'high' })
+    },
+
+    {
+        regex: /^(?:slow\s+(?:it\s+)?down|make\s+(?:it\s+)?slower)\s*(?:(?:by\s+)?(\d+(?:\.\d+)?)x?)?$/i,
+        intent: (m) => ({ type: 'edit', action: 'set_clip_speed', constraints: { speed: m[1] ? 1 / parseFloat(m[1]) : 0.5 }, confidence: 'high' })
+    },
+
+    {
+        regex: /^(?:set\s+)?(?:speed\s+(?:to\s+)?|play(?:back)?\s+(?:at\s+)?)(\d+(?:\.\d+)?)x?$/i,
+        intent: (m) => ({ type: 'edit', action: 'set_clip_speed', constraints: { speed: parseFloat(m[1]) }, confidence: 'high' })
+    },
+
+    {
+        regex: /^(?:slow[\s-]?motion|slo[\s-]?mo)$/i,
+        intent: () => ({ type: 'edit', action: 'set_clip_speed', constraints: { speed: 0.5 }, confidence: 'high' })
+    },
+
+    {
+        regex: /^(?:timelapse|time[\s-]?lapse)$/i,
+        intent: () => ({ type: 'edit', action: 'set_clip_speed', constraints: { speed: 4.0 }, confidence: 'high' })
+    },
+
+    // ── ASPECT RATIO ───────────────────────────────────────────────────────
+    {
+        regex: /^(?:change|set|convert|make|switch)\s+(?:to\s+)?(?:vertical|portrait|9:16|tiktok|reels?|shorts?)(?:\s+(?:format|mode|view))?$/i,
+        intent: () => ({ type: 'edit', action: 'set_aspect_ratio', constraints: { ratio: '9:16' }, confidence: 'high' })
+    },
+
+    {
+        regex: /^(?:change|set|convert|make|switch)\s+(?:to\s+)?(?:horizontal|landscape|16:9|youtube|widescreen)(?:\s+(?:format|mode|view))?$/i,
+        intent: () => ({ type: 'edit', action: 'set_aspect_ratio', constraints: { ratio: '16:9' }, confidence: 'high' })
+    },
+
+    {
+        regex: /^(?:change|set|convert|make|switch)\s+(?:to\s+)?(?:square|1:1|instagram)(?:\s+(?:format|mode|view))?$/i,
+        intent: () => ({ type: 'edit', action: 'set_aspect_ratio', constraints: { ratio: '1:1' }, confidence: 'high' })
+    },
+
+    {
+        regex: /^(?:change|set)\s+(?:aspect\s+)?ratio\s+(?:to\s+)?(\d+:\d+)/i,
+        intent: (m) => ({ type: 'edit', action: 'set_aspect_ratio', constraints: { ratio: m[1] }, confidence: 'high' })
+    },
+
+    // ── REMOVE / DELETE ────────────────────────────────────────────────────
+    {
+        regex: /^(?:delete|remove|erase|trash|ditch|get\s+rid\s+of)\s+(?:the\s+)?(?:current\s+)?(?:clip|selection|this)$/i,
+        intent: () => ({ type: 'edit', action: 'remove_clip', target: 'selected', confidence: 'high' })
+    },
+
+    // ── DUPLICATE ──────────────────────────────────────────────────────────
+    {
+        regex: /^(?:duplicate|copy|clone|repeat)\s+(?:the\s+)?(?:current\s+)?(?:clip|selection|this)$/i,
+        intent: () => ({ type: 'edit', action: 'duplicate_clip', target: 'selected', confidence: 'high' })
+    },
+
+    // ── TRANSITIONS ────────────────────────────────────────────────────────
+    {
+        regex: /^add\s+(?:a\s+)?(?:(\w+)\s+)?transition(?:\s+of\s+(\d+(?:\.\d+)?)\s*s)?$/i,
+        intent: (m) => ({ type: 'effect', action: 'add_transition', constraints: { type: m[1] || 'fade', duration: m[2] ? parseFloat(m[2]) : 0.5 }, confidence: 'high' })
+    },
+
+    {
+        regex: /^(?:add\s+(?:a\s+)?)?(?:fade|dissolve|crossfade|cross\s*fade)(?:\s+(?:in|out|between))?$/i,
+        intent: () => ({ type: 'effect', action: 'add_transition', constraints: { type: 'fade', duration: 0.5 }, confidence: 'high' })
+    },
+
+    // ── TEXT ───────────────────────────────────────────────────────────────
+    {
+        regex: /^add\s+(?:a\s+)?(?:text|title|caption|subtitle)[:\-\s]+["']?(.+?)["']?$/i,
+        intent: (m) => ({ type: 'effect', action: 'add_text_overlay', constraints: { text: m[1].trim() }, confidence: 'high' })
+    },
+
+    // ── VOLUME ─────────────────────────────────────────────────────────────
+    {
+        regex: /^(?:mute|silence\s+the\s+audio|turn\s+(?:off|down)\s+(?:the\s+)?audio)$/i,
+        intent: () => ({ type: 'effect', action: 'adjust_volume', constraints: { volume: 0 }, confidence: 'high' })
+    },
+
+    {
+        regex: /^(?:set\s+)?volume\s+(?:to\s+)?(\d+)\s*%$/i,
+        intent: (m) => ({ type: 'effect', action: 'adjust_volume', constraints: { volume: parseInt(m[1]) / 100 }, confidence: 'high' })
+    },
+
+    {
+        regex: /^(?:make\s+(?:it\s+)?)?(?:louder|turn\s+up|boost\s+(?:the\s+)?audio|increase\s+volume)(?:\s+(\d+)%)?$/i,
+        intent: (m) => ({ type: 'effect', action: 'adjust_volume', constraints: { volume: m[1] ? parseInt(m[1]) / 100 : 1.5 }, confidence: 'high' })
+    },
+
+    {
+        regex: /^(?:make\s+(?:it\s+)?)?(?:quieter|turn\s+down|lower\s+(?:the\s+)?(?:audio|volume)|decrease\s+volume)(?:\s+(\d+)%)?$/i,
+        intent: (m) => ({ type: 'effect', action: 'adjust_volume', constraints: { volume: m[1] ? parseInt(m[1]) / 100 : 0.5 }, confidence: 'high' })
+    },
+
+    // ── FILTER / COLOR ─────────────────────────────────────────────────────
+    {
+        regex: /^(?:make\s+(?:it\s+)?|convert\s+(?:to\s+)?)(?:black\s+and\s+white|b\s*&\s*w|grayscale|desaturate)$/i,
+        intent: () => ({ type: 'effect', action: 'add_filter', constraints: { filterType: 'grayscale', intensity: 1 }, confidence: 'high' })
+    },
+
+    {
+        regex: /^(?:add\s+)?(?:a\s+)?(?:blur|gaussian\s+blur)(?:\s+effect)?$/i,
+        intent: () => ({ type: 'effect', action: 'add_filter', constraints: { filterType: 'blur', intensity: 0.5 }, confidence: 'high' })
+    },
+
+    {
+        regex: /^(?:add\s+)?(?:a\s+)?(?:sepia|vintage)(?:\s+(?:filter|effect|look|tone))?$/i,
+        intent: () => ({ type: 'effect', action: 'add_filter', constraints: { filterType: 'sepia', intensity: 0.8 }, confidence: 'high' })
+    },
+
+    // ── EXPORT ─────────────────────────────────────────────────────────────
+    {
+        regex: /^(?:export|render|save|finish|download|output)(?:\s+(?:as|to)\s+(\w+))?(?:\s+(?:in\s+)?(\d+p|4k))?$/i,
+        intent: (m) => ({
+            type: 'export', action: 'export_video',
+            constraints: { format: m[1] || 'mp4', quality: m[2] || '1080p' },
             confidence: 'high'
         })
     },
 
-    // Duplicate clip
+    // ── NLE EXPORT ─────────────────────────────────────────────────────────
     {
-        regex: /^(?:duplicate|copy)\s+(?:the\s+)?(?:current\s+)?(?:clip|selection)$/i,
-        intent: () => ({
-            type: 'duplicate',
-            action: 'duplicate_clip',
-            target: 'selected',
-            confidence: 'high'
-        })
+        regex: /^export\s+(?:for|to)\s+premiere(?:\s+pro)?$/i,
+        intent: () => ({ type: 'export', action: 'nle_export', constraints: { nleTarget: 'premiere' }, confidence: 'high' })
     },
 
-    // Add text/captions
     {
-        regex: /^add\s+(?:text|caption|subtitle)\s*[:\-]?\s*["']?(.+?)["']?$/i,
-        intent: (match) => ({
-            type: 'add_text',
-            action: 'add_text_overlay',
-            text: match[1].trim(),
-            confidence: 'medium'
-        })
+        regex: /^export\s+(?:for|to)\s+(?:final\s+cut(?:\s+pro)?|fcpx)$/i,
+        intent: () => ({ type: 'export', action: 'nle_export', constraints: { nleTarget: 'finalcut' }, confidence: 'high' })
     },
 
-    // Export
     {
-        regex: /^export(?:\s+(?:as|to)\s+(\w+))?$/i,
-        intent: (match) => ({
-            type: 'export',
-            action: 'export',
-            format: match[1] || 'mp4',
-            confidence: 'high'
-        })
+        regex: /^export\s+(?:for|to)\s+(?:davinci(?:\s+resolve)?|resolve)$/i,
+        intent: () => ({ type: 'export', action: 'nle_export', constraints: { nleTarget: 'davinci' }, confidence: 'high' })
     },
 
-    // Undo/Redo
     {
-        regex: /^undo$/i,
-        intent: () => ({
-            type: 'undo',
-            action: 'undo',
-            confidence: 'high'
-        })
-    },
-    {
-        regex: /^redo$/i,
-        intent: () => ({
-            type: 'redo',
-            action: 'redo',
-            confidence: 'high'
-        })
+        regex: /^export\s+(?:for|to)\s+capcut$/i,
+        intent: () => ({ type: 'export', action: 'nle_export', constraints: { nleTarget: 'capcut' }, confidence: 'high' })
     },
 
-    // Apply preset/filter
+    // ── UNDO / REDO ────────────────────────────────────────────────────────
     {
-        regex: /^(?:apply|use)\s+(?:the\s+)?["']?(.+?)["']?\s+(?:preset|filter|look)$/i,
-        intent: (match) => ({
-            type: 'apply_preset',
-            action: 'apply_preset',
-            presetName: match[1].trim().toLowerCase(),
-            confidence: 'medium'
-        })
+        regex: /^(?:undo|go\s+back|revert|undo\s+(?:that|last|action)|take\s+that\s+back)$/i,
+        intent: () => ({ type: 'undo', action: 'undo_action', confidence: 'high' })
     },
 
-    // Denoise audio
     {
-        regex: /^(?:remove|reduce|clean)\s+(?:the\s+)?(?:background\s+)?noise$/i,
-        intent: () => ({
-            type: 'audio_denoise',
-            action: 'audio_denoise',
-            confidence: 'medium'
-        })
+        regex: /^(?:redo|redo\s+(?:that|last|action))$/i,
+        intent: () => ({ type: 'redo', action: 'redo_action', confidence: 'high' })
     },
 
-    // Normalize audio
+    // ── DENOISE / NORMALIZE ────────────────────────────────────────────────
+    {
+        regex: /^(?:remove|reduce|clean|eliminate|fix)\s+(?:the\s+)?(?:background\s+)?(?:noise|hiss|hum|buzz)$/i,
+        intent: () => ({ type: 'audio', action: 'denoise_audio', confidence: 'medium' })
+    },
+
     {
         regex: /^normalize\s+(?:the\s+)?audio$/i,
-        intent: () => ({
-            type: 'audio_normalize',
-            action: 'audio_normalize',
-            confidence: 'high'
-        })
-    }
+        intent: () => ({ type: 'audio', action: 'normalize_audio', confidence: 'high' })
+    },
+
+    // ── APPLY PRESET ───────────────────────────────────────────────────────
+    {
+        regex: /^(?:apply|use)\s+(?:the\s+)?["']?(.+?)["']?\s+(?:preset|filter|look|style)$/i,
+        intent: (m) => ({ type: 'effect', action: 'apply_preset', constraints: { presetName: m[1].trim().toLowerCase() }, confidence: 'medium' })
+    },
 ];
 
 class FallbackParserClass {
@@ -200,125 +259,87 @@ class FallbackParserClass {
         this.maxHistory = 50;
     }
 
-    /**
-     * Parse a user prompt using regex patterns
-     * @param {string} prompt - User input
-     * @returns {object|null} Parsed intent or null
-     */
     parse(prompt) {
-        const trimmedPrompt = prompt.trim();
+        const trimmed = prompt.trim();
 
         for (const pattern of this.patterns) {
-            const match = trimmedPrompt.match(pattern.regex);
+            const match = trimmed.match(pattern.regex);
             if (match) {
                 const intent = pattern.intent(match);
-
                 const result = {
                     ...intent,
-                    originalPrompt: trimmedPrompt,
+                    originalPrompt: trimmed,
                     parsedBy: 'fallback',
                     timestamp: Date.now()
                 };
 
                 this.recordParse(result);
-
-                // Emit event that fallback was used
-                EventBus.emit(EVENT_TYPES.FALLBACK_USED, {
-                    prompt: trimmedPrompt,
-                    intent: result
-                });
-
-                console.log(`[FallbackParser] Matched: "${trimmedPrompt}" -> ${intent.action}`);
+                EventBus.emit(EVENT_TYPES.FALLBACK_USED, { prompt: trimmed, intent: result });
+                console.log(`[FallbackParser] Matched: "${trimmed}" → ${intent.action}`);
                 return result;
             }
         }
 
-        // No match found
-        console.log(`[FallbackParser] No match for: "${trimmedPrompt}"`);
-        this.recordParse({
-            originalPrompt: trimmedPrompt,
-            parsedBy: 'fallback',
-            matched: false,
-            timestamp: Date.now()
-        });
-
+        console.log(`[FallbackParser] No match for: "${trimmed}"`);
+        this.recordParse({ originalPrompt: trimmed, parsedBy: 'fallback', matched: false, timestamp: Date.now() });
         return null;
     }
 
-    /**
-     * Check if a prompt can be parsed by fallback
-     * @param {string} prompt
-     * @returns {boolean}
-     */
     canParse(prompt) {
-        const trimmedPrompt = prompt.trim();
-        return this.patterns.some(p => p.regex.test(trimmedPrompt));
+        return this.patterns.some(p => p.regex.test(prompt.trim()));
     }
 
-    /**
-     * Record parse attempt in history
-     */
     recordParse(result) {
         this.parseHistory.push(result);
-        if (this.parseHistory.length > this.maxHistory) {
-            this.parseHistory.shift();
-        }
+        if (this.parseHistory.length > this.maxHistory) this.parseHistory.shift();
     }
 
-    /**
-     * Add a custom pattern
-     * @param {RegExp} regex - Pattern to match
-     * @param {function} intentFn - (match) => intent object
-     */
     addPattern(regex, intentFn) {
         this.patterns.unshift({ regex, intent: intentFn });
         console.log(`[FallbackParser] Added pattern: ${regex}`);
     }
 
-    /**
-     * Get all supported commands (for help/autocomplete)
-     * @returns {Array} List of example commands
-     */
     getSupportedCommands() {
         return [
-            'cut at 5s',
-            'split at 10.5 seconds',
-            'trim from 0 to 30s',
+            'split in half',
+            'split at 30s',
+            'cut to 60 seconds',
+            'trim the first 5 seconds',
+            'trim the last 10 seconds',
             'remove silence',
+            'remove filler words',
             'speed up 2x',
-            'slow down 0.5x',
-            'set speed to 1.5x',
-            'change ratio to 9:16',
-            'set aspect ratio to vertical',
+            'slow down',
+            'slow motion',
+            'make it vertical',
+            'make it horizontal',
+            '9:16',
+            'change ratio to 16:9',
             'delete clip',
             'duplicate clip',
             'add text: Hello World',
+            'make it louder',
+            'mute audio',
+            'volume 50%',
+            'add a fade',
+            'black and white',
+            'blur',
             'export',
-            'export as mp4',
+            'export for Premiere',
+            'export for Final Cut',
+            'export for DaVinci',
+            'export for CapCut',
             'undo',
             'redo',
-            'apply cinematic preset',
+            'normalize audio',
             'remove noise',
-            'normalize audio'
+            'timelapse',
         ];
     }
 
-    /**
-     * Get parse history
-     */
-    getHistory() {
-        return [...this.parseHistory];
-    }
-
-    /**
-     * Get supported patterns count
-     */
-    getPatternCount() {
-        return this.patterns.length;
-    }
+    getHistory() { return [...this.parseHistory]; }
+    getPatternCount() { return this.patterns.length; }
 }
 
-// Singleton instance
 export const FallbackParser = new FallbackParserClass();
-
 export default FallbackParser;
