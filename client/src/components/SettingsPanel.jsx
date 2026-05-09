@@ -70,7 +70,7 @@ const SettingsPanel = () => {
 
             <div className="p-3 rounded-md bg-secondary/50 text-[10px] text-muted-foreground">
                 <p>Version 0.9.0 (Beta)</p>
-                <p className="mt-1">ViralPilot Editor</p>
+                <p className="mt-1">Vibed Editor</p>
             </div>
         </div>
     );

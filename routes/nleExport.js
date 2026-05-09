@@ -2,7 +2,7 @@
  * routes/nleExport.js
  *
  * POST /api/export/nle
- * Converts the Viral Pilot timeline state into industry-standard NLE project
+ * Converts the Vibed timeline state into industry-standard NLE project
  * files using @chatoctopus/timeline (OTIO-first, frame-accurate rational math).
  *
  * Supported targets:
@@ -30,7 +30,7 @@ async function getTimeline() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Map a Viral Pilot fps value to the nearest FRAME_RATES key the library
+ * Map a Vibed fps value to the nearest FRAME_RATES key the library
  * knows about. Falls back to "30" when no exact match.
  */
 function resolveFrameRateKey(fps) {
@@ -47,7 +47,7 @@ function resolveFrameRateKey(fps) {
 }
 
 /**
- * Derive pixel dimensions from a Viral Pilot aspectRatio string.
+ * Derive pixel dimensions from a Vibed aspectRatio string.
  * Always targets a 1080-height master (or 1920-height for 9:16).
  */
 function resolveDimensions(aspectRatio) {
@@ -61,10 +61,10 @@ function resolveDimensions(aspectRatio) {
 }
 
 /**
- * Convert a Viral Pilot track list into the OTIO-first Timeline model
+ * Convert a Vibed track list into the OTIO-first Timeline model
  * expected by @chatoctopus/timeline.
  *
- * Viral Pilot clip schema:
+ * Vibed clip schema:
  *   { id, name, src|url, start, duration, offset, speed, volume, type }
  *
  * OTIO clip schema:
@@ -127,7 +127,7 @@ function buildOTIOTimeline(tracks, fps, aspectRatio, projectName, lib) {
     }).filter((t) => t.items.length > 0);
 
     return createTimeline({
-        name:   projectName || 'Viral Pilot Project',
+        name:   projectName || 'Vibed Project',
         format: {
             width,
             height,
@@ -158,7 +158,7 @@ router.post('/nle', authenticateUser, async (req, res) => {
         tracks        = [],
         fps           = 30,
         aspectRatio   = '16:9',
-        projectName   = 'Viral Pilot Project',
+        projectName   = 'Vibed Project',
     } = req.body;
 
     console.log(`[NLEExport] Requested target: ${target}, fps: ${fps}, tracks: ${tracks.length}`);

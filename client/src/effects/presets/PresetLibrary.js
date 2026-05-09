@@ -20,7 +20,7 @@ export const BUILTIN_PRESETS = [
         name: 'Cinematic Orange & Teal',
         description: 'Classic cinematic color grading with warm highlights and cool shadows',
         category: PRESET_CATEGORIES.COLOR,
-        author: 'Viral Pilot',
+        author: 'Vibed',
         tags: ['cinematic', 'film', 'professional'],
         effects: [
             {
@@ -55,7 +55,7 @@ export const BUILTIN_PRESETS = [
         name: 'Vintage Film',
         description: 'Nostalgic film look with faded blacks and grain',
         category: PRESET_CATEGORIES.COLOR,
-        author: 'Viral Pilot',
+        author: 'Vibed',
         tags: ['vintage', 'retro', 'film'],
         effects: [
             {
@@ -96,7 +96,7 @@ export const BUILTIN_PRESETS = [
         name: 'Dramatic B&W',
         description: 'High contrast black and white with dramatic tones',
         category: PRESET_CATEGORIES.COLOR,
-        author: 'Viral Pilot',
+        author: 'Vibed',
         tags: ['black and white', 'dramatic', 'contrast'],
         effects: [
             {
@@ -130,7 +130,7 @@ export const BUILTIN_PRESETS = [
         name: 'Dream Blur',
         description: 'Soft dreamy look with subtle bloom',
         category: PRESET_CATEGORIES.BLUR,
-        author: 'Viral Pilot',
+        author: 'Vibed',
         tags: ['dream', 'soft', 'romantic'],
         effects: [
             {
@@ -162,7 +162,7 @@ export const BUILTIN_PRESETS = [
         name: 'Focus Pull',
         description: 'Radial blur for focus effect',
         category: PRESET_CATEGORIES.BLUR,
-        author: 'Viral Pilot',
+        author: 'Vibed',
         tags: ['focus', 'depth', 'blur'],
         effects: [
             {
@@ -188,7 +188,7 @@ export const BUILTIN_PRESETS = [
         name: 'Speed Motion',
         description: 'Fast motion blur effect',
         category: PRESET_CATEGORIES.BLUR,
-        author: 'Viral Pilot',
+        author: 'Vibed',
         tags: ['motion', 'speed', 'action'],
         effects: [
             {
@@ -215,7 +215,7 @@ export const BUILTIN_PRESETS = [
         name: 'VHS Glitch',
         description: 'Retro VHS tape distortion',
         category: PRESET_CATEGORIES.GLITCH,
-        author: 'Viral Pilot',
+        author: 'Vibed',
         tags: ['vhs', 'retro', 'analog'],
         effects: [
             {
@@ -255,7 +255,7 @@ export const BUILTIN_PRESETS = [
         name: 'Digital Corruption',
         description: 'Heavy digital artifact effect',
         category: PRESET_CATEGORIES.GLITCH,
-        author: 'Viral Pilot',
+        author: 'Vibed',
         tags: ['digital', 'glitch', 'corrupt'],
         effects: [
             {
@@ -288,7 +288,7 @@ export const BUILTIN_PRESETS = [
         name: 'Chromatic Aberration',
         description: 'Lens-like color fringing',
         category: PRESET_CATEGORIES.GLITCH,
-        author: 'Viral Pilot',
+        author: 'Vibed',
         tags: ['chromatic', 'lens', 'color'],
         effects: [
             {
@@ -315,7 +315,7 @@ export const BUILTIN_PRESETS = [
         name: 'Golden Hour',
         description: 'Warm sunset glow effect',
         category: PRESET_CATEGORIES.LIGHT,
-        author: 'Viral Pilot',
+        author: 'Vibed',
         tags: ['golden', 'sunset', 'warm'],
         effects: [
             {
@@ -349,7 +349,7 @@ export const BUILTIN_PRESETS = [
         name: 'Neon Glow',
         description: 'Vibrant neon light effect',
         category: PRESET_CATEGORIES.LIGHT,
-        author: 'Viral Pilot',
+        author: 'Vibed',
         tags: ['neon', 'glow', 'vibrant'],
         effects: [
             {
@@ -384,7 +384,7 @@ export const BUILTIN_PRESETS = [
         name: 'Earthquake Shake',
         description: 'Intense camera shake effect',
         category: PRESET_CATEGORIES.TRANSFORM,
-        author: 'Viral Pilot',
+        author: 'Vibed',
         tags: ['shake', 'impact', 'action'],
         effects: [
             {
@@ -408,7 +408,7 @@ export const BUILTIN_PRESETS = [
         name: 'Handheld Feel',
         description: 'Subtle camera movement for realism',
         category: PRESET_CATEGORIES.TRANSFORM,
-        author: 'Viral Pilot',
+        author: 'Vibed',
         tags: ['handheld', 'natural', 'subtle'],
         effects: [
             {
@@ -434,7 +434,7 @@ export const BUILTIN_PRESETS = [
         name: 'Hollywood Movie',
         description: 'Complete cinematic treatment',
         category: PRESET_CATEGORIES.CINEMATIC,
-        author: 'Viral Pilot',
+        author: 'Vibed',
         tags: ['movie', 'hollywood', 'professional'],
         effects: [
             {
@@ -488,7 +488,7 @@ export const BUILTIN_PRESETS = [
         name: 'TikTok Trendy',
         description: 'Popular social media look',
         category: PRESET_CATEGORIES.SOCIAL,
-        author: 'Viral Pilot',
+        author: 'Vibed',
         tags: ['tiktok', 'social', 'trendy'],
         effects: [
             {
@@ -519,7 +519,7 @@ export const BUILTIN_PRESETS = [
         name: 'Instagram Clean',
         description: 'Clean and bright aesthetic',
         category: PRESET_CATEGORIES.SOCIAL,
-        author: 'Viral Pilot',
+        author: 'Vibed',
         tags: ['instagram', 'clean', 'bright'],
         effects: [
             {
@@ -546,7 +546,7 @@ export const BUILTIN_PRESETS = [
         name: '🔥 Zoom Burst',
         description: 'TikTok-style explosive zoom-in pop at the start of a clip',
         category: PRESET_CATEGORIES.SOCIAL,
-        author: 'Viral Pilot',
+        author: 'Vibed',
         tags: ['tiktok', 'zoom', 'burst', 'vfx', 'keyframe'],
         effects: [
             {
@@ -586,7 +586,7 @@ export const BUILTIN_PRESETS = [
         name: '⚡ Flash Hit',
         description: 'Rapid brightness flash on-beat — popular TikTok transition',
         category: PRESET_CATEGORIES.SOCIAL,
-        author: 'Viral Pilot',
+        author: 'Vibed',
         tags: ['tiktok', 'flash', 'beat', 'vfx', 'keyframe'],
         effects: [
             {

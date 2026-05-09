@@ -31,7 +31,7 @@ const BUILT_IN_PRESETS = [
         version: PRESET_SCHEMA_VERSION,
         category: PRESET_CATEGORIES.COLOR,
         description: 'Classic Hollywood color grade with teal shadows and orange highlights',
-        author: 'Viral Pilot',
+        author: 'Vibed',
         compatibility: ['webgl', 'ffmpeg'],
         operations: [
             {
@@ -58,7 +58,7 @@ const BUILT_IN_PRESETS = [
         version: PRESET_SCHEMA_VERSION,
         category: PRESET_CATEGORIES.COMPOSITE,
         description: 'Punchy, high-saturation look for social media',
-        author: 'Viral Pilot',
+        author: 'Vibed',
         compatibility: ['webgl', 'ffmpeg'],
         operations: [
             {
@@ -85,7 +85,7 @@ const BUILT_IN_PRESETS = [
         version: PRESET_SCHEMA_VERSION,
         category: PRESET_CATEGORIES.COLOR,
         description: 'Low-key dramatic look with crushed blacks',
-        author: 'Viral Pilot',
+        author: 'Vibed',
         compatibility: ['webgl', 'ffmpeg'],
         operations: [
             {
@@ -112,7 +112,7 @@ const BUILT_IN_PRESETS = [
         version: PRESET_SCHEMA_VERSION,
         category: PRESET_CATEGORIES.COLOR,
         description: 'Nostalgic film look with faded blacks and warm tones',
-        author: 'Viral Pilot',
+        author: 'Vibed',
         compatibility: ['webgl', 'ffmpeg'],
         operations: [
             {
@@ -139,7 +139,7 @@ const BUILT_IN_PRESETS = [
         version: PRESET_SCHEMA_VERSION,
         category: PRESET_CATEGORIES.COLOR,
         description: 'Clean, professional look for business content',
-        author: 'Viral Pilot',
+        author: 'Vibed',
         compatibility: ['webgl', 'ffmpeg'],
         operations: [
             {
@@ -166,7 +166,7 @@ const BUILT_IN_PRESETS = [
         version: PRESET_SCHEMA_VERSION,
         category: PRESET_CATEGORIES.AUDIO,
         description: 'Optimized audio settings for podcast/voice content',
-        author: 'Viral Pilot',
+        author: 'Vibed',
         compatibility: ['ffmpeg'],
         operations: [
             {

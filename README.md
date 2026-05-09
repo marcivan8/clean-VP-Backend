@@ -1,6 +1,6 @@
-# Viral Pilot — AI Video Editing Platform
+# Vibed — AI Video Editing Platform
 
-**Viral Pilot** is a full-stack, AI-powered video editing IDE. It combines a conversational AI agent with a professional non-linear timeline editor, enabling creators to edit long-form video through natural language commands, then export directly to industry-standard NLE formats.
+**Vibed** is a full-stack, AI-powered video editing IDE. It combines a conversational AI agent with a professional non-linear timeline editor, enabling creators to edit long-form video through natural language commands, then export directly to industry-standard NLE formats.
 
 ---
 
@@ -64,8 +64,8 @@ Powered by `@chatoctopus/timeline` — no floating-point drift, rational time ma
 | Database | Supabase (PostgreSQL) |
 | Storage | Google Cloud Storage / local fallback |
 | Security | `helmet`, `express-rate-limit` |
-| Frontend | React + Vite, Zustand, WebCodecs API |
-| Deploy | Docker → Railway |
+| Frontend | React + Vite, Zustand, Three.js (@react-three/fiber), WebCodecs API |
+| Deploy | Docker Compose (Unified Node.js static serving + Python FastAPI) |
 
 ---
 
@@ -126,8 +126,8 @@ clean-VP-Backend/
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/your-org/viral-pilot.git
-cd viral-pilot
+git clone https://github.com/marcivan8/clean-VP-Backend.git
+cd clean-VP-Backend
 npm install
 
 # 2. Set up environment variables
@@ -218,22 +218,20 @@ Authorization: Bearer <supabase-jwt>
 
 ---
 
-## Deployment (Railway)
+## Deployment
 
-The project includes a `Dockerfile` for container-based deployment.
+The project is fully unified and containerized for deployment using `docker-compose`. 
 
 ```bash
-# Build and test locally
-docker build -t viral-pilot .
-docker run -p 3000:3000 --env-file .env viral-pilot
+# Spin up the entire platform (Node.js React server + Python NLP parser)
+docker-compose up --build -d
 ```
 
-**Railway setup:**
-1. Connect your GitHub repo to Railway
-2. Set all environment variables in Railway's dashboard (not in a committed `.env`)
-3. Set `NODE_ENV=production` — this disables the dev auth bypass and enables production error handling
-4. Set `ALLOWED_ORIGINS=https://your-frontend-domain.com`
-5. Railway auto-deploys on push to `main`
+**Architecture details:**
+1. The `Dockerfile` uses a multi-stage build. It first compiles the React client, then copies `client/dist` into the Express backend.
+2. `index.js` statically serves the React app, meaning you only need one domain/URL.
+3. The `spacy` service runs in a separate lightweight container and is only accessible internally via port `8001`.
+4. Ensure `NODE_ENV=production` is set so the server enforces JWT Authentication, CORS rules, and rate limits.
 
 ---
 

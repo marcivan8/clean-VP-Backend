@@ -62,7 +62,7 @@ export class NLEExportService {
      */
     static async export(target, timelineState) {
         const { tracks = [], aspectRatio = '16:9', fps = 30 } = timelineState;
-        const projectName = 'Viral Pilot Project';
+        const projectName = 'Vibed Project';
 
         console.log(`[NLEExportService] Exporting for: ${target}`);
 

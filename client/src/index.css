@@ -26,25 +26,29 @@
 
 @layer base {
   :root {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
+    /* Vibed Dark Theme Palette */
+    --background: 240 20% 3%;
+    --foreground: 210 20% 98%;
+    --card: 240 15% 6%;
+    --card-foreground: 210 20% 98%;
+    --popover: 240 15% 6%;
+    --popover-foreground: 210 20% 98%;
+    /* Neon Purple */
+    --primary: 270 70% 60%;
+    --primary-foreground: 0 0% 100%;
+    /* Deep Indigo */
+    --secondary: 240 30% 12%;
+    --secondary-foreground: 210 20% 98%;
+    --muted: 240 20% 15%;
+    --muted-foreground: 240 10% 60%;
+    /* Electric Cyan Accent */
+    --accent: 190 90% 50%;
+    --accent-foreground: 0 0% 10%;
+    --destructive: 0 60% 40%;
     --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
+    --border: 240 20% 12%;
+    --input: 240 20% 12%;
+    --ring: 270 70% 60%;
   }
 }
 
@@ -54,6 +58,32 @@
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10 shadow-xl;
+  }
+  
+  .glass-button {
+    @apply bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/5 transition-all duration-300;
+  }
+
+  /* Custom scrollbar for Webkit */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
   }
 }
