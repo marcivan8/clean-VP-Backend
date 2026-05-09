@@ -218,20 +218,48 @@ Authorization: Bearer <supabase-jwt>
 
 ---
 
-## Deployment
+## Deployment (Railway)
 
-The project is fully unified and containerized for deployment using `docker-compose`. 
+Vibed is deployed as **two separate Railway services** — the Node.js backend (which also serves the React frontend) and the Python spaCy NLP microservice.
+
+### Service 1 — Node.js Backend + React Frontend
+
+The root `Dockerfile` uses a **multi-stage build**:
+1. Installs and builds the React client (outputs to `client/dist`).
+2. Sets up the Node.js backend and copies `client/dist` into it.
+3. `index.js` statically serves the React app — only one domain needed.
 
 ```bash
-# Spin up the entire platform (Node.js React server + Python NLP parser)
-docker-compose up --build -d
+# Test locally before pushing
+docker build -t vibed-backend .
+docker run -p 3000:3000 --env-file .env vibed-backend
 ```
 
-**Architecture details:**
-1. The `Dockerfile` uses a multi-stage build. It first compiles the React client, then copies `client/dist` into the Express backend.
-2. `index.js` statically serves the React app, meaning you only need one domain/URL.
-3. The `spacy` service runs in a separate lightweight container and is only accessible internally via port `8001`.
-4. Ensure `NODE_ENV=production` is set so the server enforces JWT Authentication, CORS rules, and rate limits.
+**Railway setup:**
+1. Connect your repo and point Railway to the root `Dockerfile`.
+2. Set all environment variables in Railway's **Variables** dashboard (see `.env.example`).
+3. Railway injects `PORT` automatically — do **not** hardcode `PORT=3000`.
+4. Set `FRONTEND_URL=https://your-railway-app.up.railway.app` for CORS.
+5. Set `NODE_ENV=production` to enforce JWT auth and rate limits.
+
+### Service 2 — spaCy NLP Microservice
+
+Deploy `spacy-service/` as a **separate Railway service**:
+1. In Railway, create a new service and point the **root directory** to `spacy-service/`.
+2. Railway will auto-detect `spacy-service/Dockerfile` and build it.
+3. Copy the internal URL Railway assigns and paste it into Service 1's variables as:
+   ```
+   SPACY_SERVICE_URL=https://your-spacy-service.up.railway.app
+   ```
+4. The spaCy service is **optional** — if unreachable, AI intent parsing degrades gracefully.
+
+### ⚠️ Ephemeral Filesystem Warning
+
+Railway's filesystem is **not persistent**. Any files written to `uploads/` (proxies, renders, temp files) **will be lost on every redeploy**.
+
+For production use, you must configure **Google Cloud Storage** (or S3):
+- Set `GCS_BUCKET_NAME` and `GOOGLE_APPLICATION_CREDENTIALS` (or inject the JSON key directly as an env var).
+- The storage layer in `services/` will prefer GCS when configured, falling back to local disk only in development.
 
 ---
 
@@ -240,7 +268,8 @@ docker-compose up --build -d
 - `devAuth` middleware **throws at startup** if `NODE_ENV=production` — it cannot accidentally run in production
 - All file-serving endpoints enforce a strict `/uploads` directory boundary (path traversal protection)
 - Rate limiting is applied per-route — AI endpoints are capped at 15 req/min, render at 5 req/min
-- All API secrets are validated at startup — the server refuses to start if any required env var is missing
+- `SUPABASE_SERVICE_ROLE_KEY` is **backend-only** — never prefix it with `VITE_` or it will be bundled into the client
+- In production, `CORS` is locked to `FRONTEND_URL` and `PUBLIC_URL` only — a wrong value will silently block your frontend
 
 ---
 

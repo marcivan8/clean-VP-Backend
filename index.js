@@ -5,10 +5,25 @@ const helmet     = require('helmet');
 const rateLimit  = require('express-rate-limit');
 const path       = require('path');
 const fs         = require('fs');
+const { execSync } = require('child_process');
 require('dotenv').config();
 
 const app = express();
+// Railway injects PORT dynamically — process.env.PORT is authoritative
 const port = process.env.PORT || 3000;
+
+// ── ffmpeg-static startup verification ────────────────────────────────────────
+// Catch broken binaries early so the issue shows in Railway build/deploy logs
+let ffmpegVersion = null;
+try {
+  const ffmpegBin = require('ffmpeg-static');
+  const result = execSync(`"${ffmpegBin}" -version 2>&1 | head -1`, { timeout: 5000 }).toString().trim();
+  ffmpegVersion = result;
+  console.log(`✅ ffmpeg-static ready: ${result}`);
+} catch (err) {
+  console.error(`❌ ffmpeg-static failed to load: ${err.message}`);
+  // Non-fatal: the server still starts, but audio/video routes will fail
+}
 
 // ── Security & CORS ──────────────────────────────────────────────────────────
 app.use(helmet({
@@ -116,14 +131,19 @@ try {
   audioRoutes = express.Router();
 }
 
-// Health check endpoint
+// Health check endpoint — used by Railway for zero-downtime deploys
 app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
     port: port,
-    version: '2.0.0' // Updated version
+    version: '2.0.0',
+    services: {
+      ffmpeg: !!ffmpegVersion,
+      spacy: !!process.env.SPACY_SERVICE_URL,
+      openai: !!process.env.OPENAI_API_KEY,
+    }
   });
 });
 

@@ -11,7 +11,7 @@ RUN npm run build
 FROM node:20-slim
 WORKDIR /usr/src/app
 
-# Install native module dependencies
+# Install native module dependencies + curl for health check
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3 \
@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg-dev \
     libgif-dev \
     librsvg2-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install backend dependencies
@@ -38,7 +39,8 @@ RUN chown -R node:node /usr/src/app
 USER node
 EXPOSE 3000
 
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-  CMD [ "node", "-e", "require('http').get('http://localhost:3000/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1))" ]
+# Railway injects PORT dynamically — use shell form so $PORT is expanded at runtime
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+  CMD curl -f http://localhost:${PORT:-3000}/health || exit 1
 
 CMD [ "node", "index.js" ]
