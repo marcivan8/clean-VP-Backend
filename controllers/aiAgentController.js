@@ -593,6 +593,40 @@ function localParseIntent(prompt, context) {
                 missingParameters: []
             };
         }
+        // ── "Clean this clip" / "clean up" → combined silence + filler removal ──
+        // This is a VERY common generic command that should always resolve to a
+        // deterministic editing action — never ask the user for more info.
+        if (has('clean this clip', 'clean this video', 'clean the clip',
+                'clean the video', 'clean up this clip', 'clean it up',
+                'clean it', 'clean up the clip', 'make it clean')) {
+            return {
+                intent: 'long_form_build',
+                operation: 'long_form_edit',
+                parameters: {
+                    editMode: 'CLEAN_EDIT',
+                    actions: ['silence_removal', 'remove_filler_words'],
+                    reason: 'Generic "clean" command — removing silences and filler words',
+                },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+        // ── Compound: "remove silences AND filler words" ──────────────────────
+        const wantsSilence = has('silence', 'dead air', 'pauses', 'quiet parts');
+        const wantsFiller  = has('filler', 'um', 'uh', 'ums', 'uhs');
+        if (wantsSilence && wantsFiller) {
+            return {
+                intent: 'long_form_build',
+                operation: 'long_form_edit',
+                parameters: {
+                    editMode: 'CLEAN_EDIT',
+                    actions: ['silence_removal', 'remove_filler_words'],
+                    reason: 'Compound: silence removal + filler word removal',
+                },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
         if (has('podcast', 'interview', 'clean the podcast', 'clean the interview',
                 'tighten', 'tighten up', 'clean up the audio')) {
             return {
@@ -600,6 +634,26 @@ function localParseIntent(prompt, context) {
                 operation: 'long_form_edit',
                 parameters: { editMode: 'CLEAN_EDIT', platform: 'podcast' },
                 confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+
+        // ── Basic Editing: Zoom and Cut ──────────────────────────────────────
+        if (has('zoom in', 'zoom out', 'zoom')) {
+            return {
+                intent: 'apply_effect',
+                operation: 'apply_zoom',
+                parameters: { direction: has('zoom out') ? 'out' : 'in' },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+        if (has('cut the video', 'make a cut', 'split the video', 'cut it', 'cut this', 'cut at')) {
+            return {
+                intent: 'edit',
+                operation: 'split_clip',
+                parameters: { mode: 'playhead' },
+                confidence: 'MEDIUM',
                 missingParameters: []
             };
         }
@@ -1064,6 +1118,77 @@ function generateLocalPlan(intent, context, planId) {
 
         case 'undo_action':
             steps = [{ step_id: 'undo', action: 'undo_action' }];
+            break;
+
+        case 'trim_clip': {
+            const trimFrom = params.trimFrom || params.trim_from || 'end';
+            const amount = params.amount || params.targetDuration || 5;
+            steps = [{ step_id: 'trim', action: 'trim_clip', clip_id: clipId, track_id: trackId, trim_from: trimFrom, trim_amount: amount }];
+            break;
+        }
+
+        case 'export_video': {
+            const format = params.format || 'mp4';
+            const quality = params.quality || '1080p';
+            steps = [
+                { step_id: 'validate_export', action: 'validate_export_settings', format, quality },
+                { step_id: 'prepare', action: 'prepare_export', format, quality, codec: params.codec || 'h264', audio_codec: 'aac' },
+            ];
+            break;
+        }
+
+        case 'normalize_audio':
+            steps = [{ step_id: 'normalize', action: 'normalize_audio', target_lufs: params.targetLUFS || -14 }];
+            break;
+
+        case 'audio_denoise':
+        case 'denoise_audio':
+            steps = [{ step_id: 'denoise', action: 'audio_denoise', strength: params.strength || 0.7 }];
+            break;
+
+        case 'color_grade': {
+            const presetMap = {
+                cinematic: { contrast: 1.2, saturation: 0.85, brightness: -0.05, shadows: -0.1 },
+                warm:      { temperature: 0.2, saturation: 1.1, brightness: 0.05 },
+                cool:      { temperature: -0.2, saturation: 0.95, brightness: 0.0 },
+                vibrant:   { saturation: 1.4, contrast: 1.1 },
+                bw:        { saturation: 0.0 },
+            };
+            const preset = params.preset || 'cinematic';
+            const adjustments = presetMap[preset] || presetMap.cinematic;
+            steps = [{ step_id: 'grade', action: 'color_grade', clip_id: clipId, adjustments }];
+            break;
+        }
+
+        case 'add_transition':
+            steps = [{ step_id: 'transition', action: 'add_transition', clip_id: clipId, type: params.type || 'fade', duration: params.duration || 0.5 }];
+            break;
+
+        case 'auto_captions':
+            steps = [{ step_id: 'captions', action: 'auto_captions', language: params.language || 'en', style: params.style || 'default' }];
+            break;
+
+        case 'apply_zoom':
+            steps = [{ step_id: 'zoom', action: 'apply_zoom', direction: params.direction || 'in' }];
+            break;
+
+        case 'long_form_edit':
+            steps = [
+                { step_id: 'silence', action: 'silence_removal', threshold: params.threshold || '-25dB' },
+                { step_id: 'filler', action: 'remove_filler_words' }
+            ];
+            break;
+
+        case 'analyze_structure':
+            steps = [{ step_id: 'analyze', action: 'analyze_structure' }];
+            break;
+
+        case 'adjust_volume':
+            steps = [{ step_id: 'volume', action: 'adjust_volume', clip_id: clipId, volume: params.volume ?? 0.8 }];
+            break;
+
+        case 'redo_action':
+            steps = [{ step_id: 'redo', action: 'redo_action' }];
             break;
 
         default:

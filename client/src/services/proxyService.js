@@ -1,33 +1,84 @@
 import { API_URL } from '../config';
 
 /**
+ * Get the current session token from Supabase (or localStorage fallback).
+ * Returns null if no session exists — callers must handle unauthenticated state.
+ */
+async function getAuthToken() {
+    // Read the Supabase session token from localStorage.
+    // Supabase stores it under a key like "sb-<project>-auth-token" (JSON).
+    // We also check common fallback key names used in dev environments.
+    try {
+        // Auto-detect Supabase's own key (pattern: sb-*-auth-token)
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+                const raw = localStorage.getItem(key);
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    const token = parsed?.access_token;
+                    if (token && token !== 'null' && token !== 'undefined') {
+                        return token;
+                    }
+                }
+            }
+        }
+    } catch (_) {
+        // localStorage not available or JSON parse error — fall through
+    }
+
+    // Fallback: plain token stored under common dev key names
+    const stored = localStorage.getItem('sb-access-token')
+        || localStorage.getItem('access_token')
+        || localStorage.getItem('auth_token');
+    if (stored && stored !== 'null' && stored !== 'undefined') {
+        return stored;
+    }
+
+    return null;
+}
+
+/**
+ * Build fetch headers, injecting Authorization if a token is available.
+ * Always returns a plain object — safe to spread into fetch() options.
+ */
+async function buildHeaders(extra = {}) {
+    const token = await getAuthToken();
+    const headers = { ...extra };
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+}
+
+/**
  * Service to handle proxy generation requests.
  */
 class ProxyService {
     /**
-     * Request proxy generation for a video.
-     * @param {string} videoPath - Relative path of the video.
+     * Request proxy generation for an already-uploaded video.
+     * @param {string} videoPath - Relative path of the video (relative to /uploads).
      * @param {string} userId - ID of the user.
      * @returns {Promise<{ proxyPath: string, proxyUrl: string }>}
      */
     static async generateProxy(videoPath, userId) {
         try {
+            const headers = await buildHeaders({ 'Content-Type': 'application/json' });
+
             const response = await fetch(`${API_URL}/api/proxy/generate`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers,
                 body: JSON.stringify({ videoPath, userId }),
             });
 
             if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || 'Proxy generation failed');
+                const error = await response.json().catch(() => ({}));
+                throw new Error(error.error || `Proxy generation failed (${response.status})`);
             }
 
             return await response.json();
         } catch (error) {
-            console.error('[ProxyService] Error:', error);
+            console.error('[ProxyService] generateProxy error:', error);
             throw error;
         }
     }
@@ -43,20 +94,25 @@ class ProxyService {
             const formData = new FormData();
             formData.append('video', file);
             if (userId) formData.append('userId', userId);
-            
+
+            // NOTE: Do NOT set Content-Type here — the browser sets the correct
+            // multipart/form-data boundary automatically when using FormData.
+            const headers = await buildHeaders();
+
             const response = await fetch(`${API_URL}/api/proxy/upload`, {
                 method: 'POST',
-                body: formData
+                headers,
+                body: formData,
             });
 
             if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || 'Upload failed');
+                const error = await response.json().catch(() => ({}));
+                throw new Error(error.error || `Upload failed (${response.status})`);
             }
 
             return await response.json();
-        } catch(error) {
-            console.error('[ProxyService Upload]', error);
+        } catch (error) {
+            console.error('[ProxyService Upload] Error:', error);
             throw error;
         }
     }

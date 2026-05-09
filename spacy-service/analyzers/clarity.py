@@ -1,7 +1,7 @@
 """
 Clarity Scoring Engine
 ======================
-Computes a 0–1 clarity score for user prompts.
+Computes a 0-1 clarity score for user prompts.
 Deductions are applied for missing fields, vague language, etc.
 Weights are configurable per platform for future extensibility.
 """
@@ -36,6 +36,17 @@ PLATFORM_WEIGHTS = {
 VAGUE_PRONOUNS = {"this", "that", "it", "something", "stuff", "thing", "things"}
 GENERIC_VERBS  = {"do", "make", "get", "put", "use"}
 
+# Direct editing operations that never need a platform or content type.
+# These are self-contained commands where asking for a platform is pointless.
+DIRECT_EDITING_VERBS = {
+    "split", "trim", "cut", "remove", "delete", "silence",
+    "clean", "denoise", "normalize", "export", "undo", "redo",
+    "duplicate", "speed", "slow", "fast", "mute", "unmute",
+    "caption", "subtitle", "filter", "grade", "color", "transition",
+    "filler", "analyze", "hook", "reframe", "zoom", "punch",
+    "fix", "detect", "silence",
+}
+
 
 def compute_clarity_score(
     action: Optional[str],
@@ -56,14 +67,26 @@ def compute_clarity_score(
 
     score = 1.0
     questions: list[str] = []
+    lower_tokens = [t.lower() for t in raw_tokens]
+
+    # ── Fast path: direct editing command ─────────────────────────
+    # If the prompt is a clear, direct editing command (e.g. "remove silences",
+    # "clean this clip", "normalize audio"), we never ask about platform or
+    # content type — that would be annoying and irrelevant.
+    is_direct_edit = action and action in DIRECT_EDITING_VERBS
+    if not is_direct_edit:
+        # Also check raw tokens in case spaCy missed the action verb
+        is_direct_edit = any(t in DIRECT_EDITING_VERBS for t in lower_tokens)
 
     # ── Missing platform ───────────────────────────────────────────
-    if not platform:
+    # Skip penalty for direct editing commands
+    if not platform and not is_direct_edit:
         score -= weights["no_platform"]
         questions.append("Which platform is this for? (TikTok, YouTube, Instagram, etc.)")
 
     # ── Missing content type ───────────────────────────────────────
-    if not content_type:
+    # Skip penalty for direct editing commands
+    if not content_type and not is_direct_edit:
         score -= weights["no_content_type"]
         questions.append("What type of content do you want? (clips, highlights, trailer, summary)")
 
@@ -72,13 +95,14 @@ def compute_clarity_score(
         score -= weights["no_action"]
 
     # ── No intent detected ─────────────────────────────────────────
-    if not intent:
+    # Skip for direct editing commands — they don't have emotional intent
+    if not intent and not is_direct_edit:
         score -= weights["no_intent"]
         questions.append("Do you want emotional, funny, or informative moments?")
 
     # ── No timeline for long videos ────────────────────────────────
     is_long_video = video_duration_seconds is not None and video_duration_seconds > 300
-    if is_long_video and not timeline:
+    if is_long_video and not timeline and not is_direct_edit:
         score -= weights["no_timeline_long"]
         dur_min = int(video_duration_seconds / 60)
         questions.append(
@@ -86,9 +110,9 @@ def compute_clarity_score(
         )
 
     # ── Vague pronoun usage ────────────────────────────────────────
-    lower_tokens = [t.lower() for t in raw_tokens]
+    # Only penalize if not a direct edit ("this" in "clean this clip" is fine)
     vague_count = sum(1 for t in lower_tokens if t in VAGUE_PRONOUNS)
-    if vague_count > 0:
+    if vague_count > 0 and not is_direct_edit:
         score -= weights["vague_pronouns"] * min(vague_count, 3)
 
     # ── Generic verb without clear object ──────────────────────────
@@ -96,6 +120,7 @@ def compute_clarity_score(
         score -= weights["generic_verbs"]
 
     score = max(0.0, min(1.0, round(score, 2)))
-    needs_clarification = score < 0.70
+    # Threshold lowered: direct edit commands score 1.0, vague ones go below 0.55
+    needs_clarification = score < 0.55
 
     return score, needs_clarification, questions

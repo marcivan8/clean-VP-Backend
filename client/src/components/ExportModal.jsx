@@ -71,47 +71,47 @@ const QUALITY_PROFILES = [
     { id: 'low',    label: 'Draft',  sub: 'Fast render',    bitrate: '2 Mbps' }
 ];
 
-// NLE target definitions
+// NLE target definitions — IDs must match POST /api/export/nle `target` values
 const NLE_TARGETS = [
     {
-        id: 'edl',
-        label: 'Premiere Pro',
-        sub: 'EDL (CMX 3600)',
-        ext: '.edl',
-        color: 'from-indigo-500/20 to-purple-600/10',
+        id:     'premiere',
+        label:  'Premiere Pro',
+        sub:    'xmeml v5 (.xml)',
+        ext:    '.xml',
+        color:  'from-indigo-500/20 to-purple-600/10',
         border: 'border-indigo-500/40',
-        text: 'text-indigo-400',
-        badge: 'bg-indigo-500/20 text-indigo-300',
+        text:   'text-indigo-400',
+        badge:  'bg-indigo-500/20 text-indigo-300',
     },
     {
-        id: 'fcpxml',
-        label: 'Final Cut Pro',
-        sub: 'FCPXML 1.11',
-        ext: '.fcpxml',
-        color: 'from-gray-500/20 to-slate-600/10',
+        id:     'fcpx',
+        label:  'Final Cut Pro',
+        sub:    'FCPXML 1.8 (.fcpxml)',
+        ext:    '.fcpxml',
+        color:  'from-gray-500/20 to-slate-600/10',
         border: 'border-gray-400/40',
-        text: 'text-gray-300',
-        badge: 'bg-gray-500/20 text-gray-300',
+        text:   'text-gray-300',
+        badge:  'bg-gray-500/20 text-gray-300',
     },
     {
-        id: 'davinci',
-        label: 'DaVinci Resolve',
-        sub: 'Timeline CSV',
-        ext: '.csv',
-        color: 'from-yellow-500/20 to-amber-600/10',
+        id:     'resolve',
+        label:  'DaVinci Resolve',
+        sub:    'xmeml v5 + OTIO',
+        ext:    '.xml + .otio',
+        color:  'from-yellow-500/20 to-amber-600/10',
         border: 'border-yellow-500/40',
-        text: 'text-yellow-400',
-        badge: 'bg-yellow-500/20 text-yellow-300',
+        text:   'text-yellow-400',
+        badge:  'bg-yellow-500/20 text-yellow-300',
     },
     {
-        id: 'capcut',
-        label: 'CapCut',
-        sub: 'JSON Project',
-        ext: '.json',
-        color: 'from-teal-500/20 to-cyan-600/10',
+        id:     'otio',
+        label:  'OpenTimelineIO',
+        sub:    'Universal interchange',
+        ext:    '.otio',
+        color:  'from-teal-500/20 to-cyan-600/10',
         border: 'border-teal-500/40',
-        text: 'text-teal-400',
-        badge: 'bg-teal-500/20 text-teal-300',
+        text:   'text-teal-400',
+        badge:  'bg-teal-500/20 text-teal-300',
     },
 ];
 
@@ -130,8 +130,9 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
     });
     const [step, setStep] = useState('configure');
     const [progress, setProgress] = useState(0);
-    const [nleStatus, setNleStatus] = useState(null); // null | 'success' | 'error'
-    const [nleError,  setNleError]  = useState(null);
+    const [nleStatus,      setNleStatus]      = useState(null); // null | 'success' | 'error'
+    const [nleError,       setNleError]       = useState(null);
+    const [nleLoadingId,   setNleLoadingId]   = useState(null); // id of card currently exporting
 
     const { tracks, aspectRatio } = useTimelineStore();
 
@@ -177,11 +178,12 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
         onExport(settings);
     };
 
-    const handleNLEExport = (format) => {
+    const handleNLEExport = async (format) => {
         setNleStatus(null);
         setNleError(null);
+        setNleLoadingId(format);
         try {
-            exportToNLE(format, tracks, {
+            await exportToNLE(format, tracks, {
                 fps: settings.fps || 30,
                 aspectRatio: aspectRatio || '16:9',
                 title: 'Viral Pilot Export',
@@ -190,6 +192,8 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
         } catch (err) {
             setNleStatus('error');
             setNleError(err.message);
+        } finally {
+            setNleLoadingId(null);
         }
     };
 
@@ -410,23 +414,28 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                         </p>
 
                         <div className="grid grid-cols-2 gap-2">
-                            {NLE_TARGETS.map(nle => (
-                                <button
-                                    key={nle.id}
-                                    onClick={() => handleNLEExport(nle.id)}
-                                    className={`flex flex-col gap-1.5 px-4 py-3 rounded-xl border text-left transition-all bg-gradient-to-br ${nle.color} ${nle.border} hover:brightness-110 active:scale-95`}
-                                >
-                                    <div className="flex items-center justify-between">
-                                        <span className={`text-xs font-bold ${nle.text}`}>{nle.label}</span>
-                                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-mono ${nle.badge}`}>{nle.ext}</span>
-                                    </div>
-                                    <span className="text-[10px] text-white/40">{nle.sub}</span>
-                                    <div className={`flex items-center gap-1 mt-1 text-[10px] ${nle.text}`}>
-                                        <Download className="w-3 h-3" />
-                                        <span>Download</span>
-                                    </div>
-                                </button>
-                            ))}
+                            {NLE_TARGETS.map(nle => {
+                                const isLoading = nleLoadingId === nle.id;
+                                return (
+                                    <button
+                                        key={nle.id}
+                                        onClick={() => handleNLEExport(nle.id)}
+                                        disabled={!!nleLoadingId}
+                                        className={`flex flex-col gap-1.5 px-4 py-3 rounded-xl border text-left transition-all bg-gradient-to-br ${nle.color} ${nle.border} hover:brightness-110 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed`}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <span className={`text-xs font-bold ${nle.text}`}>{nle.label}</span>
+                                            <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-mono ${nle.badge}`}>{nle.ext}</span>
+                                        </div>
+                                        <span className="text-[10px] text-white/40">{nle.sub}</span>
+                                        <div className={`flex items-center gap-1 mt-1 text-[10px] ${nle.text}`}>
+                                            {isLoading
+                                                ? <><Loader2 className="w-3 h-3 animate-spin" /><span>Generating…</span></>
+                                                : <><Download className="w-3 h-3" /><span>Download</span></>}
+                                        </div>
+                                    </button>
+                                );
+                            })}
                         </div>
 
                         {/* Status messages */}
@@ -445,10 +454,10 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
 
                         <div className="pt-1 border-t border-white/6">
                             <p className="text-[10px] text-white/25 leading-relaxed">
-                                <strong className="text-white/40">EDL</strong> — works in Premiere Pro, Avid, DaVinci Resolve<br />
-                                <strong className="text-white/40">FCPXML</strong> — Final Cut Pro X (File → Import → XML)<br />
-                                <strong className="text-white/40">CSV</strong> — DaVinci Resolve (File → Import Timeline → Timeline CSV)<br />
-                                <strong className="text-white/40">JSON</strong> — CapCut desktop (Open project → Import)
+                                <strong className="text-white/40">Premiere Pro</strong> — File → Import → .xml (xmeml v5)<br />
+                                <strong className="text-white/40">Final Cut Pro</strong> — File → Import → XML → .fcpxml (FCPXML 1.8)<br />
+                                <strong className="text-white/40">DaVinci Resolve</strong> — downloads both .xml &amp; .otio (Resolve 18+ supports OTIO natively)<br />
+                                <strong className="text-white/40">OTIO</strong> — universal interchange; works in Resolve 18, Premiere (beta), Kdenlive 20+
                             </p>
                         </div>
                     </div>

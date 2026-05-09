@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
+const { authenticateUser, optionalAuth } = require('../middleware/auth');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -99,7 +100,9 @@ function buildScaleFilter(width, height, aspectRatio) {
 // POST /render — Full timeline export
 // ============================================================================
 
-router.post('/', async (req, res) => {
+const authMiddleware = process.env.NODE_ENV === 'production' ? authenticateUser : optionalAuth;
+
+router.post('/', authMiddleware, async (req, res) => {
     const startTime = Date.now();
     try {
         const { timeline, settings = {} } = req.body;

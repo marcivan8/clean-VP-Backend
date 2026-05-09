@@ -4,8 +4,7 @@ const router = express.Router();
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-// const { authenticateUser } = require('../middleware/auth');
-const { devAuth } = require('../middleware/devAuth');
+const { authenticateUser } = require('../middleware/auth');
 const { checkUsageLimits } = require('../middleware/usageLimits');
 const { analyzeVideoHandler } = require('../controllers/mainController');
 
@@ -50,8 +49,8 @@ router.get('/health/check', (req, res) => {
   });
 });
 
-// Vision analysis endpoint (placeholder for now, as requested by frontend)
-router.post('/vision', devAuth, (req, res) => {
+// Vision analysis endpoint
+router.post('/vision', authenticateUser, (req, res) => {
   res.status(200).json({
     message: 'Vision analysis endpoint',
     objects: [],
@@ -62,11 +61,10 @@ router.post('/vision', devAuth, (req, res) => {
 
 // Main video analysis endpoint
 router.post('/',
-  devAuth,                    // BYPASS AUTH FOR DEV
-  // authenticateUser,        // TEMPORARILY DISABLED
-  checkUsageLimits,          // Vérifier les limites d'utilisation
-  upload.single('video'),    // Upload du fichier vidéo
-  analyzeVideoHandler        // Traiter l'analyse
+  authenticateUser,          // Real authentication — verified Supabase JWT
+  checkUsageLimits,          // Check plan limits
+  upload.single('video'),    // Upload the video file
+  analyzeVideoHandler        // Run the analysis
 );
 
 module.exports = router;

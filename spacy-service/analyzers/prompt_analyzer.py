@@ -49,6 +49,11 @@ CONTENT_TYPES = {
     "cuts":       "cuts",
     "compilation":"compilation",
     "teaser":     "teaser",
+    "b-roll":     "b-roll",
+    "broll":      "b-roll",
+    "stock":      "b-roll",
+    "voiceover":  "voiceover",
+    "vo":         "voiceover",
 }
 
 INTENT_KEYWORDS = {
@@ -70,6 +75,11 @@ INTENT_KEYWORDS = {
     "engaging":    "engaging moments",
     "hook":        "hook/attention-grabbing",
     "attention":   "hook/attention-grabbing",
+    "pacing":      "pacing/flow",
+    "flow":        "pacing/flow",
+    "dynamic":     "dynamic/fast-paced",
+    "retention":   "retention-optimized",
+    "cinematic":   "cinematic/high-quality",
 }
 
 # Regex patterns for timeline references like 00:20, 2:30, 1:05:30, 30s, 2min
@@ -88,7 +98,12 @@ ACTION_VERBS = {
     "make", "create", "cut", "trim", "edit", "extract", "generate",
     "build", "produce", "compile", "find", "select", "pick", "grab",
     "remove", "delete", "split", "merge", "combine", "add", "apply",
-    "shorten", "lengthen", "crop", "resize", "reframe",
+    "shorten", "lengthen", "crop", "resize", "reframe", "ripple",
+    "duck", "normalize", "punch", "zoom", "desaturate", "overlay",
+    "caption", "inject", "enhance", "grade",
+    # Direct editing verbs that map to self-contained operations
+    "clean", "denoise", "export", "undo", "redo", "mute", "unmute",
+    "silence", "analyze", "detect", "fix",
 }
 
 

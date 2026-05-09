@@ -3,7 +3,7 @@ const router = express.Router();
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
-const { devAuth } = require('../middleware/devAuth');
+const { authenticateUser } = require('../middleware/auth');
 const ffmpegPath = require('ffmpeg-static');
 
 // Set ffmpeg path
@@ -20,33 +20,30 @@ if (!fs.existsSync(tempDir)) {
  * Applies Noise Reduction to a video or audio file.
  * Returns the path to the cleaned audio/video.
  */
-router.post('/denoise', devAuth, async (req, res) => {
+router.post('/denoise', authenticateUser, async (req, res) => {
     try {
         const { filePath, filename } = req.body;
 
-        // Initial validation for input
         if (!filePath && !filename) {
             return res.status(400).json({ error: 'No filePath or filename provided' });
         }
 
-        let inputPath = filePath;
+        // SECURITY: Resolve path and enforce uploads/ boundary
+        const uploadsDir = path.resolve(__dirname, '../uploads');
+        let inputPath;
 
-        // If 'filename' is provided, look in uploads/temp (Standard for this app)
-        if (filename && !inputPath) {
-            inputPath = path.join(__dirname, '../uploads/temp', filename);
+        if (filename && !filePath) {
+            inputPath = path.resolve(uploadsDir, 'temp', path.basename(filename));
+        } else {
+            inputPath = path.resolve(filePath);
         }
 
-        // Validate existence
-        if (!inputPath || !fs.existsSync(inputPath)) {
-            // Fallback: try resolving filePath relative to uploads/temp if it was just a name
-            if (filePath && !path.isAbsolute(filePath)) {
-                const tryPath = path.join(__dirname, '../uploads/temp', filePath);
-                if (fs.existsSync(tryPath)) inputPath = tryPath;
-            }
+        if (!inputPath.startsWith(uploadsDir)) {
+            return res.status(403).json({ error: 'Access denied: invalid file path' });
+        }
 
-            if (!inputPath || !fs.existsSync(inputPath)) {
-                return res.status(404).json({ error: 'File not found on server', path: inputPath || filePath });
-            }
+        if (!fs.existsSync(inputPath)) {
+            return res.status(404).json({ error: 'File not found on server' });
         }
 
         const outputPath = path.join(tempDir, `denoised-${Date.now()}.mp4`);
@@ -94,26 +91,25 @@ const { detectBeats } = require('../analysis/beatDetector');
  * POST /api/audio/beat-detect
  * Analyzes audio/video for BPM and beat timestamps.
  */
-router.post('/beat-detect', devAuth, async (req, res) => {
+router.post('/beat-detect', authenticateUser, async (req, res) => {
     try {
         const { filePath, filename } = req.body;
 
-        // Validation similar to /denoise
         if (!filePath && !filename) {
             return res.status(400).json({ error: 'No filePath or filename provided' });
         }
 
-        let inputPath = filePath;
-        if (filename && !inputPath) inputPath = path.join(__dirname, '../uploads/temp', filename);
+        // SECURITY: Enforce uploads/ boundary
+        const uploadsDir = path.resolve(__dirname, '../uploads');
+        let inputPath = filename && !filePath
+            ? path.resolve(uploadsDir, 'temp', path.basename(filename))
+            : path.resolve(filePath);
 
-        if (!inputPath || !fs.existsSync(inputPath)) {
-            if (filePath && !path.isAbsolute(filePath)) {
-                const tryPath = path.join(__dirname, '../uploads/temp', filePath);
-                if (fs.existsSync(tryPath)) inputPath = tryPath;
-            }
-            if (!inputPath || !fs.existsSync(inputPath)) {
-                return res.status(404).json({ error: 'File not found' });
-            }
+        if (!inputPath.startsWith(uploadsDir)) {
+            return res.status(403).json({ error: 'Access denied: invalid file path' });
+        }
+        if (!fs.existsSync(inputPath)) {
+            return res.status(404).json({ error: 'File not found' });
         }
 
         console.log(`🥁 Detecting Beats for: ${inputPath}`);
@@ -133,22 +129,20 @@ router.post('/beat-detect', devAuth, async (req, res) => {
  * Normalizes audio loudness to standard levels (EBU R128 / Podcasts).
  * Target: -16 LUFS (Integrated), -1.5 dB (True Peak)
  */
-router.post('/normalize', devAuth, async (req, res) => {
+router.post('/normalize', authenticateUser, async (req, res) => {
     try {
         const { filePath, filename } = req.body;
 
-        let inputPath = filePath;
-        if (filename && !inputPath) inputPath = path.join(__dirname, '../uploads/temp', filename);
+        // SECURITY: Enforce uploads/ boundary
+        const uploadsDir = path.resolve(__dirname, '../uploads');
+        let inputPath = filename && !filePath
+            ? path.resolve(uploadsDir, 'temp', path.basename(filename))
+            : path.resolve(filePath || '');
 
-        if (!inputPath || !fs.existsSync(inputPath)) {
-            // Fallback logic similar to others
-            if (filePath && !path.isAbsolute(filePath)) {
-                const tryPath = path.join(__dirname, '../uploads/temp', filePath);
-                if (fs.existsSync(tryPath)) inputPath = tryPath;
-            }
+        if (!inputPath.startsWith(uploadsDir)) {
+            return res.status(403).json({ error: 'Access denied: invalid file path' });
         }
-
-        if (!inputPath || !fs.existsSync(inputPath)) {
+        if (!fs.existsSync(inputPath)) {
             return res.status(404).json({ error: 'File not found' });
         }
 
@@ -193,7 +187,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
  * Transcribes an audio file using OpenAI Whisper and returns word-level timestamps.
  * Useful for filler word and bad-take detection.
  */
-router.post('/transcribe', devAuth, async (req, res) => {
+router.post('/transcribe', authenticateUser, async (req, res) => {
     try {
         const { filename, filePath } = req.body;
 

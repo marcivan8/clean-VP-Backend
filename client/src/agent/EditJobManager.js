@@ -106,18 +106,47 @@ export class EditJobManager {
     async resumeJob(jobId, originalIntent, clarificationAnswers) {
         console.log(`[EditJobManager] Resuming job ${jobId}`);
 
-        const updatedIntent = {
-            ...originalIntent,
-            confidence: 'HIGH',
-            parameters: { ...(originalIntent.parameters || {}), ...(originalIntent.constraints || {}), ...clarificationAnswers },
-            constraints: { ...(originalIntent.constraints || {}), ...clarificationAnswers },
-            missingParameters: [],
-            needs_clarification: false,
-        };
-
+        let updatedIntent;
         const store = useJobStore.getState();
         const abortController = new AbortController();
         this.abortControllers.set(jobId, abortController);
+
+        // If the original intent was missing an operation (e.g. spaCy returned clarification_required early)
+        if (!originalIntent.operation || !originalIntent.intent) {
+            console.log('[EditJobManager] Re-parsing intent with clarification answers...');
+            const combinedPrompt = `${originalIntent.originalPrompt || ''}. Clarification answers: ${JSON.stringify(clarificationAnswers)}`;
+            
+            try {
+                const reParsedIntent = await IntentParser.parse(combinedPrompt, abortController.signal);
+                if (reParsedIntent.needs_clarification) {
+                    return {
+                        success: false,
+                        jobId,
+                        message: reParsedIntent.reason,
+                        requiresClarification: true,
+                        originalIntent: reParsedIntent,
+                    };
+                }
+                updatedIntent = {
+                    ...reParsedIntent,
+                    confidence: 'HIGH',
+                    missingParameters: [],
+                    needs_clarification: false
+                };
+            } catch (err) {
+                console.error(`[EditJobManager] Re-parsing failed:`, err);
+                return { success: false, jobId, message: err.message };
+            }
+        } else {
+            updatedIntent = {
+                ...originalIntent,
+                confidence: 'HIGH',
+                parameters: { ...(originalIntent.parameters || {}), ...(originalIntent.constraints || {}), ...clarificationAnswers },
+                constraints: { ...(originalIntent.constraints || {}), ...clarificationAnswers },
+                missingParameters: [],
+                needs_clarification: false,
+            };
+        }
 
         const actor = createJobActor(jobId, updatedIntent.intent || 'Resumed Job', (update) => {
             const jobState = mapStateToJobState(update.state.toLowerCase());

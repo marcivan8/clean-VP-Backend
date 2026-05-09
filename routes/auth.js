@@ -5,15 +5,15 @@ const UsageBasedPricingService = require('../services/UsageBasedPricingService')
 const router = express.Router();
 
 // Create user profile after signup
-router.post('/profile', async (req, res) => {
+// Requires a valid JWT so we can trust the userId — never take it from the body.
+router.post('/profile', authenticateUser, async (req, res) => {
   try {
-    const { userId, email, fullName } = req.body;
-    
-    // Validate required fields
-    if (!userId || !email) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: userId and email are required' 
-      });
+    // Always use the verified user ID from the token, NOT from req.body
+    const userId = req.user.id;
+    const { email, fullName } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Missing required field: email' });
     }
 
     // Check if profile already exists
@@ -48,18 +48,18 @@ router.post('/profile', async (req, res) => {
     const explorerTier = UsageBasedPricingService.tiers.explorer;
     const defaultResetDate = new Date(Date.now() + explorerTier.resetPeriod).toISOString();
 
-    // Create new profile with proper data validation
+    // Sanitize inputs before writing to the database
     const profileData = {
-      id: userId,
-      email: email.trim().toLowerCase(),
-      full_name: fullName ? fullName.trim() : null,
-      monthly_usage: { analyses: 0 },
+      id:                userId,
+      email:             email.trim().toLowerCase().slice(0, 254),
+      full_name:         fullName ? fullName.trim().slice(0, 100) : null,
+      monthly_usage:     { analyses: 0 },
       subscription_tier: 'explorer',
-      tier_expires_at: defaultResetDate,
-      usage_data: {},
-      usage_reset_at: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      tier_expires_at:   defaultResetDate,
+      usage_data:        {},
+      usage_reset_at:    new Date().toISOString(),
+      created_at:        new Date().toISOString(),
+      updated_at:        new Date().toISOString()
     };
 
     const { data: profile, error } = await supabaseAdmin
@@ -144,7 +144,9 @@ router.get('/usage', authenticateUser, async (req, res) => {
 // Get analysis history  
 router.get('/history', authenticateUser, async (req, res) => {
   try {
-    const { limit = 20, offset = 0 } = req.query;
+    // Cap limit to prevent database abuse
+    const limit  = Math.min(Math.max(parseInt(req.query.limit)  || 20, 1), 100);
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
     
     const { data, error } = await supabaseAdmin
       .from('video_analyses')

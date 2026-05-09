@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
+const { authenticateUser } = require('../middleware/auth');
 
 /**
  * Revideo Render Routes
@@ -12,12 +13,16 @@ const fs = require('fs');
  */
 
 // POST /api/revideo/render
-router.post('/render', async (req, res) => {
+router.post('/render', authenticateUser, async (req, res) => {
     try {
         // Dynamic import (ES module)
         const { renderVideo } = await import('@revideo/renderer');
 
-        const { clips = [], duration = 10, aspectRatio = '16:9', fps = 30 } = req.body;
+        const { clips = [], duration = 10, fps = 30 } = req.body;
+
+        // Whitelist aspectRatio to prevent injection
+        const ALLOWED_RATIOS = ['16:9', '9:16', '1:1', '4:5'];
+        const aspectRatio = ALLOWED_RATIOS.includes(req.body.aspectRatio) ? req.body.aspectRatio : '16:9';
 
         // Compute dimensions
         const height = 1080;

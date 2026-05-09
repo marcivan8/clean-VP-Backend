@@ -2,96 +2,124 @@
 const express = require('express');
 const router = express.Router();
 const ProxyService = require('../services/ProxyService');
-const StorageService = require('../services/StorageService');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { authenticateUser, optionalAuth } = require('../middleware/auth');
 
-const uploadDir = path.join(__dirname, '../uploads/temp');
+const uploadsDir = path.resolve(__dirname, '../uploads');
+const uploadDir  = path.join(uploadsDir, 'temp');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
+// Multer: keep the original filename (used by exportRoutes to locate clips by name)
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadDir),
-    filename: (req, file, cb) => {
-        // Keep original filename if possible to satisfy export Routes, but prepend proxy so it doesn't overwrite if needed?
-        // Actually exportRoutes tries to read exact filename. Let's use originalname.
-        cb(null, file.originalname);
-    }
+    filename:    (req, file, cb) => cb(null, file.originalname),
 });
-const upload = multer({ storage });
+const upload = multer({ storage, limits: { fileSize: 500 * 1024 * 1024 } });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: validate that a resolved path stays inside /uploads
+// ─────────────────────────────────────────────────────────────────────────────
+function safeResolve(rawPath) {
+    const resolved = path.resolve(uploadsDir, rawPath);
+    if (!resolved.startsWith(uploadsDir)) return null;
+    return resolved;
+}
+
+/**
+ * Resolve a user ID from the request.
+ * In production this comes from req.user (Supabase JWT).
+ * In development (no session), fall back to a stable dev ID so the
+ * pipeline keeps working without requiring a full auth flow.
+ */
+function resolveUserId(req) {
+    if (req.user?.id) return req.user.id;
+    // Dev fallback — clearly labelled so it's easy to spot in logs
+    if (process.env.NODE_ENV !== 'production') return 'dev-user';
+    return null;
+}
 
 /**
  * POST /api/proxy/generate
- * Trigger proxy generation for a video.
- * Body: { videoPath: string, userId: string }
+ * Trigger proxy generation for an already-uploaded video.
+ * Body: { videoPath: string } (path relative to /uploads)
+ *
+ * Uses optionalAuth — authenticated users get their user ID attached;
+ * unauthenticated dev requests continue with a dev-user ID.
+ * In production, swap optionalAuth → authenticateUser to enforce auth.
  */
-router.post('/generate', async (req, res) => {
-    try {
-        const { videoPath, userId } = req.body;
+const authMiddleware = process.env.NODE_ENV === 'production' ? authenticateUser : optionalAuth;
 
-        if (!videoPath || !userId) {
-            return res.status(400).json({ error: 'Missing videoPath or userId' });
+router.post('/generate', authMiddleware, async (req, res) => {
+    try {
+        const { videoPath } = req.body;
+
+        if (!videoPath) {
+            return res.status(400).json({ error: 'Missing videoPath' });
         }
 
-        console.log(`[ProxyRoute] Received request for: ${videoPath}`);
+        // SECURITY: Enforce uploads/ boundary — no absolute paths from clients
+        const safePath = safeResolve(videoPath);
+        if (!safePath) {
+            return res.status(403).json({ error: 'Access denied: invalid file path' });
+        }
+        if (!fs.existsSync(safePath)) {
+            return res.status(404).json({ error: 'File not found' });
+        }
 
-        // 1. Check if proxy already exists
-        const filename = videoPath.split('/').pop().split('.')[0];
-        // This is a naive check; ideally we store proxy state in DB.
-        // But for now, let's just trigger generation.
+        const userId = resolveUserId(req);
+        console.log(`[ProxyRoute] Generating proxy for: ${safePath} (user: ${userId})`);
 
-        // 2. Start generation (Non-blocking response intentionally?)
-        // The user wants to run the platform, so blocking until done might be slow (FFmpeg is slow).
-        // However, for simplicity, let's await it or return a "job started" status.
-        // Let's await for this MVP to avoid complex polling UI. A 30s video takes ~2-5s to proxy.
-        // If it's long, we might timeout. Let's try await first.
-
-        const outputRelativePath = await ProxyService.generateProxy(videoPath, userId);
+        // Pass the uploads-relative path to ProxyService
+        const relativeVideoPath = path.relative(uploadsDir, safePath);
+        const outputRelativePath = await ProxyService.generateProxy(relativeVideoPath, userId);
 
         res.json({
-            status: 'completed',
-            originalPath: videoPath,
-            proxyPath: outputRelativePath,
-            proxyUrl: `/uploads/${outputRelativePath}` // Assumes static mount
+            status:       'completed',
+            originalPath: relativeVideoPath,
+            proxyPath:    outputRelativePath,
+            proxyUrl:     `/uploads/${outputRelativePath}`,
         });
 
     } catch (error) {
         console.error('[ProxyRoute] Error:', error);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: 'Proxy generation failed' });
     }
 });
 
 /**
  * POST /api/proxy/upload
  * Accept multipart/form-data video upload and trigger proxy generation.
+ *
+ * Uses optionalAuth for the same reason as /generate above.
+ * Swap to authenticateUser before going to production.
  */
-router.post('/upload', upload.single('video'), async (req, res) => {
+router.post('/upload', authMiddleware, upload.single('video'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: 'No video uploaded' });
 
-        // multer saves to uploads/temp/<filename> — pass the temp-relative path so
-        // ProxyService can resolve uploads/temp/<filename> from the uploads root.
+        const userId = resolveUserId(req);
         const videoRelativePath = path.join('temp', req.file.filename);
-        const userId = req.body.userId || 'demo';
 
-        console.log(`[ProxyRoute] Upload received: ${videoRelativePath}, generating proxy...`);
+        console.log(`[ProxyRoute] Upload received: ${videoRelativePath} (user: ${userId}), generating proxy...`);
 
         const outputRelativePath = await ProxyService.generateProxy(videoRelativePath, userId);
 
-        // Clean up the temp file once proxy is done
-        fs.unlink(req.file.path, (err) => {
-            if (err) console.warn('[ProxyRoute] Could not delete temp file:', err.message);
-        });
+        // DO NOT delete the temp file here!
+        // The original high-quality upload is required by the export engine (exportRoutes.js)
+        // to render the final timeline. Proxies are only used for fast UI playback.
+        // fs.unlink(req.file.path, ...);
 
         res.json({
-            status: 'completed',
+            status:       'completed',
             originalPath: videoRelativePath,
-            proxyPath: outputRelativePath,
-            proxyUrl: `/uploads/${outputRelativePath}`
+            proxyPath:    outputRelativePath,
+            proxyUrl:     `/uploads/${outputRelativePath}`,
         });
     } catch (error) {
         console.error('[ProxyRoute Upload] Error:', error);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: 'Upload proxy generation failed' });
     }
 });
 

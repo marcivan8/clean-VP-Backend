@@ -1,21 +1,26 @@
 // middleware/devAuth.js
-const devAuth = (req, res, next) => {
-    // Hardcoded user ID from scripts/fetch_test_user.js
-    const DEV_USER = {
-        id: 'df851dac-790d-4800-a140-f6c0fca1dacc',
-        email: 'gillesaubin5@gmail.com',
-        aud: 'authenticated',
-        role: 'authenticated'
-    };
+//
+// ⚠️  DEV-ONLY middleware — NEVER use in production.
+// Immediately throws at startup if loaded when NODE_ENV=production.
 
-    if (process.env.NODE_ENV === 'development' || !process.env.NODE_ENV) {
-        console.log('⚠️ DEV AUTH: Bypassing authentication with dev user:', DEV_USER.email);
-        req.user = DEV_USER;
-        next();
-    } else {
-        // Fallback to error or pass to real auth if specific logic needed
-        res.status(401).json({ error: 'Dev auth only allowed in development' });
-    }
+if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+        '[SECURITY] devAuth middleware was loaded in a production environment. ' +
+        'Replace devAuth with authenticateUser on all routes before deploying.'
+    );
+}
+
+const devAuth = (req, res, next) => {
+    const DEV_USER = {
+        id:    process.env.DEV_USER_ID    || 'df851dac-790d-4800-a140-f6c0fca1dacc',
+        email: process.env.DEV_USER_EMAIL || 'dev@localhost',
+        aud:   'authenticated',
+        role:  'authenticated',
+        profile: { subscription_tier: 'explorer' },
+    };
+    console.warn('⚠️  [devAuth] Bypassing authentication — dev-only, not for production.');
+    req.user = DEV_USER;
+    next();
 };
 
 module.exports = { devAuth };

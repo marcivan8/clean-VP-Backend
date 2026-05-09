@@ -171,16 +171,19 @@ const analyzeVideoHandler = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("❌ Analysis error:", err);
+    console.error('❌ Analysis error:', err);
     if (videoPath) await safeUnlink(videoPath);
 
     if (analysisId) {
       await VideoAnalysis.updateStatus(analysisId, 'failed', err.message);
     }
 
+    // Never expose internal error details to the client in production
+    const isDevMode = process.env.NODE_ENV !== 'production';
     res.status(500).json({
       success: false,
-      error: err.message || "Internal server error"
+      error:   isDevMode ? err.message : 'Analysis failed. Please try again.',
+      code:    'ANALYSIS_FAILED',
     });
   }
 };

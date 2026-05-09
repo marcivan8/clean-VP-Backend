@@ -295,9 +295,25 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         setExportUrl(null);
 
         try {
-            const response = await fetch('/api/export', {
+            // Attach auth token if one exists in localStorage
+            const headers = { 'Content-Type': 'application/json' };
+            try {
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+                        const parsed = JSON.parse(localStorage.getItem(key) || '{}');
+                        if (parsed?.access_token) {
+                            headers['Authorization'] = `Bearer ${parsed.access_token}`;
+                            break;
+                        }
+                    }
+                }
+            } catch (_) { /* no token — dev mode, route uses optionalAuth */ }
+
+            // POST to /api/render — the FFmpeg export engine mounted in exportRoutes.js
+            const response = await fetch('/api/render', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify({ timeline: { tracks, duration }, settings })
             });
             const data = await response.json();

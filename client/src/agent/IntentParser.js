@@ -178,10 +178,38 @@ const NLP_MAP = {
         'final cut format', 'fcpx format', 'final cut pro',
         'export for davinci', 'export for davinci resolve', 'export to davinci',
         'davinci format', 'davinci resolve format', 'resolve format',
-        'export for capcut', 'export to capcut', 'capcut format',
-        'export for resolve', 'export xml', 'export edl', 'export fcpxml',
+        'export for resolve', 'export xml', 'export fcpxml',
         'export project file', 'export to nle', 'nle export',
+        // OTIO — universal interchange
+        'export otio', 'export as otio', 'export to otio',
+        'opentimelineio', 'open timeline io', 'otio format',
+        'universal export', 'export universal',
     ],
+    // ── PROFESSIONAL ───────────────────────────────────────────────────────
+    ripple: [
+        'ripple delete', 'close gap', 'ripple cut', 'delete and close',
+        'ripple', 'remove gap', 'collapse', 'shift delete'
+    ],
+    punchIn: [
+        'punch in', 'punch', 'zoom in', 'push in', 'scale up',
+        'emphasize', 'zoom close'
+    ],
+    duckAudio: [
+        'duck audio', 'duck', 'lower background', 'audio ducking',
+        'dip audio', 'auto duck'
+    ],
+    normalizeAudio: [
+        'normalize', 'normalize audio', 'level audio', 'audio level',
+        'match volume', 'standardize audio'
+    ],
+    broll: [
+        'inject broll', 'add broll', 'b-roll', 'stock footage',
+        'cover with broll', 'insert stock'
+    ],
+    reframe: [
+        'auto reframe', 'reframe', 'track face', 'keep in frame',
+        'center speaker'
+    ]
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -194,23 +222,24 @@ Your job is to understand ANY phrasing a real video editor might use — includi
 OPERATIONS you must recognize:
 - split_clip: "cut in half", "divide", "chop", "bisect", "split at X"
 - remove_clip: "delete", "remove", "get rid of", "trash", "cut out"
-- trim_clip: "shorten", "make shorter", "trim to X seconds", "cut to X", "remove the beginning/end"
-- set_clip_speed: "speed up", "slow down", "2x", "0.5x", "timelapse", "slow motion"
+- trim_clip: "shorten", "make shorter", "trim to X seconds", "cut to X"
+- ripple_delete: "ripple delete", "close the gap", "remove and collapse"
+- set_clip_speed: "speed up", "slow down", "2x", "0.5x"
 - set_aspect_ratio: "vertical", "for TikTok", "9:16", "make it square"
+- auto_reframe: "auto reframe", "track face", "keep speaker in frame"
 - silence_removal: "remove silence", "remove pauses", "clean up audio"
 - remove_filler_words: "remove ums", "remove ahs", "clean up speech"
+- duck_audio: "duck audio", "lower background music", "auto duck"
+- normalize_audio: "normalize audio", "level it out", "standardize volume"
 - add_transition: "add a fade", "crossfade", "dissolve"
 - add_filter: "blur", "black and white", "add filter"
 - color_grade: "color grade", "add warmth", "fix the colors"
 - add_text: "add a title", "add text", "put a caption"
+- punch_in: "punch in", "zoom in closer", "emphasize this"
+- inject_broll: "inject broll", "add stock footage", "cover with b-roll"
 - adjust_volume: "louder", "quieter", "mute", "boost audio"
 - export_video: "export", "render", "finish", "save"
-- undo_action: "undo", "go back", "revert"
-- analyze_structure: "analyze", "understand the video", "segment it"
-- find_hook: "find the hook", "best part", "strongest opening"
-- long_form_edit: "edit the podcast", "clean up the interview", "optimize for YouTube"
-- build_from_rushes: "build from rushes", "assemble footage", "make a video from raw clips"
-- nle_export: "export for Premiere", "export for DaVinci", "export for Final Cut", "export for CapCut"
+- nle_export: "export for Premiere", "export for DaVinci", "export otio"
 
 Always return valid JSON with this structure:
 {
@@ -224,9 +253,24 @@ Always return valid JSON with this structure:
   "missingParameters": []
 }
 
+### FEW-SHOT EXAMPLES ###
+
+User: "The pacing is too slow, cut out all the dead air."
+Assistant: {"intent": "EDIT", "operation": "silence_removal", "constraints": {"threshold": "-30dB"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "Make it ready for TikTok."
+Assistant: {"intent": "OPTIMIZE", "operation": "platform_optimize", "constraints": {"platform": "tiktok", "ratio": "9:16"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "When he says 'boom', zoom in real close."
+Assistant: {"intent": "APPLY_EFFECT", "operation": "punch_in", "constraints": {"trigger": "transcript_match", "text": "boom", "scale": 1.5}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "Export this to Premiere Pro so I can finish it."
+Assistant: {"intent": "EXPORT", "operation": "nle_export", "constraints": {"nleTarget": "premiere"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "Ripple delete the second clip."
+Assistant: {"intent": "EDIT", "operation": "ripple_delete", "targets": ["clip_2"], "constraints": {}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
 Be liberal in interpretation. When in doubt, make a reasonable assumption rather than asking for clarification.
-If the user says "make it faster" without specifying how much, default to 2x speed.
-If the user says "make it vertical", default to 9:16.
 If the user says "clean it up", assume silence_removal.
 NEVER return an error when you can make a reasonable assumption.`;
 
@@ -301,7 +345,8 @@ export class IntentParser {
                     operation: null,
                     targets: [],
                     constraints: {},
-                    intentDraft: result.intentDraft || null
+                    intentDraft: result.intentDraft || null,
+                    originalPrompt: prompt
                 };
             }
             return result;
@@ -617,15 +662,17 @@ export class IntentParser {
     static parseNLEExportIntent(prompt) {
         let nleTarget = null;
 
-        if (/premiere/i.test(prompt)) nleTarget = 'premiere';
-        else if (/final.?cut|fcpx/i.test(prompt)) nleTarget = 'finalcut';
-        else if (/davinci|resolve/i.test(prompt)) nleTarget = 'davinci';
-        else if (/capcut/i.test(prompt)) nleTarget = 'capcut';
+        // NB: target keys must match the backend /api/export/nle accepted values:
+        // 'fcpx' | 'premiere' | 'resolve' | 'otio'
+        if (/premiere/i.test(prompt))                   nleTarget = 'premiere';
+        else if (/final.?cut|fcpx/i.test(prompt))       nleTarget = 'fcpx';
+        else if (/davinci|resolve/i.test(prompt))        nleTarget = 'resolve';
+        else if (/otio|opentimelineio|universal/i.test(prompt)) nleTarget = 'otio';
 
         if (!nleTarget) {
             return {
                 needs_clarification: true,
-                reason: `Which software should I export for?\n1️⃣ Premiere Pro\n2️⃣ Final Cut Pro\n3️⃣ DaVinci Resolve\n4️⃣ CapCut`,
+                reason: `Which software should I export for?\n1️⃣ Premiere Pro\n2️⃣ Final Cut Pro\n3️⃣ DaVinci Resolve\n4️⃣ OpenTimelineIO (universal)`,
                 intent: INTENT_TYPES.EXPORT,
                 operation: 'nle_export',
                 targets: [],
@@ -1002,7 +1049,9 @@ export class IntentParser {
             needs_clarification: result.needs_clarification || false,
             reason: result.reason || null,
             confidence: result.confidence || (result.needs_clarification ? 'LOW' : 'HIGH'),
-            missingParameters: result.missingParameters || []
+            missingParameters: result.missingParameters || [],
+            originalPrompt: result.originalPrompt || null,
+            intentDraft: result.intentDraft || null
         };
     }
 }

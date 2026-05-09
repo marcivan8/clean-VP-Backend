@@ -7,3 +7,9 @@ ML_Dataset/
 !package.json
 !package-lock.json
 !ML_Models/**/*.json
+
+# Python
+venv/
+__pycache__/
+*.pyc
+.DS_Store
