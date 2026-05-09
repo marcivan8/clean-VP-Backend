@@ -224,6 +224,10 @@ Do NOT ask irrelevant duration math questions.
 
 Never mark confidence HIGH unless execution would be deterministic and missingParameters is empty.
 
+🚨 IMPORTANT RULE FOR SIMPLE COMMANDS:
+If the user requests a single, deterministic editing operation (e.g., "remove filler words", "split clip", "remove silence", "speed up 2x", "add a cut"), DO NOT use "long_form_build" and DO NOT ask for a "goal", "platform", or "style". 
+Just return type: "READY" with the specific "edit" operation and confidence "HIGH".
+
 ═══════════════════════════════════════════════════
 📤 OUTPUT FORMAT
 ═══════════════════════════════════════════════════

@@ -157,6 +157,10 @@ const NLP_MAP = {
         'remove duplicate parts', 'cut repeated content', 'remove repeats',
         'no repetition', 'clean up repetition', 'deduplicate',
     ],
+    fillerWords: [
+        'filler', 'filler words', 'um', 'uh', 'ums', 'uhs', 'stutter',
+        'clean up speech', 'remove hesitations', 'remove filler',
+    ],
     // ── CREATIVE / OPTIMIZE ────────────────────────────────────────────────
     improve: [
         'make it better', 'improve', 'enhance', 'polish', 'fix this',
@@ -456,6 +460,14 @@ export class IntentParser {
         if (matches('silence')) {
             return this.createIntent(INTENT_TYPES.EDIT, OPERATIONS.SILENCE_REMOVAL, {
                 constraints: { threshold: this.extractSilenceThreshold(lower) }
+            });
+        }
+
+        // ── Filler words removal ──────────────────────────────────────────
+        if (matches('fillerWords')) {
+            return this.createIntent(INTENT_TYPES.EDIT, OPERATIONS.REMOVE_FILLER_WORDS, {
+                targets: activeClip ? [activeClip.id] : [],
+                constraints: {}
             });
         }
 
