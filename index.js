@@ -162,6 +162,7 @@ app.use('/api/v2/analyze', uploadLimiter, analyzeRoutes);
 app.use('/analyze', uploadLimiter, analyzeRoutes);          // legacy/proxy
 app.use('/api/render', renderLimiter, exportRoutes);        // FFmpeg export
 app.use('/api/audio', uploadLimiter, audioRoutes);          // audio processing
+app.use('/api/filler', uploadLimiter, audioRoutes);         // alias: /api/filler/detect → /api/audio/filler/detect
 app.use('/api/silence', require('./routes/silenceRoutes'));
 app.use('/api/ai', aiLimiter, require('./routes/aiRoutes')); // GPT-4o — expensive
 app.use('/api/effects', require('./routes/effectsRoutes'));

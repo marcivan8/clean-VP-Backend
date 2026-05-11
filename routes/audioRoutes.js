@@ -179,8 +179,12 @@ router.post('/normalize', authenticateUser, async (req, res) => {
     }
 });
 
+const multer = require('multer');
 const { OpenAI } = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// In-memory storage for filler-detect multipart uploads (files stay in RAM, not disk)
+const fillerUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 /**
  * POST /api/audio/transcribe
@@ -246,6 +250,148 @@ router.post('/transcribe', authenticateUser, async (req, res) => {
     } catch (error) {
         console.error("Transcription Failed:", error);
         res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * POST /api/audio/filler/detect   ← registered in index.js as /api/audio/filler/detect
+ * (also aliased by proxyRoutes to /api/filler/detect for backward compat)
+ *
+ * Accepts either:
+ *   - multipart/form-data  { file: <binary> }  — direct upload
+ *   - application/json     { filename: string } — filename already in /uploads/temp
+ *
+ * Returns:
+ *   { success, removedSegments, activeSegments, fillerCount, transcript }
+ */
+
+// ── Core filler detection logic (shared by both call styles) ──────────────────
+async function detectFillerWords(inputPath, language = 'en') {
+    const FILLER_WORDS = new Set([
+        'um', 'uh', 'ah', 'er', 'eh', 'hmm', 'hm',
+        'like', 'basically', 'literally',
+        'you know', 'i mean', 'kind of', 'sort of',
+        // French
+        'euh', 'ben', 'genre', 'voilà', 'bah',
+    ]);
+
+    const stats = require('fs').statSync(inputPath);
+    if (stats.size > 25 * 1024 * 1024) {
+        throw new Error('File exceeds OpenAI 25 MB Whisper limit. Extract audio first.');
+    }
+
+    console.log(`🔤 Filler detection: transcribing ${inputPath}`);
+
+    const transcription = await openai.audio.transcriptions.create({
+        file: require('fs').createReadStream(inputPath),
+        model: 'whisper-1',
+        response_format: 'verbose_json',
+        timestamp_granularities: ['word'],
+        language: language === 'auto' ? undefined : language,
+    });
+
+    const words = transcription.words || [];
+    const totalDuration = transcription.duration || (words.length ? words[words.length - 1].end : 0);
+
+    // Identify filler word spans (merge adjacent fillers separated by < 0.15 s)
+    const MERGE_GAP = 0.15;
+    const fillerSpans = [];
+    let current = null;
+
+    for (const w of words) {
+        const token = w.word.toLowerCase().replace(/[^a-zàâéèêëîïôùûüç ]/g, '').trim();
+        const isFiller = FILLER_WORDS.has(token);
+
+        if (isFiller) {
+            if (current && w.start - current.end <= MERGE_GAP) {
+                current.end = w.end; // extend running span
+            } else {
+                if (current) fillerSpans.push(current);
+                current = { start: w.start, end: w.end };
+            }
+        } else {
+            if (current) { fillerSpans.push(current); current = null; }
+        }
+    }
+    if (current) fillerSpans.push(current);
+
+    // Build the inverse: speech segments to KEEP
+    const activeSegments = [];
+    let cursor = 0;
+    for (const span of fillerSpans) {
+        if (span.start > cursor + 0.01) {
+            activeSegments.push({ start: cursor, end: span.start, duration: span.start - cursor });
+        }
+        cursor = span.end;
+    }
+    if (cursor < totalDuration - 0.01) {
+        activeSegments.push({ start: cursor, end: totalDuration, duration: totalDuration - cursor });
+    }
+
+    return {
+        fillerCount: fillerSpans.length,
+        removedSegments: fillerSpans.map(s => ({ ...s, duration: s.end - s.start })),
+        activeSegments,
+        transcript: transcription.text,
+        totalDuration,
+    };
+}
+
+// ── Route: filename-based (JSON body, file already on server) ─────────────────
+router.post('/filler/detect', authenticateUser, async (req, res) => {
+    try {
+        const { filename, filePath, language = 'en' } = req.body;
+
+        if (!filename && !filePath) {
+            return res.status(400).json({ error: 'Provide filename or filePath' });
+        }
+
+        const uploadsDir = path.resolve(__dirname, '../uploads');
+        let inputPath = filePath
+            ? path.resolve(filePath)
+            : path.resolve(uploadsDir, 'temp', path.basename(filename));
+
+        if (!inputPath.startsWith(uploadsDir)) {
+            return res.status(403).json({ error: 'Access denied: invalid file path' });
+        }
+        if (!require('fs').existsSync(inputPath)) {
+            return res.status(404).json({ error: `File not found: ${filename || filePath}` });
+        }
+
+        const result = await detectFillerWords(inputPath, language);
+        console.log(`✅ Filler detection done — ${result.fillerCount} filler(s), ${result.activeSegments.length} keep-segment(s)`);
+        res.json({ success: true, ...result });
+
+    } catch (err) {
+        console.error('❌ Filler detect (JSON) failed:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── Route: multipart upload (file sent directly) ──────────────────────────────
+router.post('/filler/detect-upload', authenticateUser, fillerUpload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+        const language = req.body.language || 'en';
+
+        // Write buffer to a temp file so Whisper can stream it
+        const tmpPath = path.join(tempDir, `filler-upload-${Date.now()}${path.extname(req.file.originalname || '.mp4')}`);
+        require('fs').writeFileSync(tmpPath, req.file.buffer);
+
+        let result;
+        try {
+            result = await detectFillerWords(tmpPath, language);
+        } finally {
+            require('fs').unlink(tmpPath, () => {});
+        }
+
+        console.log(`✅ Filler detection done (upload) — ${result.fillerCount} filler(s)`);
+        res.json({ success: true, ...result });
+
+    } catch (err) {
+        console.error('❌ Filler detect (upload) failed:', err);
+        res.status(500).json({ error: err.message });
     }
 });
 

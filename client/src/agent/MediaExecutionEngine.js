@@ -462,6 +462,35 @@ export class MediaExecutionEngine {
 
             const result = await response.json();
 
+            // Special handling for filler word removal — rebuild timeline from non-filler segments
+            if (command.action === 'fillerDetect' && result.activeSegments) {
+                console.log(`[MediaExecutionEngine] ✂️ Applying filler cuts. Removed: ${result.fillerCount}, Keep segments: ${result.activeSegments.length}`);
+
+                const timelineStore = useTimelineStore.getState();
+                const videoTrack = timelineStore.tracks?.find(t => t.type === 'video');
+
+                if (videoTrack && videoTrack.clips.length > 0) {
+                    const baseClip = videoTrack.clips[0];
+                    timelineStore.removeClip(videoTrack.id, baseClip.id);
+
+                    let currentStartTime = 0;
+                    result.activeSegments.forEach((seg, i) => {
+                        const newClip = {
+                            ...baseClip,
+                            id: `clip_filler_${Date.now()}_${i}`,
+                            start: currentStartTime,
+                            duration: seg.duration,
+                            offset: seg.start,
+                            name: `${baseClip.name || 'Clip'} (Speech ${i + 1})`,
+                        };
+                        timelineStore.addClip(videoTrack.id, newClip);
+                        currentStartTime += seg.duration;
+                    });
+                } else {
+                    console.warn('[MediaExecutionEngine] fillerDetect: no video track or clips found to cut');
+                }
+            }
+
             // Special handling for silence detection — auto-cut the timeline
             if (command.action === 'silenceDetect' && result.activeSegments) {
                 console.log(`[MediaExecutionEngine] ✂️ Applying silence cuts. Segments: ${result.activeSegments.length}`);
