@@ -1,3 +1,16 @@
+/**
+ * IntentParser
+ *
+ * FIX: parseViaAPI() was calling fetch('/api/ai/parse-intent', ...) without an
+ *      Authorization header. In production all /api/* routes require a Supabase
+ *      JWT Bearer token. The 401 response caused the parser to fall through to
+ *      FallbackParser → localParse, which mis-classified many prompts and started
+ *      the clarification loop with no way out.
+ *
+ *      All fetch() calls replaced with authFetch().
+ */
+
+import { authFetch } from '../utils/authFetch.js';
 import { ContextGenerator } from './ContextGenerator.js';
 import { FallbackParser } from './FallbackParser.js';
 import { EventBus, EVENT_TYPES } from './EventBus.js';
@@ -6,12 +19,7 @@ import { INTENT_TYPES, OPERATIONS } from './CommandConstants.js';
 
 export { INTENT_TYPES, OPERATIONS };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// NLP SYNONYM MAP — the heart of natural language understanding
-// Add any phrase a real user might say for each operation.
-// ─────────────────────────────────────────────────────────────────────────────
 const NLP_MAP = {
-    // ── SPLIT ──────────────────────────────────────────────────────────────
     split: [
         'split', 'divide', 'cut in half', 'cut in two', 'cut into two',
         'chop in half', 'break in half', 'break apart', 'separate',
@@ -19,7 +27,6 @@ const NLP_MAP = {
         'split the video', 'cut this in half', 'cut it in half',
         'cut down the middle', 'halve it', 'halve the clip',
     ],
-    // ── CUT / TRIM ─────────────────────────────────────────────────────────
     cut: [
         'cut', 'cut at', 'cut here', 'cut it', 'snip', 'slice at',
         'cut at playhead', 'cut at this point', 'make a cut',
@@ -40,7 +47,6 @@ const NLP_MAP = {
         'cut the beginning', 'cut the end', 'cut the start',
         'chop the beginning', 'chop the end', 'chop off',
     ],
-    // ── SPEED ──────────────────────────────────────────────────────────────
     speed: [
         'speed', 'speed up', 'faster', 'fast forward', 'slow down',
         'slower', 'slow motion', 'slowmo', 'slo-mo', 'timelapse',
@@ -50,7 +56,6 @@ const NLP_MAP = {
         'make faster', 'make slower', 'play faster', 'play slower',
         'speed this up', 'slow this down',
     ],
-    // ── SILENCE ────────────────────────────────────────────────────────────
     silence: [
         'silence', 'remove silence', 'cut silence', 'delete silence',
         'remove silences', 'remove dead air', 'cut dead air',
@@ -59,7 +64,6 @@ const NLP_MAP = {
         'no silence', 'without silence', 'kill the silence',
         'eliminate silence', 'trim silence', 'auto trim',
     ],
-    // ── ASPECT RATIO ───────────────────────────────────────────────────────
     aspect: [
         'vertical', 'horizontal', 'square', 'portrait', 'landscape',
         'aspect ratio', 'aspect', '9:16', '16:9', '1:1', '4:3', '21:9',
@@ -68,7 +72,6 @@ const NLP_MAP = {
         'convert to horizontal', 'make it vertical', 'make it horizontal',
         'instagram format', 'twitter format', 'cinematic',
     ],
-    // ── EFFECTS ────────────────────────────────────────────────────────────
     transition: [
         'transition', 'add transition', 'fade', 'dissolve', 'wipe',
         'slide transition', 'zoom transition', 'add fade', 'add dissolve',
@@ -100,7 +103,6 @@ const NLP_MAP = {
         'lower audio', 'adjust volume', 'audio level',
         'make it louder', 'make it quieter', 'silence the audio',
     ],
-    // ── UNDO / REDO ────────────────────────────────────────────────────────
     undo: [
         'undo', 'go back', 'revert', 'take that back', 'undo that',
         'undo last', 'undo the last', 'undo action', 'ctrl z',
@@ -108,19 +110,16 @@ const NLP_MAP = {
     redo: [
         'redo', 'redo that', 'redo last', 'redo action', 'ctrl y',
     ],
-    // ── EXPORT ─────────────────────────────────────────────────────────────
     export: [
         'export', 'render', 'save', 'save as', 'download', 'finish',
         'export video', 'render video', 'finalize', 'publish',
         'save the video', 'export the video', 'create the video',
         'generate the video', 'output', 'produce',
     ],
-    // ── DUPLICATE ─────────────────────────────────────────────────────────
     duplicate: [
         'duplicate', 'copy', 'clone', 'repeat', 'copy clip',
         'duplicate clip', 'make a copy', 'copy this clip',
     ],
-    // ── LONG-FORM ──────────────────────────────────────────────────────────
     analyze: [
         'analyze', 'analyse', 'analyze my video', 'analyze this video',
         'analyze the content', 'analyze structure', 'segment',
@@ -161,7 +160,6 @@ const NLP_MAP = {
         'filler', 'filler words', 'um', 'uh', 'ums', 'uhs', 'stutter',
         'clean up speech', 'remove hesitations', 'remove filler',
     ],
-    // ── CREATIVE / OPTIMIZE ────────────────────────────────────────────────
     improve: [
         'make it better', 'improve', 'enhance', 'polish', 'fix this',
         'clean up', 'make it look good', 'optimize', 'refine',
@@ -174,7 +172,6 @@ const NLP_MAP = {
         'make it engaging', 'hook people', 'attention grabbing',
         'make it shareable', 'boost engagement',
     ],
-    // ── NLE EXPORT ─────────────────────────────────────────────────────────
     nleExport: [
         'export for premiere', 'export for premiere pro', 'export to premiere',
         'premiere pro format', 'premiere export', 'send to premiere',
@@ -184,41 +181,20 @@ const NLP_MAP = {
         'davinci format', 'davinci resolve format', 'resolve format',
         'export for resolve', 'export xml', 'export fcpxml',
         'export project file', 'export to nle', 'nle export',
-        // OTIO — universal interchange
         'export otio', 'export as otio', 'export to otio',
         'opentimelineio', 'open timeline io', 'otio format',
         'universal export', 'export universal',
     ],
-    // ── PROFESSIONAL ───────────────────────────────────────────────────────
     ripple: [
         'ripple delete', 'close gap', 'ripple cut', 'delete and close',
         'ripple', 'remove gap', 'collapse', 'shift delete'
-    ],
-    punchIn: [
-        'punch in', 'punch', 'zoom in', 'push in', 'scale up',
-        'emphasize', 'zoom close'
-    ],
-    duckAudio: [
-        'duck audio', 'duck', 'lower background', 'audio ducking',
-        'dip audio', 'auto duck'
     ],
     normalizeAudio: [
         'normalize', 'normalize audio', 'level audio', 'audio level',
         'match volume', 'standardize audio'
     ],
-    broll: [
-        'inject broll', 'add broll', 'b-roll', 'stock footage',
-        'cover with broll', 'insert stock'
-    ],
-    reframe: [
-        'auto reframe', 'reframe', 'track face', 'keep in frame',
-        'center speaker'
-    ]
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SYSTEM PROMPT for the AI backend — injected for parse-intent calls
-// ─────────────────────────────────────────────────────────────────────────────
 export const INTENT_SYSTEM_PROMPT = `You are a video editing assistant that converts natural language into structured JSON intents.
 
 Your job is to understand ANY phrasing a real video editor might use — including casual, abbreviated, slang, or domain-specific language.
@@ -265,24 +241,14 @@ Assistant: {"intent": "EDIT", "operation": "silence_removal", "constraints": {"t
 User: "Make it ready for TikTok."
 Assistant: {"intent": "OPTIMIZE", "operation": "platform_optimize", "constraints": {"platform": "tiktok", "ratio": "9:16"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
 
-User: "When he says 'boom', zoom in real close."
-Assistant: {"intent": "APPLY_EFFECT", "operation": "punch_in", "constraints": {"trigger": "transcript_match", "text": "boom", "scale": 1.5}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
-
 User: "Export this to Premiere Pro so I can finish it."
 Assistant: {"intent": "EXPORT", "operation": "nle_export", "constraints": {"nleTarget": "premiere"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
-
-User: "Ripple delete the second clip."
-Assistant: {"intent": "EDIT", "operation": "ripple_delete", "targets": ["clip_2"], "constraints": {}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
 
 Be liberal in interpretation. When in doubt, make a reasonable assumption rather than asking for clarification.
 If the user says "clean it up", assume silence_removal.
 NEVER return an error when you can make a reasonable assumption.`;
 
 export class IntentParser {
-    /**
-     * Parse user prompt into structured intent JSON.
-     * Primary path: API → FallbackParser → Enhanced localParse
-     */
     static async parse(userPrompt, signal = null) {
         console.log('[IntentParser] Parsing:', userPrompt);
 
@@ -331,9 +297,9 @@ export class IntentParser {
         if (signal) signal.addEventListener('abort', () => controller.abort());
 
         try {
-            const response = await fetch('/api/ai/parse-intent', {
+            // FIX: was fetch('/api/ai/parse-intent', ...) — no auth → 401 in production
+            const response = await authFetch('/api/ai/parse-intent', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ prompt, context, systemPrompt: INTENT_SYSTEM_PROMPT }),
                 signal: controller.signal
             });
@@ -360,24 +326,16 @@ export class IntentParser {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // ENHANCED LOCAL PARSE — uses NLP_MAP for synonym matching
-    // ─────────────────────────────────────────────────────────────────────
     static localParse(prompt, context) {
         const lower = prompt.toLowerCase().trim();
         const clips = context?.clips || [];
         const activeClip = clips.find(c => c.isActive);
 
-        // Helper: check if prompt contains any synonym from a category
         const matches = (category) =>
             NLP_MAP[category]?.some(phrase => lower.includes(phrase)) ?? false;
 
-        // ── NLE export (check first — very specific) ──────────────────────
-        if (matches('nleExport')) {
-            return this.parseNLEExportIntent(lower);
-        }
+        if (matches('nleExport')) return this.parseNLEExportIntent(lower);
 
-        // ── Long-form intelligence (check before generic operations) ──────
         if (matches('analyze')) {
             return this.createIntent(INTENT_TYPES.ANALYZE, OPERATIONS.ANALYZE_STRUCTURE, {
                 constraints: {
@@ -403,10 +361,7 @@ export class IntentParser {
 
         if (matches('cleanEdit')) {
             return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.LONG_FORM_EDIT, {
-                constraints: {
-                    editMode: 'CLEAN_EDIT',
-                    platform: this.inferPlatform(lower) || 'podcast'
-                }
+                constraints: { editMode: 'CLEAN_EDIT', platform: this.inferPlatform(lower) || 'podcast' }
             });
         }
 
@@ -421,20 +376,12 @@ export class IntentParser {
         }
 
         if (matches('removeRepetition')) {
-            return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.REMOVE_REPETITION, {
-                constraints: {}
-            });
+            return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.REMOVE_REPETITION, { constraints: {} });
         }
 
-        // ── Undo / Redo ───────────────────────────────────────────────────
-        if (matches('undo')) {
-            return this.createIntent(INTENT_TYPES.UNDO, 'undo_action');
-        }
-        if (matches('redo')) {
-            return this.createIntent(INTENT_TYPES.REDO, 'redo_action');
-        }
+        if (matches('undo')) return this.createIntent(INTENT_TYPES.UNDO, 'undo_action');
+        if (matches('redo')) return this.createIntent(INTENT_TYPES.REDO, 'redo_action');
 
-        // ── Export ────────────────────────────────────────────────────────
         if (matches('export')) {
             const format = this.extractExportFormat(lower);
             const quality = this.extractQuality(lower);
@@ -443,7 +390,6 @@ export class IntentParser {
             });
         }
 
-        // ── Speed (before trim to catch "slow down" etc.) ─────────────────
         if (matches('speed')) {
             const speed = this.extractSpeed(lower);
             if (speed !== null) {
@@ -452,18 +398,15 @@ export class IntentParser {
                     constraints: { speed }
                 });
             }
-            // Speed matched but no value — ask
             return this.needsClarification('What speed? (e.g., "2x faster", "half speed", "0.5x")');
         }
 
-        // ── Silence removal ───────────────────────────────────────────────
         if (matches('silence')) {
             return this.createIntent(INTENT_TYPES.EDIT, OPERATIONS.SILENCE_REMOVAL, {
                 constraints: { threshold: this.extractSilenceThreshold(lower) }
             });
         }
 
-        // ── Filler words removal ──────────────────────────────────────────
         if (matches('fillerWords')) {
             return this.createIntent(INTENT_TYPES.EDIT, OPERATIONS.REMOVE_FILLER_WORDS, {
                 targets: activeClip ? [activeClip.id] : [],
@@ -471,7 +414,6 @@ export class IntentParser {
             });
         }
 
-        // ── Aspect ratio ──────────────────────────────────────────────────
         if (matches('aspect')) {
             const ratio = this.extractAspectRatio(lower);
             return this.createIntent(INTENT_TYPES.EDIT, OPERATIONS.SET_ASPECT_RATIO, {
@@ -479,78 +421,36 @@ export class IntentParser {
             });
         }
 
-        // ── Split ─────────────────────────────────────────────────────────
-        if (matches('split')) {
-            return this.parseSplitIntent(lower, activeClip, context);
-        }
+        if (matches('split')) return this.parseSplitIntent(lower, activeClip, context);
+        if (matches('cut')) return this.parseCutIntent(lower, activeClip, context);
 
-        // ── Cut (can mean split at playhead OR trim) ──────────────────────
-        if (matches('cut')) {
-            return this.parseCutIntent(lower, activeClip, context);
-        }
-
-        // ── Trim ──────────────────────────────────────────────────────────
         if (matches('trim')) {
-            if (!activeClip && clips.length === 1) {
-                // Auto-select the only clip
-                const onlyClip = clips[0];
-                return this.parseTrimIntent(lower, onlyClip, context);
-            }
-            if (!activeClip) {
-                return this.needsClarification('Which clip should I trim? Please select a clip first.');
-            }
+            if (!activeClip && clips.length === 1) return this.parseTrimIntent(lower, clips[0], context);
+            if (!activeClip) return this.needsClarification('Which clip should I trim? Please select a clip first.');
             return this.parseTrimIntent(lower, activeClip, context);
         }
 
-        // ── Remove / Delete ───────────────────────────────────────────────
         if (matches('remove')) {
             const clip = activeClip || (clips.length === 1 ? clips[0] : null);
-            if (!clip) {
-                return this.needsClarification('Which clip should I remove? Please select one.');
-            }
+            if (!clip) return this.needsClarification('Which clip should I remove? Please select one.');
             return this.createIntent(INTENT_TYPES.EDIT, OPERATIONS.REMOVE_CLIP, {
                 targets: [clip.id],
                 target_track_id: clip.trackId
             });
         }
 
-        // ── Transitions ───────────────────────────────────────────────────
-        if (matches('transition')) {
-            return this.parseTransitionIntent(lower, activeClip);
-        }
+        if (matches('transition')) return this.parseTransitionIntent(lower, activeClip);
+        if (matches('filter')) return this.parseFilterIntent(lower, activeClip);
+        if (matches('color')) return this.parseColorIntent(lower, activeClip);
+        if (matches('text')) return this.parseTextIntent(lower);
+        if (matches('volume')) return this.parseVolumeIntent(lower, activeClip);
 
-        // ── Filter / Effects ──────────────────────────────────────────────
-        if (matches('filter')) {
-            return this.parseFilterIntent(lower, activeClip);
-        }
-
-        // ── Color grading ─────────────────────────────────────────────────
-        if (matches('color')) {
-            return this.parseColorIntent(lower, activeClip);
-        }
-
-        // ── Text overlays ─────────────────────────────────────────────────
-        if (matches('text')) {
-            return this.parseTextIntent(lower);
-        }
-
-        // ── Volume ────────────────────────────────────────────────────────
-        if (matches('volume')) {
-            return this.parseVolumeIntent(lower, activeClip);
-        }
-
-        // ── Duplicate ─────────────────────────────────────────────────────
         if (matches('duplicate')) {
             const clip = activeClip || (clips.length === 1 ? clips[0] : null);
-            if (!clip) {
-                return this.needsClarification('Which clip should I duplicate?');
-            }
-            return this.createIntent(INTENT_TYPES.EDIT, OPERATIONS.DUPLICATE_CLIP, {
-                targets: [clip.id]
-            });
+            if (!clip) return this.needsClarification('Which clip should I duplicate?');
+            return this.createIntent(INTENT_TYPES.EDIT, OPERATIONS.DUPLICATE_CLIP, { targets: [clip.id] });
         }
 
-        // ── Creative / Viral / Improve ────────────────────────────────────
         if (matches('viral')) {
             const platform = this.inferPlatform(lower);
             if (platform) {
@@ -590,18 +490,11 @@ export class IntentParser {
             };
         }
 
-        // ── Session memory: "what did you change?" ────────────────────────
         if (/what did you|what have you|show me what|what changed|summarize.*(edit|change)|recap/.test(lower)) {
-            return this.createIntent(INTENT_TYPES.QUERY, 'query_session_summary', {
-                constraints: {}
-            });
+            return this.createIntent(INTENT_TYPES.QUERY, 'query_session_summary', { constraints: {} });
         }
 
-        // ── Session memory: follow-up adjustment references ───────────────
-        // "ease up the pacing", "less aggressive cuts", "you cut too much",
-        // "add some breathing room", "too tight"
         if (/ease\s*up|less\s*aggressive|too\s*tight|cut\s*too\s*much|breathing\s*room|too\s*fast.*edit|lighten\s*up|back\s*off\s*the\s*cuts/.test(lower)) {
-            // Lazy import to avoid circular dependency at module load time
             return {
                 intent: INTENT_TYPES.EDIT,
                 operation: 'adjust_last_edit',
@@ -614,28 +507,21 @@ export class IntentParser {
             };
         }
 
-        // ── Session memory: restore / undo the AI's last change ───────────
-        // "restore the intro", "put back the beginning", "undo what you did"
         if (/restore\s+the|put\s+back|bring\s+back|undo\s+(what\s+you|the\s+last|that\s+edit)/.test(lower)) {
             return this.createIntent(INTENT_TYPES.UNDO, 'undo_action', {
                 constraints: { scope: 'last_ai_edit' }
             });
         }
 
-        // ── Could not parse ────────────────────────────────────────────────
         return this.needsClarification(
             `I didn't quite understand that. Try something like:\n• "split the clip in half"\n• "remove silence"\n• "speed up 2x"\n• "make it vertical (9:16)"\n• "trim to 30 seconds"\n• "export the video"\n• "what did you change?"`
         );
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // TRIM INTENT ─ handles "make it shorter", "remove the beginning", etc.
-    // ─────────────────────────────────────────────────────────────────────
     static parseTrimIntent(prompt, clip, context) {
         const duration = this.extractDuration(prompt);
         const targetDuration = this.extractTargetDuration(prompt);
 
-        // "trim to X seconds" or "cut to X seconds"
         if (targetDuration !== null) {
             return this.createIntent(INTENT_TYPES.EDIT, OPERATIONS.TRIM_CLIP, {
                 targets: [clip.id],
@@ -644,7 +530,6 @@ export class IntentParser {
             });
         }
 
-        // "trim X seconds from the start/end"
         if (duration !== null) {
             const from = this.extractTrimFrom(prompt);
             return this.createIntent(INTENT_TYPES.EDIT, OPERATIONS.TRIM_CLIP, {
@@ -654,9 +539,7 @@ export class IntentParser {
             });
         }
 
-        // "make it shorter" — ask how much
         if (/shorter|shorten|trim|tighten/i.test(prompt) && duration === null) {
-            // Default: trim 20% from end
             const defaultTrim = clip.duration ? clip.duration * 0.2 : 2;
             return this.createIntent(INTENT_TYPES.EDIT, OPERATIONS.TRIM_CLIP, {
                 targets: [clip.id],
@@ -668,17 +551,12 @@ export class IntentParser {
         return this.needsClarification('How much should I trim? (e.g., "trim 5 seconds from the end")');
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // NLE EXPORT INTENT
-    // ─────────────────────────────────────────────────────────────────────
     static parseNLEExportIntent(prompt) {
         let nleTarget = null;
 
-        // NB: target keys must match the backend /api/export/nle accepted values:
-        // 'fcpx' | 'premiere' | 'resolve' | 'otio'
-        if (/premiere/i.test(prompt))                   nleTarget = 'premiere';
-        else if (/final.?cut|fcpx/i.test(prompt))       nleTarget = 'fcpx';
-        else if (/davinci|resolve/i.test(prompt))        nleTarget = 'resolve';
+        if (/premiere/i.test(prompt)) nleTarget = 'premiere';
+        else if (/final.?cut|fcpx/i.test(prompt)) nleTarget = 'fcpx';
+        else if (/davinci|resolve/i.test(prompt)) nleTarget = 'resolve';
         else if (/otio|opentimelineio|universal/i.test(prompt)) nleTarget = 'otio';
 
         if (!nleTarget) {
@@ -694,26 +572,19 @@ export class IntentParser {
             };
         }
 
-        return this.createIntent(INTENT_TYPES.EXPORT, 'nle_export', {
-            constraints: { nleTarget }
-        });
+        return this.createIntent(INTENT_TYPES.EXPORT, 'nle_export', { constraints: { nleTarget } });
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // INTENT PARSERS (kept & enhanced from original)
-    // ─────────────────────────────────────────────────────────────────────
     static parseSplitIntent(prompt, activeClip, context) {
         const clip = activeClip || (context?.clips?.length === 1 ? context.clips[0] : null);
-        if (!clip) {
-            return this.needsClarification('Which clip should I split? Please select a clip first.');
-        }
+        if (!clip) return this.needsClarification('Which clip should I split? Please select a clip first.');
 
         let mode = null;
         if (/half|middle|midpoint|in\s?2|in two|50[%]?/.test(prompt)) mode = 'midpoint';
         else if (/third|in\s?3|in three|33[%]?/.test(prompt)) mode = 'thirds';
         else if (/quarter|in\s?4|in four|25[%]?/.test(prompt)) mode = 'quarters';
         else if (/playhead|current position|here|at this point/.test(prompt)) mode = 'playhead';
-        else mode = 'midpoint'; // Default to midpoint if unspecified
+        else mode = 'midpoint';
 
         const timestamp = this.extractExplicitTimestamp(prompt);
         if (timestamp !== null) mode = 'timestamp';
@@ -728,7 +599,6 @@ export class IntentParser {
     static parseCutIntent(prompt, activeClip, context) {
         const clip = activeClip || (context?.clips?.length === 1 ? context.clips[0] : null);
 
-        // "cut to X seconds" = trim
         if (/\bto\b/.test(prompt)) {
             const targetDuration = this.extractTargetDuration(prompt);
             if (targetDuration !== null && clip) {
@@ -740,7 +610,6 @@ export class IntentParser {
             }
         }
 
-        // "cut out [range]"
         if (/out|remove|delete/.test(prompt)) {
             const range = this.extractTimeRange(prompt);
             if (range) {
@@ -750,14 +619,12 @@ export class IntentParser {
             }
         }
 
-        // Cut at playhead
         if (/here|playhead|current/.test(prompt)) {
             return this.createIntent(INTENT_TYPES.CUT, OPERATIONS.CUT_AT_PLAYHEAD, {
                 targets: clip ? [clip.id] : []
             });
         }
 
-        // Cut at timestamp
         const timestamp = this.extractExplicitTimestamp(prompt);
         if (timestamp !== null) {
             return this.createIntent(INTENT_TYPES.CUT, OPERATIONS.CUT_AT_TIMESTAMP, {
@@ -766,7 +633,6 @@ export class IntentParser {
             });
         }
 
-        // Default: split at midpoint
         if (clip) {
             return this.createIntent(INTENT_TYPES.EDIT, OPERATIONS.SPLIT_CLIP, {
                 targets: [clip.id],
@@ -803,7 +669,6 @@ export class IntentParser {
                 constraints: { text: textMatch[1] }
             });
         }
-        // Extract text after "add text/caption/title"
         const textAfterKeyword = prompt.replace(/add\s+(text|title|caption|subtitle)[:\-]?\s*/i, '').trim();
         if (textAfterKeyword && textAfterKeyword.length > 0 && textAfterKeyword !== prompt.toLowerCase()) {
             return this.createIntent(INTENT_TYPES.APPLY_EFFECT, OPERATIONS.ADD_TEXT, {
@@ -847,9 +712,8 @@ export class IntentParser {
         });
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    // EXTRACTORS
-    // ─────────────────────────────────────────────────────────────────────
+    // ── Extractors ────────────────────────────────────────────────────────────
+
     static extractExplicitTimestamp(prompt) {
         const timeMatch = prompt.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
         if (timeMatch) {
@@ -864,13 +728,10 @@ export class IntentParser {
     }
 
     static extractTargetDuration(prompt) {
-        // "to X seconds" / "cut to X" / "trim to X"
         const toMatch = prompt.match(/(?:to|at|=)\s*(\d+(?:\.\d+)?)\s*(?:seconds?|sec|s\b)/i);
         if (toMatch) return parseFloat(toMatch[1]);
-        // "X second clip"
         const clipMatch = prompt.match(/(\d+(?:\.\d+)?)\s*(?:second|sec)\s*(?:clip|long|video)/i);
         if (clipMatch) return parseFloat(clipMatch[1]);
-        // "X min"
         const minMatch = prompt.match(/(?:to|at)\s*(\d+(?:\.\d+)?)\s*(?:minute|min)/i);
         if (minMatch) return parseFloat(minMatch[1]) * 60;
         return null;
@@ -911,11 +772,8 @@ export class IntentParser {
         if (/timelapse|time.?lapse/.test(prompt)) return 4.0;
         if (/1\.5x/.test(prompt)) return 1.5;
         if (/4x/.test(prompt)) return 4.0;
-        // Generic "faster" / "speed up" without value → 2x
         if (/speed up|faster|make.+faster|make.+quicker/.test(prompt)) return 2.0;
-        // Generic "slower" / "slow down" → 0.5x
         if (/slow down|slower|make.+slower/.test(prompt)) return 0.5;
-
         const match = prompt.match(/(\d+(?:\.\d+)?)\s*x/);
         return match ? parseFloat(match[1]) : null;
     }
@@ -955,7 +813,6 @@ export class IntentParser {
         if (/wipe/.test(prompt)) return 'wipe';
         if (/slide/.test(prompt)) return 'slide';
         if (/zoom/.test(prompt)) return 'zoom';
-        if (/fade/.test(prompt)) return 'fade';
         return 'fade';
     }
 
@@ -1004,13 +861,6 @@ export class IntentParser {
         const hourMatch = prompt.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hr)/i);
         if (hourMatch) return parseFloat(hourMatch[1]) * 3600;
         return null;
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // HELPERS
-    // ─────────────────────────────────────────────────────────────────────
-    static matchesPattern(text, patterns) {
-        return patterns.some(p => text.includes(p));
     }
 
     static createIntent(intent, operation, extras = {}) {

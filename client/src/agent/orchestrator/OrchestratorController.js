@@ -1,17 +1,12 @@
 /**
  * OrchestratorController
  * Main controller for edit request lifecycle management.
- * 
- * Responsibilities:
- * - Receive user prompts and create jobs
- * - Delegate to specialized agents in strict order
- * - Enforce timeouts per phase
- * - Handle retries with exponential backoff
- * - Support cancellation
- * - Rollback on failure (via VersionManager)
- * 
- * NEVER executes media operations directly.
- * NEVER generates FFmpeg commands.
+ *
+ * FIX: Added missing `await` on ValidationService.validate() in
+ *      executeValidationPhase(). Without it the method returned a Promise
+ *      object instead of the resolved validation result, causing
+ *      validationResult.success to always be undefined and the FSM to
+ *      hang in the VERIFYING state or fail silently.
  */
 
 import { OrchestratorFSM } from './OrchestratorFSM.js';
@@ -28,7 +23,6 @@ import {
     RETRY_BACKOFF_MULTIPLIER
 } from './OrchestratorConfig.js';
 
-// Import specialized agents
 import { IntentParser } from '../IntentParser.js';
 import { EditPlanner } from '../EditPlanner.js';
 import { CommandCompiler } from '../CommandCompiler.js';
@@ -37,35 +31,22 @@ import { ValidationService } from '../ValidationService.js';
 import { VersionManager } from '../VersionManager.js';
 import useTimelineStore from '../../store/useTimelineStore.js';
 
-// Import global EventBus for decoupled communication
 import { EventBus, EVENT_TYPES as GLOBAL_EVENTS } from '../EventBus.js';
 
-/**
- * Generate unique job ID
- */
 function generateJobId() {
     return `orch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
 export class OrchestratorController {
     constructor() {
-        // Active FSM instances
         this.activeFSMs = new Map();
-
-        // Abort controllers for cancellation
         this.abortControllers = new Map();
-
-        // Timeout handles for cleanup
         this.timeoutHandles = new Map();
-
-        // Retry counters
         this.retryCounts = new Map();
     }
 
     /**
      * Process a user edit request
-     * @param {string} userPrompt - Natural language edit request
-     * @returns {Promise<object>} Result with jobId, success, and details
      */
     async processRequest(userPrompt) {
         if (!userPrompt || typeof userPrompt !== 'string' || !userPrompt.trim()) {
@@ -78,31 +59,25 @@ export class OrchestratorController {
         const jobId = generateJobId();
         console.log(`[AG_DEBUG] [Orchestrator] Starting job: ${jobId}, Prompt: "${userPrompt.trim()}"`);
 
-        // Create FSM
         const fsm = new OrchestratorFSM(jobId, {
             userPrompt: userPrompt.trim(),
             startTime: Date.now()
         });
         this.activeFSMs.set(jobId, fsm);
 
-        // Create abort controller
         const abortController = new AbortController();
         this.abortControllers.set(jobId, abortController);
 
-        // Initialize retry counter
         this.retryCounts.set(jobId, 0);
 
-        // Create version checkpoint for rollback
         VersionManager.checkpoint?.();
 
-        // Set global timeout
         const globalTimeout = setTimeout(() => {
             this.handleTimeout(jobId, 'global');
         }, GLOBAL_TIMEOUT_MS);
         this.timeoutHandles.set(`${jobId}_global`, globalTimeout);
 
         try {
-            // Execute the pipeline
             console.log(`[AG_DEBUG] [Orchestrator] Executing pipeline for job: ${jobId}`);
             const result = await this.executePipeline(jobId, fsm, abortController.signal);
             console.log(`[AG_DEBUG] [Orchestrator] Pipeline finished. Success: ${result.success}`);
@@ -115,7 +90,6 @@ export class OrchestratorController {
                 fsm.forceError(error.message);
             }
 
-            // Emit global failure event for error recovery
             EventBus.emit(GLOBAL_EVENTS.JOB_FAILED, {
                 jobId,
                 error: error.message,
@@ -130,7 +104,6 @@ export class OrchestratorController {
             };
 
         } finally {
-            // Cleanup
             this.cleanup(jobId);
         }
     }
@@ -139,7 +112,6 @@ export class OrchestratorController {
      * Execute the full pipeline
      */
     async executePipeline(jobId, fsm, signal) {
-        // Emit global event for job started
         EventBus.emit(GLOBAL_EVENTS.JOB_STARTED, {
             jobId,
             userPrompt: fsm.getContext().userPrompt
@@ -152,8 +124,6 @@ export class OrchestratorController {
 
         const planningResult = await this.executePlanningPhase(jobId, fsm, signal);
 
-
-        // Handle Clarification
         if (planningResult.status === 'clarification_needed') {
             fsm.send(EVENTS.CLARIFICATION_NEEDED, {
                 questions: planningResult.questions
@@ -190,9 +160,7 @@ export class OrchestratorController {
         const executionResult = await this.executeExecutionPhase(jobId, fsm, signal, planningResult);
 
         if (!executionResult.success) {
-            // Attempt rollback
             this.attemptRollback(jobId);
-
             fsm.send(EVENTS.EXECUTION_FAILED, { error: executionResult.error });
             return {
                 success: false,
@@ -223,9 +191,7 @@ export class OrchestratorController {
             };
         }
 
-        fsm.send(EVENTS.VALIDATION_PASSED, {
-            validationResult
-        });
+        fsm.send(EVENTS.VALIDATION_PASSED, { validationResult });
 
         // === COMPLETE ===
         orchestratorEvents.emitProgress(jobId, 100, 'Complete');
@@ -235,7 +201,6 @@ export class OrchestratorController {
             validation: validationResult
         });
 
-        // Emit global completion event
         EventBus.emit(GLOBAL_EVENTS.JOB_COMPLETED, {
             jobId,
             plan: planningResult.plan,
@@ -259,7 +224,6 @@ export class OrchestratorController {
     async executePlanningPhase(jobId, fsm, signal) {
         return this.withTimeout(
             async () => {
-                // Step 1: Parse Intent
                 orchestratorEvents.emitAgentStart(jobId, 'IntentParser', { prompt: fsm.context.userPrompt });
                 console.log(`[AG_DEBUG] [Orchestrator] Sending prompt to IntentParser: "${fsm.context.userPrompt}"`);
 
@@ -272,7 +236,6 @@ export class OrchestratorController {
                     throw new Error('Cancelled');
                 }
 
-                // Check for clarification needed
                 if (intentResult.intent === 'clarification_required') {
                     console.log(`[AG_DEBUG] [Orchestrator] Clarification required: ${intentResult.message}`);
                     return {
@@ -284,7 +247,6 @@ export class OrchestratorController {
 
                 orchestratorEvents.emitProgress(jobId, 20, 'Generating plan...');
 
-                // Step 2: Generate Plan
                 orchestratorEvents.emitAgentStart(jobId, 'EditPlanner', { intent: intentResult });
                 console.log(`[AG_DEBUG] [Orchestrator] Sending intent to EditPlanner`);
 
@@ -297,7 +259,6 @@ export class OrchestratorController {
                     throw new Error('Cancelled');
                 }
 
-                // Handle Clarification Request from Planner
                 if (planResult.status === 'clarification_needed') {
                     console.log(`[AG_DEBUG] [Orchestrator] EditPlanner requested clarification:`, planResult.questions);
 
@@ -308,7 +269,7 @@ export class OrchestratorController {
                     });
 
                     return {
-                        success: true, // It's not a failure, it's a pause
+                        success: true,
                         status: 'clarification_needed',
                         questions: planResult.questions,
                         originalIntent: planResult.originalIntent
@@ -341,7 +302,6 @@ export class OrchestratorController {
     async executeExecutionPhase(jobId, fsm, signal, planningResult) {
         return this.withTimeout(
             async () => {
-                // Step 1: Compile Commands
                 orchestratorEvents.emitAgentStart(jobId, 'CommandCompiler', { plan: planningResult.plan });
                 console.log(`[AG_DEBUG] [Orchestrator] Compiling commands...`);
 
@@ -360,14 +320,12 @@ export class OrchestratorController {
 
                 orchestratorEvents.emitProgress(jobId, 50, 'Executing...');
 
-                // Step 2: Execute Commands
                 orchestratorEvents.emitAgentStart(jobId, 'MediaExecutionEngine', { commands: compileResult.commands });
                 console.log(`[AG_DEBUG] [Orchestrator] Executing media commands`);
 
                 const executionResult = await mediaExecutionEngine.execute(
                     compileResult.commands,
                     (progress) => {
-                        // Map execution progress to 50-80% range
                         const mappedProgress = 50 + Math.floor(progress * 0.3);
                         orchestratorEvents.emitProgress(jobId, mappedProgress, 'Executing...');
                     },
@@ -402,6 +360,11 @@ export class OrchestratorController {
 
     /**
      * Execute Validation Phase
+     *
+     * FIX: `ValidationService.validate()` is async. Previously called without
+     *      `await`, returning a pending Promise as the validationResult.
+     *      `validationResult.success` was therefore always `undefined`, causing
+     *      the FSM to send VALIDATION_FAILED and the job to appear stuck/failed.
      */
     async executeValidationPhase(jobId, fsm, plan, executionResult) {
         return this.withTimeout(
@@ -409,7 +372,8 @@ export class OrchestratorController {
                 orchestratorEvents.emitAgentStart(jobId, 'ValidationService', { plan, result: executionResult });
                 console.log(`[AG_DEBUG] [Orchestrator] Validating execution results...`);
 
-                const validationResult = ValidationService.validate(plan, executionResult);
+                // FIX: added `await` — validate() is an async method
+                const validationResult = await ValidationService.validate(plan, executionResult);
                 console.log(`[AG_DEBUG] [Orchestrator] Validation result: success=${validationResult.success}`);
 
                 orchestratorEvents.emitAgentComplete(jobId, 'ValidationService', validationResult);
@@ -448,9 +412,6 @@ export class OrchestratorController {
         });
     }
 
-    /**
-     * Handle timeout event
-     */
     handleTimeout(jobId, phase) {
         console.warn(`[AG_DEBUG] [Orchestrator] Timeout in ${phase} phase for job ${jobId}`);
 
@@ -460,25 +421,16 @@ export class OrchestratorController {
             orchestratorEvents.emitTimeout(jobId, phase, fsm.getElapsedTime());
         }
 
-        // Abort any ongoing operations
         const abortController = this.abortControllers.get(jobId);
         if (abortController) {
             abortController.abort();
         }
     }
 
-    /**
-     * Check if operation was aborted
-     */
     checkAborted(signal) {
         return signal && signal.aborted;
     }
 
-    /**
-     * Cancel a job
-     * @param {string} jobId - Job to cancel
-     * @param {string} reason - Cancellation reason
-     */
     cancel(jobId, reason = 'User cancelled') {
         console.log(`[Orchestrator] Cancelling job: ${jobId}`);
 
@@ -493,24 +445,17 @@ export class OrchestratorController {
             return false;
         }
 
-        // Abort ongoing operations
         const abortController = this.abortControllers.get(jobId);
         if (abortController) {
             abortController.abort();
         }
 
-        // Transition to cancelled
         fsm.cancel(reason);
-
-        // Attempt rollback
         this.attemptRollback(jobId);
 
         return true;
     }
 
-    /**
-     * Attempt to rollback changes
-     */
     attemptRollback(jobId) {
         console.log(`[Orchestrator] Attempting rollback for job: ${jobId}`);
         try {
@@ -522,10 +467,6 @@ export class OrchestratorController {
         }
     }
 
-    /**
-     * Retry a failed job
-     * @param {string} jobId - Job to retry
-     */
     async retry(jobId) {
         const fsm = this.activeFSMs.get(jobId);
         if (!fsm) {
@@ -537,7 +478,6 @@ export class OrchestratorController {
             return { success: false, error: `Max retries (${MAX_RETRIES}) exceeded` };
         }
 
-        // Calculate backoff delay
         const backoffMs = RETRY_BACKOFF_BASE_MS * Math.pow(RETRY_BACKOFF_MULTIPLIER, retryCount);
         console.log(`[Orchestrator] Retry ${retryCount + 1}/${MAX_RETRIES} after ${backoffMs}ms delay`);
 
@@ -545,34 +485,24 @@ export class OrchestratorController {
 
         this.retryCounts.set(jobId, retryCount + 1);
 
-        // Re-process with same prompt
         return this.processRequest(fsm.context.userPrompt);
     }
 
-    /**
-     * Delay helper
-     */
     delay(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    /**
-     * Cleanup job resources
-     */
     cleanup(jobId) {
-        // Clear all timeouts for this job
         this.timeoutHandles.forEach((handle, key) => {
             if (key.startsWith(jobId)) {
                 clearTimeout(handle);
             }
         });
 
-        // Remove from maps
         this.activeFSMs.delete(jobId);
         this.abortControllers.delete(jobId);
         this.retryCounts.delete(jobId);
 
-        // Clean up timeout handles
         [...this.timeoutHandles.keys()]
             .filter(k => k.startsWith(jobId))
             .forEach(k => this.timeoutHandles.delete(k));
@@ -580,43 +510,25 @@ export class OrchestratorController {
         console.log(`[Orchestrator] Cleaned up job: ${jobId}`);
     }
 
-    /**
-     * Get job status
-     */
     getJobStatus(jobId) {
         const fsm = this.activeFSMs.get(jobId);
-        if (!fsm) {
-            return null;
-        }
+        if (!fsm) return null;
         return fsm.snapshot();
     }
 
-    /**
-     * Get all active jobs
-     */
     getActiveJobs() {
         return Array.from(this.activeFSMs.keys());
     }
 
-    /**
-     * Subscribe to orchestrator events
-     * @param {string} eventType - Event type from EVENT_TYPES
-     * @param {function} callback - Handler function
-     * @returns {function} Unsubscribe function
-     */
     on(eventType, callback) {
         return orchestratorEvents.on(eventType, callback);
     }
 
-    /**
-     * Subscribe to all events
-     */
     onAll(callback) {
         return orchestratorEvents.on('*', callback);
     }
 }
 
-// Singleton instance
 export const orchestratorController = new OrchestratorController();
 
 export default OrchestratorController;

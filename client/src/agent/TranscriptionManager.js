@@ -3,24 +3,17 @@
  * Singleton that handles background transcription + content analysis
  * immediately after a file is added to the timeline.
  *
- * Flow:
- *   file added → startBackgroundTranscription()
- *     → /api/audio/transcribe  (Whisper)
- *     → setCaptions() on store
- *     → ContentAnalyzer.analyze()
- *     → setContentAnalysis() on store
- *     → emits ANALYSIS_READY
- *
- * EditJobManager checks getCachedAnalysis() before running ContentAnalyzer,
- * so if the user types their first message after upload the plan appears
- * in ~2s instead of 30-45s.
+ * FIX: All fetch() calls replaced with authFetch() so the Supabase JWT
+ *      Bearer token is sent in production. Without this, /api/audio/transcribe
+ *      returned 401 Unauthorized and transcription silently failed, leaving
+ *      the agent without any word-level transcript data.
  */
 
+import { authFetch } from '../utils/authFetch.js';
 import { EventBus, EVENT_TYPES } from './EventBus.js';
 import { ContentAnalyzer } from './ContentAnalyzer.js';
 import useTimelineStore from '../store/useTimelineStore.js';
 
-// ─── Status constants ────────────────────────────────────────────────────────
 export const TRANSCRIPTION_STATUS = {
     IDLE: 'idle',
     TRANSCRIBING: 'transcribing',
@@ -32,7 +25,7 @@ export const TRANSCRIPTION_STATUS = {
 class TranscriptionManagerClass {
     constructor() {
         this._status = TRANSCRIPTION_STATUS.IDLE;
-        this._progress = 0;           // 0-100
+        this._progress = 0;
         this._abortController = null;
         this._cachedAnalysis = null;
         this._currentFilename = null;
@@ -43,12 +36,6 @@ class TranscriptionManagerClass {
 
     /**
      * Start transcription + analysis in the background.
-     * Safe to call multiple times — cancels any in-progress job first.
-     *
-     * @param {string} filename - Filename sent to /api/audio/transcribe
-     * @param {object} [options]
-     * @param {string} [options.platform] - Passed to ContentAnalyzer
-     * @param {number} [options.targetDuration]
      */
     async startBackgroundTranscription(filename, options = {}) {
         if (!filename) {
@@ -56,7 +43,6 @@ class TranscriptionManagerClass {
             return;
         }
 
-        // Cancel any running job
         this._cancel();
 
         this._currentFilename = filename;
@@ -68,7 +54,6 @@ class TranscriptionManagerClass {
         console.log(`[TranscriptionManager] Starting background transcription for: ${filename}`);
         this._setStatus(TRANSCRIPTION_STATUS.TRANSCRIBING, 0);
 
-        // ── Phase 1: Transcribe ───────────────────────────────────────────────
         try {
             const words = await this._transcribe(filename, signal);
             if (signal.aborted) return;
@@ -82,7 +67,6 @@ class TranscriptionManagerClass {
 
             this._setStatus(TRANSCRIPTION_STATUS.ANALYZING, 55);
 
-            // ── Phase 2: Analyze content ──────────────────────────────────────
             const analysis = await ContentAnalyzer.analyze({
                 platform: options.platform || null,
                 targetDuration: options.targetDuration || null,
@@ -120,18 +104,15 @@ class TranscriptionManagerClass {
         }
     }
 
-    /** Cancel any in-progress transcription/analysis job */
     cancel() {
         this._cancel();
         this._setStatus(TRANSCRIPTION_STATUS.IDLE, 0);
     }
 
-    /** Returns the cached ContentAnalyzer result, or null if not ready */
     getCachedAnalysis() {
         return this._cachedAnalysis;
     }
 
-    /** Returns current status string */
     getStatus() {
         return {
             status: this._status,
@@ -142,12 +123,10 @@ class TranscriptionManagerClass {
         };
     }
 
-    /** True if analysis is cached and ready to use */
     isReady() {
         return this._status === TRANSCRIPTION_STATUS.READY && this._cachedAnalysis !== null;
     }
 
-    /** Clear the cached analysis (e.g. when a new file is loaded) */
     clearCache() {
         this._cachedAnalysis = null;
         this._currentFilename = null;
@@ -158,17 +137,16 @@ class TranscriptionManagerClass {
     // ── Internal ──────────────────────────────────────────────────────────────
 
     async _transcribe(filename, signal) {
-        // Emit initial progress
         this._setStatus(TRANSCRIPTION_STATUS.TRANSCRIBING, 5);
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 300_000); // 5 min max
+        const timeoutId = setTimeout(() => controller.abort(), 300_000);
         signal.addEventListener('abort', () => controller.abort());
 
         try {
-            const response = await fetch('/api/audio/transcribe', {
+            // FIX: was fetch('/api/audio/transcribe', ...) — no auth header → 401 in production
+            const response = await authFetch('/api/audio/transcribe', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ filename }),
                 signal: controller.signal,
             });

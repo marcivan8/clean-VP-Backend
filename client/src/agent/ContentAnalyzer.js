@@ -1,23 +1,15 @@
 /**
  * ContentAnalyzer Agent — Long-Form Video Intelligence Engine
  *
- * Implements Steps 1–3 of the Long-Form Spec:
- *   1. Context Analysis  — reads timeline for duration, clips, transcript presence
- *   2. Segmentation      — calls backend to semantically cluster Whisper segments
- *   3. Structure Detection — receives back { hook, intro, sections[], keyMoments[], outro }
- *
- * This agent NEVER executes edits. It ONLY analyzes and returns structured data.
- * All results are stored in useTimelineStore.contentAnalysis for downstream agents.
- *
- * Constraints:
- *   - Always calls /api/ai/analyze-content for GPT-4 topic detection (Q3 answer)
- *   - Returns requiresApproval: true at all times (Q4 answer)
- *   - Requires word-level transcript (Q1 answer) — gracefully degrades without it
+ * FIX: All fetch() calls replaced with authFetch() so the Supabase JWT
+ *      Bearer token is injected in production. Without auth headers,
+ *      /api/ai/analyze-content returned 401 and ContentAnalyzer always
+ *      fell back to _localAnalysis(), producing low-quality edit plans.
  */
 
+import { authFetch } from '../utils/authFetch.js';
 import useTimelineStore from '../store/useTimelineStore.js';
 
-// Segment type constants
 export const SEGMENT_TYPES = {
     HOOK: 'hook',
     INTRO: 'intro',
@@ -27,29 +19,21 @@ export const SEGMENT_TYPES = {
     OUTRO: 'outro',
 };
 
-// Energy levels
 export const ENERGY_LEVELS = {
     LOW: 'low',
     MEDIUM: 'medium',
     HIGH: 'high',
 };
 
-// Edit modes
 export const EDIT_MODES = {
-    FULL_BUILD: 'FULL_BUILD',         // From raw rushes → build narrative
-    CLEAN_EDIT: 'CLEAN_EDIT',         // Podcast/interview → remove silences + filler
-    YOUTUBE_OPTIMIZED: 'YOUTUBE_OPTIMIZED', // Add hook, improve pacing
+    FULL_BUILD: 'FULL_BUILD',
+    CLEAN_EDIT: 'CLEAN_EDIT',
+    YOUTUBE_OPTIMIZED: 'YOUTUBE_OPTIMIZED',
 };
 
 export class ContentAnalyzer {
     /**
      * Main entry point: Analyze video content for long-form editing.
-     *
-     * @param {object} options
-     * @param {string} [options.platform] - 'youtube' | 'podcast' | 'tiktok' | null
-     * @param {number} [options.targetDuration] - Desired output duration in seconds
-     * @param {AbortSignal} [options.signal] - For cancellation
-     * @returns {Promise<ContentAnalysisResult>}
      */
     static async analyze(options = {}) {
         const { platform = null, targetDuration = null, signal = null } = options;
@@ -57,7 +41,6 @@ export class ContentAnalyzer {
 
         console.log('[ContentAnalyzer] Starting content analysis...');
 
-        // ── Step 1: Context Analysis ────────────────────────────────────────
         const context = this._buildContext(state);
         console.log('[ContentAnalyzer] Context:', context);
 
@@ -65,10 +48,8 @@ export class ContentAnalyzer {
             return this._errorResult('No clips found on the timeline. Please import a video first.');
         }
 
-        // ── Step 2: Build transcript payload ───────────────────────────────
         const transcriptPayload = this._buildTranscriptPayload(state);
 
-        // ── Step 3: Call backend for GPT-4 semantic analysis ───────────────
         const backendResult = await this._callBackend({
             transcript: transcriptPayload,
             clips: context.clips,
@@ -79,19 +60,16 @@ export class ContentAnalyzer {
         });
 
         if (!backendResult.success) {
-            // Degrade gracefully to local analysis
             console.warn('[ContentAnalyzer] Backend unavailable, using local analysis');
             return this._localAnalysis(context, platform, targetDuration);
         }
 
-        // ── Step 4: Store result in timeline store ─────────────────────────
         const result = {
             ...backendResult,
-            requiresApproval: true, // Enforced: always ask user before executing
+            requiresApproval: true,
             timestamp: Date.now(),
         };
 
-        // Persist to store so EditPlanner and ContextGenerator can access it
         useTimelineStore.getState().setContentAnalysis(result);
 
         console.log(`[ContentAnalyzer] Analysis complete. Mode: ${result.editMode}, Segments: ${result.segments?.length}`);
@@ -100,9 +78,6 @@ export class ContentAnalyzer {
 
     // ── Context Building ──────────────────────────────────────────────────────
 
-    /**
-     * Reads timeline store state and builds a normalized context object.
-     */
     static _buildContext(state) {
         const clips = [];
         let totalDuration = 0;
@@ -137,10 +112,6 @@ export class ContentAnalyzer {
         };
     }
 
-    /**
-     * Builds the transcript payload for the backend.
-     * Handles both plain text captions and word-level timestamp captions.
-     */
     static _buildTranscriptPayload(state) {
         const captions = state.captions || [];
 
@@ -148,12 +119,10 @@ export class ContentAnalyzer {
             return { text: '', segments: [] };
         }
 
-        // Reconstruct plain text
         const text = captions.map(c => c.word || c.text || '').join(' ').trim();
 
-        // Build Whisper-compatible segments from captions if they have timing
         const segments = [];
-        const SEGMENT_GAP_THRESHOLD = 1.5; // seconds of silence = new segment
+        const SEGMENT_GAP_THRESHOLD = 1.5;
         let segStart = captions[0]?.start ?? 0;
         let segText = '';
         let segWords = [];
@@ -164,7 +133,6 @@ export class ContentAnalyzer {
             const wordEnd = caption.end ?? wordStart + 0.2;
             const gap = wordStart - prevEnd;
 
-            // New segment on long gap
             if (gap > SEGMENT_GAP_THRESHOLD && segWords.length > 0) {
                 segments.push({
                     id: segments.length,
@@ -188,7 +156,6 @@ export class ContentAnalyzer {
             prevEnd = wordEnd;
         }
 
-        // Final segment
         if (segWords.length > 0) {
             segments.push({
                 id: segments.length,
@@ -206,16 +173,16 @@ export class ContentAnalyzer {
 
     static async _callBackend({ transcript, clips, duration, platform, targetDuration, signal }) {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s for GPT-4
+        const timeoutId = setTimeout(() => controller.abort(), 45000);
 
         if (signal) {
             signal.addEventListener('abort', () => controller.abort());
         }
 
         try {
-            const response = await fetch('/api/ai/analyze-content', {
+            // FIX: was fetch('/api/ai/analyze-content', ...) — no auth → 401 in production
+            const response = await authFetch('/api/ai/analyze-content', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ transcript, clips, duration, platform, targetDuration }),
                 signal: controller.signal,
             });
@@ -238,16 +205,11 @@ export class ContentAnalyzer {
 
     // ── Local Fallback Analysis ───────────────────────────────────────────────
 
-    /**
-     * Local analysis when backend is unavailable.
-     * Uses speech-rate heuristics to score segments.
-     */
     static _localAnalysis(context, platform, targetDuration) {
         const { clips, duration } = context;
         const contentType = this._detectContentTypeLocal(context);
         const editMode = this._selectEditModeLocal(contentType, duration, platform);
 
-        // Build segments from clip positions if no transcript
         const segments = clips.map(clip => ({
             start: clip.start,
             end: clip.start + clip.duration,
@@ -280,8 +242,14 @@ export class ContentAnalyzer {
             platform: platform || 'youtube',
             segments,
             structure: {
-                sections: { intro: { start: 0, end: duration * 0.15 }, body: { start: duration * 0.15, end: duration * 0.85 }, outro: { start: duration * 0.85, end: duration } },
-                hookCandidate: clips.length > 0 ? { start: clips[0].start, end: Math.min(clips[0].start + 25, duration), reason: 'First clip used as hook candidate' } : null,
+                sections: {
+                    intro: { start: 0, end: duration * 0.15 },
+                    body: { start: duration * 0.15, end: duration * 0.85 },
+                    outro: { start: duration * 0.85, end: duration }
+                },
+                hookCandidate: clips.length > 0
+                    ? { start: clips[0].start, end: Math.min(clips[0].start + 25, duration), reason: 'First clip used as hook candidate' }
+                    : null,
                 detectedSections: [],
             },
             editPlan,
@@ -332,16 +300,10 @@ export class ContentAnalyzer {
         };
     }
 
-    /**
-     * Gets the current content analysis from the store (cached result).
-     */
     static getCachedAnalysis() {
         return useTimelineStore.getState().contentAnalysis || null;
     }
 
-    /**
-     * Returns a human-readable summary of the analysis for the chat UI.
-     */
     static formatSummaryForChat(analysis) {
         if (!analysis?.success) {
             return `❌ Analysis failed: ${analysis?.error || 'Unknown error'}`;

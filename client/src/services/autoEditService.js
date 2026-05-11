@@ -1,50 +1,54 @@
+/**
+ * autoEditService.js
+ *
+ * FIX: Every fetch() call to /api/* replaced with authFetch() so the Supabase
+ *      JWT Bearer token is sent in production. Without auth headers, all
+ *      silence detection, filler removal, denoise, normalize, beat-detect,
+ *      and transcription calls returned 401 Unauthorized and silently failed,
+ *      leaving the timeline unmodified while the agent reported success.
+ */
+
+import { authFetch } from '../utils/authFetch.js';
 import useTimelineStore from '../store/useTimelineStore';
 import { mediaBunnyService } from './MediaBunnyService.js';
 
 const API_SILENCE = '/api/silence/detect';
 
-/**
- * Get the source file from the editor store for client-side processing.
- * Falls back to null if no file is available (backend will use filename instead).
- */
 function getSourceFile() {
     const state = useTimelineStore.getState();
     return state.uploadedFile || null;
 }
 
+// ── Auto Captions ─────────────────────────────────────────────────────────────
+
 export const performAutoCaptions = async (filename) => {
     try {
         const { setCaptions } = useTimelineStore.getState();
-        console.log("🤖 Agent: Requesting Transcription for", filename);
+        console.log('🤖 Agent: Requesting Transcription for', filename);
 
-        const response = await fetch('/api/audio/transcribe', {
+        // FIX: was fetch('/api/audio/transcribe', ...) — no auth → 401
+        const response = await authFetch('/api/audio/transcribe', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ filename })
         });
 
-        if (!response.ok) throw new Error("Transcription failed on server");
+        if (!response.ok) throw new Error('Transcription failed on server');
         const data = await response.json();
 
         if (data.words && data.words.length > 0) {
-            // Note: The /api/audio/transcribe endpoint returns word-level timestamps via Whisper
-            // These serve as our text transcript AND our energy/speech markers.
             setCaptions(data.words);
-            return { success: true, count: data.words.length, message: "Transcription complete. Energy markers and captions are now available." };
+            return { success: true, count: data.words.length, message: 'Transcription complete. Energy markers and captions are now available.' };
         }
 
-        return { success: false, message: "No speech detected" };
+        return { success: false, message: 'No speech detected' };
     } catch (error) {
-        console.error("Transcription Error:", error);
+        console.error('Transcription Error:', error);
         return { success: false, error: error.message };
     }
 };
 
-/**
- * Extract audio from the uploaded video using mediabunny (client-side).
- * Returns an audio Blob that can be sent to backend for analysis,
- * or used directly for Web Audio API processing.
- */
+// ── Audio Extraction (client-side via mediabunny — no auth needed) ─────────────
+
 export const performAudioExtraction = async () => {
     try {
         const sourceFile = getSourceFile();
@@ -60,125 +64,99 @@ export const performAudioExtraction = async () => {
     }
 };
 
-/**
- * Auto-Edit Service (The "Hands" of the Agent)
- * Executes complex macro-edits based on AI instructions.
- */
+// ── Silence Removal ───────────────────────────────────────────────────────────
 
 export const performSilenceRemoval = async (filename, threshold = '-30dB') => {
     try {
-        const { tracks, updateClip, addClip, removeClip } = useTimelineStore.getState();
+        const { tracks, addClip, removeClip } = useTimelineStore.getState();
         const videoTrack = tracks.find(t => t.type === 'video');
-        if (!videoTrack || videoTrack.clips.length === 0) throw new Error("No video clip to analyze");
+        if (!videoTrack || videoTrack.clips.length === 0) throw new Error('No video clip to analyze');
 
-        // Assume we process the first clip or the "main" file
-        // In a real app we'd upload the specific clip's file or use its source ID
-        // For MVP we use the filename passed
+        console.log('🤖 Agent: Requesting Silence Analysis for', filename);
 
-        console.log("🤖 Agent: Requesting Silence Analysis for", filename);
-
-        const response = await fetch(API_SILENCE, {
+        // FIX: was fetch(API_SILENCE, ...) — no auth → 401
+        const response = await authFetch(API_SILENCE, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ filename, threshold })
         });
 
-        if (!response.ok) throw new Error("Silence detection failed on server");
+        if (!response.ok) throw new Error('Silence detection failed on server');
         const data = await response.json();
 
-        // Execution Strategy:
-        // 1. Clear existing clips (or just the one being processed)
-        // 2. Create NEW clips for each "Active Segment"
-        // 3. Place them sequentially (Jump Cut style)
-
         const activeSegments = data.activeSegments;
-        if (!activeSegments || activeSegments.length === 0) return { success: false, message: "No active speech found" };
+        if (!activeSegments || activeSegments.length === 0) return { success: false, message: 'No active speech found' };
 
-        const parentClip = videoTrack.clips[0]; // Assuming single main clip for now
-
-        // Remove original
+        const parentClip = videoTrack.clips[0];
         removeClip(videoTrack.id, parentClip.id);
 
-        // Add chopped segments
-        // We need to keep a running "timeline cursor" to stack them
         let timelineCursor = 0;
-
         activeSegments.forEach((seg, idx) => {
             addClip(videoTrack.id, {
                 id: `auto-cut-${Date.now()}-${idx}`,
                 name: `${parentClip.name} (Part ${idx + 1})`,
                 start: timelineCursor,
                 duration: seg.duration,
-                offset: seg.start, // Crucial: Play from where speech actually is
+                offset: seg.start,
                 url: parentClip.url,
                 assetId: parentClip.assetId,
                 color: parentClip.color
             });
-            timelineCursor += seg.duration; // Advance cursor
+            timelineCursor += seg.duration;
         });
 
-        // Update global duration
         useTimelineStore.getState().setDuration(Math.ceil(timelineCursor + 5));
-
         return { success: true, count: activeSegments.length };
 
     } catch (error) {
-        console.error("Auto-Edit Error:", error);
+        console.error('Auto-Edit Error:', error);
         return { success: false, error: error.message };
     }
 };
 
+// ── Filler Word Removal ───────────────────────────────────────────────────────
+
 export const performFillerRemoval = async (filename) => {
     try {
-        const { tracks, updateClip, addClip, removeClip } = useTimelineStore.getState();
+        const { tracks, addClip, removeClip } = useTimelineStore.getState();
         const videoTrack = tracks.find(t => t.type === 'video');
-        if (!videoTrack || videoTrack.clips.length === 0) throw new Error("No video clip to analyze");
+        if (!videoTrack || videoTrack.clips.length === 0) throw new Error('No video clip to analyze');
 
-        console.log("🤖 Agent: Requesting Filler Word Analysis for", filename);
+        console.log('🤖 Agent: Requesting Filler Word Analysis for', filename);
 
-        const response = await fetch('/api/audio/transcribe', {
+        // FIX: was fetch('/api/audio/transcribe', ...) — no auth → 401
+        const response = await authFetch('/api/audio/transcribe', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ filename })
         });
 
-        if (!response.ok) throw new Error("Transcription failed on server");
+        if (!response.ok) throw new Error('Transcription failed on server');
         const data = await response.json();
 
         if (!data.words || data.words.length === 0) {
-            return { success: false, message: "No speech detected" };
+            return { success: false, message: 'No speech detected' };
         }
 
         const fillerWords = ['um', 'uh', 'like', 'you know', 'sort of', 'kind of', 'euh', 'ben', 'genre'];
         const activeSegments = [];
         let currentSegmentStart = 0;
 
-        data.words.forEach((w, i) => {
+        data.words.forEach((w) => {
             const wordText = w.word.toLowerCase().replace(/[^a-z\s]/g, '').trim();
             if (fillerWords.includes(wordText)) {
-                // If we hit a filler word, close the current active segment
                 if (currentSegmentStart < w.start) {
-                    activeSegments.push({
-                        start: currentSegmentStart,
-                        duration: w.start - currentSegmentStart
-                    });
+                    activeSegments.push({ start: currentSegmentStart, duration: w.start - currentSegmentStart });
                 }
-                // Start the next segment AFTER the filler word
                 currentSegmentStart = w.end;
             }
         });
 
-        // Add the final segment if there's speech after the last filler
         const lastWord = data.words[data.words.length - 1];
         if (currentSegmentStart < lastWord.end) {
-            activeSegments.push({
-                start: currentSegmentStart,
-                duration: lastWord.end - currentSegmentStart
-            });
+            activeSegments.push({ start: currentSegmentStart, duration: lastWord.end - currentSegmentStart });
         }
 
         if (activeSegments.length === 1 && activeSegments[0].start === 0) {
-             return { success: true, count: 0, message: "No filler words found!" };
+            return { success: true, count: 0, message: 'No filler words found!' };
         }
 
         const parentClip = videoTrack.clips[0];
@@ -200,14 +178,15 @@ export const performFillerRemoval = async (filename) => {
         });
 
         useTimelineStore.getState().setDuration(Math.ceil(timelineCursor + 5));
-
-        return { success: true, count: data.words.length - activeSegments.length, message: `Removed filler words!` };
+        return { success: true, count: data.words.length - activeSegments.length, message: 'Removed filler words!' };
 
     } catch (error) {
-        console.error("Filler Removal Error:", error);
+        console.error('Filler Removal Error:', error);
         return { success: false, error: error.message };
     }
 };
+
+// ── Audio Denoise ─────────────────────────────────────────────────────────────
 
 const API_DENOISE = '/api/audio/denoise';
 
@@ -215,90 +194,85 @@ export const performAudioDenoise = async (filename) => {
     try {
         const { tracks, updateClip } = useTimelineStore.getState();
         const videoTrack = tracks.find(t => t.type === 'video');
-        if (!videoTrack || videoTrack.clips.length === 0) throw new Error("No video clip to process");
+        if (!videoTrack || videoTrack.clips.length === 0) throw new Error('No video clip to process');
+        const parentClip = videoTrack.clips[0];
 
-        const parentClip = videoTrack.clips[0]; // Process main clip
+        console.log('🤖 Agent: Denoising audio for', filename);
 
-        console.log("🤖 Agent: Denoising audio for", filename);
-
-        const response = await fetch(API_DENOISE, {
+        // FIX: was fetch(API_DENOISE, ...) — no auth → 401
+        const response = await authFetch(API_DENOISE, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filename }) // Send filename, let backend resolve
+            body: JSON.stringify({ filename })
         });
 
-        if (!response.ok) throw new Error("Denoise failed on server");
+        if (!response.ok) throw new Error('Denoise failed on server');
         const data = await response.json();
 
-        // Data should contain { url: '/uploads/audio_temp/...' }
-        // We replace the clip's URL with this new one. 
-        // The clip will reload with the cleaned video file.
-
         if (data.url) {
-            // Need absolute URL or relative?
-            // If backend returns relative relative to root, we might need to prepend host if on different port.
-            // Vite proxy handles /uploads -> Backend.
-
             updateClip(videoTrack.id, parentClip.id, {
                 url: data.url,
                 name: `${parentClip.name} (Cleaned)`
             });
-            return { success: true, count: 1, message: "Audio cleaned and updated." };
+            return { success: true, count: 1, message: 'Audio cleaned and updated.' };
         }
 
-        return { success: false, message: "No output URL received." };
+        return { success: false, message: 'No output URL received.' };
 
     } catch (error) {
-        console.error("Denoise Error:", error);
+        console.error('Denoise Error:', error);
         return { success: false, error: error.message };
     }
 };
+
+// ── Beat Detection ────────────────────────────────────────────────────────────
 
 const API_BEAT_DETECT = '/api/audio/beat-detect';
 
 export const performBeatDetection = async (filename) => {
     try {
         const { setBeatMarkers } = useTimelineStore.getState();
-        console.log("🤖 Agent: Detecting beats for", filename);
+        console.log('🤖 Agent: Detecting beats for', filename);
 
-        const response = await fetch(API_BEAT_DETECT, {
+        // FIX: was fetch(API_BEAT_DETECT, ...) — no auth → 401
+        const response = await authFetch(API_BEAT_DETECT, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ filename })
         });
 
-        if (!response.ok) throw new Error("Beat detection failed on server");
+        if (!response.ok) throw new Error('Beat detection failed on server');
         const data = await response.json();
 
         if (data.success && data.beats) {
             setBeatMarkers(data.beats);
-            return { success: true, count: data.beats.length, message: `Detailed ${data.bpm} BPM. Found ${data.beats.length} beat markers.` };
+            return { success: true, count: data.beats.length, message: `Detected ${data.bpm} BPM. Found ${data.beats.length} beat markers.` };
         }
 
-        return { success: false, message: "No beats found." };
+        return { success: false, message: 'No beats found.' };
 
     } catch (error) {
-        console.error("Beat Detect Error:", error);
+        console.error('Beat Detect Error:', error);
         return { success: false, error: error.message };
     }
 };
+
+// ── Audio Normalization ───────────────────────────────────────────────────────
 
 export const performAudioNormalization = async (filename) => {
     try {
         const { tracks, updateClip } = useTimelineStore.getState();
         const videoTrack = tracks.find(t => t.type === 'video');
-        if (!videoTrack || videoTrack.clips.length === 0) throw new Error("No video clip to process");
+        if (!videoTrack || videoTrack.clips.length === 0) throw new Error('No video clip to process');
         const parentClip = videoTrack.clips[0];
 
-        console.log("🤖 Agent: Normalizing audio for", filename);
+        console.log('🤖 Agent: Normalizing audio for', filename);
 
-        const response = await fetch('/api/audio/normalize', {
+        // FIX: was fetch('/api/audio/normalize', ...) — no auth → 401
+        const response = await authFetch('/api/audio/normalize', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ filename })
         });
 
-        if (!response.ok) throw new Error("Normalization failed on server");
+        if (!response.ok) throw new Error('Normalization failed on server');
         const data = await response.json();
 
         if (data.url) {
@@ -306,27 +280,26 @@ export const performAudioNormalization = async (filename) => {
                 url: data.url,
                 name: `${parentClip.name} (Normalized)`
             });
-            return { success: true, count: 1, message: "Audio levels fixed (Normalized)." };
+            return { success: true, count: 1, message: 'Audio levels fixed (Normalized).' };
         }
-        return { success: false, message: "No output URL received." };
+        return { success: false, message: 'No output URL received.' };
 
     } catch (error) {
-        console.error("Normalize Error:", error);
+        console.error('Normalize Error:', error);
         return { success: false, error: error.message };
     }
 };
 
+// ── Generic AI Command Parser ─────────────────────────────────────────────────
+
 export const parseAgentCommand = async (command, filename) => {
-    // 1. Keyword Parser (Optimistic Local Execution)
     const cmd = command.toLowerCase();
     const store = useTimelineStore.getState();
 
-    // Specific Keyword Overrides (Speed)
     if (cmd.includes('silence') && cmd.includes('remove')) {
         return await performSilenceRemoval(filename);
     }
 
-    // 2. Real AI Fallback (Backend LLM)
     try {
         const context = {
             filename,
@@ -335,17 +308,16 @@ export const parseAgentCommand = async (command, filename) => {
             tracks: store.tracks.map(t => ({ type: t.type, count: t.clips.length }))
         };
 
-        const response = await fetch('/api/ai/chat', {
+        // FIX: was fetch('/api/ai/chat', ...) — no auth → 401
+        const response = await authFetch('/api/ai/chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ command, context })
         });
 
-        if (!response.ok) throw new Error("AI Backend Error");
+        if (!response.ok) throw new Error('AI Backend Error');
         const data = await response.json();
 
         if (data.success && data.actions.length > 0) {
-            // Execute Actions Checklist
             let count = 0;
             for (const action of data.actions) {
                 switch (action.type) {
@@ -365,7 +337,6 @@ export const parseAgentCommand = async (command, filename) => {
                         store.tracks.forEach(track => {
                             if (track.type === 'video') {
                                 track.clips.forEach(clip => {
-                                    // Map preset name to tailwind color (Mock)
                                     const color = action.params.preset === 'cinematic' ? 'bg-teal-700' : 'bg-red-600';
                                     store.updateClip(track.id, clip.id, { color });
                                 });
@@ -373,16 +344,15 @@ export const parseAgentCommand = async (command, filename) => {
                         });
                         count++;
                         break;
-                    // TODO: Implement other actions (trim, music, etc.)
                 }
             }
-            return { success: true, count, message: data.message || "AI executed commands." };
+            return { success: true, count, message: data.message || 'AI executed commands.' };
         }
 
-        return { success: false, message: data.message || "AI returned no actions." };
+        return { success: false, message: data.message || 'AI returned no actions.' };
 
     } catch (err) {
-        console.error("AI Fallback Error:", err);
-        return { success: false, error: "AI failed to respond. (Check API Key)" };
+        console.error('AI Fallback Error:', err);
+        return { success: false, error: 'AI failed to respond. (Check API Key)' };
     }
 };
