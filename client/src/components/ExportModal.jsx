@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Film, Download, Tv2, Smartphone, Youtube, Clapperboard, CheckCircle2, Loader2, AlertCircle, FileCode2, Scissors } from 'lucide-react';
+import { X, Film, Download, Tv2, Smartphone, Youtube, Clapperboard, CheckCircle2, Loader2, AlertCircle, FileCode2, Scissors, Zap } from 'lucide-react';
 import { exportToNLE } from '../services/nleExportService';
 import useTimelineStore from '../store/useTimelineStore';
 
@@ -116,6 +116,20 @@ const NLE_TARGETS = [
 ];
 
 // ============================================================================
+// VIBED LOGO (inline SVG — no external dep, always matches brand)
+// ============================================================================
+
+const VibedLogoIcon = ({ size = 18 }) => (
+    <svg width={size} height={size} viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path
+            d="M310 110 L185 265 L250 245 L200 390 L325 230 L258 248 Z"
+            fill="none" stroke="#1a3fa8" strokeWidth="20" strokeLinejoin="round" strokeLinecap="round"
+        />
+        <line x1="248" y1="248" x2="195" y2="268" stroke="#FFB800" strokeWidth="10" strokeLinecap="round" />
+    </svg>
+);
+
+// ============================================================================
 // EXPORT MODAL
 // ============================================================================
 
@@ -202,14 +216,17 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
             <div className="w-full max-w-lg bg-[#0f1117] border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
 
                 {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-white/8 bg-white/3">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-white/8" style={{ background: 'rgba(8,12,24,0.8)' }}>
                     <div className="flex items-center gap-3">
-                        <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-2 rounded-lg shadow-lg shadow-blue-500/30">
-                            <Film className="w-4 h-4 text-white" />
+                        <div
+                            className="p-2 rounded-lg"
+                            style={{ background: 'rgba(26,63,168,0.15)', border: '1px solid rgba(26,63,168,0.3)', boxShadow: '0 0 12px rgba(26,63,168,0.2)' }}
+                        >
+                            <VibedLogoIcon size={18} />
                         </div>
                         <div>
                             <h2 className="text-sm font-bold text-white">Export</h2>
-                            <p className="text-[10px] text-white/40">Video render or NLE project file</p>
+                            <p className="text-[10px] text-white/40">Video render · NLE project file</p>
                         </div>
                     </div>
                     <button onClick={handleClose} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors">
