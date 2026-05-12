@@ -20,6 +20,7 @@
     "@revideo/player-react": "^0.10.4",
     "@revideo/ui": "^0.10.4",
     "@revideo/vite-plugin": "^0.10.4",
+    "@supabase/supabase-js": "^2.49.8",
     "classnames": "^2.5.1",
     "framer-motion": "^12.23.26",
     "lucide-react": "^0.562.0",
