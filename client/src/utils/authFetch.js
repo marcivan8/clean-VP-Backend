@@ -1,40 +1,39 @@
+// client/src/utils/authFetch.js
+
+import { supabase } from '../lib/supabaseClient.js'; // adjust path to match your project
+
 /**
  * authFetch.js
  * Authenticated fetch wrapper for all agent/service API calls.
- * Automatically injects the Supabase JWT Bearer token from localStorage.
- * Use this instead of raw fetch() for every /api/... call.
+ *
+ * FIX: Previous version read the JWT directly from localStorage without
+ *      checking expiry. Expired tokens caused every /api/* call to return
+ *      401 "token is expired" until the user hard-refreshed the page.
+ *
+ *      Now uses supabase.auth.getSession() which automatically refreshes
+ *      the token when it's expired or within the refresh window.
  */
 
+/**
+ * Get a valid (possibly freshly-refreshed) access token from Supabase.
+ * Returns null if the user is not authenticated.
+ */
 async function getToken() {
     try {
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
-                const raw = localStorage.getItem(key);
-                if (raw) {
-                    const parsed = JSON.parse(raw);
-                    const token = parsed?.access_token;
-                    if (token && token !== 'null' && token !== 'undefined') {
-                        return token;
-                    }
-                }
-            }
+        // getSession() silently refreshes the token if it's expired.
+        const { data: { session }, error } = await supabase.auth.getSession();
+
+        if (error) {
+            console.warn('[authFetch] getSession error:', error.message);
+            return null;
         }
-    } catch (_) {
-        // localStorage unavailable or JSON parse error
+
+        return session?.access_token ?? null;
+
+    } catch (err) {
+        console.warn('[authFetch] Could not retrieve session:', err.message);
+        return null;
     }
-
-    // Fallback: plain token under common dev key names
-    const stored =
-        localStorage.getItem('sb-access-token') ||
-        localStorage.getItem('access_token') ||
-        localStorage.getItem('auth_token');
-
-    if (stored && stored !== 'null' && stored !== 'undefined') {
-        return stored;
-    }
-
-    return null;
 }
 
 /**
