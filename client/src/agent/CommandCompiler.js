@@ -303,7 +303,7 @@ function compileSetAspectRatio(step, ctx) {
 function compileSilenceRemoval(step, ctx) {
     return ok(step.step_id, [
         cmd(ENGINE.API, 'silenceDetect', {
-            endpoint: '/api/silence/detect',
+            endpoint: '/api/audio/transcribe',
             method: 'POST',
             payload: { filename: '$uploaded_file', threshold: step.threshold || '-30dB', min_duration: step.min_duration || 0.5, padding: step.padding || 0.1 },
         }, { source_step_id: step.step_id, symbolic_refs: ['$uploaded_file'], description: 'Silence detection' }),
@@ -331,7 +331,7 @@ function compileMuteClip(step, ctx) {
 function compileRemoveFillerWords(step, ctx) {
     return ok(step.step_id, [
         cmd(ENGINE.API, 'fillerDetect', {
-            endpoint: '/api/filler/detect',
+            endpoint: '/api/audio/transcribe',
             method: 'POST',
             payload: { filename: '$uploaded_file', language: step.language || 'en' },
         }, { source_step_id: step.step_id, symbolic_refs: ['$uploaded_file'], description: 'Remove filler words (ums, uhs)' }),

@@ -14,8 +14,7 @@ import DraggableEffect from '../components/DraggableEffect';
 import TextPanel from '../components/TextPanel';
 import MixerPanel from '../components/Sidebar/MixerPanel';
 import ExportModal from '../components/ExportModal';
-import DebugPanel from '../components/DebugPanel';
-import { Type, Bug, Cpu, TrendingUp, GitCompare } from 'lucide-react';
+import { Type, Cpu, TrendingUp, GitCompare } from 'lucide-react';
 import { EffectsPanel } from '../components/Effects';
 import { ClarificationDialog } from '../components/ClarificationDialog';
 import { ApprovalDialog } from '../components/ApprovalDialog';
@@ -147,13 +146,13 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const [exportResult, setExportResult] = React.useState(null);
     const [exportError, setExportError] = React.useState(null);
     const [showExportModal, setShowExportModal] = React.useState(false);
-    const [showDebug, setShowDebug] = React.useState(false);
+
     const [activeTab, setActiveTab] = React.useState('media');
     const [activeColorRange, setActiveColorRange] = React.useState('reds');
     const [openMenu, setOpenMenu] = React.useState(null);
     // Phase 7 state
     const [showPresetMarketplace, setShowPresetMarketplace] = React.useState(false);
-    const [rightPanelTab, setRightPanelTab] = React.useState('ai'); // 'ai' | 'viral' | 'ab'
+
     const projectLoaderRef = useRef(null);
     const playerRef = useRef(null);
 
@@ -446,7 +445,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
     return (
         <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-            {showDebug && <DebugPanel onClose={() => setShowDebug(false)} />}
+
             <ExportModal
                 isOpen={showExportModal}
                 onClose={() => setShowExportModal(false)}
@@ -558,9 +557,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         <button onClick={() => setActiveTab('settings')} className={classNames("hidden md:block p-2 hover:bg-secondary rounded-full transition-colors", activeTab === 'settings' ? "bg-secondary text-foreground" : "")}>
                             <Settings className="w-4 h-4 text-muted-foreground" />
                         </button>
-                        <button onClick={() => setShowDebug(!showDebug)} className={classNames("hidden md:block p-2 hover:bg-secondary rounded-full transition-colors", showDebug ? "bg-red-500/20 text-red-500" : "text-muted-foreground hover:text-red-400")} title="Toggle Debug HUD">
-                            <Bug className="w-4 h-4" />
-                        </button>
+
                         <button onClick={() => setShowExportModal(true)} disabled={isExporting} className="bg-primary text-primary-foreground hover:bg-primary/90 px-3 py-1.5 md:px-4 rounded-md text-xs font-medium flex items-center gap-2 transition-colors disabled:opacity-50">
                             {isExporting ? <span className="animate-spin">⏳</span> : <Share className="w-3 h-3" />}
                             {isExporting ? "Rendering..." : "Export"}
@@ -806,59 +803,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         showAI ? "!translate-x-0" : ""
                     )}>
                         <div className="md:hidden p-3 border-b border-border flex justify-between items-center bg-card">
-                            <span className="font-bold text-sm text-foreground">Assistant</span>
+                            <span className="font-bold text-sm text-purple-400">AI Assistant</span>
                             <button onClick={() => setShowAI(false)}><X className="w-4 h-4" /></button>
                         </div>
-                        {/* Right panel tab switcher */}
-                        <div className="flex px-4 pt-3 border-b border-border bg-card shrink-0 gap-6">
-                            {[
-                                { id: 'ai', label: 'Assistant', icon: Cpu },
-                                { id: 'viral', label: 'Insights', icon: TrendingUp },
-                                { id: 'ab', label: 'Iterations', icon: GitCompare }
-                            ].map(p => {
-                                const Icon = p.icon;
-                                const isActive = rightPanelTab === p.id;
-                                return (
-                                    <button 
-                                        key={p.id} 
-                                        onClick={() => setRightPanelTab(p.id)}
-                                        className={classNames(
-                                            "flex items-center gap-2 pb-3 text-xs font-medium transition-colors relative",
-                                            isActive ? "text-foreground" : "text-muted-foreground hover:text-foreground"
-                                        )}
-                                    >
-                                        <Icon className="w-4 h-4" />
-                                        {p.label}
-                                        {isActive && (
-                                            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-full" />
-                                        )}
-                                    </button>
-                                );
-                            })}
-                        </div>
                         <div className="flex-1 overflow-hidden h-full">
-                            {rightPanelTab === 'ai' && <ReasoningPanel />}
-                            {rightPanelTab === 'viral' && (
-                                <ViralIntelligencePanel
-                                    onAnalyze={() => {
-                                        const store = useEditorStore.getState();
-                                        store.setIsAnalyzing(true);
-                                        // Mock analysis — replace with real API call to /api/analyze
-                                        setTimeout(() => {
-                                            store.setViralAnalysis({
-                                                hook:        { score: 72, grade: 'B', hasSpeech: true, hasFace: false, hasFastCuts: true, hasHookKeyword: true, matchedKeywords: ['watch this'], timestampedHooks: [{ time: 0.5, strength: 'MEDIUM', type: 'verbal_hook', keyword: 'watch this' }], suggestion: 'Strong hook — add a face for +10 points.' },
-                                                pacing:      { score: 68, feedback: 'Good pacing for short-form.', deadMoments: [{ start: 8.2, end: 11.5, length: 3.3, severity: 'MEDIUM', reasons: ['no_speech','no_visual_cut'] }] },
-                                                emotion:     { score: 60, dominantEmotion: 'neutral', feedback: 'Boost emotional energy.' },
-                                                structure:   { score: 75, hasCTA: true, feedback: 'Good structure with CTA.' },
-                                                platformFit: { tiktok: 78, reels: 72, shorts: 75, youtube: 52, pinterest: 45, linkedin: 38, bestPlatform: 'tiktok', optimizations: { tiktok: ['Add a face in the first second.'], reels: ['Shorten to under 90s.'], shorts: [], youtube: [], pinterest: [], linkedin: [] } },
-                                                engagement:  { score: 71, tier: 'HIGH', tierColor: '#22c55e', breakdown: [{ label:'Hook', score:72, contribution:22, grade:'B', suggestion:'Add a face.' },{ label:'Pacing', score:68, contribution:14, grade:'C', suggestion:'More cuts.' },{ label:'Emotion', score:60, contribution:12, grade:'C', suggestion:null },{ label:'Structure', score:75, contribution:11, grade:'B', suggestion:null },{ label:'Platform Fit', score:78, contribution:12, grade:'B', suggestion:null }], actionItems: [{ priority:1, area:'Pacing', action:'Add more cuts every 2–3s.', impact:'MEDIUM' }] }
-                                            });
-                                        }, 2000);
-                                    }}
-                                    onSeek={(t) => useTimelineStore.getState().seek(t)}
-                                />
-                            )}
-                            {rightPanelTab === 'ab' && <ABTestPanel />}
+                            <ReasoningPanel />
                         </div>
                     </aside>
 

@@ -247,6 +247,11 @@ const server = app.listen(port, '0.0.0.0', () => {
   const runCleanup = require('./scripts/cleanup');
   runCleanup(); // Run once on startup
   setInterval(runCleanup, 24 * 60 * 60 * 1000); // Then run every 24 hours
+
+  // Probe SpaCy microservice once so we know whether it's available.
+  // Subsequent calls to analyzePrompt() skip the round-trip when it's down.
+  const SpacyService = require('./services/SpacyService');
+  SpacyService.warmup().catch(() => {}); // fire-and-forget
 });
 
 module.exports = app;
