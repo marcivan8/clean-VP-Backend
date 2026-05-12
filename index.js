@@ -12,6 +12,13 @@ const app = express();
 // Railway injects PORT dynamically — process.env.PORT is authoritative
 const port = process.env.PORT || 3000;
 
+// ── Proxy trust ───────────────────────────────────────────────────────────────
+// Required when running behind Railway / any reverse-proxy that sets
+// X-Forwarded-For. Without this, express-rate-limit throws
+// ERR_ERL_UNEXPECTED_X_FORWARDED_FOR on every request.
+// '1' means trust the first proxy hop (the Railway load-balancer).
+app.set('trust proxy', 1);
+
 // ── ffmpeg-static startup verification ────────────────────────────────────────
 // Catch broken binaries early so the issue shows in Railway build/deploy logs
 let ffmpegVersion = null;
@@ -81,8 +88,8 @@ const uploadLimiter = rateLimit({
 });
 
 // Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Request logging middleware
 app.use((req, res, next) => {

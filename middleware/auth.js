@@ -25,7 +25,8 @@ const authenticateUser = async (req, res, next) => {
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
 
     if (error) {
-      console.error('Token validation error:', error);
+      // Log a compact warning — avoid printing the full stack for routine expired tokens
+      console.warn(`⚠️ [auth] Token rejected: ${error.code || error.status} – ${error.message}`);
       return res.status(401).json({ 
         error: 'Invalid or expired token',
         code: 'TOKEN_VALIDATION_FAILED',

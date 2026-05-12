@@ -16,7 +16,7 @@ const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadDir),
     filename:    (req, file, cb) => cb(null, file.originalname),
 });
-const upload = multer({ storage, limits: { fileSize: 500 * 1024 * 1024 } });
+const upload = multer({ storage, limits: { fileSize: 2 * 1024 * 1024 * 1024 } }); // 2 GB
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: validate that a resolved path stays inside /uploads
@@ -95,7 +95,17 @@ router.post('/generate', authMiddleware, async (req, res) => {
  * Uses optionalAuth for the same reason as /generate above.
  * Swap to authenticateUser before going to production.
  */
-router.post('/upload', authMiddleware, upload.single('video'), async (req, res) => {
+router.post('/upload', authMiddleware, (req, res, next) => {
+    upload.single('video')(req, res, (err) => {
+        if (err) {
+            if (err.code === 'LIMIT_FILE_SIZE') {
+                return res.status(413).json({ error: 'File too large. Maximum upload size is 2 GB.' });
+            }
+            return res.status(400).json({ error: `Upload error: ${err.message}` });
+        }
+        next();
+    });
+}, async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: 'No video uploaded' });
 
