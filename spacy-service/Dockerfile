@@ -18,8 +18,8 @@ RUN python -m spacy download en_core_web_sm
 # Copy application files
 COPY . .
 
-# Expose port
+# Internal Railway service — always listens on 8001
+# The backend reaches it via: http://spacy-service.railway.internal:8001
 EXPOSE 8001
 
-# Start the FastAPI app using Uvicorn
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001"]
