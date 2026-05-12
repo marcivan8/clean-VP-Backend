@@ -2,10 +2,9 @@
  * AgentFeedbackService
  * Generates user-friendly feedback messages after edit operations.
  *
- * Added in this version:
- * - generatePreExecutionBrief(plan, analysisResult) — shows the user exactly
- *   what the AI is about to cut, with counts and reasoning, BEFORE execution.
- *   This is the trust-building layer that converts skeptical creators.
+ * FIX: long_form_edit success message now reflects actual execution ("applied")
+ *      rather than just plan generation ("generated"), and suggestions are
+ *      updated accordingly.
  */
 export class AgentFeedbackService {
     /**
@@ -21,7 +20,7 @@ export class AgentFeedbackService {
         return this.generateSuccessFeedback(operation, validationResult, executionResult);
     }
 
-    // ── Pre-Execution Brief (NEW) ─────────────────────────────────────────────
+    // ── Pre-Execution Brief ───────────────────────────────────────────────────
 
     /**
      * Generate a markdown brief of what the AI is about to do.
@@ -45,43 +44,32 @@ export class AgentFeedbackService {
         const reorderSteps = steps.filter(s => s.action === 'reorder_segment');
         const normalizeSteps = steps.filter(s => s.action === 'normalize_audio' || s.action === 'denoise_audio');
 
-        // Segment-level stats from analysis
         const fillerSegCount = segments.filter(s => s.type === 'filler').length;
         const lowValueSegCount = segments.filter(s => (s.importance_score ?? 1) < 0.3 && s.type !== 'filler').length;
-
-        // Estimate total cut duration from cut_segment steps
         const totalCutSec = cutSegSteps.reduce((sum, s) => sum + ((s.end || 0) - (s.start || 0)), 0);
-
-        // Hook info
         const hook = structure?.hookCandidate;
 
         let brief = `## Here's what I'm going to do\n\n`;
 
-        // ── What's being removed ──────────────────────────────────────────────
         const removals = [];
 
         if (silenceSteps.length > 0) {
             removals.push(`Silent gaps and dead air (threshold: ${silenceSteps[0].threshold || '-30dB'}, min ${silenceSteps[0].min_duration || 0.5}s)`);
         }
-
         if (repeatSteps.length > 0) {
             removals.push(`Repeated takes and restart moments`);
         }
-
         if (fillerSteps.length > 0) {
             const density = fillerSegCount > 0 && segments.length > 0
                 ? ` (~${Math.round((fillerSegCount / segments.length) * 100)}% filler density)`
                 : '';
             removals.push(`Filler words — ums, uhs, and filler phrases${density}`);
         }
-
         if (cutSegSteps.length > 0) {
             const durStr = totalCutSec > 0 ? ` (~${this._formatSeconds(Math.round(totalCutSec))} total)` : '';
             removals.push(`${cutSegSteps.length} low-value segment${cutSegSteps.length !== 1 ? 's' : ''}${durStr}`);
         }
-
         if (lowValueSegCount > 0 && cutSegSteps.length === 0) {
-            // Analysis found low-value segments but no explicit cut steps (e.g. clean edit)
             removals.push(`${lowValueSegCount} low-importance segment${lowValueSegCount !== 1 ? 's' : ''} flagged by analysis`);
         }
 
@@ -91,7 +79,6 @@ export class AgentFeedbackService {
             brief += '\n';
         }
 
-        // ── What's being kept ─────────────────────────────────────────────────
         const keepingParts = [];
         if (segments.length > 0) {
             const keptCount = segments.filter(s => (s.importance_score ?? 1) >= 0.3).length;
@@ -103,27 +90,21 @@ export class AgentFeedbackService {
             brief += `**Keeping:** ${keepingParts.join(', ')}\n\n`;
         }
 
-        // ── Hook ─────────────────────────────────────────────────────────────
         if (hook && reorderSteps.length > 0) {
             brief += `**Hook:** Moving ${hook.start.toFixed(0)}s–${hook.end.toFixed(0)}s to the beginning`;
             if (hook.reason) brief += ` _(${hook.reason})_`;
             brief += '\n\n';
         }
 
-        // ── Audio cleanup ─────────────────────────────────────────────────────
         if (normalizeSteps.length > 0) {
             brief += `**Audio:** Normalizing levels and removing background noise\n\n`;
         }
 
-        // ── Mode label ────────────────────────────────────────────────────────
         if (editMode) {
             brief += `**Edit mode:** ${editMode.replace(/_/g, ' ')}\n\n`;
         }
 
-        // ── Total steps ───────────────────────────────────────────────────────
         brief += `**Total steps:** ${steps.length}\n\n`;
-
-        // ── CTA ──────────────────────────────────────────────────────────────
         brief += `---\n`;
         brief += `⚠️ This will modify your timeline. Type **approve** to proceed, or tell me what to change.`;
 
@@ -192,20 +173,32 @@ export class AgentFeedbackService {
                 } else {
                     message = '✓ Content analysis complete. Review the plan below.';
                 }
-                suggestions = ['Approve the edit plan to proceed', 'Request a different edit mode', 'Ask me to find the best hook'];
+                suggestions = ['Ask me to edit the clip', 'Request a different edit mode', 'Ask me to find the best hook'];
                 break;
             }
+
             case 'long_form_edit':
             case 'build_from_rushes': {
+                // FIX: execution now contains results from actual step execution,
+                // not just a plan. Reflect that in the message.
+                const stepResults = execution?.results || [];
+                const successCount = stepResults.filter(r => r.success !== false).length;
                 const planData = execution?.editPlan;
-                if (planData) {
-                    message = AgentFeedbackService.formatEditPlanResult(planData);
+                const totalSteps = planData?.step_count || stepResults.length;
+
+                if (execution?.message && execution.message.startsWith('✓')) {
+                    // Message came directly from VideoEditorTools.longFormEdit()
+                    message = execution.message;
+                } else if (planData) {
+                    message = `✓ Long-form edit applied — ${successCount}/${totalSteps} steps completed.\n\n`;
+                    message += AgentFeedbackService.formatEditPlanResult(planData);
                 } else {
-                    message = '✓ Long-form edit plan generated.';
+                    message = '✓ Long-form edit applied.';
                 }
-                suggestions = ['Approve to execute the plan', 'Ask to adjust pacing or structure', 'Preview the hook first'];
+                suggestions = ['Review the timeline', 'Undo if anything was cut incorrectly', 'Export when ready'];
                 break;
             }
+
             case 'find_hook': {
                 const hook = execution?.hookCandidate;
                 if (hook) {
@@ -265,21 +258,18 @@ export class AgentFeedbackService {
             msg += `⚠️ No strong hook detected in first 40% of video.\n`;
         }
 
-        if (analysis.requiresApproval) {
-            msg += `\n---\n⚠️ **Approval required.** Type "approve" to execute the edit plan, or describe changes you'd like.`;
-        }
-
         return msg;
     }
 
     static formatEditPlanResult(editPlan) {
-        let msg = `📋 **Long-Form Edit Plan Ready**\n\n`;
+        let msg = `📋 **Edit Plan Summary**\n\n`;
         msg += `**Mode:** ${(editPlan.editMode || '').replace(/_/g, ' ')}\n`;
-        msg += `**Target duration:** ~${Math.round((editPlan.duration_target || 0) / 60)}m ${Math.round((editPlan.duration_target || 0) % 60)}s\n\n`;
-        msg += `**Actions to be performed:**\n`;
-        (editPlan.actions || []).forEach(a => { msg += `  • ${a.replace(/_/g, ' ')}\n`; });
-        if (editPlan.requiresApproval) {
-            msg += `\n---\n⚠️ **Ready to execute.** Type "approve" to proceed, or request changes.`;
+        if (editPlan.duration_target) {
+            msg += `**Target duration:** ~${Math.round((editPlan.duration_target || 0) / 60)}m ${Math.round((editPlan.duration_target || 0) % 60)}s\n\n`;
+        }
+        if ((editPlan.actions || []).length > 0) {
+            msg += `**Actions applied:**\n`;
+            (editPlan.actions || []).forEach(a => { msg += `  • ${a.replace(/_/g, ' ')}\n`; });
         }
         return msg;
     }

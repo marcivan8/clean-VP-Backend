@@ -7,6 +7,12 @@ import { LongFormEditPlanner } from './LongFormEditPlanner.js';
  * VideoEditorTools
  * Defines the available tools for the Autonomous Agent.
  * Follows the Command Pattern for Reversibility (Undo).
+ *
+ * FIX: longFormEdit() was generating a LongFormEditPlanner sub-plan and
+ *      returning it with requiresApproval: true, but nothing in the pipeline
+ *      picked up that inner plan and executed its steps. The video was left
+ *      unchanged while the job reported success. Now the sub-plan is compiled
+ *      and executed directly inside longFormEdit().
  */
 
 export const TOOL_DEFINITIONS = [
@@ -197,7 +203,7 @@ export const TOOL_DEFINITIONS = [
     },
     {
         name: "long_form_edit",
-        description: "Generates and executes a full long-form edit plan based on prior content analysis. Includes silence removal, hook placement, segment reordering, repetition removal, and transitions. Always requires user approval before executing.",
+        description: "Generates and executes a full long-form edit plan based on prior content analysis. Includes silence removal, hook placement, segment reordering, repetition removal, and transitions. Executes all steps immediately.",
         parameters: {
             type: "object",
             properties: {
@@ -233,12 +239,10 @@ export class VideoEditorTools {
         console.log(`🔍 Resolving Track/Clip: trackId=${trackId}, clipId=${clipId}`);
         let track = this.store.tracks.find(t => t.id === trackId);
         if (!track) {
-            // Try to find track containing the clip
             console.log(`   Track ${trackId} not found directly. Searching by clipId...`);
             track = this.store.tracks.find(t => t.clips.some(c => c.id === clipId));
         }
         if (!track) {
-            // Default to first video track
             console.log(`   Track still not found. Defaulting to first video track.`);
             track = this.store.tracks.find(t => t.type === 'video');
         }
@@ -249,13 +253,9 @@ export class VideoEditorTools {
         }
         console.log(`   Found Track: ${track.id} (${track.type})`);
 
-        // Find clip
         let clip = track.clips.find(c => c.id === clipId);
 
-        // If clip not found by ID, and activeClipId is set, try that?
-        // Or if clipId is generic 'clip-1' and we have clips...
         if (!clip && track.clips.length > 0) {
-            // Heuristic: If we only have 1 clip, use it.
             if (track.clips.length === 1) {
                 console.log(`   Clip ${clipId} not found. Using the only available clip: ${track.clips[0].id}`);
                 clip = track.clips[0];
@@ -329,12 +329,10 @@ export class VideoEditorTools {
     cutClip({ clipId, time, trackId }) {
         let track = this.store.tracks.find(t => t.id === trackId);
 
-        // Fallback: If track not found, try to find ANY track with that clip
         if (!track) {
             track = this.store.tracks.find(t => t.clips.some(c => c.id === clipId));
         }
 
-        // Fallback 2: Default to first video track if still nothing
         if (!track) {
             track = this.store.tracks.find(t => t.type === 'video');
             if (track) console.warn(`Tool: Track ${trackId} not found, defaulting to ${track.id}`);
@@ -344,7 +342,6 @@ export class VideoEditorTools {
 
         let clip = track.clips.find(c => c.id === clipId);
 
-        // Fallback 3: Find clip at the specific timestamp
         if (!clip) {
             console.warn(`Tool: Clip ${clipId} not found. Searching for clip at time ${time}s...`);
             clip = track.clips.find(c => time >= c.start && time < c.start + c.duration);
@@ -365,7 +362,6 @@ export class VideoEditorTools {
             this.store.removeClip(track.id, clip.id);
             return { success: true, message: `Removed clip ${clip.id}` };
         } catch (e) {
-            // Keep original error logic if heuristic fails
             throw e;
         }
     }
@@ -395,7 +391,6 @@ export class VideoEditorTools {
     colorGradeClip({ clipId, trackId, preset }) {
         const { track, clip } = this.resolveTrackAndClip(trackId, clipId);
 
-        // Map presets to Tailwind classes or filter values
         const presetMap = {
             'cinematic': { filter: 'contrast(1.2) saturate(1.1) brightness(0.9)' },
             'vibrant': { filter: 'saturate(1.5) contrast(1.1)' },
@@ -415,9 +410,8 @@ export class VideoEditorTools {
     }
 
     setTrackVolume({ trackId, volume }) {
-        // Simple track resolution
         let track = this.store.tracks.find(t => t.id === trackId);
-        if (!track) track = this.store.tracks.find(t => t.type === 'audio'); // Default to audio
+        if (!track) track = this.store.tracks.find(t => t.type === 'audio');
         if (!track) track = this.store.tracks[0];
 
         if (track) {
@@ -428,13 +422,11 @@ export class VideoEditorTools {
     }
 
     muteTrack({ trackId, muted }) {
-        // Simple resolution
         const track = this.store.tracks.find(t => t.id === trackId);
         if (track && track.muted !== muted) {
             this.store.toggleTrackMute(trackId);
             return { success: true, message: `Set track ${trackId} mute to ${muted}` };
         }
-        // If not found, ignore or default
         return { success: true, message: `Track mute unchanged.` };
     }
 
@@ -467,34 +459,82 @@ export class VideoEditorTools {
     }
 
     /**
-     * Generate LongFormEditPlanner plan from cached ContentAnalyzer result.
-     * Returns the plan for approval — does NOT execute it.
+     * Generate a LongFormEditPlanner plan from cached ContentAnalyzer result
+     * and execute all steps immediately.
+     *
+     * FIX: Previously returned requiresApproval: true and the inner plan, but
+     *      nothing in EditJobManager or WorkflowController consumed that flag —
+     *      so the video was always left unchanged. Now the sub-plan is compiled
+     *      and executed directly here.
      */
     async longFormEdit({ editMode, platform, targetDuration } = {}) {
         console.log('[VideoEditorTools] Building LongFormEditPlanner plan...');
 
-        // Get cached analysis from store
+        // Get or run content analysis
         let analysis = ContentAnalyzer.getCachedAnalysis();
-
-        // If no cached analysis, run it now
         if (!analysis?.success) {
             console.log('[VideoEditorTools] No cached analysis. Running ContentAnalyzer first...');
             analysis = await ContentAnalyzer.analyze({ platform, targetDuration });
         }
 
+        if (!analysis?.success) {
+            return {
+                success: false,
+                message: `Content analysis failed: ${analysis?.error || 'unknown error'}`,
+            };
+        }
+
         // Override editMode if specified
-        if (editMode && analysis) {
+        if (editMode) {
             analysis = { ...analysis, editMode };
         }
 
+        // Generate the atomic step plan
         const plan = LongFormEditPlanner.generatePlan(analysis, { platform, targetDuration });
 
+        if (!plan || plan.error) {
+            return {
+                success: false,
+                message: plan?.error || 'Long-form plan generation failed.',
+                editPlan: plan,
+            };
+        }
+
+        if (!plan.steps || plan.steps.length === 0) {
+            return {
+                success: true,
+                message: '✓ No steps to execute for this edit mode.',
+                editPlan: plan,
+            };
+        }
+
+        console.log(`[VideoEditorTools] Executing long-form plan: ${plan.step_count} steps`);
+
+        // Dynamically import to avoid circular dependency issues at module load time
+        const { CommandCompiler } = await import('./CommandCompiler.js');
+        const { mediaExecutionEngine } = await import('./MediaExecutionEngine.js');
+
+        const compileResult = CommandCompiler.compile(plan, useTimelineStore.getState());
+
+        if (!compileResult.success && compileResult.commands.length === 0) {
+            return {
+                success: false,
+                message: compileResult.error || 'Could not compile long-form edit commands.',
+                editPlan: plan,
+            };
+        }
+
+        console.log(`[VideoEditorTools] Compiled ${compileResult.commands.length} commands — executing...`);
+
+        const executionResult = await mediaExecutionEngine.execute(compileResult.commands, null);
+
         return {
-            success: true,
-            message: plan.error || `Long-form edit plan ready: ${plan.step_count} steps.`,
+            success: executionResult.success,
+            message: executionResult.success
+                ? `✓ Long-form edit complete — ${plan.step_count} steps applied.`
+                : `Long-form edit failed: ${executionResult.error}`,
             editPlan: plan,
-            approvalMessage: plan.approvalMessage,
-            requiresApproval: true,
+            results: executionResult.results,
         };
     }
 
@@ -556,21 +596,17 @@ export class VideoEditorTools {
      */
     reorderSegment({ clipId, trackId, targetPosition }) {
         const store = this.store;
-        // Save history before mutating — use the live store method
-        useTimelineStore.getState()._saveHistory();
+        useTimelineStore.getState()._saveHistory?.();
 
         const { track, clip } = this.resolveTrackAndClip(trackId, clipId);
 
-        // Shift all clips that were at or after targetPosition to make room
         const shiftAmount = clip.duration;
         const clipsToShift = track.clips
             .filter(c => c.id !== clip.id && c.start >= targetPosition)
             .sort((a, b) => a.start - b.start);
 
-        // Move the target clip to the front
         store.updateClip(track.id, clip.id, { start: targetPosition }, { skipHistory: true });
 
-        // Ripple shift other clips
         clipsToShift.forEach(c => {
             store.updateClip(track.id, c.id, { start: c.start + shiftAmount }, { skipHistory: true });
         });
@@ -589,7 +625,6 @@ export class VideoEditorTools {
         const videoTrack = store.tracks.find(t => t.type === 'video');
         if (!videoTrack) return { success: false, message: 'No video track found' };
 
-        // Find clips that overlap with [start, end]
         const overlapping = videoTrack.clips.filter(c =>
             c.start < end && (c.start + c.duration) > start
         );
@@ -598,21 +633,16 @@ export class VideoEditorTools {
             const clipEnd = clip.start + clip.duration;
 
             if (clip.start >= start && clipEnd <= end) {
-                // Clip is fully inside the segment — remove it
                 store.removeClip(videoTrack.id, clip.id);
             } else if (clip.start < start && clipEnd > end) {
-                // Clip spans the entire segment — split twice
                 store.splitClip(videoTrack.id, clip.id, start);
-                // Find the new clip after split
                 const newTracks = useTimelineStore.getState().tracks;
                 const newTrack = newTracks.find(t => t.id === videoTrack.id);
                 const middleClip = newTrack?.clips.find(c => c.start >= start && (c.start + c.duration) <= end + 0.5);
                 if (middleClip) store.removeClip(videoTrack.id, middleClip.id);
             } else if (clip.start < start) {
-                // Clip overlaps at end — trim end
                 store.updateClip(videoTrack.id, clip.id, { duration: start - clip.start });
             } else {
-                // Clip overlaps at start — trim start
                 const newStart = end;
                 store.updateClip(videoTrack.id, clip.id, { start: newStart, duration: clipEnd - newStart });
             }
