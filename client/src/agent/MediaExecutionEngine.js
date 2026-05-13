@@ -295,20 +295,49 @@ export class MediaExecutionEngine {
 
         try {
             const store = useTimelineStore.getState();
-            const sourceFile = store.uploadedFile;
+
+            // Resolve the best available File source.
+            // Priority: explicit clipId asset file → uploadedFile → skip
+            let sourceFile = null;
+
+            // 1. Look up the clip's asset by clipId or assetId
+            if (args.clipId || args.assetId) {
+                const targetId = args.assetId || args.clipId;
+                const asset = store.assets?.find(
+                    a => a.id === targetId || a.clipId === targetId
+                );
+                if (asset?.file instanceof File || asset?.file instanceof Blob) {
+                    sourceFile = asset.file;
+                }
+            }
+
+            // 2. Fall back to the global uploaded file
+            if (!sourceFile) {
+                const candidate = store.uploadedFile;
+                if (candidate instanceof File || candidate instanceof Blob || candidate instanceof ArrayBuffer) {
+                    sourceFile = candidate;
+                } else if (candidate) {
+                    // uploadedFile is a string URL — MediaBunny can't use it
+                    console.warn(
+                        `[MediaExecutionEngine] uploadedFile is a URL string, not a File — skipping MediaBunny action "${action}". ` +
+                        `Re-import the video locally to enable in-browser processing.`
+                    );
+                    return { action, success: true, message: `${desc} (skipped — source is a URL, not a local File)`, skipped: true };
+                }
+            }
 
             if (!sourceFile) {
-                console.warn(`[MediaExecutionEngine] No uploaded file for mediabunny action: ${action}`);
-                return { action, success: true, message: `${desc} (no source file — store-only)`, skipped: true };
+                console.warn(`[MediaExecutionEngine] No File/Blob source available for mediabunny action: ${action}`);
+                return { action, success: true, message: `${desc} (no local source file — store-only)`, skipped: true };
             }
 
             let result;
             switch (action) {
-                case 'splitMedia': result = await mediaBunnyService.splitMedia(sourceFile, Number(args.splitTime)); break;
+                case 'splitMedia':   result = await mediaBunnyService.splitMedia(sourceFile, Number(args.splitTime)); break;
                 case 'changeSpeed': result = await mediaBunnyService.changeSpeed(sourceFile, Number(args.speed)); break;
-                case 'trimMedia': result = await mediaBunnyService.trimMedia(sourceFile, Number(args.start), Number(args.end)); break;
+                case 'trimMedia':   result = await mediaBunnyService.trimMedia(sourceFile, Number(args.start), Number(args.end)); break;
                 case 'convertFormat': result = await mediaBunnyService.convertFormat(sourceFile, args.format); break;
-                case 'extractAudio': result = await mediaBunnyService.extractAudio(sourceFile); break;
+                case 'extractAudio':  result = await mediaBunnyService.extractAudio(sourceFile); break;
                 default:
                     console.warn(`[MediaExecutionEngine] Unknown mediabunny action: ${action}`);
                     return { action, success: true, message: `Unknown mediabunny action: ${action}`, skipped: true };
