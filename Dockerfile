@@ -4,6 +4,18 @@ WORKDIR /app/client
 COPY client/package*.json ./
 RUN npm ci
 COPY client/ ./
+
+# Declare build-time args for Vite env vars.
+# Pass them in Railway: Settings → Build → Build Arguments
+#   VITE_SUPABASE_URL=https://xxxx.supabase.co
+#   VITE_SUPABASE_ANON_KEY=eyJ...
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_ANON_KEY
+
+# Expose them as ENV so Vite can read process.env / import.meta.env at build time
+ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
+ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
+
 # Build the Vite project (outputs to /app/client/dist)
 RUN npm run build
 
