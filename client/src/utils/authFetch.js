@@ -1,33 +1,49 @@
 // client/src/utils/authFetch.js
+//
+// Changes over the previous version:
+//  1. On 401 responses the token is force-refreshed once and the request
+//     retried — handles the edge case where the cached session is slightly
+//     stale even after getSession() returns it.
+//  2. Throws AuthError (not a plain Error) so callers can distinguish auth
+//     failures from network / server errors and redirect to login if needed.
+//  3. Exports a typed AuthError class for instanceof checks.
 
-import { supabase } from '../lib/supabaseClient.js'; // adjust path to match your project
+import { supabase } from '../lib/supabaseClient.js';
+
+// ─── Typed error ─────────────────────────────────────────────────────────────
+
+export class AuthError extends Error {
+    constructor(message, status) {
+        super(message);
+        this.name = 'AuthError';
+        this.status = status;
+    }
+}
+
+// ─── Token retrieval ─────────────────────────────────────────────────────────
 
 /**
- * authFetch.js
- * Authenticated fetch wrapper for all agent/service API calls.
- *
- * FIX: Previous version read the JWT directly from localStorage without
- *      checking expiry. Expired tokens caused every /api/* call to return
- *      401 "token is expired" until the user hard-refreshed the page.
- *
- *      Now uses supabase.auth.getSession() which automatically refreshes
- *      the token when it's expired or within the refresh window.
+ * getToken(forceRefresh)
+ * Returns a valid access token.
+ * If forceRefresh=true, refreshSession() is called to guarantee a fresh JWT.
  */
-
-/**
- * Get a valid (possibly freshly-refreshed) access token from Supabase.
- * Returns null if the user is not authenticated.
- */
-async function getToken() {
+async function getToken(forceRefresh = false) {
     try {
-        // getSession() silently refreshes the token if it's expired.
-        const { data: { session }, error } = await supabase.auth.getSession();
+        if (forceRefresh) {
+            const { data, error } = await supabase.auth.refreshSession();
+            if (error) {
+                console.warn('[authFetch] refreshSession error:', error.message);
+                return null;
+            }
+            return data.session?.access_token ?? null;
+        }
 
+        // Normal path — getSession() refreshes automatically when expired
+        const { data: { session }, error } = await supabase.auth.getSession();
         if (error) {
             console.warn('[authFetch] getSession error:', error.message);
             return null;
         }
-
         return session?.access_token ?? null;
 
     } catch (err) {
@@ -36,27 +52,46 @@ async function getToken() {
     }
 }
 
+// ─── Authenticated fetch ──────────────────────────────────────────────────────
+
 /**
- * Authenticated fetch. Mirrors the fetch() API exactly.
- * - Automatically sets Content-Type: application/json (unless body is FormData)
- * - Automatically injects Authorization: Bearer <token> when a session exists
- * - Any headers passed in options.headers override the defaults
+ * authFetch(url, options)
+ *
+ * Drop-in replacement for fetch() that:
+ *  - Sets Content-Type: application/json (unless body is FormData)
+ *  - Injects Authorization: Bearer <token>
+ *  - On 401 → force-refreshes the token and retries once
+ *  - On second 401 → throws AuthError so the app can redirect to login
+ *
+ * All other options (method, body, signal, headers, …) are forwarded as-is.
  */
-export async function authFetch(url, options = {}) {
-    const token = await getToken();
+export async function authFetch(url, options = {}, _isRetry = false) {
+    const token = await getToken(_isRetry);   // forceRefresh on retry
     const isFormData = options.body instanceof FormData;
 
     const headers = {
-        // Skip Content-Type for FormData — browser sets it with the correct boundary
         ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options.headers || {}),
     };
 
-    return fetch(url, {
-        ...options,
-        headers,
-    });
+    const response = await fetch(url, { ...options, headers });
+
+    // 401 → token may be freshly expired; try once more with a forced refresh
+    if (response.status === 401 && !_isRetry) {
+        console.warn('[authFetch] 401 received — refreshing token and retrying:', url);
+        return authFetch(url, options, true);
+    }
+
+    // Second 401 → permanent auth failure
+    if (response.status === 401 && _isRetry) {
+        throw new AuthError(
+            'Authentication failed after token refresh. Please sign in again.',
+            401
+        );
+    }
+
+    return response;
 }
 
 export default authFetch;
