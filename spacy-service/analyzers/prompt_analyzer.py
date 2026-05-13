@@ -5,7 +5,9 @@ Extracts structured information from user prompts using spaCy NLP.
 """
 
 import re
+# pyrefly: ignore [missing-import]
 import spacy
+# pyrefly: ignore [missing-import]
 from typing import Optional
 from .clarity import compute_clarity_score
 

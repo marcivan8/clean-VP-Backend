@@ -5,6 +5,7 @@ Segments transcripts, detects questions/CTAs/emotion, extracts entities,
 and computes per-sentence highlight scores.
 """
 
+# pyrefly: ignore [missing-import]
 import spacy
 from typing import Optional
 
