@@ -238,7 +238,7 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
-const server = app.listen(port, '0.0.0.0', () => {
+const server = app.listen(port, '0.0.0.0', async () => {
   console.log(`
 ╔═══════════════════════════════════════════════╗
 ║                                               ║
@@ -259,10 +259,16 @@ const server = app.listen(port, '0.0.0.0', () => {
   runCleanup(); // Run once on startup
   setInterval(runCleanup, 24 * 60 * 60 * 1000); // Then run every 24 hours
 
-  // Probe SpaCy microservice once so we know whether it's available.
-  // Subsequent calls to analyzePrompt() skip the round-trip when it's down.
-  const SpacyService = require('./services/SpacyService');
-  SpacyService.warmup().catch(() => {}); // fire-and-forget
+  // Pre-flight spaCy health check — MUST run before real traffic arrives.
+  // If spaCy is unreachable (ENOTFOUND on Railway internal DNS) the circuit
+  // breaker opens here and all subsequent NLP calls silently use the JS
+  // fallback — no per-request failure logs, no 503s.
+  const spacyClient = require('./services/spacyClient');
+  const nlpHealth = await spacyClient.healthCheck();
+  if (nlpHealth.fallbackActive) {
+    console.log('[server] NLP running on JS fallback analyzer (spaCy unreachable or disabled)');
+  }
 });
+
 
 module.exports = app;
