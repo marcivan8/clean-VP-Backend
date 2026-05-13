@@ -265,9 +265,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 proxyUrl: data.proxyUrl,
                                 isProxying: false
                             });
-                            // Store the backend path so AI commands can reference it
-                            useTimelineStore.getState().setUploadedFile({ 
-                                name: `uploads/${data.proxyPath}` 
+                            // Store uploads-relative path (no 'uploads/' prefix — audioRoutes resolves from uploads dir)
+                            useTimelineStore.getState().setUploadedFile({
+                                name: data.proxyPath
                             });
                         })
                         .catch(err => {
