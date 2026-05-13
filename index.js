@@ -178,6 +178,10 @@ app.use('/api/revideo', renderLimiter, require('./routes/revideoRenderRoutes'));
 app.use('/api/presets', require('./routes/presetRoutes'));
 app.use('/api/export', uploadLimiter, require('./routes/nleExport')); // NLE export (OTIO)
 
+// NLP routes — circuit-breaker backed, falls back to JS analyzer when spaCy is unreachable
+const { authenticateUser } = require('./middleware/auth');
+app.use('/api/nlp', authenticateUser, require('./routes/nlp'));
+
 // API documentation endpoint
 app.get('/api', (req, res) => {
   res.json({
