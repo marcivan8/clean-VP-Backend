@@ -59,7 +59,12 @@ export class EditPlanner {
 
         if (intent.needs_clarification) {
             console.warn('[AG_DEBUG] [EditPlanner] Clarification needed:', intent.reason);
-            return { success: false, error: intent.reason || 'Clarification needed' };
+            return {
+                success: true,
+                status: 'clarification_needed',
+                questions: intent.questions || [{ question: intent.reason || 'Could you clarify your request?', parameter: 'clarify_0', type: 'text' }],
+                originalIntent: intent
+            };
         }
 
         if (intent.confidence !== 'HIGH') {

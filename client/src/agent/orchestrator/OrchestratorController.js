@@ -181,11 +181,13 @@ export class OrchestratorController {
         const validationResult = await this.executeValidationPhase(jobId, fsm, planningResult.plan, executionResult.result);
 
         if (!validationResult.success) {
-            fsm.send(EVENTS.VALIDATION_FAILED, { error: validationResult.error });
+            // ValidationService returns `message`, not `error` — coalesce both
+            const errMsg = validationResult.error || validationResult.message || 'Validation failed';
+            fsm.send(EVENTS.VALIDATION_FAILED, { error: errMsg });
             return {
                 success: false,
                 jobId,
-                error: validationResult.error,
+                error: errMsg,
                 state: STATES.ERROR,
                 validation: validationResult
             };
@@ -236,12 +238,15 @@ export class OrchestratorController {
                     throw new Error('Cancelled');
                 }
 
-                if (intentResult.intent === 'clarification_required') {
-                    console.log(`[AG_DEBUG] [Orchestrator] Clarification required: ${intentResult.message}`);
+                // IntentParser normalizes 'clarification_required' → { needs_clarification: true, intent: null }
+                // so we must check needs_clarification, not intent === 'clarification_required'
+                if (intentResult.needs_clarification) {
+                    console.log(`[AG_DEBUG] [Orchestrator] Clarification required: ${intentResult.reason}`);
                     return {
-                        success: false,
-                        error: intentResult.message,
-                        requiresClarification: true
+                        success: true,
+                        status: 'clarification_needed',
+                        questions: intentResult.questions || [{ question: intentResult.reason, parameter: 'clarify_0', type: 'text' }],
+                        originalIntent: intentResult
                     };
                 }
 
