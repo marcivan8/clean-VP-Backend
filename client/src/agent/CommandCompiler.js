@@ -331,7 +331,7 @@ function compileMuteClip(step, ctx) {
 function compileRemoveFillerWords(step, ctx) {
     return ok(step.step_id, [
         cmd(ENGINE.API, 'fillerDetect', {
-            endpoint: '/api/audio/transcribe',
+            endpoint: '/api/audio/filler/detect',
             method: 'POST',
             payload: { filename: '$uploaded_file', language: step.language || 'en' },
         }, { source_step_id: step.step_id, symbolic_refs: ['$uploaded_file'], description: 'Remove filler words (ums, uhs)' }),

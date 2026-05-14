@@ -347,9 +347,10 @@ router.post('/filler/detect', authenticateUser, async (req, res) => {
         }
 
         const uploadsDir = path.resolve(__dirname, '../uploads');
+        const normalizedFilename = (filename || '').replace(/\\/g, '/').replace(/^\/|\.\.\/|\.\.$/g, '');
         let inputPath = filePath
             ? path.resolve(filePath)
-            : path.resolve(uploadsDir, 'temp', path.basename(filename));
+            : path.resolve(uploadsDir, normalizedFilename);
 
         if (!inputPath.startsWith(uploadsDir)) {
             return res.status(403).json({ error: 'Access denied: invalid file path' });

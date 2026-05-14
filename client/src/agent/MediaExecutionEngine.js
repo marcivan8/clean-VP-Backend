@@ -78,6 +78,25 @@ class ExecutionJob {
     }
 }
 
+function buildActiveSegmentsFromWords(words, minSilenceDuration = 0.5, padding = 0.1) {
+    if (!words || words.length === 0) return [];
+    const segments = [];
+    let segStart = Math.max(0, (words[0].start || 0) - padding);
+    let segEnd = (words[0].end || 0) + padding;
+    for (let i = 1; i < words.length; i++) {
+        const gap = (words[i].start || 0) - (words[i - 1].end || 0);
+        if (gap >= minSilenceDuration) {
+            segments.push({ start: segStart, end: segEnd, duration: segEnd - segStart });
+            segStart = Math.max(0, (words[i].start || 0) - padding);
+            segEnd = (words[i].end || 0) + padding;
+        } else {
+            segEnd = (words[i].end || 0) + padding;
+        }
+    }
+    if (segStart < segEnd) segments.push({ start: segStart, end: segEnd, duration: segEnd - segStart });
+    return segments;
+}
+
 export class MediaExecutionEngine {
     constructor() {
         this.queue = [];
@@ -521,29 +540,45 @@ export class MediaExecutionEngine {
             }
 
             // Special handling for silence detection — auto-cut the timeline
-            if (command.action === 'silenceDetect' && result.activeSegments) {
-                console.log(`[MediaExecutionEngine] ✂️ Applying silence cuts. Segments: ${result.activeSegments.length}`);
+            if (command.action === 'silenceDetect') {
+                let activeSegments = result.activeSegments;
 
-                const timelineStore = useTimelineStore.getState();
-                const videoTrack = timelineStore.tracks?.find(t => t.type === 'video');
+                // /api/audio/transcribe returns words[], not activeSegments.
+                // Derive speech-active segments from word-gap analysis.
+                if (!activeSegments && result.words?.length > 0) {
+                    const payload = (command.args || {}).payload || {};
+                    const minSilence = parseFloat(payload.min_duration) || 0.5;
+                    const pad = parseFloat(payload.padding) || 0.1;
+                    activeSegments = buildActiveSegmentsFromWords(result.words, minSilence, pad);
+                    console.log(`[MediaExecutionEngine] ✂️ Silence computed from ${result.words.length} words → ${activeSegments.length} active segments`);
+                }
 
-                if (videoTrack && videoTrack.clips.length > 0) {
-                    const baseClip = videoTrack.clips[0];
-                    timelineStore.removeClip(videoTrack.id, baseClip.id);
+                if (activeSegments?.length > 0) {
+                    console.log(`[MediaExecutionEngine] ✂️ Applying silence cuts. Segments: ${activeSegments.length}`);
 
-                    let currentStartTime = 0;
-                    result.activeSegments.forEach((seg, i) => {
-                        const newClip = {
-                            ...baseClip,
-                            id: `clip_silence_${Date.now()}_${i}`,
-                            start: currentStartTime,
-                            duration: seg.duration,
-                            offset: seg.start,
-                            name: `${baseClip.name || 'Clip'} (Cut ${i + 1})`
-                        };
-                        timelineStore.addClip(videoTrack.id, newClip);
-                        currentStartTime += seg.duration;
-                    });
+                    const timelineStore = useTimelineStore.getState();
+                    const videoTrack = timelineStore.tracks?.find(t => t.type === 'video');
+
+                    if (videoTrack && videoTrack.clips.length > 0) {
+                        const baseClip = videoTrack.clips[0];
+                        timelineStore.removeClip(videoTrack.id, baseClip.id);
+
+                        let currentStartTime = 0;
+                        activeSegments.forEach((seg, i) => {
+                            const newClip = {
+                                ...baseClip,
+                                id: `clip_silence_${Date.now()}_${i}`,
+                                start: currentStartTime,
+                                duration: seg.duration,
+                                offset: seg.start,
+                                name: `${baseClip.name || 'Clip'} (Cut ${i + 1})`
+                            };
+                            timelineStore.addClip(videoTrack.id, newClip);
+                            currentStartTime += seg.duration;
+                        });
+                    } else {
+                        console.warn('[MediaExecutionEngine] silenceDetect: no video track or clips found to cut');
+                    }
                 }
             }
 
