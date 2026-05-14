@@ -4,6 +4,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
 const { authenticateUser } = require('../middleware/auth');
+const { audioQueue } = require('../queue/queues');
 const ffmpegPath = require('ffmpeg-static');
 
 // Set ffmpeg path
@@ -48,33 +49,17 @@ router.post('/denoise', authenticateUser, async (req, res) => {
 
         const outputPath = path.join(tempDir, `denoised-${Date.now()}.mp4`);
 
-        console.log(`🎧 Denoising: ${inputPath}`);
+        console.log(`🎧 Enqueuing Denoise: ${inputPath}`);
 
-        await new Promise((resolve, reject) => {
-            ffmpeg(inputPath)
-                .audioFilters('afftdn=nf=-25') // FFT Denoise, Noise Floor -25dB
-                .videoCodec('copy') // Copy video stream (fast)
-                .output(outputPath)
-                .on('end', () => {
-                    console.log('✅ Denoise Complete');
-                    resolve();
-                })
-                .on('error', (err) => {
-                    console.error('❌ Denoise Error:', err);
-                    reject(err);
-                })
-                .run();
+        const job = await audioQueue.add('denoise-audio', {
+            action: 'denoise',
+            filePath: inputPath
         });
-
-        // Return relative path for frontend to play/download
-        // We need a route to serve this file.
-        // Assuming express.static serves /uploads
-        const servePath = `/uploads/audio_temp/${path.basename(outputPath)}`;
 
         res.json({
             success: true,
-            url: servePath,
-            message: "Noise reduction applied successfully."
+            jobId: job.id,
+            status: 'queued'
         });
 
     } catch (error) {
@@ -112,11 +97,14 @@ router.post('/beat-detect', authenticateUser, async (req, res) => {
             return res.status(404).json({ error: 'File not found' });
         }
 
-        console.log(`🥁 Detecting Beats for: ${inputPath}`);
-        const result = await detectBeats(inputPath);
-        console.log(`✅ BPM: ${result.bpm}, Detected ${result.beats.length} beats`);
+        console.log(`🥁 Enqueuing Beat Detection for: ${inputPath}`);
+        
+        const job = await audioQueue.add('beat-detect', {
+            action: 'beat-detect',
+            filePath: inputPath
+        });
 
-        res.json({ success: true, ...result });
+        res.json({ success: true, jobId: job.id, status: 'queued' });
 
     } catch (error) {
         console.error("Beat Detection Failed:", error);
@@ -147,30 +135,17 @@ router.post('/normalize', authenticateUser, async (req, res) => {
         }
 
         const outputPath = path.join(tempDir, `normalized-${Date.now()}.mp4`);
-        console.log(`🔊 Normalizing Audio for: ${inputPath}`);
+        console.log(`🔊 Enqueuing Audio Normalization for: ${inputPath}`);
 
-        await new Promise((resolve, reject) => {
-            ffmpeg(inputPath)
-                // loudnorm filter: I=-16 (Integrated Loudness), TP=-1.5 (True Peak), LRA=11 (Loudness Range)
-                .audioFilters('loudnorm=I=-16:TP=-1.5:LRA=11')
-                .videoCodec('copy')
-                .output(outputPath)
-                .on('end', () => {
-                    console.log('✅ Normalization Complete');
-                    resolve();
-                })
-                .on('error', (err) => {
-                    console.error('❌ Normalization Error:', err);
-                    reject(err);
-                })
-                .run();
+        const job = await audioQueue.add('normalize-audio', {
+            action: 'normalize',
+            filePath: inputPath
         });
 
-        const servePath = `/uploads/audio_temp/${path.basename(outputPath)}`;
         res.json({
             success: true,
-            url: servePath,
-            message: "Audio normalized to -16 LUFS."
+            jobId: job.id,
+            status: 'queued'
         });
 
     } catch (error) {
@@ -220,31 +195,17 @@ router.post('/transcribe', authenticateUser, async (req, res) => {
             return res.status(404).json({ error: `File not found: ${filename || filePath}` });
         }
 
-        console.log(`🎙️ Transcribing with Whisper: ${inputPath}`);
+        console.log(`🎙️ Enqueuing Transcription: ${inputPath}`);
 
-        // Check if the file is a video, we might need to extract audio first for Whisper 
-        // to save upload bandwidth and avoid 25MB limit on OpenAI.
-        // For now, we will send it directly, assuming files are small enough for testing,
-        // but we should ideally extract audio to a temp .mp3 first.
-        const stats = fs.statSync(inputPath);
-        if (stats.size > 25 * 1024 * 1024) {
-             return res.status(400).json({ error: 'File is larger than OpenAI 25MB limit. Audio extraction needed.' });
-        }
-
-        const transcription = await openai.audio.transcriptions.create({
-            file: fs.createReadStream(inputPath),
-            model: 'whisper-1',
-            response_format: 'verbose_json',
-            timestamp_granularities: ['word']
+        const job = await audioQueue.add('transcribe-audio', {
+            action: 'transcribe',
+            filePath: inputPath
         });
-
-        console.log(`✅ Transcription Complete. Words detected: ${transcription.words?.length || 0}`);
 
         res.json({
             success: true,
-            text: transcription.text,
-            words: transcription.words, // Array of { word, start, end }
-            message: "Transcription successful"
+            jobId: job.id,
+            status: 'queued'
         });
 
     } catch (error) {
@@ -359,9 +320,15 @@ router.post('/filler/detect', authenticateUser, async (req, res) => {
             return res.status(404).json({ error: `File not found: ${filename || filePath}` });
         }
 
-        const result = await detectFillerWords(inputPath, language);
-        console.log(`✅ Filler detection done — ${result.fillerCount} filler(s), ${result.activeSegments.length} keep-segment(s)`);
-        res.json({ success: true, ...result });
+        console.log(`🔤 Enqueuing Filler detection: ${inputPath}`);
+
+        const job = await audioQueue.add('filler-detect', {
+            action: 'filler-detect',
+            filePath: inputPath,
+            language
+        });
+
+        res.json({ success: true, jobId: job.id, status: 'queued' });
 
     } catch (err) {
         console.error('❌ Filler detect (JSON) failed:', err);
@@ -380,15 +347,15 @@ router.post('/filler/detect-upload', authenticateUser, fillerUpload.single('file
         const tmpPath = path.join(tempDir, `filler-upload-${Date.now()}${path.extname(req.file.originalname || '.mp4')}`);
         require('fs').writeFileSync(tmpPath, req.file.buffer);
 
-        let result;
-        try {
-            result = await detectFillerWords(tmpPath, language);
-        } finally {
-            require('fs').unlink(tmpPath, () => {});
-        }
+        console.log(`🔤 Enqueuing Filler detection (upload): ${tmpPath}`);
 
-        console.log(`✅ Filler detection done (upload) — ${result.fillerCount} filler(s)`);
-        res.json({ success: true, ...result });
+        const job = await audioQueue.add('filler-detect', {
+            action: 'filler-detect',
+            filePath: tmpPath,
+            language
+        });
+
+        res.json({ success: true, jobId: job.id, status: 'queued' });
 
     } catch (err) {
         console.error('❌ Filler detect (upload) failed:', err);

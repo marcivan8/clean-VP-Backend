@@ -59,12 +59,47 @@ router.post('/vision', authenticateUser, (req, res) => {
   });
 });
 
+const { analysisQueue } = require('../queue/queues');
+
 // Main video analysis endpoint
 router.post('/',
   authenticateUser,          // Real authentication — verified Supabase JWT
   checkUsageLimits,          // Check plan limits
   upload.single('video'),    // Upload the video file
-  analyzeVideoHandler        // Run the analysis
+  async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: "No video file provided." });
+        }
+        
+        const { title = "", description = "", language = "en", ai_training_consent = "false" } = req.body;
+        const userId = req.user.id;
+        const videoPath = req.file.path;
+
+        console.log(`🎬 Enqueuing analysis for user ${userId}: ${videoPath}`);
+
+        const job = await analysisQueue.add('analyze-video', {
+            videoPath,
+            title,
+            description,
+            language,
+            ai_training_consent,
+            userId,
+            fileSize: req.file.size
+        }, {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 2000 }
+        });
+
+        res.json({
+            jobId: job.id,
+            status: 'queued'
+        });
+    } catch (err) {
+        console.error('❌ Failed to enqueue analysis:', err);
+        res.status(500).json({ error: 'Failed to enqueue analysis job' });
+    }
+  }
 );
 
 module.exports = router;

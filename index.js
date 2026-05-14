@@ -177,6 +177,7 @@ app.use('/api/proxy', uploadLimiter, require('./routes/proxyRoutes'));
 app.use('/api/revideo', renderLimiter, require('./routes/revideoRenderRoutes')); // headless Chrome
 app.use('/api/presets', require('./routes/presetRoutes'));
 app.use('/api/export', uploadLimiter, require('./routes/nleExport')); // NLE export (OTIO)
+app.use('/api/jobs', require('./routes/jobRoutes')); // Job Queue SSE monitoring
 
 // NLP routes — circuit-breaker backed, falls back to JS analyzer when spaCy is unreachable
 const { authenticateUser } = require('./middleware/auth');

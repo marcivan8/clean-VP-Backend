@@ -160,14 +160,61 @@ class TranscriptionManagerClass {
 
             const data = await response.json();
 
+            let words = [];
+
+            if (data.jobId) {
+                // If it's queued, subscribe to SSE
+                words = await new Promise((resolve, reject) => {
+                    const source = new EventSource(`/api/jobs/${data.jobId}/progress`);
+                    
+                    source.onmessage = (e) => {
+                        try {
+                            const eventData = JSON.parse(e.data);
+                            if (eventData.error) {
+                                source.close();
+                                return reject(new Error(eventData.error));
+                            }
+                            
+                            // Map progress (0-100) to our state progress range (5-50)
+                            if (eventData.progress !== undefined) {
+                                this._setStatus(TRANSCRIPTION_STATUS.TRANSCRIBING, 5 + Math.floor(eventData.progress * 0.45));
+                            }
+                            
+                            if (eventData.state === 'completed') {
+                                source.close();
+                                resolve(eventData.result.words || []);
+                            } else if (eventData.state === 'failed') {
+                                source.close();
+                                reject(new Error(eventData.error || 'Transcription job failed'));
+                            }
+                        } catch (err) {
+                            console.error('[TranscriptionManager] Error parsing SSE message:', err);
+                        }
+                    };
+
+                    source.onerror = (err) => {
+                        source.close();
+                        reject(new Error('SSE connection failed'));
+                    };
+                    
+                    // Abort support for long SSE
+                    signal.addEventListener('abort', () => {
+                        source.close();
+                        reject(new Error('AbortError'));
+                    });
+                });
+            } else {
+                words = data.words || [];
+            }
+
             this._setStatus(TRANSCRIPTION_STATUS.TRANSCRIBING, 50);
 
             EventBus.emit(EVENT_TYPES.TRANSCRIPTION_COMPLETE, {
                 filename,
-                wordCount: data.words?.length || 0,
+                wordCount: words?.length || 0,
             });
 
-            return data.words || [];
+            return words;
 
         } catch (err) {
             clearTimeout(timeoutId);

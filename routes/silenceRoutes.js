@@ -4,6 +4,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 const path = require('path');
 const fs = require('fs');
+const { audioQueue } = require('../queue/queues');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -36,88 +37,19 @@ router.post('/detect', async (req, res) => {
             return res.status(404).json({ error: `File not found: ${filename}` });
         }
 
-        console.log(`🎤 Analyzing for silence: ${filename} (Threshold: ${threshold}, MinDuration: ${duration}s)`);
+        console.log(`🎤 Enqueuing silence detection for: ${filename} (Threshold: ${threshold}, MinDuration: ${duration}s)`);
 
-        // Run FFmpeg silence detection
-        // We parse stderr because that's where silencedetect outputs logs
-        const silenceSegments = [];
-        let videoDuration = 0;
-
-        await new Promise((resolve, reject) => {
-            ffmpeg(filePath)
-                .audioFilters(`silencedetect=noise=${threshold}:d=${duration}`)
-                .format('null') // No output file needed
-                .output('-')
-                .on('stderr', (stderrLine) => {
-                    // console.log(stderrLine); // Verbose
-
-                    // Parse Duration: "Duration: 00:00:30.04,"
-                    if (stderrLine.includes('Duration:') && videoDuration === 0) {
-                        const match = stderrLine.match(/Duration: (\d{2}):(\d{2}):(\d{2}\.\d{2})/);
-                        if (match) {
-                            const hours = parseFloat(match[1]);
-                            const mins = parseFloat(match[2]);
-                            const secs = parseFloat(match[3]);
-                            videoDuration = (hours * 3600) + (mins * 60) + secs;
-                        }
-                    }
-
-                    // Parse Silence Start: "[silencedetect @ ...] silence_start: 12.345"
-                    // Parse Silence End: "[silencedetect @ ...] silence_end: 14.567 | silence_duration: 2.222"
-                    if (stderrLine.includes('silence_start:')) {
-                        const match = stderrLine.match(/silence_start: ([\d\.]+)/);
-                        if (match) silenceSegments.push({ start: parseFloat(match[1]) });
-                    }
-                    if (stderrLine.includes('silence_end:')) {
-                        const match = stderrLine.match(/silence_end: ([\d\.]+)/);
-                        if (match && silenceSegments.length > 0) {
-                            // Find the last open segment
-                            const lastSeg = silenceSegments[silenceSegments.length - 1];
-                            if (lastSeg.end === undefined) {
-                                lastSeg.end = parseFloat(match[1]);
-                            }
-                        }
-                    }
-                })
-                .on('end', () => {
-                    resolve();
-                })
-                .on('error', (err) => {
-                    reject(err);
-                })
-                .run();
+        const job = await audioQueue.add('detect-silence', {
+            action: 'silence-detect',
+            filename,
+            threshold,
+            duration
+        }, {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 2000 }
         });
 
-        // Invert to get "Active Segments" (The parts we want to KEEP)
-        const activeSegments = [];
-        let currentPos = 0;
-
-        silenceSegments.forEach(silence => {
-            // If there's content before this silence, keep it
-            if (silence.start > currentPos) {
-                // Ensure min length to avoid micro-clips? Let's say 0.1s
-                if (silence.start - currentPos > 0.1) {
-                    activeSegments.push({
-                        start: currentPos,
-                        end: silence.start,
-                        duration: silence.start - currentPos
-                    });
-                }
-            }
-            currentPos = silence.end;
-        });
-
-        // Add final segment if file doesn't end with silence
-        if (videoDuration > currentPos) {
-            activeSegments.push({
-                start: currentPos,
-                end: videoDuration,
-                duration: videoDuration - currentPos
-            });
-        }
-
-        console.log(`✅ Silence Analysis Complete. Found ${activeSegments.length} active segments.`);
-        res.json({ success: true, activeSegments, videoDuration });
+        res.json({ success: true, jobId: job.id, status: 'queued' });
 
     } catch (error) {
         console.error("Silence Detection Failed:", error);

@@ -95,8 +95,6 @@ class ProxyService {
             formData.append('video', file);
             if (userId) formData.append('userId', userId);
 
-            // NOTE: Do NOT set Content-Type here — the browser sets the correct
-            // multipart/form-data boundary automatically when using FormData.
             const headers = await buildHeaders();
 
             const response = await fetch(`${API_URL}/api/proxy/upload`, {
@@ -110,7 +108,42 @@ class ProxyService {
                 throw new Error(error.error || `Upload failed (${response.status})`);
             }
 
-            return await response.json();
+            const data = await response.json();
+            
+            // If the backend returns a jobId, we poll via SSE until completion
+            if (data.jobId) {
+                return new Promise((resolve, reject) => {
+                    const source = new EventSource(`${API_URL}/api/jobs/${data.jobId}/progress`);
+                    
+                    source.onmessage = (e) => {
+                        try {
+                            const eventData = JSON.parse(e.data);
+                            if (eventData.error) {
+                                source.close();
+                                return reject(new Error(eventData.error));
+                            }
+                            
+                            if (eventData.state === 'completed') {
+                                source.close();
+                                // Resolve with the job result (e.g. { proxyUrl, waveformUrl, originalPath })
+                                resolve(eventData.result);
+                            } else if (eventData.state === 'failed') {
+                                source.close();
+                                reject(new Error(eventData.error || 'Proxy job failed'));
+                            }
+                        } catch (err) {
+                            console.error('[ProxyService] Error parsing SSE message:', err);
+                        }
+                    };
+
+                    source.onerror = (err) => {
+                        source.close();
+                        reject(new Error('SSE connection failed'));
+                    };
+                });
+            }
+
+            return data;
         } catch (error) {
             console.error('[ProxyService Upload] Error:', error);
             throw error;

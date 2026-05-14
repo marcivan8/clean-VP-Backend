@@ -508,7 +508,52 @@ export class MediaExecutionEngine {
                 throw new Error(`API error: ${errorMessage}`);
             }
 
-            const result = await response.json();
+            let result = await response.json();
+
+            // Check if the API queued a job instead of returning immediately
+            if (result.jobId) {
+                console.log(`[MediaExecutionEngine] API call queued. Subscribing to job ${result.jobId}...`);
+                result = await new Promise((resolve, reject) => {
+                    // Note: Use full URL or proxy path as appropriate. 
+                    // Using standard path since we are in the same domain.
+                    const source = new EventSource(`/api/jobs/${result.jobId}/progress`);
+                    
+                    source.onmessage = (e) => {
+                        try {
+                            const eventData = JSON.parse(e.data);
+                            if (eventData.error) {
+                                source.close();
+                                return reject(new Error(eventData.error));
+                            }
+                            
+                            if (eventData.progress !== undefined) {
+                                // We can bubble this progress up to the job if needed
+                                // job.setProgress(job.progress + (eventData.progress / 100) * delta);
+                            }
+                            
+                            if (eventData.state === 'completed') {
+                                source.close();
+                                resolve(eventData.result);
+                            } else if (eventData.state === 'failed') {
+                                source.close();
+                                reject(new Error(eventData.error || 'Job failed execution'));
+                            }
+                        } catch (err) {
+                            console.error('[MediaExecutionEngine] Error parsing SSE message:', err);
+                        }
+                    };
+
+                    source.onerror = (err) => {
+                        source.close();
+                        reject(new Error('SSE connection failed'));
+                    };
+
+                    job.signal.addEventListener('abort', () => {
+                        source.close();
+                        reject(new Error('AbortError'));
+                    });
+                });
+            }
 
             // Special handling for filler word removal — rebuild timeline from non-filler segments
             if (command.action === 'fillerDetect' && result.activeSegments) {

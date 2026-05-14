@@ -1,7 +1,7 @@
 // ===== routes/proxyRoutes.js =====
 const express = require('express');
 const router = express.Router();
-const ProxyService = require('../services/ProxyService');
+const { videoQueue } = require('../queue/queues');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -71,20 +71,28 @@ router.post('/generate', authMiddleware, async (req, res) => {
         const userId = resolveUserId(req);
         console.log(`[ProxyRoute] Generating proxy for: ${safePath} (user: ${userId})`);
 
-        // Pass the uploads-relative path to ProxyService
+        // Pass the uploads-relative path to job
         const relativeVideoPath = path.relative(uploadsDir, safePath);
-        const outputRelativePath = await ProxyService.generateProxy(relativeVideoPath, userId);
+        
+        const job = await videoQueue.add('generate-proxy', {
+            filename: path.basename(safePath),
+            userId,
+            inputPath: relativeVideoPath,
+            outputDir: `proxies/${userId}`
+        }, {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 2000 }
+        });
 
         res.json({
-            status:       'completed',
-            originalPath: relativeVideoPath,
-            proxyPath:    outputRelativePath,
-            proxyUrl:     `/uploads/${outputRelativePath}`,
+            jobId: job.id,
+            status: 'queued',
+            originalPath: relativeVideoPath
         });
 
     } catch (error) {
         console.error('[ProxyRoute] Error:', error);
-        res.status(500).json({ error: 'Proxy generation failed' });
+        res.status(500).json({ error: 'Failed to enqueue proxy generation' });
     }
 });
 
@@ -112,24 +120,26 @@ router.post('/upload', authMiddleware, (req, res, next) => {
         const userId = resolveUserId(req);
         const videoRelativePath = path.join('temp', req.file.filename);
 
-        console.log(`[ProxyRoute] Upload received: ${videoRelativePath} (user: ${userId}), generating proxy...`);
+        console.log(`[ProxyRoute] Upload received: ${videoRelativePath} (user: ${userId}), enqueuing proxy...`);
 
-        const outputRelativePath = await ProxyService.generateProxy(videoRelativePath, userId);
-
-        // DO NOT delete the temp file here!
-        // The original high-quality upload is required by the export engine (exportRoutes.js)
-        // to render the final timeline. Proxies are only used for fast UI playback.
-        // fs.unlink(req.file.path, ...);
+        const job = await videoQueue.add('generate-proxy', {
+            filename: req.file.filename,
+            userId,
+            inputPath: videoRelativePath,
+            outputDir: `proxies/${userId}`
+        }, {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 2000 }
+        });
 
         res.json({
-            status:       'completed',
-            originalPath: videoRelativePath,
-            proxyPath:    outputRelativePath,
-            proxyUrl:     `/uploads/${outputRelativePath}`,
+            jobId: job.id,
+            status: 'queued',
+            originalPath: videoRelativePath
         });
     } catch (error) {
         console.error('[ProxyRoute Upload] Error:', error);
-        res.status(500).json({ error: 'Upload proxy generation failed' });
+        res.status(500).json({ error: 'Failed to enqueue upload proxy generation' });
     }
 });
 
