@@ -6,7 +6,17 @@ const { detectBeats } = require('../analysis/beatDetector');
 const { OpenAI } = require('openai');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+let openaiInstance = null;
+function getOpenAI() {
+    if (!openaiInstance) {
+        if (!process.env.OPENAI_API_KEY) {
+            throw new Error('OPENAI_API_KEY environment variable is missing.');
+        }
+        openaiInstance = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    }
+    return openaiInstance;
+}
 
 async function detectFillerWords(inputPath, language = 'en') {
     const FILLER_WORDS = new Set([
@@ -21,6 +31,7 @@ async function detectFillerWords(inputPath, language = 'en') {
         throw new Error('File exceeds OpenAI 25 MB Whisper limit. Extract audio first.');
     }
 
+    const openai = getOpenAI();
     const transcription = await openai.audio.transcriptions.create({
         file: fs.createReadStream(inputPath),
         model: 'whisper-1',
@@ -152,6 +163,7 @@ module.exports = async function processAudioJob(job) {
             const stats = fs.statSync(inputPath);
             if (stats.size > 25 * 1024 * 1024) throw new Error('File is larger than OpenAI 25MB limit. Audio extraction needed.');
 
+            const openai = getOpenAI();
             const transcription = await openai.audio.transcriptions.create({
                 file: fs.createReadStream(inputPath),
                 model: 'whisper-1',
