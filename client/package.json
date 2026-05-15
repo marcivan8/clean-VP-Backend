@@ -22,6 +22,7 @@
     "@revideo/vite-plugin": "^0.10.4",
     "@supabase/supabase-js": "^2.49.8",
     "classnames": "^2.5.1",
+    "compromise": "^14.15.0",
     "framer-motion": "^12.23.26",
     "hls.js": "^1.6.16",
     "lucide-react": "^0.562.0",

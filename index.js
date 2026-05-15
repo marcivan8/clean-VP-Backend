@@ -148,7 +148,6 @@ app.get('/health', (req, res) => {
     version: '2.0.0',
     services: {
       ffmpeg: !!ffmpegVersion,
-      spacy: !!process.env.SPACY_SERVICE_URL,
       openai: !!process.env.OPENAI_API_KEY,
     }
   });
@@ -179,9 +178,7 @@ app.use('/api/presets', require('./routes/presetRoutes'));
 app.use('/api/export', uploadLimiter, require('./routes/nleExport')); // NLE export (OTIO)
 app.use('/api/jobs', require('./routes/jobRoutes')); // Job Queue SSE monitoring
 
-// NLP routes — circuit-breaker backed, falls back to JS analyzer when spaCy is unreachable
-const { authenticateUser } = require('./middleware/auth');
-app.use('/api/nlp', authenticateUser, require('./routes/nlp'));
+
 
 // API documentation endpoint
 app.get('/api', (req, res) => {
@@ -260,15 +257,6 @@ const server = app.listen(port, '0.0.0.0', async () => {
   runCleanup(); // Run once on startup
   setInterval(runCleanup, 24 * 60 * 60 * 1000); // Then run every 24 hours
 
-  // Pre-flight spaCy health check — MUST run before real traffic arrives.
-  // If spaCy is unreachable (ENOTFOUND on Railway internal DNS) the circuit
-  // breaker opens here and all subsequent NLP calls silently use the JS
-  // fallback — no per-request failure logs, no 503s.
-  const spacyClient = require('./services/spacyClient');
-  const nlpHealth = await spacyClient.healthCheck();
-  if (nlpHealth.fallbackActive) {
-    console.log('[server] NLP running on JS fallback analyzer (spaCy unreachable or disabled)');
-  }
 });
 
 

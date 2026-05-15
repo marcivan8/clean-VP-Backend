@@ -1,5 +1,4 @@
 const OpenAI = require('openai');
-const SpacyService = require('../services/SpacyService');
 
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -99,38 +98,6 @@ const parseIntentHandler = async (req, res) => {
         const { prompt, context } = req.body;
         console.log("📝 [CRL] Parsing intent:", prompt);
 
-        // ── spaCy Pre-Analysis ──────────────────────────────────────
-        const videoDuration = context?.MediaMetadata?.sourceDuration || null;
-        const spacyAnalysis = await SpacyService.analyzePrompt(prompt, videoDuration);
-
-        if (spacyAnalysis) {
-            console.log(`🔬 [SpaCy] Clarity: ${spacyAnalysis.clarity_score}`);
-
-            // Timeline exceeds video duration → block execution
-            if (spacyAnalysis.timeline_error) {
-                return res.json({
-                    intent: 'clarification_required',
-                    message: spacyAnalysis.message,
-                    timeline_error: true,
-                    video_duration: spacyAnalysis.video_duration,
-                });
-            }
-
-            // Low clarity → return clarification questions to frontend
-            if (spacyAnalysis.needs_clarification) {
-                return res.json({
-                    intent: 'clarification_required',
-                    message: 'I need a bit more detail to proceed accurately.',
-                    spacy_analysis: spacyAnalysis,
-                    questions: spacyAnalysis.clarification_questions.map((q, i) => ({
-                        question: q,
-                        parameter: `clarify_${i}`,
-                        type: 'text',
-                    })),
-                });
-            }
-        }
-        // ── End spaCy Pre-Analysis ──────────────────────────────────
 
         if (!openai) {
             console.warn("⚠️ No OpenAI Key. Using local intent parser.");
@@ -382,10 +349,9 @@ Your job is to converge toward execution grounded in real media state.
 Output ONLY valid JSON. Include the word "json" in your response.`;
 
 
-        // Attach spaCy analysis to the context for better LLM grounding
+        // Attach context for better LLM grounding
         const enrichedContext = {
             ...context,
-            spacyAnalysis: spacyAnalysis || undefined,
         };
 
         const userMessage = `STRUCTURED CONTEXT:

@@ -8,21 +8,12 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-      - SPACY_URL=http://spacy:8001
       # IMPORTANT: Add your Supabase and OpenAI keys in your deployment environment
       # - SUPABASE_URL=...
       # - SUPABASE_SERVICE_KEY=...
       # - OPENAI_API_KEY=...
     volumes:
       - uploads_data:/usr/src/app/uploads
-    depends_on:
-      - spacy
-
-  spacy:
-    build: ./spacy-service
-    restart: always
-    expose:
-      - "8001"
 
 volumes:
   uploads_data:

@@ -56,7 +56,6 @@ Powered by `@chatoctopus/timeline` — no floating-point drift, rational time ma
 | Runtime | Node.js ≥ 18, Express 4 |
 | Auth | Supabase (JWT + Row Level Security) |
 | AI | OpenAI GPT-4o, Whisper |
-| NLP | spaCy (Python microservice) |
 | Video processing | FFmpeg (via `fluent-ffmpeg` + `ffmpeg-static`) |
 | NLE export | `@chatoctopus/timeline` (OTIO-first) |
 | Rendering | `@revideo/renderer` (headless Chromium) |
@@ -103,7 +102,6 @@ clean-VP-Backend/
 ├── models/                   # Supabase data models
 ├── analysis/                 # Audio/video analysis utilities
 ├── viralEngine/              # Virality scoring engine
-├── spacy-service/            # Python spaCy NLP microservice
 ├── revideo/                  # Revideo project for headless rendering
 └── client/                   # React frontend (Vite)
     └── src/
@@ -120,7 +118,6 @@ clean-VP-Backend/
 ### Prerequisites
 - Node.js ≥ 18
 - FFmpeg (bundled via `ffmpeg-static` — no system install needed)
-- Python 3.x + spaCy (for the NLP microservice, optional)
 
 ### Setup
 
@@ -142,10 +139,6 @@ cd client
 npm install
 npm run dev          # Vite dev server on http://localhost:5173
 
-# 5. (Optional) Start the spaCy NLP service
-cd spacy-service
-pip install -r requirements.txt
-python app.py
 ```
 
 ---
@@ -220,7 +213,7 @@ Authorization: Bearer <supabase-jwt>
 
 ## Deployment (Railway)
 
-Vibed is deployed as **two separate Railway services** — the Node.js backend (which also serves the React frontend) and the Python spaCy NLP microservice.
+Vibed is deployed as a single Railway service — the Node.js backend (which also serves the React frontend).
 
 ### Service 1 — Node.js Backend + React Frontend
 
@@ -242,16 +235,7 @@ docker run -p 3000:3000 --env-file .env vibed-backend
 4. Set `FRONTEND_URL=https://your-railway-app.up.railway.app` for CORS.
 5. Set `NODE_ENV=production` to enforce JWT auth and rate limits.
 
-### Service 2 — spaCy NLP Microservice
 
-Deploy `spacy-service/` as a **separate Railway service**:
-1. In Railway, create a new service and point the **root directory** to `spacy-service/`.
-2. Railway will auto-detect `spacy-service/Dockerfile` and build it.
-3. Copy the internal URL Railway assigns and paste it into Service 1's variables as:
-   ```
-   SPACY_SERVICE_URL=https://your-spacy-service.up.railway.app
-   ```
-4. The spaCy service is **optional** — if unreachable, AI intent parsing degrades gracefully.
 
 ### ⚠️ Ephemeral Filesystem Warning
 
