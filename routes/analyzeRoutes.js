@@ -60,6 +60,7 @@ router.post('/vision', authenticateUser, (req, res) => {
 });
 
 const { analysisQueue } = require('../queue/queues');
+const { bucket, useLocalStorage } = require('../config/storage');
 
 // Main video analysis endpoint
 router.post('/',
@@ -76,6 +77,17 @@ router.post('/',
         const userId = req.user.id;
         const videoPath = req.file.path;
 
+        console.log(`🎬 Upload received for analysis user ${userId}: ${videoPath}`);
+
+        // If using GCS, upload the raw file immediately so background workers
+        // running on different nodes (e.g. Railway) can access it.
+        if (bucket && !useLocalStorage) {
+            const destPath = `raw/${userId}/${req.file.filename}`;
+            console.log(`🎬 Uploading raw file to GCS: ${destPath}...`);
+            await bucket.upload(req.file.path, { destination: destPath });
+            console.log(`🎬 Raw file uploaded to GCS.`);
+        }
+
         console.log(`🎬 Enqueuing analysis for user ${userId}: ${videoPath}`);
 
         const job = await analysisQueue.add('analyze-video', {
@@ -85,7 +97,8 @@ router.post('/',
             language,
             ai_training_consent,
             userId,
-            fileSize: req.file.size
+            fileSize: req.file.size,
+            filename: req.file.filename
         }, {
             attempts: 3,
             backoff: { type: 'exponential', delay: 2000 }

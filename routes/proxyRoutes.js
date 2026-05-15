@@ -96,6 +96,8 @@ router.post('/generate', authMiddleware, async (req, res) => {
     }
 });
 
+const { bucket, useLocalStorage } = require('../config/storage');
+
 /**
  * POST /api/proxy/upload
  * Accept multipart/form-data video upload and trigger proxy generation.
@@ -120,7 +122,20 @@ router.post('/upload', authMiddleware, (req, res, next) => {
         const userId = resolveUserId(req);
         const videoRelativePath = path.join('temp', req.file.filename);
 
-        console.log(`[ProxyRoute] Upload received: ${videoRelativePath} (user: ${userId}), enqueuing proxy...`);
+        console.log(`[ProxyRoute] Upload received: ${videoRelativePath} (user: ${userId})`);
+
+        // If using GCS, upload the raw file immediately so background workers
+        // running on different nodes (e.g. Railway) can access it.
+        if (bucket && !useLocalStorage) {
+            const destPath = `raw/${userId}/${req.file.filename}`;
+            console.log(`[ProxyRoute] Uploading raw file to GCS: ${destPath}...`);
+            await bucket.upload(req.file.path, { destination: destPath });
+            console.log(`[ProxyRoute] Raw file uploaded to GCS.`);
+            // Note: We don't delete the local file here in case there's a local worker
+            // or the export node needs it. The storage will clean it up later.
+        }
+
+        console.log(`[ProxyRoute] Enqueuing proxy generation...`);
 
         const job = await videoQueue.add('generate-proxy', {
             filename: req.file.filename,

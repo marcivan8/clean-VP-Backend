@@ -17,12 +17,38 @@ async function safeUnlink(file) {
 }
 
 module.exports = async function processAnalysisJob(job) {
-    const { videoPath, title, description, language, ai_training_consent, userId, fileSize } = job.data;
+    const { videoPath, title, description, language, ai_training_consent, userId, fileSize, filename } = job.data;
     let analysisId = null;
+
+    // Resolve absolute paths
+    const uploadsDir = path.resolve(__dirname, '../uploads');
+    const absoluteVideoPath = path.resolve(videoPath);
+    let localPathToProcess = absoluteVideoPath;
+
+    // We do NOT require bucket dynamically inside the handler so that if bucket throws an error we catch it early.
+    // We already require storage above, let's add it there or here.
+    const { bucket } = require('../config/storage');
+
+    if (!fs.existsSync(absoluteVideoPath)) {
+        if (bucket && filename) {
+            console.log(`[Job ${job.id}] Local file not found, attempting to download from GCS...`);
+            const gcsRawPath = `raw/${userId}/${filename}`;
+            try {
+                const dir = path.dirname(absoluteVideoPath);
+                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                await bucket.file(gcsRawPath).download({ destination: absoluteVideoPath });
+                console.log(`[Job ${job.id}] Successfully downloaded from GCS to ${absoluteVideoPath}`);
+            } catch (err) {
+                throw new Error(`Input file not found locally and failed to download from GCS: ${err.message}`);
+            }
+        } else {
+            throw new Error(`Input file not found: ${absoluteVideoPath}`);
+        }
+    }
 
     try {
         await job.updateProgress(5);
-        console.log(`[Job ${job.id}] 🎬 Starting analysis for user ${userId}: ${videoPath}`);
+        console.log(`[Job ${job.id}] 🎬 Starting analysis for user ${userId}: ${localPathToProcess}`);
 
         // 2. Create DB Record
         const analysisRecord = await VideoAnalysis.create({
@@ -30,7 +56,7 @@ module.exports = async function processAnalysisJob(job) {
             title: title.trim(),
             description: description.trim(),
             language: language,
-            video_path: videoPath,
+            video_path: localPathToProcess,
             file_size: fileSize,
             ai_training_consent: ai_training_consent === 'true'
         });
@@ -39,7 +65,7 @@ module.exports = async function processAnalysisJob(job) {
 
         // 3. Run Full Analysis Pipeline
         const results = await analyzeVideo({
-            videoPath,
+            videoPath: localPathToProcess,
             title,
             description,
             language,

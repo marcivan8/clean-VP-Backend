@@ -98,7 +98,22 @@ module.exports = async function processVideoJob(job) {
     const absoluteInputPath = path.resolve(uploadsDir, inputPath);
     
     if (!fs.existsSync(absoluteInputPath)) {
-        throw new Error(`Input file not found: ${absoluteInputPath}`);
+        // Fallback: try to download from GCS if we're in a distributed environment (like Railway)
+        // where the web node uploaded to GCS but the worker node doesn't have the file locally.
+        if (bucket) {
+            console.log(`[Job ${job.id}] Local file not found, attempting to download from GCS...`);
+            const gcsRawPath = `raw/${userId}/${filename}`;
+            try {
+                const dir = path.dirname(absoluteInputPath);
+                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                await bucket.file(gcsRawPath).download({ destination: absoluteInputPath });
+                console.log(`[Job ${job.id}] Successfully downloaded from GCS to ${absoluteInputPath}`);
+            } catch (err) {
+                throw new Error(`Input file not found locally and failed to download from GCS: ${err.message}`);
+            }
+        } else {
+            throw new Error(`Input file not found: ${absoluteInputPath}`);
+        }
     }
 
     const tempDir = path.join(uploadsDir, 'temp', job.id);
