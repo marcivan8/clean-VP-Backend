@@ -222,7 +222,8 @@ export class MediaExecutionEngine {
                 return successResult;
             } else {
                 job.setState(EXECUTION_STATES.FAILED);
-                job.error = 'Verification failed';
+                const failedResult = job.results.find(r => r.success === false);
+                job.error = failedResult?.error || failedResult?.message || 'Execution verification failed';
                 job.onError({ jobId: job.id, error: job.error });
                 return { success: false, jobId: job.id, state: EXECUTION_STATES.FAILED, error: job.error };
             }

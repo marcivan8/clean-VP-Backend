@@ -314,7 +314,7 @@ export class VideoEditorTools {
             // Long-Form Intelligence Engine
             case 'analyze_structure': return await this.analyzeStructure(action.args);
             case 'long_form_edit': return await this.longFormEdit(action.args);
-            case 'find_hook': return this.findHook();
+            case 'find_hook': return await this.findHook();
             case 'remove_repetition': return await this.removeRepetition(action.args);
             case 'reorder_segment': return this.reorderSegment(action.args);
             case 'cut_segment': return this.cutSegment(action.args);
@@ -541,8 +541,13 @@ export class VideoEditorTools {
     /**
      * Find the best hook from the cached content analysis.
      */
-    findHook() {
-        const analysis = ContentAnalyzer.getCachedAnalysis();
+    async findHook() {
+        let analysis = ContentAnalyzer.getCachedAnalysis();
+        if (!analysis?.structure) {
+            console.log('[VideoEditorTools] No cached analysis. Running ContentAnalyzer first...');
+            analysis = await ContentAnalyzer.analyze();
+        }
+
         const hook = analysis?.structure?.hookCandidate || analysis?.structure?.hook || null;
 
         if (hook) {
@@ -556,7 +561,7 @@ export class VideoEditorTools {
 
         return {
             success: false,
-            message: 'No hook candidate found. Run content analysis first.',
+            message: 'No hook candidate found even after analysis.',
             hookCandidate: null,
         };
     }
@@ -565,9 +570,14 @@ export class VideoEditorTools {
      * Remove repetitive / low-value segments from the timeline.
      */
     async removeRepetition({ importance_threshold = 0.3 } = {}) {
-        const analysis = ContentAnalyzer.getCachedAnalysis();
+        let analysis = ContentAnalyzer.getCachedAnalysis();
         if (!analysis?.segments) {
-            return { success: false, message: 'No content analysis available. Run analyze_structure first.' };
+            console.log('[VideoEditorTools] No cached analysis. Running ContentAnalyzer first...');
+            analysis = await ContentAnalyzer.analyze();
+        }
+
+        if (!analysis?.segments) {
+            return { success: false, message: 'Content analysis failed. Cannot remove repetition.' };
         }
 
         const lowValueSegs = analysis.segments.filter(
