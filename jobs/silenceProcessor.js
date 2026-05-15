@@ -6,20 +6,46 @@ const fs = require('fs');
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 module.exports = async function processSilenceJob(job) {
-    const { filename, threshold = '-30dB', duration = '0.5' } = job.data;
+    const { filename, filePath: jobFilePath, userId, threshold = '-30dB', duration = '0.5' } = job.data;
 
     const uploadsDir = path.resolve(__dirname, '../uploads');
     const publicDir = path.resolve(__dirname, '../client/public');
-    
-    const normalizedFilename = filename.startsWith('/') ? filename.slice(1) : filename;
-    let filePath = path.resolve(__dirname, '..', normalizedFilename);
+    const { bucket } = require('../config/storage');
 
-    if (!filePath.startsWith(uploadsDir) && !filePath.startsWith(publicDir)) {
+    // Prefer explicit filePath from job data; fall back to resolving filename
+    let filePath = jobFilePath || null;
+    if (!filePath && filename) {
+        const normalizedFilename = filename.startsWith('/') ? filename.slice(1) : filename;
+        filePath = path.resolve(uploadsDir, normalizedFilename);
+        if (!filePath.startsWith(uploadsDir) && !filePath.startsWith(publicDir)) {
+            filePath = path.resolve(uploadsDir, 'temp', path.basename(normalizedFilename));
+        }
+    }
+
+    if (!filePath || (!filePath.startsWith(uploadsDir) && !filePath.startsWith(publicDir))) {
         throw new Error('Access denied: Invalid file path');
     }
 
     if (!fs.existsSync(filePath)) {
-        throw new Error(`File not found: ${filename}`);
+        // Try temp subdir if not already there
+        const tempPath = path.resolve(uploadsDir, 'temp', path.basename(filePath));
+        if (filePath !== tempPath && fs.existsSync(tempPath)) {
+            filePath = tempPath;
+        } else if (bucket && userId && filename) {
+            // Distributed env: download the raw file from GCS
+            console.log(`[Job ${job.id}] Local file missing, downloading from GCS...`);
+            const gcsPath = `raw/${userId}/${path.basename(filename)}`;
+            const dir = path.dirname(filePath);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            try {
+                await bucket.file(gcsPath).download({ destination: filePath });
+                console.log(`[Job ${job.id}] Downloaded from GCS: ${gcsPath}`);
+            } catch (err) {
+                throw new Error(`File not found locally and GCS download failed: ${err.message}`);
+            }
+        } else {
+            throw new Error(`File not found: ${filename || filePath}`);
+        }
     }
 
     console.log(`[Job ${job.id}] 🎤 Analyzing for silence: ${filename}`);
