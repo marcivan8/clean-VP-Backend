@@ -182,24 +182,33 @@ router.post('/transcribe', authenticateUser, async (req, res) => {
         if (filename && !inputPath) {
             const normalizedFilename = filename.startsWith('/') ? filename.slice(1) : filename;
             inputPath = path.resolve(uploadsDir, normalizedFilename);
-            
+
             if (!inputPath.startsWith(uploadsDir)) {
-                 inputPath = path.resolve(publicDir, normalizedFilename);
-                 if (!inputPath.startsWith(publicDir)) {
-                     return res.status(403).json({ error: 'Access denied: Invalid file path' });
-                 }
+                inputPath = path.resolve(publicDir, normalizedFilename);
+                if (!inputPath.startsWith(publicDir)) {
+                    return res.status(403).json({ error: 'Access denied: Invalid file path' });
+                }
             }
         }
 
+        // Bare filenames (e.g. "IMG_0029.MOV") land in uploads/temp/ — fall back there
         if (!fs.existsSync(inputPath)) {
-            return res.status(404).json({ error: `File not found: ${filename || filePath}` });
+            const tempPath = path.resolve(uploadsDir, 'temp', path.basename(inputPath));
+            if (tempPath.startsWith(uploadsDir) && fs.existsSync(tempPath)) {
+                inputPath = tempPath;
+            } else {
+                return res.status(404).json({ error: `File not found: ${filename || filePath}` });
+            }
         }
 
         console.log(`🎙️ Enqueuing Transcription: ${inputPath}`);
 
+        const userId = req.user?.id || (process.env.NODE_ENV !== 'production' ? 'dev-user' : null);
         const job = await audioQueue.add('transcribe-audio', {
             action: 'transcribe',
-            filePath: inputPath
+            filename: path.basename(inputPath),
+            filePath: inputPath,
+            userId
         });
 
         res.json({
@@ -316,15 +325,25 @@ router.post('/filler/detect', authenticateUser, async (req, res) => {
         if (!inputPath.startsWith(uploadsDir)) {
             return res.status(403).json({ error: 'Access denied: invalid file path' });
         }
+
+        // Bare filenames land in uploads/temp/ — fall back there
         if (!require('fs').existsSync(inputPath)) {
-            return res.status(404).json({ error: `File not found: ${filename || filePath}` });
+            const tempPath = path.resolve(uploadsDir, 'temp', path.basename(inputPath));
+            if (tempPath.startsWith(uploadsDir) && require('fs').existsSync(tempPath)) {
+                inputPath = tempPath;
+            } else {
+                return res.status(404).json({ error: `File not found: ${filename || filePath}` });
+            }
         }
 
         console.log(`🔤 Enqueuing Filler detection: ${inputPath}`);
 
+        const userId = req.user?.id || (process.env.NODE_ENV !== 'production' ? 'dev-user' : null);
         const job = await audioQueue.add('filler-detect', {
             action: 'filler-detect',
+            filename: path.basename(inputPath),
             filePath: inputPath,
+            userId,
             language
         });
 

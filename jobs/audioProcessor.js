@@ -86,32 +86,54 @@ async function detectFillerWords(inputPath, language = 'en') {
 }
 
 module.exports = async function processAudioJob(job) {
-    const { action, filename, filePath, language } = job.data;
-    
+    const { action, filename, filePath, userId, language } = job.data;
+
     // Resolve paths
     const uploadsDir = path.resolve(__dirname, '../uploads');
     const publicDir = path.resolve(__dirname, '../client/public');
     const tempDir = path.join(uploadsDir, 'audio_temp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
+    // Delegate silence-detect to silenceProcessor
+    if (action === 'silence-detect') {
+        const processSilenceJob = require('./silenceProcessor');
+        return processSilenceJob(job);
+    }
+
     let inputPath = filePath;
     if (filename && !inputPath) {
         const normalizedFilename = filename.startsWith('/') ? filename.slice(1) : filename;
         inputPath = path.resolve(uploadsDir, normalizedFilename);
-        
+
         if (!fs.existsSync(inputPath)) {
-             inputPath = path.resolve(uploadsDir, 'temp', path.basename(filename));
+            inputPath = path.resolve(uploadsDir, 'temp', path.basename(filename));
         }
         if (!fs.existsSync(inputPath)) {
-             inputPath = path.resolve(publicDir, normalizedFilename);
+            inputPath = path.resolve(publicDir, normalizedFilename);
         }
     }
 
     if (!inputPath || (!inputPath.startsWith(uploadsDir) && !inputPath.startsWith(publicDir))) {
         throw new Error('Access denied: invalid file path');
     }
+
+    // GCS fallback for distributed environments (e.g. separate Railway worker service)
     if (!fs.existsSync(inputPath)) {
-        throw new Error(`File not found: ${filename || filePath}`);
+        const { bucket } = require('../config/storage');
+        if (bucket && userId && filename) {
+            console.log(`[Job ${job.id}] Local file missing, downloading from GCS...`);
+            const gcsPath = `raw/${userId}/${path.basename(filename)}`;
+            const dir = path.dirname(inputPath);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            try {
+                await bucket.file(gcsPath).download({ destination: inputPath });
+                console.log(`[Job ${job.id}] Downloaded from GCS: ${gcsPath}`);
+            } catch (err) {
+                throw new Error(`File not found locally and GCS download failed: ${err.message}`);
+            }
+        } else {
+            throw new Error(`File not found: ${filename || filePath}`);
+        }
     }
 
     await job.updateProgress(10);
