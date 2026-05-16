@@ -33,13 +33,15 @@ router.get('/:jobId/progress', async (req, res) => {
         return res.end();
     }
 
+    let interval;
+
     const sendState = async () => {
         try {
             const state = await job.getState();
             const progress = job.progress;
-            
+
             let data = { state, progress };
-            
+
             if (state === 'completed') {
                 data.result = job.returnvalue;
             } else if (state === 'failed') {
@@ -63,7 +65,7 @@ router.get('/:jobId/progress', async (req, res) => {
     await sendState();
 
     // Poll every 1 second and stream to client
-    const interval = setInterval(sendState, 1000);
+    interval = setInterval(sendState, 1000);
 
     req.on('close', () => {
         clearInterval(interval);
