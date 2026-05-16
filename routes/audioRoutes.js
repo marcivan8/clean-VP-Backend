@@ -34,7 +34,13 @@ router.post('/denoise', authenticateUser, async (req, res) => {
         let inputPath;
 
         if (filename && !filePath) {
-            inputPath = path.resolve(uploadsDir, 'temp', path.basename(filename));
+            const norm = filename.replace(/\\/g, '/').replace(/^\/|\.\.\/|\.\.$/g, '');
+            inputPath = path.resolve(uploadsDir, norm);
+            // Fall back to temp/ for bare filenames (e.g. "video.mp4" with no directory)
+            if (!fs.existsSync(inputPath)) {
+                const tempPath = path.resolve(uploadsDir, 'temp', path.basename(filename));
+                if (fs.existsSync(tempPath)) inputPath = tempPath;
+            }
         } else {
             inputPath = path.resolve(filePath);
         }
@@ -86,9 +92,17 @@ router.post('/beat-detect', authenticateUser, async (req, res) => {
 
         // SECURITY: Enforce uploads/ boundary
         const uploadsDir = path.resolve(__dirname, '../uploads');
-        let inputPath = filename && !filePath
-            ? path.resolve(uploadsDir, 'temp', path.basename(filename))
-            : path.resolve(filePath);
+        let inputPath;
+        if (filename && !filePath) {
+            const norm = filename.replace(/\\/g, '/').replace(/^\/|\.\.\/|\.\.$/g, '');
+            inputPath = path.resolve(uploadsDir, norm);
+            if (!fs.existsSync(inputPath)) {
+                const tempPath = path.resolve(uploadsDir, 'temp', path.basename(filename));
+                if (fs.existsSync(tempPath)) inputPath = tempPath;
+            }
+        } else {
+            inputPath = path.resolve(filePath);
+        }
 
         if (!inputPath.startsWith(uploadsDir)) {
             return res.status(403).json({ error: 'Access denied: invalid file path' });
@@ -123,9 +137,17 @@ router.post('/normalize', authenticateUser, async (req, res) => {
 
         // SECURITY: Enforce uploads/ boundary
         const uploadsDir = path.resolve(__dirname, '../uploads');
-        let inputPath = filename && !filePath
-            ? path.resolve(uploadsDir, 'temp', path.basename(filename))
-            : path.resolve(filePath || '');
+        let inputPath;
+        if (filename && !filePath) {
+            const norm = filename.replace(/\\/g, '/').replace(/^\/|\.\.\/|\.\.$/g, '');
+            inputPath = path.resolve(uploadsDir, norm);
+            if (!fs.existsSync(inputPath)) {
+                const tempPath = path.resolve(uploadsDir, 'temp', path.basename(filename));
+                if (fs.existsSync(tempPath)) inputPath = tempPath;
+            }
+        } else {
+            inputPath = path.resolve(filePath || '');
+        }
 
         if (!inputPath.startsWith(uploadsDir)) {
             return res.status(403).json({ error: 'Access denied: invalid file path' });
