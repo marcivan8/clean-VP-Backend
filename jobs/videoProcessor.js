@@ -185,7 +185,9 @@ module.exports = async function processVideoJob(job) {
         return {
             proxyUrl: m3u8Url,
             waveformUrl: waveformUrl,
-            originalPath: inputPath
+            originalPath: inputPath,
+            // proxyPath = uploads-relative raw file path; audioRoutes resolves from uploads/ dir
+            proxyPath: inputPath,
         };
 
     } finally {

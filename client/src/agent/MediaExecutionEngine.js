@@ -277,7 +277,14 @@ export class MediaExecutionEngine {
                 const firstClip = videoTrack?.clips?.[0];
                 args[key] = firstClip?.id || null;
             } else if (val === '$uploaded_file') {
-                args[key] = store.uploadedFile?.name || 'video.mp4';
+                const resolved = store.uploadedFile?.name;
+                if (!resolved) {
+                    console.warn(
+                        '[MediaExecutionEngine] $uploaded_file has no name — uploadedFile was not set after proxy generation. ' +
+                        'API calls requiring a server-side file path (silence, filler, denoise) will fail.'
+                    );
+                }
+                args[key] = resolved || 'video.mp4';
             } else if (val.startsWith('$track_of(')) {
                 const clipId = val.slice('$track_of('.length, -1);
                 const resolvedClipId = clipId === '$first_clip'

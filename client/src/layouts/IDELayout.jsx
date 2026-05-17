@@ -265,10 +265,16 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 proxyUrl: data.proxyUrl,
                                 isProxying: false
                             });
-                            // Store uploads-relative path (no 'uploads/' prefix — audioRoutes resolves from uploads dir)
-                            useTimelineStore.getState().setUploadedFile({
-                                name: data.proxyPath
-                            });
+                            // Store uploads-relative raw file path so AI API calls (silence, filler,
+                            // denoise) can locate the file on the server. proxyPath is returned by
+                            // the worker; fall back to originalPath if an older worker omits it.
+                            const rawFilePath = data.proxyPath || data.originalPath;
+                            if (rawFilePath) {
+                                useTimelineStore.getState().setUploadedFile({ name: rawFilePath });
+                                console.log(`[IDELayout] uploadedFile path set: ${rawFilePath}`);
+                            } else {
+                                console.warn('[IDELayout] Proxy job result missing proxyPath and originalPath — AI API calls will not work');
+                            }
                         })
                         .catch(err => {
                             console.error(`[IDELayout] Proxy generation failed for ${file.name}`, err);
