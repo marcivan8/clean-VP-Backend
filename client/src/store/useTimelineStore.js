@@ -309,6 +309,7 @@ const useTimelineStore = create(
                 if (updates.offset !== undefined) placementUpdates.offset = updates.offset;
                 if (updates.speed !== undefined) placementUpdates.speed = updates.speed;
                 if (updates.volume !== undefined) placementUpdates.volume = updates.volume;
+                if (updates.muted !== undefined) placementUpdates.volume = updates.muted ? 0 : (updates.volume ?? placement.volume ?? 1);
                 if (updates.layerId !== undefined) placementUpdates.layerId = updates.layerId;
 
                 if (Object.keys(placementUpdates).length > 0) {

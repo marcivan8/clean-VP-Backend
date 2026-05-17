@@ -273,15 +273,15 @@ export class MediaExecutionEngine {
             if (val === '$playhead') {
                 args[key] = store.currentTime || 0;
             } else if (val === '$first_clip') {
-                const firstTrack = store.tracks?.[0];
-                const firstClip = firstTrack?.clips?.[0];
+                const videoTrack = store.tracks?.find(t => t.type === 'video') || store.tracks?.[0];
+                const firstClip = videoTrack?.clips?.[0];
                 args[key] = firstClip?.id || null;
             } else if (val === '$uploaded_file') {
                 args[key] = store.uploadedFile?.name || 'video.mp4';
             } else if (val.startsWith('$track_of(')) {
                 const clipId = val.slice('$track_of('.length, -1);
                 const resolvedClipId = clipId === '$first_clip'
-                    ? store.tracks?.[0]?.clips?.[0]?.id
+                    ? (store.tracks?.find(t => t.type === 'video') || store.tracks?.[0])?.clips?.[0]?.id
                     : clipId;
                 for (const track of store.tracks || []) {
                     if (track.clips?.some(c => c.id === resolvedClipId)) {
@@ -501,11 +501,17 @@ export class MediaExecutionEngine {
 
             if (!response.ok) {
                 let errorMessage = response.statusText;
+                let errorBody = {};
                 try {
-                    const errorData = await response.json();
-                    if (errorData.error) errorMessage = errorData.error;
-                    else if (errorData.message) errorMessage = errorData.message;
+                    errorBody = await response.json();
+                    if (errorBody.error) errorMessage = errorBody.error;
+                    else if (errorBody.message) errorMessage = errorBody.message;
                 } catch (e) { /* ignore */ }
+                // Gracefully skip endpoints that aren't registered yet rather than crashing the job
+                if (response.status === 404 && errorBody.error === 'Route not found') {
+                    console.warn(`[MediaExecutionEngine] Endpoint ${endpoint} not registered — skipping`);
+                    return { action: command.action, success: true, skipped: true, message: `${endpoint} not yet implemented` };
+                }
                 throw new Error(`API error: ${errorMessage}`);
             }
 
@@ -515,43 +521,38 @@ export class MediaExecutionEngine {
             if (result.jobId) {
                 console.log(`[MediaExecutionEngine] API call queued. Subscribing to job ${result.jobId}...`);
                 result = await new Promise((resolve, reject) => {
-                    // Note: Use full URL or proxy path as appropriate. 
-                    // Using standard path since we are in the same domain.
+                    let settled = false;
+                    const settle = (fn, val) => {
+                        if (settled) return;
+                        settled = true;
+                        source.close();
+                        fn(val);
+                    };
+
                     const source = new EventSource(`/api/jobs/${result.jobId}/progress`);
-                    
+
                     source.onmessage = (e) => {
                         try {
                             const eventData = JSON.parse(e.data);
                             if (eventData.error) {
-                                source.close();
-                                return reject(new Error(eventData.error));
+                                return settle(reject, new Error(eventData.error));
                             }
-                            
-                            if (eventData.progress !== undefined) {
-                                // We can bubble this progress up to the job if needed
-                                // job.setProgress(job.progress + (eventData.progress / 100) * delta);
-                            }
-                            
                             if (eventData.state === 'completed') {
-                                source.close();
-                                resolve(eventData.result);
+                                settle(resolve, eventData.result);
                             } else if (eventData.state === 'failed') {
-                                source.close();
-                                reject(new Error(eventData.error || 'Job failed execution'));
+                                settle(reject, new Error(eventData.error || 'Job failed execution'));
                             }
                         } catch (err) {
                             console.error('[MediaExecutionEngine] Error parsing SSE message:', err);
                         }
                     };
 
-                    source.onerror = (err) => {
-                        source.close();
-                        reject(new Error('SSE connection failed'));
+                    source.onerror = () => {
+                        settle(reject, new Error('SSE connection failed'));
                     };
 
                     job.signal.addEventListener('abort', () => {
-                        source.close();
-                        reject(new Error('AbortError'));
+                        settle(reject, new Error('AbortError'));
                     });
                 });
             }

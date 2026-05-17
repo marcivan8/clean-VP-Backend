@@ -172,7 +172,28 @@ function compileComputeSplitTimestamp(step, ctx) {
     } else if (step.mode === 'timestamp') {
         computedVal = step.timestamp ?? step.at_time ?? null;
     } else {
-        computedVal = `$computed_split(${step.clip_id || '$first_clip'}, ${step.mode})`;
+        // Compute actual value at compile time using state snapshot
+        let clip = null;
+        if (step.clip_id) {
+            for (const track of ctx.state.tracks || []) {
+                const found = track.clips?.find(c => c.id === step.clip_id);
+                if (found) { clip = found; break; }
+            }
+        }
+        if (!clip) {
+            const videoTrack = (ctx.state.tracks || []).find(t => t.type === 'video') || ctx.state.tracks?.[0];
+            clip = videoTrack?.clips?.[0] || null;
+        }
+        if (!clip) return validationError(step.step_id, 'No clip found for split computation', VALIDATION_ERRORS.MISSING_FIELD);
+
+        const start = clip.start || 0;
+        const dur = clip.duration || 0;
+        if (step.mode === 'midpoint') computedVal = start + dur / 2;
+        else if (step.mode === 'thirds') computedVal = start + dur / 3;
+        else if (step.mode === 'quarters') computedVal = start + dur / 4;
+        else computedVal = null;
+
+        if (computedVal === null) return validationError(step.step_id, `Unsupported split mode: ${step.mode}`, VALIDATION_ERRORS.INVALID_ENUM);
     }
 
     return skip(step.step_id, `Compute split: mode=${step.mode}`, {
@@ -209,7 +230,7 @@ function compileAddClip(step, ctx) {
     return ok(step.step_id, [
         cmd(ENGINE.STORE, 'addClip', {
             trackId: trackRef,
-            clip: { id: clipId, src: step.src, start, end: start + duration, duration, type: step.type || 'video', name: step.name || 'New Clip' },
+            clip: { id: clipId, url: step.src, sourceUrl: step.src, start, duration, type: step.type || 'video', name: step.name || 'New Clip' },
         }, { source_step_id: step.step_id, description: `Add clip: ${step.name || step.src}` }),
     ]);
 }
@@ -303,9 +324,9 @@ function compileSetAspectRatio(step, ctx) {
 function compileSilenceRemoval(step, ctx) {
     return ok(step.step_id, [
         cmd(ENGINE.API, 'silenceDetect', {
-            endpoint: '/api/audio/transcribe',
+            endpoint: '/api/silence/detect',
             method: 'POST',
-            payload: { filename: '$uploaded_file', threshold: step.threshold || '-30dB', min_duration: step.min_duration || 0.5, padding: step.padding || 0.1 },
+            payload: { filename: '$uploaded_file', threshold: step.threshold || '-30dB', duration: step.min_duration || 0.5 },
         }, { source_step_id: step.step_id, symbolic_refs: ['$uploaded_file'], description: 'Silence detection' }),
     ]);
 }
