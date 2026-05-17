@@ -18,7 +18,31 @@ function getOpenAI() {
     return openaiInstance;
 }
 
-async function detectFillerWords(inputPath, language = 'en') {
+const WHISPER_LIMIT = 25 * 1024 * 1024; // 25 MB
+
+/**
+ * Extracts a mono 16kHz MP3 from any video/audio file.
+ * The result is always well under 25 MB for typical video lengths.
+ * Caller is responsible for deleting the returned temp file.
+ */
+async function extractAudioForWhisper(inputPath, tempDir) {
+    const outPath = path.join(tempDir, `whisper_audio_${Date.now()}.mp3`);
+    await new Promise((resolve, reject) => {
+        ffmpeg(inputPath)
+            .noVideo()
+            .audioChannels(1)
+            .audioFrequency(16000)
+            .audioBitrate('32k')
+            .format('mp3')
+            .output(outPath)
+            .on('end', resolve)
+            .on('error', reject)
+            .run();
+    });
+    return outPath;
+}
+
+async function detectFillerWords(inputPath, language = 'en', tempDir = null) {
     const FILLER_WORDS = new Set([
         'um', 'uh', 'ah', 'er', 'eh', 'hmm', 'hm',
         'like', 'basically', 'literally',
@@ -27,62 +51,72 @@ async function detectFillerWords(inputPath, language = 'en') {
     ]);
 
     const stats = fs.statSync(inputPath);
-    if (stats.size > 25 * 1024 * 1024) {
-        throw new Error('File exceeds OpenAI 25 MB Whisper limit. Extract audio first.');
+    let whisperPath = inputPath;
+    let tempAudio = null;
+
+    if (stats.size > WHISPER_LIMIT) {
+        if (!tempDir) throw new Error('tempDir required to extract audio for large files');
+        console.log(`[detectFillerWords] File is ${(stats.size / 1024 / 1024).toFixed(1)} MB — extracting audio for Whisper...`);
+        tempAudio = await extractAudioForWhisper(inputPath, tempDir);
+        whisperPath = tempAudio;
     }
 
-    const openai = getOpenAI();
-    const transcription = await openai.audio.transcriptions.create({
-        file: fs.createReadStream(inputPath),
-        model: 'whisper-1',
-        response_format: 'verbose_json',
-        timestamp_granularities: ['word'],
-        language: language === 'auto' ? undefined : language,
-    });
+    try {
+        const openai = getOpenAI();
+        const transcription = await openai.audio.transcriptions.create({
+            file: fs.createReadStream(whisperPath),
+            model: 'whisper-1',
+            response_format: 'verbose_json',
+            timestamp_granularities: ['word'],
+            language: language === 'auto' ? undefined : language,
+        });
 
-    const words = transcription.words || [];
-    const totalDuration = transcription.duration || (words.length ? words[words.length - 1].end : 0);
+        const words = transcription.words || [];
+        const totalDuration = transcription.duration || (words.length ? words[words.length - 1].end : 0);
 
-    const MERGE_GAP = 0.15;
-    const fillerSpans = [];
-    let current = null;
+        const MERGE_GAP = 0.15;
+        const fillerSpans = [];
+        let current = null;
 
-    for (const w of words) {
-        const token = w.word.toLowerCase().replace(/[^a-zàâéèêëîïôùûüç ]/g, '').trim();
-        const isFiller = FILLER_WORDS.has(token);
+        for (const w of words) {
+            const token = w.word.toLowerCase().replace(/[^a-zàâéèêëîïôùûüç ]/g, '').trim();
+            const isFiller = FILLER_WORDS.has(token);
 
-        if (isFiller) {
-            if (current && w.start - current.end <= MERGE_GAP) {
-                current.end = w.end;
+            if (isFiller) {
+                if (current && w.start - current.end <= MERGE_GAP) {
+                    current.end = w.end;
+                } else {
+                    if (current) fillerSpans.push(current);
+                    current = { start: w.start, end: w.end };
+                }
             } else {
-                if (current) fillerSpans.push(current);
-                current = { start: w.start, end: w.end };
+                if (current) { fillerSpans.push(current); current = null; }
             }
-        } else {
-            if (current) { fillerSpans.push(current); current = null; }
         }
-    }
-    if (current) fillerSpans.push(current);
+        if (current) fillerSpans.push(current);
 
-    const activeSegments = [];
-    let cursor = 0;
-    for (const span of fillerSpans) {
-        if (span.start > cursor + 0.01) {
-            activeSegments.push({ start: cursor, end: span.start, duration: span.start - cursor });
+        const activeSegments = [];
+        let cursor = 0;
+        for (const span of fillerSpans) {
+            if (span.start > cursor + 0.01) {
+                activeSegments.push({ start: cursor, end: span.start, duration: span.start - cursor });
+            }
+            cursor = span.end;
         }
-        cursor = span.end;
-    }
-    if (cursor < totalDuration - 0.01) {
-        activeSegments.push({ start: cursor, end: totalDuration, duration: totalDuration - cursor });
-    }
+        if (cursor < totalDuration - 0.01) {
+            activeSegments.push({ start: cursor, end: totalDuration, duration: totalDuration - cursor });
+        }
 
-    return {
-        fillerCount: fillerSpans.length,
-        removedSegments: fillerSpans.map(s => ({ ...s, duration: s.end - s.start })),
-        activeSegments,
-        transcript: transcription.text,
-        totalDuration,
-    };
+        return {
+            fillerCount: fillerSpans.length,
+            removedSegments: fillerSpans.map(s => ({ ...s, duration: s.end - s.start })),
+            activeSegments,
+            transcript: transcription.text,
+            totalDuration,
+        };
+    } finally {
+        if (tempAudio && fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio);
+    }
 }
 
 module.exports = async function processAudioJob(job) {
@@ -182,23 +216,32 @@ module.exports = async function processAudioJob(job) {
 
         case 'transcribe': {
             console.log(`[Job ${job.id}] 🎙️ Transcribing with Whisper: ${inputPath}`);
-            const stats = fs.statSync(inputPath);
-            if (stats.size > 25 * 1024 * 1024) throw new Error('File is larger than OpenAI 25MB limit. Audio extraction needed.');
-
-            const openai = getOpenAI();
-            const transcription = await openai.audio.transcriptions.create({
-                file: fs.createReadStream(inputPath),
-                model: 'whisper-1',
-                response_format: 'verbose_json',
-                timestamp_granularities: ['word']
-            });
-            await job.updateProgress(100);
-            return { text: transcription.text, words: transcription.words };
+            const tStats = fs.statSync(inputPath);
+            let tWhisperPath = inputPath;
+            let tTempAudio = null;
+            if (tStats.size > WHISPER_LIMIT) {
+                console.log(`[Job ${job.id}] File is ${(tStats.size / 1024 / 1024).toFixed(1)} MB — extracting audio for Whisper...`);
+                tTempAudio = await extractAudioForWhisper(inputPath, tempDir);
+                tWhisperPath = tTempAudio;
+            }
+            try {
+                const openai = getOpenAI();
+                const transcription = await openai.audio.transcriptions.create({
+                    file: fs.createReadStream(tWhisperPath),
+                    model: 'whisper-1',
+                    response_format: 'verbose_json',
+                    timestamp_granularities: ['word']
+                });
+                await job.updateProgress(100);
+                return { text: transcription.text, words: transcription.words };
+            } finally {
+                if (tTempAudio && fs.existsSync(tTempAudio)) fs.unlinkSync(tTempAudio);
+            }
         }
 
         case 'filler-detect': {
             console.log(`[Job ${job.id}] 🔤 Filler detection: ${inputPath}`);
-            const result = await detectFillerWords(inputPath, language || 'en');
+            const result = await detectFillerWords(inputPath, language || 'en', tempDir);
             await job.updateProgress(100);
             return result;
         }
