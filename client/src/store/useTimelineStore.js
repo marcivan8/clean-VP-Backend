@@ -808,8 +808,29 @@ const useTimelineStore = create(
             },
 
             rippleDelete: (atTime) => {
+                if (atTime === undefined || atTime === null) return;
                 get()._saveHistory();
-                // Placeholder
+
+                const placements = Object.values(timelineManager.getState().entities.placements);
+                for (const { id, startTime, duration } of placements) {
+                    const endTime = startTime + duration;
+                    if (startTime >= atTime) {
+                        // Entirely at or after cut point — remove
+                        timelineManager.dispatch(TimelineActions.removePlacement(id));
+                    } else if (endTime > atTime) {
+                        // Spans the cut point — trim end to atTime
+                        timelineManager.dispatch(
+                            TimelineActions.updatePlacement(id, { duration: atTime - startTime })
+                        );
+                    }
+                }
+
+                set({
+                    tracks: timelineManager.toLegacyTracks(),
+                    activeClipId: null,
+                    selectedClipIds: [],
+                    duration: Math.max(atTime, 1),
+                });
             },
 
             syncClipsToBeats: () => {

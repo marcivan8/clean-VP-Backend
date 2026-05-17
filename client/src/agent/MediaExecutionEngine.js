@@ -404,7 +404,7 @@ export class MediaExecutionEngine {
             case 'rippleDelete': this._callStore(store, 'rippleDelete', args.atTime); return { action, success: true, message: 'Ripple delete applied' };
             case 'addTransition': this._callStore(store, 'addTransition', args.clipId, args.type, args.duration); return { action, success: true, message: `Added ${args.type} transition` };
             case 'addFilter': this._callStore(store, 'addFilter', args.clipId, args.filterType, args.intensity); return { action, success: true, message: `Added ${args.filterType} filter` };
-            case 'addTextOverlay': this._callStore(store, 'addTextOverlay', args.text, args.position, args.duration); return { action, success: true, message: `Added text: "${args.text}"` };
+            case 'addTextOverlay': this._callStore(store, 'addTextOverlay', args.text, args.position, args.duration, args.style); return { action, success: true, message: `Added text: "${args.text}"` };
             case 'applyColorGrade': this._callStore(store, 'applyColorGrade', args.clipId, args.adjustments); return { action, success: true, message: 'Color grade applied' };
             case 'undo': this._callStore(store, 'undo'); return { action, success: true, message: 'Undone' };
             case 'redo': this._callStore(store, 'redo'); return { action, success: true, message: 'Redone' };
@@ -590,6 +590,43 @@ export class MediaExecutionEngine {
                     });
                 } else {
                     console.warn('[MediaExecutionEngine] fillerDetect: no video track or clips found to cut');
+                }
+            }
+
+            // After denoise / normalize: update the first clip's asset so the player
+            // uses the processed audio instead of the original HLS proxy.
+            if ((command.action === 'audioDenoise' || command.action === 'audioNormalize') && result?.url) {
+                const timelineStore = useTimelineStore.getState();
+                const videoTrack = timelineStore.tracks?.find(t => t.type === 'video');
+                const firstClip = videoTrack?.clips?.[0];
+                if (firstClip?.assetId) {
+                    timelineStore.updateAsset(firstClip.assetId, { proxyUrl: result.url });
+                    console.log(`[MediaExecutionEngine] ✅ Clip asset updated with processed audio: ${result.url}`);
+                } else {
+                    console.warn('[MediaExecutionEngine] No video clip found to apply processed audio');
+                }
+            }
+
+            // After repeated-takes detection: rebuild timeline from active segments (same as filler/silence)
+            if (command.action === 'detectRepeatedTakes' && result?.activeSegments?.length > 0) {
+                console.log(`[MediaExecutionEngine] ✂️ Applying repeated-takes cuts. Segments: ${result.activeSegments.length}`);
+                const timelineStore = useTimelineStore.getState();
+                const videoTrack = timelineStore.tracks?.find(t => t.type === 'video');
+                if (videoTrack && videoTrack.clips.length > 0) {
+                    const baseClip = videoTrack.clips[0];
+                    timelineStore.removeClip(videoTrack.id, baseClip.id);
+                    let currentStartTime = 0;
+                    result.activeSegments.forEach((seg, i) => {
+                        timelineStore.addClip(videoTrack.id, {
+                            ...baseClip,
+                            id: `clip_take_${Date.now()}_${i}`,
+                            start: currentStartTime,
+                            duration: seg.duration,
+                            offset: seg.start,
+                            name: `${baseClip.name || 'Clip'} (Take ${i + 1})`,
+                        });
+                        currentStartTime += seg.duration;
+                    });
                 }
             }
 
