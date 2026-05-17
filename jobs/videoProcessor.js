@@ -2,7 +2,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 const path = require('path');
 const fs = require('fs');
-const { bucket, useLocalStorage } = require('../config/storage');
+const storageConfig = require('../config/storage');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -72,8 +72,8 @@ async function generateWaveform(inputPath) {
  * Uploads a local file to GCS or falls back to local uploads logic
  */
 async function uploadToStorage(localFilePath, destinationPath) {
+    const { bucket, useLocalStorage } = storageConfig;
     if (useLocalStorage || !bucket) {
-        // Just move the file to the right spot in uploads dir
         const dest = path.join(__dirname, '..', 'uploads', destinationPath);
         const destDir = path.dirname(dest);
         if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
@@ -82,9 +82,7 @@ async function uploadToStorage(localFilePath, destinationPath) {
     } else {
         await bucket.upload(localFilePath, {
             destination: destinationPath,
-            metadata: {
-                cacheControl: 'public, max-age=31536000',
-            },
+            metadata: { cacheControl: 'public, max-age=31536000' },
         });
         return `https://storage.googleapis.com/${bucket.name}/${destinationPath}`;
     }
@@ -98,8 +96,7 @@ module.exports = async function processVideoJob(job) {
     const absoluteInputPath = path.resolve(uploadsDir, inputPath);
     
     if (!fs.existsSync(absoluteInputPath)) {
-        // Fallback: try to download from GCS if we're in a distributed environment (like Railway)
-        // where the web node uploaded to GCS but the worker node doesn't have the file locally.
+        const { bucket } = storageConfig;
         if (bucket) {
             console.log(`[Job ${job.id}] Local file not found, attempting to download from GCS...`);
             const gcsRawPath = `raw/${userId}/${filename}`;

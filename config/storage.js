@@ -1,115 +1,129 @@
-// config/storage.js - Production configuration with proper error handling
+// config/storage.js
 const { Storage } = require('@google-cloud/storage');
 const path = require('path');
 const fs = require('fs');
 
-let storage = null;
-let bucket = null;
-let useLocalStorage = false;
+const uploadsDir = path.join(__dirname, '..', 'uploads');
 
-// Function to setup local storage
 function setupLocalStorage() {
-  const uploadsDir = path.join(__dirname, '..', 'uploads');
-  
-  // Create main uploads directory
-  if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-  }
-  
-  // Create subdirectories for different storage types
-  const folders = ['analysis-only', 'ai-training', 'temp'];
-  folders.forEach(folder => {
-    const folderPath = path.join(uploadsDir, folder);
-    if (!fs.existsSync(folderPath)) {
-      fs.mkdirSync(folderPath, { recursive: true });
+    for (const sub of ['', 'analysis-only', 'ai-training', 'temp']) {
+        const dir = path.join(uploadsDir, sub);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     }
-  });
-  
-  console.log('📁 Using local storage at:', uploadsDir);
-  useLocalStorage = true;
+    console.log('📁 Using local storage at:', uploadsDir);
+    exports.useLocalStorage = true;
+    exports.bucket = null;
+    exports.storage = null;
 }
 
-// Try to initialize Google Cloud Storage
-try {
-  // Check if GCS credentials are provided
-  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON || 
-      process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON === '' ||
-      process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON === '{}' ||
-      process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON === 'your-credentials-here') {
-    
-    console.log('ℹ️ Google Cloud Storage credentials not configured');
-    console.log('ℹ️ Using local file storage instead');
-    setupLocalStorage();
-  } else {
-    try {
-      // Try to parse the credentials
-      const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
-      
-      // Validate required fields
-      if (!credentials.type || !credentials.project_id || !credentials.private_key) {
-        throw new Error('Invalid Google Cloud credentials structure');
-      }
-      
-      // Check for bucket name
-      const bucketName = process.env.GOOGLE_CLOUD_BUCKET_NAME;
-      if (!bucketName || bucketName === 'your-bucket-name') {
-        console.log('⚠️ GOOGLE_CLOUD_BUCKET_NAME not properly configured');
-        console.log('ℹ️ Using local file storage instead');
-        setupLocalStorage();
-      } else {
-        // Initialize Google Cloud Storage
-        storage = new Storage({
-          projectId: process.env.GOOGLE_CLOUD_PROJECT_ID || credentials.project_id,
-          credentials: credentials
-        });
-        
-        bucket = storage.bucket(bucketName);
-        
-        // Test the connection
-        bucket.exists()
-          .then(([exists]) => {
-            if (exists) {
-              console.log('✅ Google Cloud Storage configured successfully');
-              console.log(`📦 Using bucket: ${bucketName}`);
-            } else {
-              console.warn(`⚠️ Bucket ${bucketName} does not exist`);
-              console.log('ℹ️ Falling back to local storage');
-              setupLocalStorage();
+/**
+ * Resolve GCS credentials from whichever env var is set.
+ *
+ * Resolution order:
+ *   1. GOOGLE_APPLICATION_CREDENTIALS_JSON  — JSON string (Railway-friendly custom var)
+ *   2. GOOGLE_APPLICATION_CREDENTIALS       — JSON string content OR file path
+ *      - starts with '{' → parse as JSON inline
+ *      - file path that exists  → read and parse
+ *      - any other value        → let the GCS SDK use it natively
+ *
+ * Returns:
+ *   { type: 'object', value: <credentials JS object> }
+ *   { type: 'native' }   — SDK reads GOOGLE_APPLICATION_CREDENTIALS on its own
+ *   null                 — no credentials found
+ */
+function resolveCredentials() {
+    const jsonEnv = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+    if (jsonEnv && jsonEnv.trim() && jsonEnv !== '{}' && jsonEnv !== 'your-credentials-here') {
+        try {
+            const parsed = JSON.parse(jsonEnv);
+            console.log('🔑 GCS credentials: GOOGLE_APPLICATION_CREDENTIALS_JSON');
+            return { type: 'object', value: parsed };
+        } catch {
+            console.warn('⚠️ GOOGLE_APPLICATION_CREDENTIALS_JSON is not valid JSON — ignoring');
+        }
+    }
+
+    const gac = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    if (gac && gac.trim()) {
+        if (gac.trim().startsWith('{')) {
+            // JSON content stored directly in the standard env var
+            try {
+                const parsed = JSON.parse(gac);
+                console.log('🔑 GCS credentials: GOOGLE_APPLICATION_CREDENTIALS (inline JSON)');
+                return { type: 'object', value: parsed };
+            } catch {
+                console.warn('⚠️ GOOGLE_APPLICATION_CREDENTIALS looks like JSON but failed to parse — ignoring');
             }
-          })
-          .catch(err => {
-            console.warn('⚠️ Could not verify GCS bucket:', err.message);
-            console.log('ℹ️ Falling back to local storage');
-            setupLocalStorage();
-          });
-      }
-    } catch (parseError) {
-      console.error('⚠️ Error parsing Google Cloud credentials:', parseError.message);
-      console.log('ℹ️ Using local file storage instead');
-      console.log('💡 Tip: Make sure GOOGLE_APPLICATION_CREDENTIALS_JSON contains valid JSON');
-      setupLocalStorage();
+        } else if (fs.existsSync(gac)) {
+            // File path pointing to a service account JSON file
+            try {
+                const parsed = JSON.parse(fs.readFileSync(gac, 'utf8'));
+                console.log('🔑 GCS credentials: GOOGLE_APPLICATION_CREDENTIALS (file:', gac, ')');
+                return { type: 'object', value: parsed };
+            } catch {
+                console.warn('⚠️ GOOGLE_APPLICATION_CREDENTIALS file cannot be read/parsed — ignoring');
+            }
+        } else {
+            // Non-JSON, non-existent-path value — let the GCS SDK handle it natively
+            console.log('🔑 GCS credentials: GOOGLE_APPLICATION_CREDENTIALS (native SDK resolution)');
+            return { type: 'native' };
+        }
     }
-  }
-} catch (error) {
-  console.error('⚠️ Unexpected error in storage configuration:', error.message);
-  setupLocalStorage();
+
+    return null;
 }
 
-// If nothing was configured, use local storage
-if (!storage && !useLocalStorage) {
-  setupLocalStorage();
+// Mutable exports — async bucket.exists() callback can update these in-place
+exports.storage = null;
+exports.bucket = null;
+exports.useLocalStorage = false;
+exports.FOLDERS = {
+    ANALYSIS_ONLY: 'analysis-only/',
+    AI_TRAINING: 'ai-training/',
+    TEMP: 'temp/',
+};
+
+const bucketName = process.env.GOOGLE_CLOUD_BUCKET_NAME;
+const creds = resolveCredentials();
+
+if (!creds || !bucketName || bucketName === 'your-bucket-name') {
+    console.log('ℹ️  No GCS credentials or bucket name configured — using local storage');
+    setupLocalStorage();
+} else {
+    try {
+        const storageOpts = {};
+        if (creds.type === 'object') {
+            storageOpts.credentials = creds.value;
+            storageOpts.projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || creds.value.project_id;
+        } else {
+            // native: GCS SDK reads GOOGLE_APPLICATION_CREDENTIALS itself
+            if (process.env.GOOGLE_CLOUD_PROJECT_ID) {
+                storageOpts.projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
+            }
+        }
+
+        const gcsStorage = new Storage(storageOpts);
+        const gcsBucket = gcsStorage.bucket(bucketName);
+
+        exports.storage = gcsStorage;
+        exports.bucket = gcsBucket;
+
+        // Async verification — updates exports in-place if the bucket turns out to be bad
+        gcsBucket.exists()
+            .then(([exists]) => {
+                if (exists) {
+                    console.log(`✅ Google Cloud Storage ready — bucket: ${bucketName}`);
+                } else {
+                    console.warn(`⚠️ GCS bucket "${bucketName}" does not exist — falling back to local storage`);
+                    setupLocalStorage();
+                }
+            })
+            .catch(err => {
+                console.warn('⚠️ GCS bucket verification failed:', err.message, '— falling back to local storage');
+                setupLocalStorage();
+            });
+    } catch (err) {
+        console.error('⚠️ Failed to initialize GCS client:', err.message, '— using local storage');
+        setupLocalStorage();
+    }
 }
-
-// Storage folders configuration
-const FOLDERS = {
-  ANALYSIS_ONLY: 'analysis-only/', // Videos deleted after 30 days
-  AI_TRAINING: 'ai-training/',     // Videos kept for AI training
-  TEMP: 'temp/'                    // Temporary files
-};
-
-module.exports = { 
-  storage, 
-  bucket, 
-  FOLDERS,
-  useLocalStorage 
-};
