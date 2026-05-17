@@ -260,6 +260,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 if (isVideo) {
                     ProxyService.uploadAndGenerateProxy(file, 'demo-user')
                         .then(data => {
+                            if (!data) {
+                                console.warn('[IDELayout] Proxy job resolved with null result — job may have completed before SSE could read returnvalue');
+                                useTimelineStore.getState().updateAsset(assetId, { isProxying: false });
+                                return;
+                            }
                             console.log(`[IDELayout] Proxy Ready: ${data.proxyUrl}`);
                             useTimelineStore.getState().updateAsset(assetId, {
                                 proxyUrl: data.proxyUrl,

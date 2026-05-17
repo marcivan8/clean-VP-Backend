@@ -43,7 +43,11 @@ router.get('/:jobId/progress', async (req, res) => {
             let data = { state, progress };
 
             if (state === 'completed') {
-                data.result = job.returnvalue;
+                // Re-fetch the job so returnvalue is populated from Redis.
+                // The initial getJob() call may have happened while the job
+                // was still active, leaving job.returnvalue as null.
+                const fresh = await findJob(req.params.jobId);
+                data.result = fresh ? fresh.returnvalue : job.returnvalue;
             } else if (state === 'failed') {
                 data.error = job.failedReason;
             }
