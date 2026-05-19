@@ -53,8 +53,6 @@ router.post('/denoise', authenticateUser, async (req, res) => {
             return res.status(404).json({ error: 'File not found on server' });
         }
 
-        const outputPath = path.join(tempDir, `denoised-${Date.now()}.mp4`);
-
         console.log(`🎧 Enqueuing Denoise: ${inputPath}`);
 
         const job = await audioQueue.add('denoise-audio', {
@@ -74,9 +72,6 @@ router.post('/denoise', authenticateUser, async (req, res) => {
     }
 });
 
-const { detectBeats } = require('../analysis/beatDetector');
-
-// ... existing /denoise route ...
 
 /**
  * POST /api/audio/beat-detect
@@ -156,7 +151,6 @@ router.post('/normalize', authenticateUser, async (req, res) => {
             return res.status(404).json({ error: 'File not found' });
         }
 
-        const outputPath = path.join(tempDir, `normalized-${Date.now()}.mp4`);
         console.log(`🔊 Enqueuing Audio Normalization for: ${inputPath}`);
 
         const job = await audioQueue.add('normalize-audio', {
@@ -177,8 +171,6 @@ router.post('/normalize', authenticateUser, async (req, res) => {
 });
 
 const multer = require('multer');
-const { OpenAI } = require('openai');
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // In-memory storage for filler-detect multipart uploads (files stay in RAM, not disk)
 const fillerUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -257,78 +249,6 @@ router.post('/transcribe', authenticateUser, async (req, res) => {
  *   { success, removedSegments, activeSegments, fillerCount, transcript }
  */
 
-// ── Core filler detection logic (shared by both call styles) ──────────────────
-async function detectFillerWords(inputPath, language = 'en') {
-    const FILLER_WORDS = new Set([
-        'um', 'uh', 'ah', 'er', 'eh', 'hmm', 'hm',
-        'like', 'basically', 'literally',
-        'you know', 'i mean', 'kind of', 'sort of',
-        // French
-        'euh', 'ben', 'genre', 'voilà', 'bah',
-    ]);
-
-    const stats = require('fs').statSync(inputPath);
-    if (stats.size > 25 * 1024 * 1024) {
-        throw new Error('File exceeds OpenAI 25 MB Whisper limit. Extract audio first.');
-    }
-
-    console.log(`🔤 Filler detection: transcribing ${inputPath}`);
-
-    const transcription = await openai.audio.transcriptions.create({
-        file: require('fs').createReadStream(inputPath),
-        model: 'whisper-1',
-        response_format: 'verbose_json',
-        timestamp_granularities: ['word'],
-        language: language === 'auto' ? undefined : language,
-    });
-
-    const words = transcription.words || [];
-    const totalDuration = transcription.duration || (words.length ? words[words.length - 1].end : 0);
-
-    // Identify filler word spans (merge adjacent fillers separated by < 0.15 s)
-    const MERGE_GAP = 0.15;
-    const fillerSpans = [];
-    let current = null;
-
-    for (const w of words) {
-        const token = w.word.toLowerCase().replace(/[^a-zàâéèêëîïôùûüç ]/g, '').trim();
-        const isFiller = FILLER_WORDS.has(token);
-
-        if (isFiller) {
-            if (current && w.start - current.end <= MERGE_GAP) {
-                current.end = w.end; // extend running span
-            } else {
-                if (current) fillerSpans.push(current);
-                current = { start: w.start, end: w.end };
-            }
-        } else {
-            if (current) { fillerSpans.push(current); current = null; }
-        }
-    }
-    if (current) fillerSpans.push(current);
-
-    // Build the inverse: speech segments to KEEP
-    const activeSegments = [];
-    let cursor = 0;
-    for (const span of fillerSpans) {
-        if (span.start > cursor + 0.01) {
-            activeSegments.push({ start: cursor, end: span.start, duration: span.start - cursor });
-        }
-        cursor = span.end;
-    }
-    if (cursor < totalDuration - 0.01) {
-        activeSegments.push({ start: cursor, end: totalDuration, duration: totalDuration - cursor });
-    }
-
-    return {
-        fillerCount: fillerSpans.length,
-        removedSegments: fillerSpans.map(s => ({ ...s, duration: s.end - s.start })),
-        activeSegments,
-        transcript: transcription.text,
-        totalDuration,
-    };
-}
-
 // ── Route: filename-based (JSON body, file already on server) ─────────────────
 router.post('/filler/detect', authenticateUser, async (req, res) => {
     try {
@@ -361,12 +281,17 @@ router.post('/filler/detect', authenticateUser, async (req, res) => {
         console.log(`🔤 Enqueuing Filler detection: ${inputPath}`);
 
         const userId = req.user?.id || (process.env.NODE_ENV !== 'production' ? 'dev-user' : null);
+        const uniqueJobId = `filler-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
         const job = await audioQueue.add('filler-detect', {
             action: 'filler-detect',
             filename: path.basename(inputPath),
             filePath: inputPath,
             userId,
             language
+        }, {
+            jobId: uniqueJobId,
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 2000 }
         });
 
         res.json({ success: true, jobId: job.id, status: 'queued' });

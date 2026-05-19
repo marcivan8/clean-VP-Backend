@@ -11,8 +11,14 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 
 /**
  * POST /api/silence/detect
- * Body: { filename: "sample.mp4", threshold: "-30dB", duration: "0.5" }
- * Returns: { segments: [{ start: 0, end: 10 }, { start: 12, end: 20 }] } (Active Speech Segments)
+ * Body: { filename: "temp/sample.mp4", threshold: "-30dB", duration: "0.5" }
+ * Returns: { jobId: "silence-1716000000000-abc123", status: "queued" }
+ *
+ * FIX: Use a unique string jobId (e.g. "silence-<timestamp>-<random>") so
+ * findJob() in jobRoutes.js cannot confuse this job with a same-numbered job
+ * in videoQueue (proxy upload jobs).  BullMQ auto-increment IDs are per-queue,
+ * so videoQueue and audioQueue can both have a job #13.  A prefixed string ID
+ * is globally unique across all queues.
  */
 router.post('/detect', optionalAuth, async (req, res) => {
     try {
@@ -24,15 +30,12 @@ router.post('/detect', optionalAuth, async (req, res) => {
 
         // SECURITY: Resolve path and prevent Directory Traversal attacks
         const uploadsDir = path.resolve(__dirname, '../uploads');
-        const publicDir = path.resolve(__dirname, '../client/public');
+        const publicDir  = path.resolve(__dirname, '../client/public');
 
-        // Resolve relative to uploadsDir; bare filenames (e.g. "IMG_0029.MOV") that
-        // escape uploads/ are retried under uploads/temp/ before returning 403.
         const normalizedFilename = filename.startsWith('/') ? filename.slice(1) : filename;
         let filePath = path.resolve(uploadsDir, normalizedFilename);
 
         if (!filePath.startsWith(uploadsDir) && !filePath.startsWith(publicDir)) {
-            // Bare filename resolves outside uploads/ — check temp/ subdir
             const tempPath = path.resolve(uploadsDir, 'temp', path.basename(normalizedFilename));
             if (tempPath.startsWith(uploadsDir)) {
                 filePath = tempPath;
@@ -41,27 +44,39 @@ router.post('/detect', optionalAuth, async (req, res) => {
             }
         }
 
-        // Also fall back to uploads/temp/ when the file simply isn't at the resolved path
+        // Fall back to uploads/temp/ when the file isn't at the resolved path
         if (!fs.existsSync(filePath)) {
             const tempPath = path.resolve(uploadsDir, 'temp', path.basename(normalizedFilename));
             if (filePath !== tempPath && fs.existsSync(tempPath)) {
                 filePath = tempPath;
             } else {
-                return res.status(404).json({ error: `File not found: ${filename}` });
+                // On a distributed deployment (separate API + Worker services) the
+                // worker downloads from GCS, so the file may not be local here.
+                // Only hard-reject when we're sure it can't be found anywhere.
+                if (process.env.NODE_ENV === 'production') {
+                    console.warn(`[silenceRoutes] File not found locally (${filePath}); worker will attempt GCS download.`);
+                    // Allow the job to be queued — the worker has its own GCS fallback
+                } else {
+                    return res.status(404).json({ error: `File not found: ${filename}` });
+                }
             }
         }
 
-        const userId = req.user?.id || (process.env.NODE_ENV !== 'production' ? 'dev-user' : null);
-        console.log(`🎤 Enqueuing silence detection for: ${filename} (Threshold: ${threshold}, MinDuration: ${duration}s)`);
+        const userId = req.user?.id || null;
+        console.log(`🎤 Enqueuing silence detection for: ${filename} (threshold=${threshold}, minDur=${duration}s)`);
+
+        // ── KEY FIX: unique string jobId prevents cross-queue ID collisions ──
+        const uniqueJobId = `silence-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
         const job = await audioQueue.add('detect-silence', {
-            action: 'silence-detect',
-            filename: path.basename(filePath),
+            action:    'silence-detect',
+            filename:  path.basename(filePath),
             filePath,
             userId,
             threshold,
             duration
         }, {
+            jobId:   uniqueJobId,   // ← prevents collision with videoQueue integer IDs
             attempts: 3,
             backoff: { type: 'exponential', delay: 2000 }
         });
@@ -69,7 +84,7 @@ router.post('/detect', optionalAuth, async (req, res) => {
         res.json({ success: true, jobId: job.id, status: 'queued' });
 
     } catch (error) {
-        console.error("Silence Detection Failed:", error);
+        console.error('Silence Detection Failed:', error);
         res.status(500).json({ error: error.message });
     }
 });
