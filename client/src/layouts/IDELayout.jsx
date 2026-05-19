@@ -276,6 +276,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             const rawFilePath = data.proxyPath || data.originalPath;
                             if (rawFilePath) {
                                 useTimelineStore.getState().setUploadedFile({ name: rawFilePath });
+                                useTimelineStore.getState().setUploadedFilePath(rawFilePath);
                                 console.log(`[IDELayout] uploadedFile path set: ${rawFilePath}`);
                             } else {
                                 console.warn('[IDELayout] Proxy job result missing proxyPath and originalPath — AI API calls will not work');

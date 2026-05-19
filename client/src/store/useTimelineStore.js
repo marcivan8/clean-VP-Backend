@@ -66,6 +66,7 @@ const useTimelineStore = create(
             // Assets & uploads (UI-only, not in timeline engine)
             assets: [],
             uploadedFile: null,
+            uploadedFilePath: null,
             pacingSegments: [],
             beatMarkers: [],
             captions: [],
@@ -182,6 +183,7 @@ const useTimelineStore = create(
                 assets: state.assets.map(a => a.id === assetId ? { ...a, ...updates } : a)
             })),
             setUploadedFile: (file) => set({ uploadedFile: file }),
+            setUploadedFilePath: (path) => set({ uploadedFilePath: path }),
 
             // Audio
             setAudioLevels: (levels) => set({ audioLevels: levels }),
