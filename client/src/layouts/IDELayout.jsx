@@ -482,7 +482,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             {/* Phase 7: Autonomous Editing Panel (floating) */}
             <AutonomousEditingPanel />
 
-            <div className="h-screen w-screen bg-background text-foreground flex flex-col overflow-hidden font-sans">
+            <div className="h-screen w-screen bg-background text-foreground flex flex-col overflow-hidden font-sans relative selection:bg-primary/30">
+                {/* ── Background Glows (Cyber-Cinematic) ── */}
+                <div className="pointer-events-none fixed inset-0 overflow-hidden z-0" aria-hidden="true">
+                    <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-primary/5 blur-[120px]" />
+                    <div className="absolute bottom-[-10%] right-[-10%] w-[40vw] h-[40vw] rounded-full bg-accent/5 blur-[120px]" />
+                </div>
                 {/* Top Bar */}
                 <header className="h-14 md:h-12 border-b border-border flex items-center justify-between px-4 bg-card z-20 shrink-0">
                     <div className="flex items-center gap-3">
@@ -746,7 +751,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     <main className="flex-1 flex flex-col min-w-0 bg-background/50 relative">
                         <div className="flex-1 flex items-center justify-center bg-black/20 md:p-8 p-4 relative overflow-hidden">
                             <div className={classNames(
-                                "bg-black rounded-lg shadow-2xl relative border border-white/5 group overflow-hidden transition-all duration-500 ease-in-out",
+                                "bg-black rounded-lg shadow-[0_0_50px_rgba(40,40,255,0.08)] relative border border-white/5 group overflow-hidden transition-all duration-500 ease-in-out",
                                 aspectRatio === '9:16'
                                     ? 'aspect-[9/16] max-h-[70vh] md:max-h-[550px] w-auto'
                                     : aspectRatio === '1:1'

@@ -26,29 +26,37 @@
 
 @layer base {
   :root {
-    /* Vibed Dark Theme Palette */
-    --background: 240 20% 3%;
+    /* Vibed Cyber-Cinematic Theme Palette */
+    --background: 230 30% 4%;
     --foreground: 210 20% 98%;
-    --card: 240 15% 6%;
+    
+    --card: 230 25% 8%;
     --card-foreground: 210 20% 98%;
-    --popover: 240 15% 6%;
+    
+    --popover: 230 25% 8%;
     --popover-foreground: 210 20% 98%;
-    /* Neon Purple */
-    --primary: 270 70% 60%;
+    
+    /* Vibrant Purple/Royal Blue */
+    --primary: 250 100% 65%;
     --primary-foreground: 0 0% 100%;
-    /* Deep Indigo */
-    --secondary: 240 30% 12%;
+    
+    /* Deep Editor Surface */
+    --secondary: 230 20% 11%;
     --secondary-foreground: 210 20% 98%;
-    --muted: 240 20% 15%;
-    --muted-foreground: 240 10% 60%;
-    /* Electric Cyan Accent */
-    --accent: 190 90% 50%;
-    --accent-foreground: 0 0% 10%;
-    --destructive: 0 60% 40%;
+    
+    --muted: 230 15% 15%;
+    --muted-foreground: 230 10% 65%;
+    
+    /* Bright Cyan/Blue Accent */
+    --accent: 210 100% 55%;
+    --accent-foreground: 0 0% 100%;
+    
+    --destructive: 0 60% 50%;
     --destructive-foreground: 0 0% 98%;
-    --border: 240 20% 12%;
-    --input: 240 20% 12%;
-    --ring: 270 70% 60%;
+    
+    --border: 230 20% 14%;
+    --input: 230 20% 14%;
+    --ring: 250 100% 65%;
   }
 }
 
@@ -64,11 +72,11 @@
 
 @layer utilities {
   .glass-panel {
-    @apply bg-white/5 backdrop-blur-xl border border-white/10 shadow-xl;
+    @apply bg-card/40 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(40,40,255,0.05)];
   }
   
   .glass-button {
-    @apply bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/5 transition-all duration-300;
+    @apply bg-primary/20 hover:bg-primary/40 backdrop-blur-md border border-primary/30 transition-all duration-300 shadow-[0_0_15px_rgba(100,50,255,0.2)] hover:shadow-[0_0_25px_rgba(100,50,255,0.4)] text-primary-foreground;
   }
 
   /* Custom scrollbar for Webkit */
