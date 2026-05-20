@@ -212,43 +212,45 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-            <div className="w-full max-w-lg bg-[#0f1117] border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md">
+            <div className="w-full max-w-lg glass-panel rounded-2xl shadow-2xl overflow-hidden border border-primary/20 relative">
+                {/* Background glow for modal */}
+                <div className="absolute inset-0 bg-primary/5 blur-[50px] pointer-events-none" />
 
                 {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-white/8" style={{ background: 'rgba(8,12,24,0.8)' }}>
+                <div className="relative flex items-center justify-between px-6 py-4 border-b border-white/10 bg-card/80">
                     <div className="flex items-center gap-3">
-                        <div
-                            className="p-2 rounded-lg"
-                            style={{ background: 'rgba(26,63,168,0.15)', border: '1px solid rgba(26,63,168,0.3)', boxShadow: '0 0 12px rgba(26,63,168,0.2)' }}
-                        >
+                        <div className="p-2 rounded-lg bg-primary/20 border border-primary/30 shadow-[0_0_15px_rgba(40,40,255,0.2)] text-primary">
                             <VibedLogoIcon size={18} />
                         </div>
                         <div>
-                            <h2 className="text-sm font-bold text-white">Export</h2>
-                            <p className="text-[10px] text-white/40">Video render · NLE project file</p>
+                            <h2 className="text-sm font-extrabold tracking-tight text-foreground">Export Media</h2>
+                            <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest">Video render · NLE project</p>
                         </div>
                     </div>
-                    <button onClick={handleClose} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors">
-                        <X className="w-4 h-4 text-white/50" />
+                    <button onClick={handleClose} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-muted-foreground hover:text-foreground">
+                        <X className="w-5 h-5" />
                     </button>
                 </div>
 
                 {/* Tab Switcher */}
-                <div className="flex border-b border-white/8 px-5 pt-3 gap-1">
+                <div className="relative flex border-b border-white/10 px-5 pt-3 gap-2 bg-card/40">
                     <button
                         onClick={() => setActiveTab('video')}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t-lg text-xs font-semibold transition-all ${activeTab === 'video' ? 'bg-blue-500/20 text-blue-300 border-b-2 border-blue-400' : 'text-white/40 hover:text-white/70'}`}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-t-lg text-xs font-extrabold tracking-wide transition-all ${activeTab === 'video' ? 'bg-primary/20 text-primary-foreground border-b-2 border-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'}`}
                     >
-                        <Film className="w-3 h-3" /> Video File
+                        <Film className="w-3.5 h-3.5" /> Video File
                     </button>
                     <button
                         onClick={() => setActiveTab('nle')}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t-lg text-xs font-semibold transition-all ${activeTab === 'nle' ? 'bg-indigo-500/20 text-indigo-300 border-b-2 border-indigo-400' : 'text-white/40 hover:text-white/70'}`}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-t-lg text-xs font-extrabold tracking-wide transition-all ${activeTab === 'nle' ? 'bg-accent/20 text-accent border-b-2 border-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'}`}
                     >
-                        <Scissors className="w-3 h-3" /> NLE Project
+                        <Scissors className="w-3.5 h-3.5" /> NLE Project
                     </button>
                 </div>
+                
+                {/* Scrollable Body */}
+                <div className="relative max-h-[70vh] overflow-y-auto">
 
                 {/* ── VIDEO TAB ── */}
                 {activeTab === 'video' && (
@@ -349,7 +351,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                 </div>
 
                                 <button onClick={handleExport}
-                                    className="w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 hover:scale-[1.01] transition-all">
+                                    className="glass-button-pro w-full py-4 mt-2 flex items-center justify-center gap-2 text-sm uppercase tracking-wider font-extrabold hover:scale-[1.01]">
                                     <Download className="w-4 h-4" />
                                     {selectedPlatform ? `Export for ${selectedPlatform.label}` : 'Export Video'}
                                 </button>
@@ -479,6 +481,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                         </div>
                     </div>
                 )}
+                </div>
 
             </div>
         </div>

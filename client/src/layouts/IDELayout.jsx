@@ -575,7 +575,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             <Settings className="w-4 h-4 text-muted-foreground" />
                         </button>
 
-                        <button onClick={() => setShowExportModal(true)} disabled={isExporting} className="bg-primary text-primary-foreground hover:bg-primary/90 px-3 py-1.5 md:px-4 rounded-md text-xs font-medium flex items-center gap-2 transition-colors disabled:opacity-50">
+                        <button onClick={() => setShowExportModal(true)} disabled={isExporting} className="glass-button-pro px-4 py-1.5 md:px-6 rounded-md text-xs font-extrabold flex items-center gap-2 transition-all disabled:opacity-50">
                             {isExporting ? <span className="animate-spin">⏳</span> : <Share className="w-3 h-3" />}
                             {isExporting ? "Rendering..." : "Export"}
                         </button>
