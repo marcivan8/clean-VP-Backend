@@ -111,9 +111,9 @@ const HomePage = () => {
                         transition={{ delay: 0.3 }}
                         className="text-5xl md:text-7xl font-extrabold tracking-tight leading-[1.1] max-w-4xl mx-auto"
                     >
-                        Turn Long Videos Into <br />
+                        Stop editing. <br />
                         <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">
-                            Viral Clips Instantly
+                            Start creating.
                         </span>
                     </motion.h1>
 
@@ -123,7 +123,7 @@ const HomePage = () => {
                         transition={{ delay: 0.4 }}
                         className="text-lg md:text-xl text-muted-foreground max-w-2xl leading-relaxed"
                     >
-                        Upload your footage and let the AI agent handle the heavy lifting — silence removal, filler words, smart cuts, and viral hooks.
+                        Upload your footage and let the AI agent handle the heavy lifting automatically, the moment you ask.
                     </motion.p>
 
                     {/* CTA */}
