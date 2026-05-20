@@ -212,15 +212,15 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md">
-            <div className="w-full max-w-lg glass-panel rounded-2xl shadow-2xl overflow-hidden border border-primary/20 relative">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <div className="w-full max-w-lg glass-panel rounded-2xl shadow-2xl overflow-hidden border border-border relative">
                 {/* Background glow for modal */}
                 <div className="absolute inset-0 bg-primary/5 blur-[50px] pointer-events-none" />
 
                 {/* Header */}
-                <div className="relative flex items-center justify-between px-6 py-4 border-b border-white/10 bg-card/80">
+                <div className="relative flex items-center justify-between px-6 py-4 border-b border-border bg-card/80">
                     <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-primary/20 border border-primary/30 shadow-[0_0_15px_rgba(40,40,255,0.2)] text-primary">
+                        <div className="p-2 rounded-lg bg-primary/10 border border-primary/20 shadow-sm text-primary">
                             <VibedLogoIcon size={18} />
                         </div>
                         <div>
@@ -228,22 +228,22 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                             <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest">Video render · NLE project</p>
                         </div>
                     </div>
-                    <button onClick={handleClose} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-muted-foreground hover:text-foreground">
+                    <button onClick={handleClose} className="p-1.5 hover:bg-black/5 rounded-lg transition-colors text-muted-foreground hover:text-foreground">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
 
                 {/* Tab Switcher */}
-                <div className="relative flex border-b border-white/10 px-5 pt-3 gap-2 bg-card/40">
+                <div className="relative flex border-b border-border px-5 pt-3 gap-2 bg-secondary/30">
                     <button
                         onClick={() => setActiveTab('video')}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-t-lg text-xs font-extrabold tracking-wide transition-all ${activeTab === 'video' ? 'bg-primary/20 text-primary-foreground border-b-2 border-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'}`}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-t-lg text-xs font-extrabold tracking-wide transition-all ${activeTab === 'video' ? 'bg-primary/10 text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground hover:bg-black/5'}`}
                     >
                         <Film className="w-3.5 h-3.5" /> Video File
                     </button>
                     <button
                         onClick={() => setActiveTab('nle')}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-t-lg text-xs font-extrabold tracking-wide transition-all ${activeTab === 'nle' ? 'bg-accent/20 text-accent border-b-2 border-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'}`}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-t-lg text-xs font-extrabold tracking-wide transition-all ${activeTab === 'nle' ? 'bg-accent/10 text-accent border-b-2 border-accent' : 'text-muted-foreground hover:text-foreground hover:bg-black/5'}`}
                     >
                         <Scissors className="w-3.5 h-3.5" /> NLE Project
                     </button>

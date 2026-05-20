@@ -498,7 +498,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             <Video className="w-5 h-5 text-primary" />
                         </div>
                         <h1 className="font-bold text-sm tracking-wide truncate max-w-[150px] md:max-w-none">
-                            VIRAL PILOT <span className="text-muted-foreground font-normal ml-2 hidden sm:inline">Untitled Project</span>
+                            VIBED <span className="text-muted-foreground font-normal ml-2 hidden sm:inline">Untitled Project</span>
                         </h1>
                     </div>
 
