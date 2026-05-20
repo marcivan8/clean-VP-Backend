@@ -26,36 +26,37 @@
 
 @layer base {
   :root {
-    /* Vibed Light Theme (Linear/Vercel inspired) */
-    --background: 0 0% 98%;
-    --foreground: 240 10% 10%;
+    /* Vibed Cyber-Cinematic Theme Palette */
+    --background: 230 30% 4%;
+    --foreground: 210 20% 98%;
     
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 10%;
+    --card: 230 25% 8%;
+    --card-foreground: 210 20% 98%;
     
-    --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 10%;
+    --popover: 230 25% 8%;
+    --popover-foreground: 210 20% 98%;
     
-    /* Clean Vibrant Blue (Primary) */
-    --primary: 220 90% 55%;
+    /* Vibrant Purple/Royal Blue */
+    --primary: 250 100% 65%;
     --primary-foreground: 0 0% 100%;
     
-    /* Light UI Elements */
-    --secondary: 0 0% 94%;
-    --secondary-foreground: 240 10% 20%;
+    /* Deep Editor Surface */
+    --secondary: 230 20% 11%;
+    --secondary-foreground: 210 20% 98%;
     
-    --muted: 0 0% 92%;
-    --muted-foreground: 240 5% 45%;
+    --muted: 230 15% 15%;
+    --muted-foreground: 230 10% 65%;
     
-    --accent: 220 90% 55%;
+    /* Bright Cyan/Blue Accent */
+    --accent: 210 100% 55%;
     --accent-foreground: 0 0% 100%;
     
-    --destructive: 0 84% 60%;
+    --destructive: 0 60% 50%;
     --destructive-foreground: 0 0% 98%;
     
-    --border: 240 5% 90%;
-    --input: 240 5% 90%;
-    --ring: 220 90% 55%;
+    --border: 230 20% 14%;
+    --input: 230 20% 14%;
+    --ring: 250 100% 65%;
   }
 }
 
@@ -71,15 +72,16 @@
 
 @layer utilities {
   .glass-panel {
-    @apply bg-card/80 backdrop-blur-xl border border-black/5 shadow-[0_8px_30px_rgb(0,0,0,0.04)];
+    @apply bg-card/40 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(40,40,255,0.05)];
   }
   
   .glass-button {
-    @apply bg-white hover:bg-gray-50 backdrop-blur-md border border-gray-200 transition-all duration-200 shadow-sm text-foreground font-medium;
+    @apply bg-primary/20 hover:bg-primary/40 backdrop-blur-md border border-primary/30 transition-all duration-300 shadow-[0_0_15px_rgba(100,50,255,0.2)] hover:shadow-[0_0_25px_rgba(100,50,255,0.4)] text-primary-foreground;
   }
   
   .glass-button-pro {
-    @apply bg-primary hover:bg-blue-600 transition-all duration-200 text-white rounded-full font-semibold shadow-[0_4px_14px_0_rgb(37,99,235,0.39)] hover:shadow-[0_6px_20px_rgba(37,99,235,0.23)] hover:scale-[1.02];
+    @apply bg-black/40 hover:bg-black/60 backdrop-blur-2xl transition-all duration-300 text-white rounded-full border border-white/5;
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25), inset 0 -1px 1px rgba(0, 0, 0, 0.5), 0 8px 32px rgba(0, 0, 0, 0.5);
   }
 
   /* Custom scrollbar for Webkit */
