@@ -78,6 +78,11 @@
   .glass-button {
     @apply bg-primary/20 hover:bg-primary/40 backdrop-blur-md border border-primary/30 transition-all duration-300 shadow-[0_0_15px_rgba(100,50,255,0.2)] hover:shadow-[0_0_25px_rgba(100,50,255,0.4)] text-primary-foreground;
   }
+  
+  .glass-button-pro {
+    @apply bg-black/40 hover:bg-black/60 backdrop-blur-2xl transition-all duration-300 text-white rounded-full border border-white/5;
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25), inset 0 -1px 1px rgba(0, 0, 0, 0.5), 0 8px 32px rgba(0, 0, 0, 0.5);
+  }
 
   /* Custom scrollbar for Webkit */
   ::-webkit-scrollbar {

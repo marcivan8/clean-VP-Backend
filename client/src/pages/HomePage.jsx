@@ -33,8 +33,8 @@ const FeaturePill = ({ icon: Icon, label }) => (
 
 const StatBox = ({ value, label }) => (
     <div className="flex flex-col items-center gap-1">
-        <span className="text-2xl font-extrabold text-foreground tracking-tight">{value}</span>
-        <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-widest">{label}</span>
+        <span className="text-2xl md:text-3xl font-extrabold text-foreground tracking-tight">{value}</span>
+        <span className="text-[10px] md:text-xs text-muted-foreground font-semibold uppercase tracking-widest text-center">{label}</span>
     </div>
 );
 
@@ -50,9 +50,10 @@ const HomePage = () => {
     return (
         <div className="min-h-screen bg-background text-foreground overflow-x-hidden font-sans relative selection:bg-primary/30">
             {/* ── Background Glows (Cyber-Cinematic) ── */}
-            <div className="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden="true">
-                <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-primary/10 blur-[120px]" />
-                <div className="absolute bottom-[-10%] right-[-10%] w-[40vw] h-[40vw] rounded-full bg-accent/5 blur-[120px]" />
+            <div className="pointer-events-none fixed inset-0 overflow-hidden z-0" aria-hidden="true">
+                <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-primary/10 blur-[150px]" />
+                <div className="absolute bottom-[20%] right-[-10%] w-[40vw] h-[40vw] rounded-full bg-accent/5 blur-[150px]" />
+                <div className="absolute top-[40%] right-[10%] w-[30vw] h-[30vw] rounded-full bg-destructive/5 blur-[150px]" />
             </div>
 
             <div
@@ -75,7 +76,7 @@ const HomePage = () => {
                     <div className="flex items-center gap-6">
                         <button
                             onClick={() => navigate('/editor')}
-                            className="glass-button px-6 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 group"
+                            className="glass-button-pro px-6 py-2.5 text-sm font-bold flex items-center gap-2 group"
                         >
                             Open Editor
                             <ChevronRight className="w-4 h-4 transform group-hover:translate-x-1 transition-transform" />
@@ -106,7 +107,7 @@ const HomePage = () => {
                     {/* CTA */}
                     <button
                         onClick={() => navigate('/editor')}
-                        className="glass-button px-8 py-4 rounded-2xl text-lg font-bold flex items-center gap-3 mt-4"
+                        className="glass-button-pro px-8 py-4 text-lg font-bold flex items-center gap-3 mt-4"
                     >
                         <VibedLogoIcon size={20} />
                         Start Editing Free
@@ -173,8 +174,116 @@ const HomePage = () => {
                     </div>
                 </main>
 
+                {/* ── SECTION 1: Vibe Editing ── */}
+                <section className="flex flex-col md:flex-row items-center gap-12 py-24 border-t border-white/5">
+                    <div className="flex-1 space-y-6 text-left">
+                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold uppercase tracking-wider">
+                            <Wand2 className="w-3 h-3" /> Conversational AI
+                        </div>
+                        <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.1]">
+                            Edit to your <br />
+                            <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">vibe.</span>
+                        </h2>
+                        <p className="text-lg text-muted-foreground leading-relaxed max-w-md">
+                            Stop clicking and start talking. Just tell the AI what you want: "Remove all the filler words", "Make it punchier", or "Find the best 60-second hook". Vibed understands your intent and generates the perfect edit instantly.
+                        </p>
+                    </div>
+                    <div className="flex-1 relative w-full">
+                        <div className="absolute inset-0 bg-primary/20 blur-[80px] rounded-full scale-75" />
+                        <div className="glass-panel p-6 rounded-2xl relative z-10 space-y-4">
+                            <div className="flex items-start gap-3">
+                                <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0 border border-white/5"><span className="text-xs font-bold">U</span></div>
+                                <div className="bg-card px-4 py-3 rounded-2xl rounded-tl-sm text-sm border border-white/5 shadow-md">Please remove all the silent parts and umms.</div>
+                            </div>
+                            <div className="flex items-start gap-3 flex-row-reverse">
+                                <div className="w-8 h-8 rounded-full bg-accent/20 text-accent border border-accent/20 flex items-center justify-center shrink-0"><VibedLogoIcon size={16} /></div>
+                                <div className="bg-primary/20 border border-primary/30 px-4 py-3 rounded-2xl rounded-tr-sm text-sm shadow-md text-primary-foreground backdrop-blur-md">
+                                    Done! I removed 42 seconds of silence and 14 filler words.
+                                </div>
+                            </div>
+                            <div className="flex items-start gap-3">
+                                <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0 border border-white/5"><span className="text-xs font-bold">U</span></div>
+                                <div className="bg-card px-4 py-3 rounded-2xl rounded-tl-sm text-sm border border-white/5 shadow-md">Export it for Premiere.</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                {/* ── SECTION 2: Massive Time Savings ── */}
+                <section className="flex flex-col md:flex-row-reverse items-center gap-12 py-24 border-t border-white/5">
+                    <div className="flex-1 space-y-6 text-left md:pl-12">
+                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 text-accent text-xs font-bold uppercase tracking-wider">
+                            <Zap className="w-3 h-3" /> Turbocharge Workflow
+                        </div>
+                        <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.1]">
+                            Save hours on <br/>
+                            <span className="text-white">long-form video.</span>
+                        </h2>
+                        <p className="text-lg text-muted-foreground leading-relaxed max-w-md">
+                            Podcasts, interviews, and streams take forever to scrub through. Vibed automatically analyzes your entire timeline, detecting silence, dead air, and boring segments, condensing a 2-hour recording into a punchy cut in seconds.
+                        </p>
+                    </div>
+                    <div className="flex-1 relative w-full flex justify-center md:justify-start">
+                        <div className="relative w-full max-w-sm">
+                            <div className="absolute inset-0 bg-accent/20 blur-[80px] rounded-full scale-75" />
+                            <div className="glass-panel p-10 rounded-3xl relative z-10 flex flex-col items-center gap-6 border-accent/20 text-center">
+                                <div>
+                                    <div className="text-5xl font-extrabold text-white tracking-tighter">02:14:00</div>
+                                    <div className="text-xs text-muted-foreground uppercase tracking-widest font-bold mt-2">Original Footage</div>
+                                </div>
+                                
+                                <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                                    <div className="w-0.5 h-6 bg-gradient-to-b from-white/20 to-transparent rounded-full" />
+                                    <Scissors className="w-5 h-5 opacity-50" />
+                                    <div className="w-0.5 h-6 bg-gradient-to-t from-accent/50 to-transparent rounded-full" />
+                                </div>
+
+                                <div>
+                                    <div className="text-6xl font-extrabold text-transparent bg-clip-text bg-gradient-to-b from-accent to-primary flex items-center justify-center gap-2 tracking-tighter drop-shadow-2xl">
+                                        <Zap className="w-8 h-8 text-accent" fill="currentColor" /> 00:15:30
+                                    </div>
+                                    <div className="text-xs text-accent uppercase tracking-widest font-bold mt-2">Viral Cut Ready</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                {/* ── SECTION 3: Pro NLE Export ── */}
+                <section className="flex flex-col md:flex-row items-center gap-12 py-24 border-t border-white/5">
+                    <div className="flex-1 space-y-6 text-left">
+                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-destructive/10 text-destructive text-xs font-bold uppercase tracking-wider">
+                            <Layers className="w-3 h-3" /> Pro Ecosystem
+                        </div>
+                        <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight leading-[1.1]">
+                            Finish in your <br/>
+                            <span className="text-white">favorite software.</span>
+                        </h2>
+                        <p className="text-lg text-muted-foreground leading-relaxed max-w-md">
+                            Vibed isn't a walled garden. We focus on the heavy lifting of cutting and rough assembly. Once the AI finishes, export a frame-accurate XML or OTIO file directly to Premiere Pro, Final Cut Pro, or DaVinci Resolve to finish your masterpiece.
+                        </p>
+                    </div>
+                    <div className="flex-1 relative w-full flex justify-center md:justify-end">
+                        <div className="relative w-full max-w-md">
+                            <div className="absolute inset-0 bg-destructive/20 blur-[80px] rounded-full scale-75" />
+                            <div className="glass-panel p-8 rounded-3xl relative z-10 flex flex-col gap-8 items-center border border-white/5">
+                                <div className="w-full flex justify-around items-center px-2">
+                                    <div className="w-20 h-20 rounded-3xl bg-[#00003b] border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold text-2xl shadow-[0_0_30px_rgba(0,0,255,0.2)]">Pr</div>
+                                    <div className="w-20 h-20 rounded-3xl bg-black border border-gray-600 flex items-center justify-center text-white font-bold text-2xl shadow-[0_0_30px_rgba(255,255,255,0.1)]">FCP</div>
+                                    <div className="w-20 h-20 rounded-3xl bg-[#1a0f00] border border-orange-500/30 flex items-center justify-center text-orange-400 font-bold text-2xl shadow-[0_0_30px_rgba(255,100,0,0.2)]">Da</div>
+                                </div>
+                                <div className="w-full h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                                <button className="glass-button-pro w-full py-5 text-sm font-bold tracking-wider uppercase flex justify-center items-center gap-2 group">
+                                    Export OTIO / XML
+                                    <ChevronRight className="w-4 h-4 text-white/50 group-hover:text-white transition-colors transform group-hover:translate-x-1" />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
                 {/* ── STATS ── */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-8 py-12 mb-12 border-t border-white/5">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-8 py-16 mt-12 border-t border-white/5">
                     <StatBox value="10×" label="Faster Editing" />
                     <StatBox value="AI" label="Copilot" />
                     <StatBox value="100%" label="Privacy First" />
@@ -182,7 +291,7 @@ const HomePage = () => {
                 </div>
 
                 {/* ── FOOTER ── */}
-                <footer className="py-6 flex flex-col sm:flex-row items-center justify-between border-t border-white/5 gap-4">
+                <footer className="py-8 flex flex-col sm:flex-row items-center justify-between border-t border-white/5 gap-4">
                     <div className="flex items-center gap-2 text-primary">
                         <VibedLogoIcon size={20} />
                         <span className="text-sm font-bold">Vibed</span>
