@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+
 @tailwind base;
 
 @keyframes pop-in {
@@ -5,12 +7,10 @@
     transform: scale(0.5);
     opacity: 0;
   }
-
   80% {
     transform: scale(1.1);
     opacity: 1;
   }
-
   100% {
     transform: scale(1);
     opacity: 1;
@@ -26,37 +26,40 @@
 
 @layer base {
   :root {
-    /* Vibed Cyber-Cinematic Theme Palette */
-    --background: 230 30% 4%;
-    --foreground: 210 20% 98%;
+    /* Vibed Premium Soft Graphite Palette */
+    /* Background: #111315 */
+    --background: 210 10% 7%;
+    /* Foreground: #F6F5F2 */
+    --foreground: 45 15% 96%;
     
-    --card: 230 25% 8%;
-    --card-foreground: 210 20% 98%;
+    /* Card: slightly lighter graphite #1A1D21 */
+    --card: 210 10% 12%;
+    --card-foreground: 45 15% 96%;
     
-    --popover: 230 25% 8%;
-    --popover-foreground: 210 20% 98%;
+    --popover: 210 10% 12%;
+    --popover-foreground: 45 15% 96%;
     
-    /* Vibrant Purple/Royal Blue */
-    --primary: 250 100% 65%;
+    /* Muted Violet / Soft Indigo Accent */
+    --primary: 250 30% 60%;
     --primary-foreground: 0 0% 100%;
     
-    /* Deep Editor Surface */
-    --secondary: 230 20% 11%;
-    --secondary-foreground: 210 20% 98%;
+    /* Secondary / UI elements */
+    --secondary: 210 10% 15%;
+    --secondary-foreground: 45 15% 96%;
     
-    --muted: 230 15% 15%;
-    --muted-foreground: 230 10% 65%;
+    --muted: 210 10% 15%;
+    --muted-foreground: 210 5% 65%;
     
-    /* Bright Cyan/Blue Accent */
-    --accent: 210 100% 55%;
+    /* Secondary Accent: Soft Indigo */
+    --accent: 220 40% 55%;
     --accent-foreground: 0 0% 100%;
     
-    --destructive: 0 60% 50%;
+    --destructive: 0 50% 50%;
     --destructive-foreground: 0 0% 98%;
     
-    --border: 230 20% 14%;
-    --input: 230 20% 14%;
-    --ring: 250 100% 65%;
+    --border: 210 10% 20%;
+    --input: 210 10% 20%;
+    --ring: 250 30% 60%;
   }
 }
 
@@ -66,22 +69,27 @@
   }
 
   body {
-    @apply bg-background text-foreground font-sans;
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', sans-serif;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Space Grotesk', sans-serif;
+    letter-spacing: -0.02em;
   }
 }
 
 @layer utilities {
   .glass-panel {
-    @apply bg-card/40 backdrop-blur-xl border border-white/10 shadow-[0_0_40px_rgba(40,40,255,0.05)];
+    @apply bg-card/60 backdrop-blur-2xl border border-white/5 shadow-[0_20px_40px_rgba(0,0,0,0.4)];
   }
   
   .glass-button {
-    @apply bg-primary/20 hover:bg-primary/40 backdrop-blur-md border border-primary/30 transition-all duration-300 shadow-[0_0_15px_rgba(100,50,255,0.2)] hover:shadow-[0_0_25px_rgba(100,50,255,0.4)] text-primary-foreground;
+    @apply bg-white/5 hover:bg-white/10 backdrop-blur-md border border-white/10 transition-all duration-300 text-foreground;
   }
   
   .glass-button-pro {
-    @apply bg-black/40 hover:bg-black/60 backdrop-blur-2xl transition-all duration-300 text-white rounded-full border border-white/5;
-    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25), inset 0 -1px 1px rgba(0, 0, 0, 0.5), 0 8px 32px rgba(0, 0, 0, 0.5);
+    @apply bg-foreground text-background hover:bg-foreground/90 transition-all duration-300 rounded-full font-medium shadow-[0_4px_14px_0_rgba(246,245,242,0.15)];
   }
 
   /* Custom scrollbar for Webkit */
@@ -90,7 +98,7 @@
     height: 6px;
   }
   ::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0.2);
+    background: transparent;
   }
   ::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.1);

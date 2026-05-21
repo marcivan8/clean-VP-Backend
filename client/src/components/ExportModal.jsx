@@ -213,14 +213,12 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md">
-            <div className="w-full max-w-lg glass-panel rounded-2xl shadow-2xl overflow-hidden border border-primary/20 relative">
-                {/* Background glow for modal */}
-                <div className="absolute inset-0 bg-primary/5 blur-[50px] pointer-events-none" />
+            <div className="w-full max-w-lg glass-panel rounded-2xl overflow-hidden relative">
 
                 {/* Header */}
-                <div className="relative flex items-center justify-between px-6 py-4 border-b border-white/10 bg-card/80">
+                <div className="relative flex items-center justify-between px-6 py-4 border-b border-white/5 bg-card/80">
                     <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-primary/20 border border-primary/30 shadow-[0_0_15px_rgba(40,40,255,0.2)] text-primary">
+                        <div className="p-2 rounded-lg bg-white/5 border border-white/10 text-primary">
                             <VibedLogoIcon size={18} />
                         </div>
                         <div>
@@ -234,16 +232,16 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                 </div>
 
                 {/* Tab Switcher */}
-                <div className="relative flex border-b border-white/10 px-5 pt-3 gap-2 bg-card/40">
+                <div className="relative flex border-b border-white/5 px-5 pt-3 gap-2 bg-card/40">
                     <button
                         onClick={() => setActiveTab('video')}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-t-lg text-xs font-extrabold tracking-wide transition-all ${activeTab === 'video' ? 'bg-primary/20 text-primary-foreground border-b-2 border-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'}`}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-t-lg text-xs font-bold tracking-wide transition-all ${activeTab === 'video' ? 'bg-white/5 text-foreground border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'}`}
                     >
                         <Film className="w-3.5 h-3.5" /> Video File
                     </button>
                     <button
                         onClick={() => setActiveTab('nle')}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-t-lg text-xs font-extrabold tracking-wide transition-all ${activeTab === 'nle' ? 'bg-accent/20 text-accent border-b-2 border-accent shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'}`}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-t-lg text-xs font-bold tracking-wide transition-all ${activeTab === 'nle' ? 'bg-white/5 text-foreground border-b-2 border-accent' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'}`}
                     >
                         <Scissors className="w-3.5 h-3.5" /> NLE Project
                     </button>

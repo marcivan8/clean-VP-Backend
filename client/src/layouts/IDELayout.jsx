@@ -751,7 +751,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     <main className="flex-1 flex flex-col min-w-0 bg-background/50 relative">
                         <div className="flex-1 flex items-center justify-center bg-black/20 md:p-8 p-4 relative overflow-hidden">
                             <div className={classNames(
-                                "bg-black rounded-lg shadow-[0_0_50px_rgba(40,40,255,0.08)] relative border border-white/5 group overflow-hidden transition-all duration-500 ease-in-out",
+                                "bg-black rounded-lg shadow-2xl relative border border-white/5 group overflow-hidden transition-all duration-500 ease-in-out",
                                 aspectRatio === '9:16'
                                     ? 'aspect-[9/16] max-h-[70vh] md:max-h-[550px] w-auto'
                                     : aspectRatio === '1:1'
