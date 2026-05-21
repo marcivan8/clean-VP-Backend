@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useDraggable } from '@dnd-kit/core';
-import { Video, Music, Image as ImageIcon, Trash2, Loader2 } from 'lucide-react';
+import { Video, Music, Image as ImageIcon, Trash2, Loader2, Plus } from 'lucide-react';
 import useTimelineStore from '../store/useTimelineStore';
+import useDeviceType from '../hooks/useDeviceType';
 
 // Helper to format duration like 1:05
 const formatTime = (seconds) => {
@@ -12,6 +13,8 @@ const formatTime = (seconds) => {
 };
 
 const DraggableAsset = ({ asset }) => {
+    const { isTouch } = useDeviceType();
+    const [addedOverlay, setAddedOverlay] = useState(false);
     const { attributes, listeners, setNodeRef, transform } = useDraggable({
         id: `asset-${asset.id}`,
         data: {
@@ -36,6 +39,13 @@ const DraggableAsset = ({ asset }) => {
             {...listeners}
             {...attributes}
             style={style}
+            onClick={() => {
+                if (isTouch && !asset.isProxying) {
+                    useTimelineStore.getState().addAssetToTimeline(asset);
+                    setAddedOverlay(true);
+                    setTimeout(() => setAddedOverlay(false), 1000);
+                }
+            }}
             className="aspect-video bg-secondary/30 border border-border rounded-md relative group overflow-hidden cursor-grab active:cursor-grabbing hover:border-primary/50 transition-colors"
         >
             {/* Delete Button */}
@@ -92,10 +102,24 @@ const DraggableAsset = ({ asset }) => {
                 </div>
             )}
 
-            {/* Hint Overlay */}
-            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center pointer-events-none">
-                <span className="text-[10px] text-white font-medium">Drag to Timeline</span>
-            </div>
+            {/* Hint Overlay (Desktop) / Add Button (Mobile) */}
+            {!isTouch && (
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center pointer-events-none">
+                    <span className="text-[10px] text-white font-medium">Drag to Timeline</span>
+                </div>
+            )}
+            
+            {isTouch && !asset.isProxying && (
+                <div className="absolute inset-0 bg-black/40 opacity-0 active:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                    <Plus className="w-8 h-8 text-white drop-shadow-md" />
+                </div>
+            )}
+            
+            {addedOverlay && (
+                <div className="absolute inset-0 bg-green-500/80 flex items-center justify-center z-20 transition-all">
+                    <span className="text-white text-xs font-bold shadow-sm">Added!</span>
+                </div>
+            )}
         </div>
     );
 };

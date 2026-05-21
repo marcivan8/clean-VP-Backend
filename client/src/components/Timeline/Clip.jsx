@@ -37,15 +37,18 @@ const Clip = ({ clip, trackId }) => {
     };
 
     const handleResize = (e, direction) => {
-        // ... (existing resize logic)
         e.stopPropagation();
-        const startX = e.clientX;
+        
+        // Handle both mouse and touch events
+        const isTouch = e.type.startsWith('touch');
+        const startX = isTouch ? e.touches[0].clientX : e.clientX;
         const startDuration = clip.duration;
         const startStart = clip.start;
         const startOffset = clip.offset || 0;
 
         const onMove = (moveEvent) => {
-            const deltaX = moveEvent.clientX - startX;
+            const currentX = moveEvent.type.startsWith('touch') ? moveEvent.touches[0].clientX : moveEvent.clientX;
+            const deltaX = currentX - startX;
             const deltaSeconds = deltaX / zoomLevel;
 
             let updates = {};
@@ -66,11 +69,22 @@ const Clip = ({ clip, trackId }) => {
         };
 
         const onUp = () => {
-            document.removeEventListener('mousemove', onMove);
-            document.removeEventListener('mouseup', onUp);
+            if (isTouch) {
+                document.removeEventListener('touchmove', onMove);
+                document.removeEventListener('touchend', onUp);
+            } else {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+            }
         };
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', onUp);
+        
+        if (isTouch) {
+            document.addEventListener('touchmove', onMove, { passive: false });
+            document.addEventListener('touchend', onUp);
+        } else {
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        }
     };
 
     const handleTransitionResize = (e) => {
@@ -175,17 +189,23 @@ const Clip = ({ clip, trackId }) => {
                 <div
                     className="absolute top-0 bottom-0 w-2 cursor-col-resize hover:bg-primary/50 z-30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                     style={{ right: `${clip.transition.duration * zoomLevel - 4}px` }}
-                    onPointerDown={handleTransitionResize}
+                    onMouseDown={handleTransitionResize}
+                    onTouchStart={handleTransitionResize}
                     title="Drag to change transition duration"
                 >
                     <div className="h-4 w-0.5 bg-primary shadow-sm rounded-full"></div>
                 </div>
             )}
 
-            {/* Right Handle */}
             <div
-                className="absolute right-0 top-0 bottom-0 w-2 cursor-e-resize hover:bg-white/20 z-20"
-                onPointerDown={(e) => handleResize(e, 'right')}
+                className="absolute top-0 bottom-0 left-0 w-4 md:w-2 cursor-w-resize z-10 hover:bg-white/20 touch-none pointer-events-auto"
+                onMouseDown={(e) => handleResize(e, 'left')}
+                onTouchStart={(e) => handleResize(e, 'left')}
+            ></div>
+            <div
+                className="absolute top-0 bottom-0 right-0 w-4 md:w-2 cursor-e-resize z-10 hover:bg-white/20 touch-none pointer-events-auto"
+                onMouseDown={(e) => handleResize(e, 'right')}
+                onTouchStart={(e) => handleResize(e, 'right')}
             ></div>
         </div>
     );

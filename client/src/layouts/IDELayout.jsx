@@ -12,6 +12,8 @@ import { DndContext, DragOverlay, useSensor, useSensors, PointerSensor } from '@
 import DraggableAsset from '../components/DraggableAsset';
 import DraggableEffect from '../components/DraggableEffect';
 import TextPanel from '../components/TextPanel';
+import MobileBottomNav from '../components/MobileBottomNav';
+import useDeviceType from '../hooks/useDeviceType';
 import MixerPanel from '../components/Sidebar/MixerPanel';
 import ExportModal from '../components/ExportModal';
 import { Type, Cpu, TrendingUp, GitCompare } from 'lucide-react';
@@ -138,6 +140,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     );
     const [showSidebar, setShowSidebar] = React.useState(false);
     const [showAI, setShowAI] = React.useState(false);
+    
+    const { isMobile } = useDeviceType();
+    const [mobileTab, setMobileTab] = React.useState('ai'); // Default to AI on mobile as per user preference
 
     const fileInputRef = useRef(null);
 
@@ -586,17 +591,16 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 </header>
 
                 {/* Main Workspace */}
-                <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+                <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative pb-[64px] md:pb-0">
 
-                    {/* Left Sidebar */}
+                    {/* Left Sidebar (Media/Effects) */}
                     <aside className={classNames(
                         "bg-card border-r border-border md:w-72 flex flex-col z-30 transition-transform duration-300 ease-in-out font-sans",
-                        "absolute inset-0 md:static md:translate-x-0 w-3/4 max-w-sm border-r shadow-2xl md:shadow-none",
-                        showSidebar ? "translate-x-0" : "-translate-x-full"
+                        "absolute inset-0 md:static md:translate-x-0 w-full md:w-72 border-r md:shadow-none",
+                        (!isMobile || mobileTab === 'media') ? "translate-x-0" : "-translate-x-full"
                     )}>
                         <div className="md:hidden p-3 border-b border-border flex justify-between items-center bg-card">
-                            <span className="font-bold text-sm">Tools</span>
-                            <button onClick={() => setShowSidebar(false)}><X className="w-4 h-4" /></button>
+                            <span className="font-bold text-sm">Media & Assets</span>
                         </div>
 
                         <input type="file" ref={fileInputRef} onChange={handleFileImport} className="hidden" accept="video/*,audio/*,image/*" multiple />
@@ -748,8 +752,14 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     {showSidebar && <div className="fixed inset-0 bg-black/50 z-20 md:hidden" onClick={() => setShowSidebar(false)} />}
 
                     {/* Center — Viewport & Timeline */}
-                    <main className="flex-1 flex flex-col min-w-0 bg-background/50 relative">
-                        <div className="flex-1 flex items-center justify-center bg-black/20 md:p-8 p-4 relative overflow-hidden">
+                    <main className={classNames(
+                        "flex-1 flex flex-col min-w-0 bg-background/50 relative",
+                        isMobile && mobileTab !== 'player' && mobileTab !== 'edit' ? "hidden" : "flex"
+                    )}>
+                        <div className={classNames(
+                            "flex-1 flex items-center justify-center bg-black/20 md:p-8 p-4 relative overflow-hidden",
+                            isMobile && mobileTab === 'edit' ? "hidden" : "flex"
+                        )}>
                             <div className={classNames(
                                 "bg-black rounded-lg shadow-2xl relative border border-white/5 group overflow-hidden transition-all duration-500 ease-in-out",
                                 aspectRatio === '9:16'
@@ -806,8 +816,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             </div>
                         </div>
 
-                        {mode === 'editor' && (
-                            <div className="h-48 md:h-72 border-t border-border bg-card flex flex-col overflow-hidden shrink-0">
+                        {/* Always show timeline in desktop. On mobile, show only in edit tab. */}
+                        {mode === 'editor' && (!isMobile || mobileTab === 'edit') && (
+                            <div className={classNames(
+                                "border-t border-border bg-card flex flex-col overflow-hidden shrink-0",
+                                isMobile ? "flex-1 h-full" : "h-48 md:h-72"
+                            )}>
                                 <Timeline />
                             </div>
                         )}
@@ -815,21 +829,21 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                     {/* Right Sidebar — AI + Phase 7 panels */}
                     <aside className={classNames(
-                        "bg-card border-l border-border md:w-80 flex flex-col z-30 transition-transform duration-300 ease-in-out font-sans",
-                        "absolute inset-0 md:static translate-x-full md:translate-x-0 w-full md:w-80 border-l shadow-2xl md:shadow-none",
-                        showAI ? "!translate-x-0" : ""
+                        "bg-card border-l border-border flex flex-col z-30 transition-transform duration-300 ease-in-out font-sans",
+                        "absolute inset-0 md:static w-full md:w-80 border-l shadow-2xl md:shadow-none",
+                        (!isMobile && showAI) || (isMobile && mobileTab === 'ai') ? "translate-x-0" : "translate-x-full md:translate-x-0"
                     )}>
                         <div className="md:hidden p-3 border-b border-border flex justify-between items-center bg-card">
                             <span className="font-bold text-sm text-purple-400">AI Assistant</span>
-                            <button onClick={() => setShowAI(false)}><X className="w-4 h-4" /></button>
                         </div>
                         <div className="flex-1 overflow-hidden h-full">
                             <ReasoningPanel />
                         </div>
                     </aside>
-
-                    {showAI && <div className="fixed inset-0 bg-black/50 z-20 md:hidden" onClick={() => setShowAI(false)} />}
                 </div>
+                
+                {/* Mobile Bottom Navigation */}
+                <MobileBottomNav activeTab={mobileTab} onTabChange={setMobileTab} />
             </div>
 
             <DragOverlay>

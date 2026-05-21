@@ -184,6 +184,48 @@ const useTimelineStore = create(
             })),
             setUploadedFile: (file) => set({ uploadedFile: file }),
             setUploadedFilePath: (path) => set({ uploadedFilePath: path }),
+            
+            // Add asset to timeline (used primarily by mobile tap-to-add interface)
+            addAssetToTimeline: (asset) => {
+                const state = get();
+                const tracks = timelineManager.toLegacyTracks();
+                
+                // Find target track (first video track for video/image, first audio for audio)
+                let targetTrack = tracks.find(t => t.type === asset.type);
+                
+                // Or fallback to first track if type matches roughly
+                if (!targetTrack && (asset.type === 'video' || asset.type === 'image')) {
+                    targetTrack = tracks.find(t => t.type === 'video');
+                }
+                
+                // If no track exists, create one
+                let trackId = targetTrack?.id;
+                if (!trackId) {
+                    const newType = asset.type === 'audio' ? 'audio' : 'video';
+                    trackId = get().addTrack(newType);
+                }
+                
+                // Find end of current clips on this track
+                const finalTrack = get().tracks.find(t => t.id === trackId);
+                const currentEnd = finalTrack?.clips?.reduce((max, clip) => {
+                    return Math.max(max, clip.start + clip.duration);
+                }, 0) || 0;
+                
+                // Add the clip at the end
+                get().addClip(trackId, {
+                    assetId: asset.id,
+                    start: currentEnd,
+                    duration: asset.duration || 5,
+                    name: asset.name,
+                    color: asset.type === 'audio' ? 'bg-orange-500' : 'bg-blue-500',
+                    url: asset.url,
+                    sourceUrl: asset.sourceUrl || asset.url,
+                    type: asset.type
+                });
+                
+                // Seek to the new clip
+                get().seek(currentEnd);
+            },
 
             // Audio
             setAudioLevels: (levels) => set({ audioLevels: levels }),

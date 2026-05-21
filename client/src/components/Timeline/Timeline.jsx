@@ -234,6 +234,7 @@ const Timeline = () => {
             {/* Tracks Area */}
             <div
                 className="flex-1 overflow-auto relative custom-scrollbar flex flex-col"
+                style={{ WebkitOverflowScrolling: 'touch' }}
                 onClick={(e) => {
                     clearSelection();
                 }}
