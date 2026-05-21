@@ -15,6 +15,8 @@
  *   "otio"     → OpenTimelineIO (.otio) Universal interchange
  */
 
+import { authFetch } from '../utils/authFetch.js';
+
 const API_BASE = '/api/export';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -75,7 +77,7 @@ export class NLEExportService {
             projectName,
         };
 
-        const response = await fetch(`${API_BASE}/nle`, {
+        const response = await authFetch(`${API_BASE}/nle`, {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify(body),
