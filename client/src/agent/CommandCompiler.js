@@ -533,6 +533,43 @@ function compileRedo(step) {
 
 // ── Long-Form AI operations ────────────────────────────────────────────────────
 
+/**
+ * Compiles a seek_to step → ENGINE.STORE action so the executor moves the playhead.
+ */
+function compileSeekTo(step, ctx) {
+    const time = typeof step.time === 'number' ? step.time : 0;
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'seek_to', { time },
+            { source_step_id: step.step_id, description: `Seek to ${time}s` }),
+    ]);
+}
+
+/**
+ * cut_segment — delegates to VideoEditorTools.cutSegment() at runtime.
+ */
+function compileCutSegment(step, ctx) {
+    if (step.start === undefined || step.end === undefined) {
+        return validationError(step.step_id, 'cut_segment requires start and end', VALIDATION_ERRORS.MISSING_FIELD);
+    }
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'cutSegment', { start: step.start, end: step.end },
+            { source_step_id: step.step_id, description: `Cut ${step.start.toFixed(1)}s–${step.end.toFixed(1)}s` }),
+    ]);
+}
+
+/**
+ * add_transitions_to_sections — skipped at compile time; runtime VideoEditorTools handles it.
+ */
+function compileAddTransitionsToSections(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'add_transitions_to_sections', {
+            type: step.type || 'fade',
+            duration: step.duration || 0.5,
+            apply_at: step.apply_at || 'section_boundaries',
+        }, { source_step_id: step.step_id, description: `Add ${step.type || 'fade'} transitions` }),
+    ]);
+}
+
 function compileAnalyzeStructure(step, ctx) {
     return ok(step.step_id, [
         cmd(ENGINE.STORE, 'analyzeStructure', { platform: step.platform || null, targetDuration: step.targetDuration || null },
@@ -629,6 +666,13 @@ const COMMAND_REGISTRY = new Map([
     // Undo / Redo
     ['undo_action', { compiler: compileUndo }],
     ['redo_action', { compiler: compileRedo }],
+
+    // Playback / navigation
+    ['seek_to', { compiler: compileSeekTo }],
+
+    // Additional long-form steps
+    ['cut_segment', { compiler: compileCutSegment }],
+    ['add_transitions_to_sections', { compiler: compileAddTransitionsToSections }],
 ]);
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -390,19 +390,35 @@ export class MediaExecutionEngine {
             case 'applyColorGrade':this._callStore(store, 'applyColorGrade', args.clipId, args.adjustments); return { action, success: true };
             case 'undo':           this._callStore(store, 'undo'); return { action, success: true };
             case 'redo':           this._callStore(store, 'redo'); return { action, success: true };
-            case 'analyzeStructure':
-            case 'longFormEdit':
+
+            // ── Playhead seek — handled directly without VideoEditorTools ─────────
+            case 'seek_to': {
+                const time = typeof args.time === 'number' ? args.time : 0;
+                if (typeof store.seek === 'function') store.seek(time);
+                return { action, success: true, message: `Seeked to ${time}s` };
+            }
+
+            // ── All long-form semantic actions — delegate to VideoEditorTools ─────
+            case 'cutSegment':
+            case 'reorderSegment':
             case 'findHook':
             case 'removeRepetition':
-            case 'reorderSegment': {
+            case 'add_transitions_to_sections':
+            case 'analyzeStructure':
+            case 'longFormEdit': {
                 const { VideoEditorTools } = await import('./VideoEditorTools.js');
                 const tools = new VideoEditorTools();
-                const toolName = action.replace(/([A-Z])/g, m => `_${m.toLowerCase()}`);
+                // Convert camelCase / underscore action to the tool's snake_case name
+                const toolName = action
+                    .replace(/([A-Z])/g, m => `_${m.toLowerCase()}`)
+                    .replace(/^_/, '');
                 const result = await tools.execute({ name: toolName, args });
                 return { action, success: result.success !== false, message: result.message || action, result };
             }
+
             default: throw new Error(`Unknown store action: ${action}`);
         }
+
     }
 
     async executeFFmpegCommand(command, job) {
