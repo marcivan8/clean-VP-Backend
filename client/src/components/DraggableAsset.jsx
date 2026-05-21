@@ -12,7 +12,7 @@ const formatTime = (seconds) => {
     return `${m}:${s.toString().padStart(2, '0')}`;
 };
 
-const DraggableAsset = ({ asset }) => {
+const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","#5B3BE4"], isActive = false }) => {
     const { isTouch } = useDeviceType();
     const [addedOverlay, setAddedOverlay] = useState(false);
     const { attributes, listeners, setNodeRef, transform } = useDraggable({
@@ -32,6 +32,31 @@ const DraggableAsset = ({ asset }) => {
     } : undefined;
 
     const Icon = asset.type === 'video' ? Video : asset.type === 'audio' ? Music : ImageIcon;
+    const dur = asset.sourceDuration || asset.duration || 0;
+    const mm = Math.floor(dur / 60).toString().padStart(2, '0');
+    const ss = Math.floor(dur % 60).toString().padStart(2, '0');
+
+    if (listView) {
+        return (
+            <div
+                ref={setNodeRef}
+                {...listeners}
+                {...attributes}
+                style={{ ...style, background: isActive ? "color-mix(in oklch, oklch(0.66 0.16 268) 14%, transparent)" : "transparent", cursor: "grab" }}
+                className="flex items-center gap-2.5 px-3 py-1.5 mx-1 rounded-md transition-colors hover:bg-[rgba(255,255,255,0.04)] active:cursor-grabbing"
+            >
+                <div className="w-[22px] h-[22px] rounded-[4px] shrink-0 overflow-hidden flex items-center justify-center" style={{ background: `linear-gradient(135deg, ${gradientColors[0]}, ${gradientColors[1]})` }}>
+                    {asset.thumbnail
+                        ? <img src={asset.thumbnail} className="w-full h-full object-cover" />
+                        : <Icon className="w-3 h-3 text-white opacity-70" />
+                    }
+                    {asset.isProxying && <Loader2 className="w-3 h-3 text-white animate-spin absolute" />}
+                </div>
+                <span className="flex-1 truncate" style={{ fontFamily: "var(--f-sans)", fontSize: 12, color: isActive ? "var(--fg)" : "var(--fg-2)" }}>{asset.name}</span>
+                <span style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--fg-4)", flexShrink: 0 }}>{mm}:{ss}</span>
+            </div>
+        );
+    }
 
     return (
         <div

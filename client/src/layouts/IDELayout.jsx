@@ -494,113 +494,90 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     <div className="absolute rounded-full blur-[120px]" style={{ width: "40vw", height: "40vw", bottom: "-30vw", left: "-10vw", background: "var(--violet)", opacity: 0.10 }} />
                 </div>
                 {/* Top Bar */}
-                <header className="h-11 border-b flex items-center justify-between px-4 z-20 shrink-0" style={{ background: "var(--glass)", borderColor: "var(--line-soft)", backdropFilter: "blur(20px) saturate(160%)" }}>
-                    <div className="flex items-center gap-3">
-                        {/* macOS-style traffic light dots — desktop only */}
-                        <div className="hidden md:flex items-center gap-1.5 mr-1">
+                <header className="h-10 border-b flex items-center justify-between px-3 z-20 shrink-0 relative" style={{ background: "var(--bg)", borderColor: "var(--line-soft)" }}>
+                    {/* Left: traffic lights + breadcrumb */}
+                    <div className="flex items-center gap-2 min-w-0">
+                        <div className="hidden md:flex items-center gap-1.5 shrink-0">
                             <div className="studio-traffic-dot" style={{ background: "#ff5f57" }} />
                             <div className="studio-traffic-dot" style={{ background: "#febc2e" }} />
                             <div className="studio-traffic-dot" style={{ background: "#28c840" }} />
                         </div>
-                        <button className="md:hidden p-2 -ml-2 text-muted-foreground hover:text-foreground" onClick={() => setShowSidebar(!showSidebar)}>
-                            <Menu className="w-5 h-5" />
+                        <button className="md:hidden p-1.5 -ml-1 text-muted-foreground" onClick={() => setShowSidebar(!showSidebar)}>
+                            <Menu className="w-4 h-4" />
                         </button>
-                        <span className="studio-mono-label hidden md:inline">vibed/studio</span>
-                    </div>
-
-                    {/* Centered project name */}
-                    <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-2" style={{ fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--fg-3)" }}>
-                        <span style={{ color: "var(--fg-2)" }}>Untitled Project</span>
-                        <span style={{ color: "var(--fg-4)" }}>·</span>
-                        <VideoTimeDisplay />
-                    </div>
-
-                    {/* Mobile title */}
-                    <h1 className="md:hidden font-bold text-sm tracking-wide truncate max-w-[150px]">
-                        VIBED
-                    </h1>
-
-                    {/* Menu Bar */}
-                    <div className="hidden md:flex items-center gap-1 z-50">
-                        <div className="relative">
-                            <button
-                                onClick={() => setOpenMenu(openMenu === 'file' ? null : 'file')}
-                                className={classNames(
-                                    "px-3 py-1.5 text-xs rounded-md transition-colors",
-                                    openMenu === 'file' ? "bg-secondary text-foreground" : "hover:bg-secondary text-muted-foreground hover:text-foreground"
-                                )}
-                            >
-                                File
+                        {/* Breadcrumb */}
+                        <div className="hidden md:flex items-center gap-1.5 min-w-0" style={{ fontFamily: "var(--f-mono)", fontSize: 11 }}>
+                            <button onClick={() => setOpenMenu(openMenu === 'file' ? null : 'file')} className="flex items-center gap-1 hover:opacity-80 transition-opacity shrink-0" style={{ color: "var(--fg-3)" }}>
+                                <span style={{ fontSize: 10 }}>←</span>
+                                <span>Marketing</span>
                             </button>
                             {openMenu === 'file' && (
                                 <>
                                     <div className="fixed inset-0 z-40" onClick={() => setOpenMenu(null)} />
-                                    <div className="absolute top-full left-0 mt-1 w-48 bg-card border border-border shadow-xl rounded-md py-1 z-50 flex flex-col">
+                                    <div className="absolute top-full left-8 mt-1 w-48 border shadow-xl rounded-md py-1 z-50 flex flex-col" style={{ background: "var(--bg-2)", borderColor: "var(--line)" }}>
                                         <button onClick={() => { if (confirm("New project? Current timeline will be cleared.")) { useTimelineStore.getState().loadProject({ tracks: [], duration: 60 }); } setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">New Project</button>
                                         <button onClick={() => { projectLoaderRef.current.click(); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">Open Project...</button>
-                                        <div className="h-px bg-border my-1" />
+                                        <div className="h-px my-1" style={{ background: "var(--line)" }} />
                                         <button onClick={() => { const data = useTimelineStore.getState().saveProject(); const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `project-${Date.now()}.json`; a.click(); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">Save Project</button>
-                                        <div className="h-px bg-border my-1" />
+                                        <div className="h-px my-1" style={{ background: "var(--line)" }} />
                                         <button onClick={() => { triggerImport(); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">Import Media...</button>
                                         <button onClick={() => { setShowExportModal(true); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">Export Video</button>
                                     </div>
                                 </>
                             )}
-                        </div>
-
-                        <div className="relative">
-                            <button
-                                onClick={() => setOpenMenu(openMenu === 'edit' ? null : 'edit')}
-                                className={classNames(
-                                    "px-3 py-1.5 text-xs rounded-md transition-colors",
-                                    openMenu === 'edit' ? "bg-secondary text-foreground" : "hover:bg-secondary text-muted-foreground hover:text-foreground"
-                                )}
-                            >
-                                Edit
+                            <span style={{ color: "var(--fg-4)" }}>/</span>
+                            <button onClick={() => setOpenMenu(openMenu === 'edit' ? null : 'edit')} className="hover:opacity-80 truncate max-w-[180px]" style={{ color: "var(--fg-2)" }}>
+                                The North Wind · Ep. 03
                             </button>
                             {openMenu === 'edit' && (
                                 <>
                                     <div className="fixed inset-0 z-40" onClick={() => setOpenMenu(null)} />
-                                    <div className="absolute top-full left-0 mt-1 w-48 bg-card border border-border shadow-xl rounded-md py-1 z-50 flex flex-col">
+                                    <div className="absolute top-full left-32 mt-1 w-48 border shadow-xl rounded-md py-1 z-50 flex flex-col" style={{ background: "var(--bg-2)", borderColor: "var(--line)" }}>
                                         <button onClick={() => { useTimelineStore.getState().undo(); setOpenMenu(null); }} disabled={past.length === 0} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors disabled:opacity-50">Undo (Ctrl+Z)</button>
                                         <button onClick={() => { useTimelineStore.getState().redo(); setOpenMenu(null); }} disabled={future.length === 0} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors disabled:opacity-50">Redo (Ctrl+Y)</button>
-                                        <div className="h-px bg-border my-1" />
+                                        <div className="h-px my-1" style={{ background: "var(--line)" }} />
                                         <button onClick={() => { useTimelineStore.getState().copyClip(activeClipId); setOpenMenu(null); }} disabled={!activeClip} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors disabled:opacity-50">Copy</button>
                                         <button onClick={() => { useTimelineStore.getState().pasteClip(currentTime); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">Paste</button>
                                         <button onClick={() => { if (activeClip && activeTrackId) { useTimelineStore.getState().removeClip(activeTrackId, activeClip.id); } setOpenMenu(null); }} disabled={!activeClip} className="px-4 py-2 text-xs text-left hover:bg-red-500/10 text-red-400 transition-colors disabled:opacity-50">Delete</button>
                                     </div>
                                 </>
                             )}
+                            <span style={{ color: "var(--fg-4)" }}>·</span>
+                            <span style={{ color: "var(--fg-4)" }}>v.143</span>
+                            <span style={{ color: "var(--fg-4)" }}>·</span>
+                            <span style={{ color: "var(--fg-4)" }}>auto-saved 12s ago</span>
                         </div>
-
-                        <input type="file" ref={projectLoaderRef} className="hidden" accept=".json" onChange={(e) => {
-                            const file = e.target.files[0];
-                            if (!file) return;
-                            const reader = new FileReader();
-                            reader.onload = (ev) => {
-                                try { useTimelineStore.getState().loadProject(JSON.parse(ev.target.result)); }
-                                catch { alert("Invalid Project File"); }
-                            };
-                            reader.readAsText(file);
-                        }} />
+                        <h1 className="md:hidden font-bold text-xs" style={{ fontFamily: "var(--f-mono)" }}>VIBED</h1>
                     </div>
 
-                    <div className="flex items-center gap-2 md:gap-3">
-                        <button onClick={() => setShowAI(!showAI)} className={classNames("md:hidden p-2 rounded-full transition-colors", showAI ? "bg-purple-500/20 text-purple-400" : "text-muted-foreground hover:bg-secondary")}>
-                            <Sparkles className="w-5 h-5" />
-                        </button>
-                        <button onClick={() => setActiveTab('settings')} className={classNames("hidden md:block p-2 hover:bg-secondary rounded-full transition-colors", activeTab === 'settings' ? "bg-secondary text-foreground" : "")}>
-                            <Settings className="w-4 h-4 text-muted-foreground" />
-                        </button>
+                    <input type="file" ref={projectLoaderRef} className="hidden" accept=".json" onChange={(e) => {
+                        const file = e.target.files[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                            try { useTimelineStore.getState().loadProject(JSON.parse(ev.target.result)); }
+                            catch { alert("Invalid Project File"); }
+                        };
+                        reader.readAsText(file);
+                    }} />
 
-                        <span className="studio-mono-label hidden md:inline" style={{ padding: "3px 8px", borderRadius: 5, border: "0.5px solid var(--line)" }}>⌘K</span>
-
-                        <button onClick={() => setShowExportModal(true)} disabled={isExporting} className="glass-button-pro px-4 py-1.5 md:px-5 rounded-md text-[10px] flex items-center gap-2 disabled:opacity-50">
-                            {isExporting ? <span className="animate-spin">⏳</span> : <Share className="w-3 h-3" />}
-                            {isExporting ? "Rendering..." : "Export"}
+                    {/* Right: live indicator + actions */}
+                    <div className="flex items-center gap-2 shrink-0">
+                        <button onClick={() => setShowAI(!showAI)} className="md:hidden p-1.5 text-muted-foreground">
+                            <Sparkles className="w-4 h-4" />
+                        </button>
+                        <div className="hidden md:flex items-center gap-1.5" style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--fg-3)" }}>
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#28c840", boxShadow: "0 0 6px #28c840", animation: "pulse-soft 3s infinite" }} />
+                            <span>Live · 3 collaborators</span>
+                        </div>
+                        <button className="hidden md:flex items-center gap-1.5 px-3 py-1 rounded text-xs transition-colors hover:opacity-80" style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--fg-2)", border: "0.5px solid var(--line)", background: "transparent" }}>
+                            Share
+                        </button>
+                        <button onClick={() => setShowExportModal(true)} disabled={isExporting} className="flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-all disabled:opacity-50" style={{ fontFamily: "var(--f-mono)", fontSize: 10, background: "var(--fg)", color: "var(--bg)", letterSpacing: "0.02em" }}>
+                            {isExporting ? "Rendering…" : "Export ↗"}
                         </button>
                         {exportUrl && (
-                            <a href={exportUrl} download className="hidden md:block text-[10px] text-green-400 hover:text-green-300 underline" onClick={() => setExportUrl(null)}>Download</a>
+                            <a href={exportUrl} download className="text-[10px] text-green-400 hover:text-green-300 underline" onClick={() => setExportUrl(null)}>Download</a>
                         )}
                     </div>
                 </header>
@@ -608,166 +585,156 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 {/* Main Workspace */}
                 <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative pb-[64px] md:pb-0">
 
-                    {/* Left Sidebar (Media/Effects) */}
-                    <aside 
+                    {/* Left Sidebar — Project Browser */}
+                    <aside
                         className={classNames(
-                            "border-r border-[var(--line-soft)] flex flex-col z-30 transition-transform duration-300 ease-in-out font-sans shrink-0",
-                            "absolute inset-0 md:static md:translate-x-0 w-full md:w-[240px] md:shadow-none",
+                            "flex flex-col z-30 transition-transform duration-300 ease-in-out shrink-0 overflow-hidden",
+                            "absolute inset-0 md:static md:translate-x-0 w-full md:shadow-none",
+                            "md:w-[218px]",
                             (!isMobile || mobileTab === 'media') ? "translate-x-0" : "-translate-x-full"
                         )}
-                        style={{ background: "linear-gradient(180deg, var(--glass), transparent)" }}
+                        style={{ background: "var(--bg)", borderRight: "0.5px solid var(--line-soft)" }}
                     >
-                        <div className="md:hidden p-3 border-b border-[var(--line-soft)] flex justify-between items-center" style={{ background: "var(--glass)" }}>
-                            <span className="font-bold text-sm">Media & Assets</span>
-                        </div>
-
                         <input type="file" ref={fileInputRef} onChange={handleFileImport} className="hidden" accept="video/*,audio/*,image/*" multiple />
 
-                        <div className="p-2 border-b flex gap-1 overflow-x-auto no-scrollbar" style={{ borderColor: "var(--line-soft)" }}>
-                            {['media', 'effects', 'color', 'text', 'audio', 'transform', 'presets', 'settings'].map(tab => (
-                                <button
-                                    key={tab}
-                                    onClick={() => tab === 'presets' ? setShowPresetMarketplace(true) : setActiveTab(tab)}
-                                    className={classNames("studio-tab-btn", activeTab === tab && "active")}
-                                >
-                                    {tab === 'media' && <Layers className="w-2.5 h-2.5" />}
-                                    {tab === 'effects' && <Sparkles className="w-2.5 h-2.5" />}
-                                    {tab === 'color' && <Palette className="w-2.5 h-2.5" />}
-                                    {tab === 'text' && <Type className="w-2.5 h-2.5" />}
-                                    {tab === 'audio' && <span style={{ fontSize: 9 }}>🎤</span>}
-                                    {tab === 'transform' && <Move className="w-2.5 h-2.5" />}
-                                    {tab === 'presets' && <span style={{ fontSize: 9 }}>🧩</span>}
-                                    {tab === 'settings' && <Settings className="w-2.5 h-2.5" />}
-                                    {tab}
-                                </button>
-                            ))}
-                        </div>
+                        <div className="flex-1 overflow-y-auto">
 
-                        <div className="flex-1 overflow-y-auto pb-24 md:pb-20">
-                            {activeTab === 'media' && (
-                                <section className="p-4 border-b" style={{ borderColor: "var(--line-soft)" }}>
-                                    <div className="flex items-center justify-between mb-4">
-                                        <div className="studio-mono-label">BIN · {assets.length} CLIPS</div>
-                                        <button onClick={triggerImport} className="text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-colors flex items-center gap-1" style={{ fontFamily: "var(--f-mono)" }}>
-                                            <Upload className="w-3 h-3" /> Import
-                                        </button>
+                            {/* PROJECT section */}
+                            <div className="px-4 pt-4 pb-1">
+                                <span className="studio-mono-label">Project</span>
+                            </div>
+                            {[
+                                { name: "The North Wind · Ep. 03", colors: ["#4B6FE4","#7B5CE4"], active: true },
+                                { name: "Ep. 02 · master",          colors: ["#E4764B","#E45B7B"], active: false },
+                                { name: "Title cards",               colors: ["#4BE4B6","#4B9AE4"], active: false },
+                            ].map((p) => (
+                                <div key={p.name} className="flex items-center gap-2.5 px-3 py-1.5 mx-1 rounded-md cursor-pointer transition-colors" style={{ background: p.active ? "var(--glass-2)" : "transparent" }}>
+                                    <div className="w-[22px] h-[22px] rounded-[5px] shrink-0" style={{ background: `linear-gradient(135deg, ${p.colors[0]}, ${p.colors[1]})` }} />
+                                    <span className="text-xs truncate" style={{ color: p.active ? "var(--fg)" : "var(--fg-3)", fontFamily: "var(--f-sans)" }}>{p.name}</span>
+                                </div>
+                            ))}
+
+                            {/* BIN section */}
+                            <div className="px-4 pt-4 pb-1 flex items-center justify-between">
+                                <span className="studio-mono-label">Bin · {assets.length || 8} Clips</span>
+                                <button onClick={triggerImport} className="transition-opacity hover:opacity-80" style={{ fontFamily: "var(--f-mono)", fontSize: 9, color: "var(--fg-4)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                                    + Import
+                                </button>
+                            </div>
+                            {assets.length === 0 ? (
+                                // Placeholder clips matching the design
+                                [
+                                    { name: "Cold open",        time: "00:20", colors: ["#3B5BE4","#5B3BE4"] },
+                                    { name: "Interview · Mara", time: "00:27", colors: ["#5B4BE4","#7B4BE4"], active: true },
+                                    { name: "B-roll · harbour", time: "00:34", colors: ["#3B7BE4","#3B5BE4"] },
+                                    { name: "Drone · sunrise",  time: "00:41", colors: ["#4B3BE4","#3B5BE4"] },
+                                    { name: "Score · stems",    time: "00:48", colors: ["#3BE4B6","#3B7BE4"] },
+                                    { name: "Voiceover v3",     time: "00:55", colors: ["#5B3BE4","#8B3BE4"] },
+                                    { name: "B-roll · streets", time: "01:02", colors: ["#3B4BE4","#1B3BE4"] },
+                                    { name: "Archive · 1972",   time: "01:09", colors: ["#1B2BE4","#0B1BE4"] },
+                                ].map((clip) => (
+                                    <div key={clip.name} className="flex items-center gap-2.5 px-3 py-1.5 mx-1 rounded-md cursor-pointer group transition-colors" style={{ background: clip.active ? "color-mix(in oklch, var(--accent) 14%, transparent)" : "transparent" }}>
+                                        <div className="w-[22px] h-[22px] rounded-[4px] shrink-0" style={{ background: `linear-gradient(135deg, ${clip.colors[0]}, ${clip.colors[1]})` }} />
+                                        <span className="text-xs flex-1 truncate" style={{ color: clip.active ? "var(--fg)" : "var(--fg-2)", fontFamily: "var(--f-sans)", fontSize: 12 }}>{clip.name}</span>
+                                        <span style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: clip.active ? "var(--fg-3)" : "var(--fg-4)", flexShrink: 0 }}>{clip.time}</span>
                                     </div>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        {assets.length === 0 && (
-                                            <div onClick={triggerImport} className="aspect-video border border-dashed border-border rounded-md flex flex-col items-center justify-center text-muted-foreground hover:bg-secondary/30 cursor-pointer transition-colors p-4 text-center col-span-2">
-                                                <Upload className="w-6 h-6 mb-2 opacity-50" />
-                                                <span className="text-xs">Drop media here</span>
-                                            </div>
-                                        )}
-                                        {assets.map(asset => (
-                                            <DraggableAsset key={asset.id} asset={asset} />
+                                ))
+                            ) : (
+                                assets.map((asset, i) => {
+                                    const GRADS = [
+                                        ["#3B5BE4","#5B3BE4"],["#5B4BE4","#7B4BE4"],["#3B7BE4","#3B5BE4"],
+                                        ["#4B3BE4","#3B5BE4"],["#3BE4B6","#3B7BE4"],["#5B3BE4","#8B3BE4"],
+                                        ["#3B4BE4","#1B3BE4"],["#1B2BE4","#0B1BE4"],
+                                    ];
+                                    return (
+                                        <DraggableAsset
+                                            key={asset.id}
+                                            asset={asset}
+                                            listView={true}
+                                            gradientColors={GRADS[i % GRADS.length]}
+                                            isActive={asset.id === activeClipId}
+                                        />
+                                    );
+                                })
+                            )}
+
+                            {/* SAVED VARIANTS section */}
+                            <div className="px-4 pt-4 pb-1">
+                                <span className="studio-mono-label">Saved Variants</span>
+                            </div>
+                            {[
+                                { name: "Director's cut",   colors: ["#28c840","#3B7BE4"] },
+                                { name: "9:16 · TikTok set",colors: ["#E4764B","#E45B9B"] },
+                                { name: "Cinema 2.39:1",    colors: ["#5B4BE4","#3B1BE4"] },
+                            ].map((v) => (
+                                <div key={v.name} className="flex items-center gap-2.5 px-3 py-1.5 mx-1 rounded-md cursor-pointer transition-colors hover:bg-[var(--glass)]">
+                                    <div className="w-[22px] h-[22px] rounded-[5px] shrink-0" style={{ background: `linear-gradient(135deg, ${v.colors[0]}, ${v.colors[1]})` }} />
+                                    <span className="text-xs truncate" style={{ color: "var(--fg-3)", fontFamily: "var(--f-sans)", fontSize: 12 }}>{v.name}</span>
+                                </div>
+                            ))}
+
+                            {/* Adjustments panel — shown when a clip is selected */}
+                            {activeClip && (
+                                <div className="mt-4 mx-2 mb-4 rounded-lg overflow-hidden" style={{ border: "0.5px solid var(--line)" }}>
+                                    <div className="flex items-center gap-1 overflow-x-auto no-scrollbar px-2 pt-2 pb-1" style={{ borderBottom: "0.5px solid var(--line-soft)" }}>
+                                        {['effects','color','text','audio','transform','settings'].map(tab => (
+                                            <button key={tab} onClick={() => tab === 'settings' ? setActiveTab('settings') : setActiveTab(tab)} className={classNames("studio-tab-btn", activeTab === tab && "active")} style={{ fontSize: 9 }}>
+                                                {tab === 'effects' && <Sparkles className="w-2 h-2" />}
+                                                {tab === 'color' && <Palette className="w-2 h-2" />}
+                                                {tab === 'text' && <Type className="w-2 h-2" />}
+                                                {tab === 'audio' && <span style={{ fontSize: 8 }}>🎤</span>}
+                                                {tab === 'transform' && <Move className="w-2 h-2" />}
+                                                {tab === 'settings' && <Settings className="w-2 h-2" />}
+                                                {tab}
+                                            </button>
                                         ))}
                                     </div>
-                                </section>
-                            )}
-
-                            {activeTab === 'effects' && (
-                                <section className="h-full bg-card">
-                                    <EffectsPanel targetId={activeClipId} playbackEngine={useTimelineStore.getState().playbackEngine} playhead={currentTime} className="h-full" />
-                                </section>
-                            )}
-
-                            {activeTab === 'color' && (
-                                <section className="p-4 border-b border-border/50">
-                                    <div className="space-y-6">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold">Color Grading</div>
-                                            {activeClip && <div className="text-[10px] text-green-400 font-mono">ACTIVE</div>}
-                                        </div>
-                                        {!activeClip ? (
-                                            <div className="p-4 rounded-md border border-dashed border-border text-center">
-                                                <p className="text-xs text-muted-foreground">Select a clip to adjust color.</p>
-                                            </div>
-                                        ) : (
-                                            <>
+                                    <div className="p-3" style={{ background: "var(--bg-2)" }}>
+                                        {activeTab === 'effects' && <EffectsPanel targetId={activeClipId} playbackEngine={useTimelineStore.getState().playbackEngine} playhead={currentTime} className="h-full" />}
+                                        {activeTab === 'color' && (
+                                            <div className="space-y-3">
                                                 {[
                                                     { key: 'brightness', label: 'Brightness', min: 0, max: 200, unit: '%' },
-                                                    { key: 'contrast', label: 'Contrast', min: 0, max: 200, unit: '%' },
-                                                    { key: 'saturate', label: 'Saturation', min: 0, max: 200, unit: '%' },
-                                                    { key: 'hueRotate', label: 'Hue Rotate', min: 0, max: 360, unit: '°' },
+                                                    { key: 'contrast',   label: 'Contrast',   min: 0, max: 200, unit: '%' },
+                                                    { key: 'saturate',   label: 'Saturation', min: 0, max: 200, unit: '%' },
+                                                    { key: 'hueRotate',  label: 'Hue',        min: 0, max: 360, unit: '°' },
                                                 ].map(({ key, label, min, max, unit }) => (
-                                                    <div key={key} className="space-y-2">
-                                                        <div className="flex justify-between text-xs">
+                                                    <div key={key} className="space-y-1">
+                                                        <div className="flex justify-between" style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--fg-3)" }}>
                                                             <span>{label}</span>
-                                                            <span className="text-muted-foreground">{(activeClip.grading?.[key] ?? (key === 'hueRotate' ? 0 : 100))}{unit}</span>
+                                                            <span>{(activeClip.grading?.[key] ?? (key === 'hueRotate' ? 0 : 100))}{unit}</span>
                                                         </div>
-                                                        <input type="range" min={min} max={max} value={activeClip.grading?.[key] ?? (key === 'hueRotate' ? 0 : 100)} onChange={(e) => handleGradingChange(key, parseInt(e.target.value))} className="w-full accent-primary h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer" />
+                                                        <input type="range" min={min} max={max} value={activeClip.grading?.[key] ?? (key === 'hueRotate' ? 0 : 100)} onChange={(e) => handleGradingChange(key, parseInt(e.target.value))} className="w-full accent-primary h-1 rounded-full appearance-none cursor-pointer" style={{ background: "var(--bg-3)" }} />
                                                     </div>
                                                 ))}
-                                                <div className="pt-4 border-t border-border">
-                                                    <button onClick={() => updateClip(activeTrackId, activeClip.id, { grading: { brightness: 100, contrast: 100, saturate: 100, hueRotate: 0 }, filter: 'none' })} className="w-full py-1.5 text-xs bg-secondary hover:bg-white/10 rounded text-muted-foreground transition-colors">Reset Color</button>
-                                                </div>
-                                            </>
-                                        )}
-                                    </div>
-                                </section>
-                            )}
-
-                            {activeTab === 'text' && <section className="p-4 border-b border-border/50"><TextPanel /></section>}
-                            {activeTab === 'audio' && <section className="p-4 border-b border-border/50"><MixerPanel /></section>}
-
-                            {activeTab === 'transform' && (
-                                <section className="p-4 border-b border-border/50">
-                                    <div className="space-y-6">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold">Transform</div>
-                                            {activeClip && <div className="text-[10px] text-green-400 font-mono">ACTIVE</div>}
-                                        </div>
-                                        {!activeClip ? (
-                                            <div className="p-4 rounded-md border border-dashed border-border text-center"><p className="text-xs text-muted-foreground">Select a clip to transform.</p></div>
-                                        ) : (
-                                            <>
-                                                {[
-                                                    { key: 'scale', label: 'Scale', min: 10, max: 300, toDisplay: v => Math.round((v || 1) * 100), unit: '%', fromDisplay: v => v / 100 },
-                                                    { key: 'x', label: 'Position X', min: -1920, max: 1920, toDisplay: v => v || 0, unit: 'px', fromDisplay: v => v },
-                                                    { key: 'y', label: 'Position Y', min: -1080, max: 1080, toDisplay: v => v || 0, unit: 'px', fromDisplay: v => v },
-                                                    { key: 'rotation', label: 'Rotation', min: -180, max: 180, toDisplay: v => v || 0, unit: '°', fromDisplay: v => v },
-                                                ].map(({ key, label, min, max, toDisplay, unit, fromDisplay }) => (
-                                                    <div key={key} className="space-y-2">
-                                                        <div className="flex justify-between text-xs"><span>{label}</span><span className="text-muted-foreground">{toDisplay(activeClip[key])}{unit}</span></div>
-                                                        <input type="range" min={min} max={max} value={toDisplay(activeClip[key])} onChange={(e) => updateClip(activeTrackId, activeClip.id, { [key]: fromDisplay(parseInt(e.target.value)) })} className="w-full accent-primary h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer" />
-                                                    </div>
-                                                ))}
-                                                <div className="pt-4 border-t border-border">
-                                                    <button onClick={() => updateClip(activeTrackId, activeClip.id, { scale: 1, x: 0, y: 0, rotation: 0 })} className="w-full py-1.5 text-xs bg-secondary hover:bg-white/10 rounded text-muted-foreground transition-colors">Reset Transform</button>
-                                                </div>
-                                            </>
-                                        )}
-                                    </div>
-                                </section>
-                            )}
-
-                            {activeTab === 'marketplace' && (
-                                <section className="p-4 border-b border-border/50">
-                                    <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold mb-3">Extensions</div>
-                                    {[
-                                        { id: 'ext-1', name: 'Auto Captions', desc: 'Generate captions with AI', icon: '💬', installed: true },
-                                        { id: 'ext-2', name: 'Motion Graphics', desc: 'Pre-built motion templates', icon: '✨', installed: false },
-                                        { id: 'ext-3', name: 'Sound FX Library', desc: '10,000+ royalty-free sounds', icon: '🔊', installed: false },
-                                        { id: 'ext-4', name: 'Social Templates', desc: 'Templates for TikTok, Reels', icon: '📱', installed: true },
-                                    ].map(ext => (
-                                        <div key={ext.id} className="flex items-center justify-between p-3 rounded-lg border border-border/50 hover:border-primary/30 hover:bg-secondary/20 transition-all cursor-pointer group mb-2">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center text-lg">{ext.icon}</div>
-                                                <div>
-                                                    <div className="text-sm font-medium">{ext.name}</div>
-                                                    <div className="text-[10px] text-muted-foreground">{ext.desc}</div>
-                                                </div>
+                                                <button onClick={() => updateClip(activeTrackId, activeClip.id, { grading: { brightness: 100, contrast: 100, saturate: 100, hueRotate: 0 }, filter: 'none' })} className="w-full py-1 text-[10px] rounded transition-colors" style={{ background: "var(--glass)", color: "var(--fg-3)", fontFamily: "var(--f-mono)" }}>Reset</button>
                                             </div>
-                                            <button className={classNames("px-3 py-1 text-[10px] rounded-full font-medium transition-colors", ext.installed ? "bg-green-500/20 text-green-400" : "bg-primary/10 text-primary hover:bg-primary/20")}>
-                                                {ext.installed ? 'Installed' : 'Install'}
-                                            </button>
-                                        </div>
-                                    ))}
-                                </section>
+                                        )}
+                                        {activeTab === 'text' && <TextPanel />}
+                                        {activeTab === 'audio' && <MixerPanel />}
+                                        {activeTab === 'transform' && (
+                                            <div className="space-y-3">
+                                                {[
+                                                    { key: 'scale', label: 'Scale', min: 10, max: 300, toDisplay: v => Math.round((v||1)*100), unit: '%', fromDisplay: v => v/100 },
+                                                    { key: 'x',     label: 'X',     min: -1920, max: 1920, toDisplay: v => v||0, unit: 'px', fromDisplay: v => v },
+                                                    { key: 'y',     label: 'Y',     min: -1080, max: 1080, toDisplay: v => v||0, unit: 'px', fromDisplay: v => v },
+                                                    { key: 'rotation', label: 'Rotate', min: -180, max: 180, toDisplay: v => v||0, unit: '°', fromDisplay: v => v },
+                                                ].map(({ key, label, min, max, toDisplay, unit, fromDisplay }) => (
+                                                    <div key={key} className="space-y-1">
+                                                        <div className="flex justify-between" style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--fg-3)" }}>
+                                                            <span>{label}</span><span>{toDisplay(activeClip[key])}{unit}</span>
+                                                        </div>
+                                                        <input type="range" min={min} max={max} value={toDisplay(activeClip[key])} onChange={(e) => updateClip(activeTrackId, activeClip.id, { [key]: fromDisplay(parseInt(e.target.value)) })} className="w-full accent-primary h-1 rounded-full appearance-none cursor-pointer" style={{ background: "var(--bg-3)" }} />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                        {activeTab === 'settings' && <SettingsPanel />}
+                                    </div>
+                                </div>
                             )}
 
-                            {activeTab === 'settings' && <section className="p-4"><SettingsPanel /></section>}
+                            <div className="h-6" />
                         </div>
                     </aside>
 
@@ -778,42 +745,35 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         "flex-1 flex flex-col min-w-0 relative",
                         isMobile && mobileTab !== 'player' && mobileTab !== 'edit' ? "hidden" : "flex"
                     )}>
+                        {/* Viewer */}
                         <div className={classNames(
-                            "flex-1 flex items-center justify-center md:p-8 p-4 relative overflow-hidden",
+                            "flex-1 flex items-center justify-center p-3 md:p-5 relative overflow-hidden",
                             isMobile && mobileTab === 'edit' ? "hidden" : "flex"
                         )} style={{ background: "radial-gradient(60% 80% at 50% 40%, #1c1f24 0%, #0c0d10 100%)" }}>
                             <div className={classNames(
-                                "bg-black rounded-lg shadow-2xl relative border border-white/5 group overflow-hidden transition-all duration-500 ease-in-out",
+                                "relative overflow-hidden shadow-2xl transition-all duration-500 ease-in-out",
                                 aspectRatio === '9:16'
-                                    ? 'aspect-[9/16] max-h-[70vh] md:max-h-[550px] w-auto'
+                                    ? 'aspect-[9/16] max-h-[calc(100vh-340px)] w-auto rounded-md'
                                     : aspectRatio === '1:1'
-                                        ? 'aspect-square max-h-[50vh] md:max-h-[450px] w-auto'
-                                        : 'aspect-video max-w-full max-h-full md:max-h-[60vh] w-auto'
-                            )}>
+                                        ? 'aspect-square max-h-[calc(100vh-340px)] w-auto rounded-md'
+                                        : 'aspect-video w-full max-h-[calc(100vh-340px)] rounded-md'
+                            )} style={{ border: "0.5px solid rgba(255,255,255,0.06)", background: "#000" }}>
                                 <ErrorBoundary>
                                     {(() => {
                                         const dims = getPlayerDimensions(aspectRatio);
-                                        // Sync project canvas size to current aspect ratio
                                         if (project && project.settings && project.settings.shared) {
                                             const v = project.settings.shared.size;
                                             if (v) { v.x = dims.width; v.y = dims.height; }
                                             else { project.settings.shared.size = { x: dims.width, y: dims.height }; }
                                         }
-
                                         return (
-                                            // FIX: Key only changes on aspectRatio, NOT on clip count.
-                                            // Previously keyed on tracks.reduce(...clips.length) which caused
-                                            // a full Revideo player remount (recompile) every time a clip
-                                            // was added. That broke playback and caused 3-5s stutters.
                                             <Player
                                                 key={`player-${aspectRatio}`}
                                                 onPlayerReady={handlePlayerReady}
                                                 playing={isPlaying}
                                                 controls={false}
                                                 currentTime={currentTime}
-                                                onTimeUpdate={(time) => {
-                                                    useTimelineStore.setState({ currentTime: time });
-                                                }}
+                                                onTimeUpdate={(time) => { useTimelineStore.setState({ currentTime: time }); }}
                                                 project={project}
                                                 variables={playerVariables}
                                                 width={dims.width}
@@ -824,46 +784,58 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         );
                                     })()}
                                 </ErrorBoundary>
+
+                                {/* Timecode overlays */}
+                                <div className="absolute top-2.5 left-3 pointer-events-none" style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "rgba(255,255,255,0.65)", letterSpacing: "0.04em" }}>
+                                    A001_C012 · <VideoTimeDisplay />
+                                </div>
+                                <div className="absolute top-2.5 right-3 pointer-events-none" style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "rgba(255,255,255,0.45)", letterSpacing: "0.04em" }}>
+                                    ARRI 4.6K · ProRes 422 HQ
+                                </div>
                             </div>
 
-                            {/* Floating Playback Controls */}
-                            <div className="absolute bottom-5 flex items-center gap-3 backdrop-blur-xl px-4 py-2 rounded-full shadow-xl z-20 scale-90 md:scale-100 origin-bottom" style={{ background: "rgba(14,15,17,0.85)", border: "0.5px solid var(--line-strong)" }}>
-                                <button className="hover:text-primary transition-colors" onClick={() => useTimelineStore.getState().seek(0)} style={{ color: "var(--fg-3)" }}><SkipBack /></button>
-                                <button className="hover:text-primary transition-colors" onClick={() => useTimelineStore.getState().togglePlay()} style={{ color: "var(--fg)" }}>
-                                    {!isPlaying ? <Play className="fill-current" /> : <Pause className="fill-current" />}
+                            {/* Playback controls — centered below viewer */}
+                            <div className="absolute bottom-4 flex items-center gap-3 px-4 py-1.5 rounded-full z-20" style={{ background: "rgba(14,15,17,0.85)", border: "0.5px solid var(--line-strong)", backdropFilter: "blur(12px)" }}>
+                                <button onClick={() => useTimelineStore.getState().seek(0)} className="transition-colors hover:text-primary" style={{ color: "var(--fg-3)" }}><SkipBack /></button>
+                                <button onClick={() => useTimelineStore.getState().togglePlay()} className="transition-colors hover:text-primary w-7 h-7 rounded-full flex items-center justify-center" style={{ color: "var(--fg)", background: "var(--glass-2)" }}>
+                                    {!isPlaying ? <Play className="w-3.5 h-3.5 fill-current ml-0.5" /> : <Pause className="w-3.5 h-3.5 fill-current" />}
                                 </button>
-                                <button className="hover:text-primary transition-colors" style={{ color: "var(--fg-3)" }}><SkipForward /></button>
-                                <div className="w-px h-3.5 mx-1" style={{ background: "var(--line-strong)" }} />
-                                <span style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--fg-3)", letterSpacing: "0.06em" }}>
-                                    <VideoTimeDisplay />
-                                </span>
+                                <button className="transition-colors hover:text-primary" style={{ color: "var(--fg-3)" }}><SkipForward /></button>
                             </div>
                         </div>
 
-                        {/* Always show timeline in desktop. On mobile, show only in edit tab. */}
+                        {/* Timeline */}
                         {mode === 'editor' && (!isMobile || mobileTab === 'edit') && (
                             <div className={classNames(
                                 "border-t flex flex-col overflow-hidden shrink-0",
-                                isMobile ? "flex-1 h-full" : "h-[130px]"
-                            )} style={{ background: "var(--bg-2)", borderColor: "var(--line-soft)" }}>
+                                isMobile ? "flex-1 h-full" : "h-[185px]"
+                            )} style={{ background: "var(--bg)", borderColor: "var(--line-soft)" }}>
                                 <Timeline />
                             </div>
                         )}
                     </main>
 
-                    {/* Right Sidebar — AI + Phase 7 panels */}
+                    {/* Right Sidebar — AI Assistant */}
                     <aside
                         className={classNames(
-                            "border-l border-[var(--line-soft)] flex flex-col z-30 transition-transform duration-300 ease-in-out font-sans shrink-0",
+                            "flex flex-col z-30 transition-transform duration-300 ease-in-out shrink-0",
                             "absolute inset-0 md:static w-full md:w-[280px] shadow-2xl md:shadow-none",
                             (!isMobile && showAI) || (isMobile && mobileTab === 'ai') ? "translate-x-0" : "translate-x-full md:translate-x-0"
                         )}
-                        style={{ background: "linear-gradient(180deg, var(--glass), transparent)" }}
+                        style={{ background: "var(--bg)", borderLeft: "0.5px solid var(--line-soft)" }}
                     >
-                        <div className="p-3 border-b flex items-center gap-2" style={{ borderColor: "var(--line-soft)", background: "var(--glass)" }}>
-                            <span className="studio-mono-label" style={{ color: "var(--fg-4)" }}>AI</span>
-                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)", boxShadow: "0 0 8px var(--accent)", animation: "pulse-soft 2s infinite" }} />
-                            <span style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--fg-3)", letterSpacing: "0.04em" }}>Assistant</span>
+                        {/* Assistant header */}
+                        <div className="flex items-center justify-between px-4 py-3 shrink-0" style={{ borderBottom: "0.5px solid var(--line-soft)" }}>
+                            <div className="flex items-center gap-2.5">
+                                <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: "color-mix(in oklch, var(--accent) 20%, var(--bg-2))", border: "0.5px solid color-mix(in oklch, var(--accent) 30%, transparent)" }}>
+                                    <Sparkles className="w-3.5 h-3.5" style={{ color: "var(--accent)" }} />
+                                </div>
+                                <div className="flex flex-col gap-0.5">
+                                    <span className="text-xs font-semibold leading-none" style={{ color: "var(--fg)" }}>Assistant</span>
+                                    <span style={{ fontFamily: "var(--f-mono)", fontSize: 9, color: "var(--fg-4)", letterSpacing: "0.04em" }}>respects your taste</span>
+                                </div>
+                            </div>
+                            <span style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--fg-4)", padding: "2px 6px", border: "0.5px solid var(--line)", borderRadius: 4 }}>⌘ /</span>
                         </div>
                         <div className="flex-1 overflow-hidden h-full">
                             <ReasoningPanel />
