@@ -487,7 +487,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             {/* Phase 7: Autonomous Editing Panel (floating) */}
             <AutonomousEditingPanel />
 
-            <div className="h-screen w-screen bg-background text-foreground flex flex-col overflow-hidden font-sans relative selection:bg-primary/30">
+            <div className="h-screen w-screen overflow-hidden flex flex-col font-sans selection:bg-primary/30 text-foreground" style={{ background: "linear-gradient(180deg, var(--bg-2), var(--bg-3))" }}>
                 {/* ── Background Glows (Cyber-Cinematic) ── */}
                 <div className="pointer-events-none fixed inset-0 overflow-hidden z-0" aria-hidden="true">
                     <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-primary/5 blur-[120px]" />
@@ -594,12 +594,15 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative pb-[64px] md:pb-0">
 
                     {/* Left Sidebar (Media/Effects) */}
-                    <aside className={classNames(
-                        "bg-card border-r border-border md:w-72 flex flex-col z-30 transition-transform duration-300 ease-in-out font-sans",
-                        "absolute inset-0 md:static md:translate-x-0 w-full md:w-72 border-r md:shadow-none",
-                        (!isMobile || mobileTab === 'media') ? "translate-x-0" : "-translate-x-full"
-                    )}>
-                        <div className="md:hidden p-3 border-b border-border flex justify-between items-center bg-card">
+                    <aside 
+                        className={classNames(
+                            "border-r border-[var(--line-soft)] flex flex-col z-30 transition-transform duration-300 ease-in-out font-sans shrink-0",
+                            "absolute inset-0 md:static md:translate-x-0 w-full md:w-[240px] md:shadow-none",
+                            (!isMobile || mobileTab === 'media') ? "translate-x-0" : "-translate-x-full"
+                        )}
+                        style={{ background: "linear-gradient(180deg, var(--glass), transparent)" }}
+                    >
+                        <div className="md:hidden p-3 border-b border-[var(--line-soft)] flex justify-between items-center" style={{ background: "var(--glass)" }}>
                             <span className="font-bold text-sm">Media & Assets</span>
                         </div>
 
@@ -753,13 +756,13 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                     {/* Center — Viewport & Timeline */}
                     <main className={classNames(
-                        "flex-1 flex flex-col min-w-0 bg-background/50 relative",
+                        "flex-1 flex flex-col min-w-0 relative",
                         isMobile && mobileTab !== 'player' && mobileTab !== 'edit' ? "hidden" : "flex"
                     )}>
                         <div className={classNames(
-                            "flex-1 flex items-center justify-center bg-black/20 md:p-8 p-4 relative overflow-hidden",
+                            "flex-1 flex items-center justify-center md:p-8 p-4 relative overflow-hidden",
                             isMobile && mobileTab === 'edit' ? "hidden" : "flex"
-                        )}>
+                        )} style={{ background: "radial-gradient(60% 80% at 50% 40%, #1c1f24 0%, #0c0d10 100%)" }}>
                             <div className={classNames(
                                 "bg-black rounded-lg shadow-2xl relative border border-white/5 group overflow-hidden transition-all duration-500 ease-in-out",
                                 aspectRatio === '9:16'
@@ -819,21 +822,24 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         {/* Always show timeline in desktop. On mobile, show only in edit tab. */}
                         {mode === 'editor' && (!isMobile || mobileTab === 'edit') && (
                             <div className={classNames(
-                                "border-t border-border bg-card flex flex-col overflow-hidden shrink-0",
-                                isMobile ? "flex-1 h-full" : "h-48 md:h-72"
-                            )}>
+                                "border-t border-[var(--line-soft)] flex flex-col overflow-hidden shrink-0",
+                                isMobile ? "flex-1 h-full" : "h-[130px]"
+                            )} style={{ background: "var(--bg-2)" }}>
                                 <Timeline />
                             </div>
                         )}
                     </main>
 
                     {/* Right Sidebar — AI + Phase 7 panels */}
-                    <aside className={classNames(
-                        "bg-card border-l border-border flex flex-col z-30 transition-transform duration-300 ease-in-out font-sans",
-                        "absolute inset-0 md:static w-full md:w-80 border-l shadow-2xl md:shadow-none",
-                        (!isMobile && showAI) || (isMobile && mobileTab === 'ai') ? "translate-x-0" : "translate-x-full md:translate-x-0"
-                    )}>
-                        <div className="md:hidden p-3 border-b border-border flex justify-between items-center bg-card">
+                    <aside 
+                        className={classNames(
+                            "border-l border-[var(--line-soft)] flex flex-col z-30 transition-transform duration-300 ease-in-out font-sans shrink-0",
+                            "absolute inset-0 md:static w-full md:w-[280px] shadow-2xl md:shadow-none",
+                            (!isMobile && showAI) || (isMobile && mobileTab === 'ai') ? "translate-x-0" : "translate-x-full md:translate-x-0"
+                        )}
+                        style={{ background: "linear-gradient(180deg, var(--glass), transparent)" }}
+                    >
+                        <div className="md:hidden p-3 border-b border-[var(--line-soft)] flex justify-between items-center" style={{ background: "var(--glass)" }}>
                             <span className="font-bold text-sm text-purple-400">AI Assistant</span>
                         </div>
                         <div className="flex-1 overflow-hidden h-full">

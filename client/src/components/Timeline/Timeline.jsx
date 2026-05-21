@@ -96,7 +96,7 @@ const Timeline = () => {
     const timelineRef = React.useRef(null);
 
     return (
-        <div className="flex-1 bg-card flex flex-col relative h-full select-none" onKeyDown={handleKeyDown} tabIndex={0}>
+        <div className="flex-1 bg-transparent flex flex-col relative h-full select-none" onKeyDown={handleKeyDown} tabIndex={0}>
             {/* Toolbar */}
             <div className="h-10 border-b border-border flex items-center px-4 justify-between bg-card z-20">
                 <div className="flex items-center gap-4">
