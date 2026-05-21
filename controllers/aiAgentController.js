@@ -568,7 +568,7 @@ function localParseIntent(prompt, context) {
         // deterministic editing action — never ask the user for more info.
         if (has('clean this clip', 'clean this video', 'clean the clip',
                 'clean the video', 'clean up this clip', 'clean it up',
-                'clean it', 'clean up the clip', 'make it clean')) {
+                'clean it', 'clean up the clip', 'make it clean', 'remove laughter', 'remove laughs')) {
             return {
                 intent: 'long_form_build',
                 operation: 'long_form_edit',
@@ -583,7 +583,7 @@ function localParseIntent(prompt, context) {
         }
         // ── Compound: "remove silences AND filler words" ──────────────────────
         const wantsSilence = has('silence', 'dead air', 'pauses', 'quiet parts');
-        const wantsFiller  = has('filler', 'um', 'uh', 'ums', 'uhs');
+        const wantsFiller  = has('filler', 'um', 'uh', 'ums', 'uhs', 'laughter', 'laughs', 'laughing');
         if (wantsSilence && wantsFiller) {
             return {
                 intent: 'long_form_build',
@@ -1343,12 +1343,12 @@ function _inferPlatformFromMode(editMode, duration) {
 }
 
 async function _gptAnalyzeSegments(transcript, duration, contentType, platform, targetDuration) {
-    // Build a condensed segment list for GPT (max 50 segments to stay within token limits)
-    const whisperSegs = (transcript.segments || []).slice(0, 50).map(s => ({
+    // Pass full segment list (up to 1000 chunks) to fully utilize the 128k context window of GPT-4o
+    const whisperSegs = (transcript.segments || []).slice(0, 1000).map(s => ({
         id: s.id,
         start: parseFloat(s.start.toFixed(1)),
         end: parseFloat(s.end.toFixed(1)),
-        text: s.text.slice(0, 200) // Truncate to save tokens
+        text: s.text // Pass full text for accurate contextual editing
     }));
 
     const systemPrompt = `You are an expert long-form video editor and content strategist.

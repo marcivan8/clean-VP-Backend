@@ -136,7 +136,7 @@ export const performFillerRemoval = async (filename) => {
             return { success: false, message: 'No speech detected' };
         }
 
-        const fillerWords = ['um', 'uh', 'like', 'you know', 'sort of', 'kind of', 'euh', 'ben', 'genre'];
+        const fillerWords = ['um', 'uh', 'like', 'you know', 'sort of', 'kind of', 'euh', 'ben', 'genre', '[laughter]', '[laughs]', '(laughs)', '(laughter)', 'haha', 'hehe'];
         const activeSegments = [];
         let currentSegmentStart = 0;
 
