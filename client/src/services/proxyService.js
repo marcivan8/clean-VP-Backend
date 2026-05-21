@@ -1,13 +1,11 @@
 import { API_URL } from '../config';
+import { pollJobResult } from '../utils/jobPoller.js';
 
 /**
  * Get the current session token from Supabase (or localStorage fallback).
  * Returns null if no session exists — callers must handle unauthenticated state.
  */
 async function getAuthToken() {
-    // Read the Supabase session token from localStorage.
-    // Supabase stores it under a key like "sb-<project>-auth-token" (JSON).
-    // We also check common fallback key names used in dev environments.
     try {
         // Auto-detect Supabase's own key (pattern: sb-*-auth-token)
         for (let i = 0; i < localStorage.length; i++) {
@@ -40,7 +38,6 @@ async function getAuthToken() {
 
 /**
  * Build fetch headers, injecting Authorization if a token is available.
- * Always returns a plain object — safe to spread into fetch() options.
  */
 async function buildHeaders(extra = {}) {
     const token = await getAuthToken();
@@ -85,6 +82,9 @@ class ProxyService {
 
     /**
      * Upload a video file to the server and trigger proxy generation.
+     * Uses REST polling (not SSE) to track job completion — SSE is unreliable
+     * behind Railway / Nginx reverse proxies (ERR_CONNECTION_RESET).
+     *
      * @param {File} file - The video File object.
      * @param {string} userId - ID of the user.
      * @returns {Promise<{ proxyPath: string, proxyUrl: string }>}
@@ -109,38 +109,16 @@ class ProxyService {
             }
 
             const data = await response.json();
-            
-            // If the backend returns a jobId, we poll via SSE until completion
-            if (data.jobId) {
-                return new Promise((resolve, reject) => {
-                    const source = new EventSource(`${API_URL}/api/jobs/${data.jobId}/progress`);
-                    
-                    source.onmessage = (e) => {
-                        try {
-                            const eventData = JSON.parse(e.data);
-                            if (eventData.error) {
-                                source.close();
-                                return reject(new Error(eventData.error));
-                            }
-                            
-                            if (eventData.state === 'completed') {
-                                source.close();
-                                // Resolve with the job result (e.g. { proxyUrl, waveformUrl, originalPath })
-                                resolve(eventData.result);
-                            } else if (eventData.state === 'failed') {
-                                source.close();
-                                reject(new Error(eventData.error || 'Proxy job failed'));
-                            }
-                        } catch (err) {
-                            console.error('[ProxyService] Error parsing SSE message:', err);
-                        }
-                    };
 
-                    source.onerror = (err) => {
-                        source.close();
-                        reject(new Error('SSE connection failed'));
-                    };
-                });
+            // If the backend queued a job, poll until it completes.
+            // We use REST polling instead of EventSource (SSE) because SSE
+            // connections are killed by Railway's / Nginx's proxy after ~30s.
+            if (data.jobId) {
+                console.log(`[ProxyService] Polling proxy job ${data.jobId}...`);
+                const result = await pollJobResult(data.jobId);
+                // result may be null if the job completed before the first poll;
+                // fall back to the original response data.
+                return result ?? data;
             }
 
             return data;
