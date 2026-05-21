@@ -60,7 +60,7 @@ router.post('/vision', authenticateUser, (req, res) => {
 });
 
 const { analysisQueue } = require('../queue/queues');
-const { bucket, useLocalStorage } = require('../config/storage');
+const storageConfig = require('../config/storage');
 
 // Main video analysis endpoint
 router.post('/',
@@ -81,10 +81,10 @@ router.post('/',
 
         // If using GCS, upload the raw file immediately so background workers
         // running on different nodes (e.g. Railway) can access it.
-        if (bucket && !useLocalStorage) {
+        if (storageConfig.bucket && !storageConfig.useLocalStorage) {
             const destPath = `raw/${userId}/${req.file.filename}`;
             console.log(`🎬 Uploading raw file to GCS: ${destPath}...`);
-            await bucket.upload(req.file.path, { destination: destPath });
+            await storageConfig.bucket.upload(req.file.path, { destination: destPath });
             console.log(`🎬 Raw file uploaded to GCS.`);
         }
 

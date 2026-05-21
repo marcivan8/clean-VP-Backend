@@ -10,7 +10,7 @@ module.exports = async function processSilenceJob(job) {
 
     const uploadsDir = path.resolve(__dirname, '../uploads');
     const publicDir = path.resolve(__dirname, '../client/public');
-    const { bucket } = require('../config/storage');
+    const storageConfig = require('../config/storage');
 
     // Prefer explicit filePath from job data; fall back to resolving filename
     let filePath = jobFilePath || null;
@@ -31,14 +31,14 @@ module.exports = async function processSilenceJob(job) {
         const tempPath = path.resolve(uploadsDir, 'temp', path.basename(filePath));
         if (filePath !== tempPath && fs.existsSync(tempPath)) {
             filePath = tempPath;
-        } else if (bucket && userId && filename) {
+        } else if (storageConfig.bucket && userId && filename) {
             // Distributed env: download the raw file from GCS
             console.log(`[Job ${job.id}] Local file missing, downloading from GCS...`);
             const gcsPath = `raw/${userId}/${path.basename(filename)}`;
             const dir = path.dirname(filePath);
             if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
             try {
-                await bucket.file(gcsPath).download({ destination: filePath });
+                await storageConfig.bucket.file(gcsPath).download({ destination: filePath });
                 console.log(`[Job ${job.id}] Downloaded from GCS: ${gcsPath}`);
             } catch (err) {
                 throw new Error(`File not found locally and GCS download failed: ${err.message}`);

@@ -1,5 +1,5 @@
 // ===== services/StorageService.js =====
-const { bucket, FOLDERS, useLocalStorage } = require('../config/storage');
+const storageConfig = require('../config/storage');
 const { supabaseAdmin } = require('../config/database');
 const fs = require('fs');
 const path = require('path');
@@ -11,9 +11,9 @@ class StorageService {
         throw new Error('Invalid file data');
       }
 
-      console.log(`📤 Uploading video for user ${userId}, consent: ${hasConsent}, useLocalStorage: ${useLocalStorage}`);
+      console.log(`📤 Uploading video for user ${userId}, consent: ${hasConsent}, useLocalStorage: ${storageConfig.useLocalStorage}`);
 
-      if (useLocalStorage) {
+      if (storageConfig.useLocalStorage) {
         return this.uploadToLocal(file, userId, hasConsent);
       } else {
         return this.uploadToGCS(file, userId, hasConsent);
@@ -26,7 +26,7 @@ class StorageService {
 
   static async uploadToLocal(file, userId, hasConsent) {
     try {
-      const folder = hasConsent ? FOLDERS.AI_TRAINING : FOLDERS.ANALYSIS_ONLY;
+      const folder = hasConsent ? storageConfig.FOLDERS.AI_TRAINING : storageConfig.FOLDERS.ANALYSIS_ONLY;
       const timestamp = Date.now();
       const sanitizedFilename = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
       const filename = `${folder}${userId}/${timestamp}-${sanitizedFilename}`;
@@ -61,16 +61,16 @@ class StorageService {
 
   static async uploadToGCS(file, userId, hasConsent) {
     try {
-      if (!bucket) {
+      if (!storageConfig.bucket) {
         throw new Error('Google Cloud Storage not configured');
       }
 
-      const folder = hasConsent ? FOLDERS.AI_TRAINING : FOLDERS.ANALYSIS_ONLY;
+      const folder = hasConsent ? storageConfig.FOLDERS.AI_TRAINING : storageConfig.FOLDERS.ANALYSIS_ONLY;
       const timestamp = Date.now();
       const sanitizedFilename = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
       const filename = `${folder}${userId}/${timestamp}-${sanitizedFilename}`;
 
-      const fileUpload = bucket.file(filename);
+      const fileUpload = storageConfig.bucket.file(filename);
       const stream = fileUpload.createWriteStream({
         metadata: {
           contentType: file.mimetype,
@@ -100,7 +100,7 @@ class StorageService {
 
             resolve({
               path: filename,
-              publicUrl: `gs://${bucket.name}/${filename}`,
+              publicUrl: `gs://${storageConfig.bucket.name}/${filename}`,
               size: file.size,
               mimeType: file.mimetype,
               isLocal: false
@@ -125,7 +125,7 @@ class StorageService {
       
       console.log(`🗑️ Deleting video: ${videoPath}`);
       
-      if (useLocalStorage || videoPath.startsWith('file://')) {
+      if (storageConfig.useLocalStorage || videoPath.startsWith('file://')) {
         return this.deleteFromLocal(videoPath);
       } else {
         return this.deleteFromGCS(videoPath);
@@ -159,12 +159,12 @@ class StorageService {
 
   static async deleteFromGCS(videoPath) {
     try {
-      if (!bucket) {
+      if (!storageConfig.bucket) {
         console.warn('⚠️ GCS not configured, cannot delete');
         return false;
       }
 
-      const file = bucket.file(videoPath);
+      const file = storageConfig.bucket.file(videoPath);
       await file.delete();
       console.log(`✅ GCS file deleted: ${videoPath}`);
       return true;
@@ -182,7 +182,7 @@ class StorageService {
 
       console.log(`📥 Downloading video: ${videoPath}`);
       
-      if (useLocalStorage || videoPath.startsWith('file://')) {
+      if (storageConfig.useLocalStorage || videoPath.startsWith('file://')) {
         return this.downloadFromLocal(videoPath);
       } else {
         return this.downloadFromGCS(videoPath);
@@ -215,11 +215,11 @@ class StorageService {
 
   static async downloadFromGCS(videoPath) {
     try {
-      if (!bucket) {
+      if (!storageConfig.bucket) {
         throw new Error('Google Cloud Storage not configured');
       }
 
-      const file = bucket.file(videoPath);
+      const file = storageConfig.bucket.file(videoPath);
       const [exists] = await file.exists();
       
       if (!exists) {
@@ -312,7 +312,7 @@ class StorageService {
         totalVideos: userAnalyses.length,
         totalSize: totalSize,
         paths: userAnalyses.map(a => a.video_path),
-        storageType: useLocalStorage ? 'local' : 'gcs'
+        storageType: storageConfig.useLocalStorage ? 'local' : 'gcs'
       };
     } catch (error) {
       console.error('Storage stats error:', error);
@@ -332,13 +332,13 @@ class StorageService {
           path: uploadsDir,
           writable: exists && fs.constants && fs.access ? await fs.promises.access(uploadsDir, fs.constants.W_OK).then(() => true).catch(() => false) : exists
         };
-      } else if (bucket) {
+      } else if (storageConfig.bucket) {
         try {
-          await bucket.getMetadata();
+          await storageConfig.bucket.getMetadata();
           return {
             type: 'gcs',
             healthy: true,
-            bucketName: bucket.name
+            bucketName: storageConfig.bucket.name
           };
         } catch (error) {
           return {

@@ -153,14 +153,14 @@ module.exports = async function processAudioJob(job) {
 
     // GCS fallback for distributed environments (e.g. separate Railway worker service)
     if (!fs.existsSync(inputPath)) {
-        const { bucket } = require('../config/storage');
-        if (bucket && userId && filename) {
+        const storageConfig = require('../config/storage');
+        if (storageConfig.bucket && userId && filename) {
             console.log(`[Job ${job.id}] Local file missing, downloading from GCS...`);
             const gcsPath = `raw/${userId}/${path.basename(filename)}`;
             const dir = path.dirname(inputPath);
             if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
             try {
-                await bucket.file(gcsPath).download({ destination: inputPath });
+                await storageConfig.bucket.file(gcsPath).download({ destination: inputPath });
                 console.log(`[Job ${job.id}] Downloaded from GCS: ${gcsPath}`);
             } catch (err) {
                 throw new Error(`File not found locally and GCS download failed: ${err.message}`);

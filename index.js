@@ -260,8 +260,8 @@ const server = app.listen(port, '0.0.0.0', async () => {
   // When using local storage (no GCS), web + worker must share a filesystem.
   // Auto-start the BullMQ workers in-process so uploaded files are accessible.
   // When GCS is configured, a dedicated worker service can run separately instead.
-  const { useLocalStorage, bucket } = require('./config/storage');
-  if (useLocalStorage || !bucket || process.env.WORKER_INLINE === 'true') {
+  const storageConfig = require('./config/storage');
+  if (storageConfig.useLocalStorage || !storageConfig.bucket || process.env.WORKER_INLINE === 'true') {
       console.log('👷 Starting inline workers (local storage mode — no GCS configured)...');
       console.log('   ⚠️  If you have a separate Railway worker service, shut it down — it cannot access local files.');
       require('./worker');

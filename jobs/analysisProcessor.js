@@ -27,16 +27,16 @@ module.exports = async function processAnalysisJob(job) {
 
     // We do NOT require bucket dynamically inside the handler so that if bucket throws an error we catch it early.
     // We already require storage above, let's add it there or here.
-    const { bucket } = require('../config/storage');
+    const storageConfig = require('../config/storage');
 
     if (!fs.existsSync(absoluteVideoPath)) {
-        if (bucket && filename) {
+        if (storageConfig.bucket && filename) {
             console.log(`[Job ${job.id}] Local file not found, attempting to download from GCS...`);
             const gcsRawPath = `raw/${userId}/${filename}`;
             try {
                 const dir = path.dirname(absoluteVideoPath);
                 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-                await bucket.file(gcsRawPath).download({ destination: absoluteVideoPath });
+                await storageConfig.bucket.file(gcsRawPath).download({ destination: absoluteVideoPath });
                 console.log(`[Job ${job.id}] Successfully downloaded from GCS to ${absoluteVideoPath}`);
             } catch (err) {
                 throw new Error(`Input file not found locally and failed to download from GCS: ${err.message}`);
