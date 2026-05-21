@@ -297,6 +297,7 @@ export class VideoEditorTools {
             case 'normalize_audio': return await performAudioNormalization(getFilename());
             case 'sync_clips_to_beat': return this.syncClipsToBeats();
             case 'auto_captions': return await performAutoCaptions(getFilename());
+            case 'apply_smart_zoom': return await this.applySmartZoom(action.args);
 
             // Visual / Project
             case 'set_aspect_ratio': return this.setAspectRatio(action.args);
@@ -438,6 +439,47 @@ export class VideoEditorTools {
     undo() {
         this.store.undo();
         return { success: true, message: "Undid last action." };
+    }
+
+    // ─── SMART ZOOM (Ken Burns / Punch-in) ───────────────────────────────────
+
+    async applySmartZoom(args = {}) {
+        try {
+            console.log('[VideoEditorTools] Executing apply_smart_zoom');
+            const state = useTimelineStore.getState();
+            
+            // Gather all video clips
+            const videoTracks = state.tracks.filter(t => t.type === 'video');
+            const allClips = [];
+            videoTracks.forEach(t => allClips.push(...t.clips));
+            
+            if (allClips.length === 0) {
+                return { success: false, message: 'No video clips found to apply zoom to.' };
+            }
+            
+            // Generate zoom events using ZoomAnalyzer
+            const { ZoomAnalyzer } = await import('./ZoomAnalyzer.js');
+            const events = await ZoomAnalyzer.generateZoomEvents(allClips);
+            
+            if (!events || events.length === 0) {
+                 return { success: true, message: 'Smart zoom analyzed but no zoom keyframes were necessary.' };
+            }
+            
+            // Apply keyframes via the store
+            events.forEach(ev => {
+                // ev: { clipId, time, scale, easing }
+                state.addTransformKeyframe(ev.clipId, 'scale', ev.time, ev.scale, ev.easing);
+            });
+            
+            return {
+                success: true,
+                message: `Applied smart zoom effects to ${allClips.length} clips.`
+            };
+            
+        } catch (error) {
+            console.error('[VideoEditorTools] applySmartZoom error:', error);
+            return { success: false, message: `Failed to apply smart zoom: ${error.message}` };
+        }
     }
 
     // ── Long-Form Tool Implementations ───────────────────────────────────────

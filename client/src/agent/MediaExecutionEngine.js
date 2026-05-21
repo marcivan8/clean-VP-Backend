@@ -50,7 +50,7 @@ export const ENGINE_TYPES = {
 
 const TIMEOUTS = {
     STORE_ACTION:  5000,
-    API_CALL:      60000,
+    API_CALL:      360000,  // 6 min — must exceed jobPoller's 5-min timeout
     FFMPEG_JOB:    300000,
     VERIFICATION:  10000
 };
@@ -405,6 +405,7 @@ export class MediaExecutionEngine {
             case 'removeRepetition':
             case 'add_transitions_to_sections':
             case 'analyzeStructure':
+            case 'apply_smart_zoom':
             case 'longFormEdit': {
                 const { VideoEditorTools } = await import('./VideoEditorTools.js');
                 const tools = new VideoEditorTools();

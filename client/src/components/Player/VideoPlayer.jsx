@@ -277,6 +277,52 @@ const VideoPlayer = () => {
         }
     };
     const dynamicRatio = getPlayerRatioString(aspectRatio);
+
+    // --- Interpolate Keyframes for Smart Zoom ---
+    let transformStyle = '';
+    if (activeClip && activeClip.keyframes) {
+        const localTime = currentTime - activeClip.start;
+        const kf = activeClip.keyframes;
+
+        const interpolate = (propKeyframes, defaultVal) => {
+            if (!propKeyframes || propKeyframes.length === 0) return defaultVal;
+            if (propKeyframes.length === 1) return propKeyframes[0].value;
+            
+            // Find surrounding keyframes
+            let k1 = propKeyframes[0];
+            let k2 = propKeyframes[propKeyframes.length - 1];
+            
+            for (let i = 0; i < propKeyframes.length - 1; i++) {
+                if (localTime >= propKeyframes[i].time && localTime <= propKeyframes[i+1].time) {
+                    k1 = propKeyframes[i];
+                    k2 = propKeyframes[i+1];
+                    break;
+                }
+            }
+            
+            if (localTime <= k1.time) return k1.value;
+            if (localTime >= k2.time) return k2.value;
+            
+            const progress = (localTime - k1.time) / (k2.time - k1.time);
+            
+            // Simple easeOutCubic approximation if requested
+            let eased = progress;
+            if (k2.easing === 'easeOutCubic') {
+                eased = 1 - Math.pow(1 - progress, 3);
+            }
+            
+            return k1.value + (k2.value - k1.value) * eased;
+        };
+
+        const scale = interpolate(kf.scale, 1.0);
+        const x = interpolate(kf.x, 0);
+        const y = interpolate(kf.y, 0);
+        
+        if (scale !== 1.0 || x !== 0 || y !== 0) {
+            transformStyle = `translate(${x}px, ${y}px) scale(${scale})`;
+        }
+    }
+
     return (
         <div
             ref={containerRef}
@@ -286,8 +332,14 @@ const VideoPlayer = () => {
             {/* The Custom Rendering Surface */}
             <canvas
                 ref={canvasRef}
-                className="transition-all duration-300"
-                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                className="transition-transform duration-75"
+                style={{ 
+                    width: '100%', 
+                    height: '100%', 
+                    objectFit: 'contain',
+                    transform: transformStyle,
+                    transformOrigin: 'center center'
+                }}
             />
         </div>
     );

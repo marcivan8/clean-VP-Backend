@@ -131,6 +131,10 @@ export class LongFormEditPlanner {
             max_results: 5,
             reason: 'Surface the best standalone clips for repurposing (no edits made)',
         }));
+        
+        steps.push(S('apply_smart_zoom', {
+            reason: 'Automatically apply subtle push-ins to talking heads or punch-ins to dialogue turns',
+        }));
 
         steps.push(S('normalize_audio', {
             reason: 'Ensure consistent loudness throughout',
@@ -192,6 +196,10 @@ export class LongFormEditPlanner {
                 reason: 'Smooth transitions between main content sections',
             }));
         }
+        
+        steps.push(S('apply_smart_zoom', {
+            reason: 'Automatically apply Ken Burns and punch-ins based on content context',
+        }));
 
         steps.push(S('normalize_audio', { reason: 'Final audio normalization' }));
 
@@ -246,6 +254,10 @@ export class LongFormEditPlanner {
             min_importance: 0.6,
             max_results: 5,
             reason: 'Surface best standalone clips for repurposing',
+        }));
+        
+        steps.push(S('apply_smart_zoom', {
+            reason: 'Automatically apply Ken Burns and punch-ins based on content context',
         }));
 
         steps.push(S('add_transitions_to_sections', {
