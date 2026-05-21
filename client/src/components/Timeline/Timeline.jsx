@@ -98,12 +98,12 @@ const Timeline = () => {
     return (
         <div className="flex-1 bg-transparent flex flex-col relative h-full select-none" onKeyDown={handleKeyDown} tabIndex={0}>
             {/* Toolbar */}
-            <div className="h-10 border-b border-border flex items-center px-4 justify-between bg-card z-20">
+            <div className="h-10 border-b flex items-center px-4 justify-between z-20 shrink-0" style={{ background: "var(--glass)", borderColor: "var(--line-soft)" }}>
                 <div className="flex items-center gap-4">
-                    <span ref={timeDisplayRef} className="text-xs font-mono text-primary w-16 text-center">0.00s</span>
-                    <div className="h-4 w-px bg-border mx-2"></div>
+                    <span ref={timeDisplayRef} className="text-xs w-16 text-center studio-mono-label" style={{ color: "var(--accent)" }}>0.00s</span>
+                    <div className="h-4 w-px mx-2" style={{ background: "var(--line-soft)" }}></div>
                     <button
-                        className="p-1 hover:bg-secondary rounded relative group"
+                        className="p-1 rounded relative group transition-colors hover:bg-white/5"
                         title="Split Clip (Cmd+B)"
                         onClick={() => {
                             const { activeClipId, tracks, splitClip, currentTime } = useTimelineStore.getState();
@@ -117,7 +117,7 @@ const Timeline = () => {
                     </button>
 
                     <button
-                        className="p-1 hover:bg-secondary rounded relative group"
+                        className="p-1 rounded relative group transition-colors hover:bg-white/5"
                         title="Duplicate Clip (Cmd+D)"
                         onClick={() => {
                             const { activeClipId, tracks, duplicateClip } = useTimelineStore.getState();
@@ -130,10 +130,10 @@ const Timeline = () => {
                         <Copy className="w-3 h-3 text-muted-foreground group-hover:text-primary" />
                     </button>
 
-                    <div className="h-4 w-px bg-border mx-2"></div>
+                    <div className="h-4 w-px mx-2" style={{ background: "var(--line-soft)" }}></div>
 
                     <button
-                        className="p-1 hover:bg-secondary rounded relative group"
+                        className="p-1 rounded relative group transition-colors hover:bg-white/5"
                         title="Add Text Overlay"
                         onClick={() => {
                             useTimelineStore.getState().addTextOverlay('New Text', 'center', 5, 'default');
@@ -143,7 +143,8 @@ const Timeline = () => {
                     </button>
 
                     <select
-                        className="bg-secondary text-[10px] text-muted-foreground rounded px-1 py-0.5 border-none outline-none cursor-pointer hover:bg-white/10"
+                        className="text-[10px] text-muted-foreground rounded px-1 py-0.5 border-none outline-none cursor-pointer hover:bg-white/10"
+                        style={{ background: "var(--glass-2)", fontFamily: "var(--f-mono)" }}
                         title="Add Transition"
                         value=""
                         onChange={(e) => {
@@ -162,7 +163,7 @@ const Timeline = () => {
                     </select>
 
                     <button
-                        className="p-1 hover:bg-secondary rounded relative group"
+                        className="p-1 rounded relative group transition-colors hover:bg-white/5"
                         title="Add Filter (Cinematic)"
                         onClick={() => {
                             const { activeClipId, addFilter } = useTimelineStore.getState();
@@ -173,9 +174,10 @@ const Timeline = () => {
                     </button>
 
                     {/* Aspect Ratio Control */}
-                    <div className="h-4 w-px bg-border mx-2"></div>
+                    <div className="h-4 w-px mx-2" style={{ background: "var(--line-soft)" }}></div>
                     <select
-                        className="bg-secondary text-[10px] text-muted-foreground rounded px-1 py-0.5 border-none outline-none cursor-pointer hover:bg-white/10"
+                        className="text-[10px] text-muted-foreground rounded px-1 py-0.5 border-none outline-none cursor-pointer hover:bg-white/10"
+                        style={{ background: "var(--glass-2)", fontFamily: "var(--f-mono)" }}
                         title="Aspect Ratio"
                         value={useTimelineStore(state => state.aspectRatio)}
                         onChange={(e) => useTimelineStore.getState().setAspectRatio(e.target.value)}
@@ -189,9 +191,10 @@ const Timeline = () => {
                     </select>
 
                     {/* Speed Control */}
-                    <div className="h-4 w-px bg-border mx-2"></div>
+                    <div className="h-4 w-px mx-2" style={{ background: "var(--line-soft)" }}></div>
                     <select
-                        className="bg-secondary text-[10px] text-muted-foreground rounded px-1 py-0.5 border-none outline-none cursor-pointer hover:bg-white/10"
+                        className="text-[10px] text-muted-foreground rounded px-1 py-0.5 border-none outline-none cursor-pointer hover:bg-white/10"
+                        style={{ background: "var(--glass-2)", fontFamily: "var(--f-mono)" }}
                         title="Playback Speed"
                         value={(() => {
                             const { activeClipId, tracks } = useTimelineStore.getState();
@@ -218,13 +221,14 @@ const Timeline = () => {
                 </div>
                 <div className="flex items-center gap-2">
                     <button
+                        className="text-[10px] px-2 py-1 rounded text-muted-foreground transition-colors hover:bg-white/10"
+                        style={{ background: "var(--glass-2)", fontFamily: "var(--f-mono)" }}
                         onClick={() => addTrack('video')}
-                        className="text-[10px] bg-secondary hover:bg-white/10 px-2 py-1 rounded text-muted-foreground transition-colors"
                     >
                         + Track
                     </button>
                     <button onClick={() => setZoomLevel(zoomLevel * 0.8)} className="group"><ZoomOut className="w-3 h-3 text-muted-foreground group-hover:text-foreground" /></button>
-                    <div className="w-20 h-1 bg-secondary rounded-full overflow-hidden relative">
+                    <div className="w-20 h-1 rounded-full overflow-hidden relative" style={{ background: "var(--glass-2)" }}>
                         <div className="absolute inset-y-0 left-0 bg-primary/50 w-full" style={{ width: '50%' }}></div>
                     </div>
                     <button onClick={() => setZoomLevel(zoomLevel * 1.2)} className="group"><ZoomIn className="w-3 h-3 text-muted-foreground group-hover:text-foreground" /></button>
@@ -241,7 +245,7 @@ const Timeline = () => {
             >
                 {/* Ruler */}
                 <div className="flex h-6 border-b border-white/5 bg-black/20 sticky top-0 z-10 shrink-0">
-                    <div className="w-32 border-r border-border bg-card shrink-0"></div>
+                    <div className="w-32 border-r shrink-0" style={{ borderColor: "var(--line-soft)", background: "var(--bg-2)" }}></div>
                     <div
                         className="flex-1 relative cursor-pointer"
                         style={{ width: `${duration * zoomLevel}px`, minWidth: '100%' }}

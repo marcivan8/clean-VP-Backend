@@ -612,7 +612,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     <aside 
                         className={classNames(
                             "border-r border-[var(--line-soft)] flex flex-col z-30 transition-transform duration-300 ease-in-out font-sans shrink-0",
-                            "absolute inset-0 md:static md:translate-x-0 w-full md:w-[240px] md:shadow-none",
+                            "absolute inset-0 md:static md:translate-x-0 w-full md:w-72 md:shadow-none",
                             (!isMobile || mobileTab === 'media') ? "translate-x-0" : "-translate-x-full"
                         )}
                         style={{ background: "linear-gradient(180deg, var(--glass), transparent)" }}
@@ -844,7 +844,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         {mode === 'editor' && (!isMobile || mobileTab === 'edit') && (
                             <div className={classNames(
                                 "border-t flex flex-col overflow-hidden shrink-0",
-                                isMobile ? "flex-1 h-full" : "h-[130px]"
+                                isMobile ? "flex-1 h-full" : "h-48 md:h-72"
                             )} style={{ background: "var(--bg-2)", borderColor: "var(--line-soft)" }}>
                                 <Timeline />
                             </div>
@@ -855,7 +855,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     <aside
                         className={classNames(
                             "border-l border-[var(--line-soft)] flex flex-col z-30 transition-transform duration-300 ease-in-out font-sans shrink-0",
-                            "absolute inset-0 md:static w-full md:w-[280px] shadow-2xl md:shadow-none",
+                            "absolute inset-0 md:static w-full md:w-80 shadow-2xl md:shadow-none",
                             (!isMobile && showAI) || (isMobile && mobileTab === 'ai') ? "translate-x-0" : "translate-x-full md:translate-x-0"
                         )}
                         style={{ background: "linear-gradient(180deg, var(--glass), transparent)" }}
