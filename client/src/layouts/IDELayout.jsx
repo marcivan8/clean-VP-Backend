@@ -488,24 +488,37 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             <AutonomousEditingPanel />
 
             <div className="h-screen w-screen overflow-hidden flex flex-col font-sans selection:bg-primary/30 text-foreground" style={{ background: "linear-gradient(180deg, var(--bg-2), var(--bg-3))" }}>
-                {/* ── Background Glows (Cyber-Cinematic) ── */}
+                {/* ── Background Aurora Glows ── */}
                 <div className="pointer-events-none fixed inset-0 overflow-hidden z-0" aria-hidden="true">
-                    <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-primary/5 blur-[120px]" />
-                    <div className="absolute bottom-[-10%] right-[-10%] w-[40vw] h-[40vw] rounded-full bg-accent/5 blur-[120px]" />
+                    <div className="absolute rounded-full blur-[120px]" style={{ width: "50vw", height: "50vw", top: "-20vw", left: "40vw", background: "var(--accent)", opacity: 0.12 }} />
+                    <div className="absolute rounded-full blur-[120px]" style={{ width: "40vw", height: "40vw", bottom: "-30vw", left: "-10vw", background: "var(--violet)", opacity: 0.10 }} />
                 </div>
                 {/* Top Bar */}
-                <header className="h-14 md:h-12 border-b border-border flex items-center justify-between px-4 bg-card z-20 shrink-0">
+                <header className="h-11 border-b flex items-center justify-between px-4 z-20 shrink-0" style={{ background: "var(--glass)", borderColor: "var(--line-soft)", backdropFilter: "blur(20px) saturate(160%)" }}>
                     <div className="flex items-center gap-3">
+                        {/* macOS-style traffic light dots — desktop only */}
+                        <div className="hidden md:flex items-center gap-1.5 mr-1">
+                            <div className="studio-traffic-dot" style={{ background: "#ff5f57" }} />
+                            <div className="studio-traffic-dot" style={{ background: "#febc2e" }} />
+                            <div className="studio-traffic-dot" style={{ background: "#28c840" }} />
+                        </div>
                         <button className="md:hidden p-2 -ml-2 text-muted-foreground hover:text-foreground" onClick={() => setShowSidebar(!showSidebar)}>
                             <Menu className="w-5 h-5" />
                         </button>
-                        <div className="bg-primary/10 p-1.5 rounded-md hidden md:block">
-                            <Video className="w-5 h-5 text-primary" />
-                        </div>
-                        <h1 className="font-bold text-sm tracking-wide truncate max-w-[150px] md:max-w-none">
-                            VIBED <span className="text-muted-foreground font-normal ml-2 hidden sm:inline">Untitled Project</span>
-                        </h1>
+                        <span className="studio-mono-label hidden md:inline">vibed/studio</span>
                     </div>
+
+                    {/* Centered project name */}
+                    <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-2" style={{ fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--fg-3)" }}>
+                        <span style={{ color: "var(--fg-2)" }}>Untitled Project</span>
+                        <span style={{ color: "var(--fg-4)" }}>·</span>
+                        <VideoTimeDisplay />
+                    </div>
+
+                    {/* Mobile title */}
+                    <h1 className="md:hidden font-bold text-sm tracking-wide truncate max-w-[150px]">
+                        VIBED
+                    </h1>
 
                     {/* Menu Bar */}
                     <div className="hidden md:flex items-center gap-1 z-50">
@@ -580,7 +593,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             <Settings className="w-4 h-4 text-muted-foreground" />
                         </button>
 
-                        <button onClick={() => setShowExportModal(true)} disabled={isExporting} className="glass-button-pro px-4 py-1.5 md:px-6 rounded-md text-xs font-extrabold flex items-center gap-2 transition-all disabled:opacity-50">
+                        <span className="studio-mono-label hidden md:inline" style={{ padding: "3px 8px", borderRadius: 5, border: "0.5px solid var(--line)" }}>⌘K</span>
+
+                        <button onClick={() => setShowExportModal(true)} disabled={isExporting} className="glass-button-pro px-4 py-1.5 md:px-5 rounded-md text-[10px] flex items-center gap-2 disabled:opacity-50">
                             {isExporting ? <span className="animate-spin">⏳</span> : <Share className="w-3 h-3" />}
                             {isExporting ? "Rendering..." : "Export"}
                         </button>
@@ -608,28 +623,32 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                         <input type="file" ref={fileInputRef} onChange={handleFileImport} className="hidden" accept="video/*,audio/*,image/*" multiple />
 
-                        <div className="p-3 border-b border-border flex gap-2 overflow-x-auto no-scrollbar">
+                        <div className="p-2 border-b flex gap-1 overflow-x-auto no-scrollbar" style={{ borderColor: "var(--line-soft)" }}>
                             {['media', 'effects', 'color', 'text', 'audio', 'transform', 'presets', 'settings'].map(tab => (
-                                <button key={tab} onClick={() => tab === 'presets' ? setShowPresetMarketplace(true) : setActiveTab(tab)} className={classNames("px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-2", activeTab === tab ? "bg-secondary/50 text-foreground" : "hover:bg-secondary text-muted-foreground")}>
-                                    {tab === 'media' && <Layers className="w-3 h-3" />}
-                                    {tab === 'effects' && <Sparkles className="w-3 h-3" />}
-                                    {tab === 'color' && <Palette className="w-3 h-3" />}
-                                    {tab === 'text' && <Type className="w-3 h-3" />}
-                                    {tab === 'audio' && <span>🎤</span>}
-                                    {tab === 'transform' && <Move className="w-3 h-3" />}
-                                    {tab === 'presets' && <span>🧩</span>}
-                                    {tab === 'settings' && <Settings className="w-3 h-3" />}
-                                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                                <button
+                                    key={tab}
+                                    onClick={() => tab === 'presets' ? setShowPresetMarketplace(true) : setActiveTab(tab)}
+                                    className={classNames("studio-tab-btn", activeTab === tab && "active")}
+                                >
+                                    {tab === 'media' && <Layers className="w-2.5 h-2.5" />}
+                                    {tab === 'effects' && <Sparkles className="w-2.5 h-2.5" />}
+                                    {tab === 'color' && <Palette className="w-2.5 h-2.5" />}
+                                    {tab === 'text' && <Type className="w-2.5 h-2.5" />}
+                                    {tab === 'audio' && <span style={{ fontSize: 9 }}>🎤</span>}
+                                    {tab === 'transform' && <Move className="w-2.5 h-2.5" />}
+                                    {tab === 'presets' && <span style={{ fontSize: 9 }}>🧩</span>}
+                                    {tab === 'settings' && <Settings className="w-2.5 h-2.5" />}
+                                    {tab}
                                 </button>
                             ))}
                         </div>
 
                         <div className="flex-1 overflow-y-auto pb-24 md:pb-20">
                             {activeTab === 'media' && (
-                                <section className="p-4 border-b border-border/50">
+                                <section className="p-4 border-b" style={{ borderColor: "var(--line-soft)" }}>
                                     <div className="flex items-center justify-between mb-4">
-                                        <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold">Project Media</div>
-                                        <button onClick={triggerImport} className="text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-colors flex items-center gap-1">
+                                        <div className="studio-mono-label">BIN · {assets.length} CLIPS</div>
+                                        <button onClick={triggerImport} className="text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-colors flex items-center gap-1" style={{ fontFamily: "var(--f-mono)" }}>
                                             <Upload className="w-3 h-3" /> Import
                                         </button>
                                     </div>
@@ -808,30 +827,32 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             </div>
 
                             {/* Floating Playback Controls */}
-                            <div className="absolute bottom-6 flex items-center gap-4 bg-black/80 backdrop-blur-md px-4 py-2 rounded-full border border-white/10 shadow-xl z-20 scale-90 md:scale-100 origin-bottom">
-                                <button className="hover:text-primary transition-colors" onClick={() => useTimelineStore.getState().seek(0)}><SkipBack /></button>
-                                <button className="hover:text-primary transition-colors" onClick={() => useTimelineStore.getState().togglePlay()}>
-                                    {!isPlaying ? <Play className="fill-white" /> : <Pause className="fill-white" />}
+                            <div className="absolute bottom-5 flex items-center gap-3 backdrop-blur-xl px-4 py-2 rounded-full shadow-xl z-20 scale-90 md:scale-100 origin-bottom" style={{ background: "rgba(14,15,17,0.85)", border: "0.5px solid var(--line-strong)" }}>
+                                <button className="hover:text-primary transition-colors" onClick={() => useTimelineStore.getState().seek(0)} style={{ color: "var(--fg-3)" }}><SkipBack /></button>
+                                <button className="hover:text-primary transition-colors" onClick={() => useTimelineStore.getState().togglePlay()} style={{ color: "var(--fg)" }}>
+                                    {!isPlaying ? <Play className="fill-current" /> : <Pause className="fill-current" />}
                                 </button>
-                                <button className="hover:text-primary transition-colors"><SkipForward /></button>
-                                <div className="w-px h-4 bg-white/20 mx-2"></div>
-                                <VideoTimeDisplay />
+                                <button className="hover:text-primary transition-colors" style={{ color: "var(--fg-3)" }}><SkipForward /></button>
+                                <div className="w-px h-3.5 mx-1" style={{ background: "var(--line-strong)" }} />
+                                <span style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--fg-3)", letterSpacing: "0.06em" }}>
+                                    <VideoTimeDisplay />
+                                </span>
                             </div>
                         </div>
 
                         {/* Always show timeline in desktop. On mobile, show only in edit tab. */}
                         {mode === 'editor' && (!isMobile || mobileTab === 'edit') && (
                             <div className={classNames(
-                                "border-t border-[var(--line-soft)] flex flex-col overflow-hidden shrink-0",
+                                "border-t flex flex-col overflow-hidden shrink-0",
                                 isMobile ? "flex-1 h-full" : "h-[130px]"
-                            )} style={{ background: "var(--bg-2)" }}>
+                            )} style={{ background: "var(--bg-2)", borderColor: "var(--line-soft)" }}>
                                 <Timeline />
                             </div>
                         )}
                     </main>
 
                     {/* Right Sidebar — AI + Phase 7 panels */}
-                    <aside 
+                    <aside
                         className={classNames(
                             "border-l border-[var(--line-soft)] flex flex-col z-30 transition-transform duration-300 ease-in-out font-sans shrink-0",
                             "absolute inset-0 md:static w-full md:w-[280px] shadow-2xl md:shadow-none",
@@ -839,8 +860,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         )}
                         style={{ background: "linear-gradient(180deg, var(--glass), transparent)" }}
                     >
-                        <div className="md:hidden p-3 border-b border-[var(--line-soft)] flex justify-between items-center" style={{ background: "var(--glass)" }}>
-                            <span className="font-bold text-sm text-purple-400">AI Assistant</span>
+                        <div className="p-3 border-b flex items-center gap-2" style={{ borderColor: "var(--line-soft)", background: "var(--glass)" }}>
+                            <span className="studio-mono-label" style={{ color: "var(--fg-4)" }}>AI</span>
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)", boxShadow: "0 0 8px var(--accent)", animation: "pulse-soft 2s infinite" }} />
+                            <span style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--fg-3)", letterSpacing: "0.04em" }}>Assistant</span>
                         </div>
                         <div className="flex-1 overflow-hidden h-full">
                             <ReasoningPanel />
