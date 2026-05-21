@@ -28,12 +28,12 @@ const CONFIG = {
     MAX_CONCURRENT_JOBS: 3,
 
     // Maximum job duration (hard limit) (ms)
-    MAX_JOB_DURATION_MS: 120000, // 2 minutes
+    MAX_JOB_DURATION_MS: 900000, // 15 minutes
 
     // Per-phase timeouts (ms)
     PHASE_TIMEOUTS: {
-        planning: 30000,      // 30s for intent parsing + plan generation
-        executing: 60000,     // 60s for command execution
+        planning: 60000,      // 60s for intent parsing + plan generation
+        executing: 600000,    // 10m for command execution (long-form jobs)
         validating: 15000     // 15s for validation
     },
 

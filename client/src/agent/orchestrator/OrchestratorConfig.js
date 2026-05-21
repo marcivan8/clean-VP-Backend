@@ -5,10 +5,10 @@
  */
 
 // Phase Timeouts (milliseconds)
-export const PLANNING_TIMEOUT_MS = 30000;     // 30s for intent parsing + plan generation
-export const EXECUTING_TIMEOUT_MS = 60000;    // 60s for command execution
+export const PLANNING_TIMEOUT_MS = 60000;     // 60s for intent parsing + plan generation
+export const EXECUTING_TIMEOUT_MS = 600000;   // 10m for command execution (long-form jobs)
 export const VALIDATING_TIMEOUT_MS = 10000;   // 10s for validation
-export const GLOBAL_TIMEOUT_MS = 120000;      // 2min max for entire request
+export const GLOBAL_TIMEOUT_MS = 900000;      // 15m max for entire request
 
 // Retry Configuration
 export const MAX_RETRIES = 3;
