@@ -1,6 +1,6 @@
 # Vibed — AI Video Editing Platform
 
-**Vibed** is a full-stack, AI-powered video editing IDE. It combines a conversational AI agent with a professional non-linear timeline editor, enabling creators to edit long-form video through natural language commands, then export directly to industry-standard NLE formats.
+**Vibed** is a full-stack, AI-powered video editing IDE. Stop editing. Start creating. Upload your footage and let the AI agent handle the heavy lifting automatically, the moment you ask. It combines a conversational AI agent with a professional non-linear timeline editor, enabling creators to edit long-form video through natural language commands, then export directly to industry-standard NLE formats.
 
 ---
 
@@ -63,7 +63,7 @@ Powered by `@chatoctopus/timeline` — no floating-point drift, rational time ma
 | Database | Supabase (PostgreSQL) |
 | Storage | Google Cloud Storage / local fallback |
 | Security | `helmet`, `express-rate-limit` |
-| Frontend | React + Vite, Zustand, Three.js (@react-three/fiber), WebCodecs API |
+| Frontend | React + Vite, Zustand, Framer Motion, Tailwind CSS, WebCodecs API |
 | Deploy | Docker Compose (Unified Node.js static serving + Python FastAPI) |
 
 ---
