@@ -878,22 +878,46 @@ export class TimelineStateManager {
                     return {
                         id: placement.id,
                         clipId: placement.clipId,
+                        assetId: clip.assetId,
                         name: clip.name || 'Untitled',
                         type: clip.type,
                         sourceUrl: clip.sourceUrl,
-                        url: clip.sourceUrl,          // ← ADD THIS LINE (VideoPlayer reads .url)
+                        url: clip.sourceUrl,
                         start: placement.startTime,
                         duration: placement.duration,
                         offset: placement.offset,
                         speed: placement.speed,
                         volume: placement.volume ?? 1.0,
                         sourceDuration: clip.sourceDuration,
-                        grading: clip.grading,        // ← also needed for color grading
+                        metadata: clip.metadata,
+                        thumbnail: clip.thumbnail,
+                        // Color grading
+                        grading: clip.grading,
                         filter: clip.filter,
                         filterIntensity: clip.filterIntensity,
                         transition: clip.transition,
                         keyframes: clip.keyframes,
+                        // Text / overlay properties
+                        content: clip.content,
+                        fontSize: clip.fontSize,
+                        fontFamily: clip.fontFamily,
+                        fontWeight: clip.fontWeight,
+                        fontStyle: clip.fontStyle,
+                        textDecoration: clip.textDecoration,
+                        textShadow: clip.textShadow,
+                        stroke: clip.stroke,
                         color: clip.color,
+                        textAlign: clip.textAlign,
+                        position: clip.position,
+                        style: clip.style,
+                        // Transform
+                        x: clip.x,
+                        y: clip.y,
+                        scale: clip.scale,
+                        scaleX: clip.scaleX,
+                        scaleY: clip.scaleY,
+                        rotation: clip.rotation,
+                        opacity: clip.opacity,
                     };
                 })
             };

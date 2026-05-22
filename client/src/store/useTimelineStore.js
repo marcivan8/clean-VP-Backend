@@ -298,15 +298,14 @@ const useTimelineStore = create(
 
                 timelineManager.beginTransaction();
                 try {
-                    // Add clip entity
+                    // Add clip entity — spread full clip so text/transform/overlay
+                    // properties (content, fontSize, color, x, y, …) are stored.
                     timelineManager.dispatch(TimelineActions.addClip({
+                        ...clip,
                         id: clipId,
-                        name: clip.name,
-                        type: clip.type || 'video',
                         sourceUrl: clip.url || clip.sourceUrl,
                         sourceDuration: clip.sourceDuration || clip.duration,
-                        thumbnail: clip.thumbnail,
-                        metadata: clip.metadata || {}
+                        metadata: clip.metadata || {},
                     }));
 
                     // Add placement on the specified layer
