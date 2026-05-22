@@ -118,6 +118,38 @@ function buildActiveSegmentsFromWords(words, minSilenceDuration = 0.5, padding =
     return segments;
 }
 
+/**
+ * Group word-level timestamps into caption lines.
+ * Splits on natural pauses (gap > 0.4 s) or every MAX_WORDS words.
+ */
+function groupWordsIntoCaptions(words, maxWords = 6, pauseThreshold = 0.4) {
+    if (!words || words.length === 0) return [];
+    const captions = [];
+    let group = [];
+    for (let i = 0; i < words.length; i++) {
+        const w = words[i];
+        const gap = i > 0 ? (w.start || 0) - (words[i - 1].end || 0) : 0;
+        const shouldFlush = group.length >= maxWords || (group.length > 0 && gap >= pauseThreshold);
+        if (shouldFlush) {
+            captions.push({
+                text: group.map(x => x.word).join(' '),
+                start: group[0].start,
+                end: group[group.length - 1].end,
+            });
+            group = [];
+        }
+        group.push(w);
+    }
+    if (group.length > 0) {
+        captions.push({
+            text: group.map(x => x.word).join(' '),
+            start: group[0].start,
+            end: group[group.length - 1].end,
+        });
+    }
+    return captions;
+}
+
 // ─── MediaExecutionEngine ────────────────────────────────────────────────────
 
 export class MediaExecutionEngine {
@@ -555,7 +587,14 @@ export class MediaExecutionEngine {
                 this._applySegmentsToTimeline(result.activeSegments, 'take');
             }
 
-            // ── 7. Silence detection ──────────────────────────────────────
+            // ── 7. Auto captions ─────────────────────────────────────────
+            if (command.action === 'autoCaptions' && result?.words?.length > 0) {
+                const captions = groupWordsIntoCaptions(result.words);
+                console.log(`[MediaExecutionEngine] 💬 autoCaptions: adding ${captions.length} caption clips from ${result.words.length} words`);
+                useTimelineStore.getState().addCaptionClips(captions);
+            }
+
+            // ── 8. Silence detection ──────────────────────────────────────
             if (command.action === 'silenceDetect') {
                 let activeSegments = result.activeSegments;
 

@@ -369,6 +369,27 @@ const useTimelineStore = create(
                 if (updates.filter !== undefined) clipUpdates.filter = updates.filter;
                 if (updates.filterIntensity !== undefined) clipUpdates.filterIntensity = updates.filterIntensity;
                 if (updates.transition !== undefined) clipUpdates.transition = updates.transition;
+                // Text / visual properties
+                if (updates.content !== undefined) clipUpdates.content = updates.content;
+                if (updates.fontSize !== undefined) clipUpdates.fontSize = updates.fontSize;
+                if (updates.fontFamily !== undefined) clipUpdates.fontFamily = updates.fontFamily;
+                if (updates.fontWeight !== undefined) clipUpdates.fontWeight = updates.fontWeight;
+                if (updates.fontStyle !== undefined) clipUpdates.fontStyle = updates.fontStyle;
+                if (updates.textDecoration !== undefined) clipUpdates.textDecoration = updates.textDecoration;
+                if (updates.textShadow !== undefined) clipUpdates.textShadow = updates.textShadow;
+                if (updates.stroke !== undefined) clipUpdates.stroke = updates.stroke;
+                if (updates.color !== undefined) clipUpdates.color = updates.color;
+                if (updates.textAlign !== undefined) clipUpdates.textAlign = updates.textAlign;
+                if (updates.position !== undefined) clipUpdates.position = updates.position;
+                if (updates.style !== undefined) clipUpdates.style = updates.style;
+                if (updates.x !== undefined) clipUpdates.x = updates.x;
+                if (updates.y !== undefined) clipUpdates.y = updates.y;
+                if (updates.scale !== undefined) clipUpdates.scale = updates.scale;
+                if (updates.scaleX !== undefined) clipUpdates.scaleX = updates.scaleX;
+                if (updates.scaleY !== undefined) clipUpdates.scaleY = updates.scaleY;
+                if (updates.rotation !== undefined) clipUpdates.rotation = updates.rotation;
+                if (updates.opacity !== undefined) clipUpdates.opacity = updates.opacity;
+                if (updates.keyframes !== undefined) clipUpdates.keyframes = updates.keyframes;
 
                 if (Object.keys(clipUpdates).length > 0 && placement.clipId) {
                     timelineManager.dispatch(
@@ -660,9 +681,12 @@ const useTimelineStore = create(
             },
 
             addTextOverlay: (text, position, duration, style) => {
-                get().addTextTrack();
-                const tracks = timelineManager.toLegacyTracks();
-                const textTrack = tracks.find(t => t.type === 'text');
+                let tracks = timelineManager.toLegacyTracks();
+                let textTrack = tracks.find(t => t.type === 'text');
+                if (!textTrack) {
+                    get().addTextTrack();
+                    textTrack = timelineManager.toLegacyTracks().find(t => t.type === 'text');
+                }
                 if (textTrack) {
                     get().addClip(textTrack.id, {
                         id: `text-${Date.now()}`,
@@ -675,6 +699,33 @@ const useTimelineStore = create(
                         type: 'text'
                     });
                 }
+            },
+
+            addCaptionClips: (captions) => {
+                if (!captions || captions.length === 0) return;
+                get()._saveHistory();
+                let tracks = timelineManager.toLegacyTracks();
+                let textTrack = tracks.find(t => t.type === 'text');
+                if (!textTrack) {
+                    get().addTextTrack();
+                    textTrack = timelineManager.toLegacyTracks().find(t => t.type === 'text');
+                }
+                if (!textTrack) return;
+                captions.forEach(cap => {
+                    get().addClip(textTrack.id, {
+                        id: `caption-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                        start: cap.start,
+                        duration: Math.max(0.3, cap.end - cap.start),
+                        name: cap.text,
+                        content: cap.text,
+                        position: 'bottom',
+                        style: 'subtitle',
+                        type: 'text',
+                        fontSize: 36,
+                        color: '#ffffff',
+                        textShadow: '2px 2px 4px rgba(0,0,0,0.9)',
+                    });
+                });
             },
 
             // ==============================================================
