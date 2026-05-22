@@ -32,25 +32,26 @@ export async function authFetch(url, options = {}) {
             token = session?.access_token ?? null;
         }
     } catch (err) {
-        // In dev/test environments without Supabase, proceed without a token.
         console.warn('[authFetch] Could not retrieve session token:', err.message);
     }
 
-    // ── 2. Build headers ──────────────────────────────────────────────────
+    // ── 2. Anonymous session fallback ─────────────────────────────────────
+    // When there's no JWT, attach the anonymous session ID so the server can
+    // associate uploads and operations with this user's project.
+    const anonSessionId = !token ? (localStorage.getItem('vp_session') ?? null) : null;
+
+    // ── 3. Build headers ──────────────────────────────────────────────────
     const method = (options.method || 'GET').toUpperCase();
     const needsContentType = ['POST', 'PUT', 'PATCH'].includes(method) && options.body;
 
     const headers = {
-        // Always set Content-Type when sending a body so Express body-parser
-        // parses it.  Without this header, req.body is {} on the server.
         ...(needsContentType ? { 'Content-Type': 'application/json' } : {}),
-        // Attach auth token when available
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        // Allow callers to override / extend headers
+        ...(token          ? { Authorization:  `Bearer ${token}` }   : {}),
+        ...(anonSessionId  ? { 'X-Session-Id': anonSessionId }       : {}),
         ...(options.headers || {}),
     };
 
-    // ── 3. Execute fetch ──────────────────────────────────────────────────
+    // ── 4. Execute fetch ──────────────────────────────────────────────────
     return fetch(url, { ...options, headers });
 }
 

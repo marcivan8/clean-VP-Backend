@@ -29,6 +29,8 @@ import { AutonomousEditingPanel } from '../components/AutonomousEditingPanel';
 import useEditorStore from '../store/useEditorStore';
 import PresetSystem from '../presets/PresetSystem';
 import useAIStore from '../store/useAIStore';
+import useSessionStore from '../store/useSessionStore';
+import AuthPromptModal from '../components/AuthPromptModal';
 
 const VideoTimeDisplay = () => {
     const timeRef = useRef(null);
@@ -152,6 +154,46 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const [exportResult, setExportResult] = React.useState(null);
     const [exportError, setExportError] = React.useState(null);
     const [showExportModal, setShowExportModal] = React.useState(false);
+
+    // ── Progressive auth ──────────────────────────────────────────────────
+    const { isAnonymous, hoursLeft, getOrCreate } = useSessionStore();
+    const [authPrompt, setAuthPrompt] = React.useState(null); // null | trigger string
+    const authShownRef = React.useRef(false); // only show one prompt per session
+
+    const showAuthPrompt = React.useCallback((trigger) => {
+        if (!isAnonymous || authShownRef.current) return;
+        authShownRef.current = true;
+        setAuthPrompt(trigger);
+    }, [isAnonymous]);
+
+    // Ensure a session exists from the moment they open the editor
+    useEffect(() => { getOrCreate(); }, [getOrCreate]);
+
+    // Trigger: 20-minute editing timer
+    useEffect(() => {
+        if (!isAnonymous) return;
+        const t = setTimeout(() => showAuthPrompt('timer'), 20 * 60 * 1000);
+        return () => clearTimeout(t);
+    }, [isAnonymous, showAuthPrompt]);
+
+    // Trigger: exit intent — mouse leaves the top of the viewport
+    useEffect(() => {
+        if (!isAnonymous) return;
+        const handler = (e) => {
+            if (e.clientY < 8) showAuthPrompt('exit_intent');
+        };
+        document.addEventListener('mouseleave', handler);
+        return () => document.removeEventListener('mouseleave', handler);
+    }, [isAnonymous, showAuthPrompt]);
+
+    // Trigger: first successful AI operation
+    useEffect(() => {
+        if (!isAnonymous) return;
+        return useAIStore.subscribe((state) => {
+            const hasSuccess = state.logs.some(l => l.type === 'success');
+            if (hasSuccess) showAuthPrompt('ai_success');
+        });
+    }, [isAnonymous, showAuthPrompt]);
 
     const [activeTab, setActiveTab] = React.useState('media');
     const [activeColorRange, setActiveColorRange] = React.useState('reds');
@@ -317,12 +359,23 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
             addAssets(processedAssets);
 
-            // Fix 1: auto-place every imported asset on the timeline immediately.
-            // The player resolves the proxy URL from the asset store, so the clip
-            // will automatically upgrade from blob URL → proxy URL once processing
-            // finishes without any extra work here.
-            for (const asset of processedAssets) {
-                useTimelineStore.getState().addAssetToTimeline(asset);
+            if (processedAssets.length === 1) {
+                // Single file: auto-place immediately. The player resolves proxy URL
+                // from the asset store once processing finishes — no extra work needed.
+                useTimelineStore.getState().addAssetToTimeline(processedAssets[0]);
+            } else {
+                // Multiple files: populate the media panel and let the AI suggest order.
+                const formatDur = (s) => {
+                    const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+                    return `${m}:${sec.toString().padStart(2, '0')}`;
+                };
+                const list = processedAssets.map(a => `  — ${a.name} (${formatDur(a.duration || 0)})`).join('\n');
+                useAIStore.getState().addLog({
+                    id:        'multi-upload-' + Date.now(),
+                    type:      'assistant',
+                    message:   `I've got your ${processedAssets.length} clips ready:\n${list}\n\nWant me to arrange them on the timeline in order, or would you prefer to do it yourself?`,
+                    timestamp: new Date().toLocaleTimeString(),
+                });
             }
 
             console.log("✅ Store updated with assets and metadata", processedAssets);
@@ -504,6 +557,37 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             <ClarificationDialog />
             <ApprovalDialog />
 
+            {/* Progressive auth prompt */}
+            {authPrompt && (
+                <AuthPromptModal
+                    trigger={authPrompt}
+                    onDismiss={() => { setAuthPrompt(null); authShownRef.current = false; }}
+                    onSuccess={() => {
+                        setAuthPrompt(null);
+                        // If this was an export trigger, open the export modal now
+                        if (authPrompt === 'export') setShowExportModal(true);
+                    }}
+                />
+            )}
+
+            {/* Session countdown — show when < 24 h remain and user is anonymous */}
+            {isAnonymous && hoursLeft() !== null && hoursLeft() < 24 && (
+                <div
+                    className="fixed top-0 left-0 right-0 z-[100] flex items-center justify-center gap-3 py-2 px-4 text-xs"
+                    style={{ background: 'rgba(255,140,0,0.12)', borderBottom: '0.5px solid rgba(255,140,0,0.3)', backdropFilter: 'blur(8px)' }}
+                >
+                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'oklch(0.78 0.15 60)', letterSpacing: '0.06em' }}>
+                        Your project will be available for {Math.round(hoursLeft())} more hour{Math.round(hoursLeft()) !== 1 ? 's' : ''} —
+                    </span>
+                    <button
+                        onClick={() => showAuthPrompt('timer')}
+                        style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'oklch(0.85 0.18 60)', textDecoration: 'underline', letterSpacing: '0.06em' }}
+                    >
+                        Save with a free account
+                    </button>
+                </div>
+            )}
+
             {/* Phase 7: Preset Marketplace Modal */}
             <PresetMarketplace
                 isOpen={showPresetMarketplace}
@@ -620,7 +704,14 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                         <span className="studio-mono-label hidden md:inline" style={{ padding: "3px 8px", borderRadius: 5, border: "0.5px solid var(--line)" }}>⌘K</span>
 
-                        <button onClick={() => setShowExportModal(true)} disabled={isExporting} className="glass-button-pro px-4 py-1.5 md:px-5 rounded-md text-[10px] flex items-center gap-2 disabled:opacity-50">
+                        <button
+                            onClick={() => {
+                                if (isAnonymous) { showAuthPrompt('export'); }
+                                else { setShowExportModal(true); }
+                            }}
+                            disabled={isExporting}
+                            className="glass-button-pro px-4 py-1.5 md:px-5 rounded-md text-[10px] flex items-center gap-2 disabled:opacity-50"
+                        >
                             {isExporting ? <span className="animate-spin">⏳</span> : <Share className="w-3 h-3" />}
                             {isExporting ? "Rendering..." : "Export"}
                         </button>

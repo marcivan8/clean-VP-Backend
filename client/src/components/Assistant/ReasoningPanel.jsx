@@ -21,8 +21,21 @@ const StepLogItem = ({ log }) => (
     </div>
 );
 
+const AssistantLogItem = ({ log }) => (
+    <div className="rounded-lg p-3 mb-1 animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ background: 'rgba(0,0,0,0.25)', border: '0.5px solid var(--line)' }}>
+        <div className="flex items-center gap-1.5 mb-2">
+            <Sparkles className="w-3 h-3" style={{ color: 'var(--accent)' }} />
+            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Assistant</span>
+        </div>
+        <p className="whitespace-pre-wrap leading-relaxed" style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg-2)' }}>
+            {log.message}
+        </p>
+    </div>
+);
+
 const LogItem = ({ log }) => {
-    if (log.type === 'step') return <StepLogItem log={log} />;
+    if (log.type === 'step')      return <StepLogItem log={log} />;
+    if (log.type === 'assistant') return <AssistantLogItem log={log} />;
 
     const isSuccess = log.type === 'success';
     const isWarning = log.type === 'warning';
