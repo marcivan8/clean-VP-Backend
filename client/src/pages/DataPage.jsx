@@ -260,7 +260,7 @@ const DataPage = () => {
                             {[
                                 'Delete all my files and project data',
                                 'Send me a copy of everything you have on me',
-                                'Tell me exactly what data you're storing and where',
+                                "Tell me exactly what data you're storing and where",
                                 'Remove my account completely',
                             ].map(item => (
                                 <div key={item} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
