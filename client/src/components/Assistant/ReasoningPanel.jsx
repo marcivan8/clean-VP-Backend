@@ -1,5 +1,5 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { Sparkles, Brain, Check, X, ArrowRight, Activity, MessageSquare, Loader2, XCircle } from 'lucide-react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { Sparkles, Brain, Check, X, ArrowRight, Activity, MessageSquare, Loader2, XCircle, Shield } from 'lucide-react';
 import useAIStore from '../../store/useAIStore';
 import useTimelineStore from '../../store/useTimelineStore';
 import useJobStore, { JOB_STATES, TERMINAL_STATES } from '../../store/useJobStore';
@@ -12,7 +12,18 @@ import { workflowController } from '../../agent/WorkflowController.js';
 
 // --- Sub-components ---
 
+const StepLogItem = ({ log }) => (
+    <div className="flex items-center gap-2 py-1.5 animate-in fade-in slide-in-from-bottom-1 duration-200">
+        <Loader2 className="w-3 h-3 shrink-0 animate-spin" style={{ color: 'var(--accent)' }} />
+        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)', letterSpacing: '0.04em' }}>
+            {log.message}
+        </span>
+    </div>
+);
+
 const LogItem = ({ log }) => {
+    if (log.type === 'step') return <StepLogItem log={log} />;
+
     const isSuccess = log.type === 'success';
     const isWarning = log.type === 'warning';
     const isAgent = log.id.startsWith('agent-');
@@ -164,16 +175,67 @@ const SuggestionCard = ({ suggestion, onAccept, onReject }) => {
 
 // --- Main Panel ---
 
+const UPLOAD_STEPS = ['uploading', 'processing', 'ready'];
+const UPLOAD_STEP_LABELS = { uploading: 'Uploading', processing: 'Processing', ready: 'Ready' };
+
+const UploadStatusCard = ({ asset }) => {
+    const phase = asset.uploadPhase || 'uploading';
+    const phaseIdx = UPLOAD_STEPS.indexOf(phase);
+
+    return (
+        <div className="rounded-lg p-3 mb-3 border" style={{ background: 'rgba(0,0,0,0.3)', borderColor: 'var(--line)' }}>
+            <div className="flex items-center justify-between mb-2.5">
+                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    {UPLOAD_STEP_LABELS[phase]}…
+                </span>
+                <Loader2 className="w-3 h-3 animate-spin" style={{ color: 'var(--accent)' }} />
+            </div>
+            {/* Step bar */}
+            <div className="flex items-center gap-1 mb-2">
+                {UPLOAD_STEPS.map((s, i) => (
+                    <React.Fragment key={s}>
+                        <div className="flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full transition-all" style={{ background: i <= phaseIdx ? 'var(--accent)' : 'rgba(255,255,255,0.15)' }} />
+                            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 8, color: i <= phaseIdx ? 'var(--fg-2)' : 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                                {UPLOAD_STEP_LABELS[s]}
+                            </span>
+                        </div>
+                        {i < UPLOAD_STEPS.length - 1 && (
+                            <div className="flex-1 h-px mx-1" style={{ background: i < phaseIdx ? 'var(--accent)' : 'rgba(255,255,255,0.1)' }} />
+                        )}
+                    </React.Fragment>
+                ))}
+            </div>
+            {/* Animated progress bar */}
+            <div className="h-px w-full rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                <div
+                    className="h-full rounded-full transition-all duration-1000"
+                    style={{
+                        width: phase === 'uploading' ? '35%' : phase === 'processing' ? '70%' : '100%',
+                        background: 'var(--accent)',
+                        boxShadow: '0 0 6px var(--accent)'
+                    }}
+                />
+            </div>
+            {/* GCS trust note */}
+            <div className="flex items-center gap-1.5 mt-2">
+                <Shield className="w-2.5 h-2.5 shrink-0" style={{ color: 'var(--fg-4)' }} />
+                <span style={{ fontFamily: 'var(--f-sans)', fontSize: 9, color: 'var(--fg-4)' }}>
+                    Securely uploaded to Google Cloud Storage
+                </span>
+            </div>
+        </div>
+    );
+};
+
 const ReasoningPanel = () => {
-    const { logs, suggestions, isAnalyzing, setIsAnalyzing, addLog, addSuggestion, removeSuggestion, clearSession } = useAIStore();
-    const { uploadedFile, performAction } = useTimelineStore();
-    const { recordDecision } = useUserPreferences(); // Connect to Memory
+    const { logs, suggestions, isAnalyzing, setIsAnalyzing, addLog, removeSuggestion, contextualSuggestion, quickChips } = useAIStore();
+    const { uploadedFile, performAction, assets } = useTimelineStore();
+    const { recordDecision } = useUserPreferences();
     const scrollRef = useRef(null);
 
-    // Subscribe to job store for progress display
-    const activeJob = useJobStore(state => state.getActiveJob());
-    const jobProgress = activeJob?.progress || 0;
-    const jobState = activeJob?.state || 'IDLE';
+    const proxying = assets.filter(a => a.isProxying);
+    const isEmpty = logs.length === 0 && suggestions.length === 0 && !isAnalyzing;
 
     const handleAccept = async (suggestion) => {
         console.log("Accepted suggestion:", suggestion);
@@ -300,13 +362,53 @@ const ReasoningPanel = () => {
             </div>
 
             {/* Scrollable Content */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-2 relative scroll-smooth">
-                {/* ... existing logs rendering ... */}
-                {logs.length === 0 && suggestions.length === 0 && !isAnalyzing && (
-                    <div className="h-full flex flex-col items-center justify-center text-center opacity-50 p-4">
-                        <Brain className="w-12 h-12 text-muted-foreground mb-3" />
-                        <p className="text-sm text-muted-foreground">Detailed Agent Mode</p>
-                        <p className="text-xs text-muted-foreground/50 mt-1">Try: "Remove silence" or "Cut the gaps"</p>
+            <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-2 relative scroll-smooth">
+                {/* Upload progress cards */}
+                {proxying.map(asset => (
+                    <UploadStatusCard key={asset.id} asset={asset} />
+                ))}
+
+                {/* Empty state with contextual suggestion + quick chips */}
+                {isEmpty && proxying.length === 0 && (
+                    <div className="flex flex-col gap-4 pt-4 pb-2">
+                        {contextualSuggestion ? (
+                            <div className="rounded-lg p-3 border" style={{ background: 'rgba(0,0,0,0.25)', borderColor: 'var(--line)' }}>
+                                <div className="flex items-center gap-1.5 mb-2">
+                                    <Sparkles className="w-3 h-3" style={{ color: 'var(--accent)' }} />
+                                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Try this</span>
+                                </div>
+                                <button
+                                    onClick={() => { if (inputRef.current) { inputRef.current.value = contextualSuggestion; inputRef.current.focus(); } }}
+                                    className="text-left w-full"
+                                    style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.5 }}
+                                >
+                                    "{contextualSuggestion}"
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="flex flex-col items-center gap-2 py-6 opacity-40">
+                                <Brain className="w-8 h-8" style={{ color: 'var(--fg-4)' }} />
+                                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Assistant</span>
+                            </div>
+                        )}
+                        {/* Quick chips */}
+                        <div>
+                            <span className="block mb-2" style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Quick actions</span>
+                            <div className="flex flex-wrap gap-1.5">
+                                {quickChips.map(chip => (
+                                    <button
+                                        key={chip}
+                                        onClick={() => { if (inputRef.current) { inputRef.current.value = chip; inputRef.current.focus(); } }}
+                                        className="px-2.5 py-1 rounded-full text-[10px] transition-colors"
+                                        style={{ background: 'var(--glass-2)', border: '0.5px solid var(--glass-stroke)', color: 'var(--fg-3)', fontFamily: 'var(--f-sans)' }}
+                                        onMouseEnter={e => e.currentTarget.style.color = 'var(--fg)'}
+                                        onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-3)'}
+                                    >
+                                        {chip}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
                     </div>
                 )}
 
@@ -325,7 +427,7 @@ const ReasoningPanel = () => {
                             onReject={removeSuggestion}
                         />
                     ) : (
-                        <SuggestionCard // Legacy/Other suggestions
+                        <SuggestionCard
                             key={suggestion.id}
                             suggestion={suggestion}
                             onAccept={handleAccept}
@@ -335,33 +437,46 @@ const ReasoningPanel = () => {
                 ))}
 
                 {isAnalyzing && (
-                    <div className="flex gap-3 text-xs animate-pulse">
-                        <div className="flex flex-col items-center pt-1">
-                            <div className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0"></div>
-                            <div className="w-px h-full bg-gradient-to-b from-purple-500 via-transparent to-transparent my-1 h-8"></div>
+                    <div className="sticky bottom-0 rounded-lg p-3 mt-2 border animate-in fade-in duration-300" style={{ background: 'rgba(0,0,0,0.6)', borderColor: 'var(--line)', backdropFilter: 'blur(12px)' }}>
+                        <div className="flex items-center gap-2 mb-2">
+                            <div className="relative w-4 h-4 shrink-0">
+                                <Loader2 className="w-4 h-4 animate-spin absolute inset-0" style={{ color: 'var(--accent)' }} />
+                            </div>
+                            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-2)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                                Agent working
+                            </span>
+                            <span className="ml-auto flex gap-0.5">
+                                {[0, 1, 2].map(i => (
+                                    <span key={i} className="w-1 h-1 rounded-full" style={{ background: 'var(--accent)', opacity: 0.4, animation: `pulse-soft 1.2s ${i * 0.2}s infinite` }} />
+                                ))}
+                            </span>
                         </div>
-                        <span className="text-purple-400/80 italic">Agent is processing edits...</span>
+                        <p className="text-[10px] leading-relaxed" style={{ color: 'var(--fg-4)', fontFamily: 'var(--f-sans)' }}>
+                            Steps appear above as they complete. This can take 10–30 s for longer videos.
+                        </p>
                     </div>
                 )}
             </div>
 
             {/* Input Area */}
-            <div className="p-3 border-t border-border bg-card">
+            <div className="p-3 border-t" style={{ borderColor: 'var(--line-soft)', background: 'var(--glass)' }}>
                 <div className="relative group">
                     <input
                         ref={inputRef}
                         type="text"
                         disabled={isAnalyzing}
                         onKeyDown={handleKeyDown}
-                        placeholder={isAnalyzing ? "Agent is working..." : "Tell the agent what to do..."}
-                        className="w-full bg-black/20 border border-white/10 rounded-md pl-3 pr-10 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-purple-500/50 transition-all placeholder:text-white/40 disabled:opacity-50"
+                        placeholder={isAnalyzing ? "Agent is working…" : contextualSuggestion ? `Try: ${contextualSuggestion}` : "Tell the agent what to do…"}
+                        className="w-full rounded-md pl-3 pr-10 py-2 text-xs focus:outline-none focus:ring-1 transition-all disabled:opacity-50"
+                        style={{ background: 'rgba(0,0,0,0.3)', border: '0.5px solid var(--line)', color: 'var(--fg)', fontFamily: 'var(--f-sans)' }}
                     />
                     <button
                         onClick={processCommand}
                         disabled={isAnalyzing}
-                        className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 bg-primary text-primary-foreground rounded hover:opacity-90 transition-opacity disabled:opacity-50"
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded transition-opacity disabled:opacity-50"
+                        style={{ background: 'var(--accent)' }}
                     >
-                        <ArrowRight className="w-3 h-3" />
+                        <ArrowRight className="w-3 h-3 text-white" />
                     </button>
                 </div>
             </div>

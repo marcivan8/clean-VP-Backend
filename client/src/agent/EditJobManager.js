@@ -9,6 +9,14 @@ import { AgentFeedbackService } from './AgentFeedbackService.js';
 import useJobStore from '../store/useJobStore.js';
 import { transcriptionManager } from './TranscriptionManager.js';
 import { editSessionMemory } from './EditSessionMemory.js';
+import useAIStore from '../store/useAIStore.js';
+
+const logStep = (message) => useAIStore.getState().addLog({
+    id: `step-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+    type: 'step',
+    message,
+    timestamp: new Date().toLocaleTimeString()
+});
 
 /**
  * EditJobManager — Fixed + Enhanced Version
@@ -184,6 +192,7 @@ export class EditJobManager {
         }
 
         // ── Generate Plan ─────────────────────────────────────────────────────
+        logStep('Planning edits…');
         console.log('[EditJobManager] Generating plan...');
         const planResult = await EditPlanner.generatePlan(intentResult, abortController.signal);
 
@@ -225,6 +234,7 @@ export class EditJobManager {
         }
 
         // ── Compile Commands ──────────────────────────────────────────────────
+        logStep(`Plan ready — ${(planResult.plan.steps || []).length} step(s) queued`);
         console.log('[EditJobManager] Compiling commands...');
 
         // FIX 2 (original): Override intent confidence to HIGH when plan is valid
@@ -246,6 +256,7 @@ export class EditJobManager {
         actor.send({ type: 'COMMANDS_COMPILED', commands: compileResult.commands });
 
         // ── Execute Commands ──────────────────────────────────────────────────
+        logStep(`Executing ${compileResult.commands.length} operation(s)…`);
         console.log(`[EditJobManager] Executing ${compileResult.commands.length} commands...`);
         const executionResult = await mediaExecutionEngine.execute(
             compileResult.commands,
@@ -268,6 +279,7 @@ export class EditJobManager {
         actor.send({ type: 'EXECUTION_COMPLETE', result: executionResult });
 
         // ── Validate Results ──────────────────────────────────────────────────
+        logStep('Verifying edits…');
         console.log('[EditJobManager] Validating results...');
 
         // FIX 1 (original): ValidationService.validate() is ASYNC — must await

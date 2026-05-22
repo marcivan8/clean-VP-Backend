@@ -28,6 +28,7 @@ import { PresetMarketplace } from '../components/PresetMarketplace';
 import { AutonomousEditingPanel } from '../components/AutonomousEditingPanel';
 import useEditorStore from '../store/useEditorStore';
 import PresetSystem from '../presets/PresetSystem';
+import useAIStore from '../store/useAIStore';
 
 const VideoTimeDisplay = () => {
     const timeRef = useRef(null);
@@ -247,7 +248,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                 const assetId = `asset-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-                processedAssets.push({
+                const assetEntry = {
                     id: assetId,
                     name: file.name,
                     type: isVideo ? 'video' : file.type.startsWith('image') ? 'image' : 'audio',
@@ -255,25 +256,35 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     file: file,
                     proxyUrl: null,
                     isProxying: isVideo,
+                    uploadPhase: isVideo ? 'uploading' : 'ready',
+                    uploadStartTime: Date.now(),
                     thumbnail: metadata.thumbnail,
                     sourceDuration: metadata.duration,
                     duration: metadata.duration,
                     fps: metadata.fps,
                     resolution: metadata.width && metadata.height ? { w: metadata.width, h: metadata.height } : null
-                });
+                };
+                processedAssets.push(assetEntry);
 
                 if (isVideo) {
+                    // After 5s with no response, assume upload is done and proxy is encoding
+                    const processingTimer = setTimeout(() => {
+                        useTimelineStore.getState().updateAsset(assetId, { uploadPhase: 'processing' });
+                    }, 5000);
+
                     ProxyService.uploadAndGenerateProxy(file, 'demo-user')
                         .then(data => {
+                            clearTimeout(processingTimer);
                             if (!data) {
                                 console.warn('[IDELayout] Proxy job resolved with null result — job may have completed before SSE could read returnvalue');
-                                useTimelineStore.getState().updateAsset(assetId, { isProxying: false });
+                                useTimelineStore.getState().updateAsset(assetId, { isProxying: false, uploadPhase: 'ready' });
                                 return;
                             }
                             console.log(`[IDELayout] Proxy Ready: ${data.proxyUrl}`);
                             useTimelineStore.getState().updateAsset(assetId, {
                                 proxyUrl: data.proxyUrl,
-                                isProxying: false
+                                isProxying: false,
+                                uploadPhase: 'ready'
                             });
                             // Store uploads-relative raw file path so AI API calls (silence, filler,
                             // denoise) can locate the file on the server. proxyPath is returned by
@@ -286,15 +297,34 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             } else {
                                 console.warn('[IDELayout] Proxy job result missing proxyPath and originalPath — AI API calls will not work');
                             }
+
+                            // Set contextual AI suggestion based on video duration
+                            const dur = assetEntry.sourceDuration || assetEntry.duration || 0;
+                            const suggestion = dur > 600
+                                ? 'Remove all silences and filler words'
+                                : dur > 60
+                                    ? 'Clean up the audio and trim the intro'
+                                    : 'Add captions and export for social';
+                            useAIStore.getState().setContextualSuggestion(suggestion);
                         })
                         .catch(err => {
+                            clearTimeout(processingTimer);
                             console.error(`[IDELayout] Proxy generation failed for ${file.name}`, err);
-                            useTimelineStore.getState().updateAsset(assetId, { isProxying: false });
+                            useTimelineStore.getState().updateAsset(assetId, { isProxying: false, uploadPhase: 'ready' });
                         });
                 }
             }
 
             addAssets(processedAssets);
+
+            // Fix 1: auto-place every imported asset on the timeline immediately.
+            // The player resolves the proxy URL from the asset store, so the clip
+            // will automatically upgrade from blob URL → proxy URL once processing
+            // finishes without any extra work here.
+            for (const asset of processedAssets) {
+                useTimelineStore.getState().addAssetToTimeline(asset);
+            }
+
             console.log("✅ Store updated with assets and metadata", processedAssets);
         }
     };

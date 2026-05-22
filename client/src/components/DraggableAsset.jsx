@@ -1,8 +1,50 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { Video, Music, Image as ImageIcon, Trash2, Loader2, Plus } from 'lucide-react';
 import useTimelineStore from '../store/useTimelineStore';
 import useDeviceType from '../hooks/useDeviceType';
+
+const PHASES = ['uploading', 'processing', 'ready'];
+const PHASE_LABELS = { uploading: 'Uploading', processing: 'Processing', ready: 'Ready' };
+
+const ProxyingOverlay = ({ asset }) => {
+    const [showLargeFileMsg, setShowLargeFileMsg] = useState(false);
+
+    useEffect(() => {
+        const elapsed = Date.now() - (asset.uploadStartTime || Date.now());
+        const remaining = Math.max(0, 10000 - elapsed);
+        const t = setTimeout(() => setShowLargeFileMsg(true), remaining);
+        return () => clearTimeout(t);
+    }, [asset.uploadStartTime]);
+
+    const phase = asset.uploadPhase || 'uploading';
+    const phaseIdx = PHASES.indexOf(phase);
+
+    return (
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(1px)' }}>
+            <div className="flex flex-col items-center gap-2 px-3 py-2.5 rounded-xl" style={{ background: 'rgba(0,0,0,0.55)' }}>
+                <Loader2 className="w-4 h-4 animate-spin" style={{ color: 'var(--accent)' }} />
+                {/* Step dots */}
+                <div className="flex items-center gap-1">
+                    {PHASES.map((p, i) => (
+                        <React.Fragment key={p}>
+                            <span className="w-1.5 h-1.5 rounded-full transition-colors" style={{ background: i <= phaseIdx ? 'var(--accent)' : 'rgba(255,255,255,0.2)' }} />
+                            {i < PHASES.length - 1 && <span className="w-2 h-px" style={{ background: i < phaseIdx ? 'var(--accent)' : 'rgba(255,255,255,0.15)' }} />}
+                        </React.Fragment>
+                    ))}
+                </div>
+                <span className="text-[8px] font-mono uppercase tracking-widest" style={{ color: 'var(--fg-3)' }}>
+                    {PHASE_LABELS[phase]}
+                </span>
+                {showLargeFileMsg && (
+                    <span className="text-[7px] text-center leading-tight mt-0.5 px-1" style={{ color: 'var(--fg-4)', maxWidth: 90 }}>
+                        Creating a lightweight preview so editing stays fast
+                    </span>
+                )}
+            </div>
+        </div>
+    );
+};
 
 // Helper to format duration like 1:05
 const formatTime = (seconds) => {
@@ -121,10 +163,7 @@ const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","
 
             {/* Proxying Overlay */}
             {asset.isProxying && (
-                <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center pointer-events-none z-10 backdrop-blur-[2px]">
-                    <Loader2 className="w-5 h-5 text-primary animate-spin mb-1" />
-                    <span className="text-[8px] text-primary/80 font-bold uppercase tracking-widest text-center px-2">Optimizing<br/>Preview</span>
-                </div>
+                <ProxyingOverlay asset={asset} />
             )}
 
             {/* Hint Overlay (Desktop) / Add Button (Mobile) */}

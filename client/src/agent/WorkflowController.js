@@ -3,6 +3,7 @@ import { editJobManager } from './EditJobManager.js';
 import useAIStore from '../store/useAIStore.js';
 import useJobStore, { JOB_STATES, TERMINAL_STATES } from '../store/useJobStore.js';
 import { EventBus, EVENT_TYPES } from './EventBus.js';
+import useTimelineStore from '../store/useTimelineStore.js';
 
 /**
  * WorkflowController V2
@@ -110,6 +111,18 @@ const workflowMachine = createMachine({
                                     },
                                     timestamp: new Date().toLocaleTimeString()
                                 });
+
+                                // P5: seek to the first edit point so the user immediately
+                                // sees the result without having to manually press play.
+                                setTimeout(() => {
+                                    const ts = useTimelineStore.getState();
+                                    const firstClipStart = ts.tracks
+                                        ?.flatMap(t => t.clips || [])
+                                        .sort((a, b) => a.start - b.start)[0]?.start ?? 0;
+                                    ts.seek(firstClipStart);
+                                    ts.setIsPlaying(true);
+                                    setTimeout(() => useTimelineStore.getState().setIsPlaying(false), 4000);
+                                }, 300);
 
                                 // Add suggestion for next actions
                                 if (result.suggestions && result.suggestions.length > 0) {

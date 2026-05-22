@@ -30,6 +30,7 @@ import { authFetch }  from '../utils/authFetch.js';
 import { pollJobResult } from '../utils/jobPoller.js';
 import useTimelineStore  from '../store/useTimelineStore.js';
 import { mediaBunnyService } from '../services/MediaBunnyService.js';
+import useAIStore from '../store/useAIStore.js';
 
 export const EXECUTION_STATES = {
     QUEUED:    'QUEUED',
@@ -628,6 +629,13 @@ export class MediaExecutionEngine {
         let currentStartTime = 0;
         const ts = Date.now();
 
+        useAIStore.getState().addLog({
+            id: `step-seg-${ts}`,
+            type: 'step',
+            message: `Applying ${validSegs.length} segment(s) to timeline…`,
+            timestamp: new Date().toLocaleTimeString()
+        });
+
         validSegs.forEach((seg, i) => {
             const newClip = {
                 ...baseClip,
@@ -635,7 +643,7 @@ export class MediaExecutionEngine {
                 start:    currentStartTime,
                 duration: seg.duration,
                 offset:   seg.start,
-                name:     `${baseClip.name || 'Clip'} (${prefix} ${i + 1})`
+                name:     `Segment ${i + 1}`
             };
             timelineStore.addClip(videoTrack.id, newClip);
             currentStartTime += seg.duration;
