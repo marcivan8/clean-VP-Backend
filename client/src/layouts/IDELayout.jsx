@@ -496,12 +496,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 {/* Top Bar */}
                 <header className="h-11 border-b flex items-center justify-start gap-6 px-4 z-20 shrink-0" style={{ background: "var(--glass)", borderColor: "var(--line-soft)", backdropFilter: "blur(20px) saturate(160%)" }}>
                     <div className="flex items-center gap-3">
-                        {/* macOS-style traffic light dots — desktop only */}
-                        <div className="hidden md:flex items-center gap-1.5 mr-1">
-                            <div className="studio-traffic-dot" style={{ background: "#ff5f57" }} />
-                            <div className="studio-traffic-dot" style={{ background: "#febc2e" }} />
-                            <div className="studio-traffic-dot" style={{ background: "#28c840" }} />
-                        </div>
+
                         <button className="md:hidden p-2 -ml-2 text-muted-foreground hover:text-foreground" onClick={() => setShowSidebar(!showSidebar)}>
                             <Menu className="w-5 h-5" />
                         </button>
