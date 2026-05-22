@@ -282,16 +282,17 @@ const ReasoningPanel = () => {
     return (
         <aside className="w-full h-full border-l border-border bg-card flex flex-col shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.1)]">
             {/* Header */}
-            <div className="p-4 border-b border-border flex items-center justify-between bg-card z-10">
+            <div className="p-3 border-b flex items-center justify-between" style={{ borderColor: "var(--line-soft)", background: "var(--glass)" }}>
                 <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-primary" />
-                    <span className="text-sm font-semibold text-foreground">Assistant</span>
+                    <span className="studio-mono-label" style={{ color: "var(--fg-4)" }}>AI</span>
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)", boxShadow: "0 0 8px var(--accent)", animation: "pulse-soft 2s infinite" }} />
+                    <span style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--fg-3)", letterSpacing: "0.04em" }}>Assistant</span>
                 </div>
                 <div className="flex items-center gap-2">
                     {isAnalyzing && <Activity className="w-3 h-3 text-purple-400 animate-pulse" />}
                     <div className={classNames(
                         "text-[10px] px-2 py-0.5 rounded-full border transition-colors",
-                        isAnalyzing ? "bg-purple-500/20 text-purple-300 border-purple-500/30" : "bg-secondary text-muted-foreground border-border"
+                        isAnalyzing ? "bg-purple-500/20 text-purple-300 border-purple-500/30" : "bg-black/40 text-muted-foreground border-white/10"
                     )}>
                         {isAnalyzing ? "Agent Working..." : "Ready"}
                     </div>

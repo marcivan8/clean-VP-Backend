@@ -855,11 +855,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         )}
                         style={{ background: "linear-gradient(180deg, var(--glass), transparent)" }}
                     >
-                        <div className="p-3 border-b flex items-center gap-2" style={{ borderColor: "var(--line-soft)", background: "var(--glass)" }}>
-                            <span className="studio-mono-label" style={{ color: "var(--fg-4)" }}>AI</span>
-                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)", boxShadow: "0 0 8px var(--accent)", animation: "pulse-soft 2s infinite" }} />
-                            <span style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--fg-3)", letterSpacing: "0.04em" }}>Assistant</span>
-                        </div>
+
                         <div className="flex-1 overflow-hidden h-full">
                             <ReasoningPanel />
                         </div>
