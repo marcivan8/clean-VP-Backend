@@ -120,6 +120,8 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                 // Wait for clip's start time on the timeline
                 yield* waitFor(clip.start);
 
+                if (!layerRefs[track.id]) return;
+
                 let clipRef: any = null;
                 if (clip.type === 'video') {
                     clipRef = createRef<Video>();

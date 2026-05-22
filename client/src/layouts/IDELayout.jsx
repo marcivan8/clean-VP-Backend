@@ -11,6 +11,7 @@ import ReasoningPanel from '../components/Assistant/ReasoningPanel';
 import { DndContext, DragOverlay, useSensor, useSensors, PointerSensor } from '@dnd-kit/core';
 import DraggableAsset from '../components/DraggableAsset';
 import TextPanel from '../components/TextPanel';
+import TextOverlay from '../components/Player/TextOverlay';
 import MobileBottomNav from '../components/MobileBottomNav';
 import useDeviceType from '../hooks/useDeviceType';
 import MixerPanel from '../components/Sidebar/MixerPanel';
@@ -918,6 +919,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         );
                                     })()}
                                 </ErrorBoundary>
+                                <TextOverlay />
                             </div>
 
                             {/* Floating Playback Controls */}

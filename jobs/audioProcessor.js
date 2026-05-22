@@ -230,10 +230,15 @@ module.exports = async function processAudioJob(job) {
                     file: fs.createReadStream(tWhisperPath),
                     model: 'whisper-1',
                     response_format: 'verbose_json',
-                    timestamp_granularities: ['word']
+                    timestamp_granularities: ['word', 'segment']
                 });
                 await job.updateProgress(100);
-                return { text: transcription.text, words: transcription.words };
+                // Some Whisper API versions return words at top level; others nest them inside segments
+                const topWords = transcription.words || [];
+                const segWords = (transcription.segments || []).flatMap(s => s.words || []);
+                const words = topWords.length > 0 ? topWords : segWords;
+                console.log(`[Job ${job.id}] 📝 Transcription complete: ${words.length} words`);
+                return { text: transcription.text, words };
             } finally {
                 if (tTempAudio && fs.existsSync(tTempAudio)) fs.unlinkSync(tTempAudio);
             }
