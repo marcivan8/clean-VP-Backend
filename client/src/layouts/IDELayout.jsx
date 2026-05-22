@@ -494,7 +494,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     <div className="absolute rounded-full blur-[120px]" style={{ width: "40vw", height: "40vw", bottom: "-30vw", left: "-10vw", background: "var(--violet)", opacity: 0.10 }} />
                 </div>
                 {/* Top Bar */}
-                <header className="h-11 border-b flex items-center justify-between px-4 z-20 shrink-0" style={{ background: "var(--glass)", borderColor: "var(--line-soft)", backdropFilter: "blur(20px) saturate(160%)" }}>
+                <header className="h-11 border-b flex items-center justify-start gap-6 px-4 z-20 shrink-0" style={{ background: "var(--glass)", borderColor: "var(--line-soft)", backdropFilter: "blur(20px) saturate(160%)" }}>
                     <div className="flex items-center gap-3">
                         {/* macOS-style traffic light dots — desktop only */}
                         <div className="hidden md:flex items-center gap-1.5 mr-1">
@@ -585,7 +585,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         }} />
                     </div>
 
-                    <div className="flex items-center gap-2 md:gap-3">
+                    <div className="flex items-center gap-2 md:gap-3 ml-auto">
                         <button onClick={() => setShowAI(!showAI)} className={classNames("md:hidden p-2 rounded-full transition-colors", showAI ? "bg-purple-500/20 text-purple-400" : "text-muted-foreground hover:bg-secondary")}>
                             <Sparkles className="w-5 h-5" />
                         </button>

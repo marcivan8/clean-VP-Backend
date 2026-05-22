@@ -353,7 +353,7 @@ const ReasoningPanel = () => {
                         disabled={isAnalyzing}
                         onKeyDown={handleKeyDown}
                         placeholder={isAnalyzing ? "Agent is working..." : "Tell the agent what to do..."}
-                        className="w-full bg-secondary/50 border border-border rounded-md pl-3 pr-10 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all placeholder:text-muted-foreground/50 disabled:opacity-50"
+                        className="w-full bg-black/20 border border-white/10 rounded-md pl-3 pr-10 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-purple-500/50 transition-all placeholder:text-white/40 disabled:opacity-50"
                     />
                     <button
                         onClick={processCommand}
