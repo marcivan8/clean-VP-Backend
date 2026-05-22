@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import HomePage from './pages/HomePage';
 import EditorPage from './pages/EditorPage';
 import AnalyzerPage from './pages/AnalyzerPage';
+import DataPage from './pages/DataPage';
 import { supabase } from './lib/supabaseClient';
 import useSessionStore from './store/useSessionStore';
 
@@ -28,6 +29,7 @@ function App() {
                 <Route path="/"        element={<HomePage />} />
                 <Route path="/editor"  element={<EditorPage />} />
                 <Route path="/analyzer" element={<AnalyzerPage />} />
+                <Route path="/data"     element={<DataPage />} />
             </Routes>
         </BrowserRouter>
     );

@@ -15,7 +15,7 @@ const FONTS = [
 ];
 
 const TextPanel = () => {
-    const { activeClipId, tracks, updateClip, addClip, addTextTrack, currentTime } = useTimelineStore();
+    const { activeClipId, tracks, updateClip, addClip, addTextTrack, currentTime, setActiveClip } = useTimelineStore();
 
     // Derive active clip
     const activeTrack = tracks.find(t => t.clips.some(c => c.id === activeClipId));
@@ -24,16 +24,12 @@ const TextPanel = () => {
     const isTextClip = activeTrack?.type === 'text';
 
     const handleAddText = (preset) => {
-        // Find or Create a text track
         let textTrack = tracks.find(t => t.type === 'text');
         if (!textTrack) {
             useTimelineStore.getState().addTextTrack();
-            // Re-fetch tracks after state update logic (or assume addTextTrack adds it)
-            // Zustand updates are sync, but we need to get the new state.
             textTrack = useTimelineStore.getState().tracks.find(t => t.type === 'text');
         }
 
-        // Add clip to track
         const id = `clip-text-${Date.now()}`;
         addClip(textTrack.id, {
             id,
@@ -46,6 +42,7 @@ const TextPanel = () => {
             color: preset.color || '#ffffff',
             type: 'text'
         });
+        setActiveClip(id);
     };
 
     if (activeClip && isTextClip) {
@@ -247,7 +244,7 @@ const TextPanel = () => {
 
             <div className="pt-4 border-t border-border">
                 <button
-                    onClick={() => useTimelineStore.getState().addTextTrack()}
+                    onClick={() => handleAddText({ name: 'Text', content: 'Enter text here', fontSize: 48 })}
                     className="w-full flex items-center justify-center gap-2 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-md text-xs font-medium transition-colors"
                 >
                     <Plus className="w-3 h-3" /> Add Text Layer

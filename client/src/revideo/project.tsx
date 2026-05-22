@@ -1,6 +1,6 @@
 /** @jsxImportSource @revideo/2d/lib */
 import { makeProject } from '@revideo/core';
-import { makeScene2D, Video, Audio, Img, Txt, Node } from '@revideo/2d';
+import { makeScene2D, Video, Audio, Img, Txt, Node, brightness, contrast, saturate, hue } from '@revideo/2d';
 import { waitFor, useScene, all, any, createRef } from '@revideo/core';
 
 /**
@@ -131,6 +131,11 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || canvasHeight;
                     const fitted = fitSize(srcW, srcH);
 
+                    const getGrading = () => {
+                        const t = typeof tracksSignal === 'function' ? tracksSignal() : (tracksSignal || []);
+                        return (t as any[]).flatMap((tr: any) => tr.clips || []).find((c: any) => c.id === clip.id)?.grading;
+                    };
+
                     layerRefs[track.id]().add(
                         <Video
                             ref={clipRef}
@@ -146,6 +151,12 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
                             rotation={() => evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
                             opacity={() => evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
+                            filters={[
+                                brightness(() => (getGrading()?.brightness ?? 100) / 100),
+                                contrast(() => (getGrading()?.contrast ?? 100) / 100),
+                                saturate(() => (getGrading()?.saturate ?? 100) / 100),
+                                hue(() => getGrading()?.hueRotate ?? 0),
+                            ]}
                         />
                     );
                 } else if (clip.type === 'audio') {
@@ -168,6 +179,11 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || canvasHeight;
                     const fitted = fitSize(srcW, srcH);
 
+                    const getGrading = () => {
+                        const t = typeof tracksSignal === 'function' ? tracksSignal() : (tracksSignal || []);
+                        return (t as any[]).flatMap((tr: any) => tr.clips || []).find((c: any) => c.id === clip.id)?.grading;
+                    };
+
                     layerRefs[track.id]().add(
                         <Img
                             ref={clipRef}
@@ -180,6 +196,12 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
                             rotation={() => evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
                             opacity={() => evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
+                            filters={[
+                                brightness(() => (getGrading()?.brightness ?? 100) / 100),
+                                contrast(() => (getGrading()?.contrast ?? 100) / 100),
+                                saturate(() => (getGrading()?.saturate ?? 100) / 100),
+                                hue(() => getGrading()?.hueRotate ?? 0),
+                            ]}
                         />
                     );
                 } else if (clip.type === 'text') {

@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { PanelLeft, Sparkles, Video, Play, Pause, Maximize2, Scissors, Music, Layers, Settings, Share, Menu, Upload, Palette, X, Puzzle, Move } from 'lucide-react';
+import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Menu, Upload, Palette, Move } from 'lucide-react';
 import classNames from 'classnames';
 import { Player } from '@revideo/player-react';
 import project from '../revideo/project';
@@ -10,24 +10,17 @@ import Timeline from '../components/Timeline/Timeline';
 import ReasoningPanel from '../components/Assistant/ReasoningPanel';
 import { DndContext, DragOverlay, useSensor, useSensors, PointerSensor } from '@dnd-kit/core';
 import DraggableAsset from '../components/DraggableAsset';
-import DraggableEffect from '../components/DraggableEffect';
 import TextPanel from '../components/TextPanel';
 import MobileBottomNav from '../components/MobileBottomNav';
 import useDeviceType from '../hooks/useDeviceType';
 import MixerPanel from '../components/Sidebar/MixerPanel';
 import ExportModal from '../components/ExportModal';
-import { Type, Cpu, TrendingUp, GitCompare } from 'lucide-react';
-import { EffectsPanel } from '../components/Effects';
+import { Type } from 'lucide-react';
 import { ClarificationDialog } from '../components/ClarificationDialog';
 import { ApprovalDialog } from '../components/ApprovalDialog';
 import { probeMedia } from '../utils/mediaProbe';
 import ProxyService from '../services/proxyService';
-import { ViralIntelligencePanel } from '../components/ViralIntelligencePanel';
-import { ABTestPanel } from '../components/ABTestPanel';
-import { PresetMarketplace } from '../components/PresetMarketplace';
 import { AutonomousEditingPanel } from '../components/AutonomousEditingPanel';
-import useEditorStore from '../store/useEditorStore';
-import PresetSystem from '../presets/PresetSystem';
 import useAIStore from '../store/useAIStore';
 import useSessionStore from '../store/useSessionStore';
 import AuthPromptModal from '../components/AuthPromptModal';
@@ -198,8 +191,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const [activeTab, setActiveTab] = React.useState('media');
     const [activeColorRange, setActiveColorRange] = React.useState('reds');
     const [openMenu, setOpenMenu] = React.useState(null);
-    // Phase 7 state
-    const [showPresetMarketplace, setShowPresetMarketplace] = React.useState(false);
 
     const projectLoaderRef = useRef(null);
     const playerRef = useRef(null);
@@ -588,17 +579,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 </div>
             )}
 
-            {/* Phase 7: Preset Marketplace Modal */}
-            <PresetMarketplace
-                isOpen={showPresetMarketplace}
-                onClose={() => setShowPresetMarketplace(false)}
-                onApplyPreset={(preset) => {
-                    const ops = PresetSystem.apply(preset.id);
-                    console.log('[IDELayout] Applying preset:', preset.name, ops);
-                }}
-            />
-
-            {/* Phase 7: Autonomous Editing Panel (floating) */}
             <AutonomousEditingPanel />
 
             <div className="h-screen w-screen overflow-hidden flex flex-col font-sans selection:bg-primary/30 text-foreground" style={{ background: "linear-gradient(180deg, var(--bg-2), var(--bg-3))" }}>
@@ -740,19 +720,17 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         <input type="file" ref={fileInputRef} onChange={handleFileImport} className="hidden" accept="video/*,audio/*,image/*" multiple />
 
                         <div className="p-2 border-b flex gap-1 overflow-x-auto no-scrollbar" style={{ borderColor: "var(--line-soft)" }}>
-                            {['media', 'effects', 'color', 'text', 'audio', 'transform', 'presets', 'settings'].map(tab => (
+                            {['media', 'color', 'text', 'audio', 'transform', 'settings'].map(tab => (
                                 <button
                                     key={tab}
-                                    onClick={() => tab === 'presets' ? setShowPresetMarketplace(true) : setActiveTab(tab)}
+                                    onClick={() => setActiveTab(tab)}
                                     className={classNames("studio-tab-btn", activeTab === tab && "active")}
                                 >
                                     {tab === 'media' && <Layers className="w-2.5 h-2.5" />}
-                                    {tab === 'effects' && <Sparkles className="w-2.5 h-2.5" />}
                                     {tab === 'color' && <Palette className="w-2.5 h-2.5" />}
                                     {tab === 'text' && <Type className="w-2.5 h-2.5" />}
                                     {tab === 'audio' && <span style={{ fontSize: 9 }}>🎤</span>}
                                     {tab === 'transform' && <Move className="w-2.5 h-2.5" />}
-                                    {tab === 'presets' && <span style={{ fontSize: 9 }}>🧩</span>}
                                     {tab === 'settings' && <Settings className="w-2.5 h-2.5" />}
                                     {tab}
                                 </button>

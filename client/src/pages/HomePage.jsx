@@ -609,6 +609,7 @@ const Footer = () => {
       "Product": ["Studio", "Conversational editor", "Workflows", "Exports", "Changelog"],
       "Resources": ["Documentation", "Style guides", "Roundtrip presets", "Community", "Status"],
       "Company": ["Manifesto", "Studios", "Careers", "Press", "Contact"],
+      "Legal": ["Your data", "Terms"],
     };
     return (
       <footer style={{ borderTop: "0.5px solid var(--line)", padding: "64px 0 32px", background: "var(--bg)" }}>
@@ -626,7 +627,7 @@ const Footer = () => {
             <div key={k} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <div className="mono" style={{ color: "var(--fg-4)" }}>{k.toUpperCase()}</div>
               {items.map(it => (
-                <a key={it} href="#" style={{ fontSize: 13.5, color: "var(--fg-2)" }} className="hover:text-foreground transition-colors">{it}</a>
+                <a key={it} href={it === 'Your data' ? '/data' : '#'} style={{ fontSize: 13.5, color: "var(--fg-2)" }} className="hover:text-foreground transition-colors">{it}</a>
               ))}
             </div>
           ))}
