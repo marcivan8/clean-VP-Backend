@@ -118,6 +118,7 @@ const Clip = ({ clip, trackId }) => {
                 setNodeRef(node);
                 setDroppableRef(node);
             }}
+            data-clip-id={clip.id}
             style={style}
             {...listeners}
             {...attributes}

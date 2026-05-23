@@ -1,14 +1,95 @@
 import React from 'react';
 import Track from './Track';
 import useTimelineStore from '../../store/useTimelineStore';
-import { Scissors, ZoomIn, ZoomOut, Copy, Type, Wand2, Palette } from 'lucide-react';
+import { Scissors, ZoomIn, ZoomOut, Copy, Type, Palette } from 'lucide-react';
+
+const RULER_H = 24;   // h-6 = 24px (ruler height)
+const LABEL_W = 128;  // w-32 = 128px (track label column)
 
 const Timeline = () => {
-    const { tracks, duration, zoomLevel, seek, addClip, updateClip, setZoomLevel, addTrack, clearSelection } = useTimelineStore();
+    const { tracks, duration, zoomLevel, seek, setZoomLevel, addTrack } = useTimelineStore();
 
     const timeDisplayRef = React.useRef(null);
     const playheadLineRef = React.useRef(null);
     const playheadHandleRef = React.useRef(null);
+
+    // Rubber-band multi-select
+    const tracksAreaRef = React.useRef(null);
+    const selDragRef = React.useRef(null);
+    const [selBox, setSelBox] = React.useState(null);
+
+    const getContentPos = React.useCallback((clientX, clientY) => {
+        const area = tracksAreaRef.current;
+        if (!area) return { x: 0, y: 0 };
+        const rect = area.getBoundingClientRect();
+        return {
+            x: clientX - rect.left + area.scrollLeft,
+            y: clientY - rect.top + area.scrollTop - RULER_H,
+        };
+    }, []);
+
+    const handleTracksMouseDown = React.useCallback((e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest('[data-clip-id], button, input, select')) return;
+        const area = tracksAreaRef.current;
+        if (!area) return;
+        const rect = area.getBoundingClientRect();
+        const localX = e.clientX - rect.left + area.scrollLeft;
+        if (localX < LABEL_W) return; // in label column
+
+        const start = getContentPos(e.clientX, e.clientY);
+        selDragRef.current = { ...start, moved: false };
+
+        const onMove = (me) => {
+            const cur = getContentPos(me.clientX, me.clientY);
+            const dx = cur.x - selDragRef.current.x;
+            const dy = cur.y - selDragRef.current.y;
+            if (!selDragRef.current.moved && Math.hypot(dx, dy) < 5) return;
+            selDragRef.current.moved = true;
+            setSelBox({
+                left: Math.min(selDragRef.current.x, cur.x),
+                top: Math.min(selDragRef.current.y, cur.y),
+                width: Math.abs(dx),
+                height: Math.abs(dy),
+            });
+        };
+
+        const onUp = (me) => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+
+            if (selDragRef.current?.moved) {
+                const cur = getContentPos(me.clientX, me.clientY);
+                const x1 = Math.min(selDragRef.current.x, cur.x);
+                const x2 = Math.max(selDragRef.current.x, cur.x);
+                const zl = useTimelineStore.getState().zoomLevel;
+                const tStart = Math.max(0, (x1 - LABEL_W) / zl);
+                const tEnd = (x2 - LABEL_W) / zl;
+
+                const ids = [];
+                for (const track of useTimelineStore.getState().tracks) {
+                    for (const clip of track.clips || []) {
+                        if ((clip.start + clip.duration) > tStart && clip.start < tEnd) {
+                            ids.push(clip.id);
+                        }
+                    }
+                }
+                if (ids.length > 0) {
+                    useTimelineStore.setState({ selectedClipIds: ids, activeClipId: ids[0] });
+                } else {
+                    useTimelineStore.getState().clearSelection();
+                }
+            } else {
+                useTimelineStore.getState().clearSelection();
+            }
+
+            selDragRef.current = null;
+            setSelBox(null);
+        };
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    }, [getContentPos]);
 
     React.useEffect(() => {
         let rafId;
@@ -93,7 +174,6 @@ const Timeline = () => {
         seek(clickedTime);
     };
 
-    const timelineRef = React.useRef(null);
 
     return (
         <div className="flex-1 bg-transparent flex flex-col relative h-full select-none" onKeyDown={handleKeyDown} tabIndex={0}>
@@ -237,11 +317,10 @@ const Timeline = () => {
 
             {/* Tracks Area */}
             <div
+                ref={tracksAreaRef}
                 className="flex-1 overflow-auto relative custom-scrollbar flex flex-col"
                 style={{ WebkitOverflowScrolling: 'touch' }}
-                onClick={(e) => {
-                    clearSelection();
-                }}
+                onMouseDown={handleTracksMouseDown}
             >
                 {/* Ruler */}
                 <div className="flex h-6 border-b border-white/5 bg-black/20 sticky top-0 z-10 shrink-0">
@@ -290,6 +369,19 @@ const Timeline = () => {
                     {tracks.map(track => (
                         <Track key={track.id} track={track} />
                     ))}
+
+                    {/* Rubber-band selection box */}
+                    {selBox && (
+                        <div
+                            className="absolute z-40 border border-blue-400/80 bg-blue-400/10 pointer-events-none rounded-sm"
+                            style={{
+                                left: `${selBox.left}px`,
+                                top: `${selBox.top}px`,
+                                width: `${selBox.width}px`,
+                                height: `${selBox.height}px`,
+                            }}
+                        />
+                    )}
                 </div>
             </div>
         </div>

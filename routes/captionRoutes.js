@@ -33,15 +33,16 @@ router.post('/generate', optionalAuth, async (req, res) => {
         }
 
         if (!fs.existsSync(filePath)) {
+            // Try uploads/temp/<basename> as fallback
             const tempPath = path.resolve(uploadsDir, 'temp', path.basename(normalizedFilename));
             if (filePath !== tempPath && fs.existsSync(tempPath)) {
                 filePath = tempPath;
-            } else if (process.env.NODE_ENV !== 'production') {
+            } else {
                 return res.status(404).json({ error: `File not found: ${filename}` });
             }
         }
 
-        const userId = req.user?.id || (process.env.NODE_ENV !== 'production' ? 'dev-user' : null);
+        const userId = req.user?.id || null;
         const job = await audioQueue.add('transcribe-audio', {
             action: 'transcribe',
             filename: path.basename(filePath),
