@@ -50,7 +50,10 @@ router.post('/denoise', optionalAuth, async (req, res) => {
         }
 
         if (!fs.existsSync(inputPath)) {
-            return res.status(404).json({ error: 'File not found on server' });
+            if (process.env.NODE_ENV !== 'production') {
+                return res.status(404).json({ error: 'File not found on server' });
+            }
+            console.warn(`[audioRoutes] File not found locally (${inputPath}); worker will attempt GCS download.`);
         }
 
         console.log(`🎧 Enqueuing Denoise: ${inputPath}`);
@@ -103,7 +106,10 @@ router.post('/beat-detect', authenticateUser, async (req, res) => {
             return res.status(403).json({ error: 'Access denied: invalid file path' });
         }
         if (!fs.existsSync(inputPath)) {
-            return res.status(404).json({ error: 'File not found' });
+            if (process.env.NODE_ENV !== 'production') {
+                return res.status(404).json({ error: 'File not found' });
+            }
+            console.warn(`[audioRoutes] File not found locally (${inputPath}); worker will attempt GCS download.`);
         }
 
         console.log(`🥁 Enqueuing Beat Detection for: ${inputPath}`);
@@ -148,7 +154,10 @@ router.post('/normalize', optionalAuth, async (req, res) => {
             return res.status(403).json({ error: 'Access denied: invalid file path' });
         }
         if (!fs.existsSync(inputPath)) {
-            return res.status(404).json({ error: 'File not found' });
+            if (process.env.NODE_ENV !== 'production') {
+                return res.status(404).json({ error: 'File not found' });
+            }
+            console.warn(`[audioRoutes] File not found locally (${inputPath}); worker will attempt GCS download.`);
         }
 
         console.log(`🔊 Enqueuing Audio Normalization for: ${inputPath}`);
@@ -211,7 +220,10 @@ router.post('/transcribe', authenticateUser, async (req, res) => {
             if (tempPath.startsWith(uploadsDir) && fs.existsSync(tempPath)) {
                 inputPath = tempPath;
             } else {
-                return res.status(404).json({ error: `File not found: ${filename || filePath}` });
+                if (process.env.NODE_ENV !== 'production') {
+                    return res.status(404).json({ error: `File not found: ${filename || filePath}` });
+                }
+                console.warn(`[audioRoutes] File not found locally (${inputPath}); worker will attempt GCS download.`);
             }
         }
 
@@ -274,7 +286,10 @@ router.post('/filler/detect', authenticateUser, async (req, res) => {
             if (tempPath.startsWith(uploadsDir) && require('fs').existsSync(tempPath)) {
                 inputPath = tempPath;
             } else {
-                return res.status(404).json({ error: `File not found: ${filename || filePath}` });
+                if (process.env.NODE_ENV !== 'production') {
+                    return res.status(404).json({ error: `File not found: ${filename || filePath}` });
+                }
+                console.warn(`[audioRoutes] File not found locally (${inputPath}); worker will attempt GCS download.`);
             }
         }
 
