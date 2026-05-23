@@ -89,6 +89,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         return { activeClip: null, activeTrackId: null };
     }, [tracks, activeClipId]);
 
+    const hasClips = React.useMemo(
+        () => tracks.some(t => t.clips?.length > 0),
+        [tracks]
+    );
+
     const playerVariables = React.useMemo(() => {
         return {
             tracks: tracks.map((t, idx) => {
@@ -103,7 +108,14 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     order: t.order ?? idx,
                     clips: t.clips.map(c => {
                         const sourceAsset = assets.find(a => a.id === c.assetId);
-                        const activeUrl = sourceAsset?.proxyUrl || c.proxyUrl || sourceAsset?.fileUrl || c.url || c.fileUrl;
+                        // Prefer proxy (GCS) → clip-level proxy → asset blob URL (in-memory,
+                        // valid while the tab is open) → stored fileUrl → clip's own url field
+                        const activeUrl = sourceAsset?.proxyUrl
+                            || c.proxyUrl
+                            || sourceAsset?.url
+                            || sourceAsset?.fileUrl
+                            || c.url
+                            || c.fileUrl;
                         return {
                             ...c,
                             type: t.type || c.type,
@@ -905,7 +917,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                             // a full Revideo player remount (recompile) every time a clip
                                             // was added. That broke playback and caused 3-5s stutters.
                                             <Player
-                                                key={`player-${aspectRatio}`}
+                                                key={`player-${aspectRatio}-${hasClips ? 'media' : 'empty'}`}
                                                 onPlayerReady={handlePlayerReady}
                                                 playing={isPlaying}
                                                 controls={false}

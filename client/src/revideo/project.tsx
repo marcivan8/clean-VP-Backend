@@ -66,7 +66,10 @@ const timelineScene = makeScene2D('timeline', function* (view) {
     const canvasWidth = cw;
     const canvasHeight = ch;
 
-    // Simple placeholder text when no tracks/clips
+    // Simple placeholder text when no tracks/clips.
+    // Loop quickly (0.5s) so the scene re-reads tracks as soon as a clip is
+    // added — the player key also remounts on empty→media transition as a
+    // belt-and-suspenders guard.
     const hasClips = tracks.some(t => t.clips && t.clips.length > 0);
     if (!hasClips) {
         yield view.add(
@@ -78,7 +81,7 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                 fill="rgba(255,255,255,0.15)"
             />
         );
-        yield* waitFor(totalDuration);
+        yield* waitFor(0.5);
         return;
     }
 
