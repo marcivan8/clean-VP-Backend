@@ -84,6 +84,15 @@ async function uploadToStorage(localFilePath, destinationPath) {
             destination: destinationPath,
             metadata: { cacheControl: 'public, max-age=31536000' },
         });
+        // Make the object publicly readable. Throws on uniform-bucket-level-access
+        // buckets — in that case the bucket IAM binding handles it instead.
+        try {
+            await bucket.file(destinationPath).makePublic();
+        } catch (err) {
+            if (!err.message?.includes('uniform bucket-level access')) {
+                console.warn(`[uploadToStorage] makePublic failed for ${destinationPath}:`, err.message);
+            }
+        }
         return `https://storage.googleapis.com/${bucket.name}/${destinationPath}`;
     }
 }
