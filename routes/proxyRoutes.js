@@ -98,6 +98,31 @@ router.post('/generate', authMiddleware, async (req, res) => {
 
 const storageConfig = require('../config/storage');
 
+// ── In-memory segment cache ───────────────────────────────────────────────────
+// Caches small GCS objects (HLS .ts segments, .m3u8 playlists) so seek-backs
+// after playback.reload() are instant instead of re-fetching from GCS each time.
+const _segCache   = new Map(); // gcsPath → { buf: Buffer, ts: number }
+const SEG_TTL_MS  = 10 * 60 * 1000; // .ts segments expire after 10 min
+const M3U8_TTL_MS = 30 * 1000;       // .m3u8 playlists expire after 30 s
+const MAX_CACHE_BYTES = 5 * 1024 * 1024; // never cache objects > 5 MB
+const MAX_CACHE_ENTRIES = 120;
+
+function _cacheGet(key, ext) {
+    const entry = _segCache.get(key);
+    if (!entry) return null;
+    const ttl = ext === '.m3u8' ? M3U8_TTL_MS : SEG_TTL_MS;
+    if (Date.now() - entry.ts > ttl) { _segCache.delete(key); return null; }
+    return entry.buf;
+}
+
+function _cachePut(key, buf) {
+    if (buf.length > MAX_CACHE_BYTES) return;
+    if (_segCache.size >= MAX_CACHE_ENTRIES) {
+        _segCache.delete(_segCache.keys().next().value); // evict oldest (insertion order)
+    }
+    _segCache.set(key, { buf, ts: Date.now() });
+}
+
 /**
  * POST /api/proxy/upload
  * Accept multipart/form-data video upload and trigger proxy generation.
@@ -190,15 +215,38 @@ router.get('/gcs-media/*', async (req, res) => {
         return res.sendFile(localPath);
     }
 
-    // ── GCS streaming ─────────────────────────────────────────────────────
-    try {
-        const file = bucket.file(gcsPath);
-        const [exists] = await file.exists();
-        if (!exists) return res.status(404).end();
+    // ── GCS with in-memory cache for HLS segments ─────────────────────────
+    // .ts segments and .m3u8 playlists are buffered on first fetch so that
+    // repeat seeks (after playback.reload()) are served instantly from memory.
+    const CACHEABLE_EXTS = new Set(['.ts', '.m3u8', '.json']);
+    const cachedBuf = _cacheGet(gcsPath, ext);
 
+    try {
         res.setHeader('Content-Type', contentType);
         res.setHeader('Cache-Control', 'public, max-age=31536000');
         res.setHeader('Access-Control-Allow-Origin', '*');
+
+        // ── Cache hit ──────────────────────────────────────────────────────
+        if (cachedBuf) {
+            if (req.headers.range) {
+                const fileSize = cachedBuf.length;
+                const [startStr, endStr] = req.headers.range.replace(/bytes=/, '').split('-');
+                const start = parseInt(startStr);
+                const end = endStr ? parseInt(endStr) : fileSize - 1;
+                res.status(206);
+                res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+                res.setHeader('Accept-Ranges', 'bytes');
+                res.setHeader('Content-Length', end - start + 1);
+                return res.end(cachedBuf.slice(start, end + 1));
+            }
+            res.setHeader('Content-Length', cachedBuf.length);
+            return res.end(cachedBuf);
+        }
+
+        // ── Cache miss: fetch from GCS ─────────────────────────────────────
+        const file = bucket.file(gcsPath);
+        const [exists] = await file.exists();
+        if (!exists) return res.status(404).end();
 
         if (req.headers.range) {
             const [metadata] = await file.getMetadata();
@@ -210,13 +258,31 @@ router.get('/gcs-media/*', async (req, res) => {
             res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
             res.setHeader('Accept-Ranges', 'bytes');
             res.setHeader('Content-Length', end - start + 1);
-            file.createReadStream({ start, end }).pipe(res);
+            return file.createReadStream({ start, end }).pipe(res);
+        }
+
+        if (CACHEABLE_EXTS.has(ext)) {
+            // Buffer the whole object so it can be cached for future seeks
+            const chunks = [];
+            const stream = file.createReadStream();
+            stream.on('data', chunk => chunks.push(chunk));
+            stream.on('end', () => {
+                const buf = Buffer.concat(chunks);
+                _cachePut(gcsPath, buf);
+                res.setHeader('Content-Length', buf.length);
+                res.end(buf);
+            });
+            stream.on('error', (err) => {
+                console.error('[proxy/gcs-media] Stream error', gcsPath, ':', err.message);
+                if (!res.headersSent) res.status(500).end();
+            });
         } else {
+            // Large video files (mp4/mov/webm) — stream directly, never buffer
             file.createReadStream().pipe(res);
         }
     } catch (err) {
         console.error('[proxy/gcs-media] Error streaming', gcsPath, ':', err.message);
-        res.status(500).end();
+        if (!res.headersSent) res.status(500).end();
     }
 });
 

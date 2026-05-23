@@ -89,9 +89,13 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         return { activeClip: null, activeTrackId: null };
     }, [tracks, activeClipId]);
 
+    // Defer track changes so rapid caption/clip additions coalesce into a
+    // single playerVariables update — one playback.reload() instead of N.
+    const deferredTracks = React.useDeferredValue(tracks);
+
     const hasClips = React.useMemo(
-        () => tracks.some(t => t.clips?.length > 0),
-        [tracks]
+        () => deferredTracks.some(t => t.clips?.length > 0),
+        [deferredTracks]
     );
 
     // Convert legacy direct GCS URLs (stored in old autosaves) to go through
@@ -109,8 +113,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
     const playerVariables = React.useMemo(() => {
         return {
-            tracks: tracks.map((t, idx) => {
-                const isAnySolo = tracks.some(tr => tr.solo);
+            tracks: deferredTracks.map((t, idx) => {
+                const isAnySolo = deferredTracks.some(tr => tr.solo);
                 const shouldMute = t.muted || (isAnySolo && !t.solo);
                 const rawVol = t.volume !== undefined ? t.volume : 1;
                 const trackVol = shouldMute ? 0 : rawVol;
@@ -145,7 +149,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             aspectRatio: aspectRatio,
             fps: 30
         };
-    }, [tracks, duration, aspectRatio, assets, toProxyUrl]);
+    }, [deferredTracks, duration, aspectRatio, assets, toProxyUrl]);
 
     const handleGradingChange = (key, value) => {
         if (!activeClip || !activeTrackId) return;
