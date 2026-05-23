@@ -33,12 +33,17 @@ router.post('/generate', optionalAuth, async (req, res) => {
         }
 
         if (!fs.existsSync(filePath)) {
-            // Try uploads/temp/<basename> as fallback
             const tempPath = path.resolve(uploadsDir, 'temp', path.basename(normalizedFilename));
-            if (filePath !== tempPath && fs.existsSync(tempPath)) {
-                filePath = tempPath;
+            if (fs.existsSync(tempPath)) {
+                filePath = tempPath;   // found in temp/ subdir — use it
             } else {
-                return res.status(404).json({ error: `File not found: ${filename}` });
+                // File missing locally. In production the worker will download from GCS.
+                // In dev, fail fast so the error is visible.
+                if (process.env.NODE_ENV !== 'production') {
+                    return res.status(404).json({ error: `File not found: ${filename}` });
+                }
+                // Production: queue anyway — worker has GCS fallback (same as silenceProcessor.js)
+                console.warn(`[captionRoutes] File not found locally (${filePath}); worker will attempt GCS download.`);
             }
         }
 
