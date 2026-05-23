@@ -728,30 +728,41 @@ const useTimelineStore = create(
 
             addCaptionClips: (captions) => {
                 if (!captions || captions.length === 0) return;
+
+                // Save history once (before any mutations)
                 get()._saveHistory();
 
-                // Ensure a text track exists — dispatch directly to avoid double history save
+                // Ensure a text track exists — dispatch directly to timelineManager
+                // so we don't trigger addTextTrack()'s own _saveHistory() call.
                 let textTrack = timelineManager.toLegacyTracks().find(t => t.type === 'text');
                 if (!textTrack) {
                     const layers = timelineManager.getEntitiesArray(ENTITY_TYPES.LAYER);
                     const count = layers.filter(l => l.type === 'text').length;
-                    const id = `track-${Date.now()}`;
+                    const id = `track-text-${Date.now()}`;
                     timelineManager.dispatch(TimelineActions.addLayer({
-                        id, name: `Text Layer ${count + 1}`, type: 'text', order: 0
-                    }));
+                        id,
+                        name: `Captions ${count + 1}`,
+                        type: 'text',
+                        order: 0,
+                    }), { skipHistory: true });
                     textTrack = timelineManager.toLegacyTracks().find(t => t.type === 'text');
                 }
-                if (!textTrack) return;
+                if (!textTrack) {
+                    console.error('[addCaptionClips] Could not find or create text track');
+                    return;
+                }
 
                 const trackId = textTrack.id;
                 let maxEnd = get().duration;
 
-                // Batch ALL clip additions into ONE transaction → ONE event → ONE React render
+                // ── ONE transaction → ONE timeline event → ONE React render ──
                 timelineManager.beginTransaction();
                 try {
                     captions.forEach((cap, i) => {
                         const clipId = `caption-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`;
-                        const duration = Math.max(0.3, cap.end - cap.start);
+                        const duration = Math.max(0.3, (cap.end || 0) - (cap.start || 0));
+
+                        // Add the clip entity (metadata / visual properties)
                         timelineManager.dispatch(TimelineActions.addClip({
                             id: clipId,
                             name: cap.text,
@@ -766,18 +777,22 @@ const useTimelineStore = create(
                             sourceDuration: duration,
                             metadata: {},
                         }));
+
+                        // Add the placement (when/where on the timeline)
                         timelineManager.dispatch(TimelineActions.addPlacement({
                             clipId,
                             layerId: trackId,
-                            startTime: cap.start,
+                            startTime: cap.start || 0,
                             duration,
                             offset: 0,
                             speed: 1.0,
                             volume: 1.0,
                         }));
-                        const clipEnd = cap.start + duration;
+
+                        const clipEnd = (cap.start || 0) + duration;
                         if (clipEnd > maxEnd) maxEnd = clipEnd;
                     });
+
                     timelineManager.commitTransaction('Add Captions');
                 } catch (err) {
                     timelineManager.rollbackTransaction();
@@ -785,7 +800,12 @@ const useTimelineStore = create(
                     return;
                 }
 
-                if (maxEnd > get().duration) get().setDuration(maxEnd);
+                // Extend timeline duration if captions run past it
+                if (maxEnd > get().duration) {
+                    get().setDuration(maxEnd);
+                }
+
+                // Single sync to Zustand / React
                 set({ tracks: timelineManager.toLegacyTracks() });
             },
 
