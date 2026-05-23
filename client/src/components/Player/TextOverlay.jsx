@@ -132,6 +132,7 @@ const TextOverlay = () => {
                             top: `${clip.y || 50}%`,
                             // Transform: Center (-50%) + Scale
                             transform: `translate(-50%, -50%) scale(${clip.scale || 1})`,
+                            width: '80%',
                             fontFamily: FONT_MAP[clip.fontFamily] || 'Inter, sans-serif',
                             fontSize: `${clip.fontSize || 48}px`,
                             fontWeight: clip.fontWeight || 'normal',

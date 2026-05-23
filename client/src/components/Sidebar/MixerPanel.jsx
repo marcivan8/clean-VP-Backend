@@ -1,6 +1,8 @@
 import React from 'react';
 import useTimelineStore from '../../store/useTimelineStore';
-import { Volume2, Mic, Settings2, Sliders, Activity } from 'lucide-react';
+import { authFetch } from '../../utils/authFetch';
+import { pollJobResult } from '../../utils/jobPoller';
+import { Volume2, Mic, Settings2, Sliders, Activity, Loader2 } from 'lucide-react';
 
 const MixerPanel = () => {
     const {
@@ -13,32 +15,62 @@ const MixerPanel = () => {
         audioLevels
     } = useTimelineStore();
 
-    // Find Active Clip to inspect
+    const [processing, setProcessing] = React.useState({});
+
     let activeClip = null;
     let activeTrackId = null;
-
     if (activeClipId) {
         for (const track of tracks) {
             const clip = track.clips.find(c => c.id === activeClipId);
-            if (clip) {
-                activeClip = clip;
-                activeTrackId = track.id;
-                break;
-            }
+            if (clip) { activeClip = clip; activeTrackId = track.id; break; }
         }
     }
 
-    // Helper for updating clip
     const updateActive = (updates) => {
-        if (activeTrackId && activeClip) {
-            updateClip(activeTrackId, activeClip.id, updates);
+        if (activeTrackId && activeClip) updateClip(activeTrackId, activeClip.id, updates);
+    };
+
+    const runAudioProcess = async (type) => {
+        if (!activeClip) return;
+        const store = useTimelineStore.getState();
+        const filename = store.uploadedFilePath || store.uploadedFile?.name;
+        if (!filename) return;
+
+        setProcessing(p => ({ ...p, [type]: true }));
+        try {
+            const endpoint = type === 'denoise' ? '/api/audio/denoise' : '/api/audio/normalize';
+            const res = await authFetch(endpoint, {
+                method: 'POST',
+                body: JSON.stringify({ filename }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || `${type} failed (${res.status})`);
+            }
+            const data = await res.json();
+            if (data.jobId) {
+                const result = await pollJobResult(data.jobId);
+                if (result?.url) {
+                    // Update asset proxyUrl so the player picks up the processed audio
+                    const asset = store.assets.find(a => a.id === activeClip.assetId);
+                    if (asset) store.updateAsset(asset.id, { proxyUrl: result.url });
+                    updateActive({ [type]: true });
+                }
+            }
+        } catch (err) {
+            console.error(`[MixerPanel] ${type} failed:`, err.message);
+        } finally {
+            setProcessing(p => ({ ...p, [type]: false }));
         }
     };
+
+    // Text tracks don't carry audio — exclude them from the mixer
+    const audioTracks = tracks.filter(t => t.type !== 'text');
 
     return (
         <div className="flex flex-col h-full bg-gray-900/50 p-4 border-l border-white/5 font-sans overflow-hidden">
 
-            {/* 1. INSPECTOR SECTION (If Clip Selected) */}
+            {/* 1. INSPECTOR SECTION */}
             <div className="mb-6 border-b border-white/10 pb-6 flex-shrink-0">
                 <div className="flex items-center gap-2 mb-4">
                     <Settings2 className="w-4 h-4 text-primary" />
@@ -91,19 +123,27 @@ const MixerPanel = () => {
                                 </div>
                             </div>
 
-                            {/* Effects Toggles */}
+                            {/* Effects Buttons */}
                             <div className="flex gap-2">
                                 <button
-                                    onClick={() => updateActive({ denoise: !activeClip.denoise })}
-                                    className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors flex items-center justify-center gap-1 ${activeClip.denoise ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-white/5 text-gray-400 border border-transparent hover:bg-white/10'}`}
+                                    onClick={() => runAudioProcess('denoise')}
+                                    disabled={!!processing.denoise}
+                                    className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors flex items-center justify-center gap-1 ${activeClip.denoise ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-white/5 text-gray-400 border border-transparent hover:bg-white/10'} disabled:opacity-50 disabled:cursor-not-allowed`}
                                 >
-                                    <Mic className="w-3 h-3" /> Denoise
+                                    {processing.denoise
+                                        ? <><Loader2 className="w-3 h-3 animate-spin" /> Processing…</>
+                                        : <><Mic className="w-3 h-3" /> Denoise</>
+                                    }
                                 </button>
                                 <button
-                                    onClick={() => updateActive({ enhance: !activeClip.enhance })}
-                                    className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors flex items-center justify-center gap-1 ${activeClip.enhance ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-white/5 text-gray-400 border border-transparent hover:bg-white/10'}`}
+                                    onClick={() => runAudioProcess('enhance')}
+                                    disabled={!!processing.enhance}
+                                    className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors flex items-center justify-center gap-1 ${activeClip.enhance ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-white/5 text-gray-400 border border-transparent hover:bg-white/10'} disabled:opacity-50 disabled:cursor-not-allowed`}
                                 >
-                                    <Activity className="w-3 h-3" /> Enhance
+                                    {processing.enhance
+                                        ? <><Loader2 className="w-3 h-3 animate-spin" /> Processing…</>
+                                        : <><Activity className="w-3 h-3" /> Enhance</>
+                                    }
                                 </button>
                             </div>
                         </div>
@@ -111,7 +151,7 @@ const MixerPanel = () => {
                 )}
             </div>
 
-            {/* 2. TRACK MIXER SECTION */}
+            {/* 2. TRACK MIXER */}
             <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar">
                 <div className="flex items-center gap-2 mb-3 px-1">
                     <Sliders className="w-4 h-4 text-primary" />
@@ -119,7 +159,7 @@ const MixerPanel = () => {
                 </div>
 
                 <div className="space-y-2">
-                    {tracks.map(track => {
+                    {audioTracks.map(track => {
                         const isMuted = track.muted;
                         const isSolo = track.solo;
                         const level = audioLevels[track.id] || 0;
@@ -139,27 +179,19 @@ const MixerPanel = () => {
                                             onClick={() => toggleTrackSolo(track.id)}
                                             className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold transition-colors ${isSolo ? 'bg-yellow-500/20 text-yellow-400' : 'bg-white/5 text-gray-500 hover:text-gray-300'}`}
                                             title="Solo"
-                                        >
-                                            S
-                                        </button>
+                                        >S</button>
                                         <button
                                             onClick={() => toggleTrackMute(track.id)}
                                             className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold transition-colors ${isMuted ? 'bg-red-500/20 text-red-400' : 'bg-white/5 text-gray-500 hover:text-gray-300'}`}
                                             title="Mute"
-                                        >
-                                            M
-                                        </button>
+                                        >M</button>
                                     </div>
                                 </div>
 
-                                {/* Horizontal Slider */}
                                 <div className="flex items-center gap-3">
                                     <Volume2 className="w-3 h-3 text-gray-500" />
                                     <input
-                                        type="range"
-                                        min="0"
-                                        max="1.5"
-                                        step="0.01"
+                                        type="range" min="0" max="1.5" step="0.01"
                                         value={track.volume}
                                         onChange={(e) => updateTrackVolume(track.id, parseFloat(e.target.value))}
                                         className="flex-1 accent-white h-1 bg-white/10 rounded-full appearance-none cursor-pointer"
@@ -169,7 +201,6 @@ const MixerPanel = () => {
                                     </span>
                                 </div>
 
-                                {/* Horizontal Meter */}
                                 <div className="mt-2 h-1 bg-black/50 rounded-full overflow-hidden w-full">
                                     <div
                                         className="h-full bg-gradient-to-r from-green-500 via-yellow-500 to-red-500 transition-all duration-100"

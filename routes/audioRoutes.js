@@ -3,7 +3,7 @@ const router = express.Router();
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
-const { authenticateUser } = require('../middleware/auth');
+const { authenticateUser, optionalAuth } = require('../middleware/auth');
 const { audioQueue } = require('../queue/queues');
 const ffmpegPath = require('ffmpeg-static');
 
@@ -21,7 +21,7 @@ if (!fs.existsSync(tempDir)) {
  * Applies Noise Reduction to a video or audio file.
  * Returns the path to the cleaned audio/video.
  */
-router.post('/denoise', authenticateUser, async (req, res) => {
+router.post('/denoise', optionalAuth, async (req, res) => {
     try {
         const { filePath, filename } = req.body;
 
@@ -126,7 +126,7 @@ router.post('/beat-detect', authenticateUser, async (req, res) => {
  * Normalizes audio loudness to standard levels (EBU R128 / Podcasts).
  * Target: -16 LUFS (Integrated), -1.5 dB (True Peak)
  */
-router.post('/normalize', authenticateUser, async (req, res) => {
+router.post('/normalize', optionalAuth, async (req, res) => {
     try {
         const { filePath, filename } = req.body;
 
