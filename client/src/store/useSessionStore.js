@@ -45,11 +45,37 @@ const useSessionStore = create((set, get) => ({
     },
 
     // ── getOrCreate ────────────────────────────────────────────────────────
-    // Call this instead of createSession when you're not sure if one exists.
+    // Checks the stored session ID against the server and creates a new one
+    // if it was wiped (e.g. after a Railway redeploy cleared the in-memory Map
+    // before Supabase persistence was configured).
     getOrCreate: async () => {
         const { sessionId, createSession } = get();
-        if (sessionId) return sessionId;
-        return createSession();
+        if (!sessionId) return createSession();
+
+        // Local-only fallback IDs don't need server validation
+        if (sessionId.startsWith('local-')) return sessionId;
+
+        try {
+            const res = await fetch(`/api/session/${sessionId}`);
+            if (res.status === 404) {
+                // Server no longer knows about this session — create a fresh one
+                console.warn('[session] Stored session not found on server, creating new one');
+                localStorage.removeItem(LS_SESSION);
+                localStorage.removeItem(LS_EXPIRES);
+                set({ sessionId: null });
+                return createSession();
+            }
+            const data = await res.json();
+            if (data.isExpired) {
+                localStorage.removeItem(LS_SESSION);
+                localStorage.removeItem(LS_EXPIRES);
+                set({ sessionId: null });
+                return createSession();
+            }
+        } catch (_) {
+            // Network error — keep using the stored ID, server may come back
+        }
+        return sessionId;
     },
 
     // ── migrateSession ─────────────────────────────────────────────────────

@@ -17,6 +17,9 @@ import {
     ENTITY_TYPES
 } from '../timeline/index.js';
 
+// Module-level debounce timer — lives outside React so it survives re-renders
+let _autosaveTimer = null;
+
 /**
  * Zustand store that syncs with TimelineStateManager
  */
@@ -29,6 +32,11 @@ const useTimelineStore = create(
                 tracks: timelineManager.toLegacyTracks(),
                 _lastEvent: event
             });
+            // Auto-save 1.5 s after the last change so rapid edits don't spam localStorage
+            clearTimeout(_autosaveTimer);
+            _autosaveTimer = setTimeout(() => {
+                useTimelineStore.getState().saveProject();
+            }, 1500);
         });
 
         const legacyTracks = timelineManager.toLegacyTracks();
@@ -703,28 +711,64 @@ const useTimelineStore = create(
             addCaptionClips: (captions) => {
                 if (!captions || captions.length === 0) return;
                 get()._saveHistory();
-                let tracks = timelineManager.toLegacyTracks();
-                let textTrack = tracks.find(t => t.type === 'text');
+
+                // Ensure a text track exists — dispatch directly to avoid double history save
+                let textTrack = timelineManager.toLegacyTracks().find(t => t.type === 'text');
                 if (!textTrack) {
-                    get().addTextTrack();
+                    const layers = timelineManager.getEntitiesArray(ENTITY_TYPES.LAYER);
+                    const count = layers.filter(l => l.type === 'text').length;
+                    const id = `track-${Date.now()}`;
+                    timelineManager.dispatch(TimelineActions.addLayer({
+                        id, name: `Text Layer ${count + 1}`, type: 'text', order: 0
+                    }));
                     textTrack = timelineManager.toLegacyTracks().find(t => t.type === 'text');
                 }
                 if (!textTrack) return;
-                captions.forEach(cap => {
-                    get().addClip(textTrack.id, {
-                        id: `caption-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-                        start: cap.start,
-                        duration: Math.max(0.3, cap.end - cap.start),
-                        name: cap.text,
-                        content: cap.text,
-                        position: 'bottom',
-                        style: 'subtitle',
-                        type: 'text',
-                        fontSize: 36,
-                        color: '#ffffff',
-                        textShadow: '2px 2px 4px rgba(0,0,0,0.9)',
+
+                const trackId = textTrack.id;
+                let maxEnd = get().duration;
+
+                // Batch ALL clip additions into ONE transaction → ONE event → ONE React render
+                timelineManager.beginTransaction();
+                try {
+                    captions.forEach((cap, i) => {
+                        const clipId = `caption-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`;
+                        const duration = Math.max(0.3, cap.end - cap.start);
+                        timelineManager.dispatch(TimelineActions.addClip({
+                            id: clipId,
+                            name: cap.text,
+                            content: cap.text,
+                            type: 'text',
+                            position: 'bottom',
+                            style: 'subtitle',
+                            fontSize: 36,
+                            color: '#ffffff',
+                            textShadow: '2px 2px 4px rgba(0,0,0,0.9)',
+                            sourceUrl: null,
+                            sourceDuration: duration,
+                            metadata: {},
+                        }));
+                        timelineManager.dispatch(TimelineActions.addPlacement({
+                            clipId,
+                            layerId: trackId,
+                            startTime: cap.start,
+                            duration,
+                            offset: 0,
+                            speed: 1.0,
+                            volume: 1.0,
+                        }));
+                        const clipEnd = cap.start + duration;
+                        if (clipEnd > maxEnd) maxEnd = clipEnd;
                     });
-                });
+                    timelineManager.commitTransaction('Add Captions');
+                } catch (err) {
+                    timelineManager.rollbackTransaction();
+                    console.error('[addCaptionClips] Transaction failed:', err);
+                    return;
+                }
+
+                if (maxEnd > get().duration) get().setDuration(maxEnd);
+                set({ tracks: timelineManager.toLegacyTracks() });
             },
 
             // ==============================================================
@@ -838,8 +882,11 @@ const useTimelineStore = create(
             // ==============================================================
             saveProject: () => {
                 const state = get();
+                // Strip blob URLs and File objects — they die on page reload.
+                // Keep proxyUrl / fileUrl which point to server-side files that survive.
+                const sanitizedAssets = (state.assets || []).map(({ file: _f, url: _u, ...rest }) => rest);
                 const projectData = {
-                    version: '1.0',
+                    version: '1.1',
                     timestamp: Date.now(),
                     tracks: state.tracks,
                     duration: state.duration,
@@ -847,20 +894,24 @@ const useTimelineStore = create(
                     zoomLevel: state.zoomLevel,
                     pacingSegments: state.pacingSegments,
                     beatMarkers: state.beatMarkers,
-                    captions: state.captions
+                    captions: state.captions,
+                    assets: sanitizedAssets,
+                    uploadedFilePath: state.uploadedFilePath || null,
                 };
-                localStorage.setItem('vp_autosave', JSON.stringify(projectData));
-                console.log('💾 Project Saved to LocalStorage');
+                try {
+                    localStorage.setItem('vp_autosave', JSON.stringify(projectData));
+                } catch (_) {
+                    // localStorage full — silently skip
+                }
                 return projectData;
             },
 
             loadProject: (projectData) => {
                 if (!projectData) return;
-                // Import legacy tracks into the timeline engine
                 if (projectData.tracks) {
                     timelineManager.fromLegacyTracks(projectData.tracks);
                 }
-                set({
+                const updates = {
                     tracks: timelineManager.toLegacyTracks(),
                     duration: projectData.duration || 60,
                     aspectRatio: projectData.aspectRatio || '16:9',
@@ -871,8 +922,16 @@ const useTimelineStore = create(
                     activeClipId: null,
                     currentTime: 0,
                     past: [],
-                    future: []
-                });
+                    future: [],
+                };
+                if (projectData.assets?.length) {
+                    updates.assets = projectData.assets;
+                }
+                if (projectData.uploadedFilePath) {
+                    updates.uploadedFilePath = projectData.uploadedFilePath;
+                    updates.uploadedFile = { name: projectData.uploadedFilePath };
+                }
+                set(updates);
                 console.log('📂 Project Loaded');
             },
 

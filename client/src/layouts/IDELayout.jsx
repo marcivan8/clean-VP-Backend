@@ -163,6 +163,23 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     // Ensure a session exists from the moment they open the editor
     useEffect(() => { getOrCreate(); }, [getOrCreate]);
 
+    // Auto-restore the last project from localStorage on first load
+    useEffect(() => {
+        const hasTracks = useTimelineStore.getState().tracks.some(t => t.clips.length > 0);
+        if (hasTracks) return; // don't overwrite an already-loaded project
+        try {
+            const raw = localStorage.getItem('vp_autosave');
+            if (!raw) return;
+            const saved = JSON.parse(raw);
+            // Only restore if saved less than 24 hours ago
+            if (Date.now() - (saved.timestamp || 0) > 24 * 60 * 60 * 1000) return;
+            const hasSavedTracks = saved.tracks?.some(t => t.clips?.length > 0);
+            if (!hasSavedTracks) return;
+            useTimelineStore.getState().loadProject(saved);
+            console.log('[IDELayout] Auto-restored project from localStorage');
+        } catch (_) { /* corrupted autosave — ignore */ }
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
     // Trigger: 20-minute editing timer
     useEffect(() => {
         if (!isAnonymous) return;
