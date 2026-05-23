@@ -123,7 +123,11 @@ const Clip = ({ clip, trackId }) => {
             {...attributes}
             className={classNames(
                 "absolute top-0 bottom-0 rounded-md border border-white/10 overflow-hidden group flex flex-col justify-between select-none",
-                clip.color || 'bg-blue-500',
+                // Text clips use a CSS color (e.g. '#fff') for their content — use
+                // type-based Tailwind class for the timeline bar instead.
+                clip.type === 'text'
+                    ? (clip.bgColor || 'bg-green-600/80')
+                    : (clip.color || 'bg-blue-500'),
                 (isActive || isSelected) ? "border-white ring-2 ring-primary/50 z-20" : "opacity-90 hover:opacity-100",
                 isDragging && "opacity-50 z-30 ring-2 ring-primary"
             )}

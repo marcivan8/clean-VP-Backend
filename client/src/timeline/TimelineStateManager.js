@@ -953,8 +953,9 @@ export class TimelineStateManager {
 
                 // Create clips and placements
                 track.clips?.forEach(legacyClip => {
-                    // Create clip entity
-                    const clipId = `clip-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+                    // Create clip entity — preserve ALL properties so text/caption
+                    // clips survive project save → reload with full fidelity.
+                    const clipId = `clip-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
                     this.dispatch({
                         type: ACTION_TYPES.CLIP_ADD,
                         payload: {
@@ -962,8 +963,37 @@ export class TimelineStateManager {
                                 id: clipId,
                                 name: legacyClip.name,
                                 type: legacyClip.type || track.type,
-                                sourceUrl: legacyClip.sourceUrl,
-                                sourceDuration: legacyClip.sourceDuration || legacyClip.duration
+                                sourceUrl: legacyClip.sourceUrl || legacyClip.url,
+                                sourceDuration: legacyClip.sourceDuration || legacyClip.duration,
+                                assetId: legacyClip.assetId,
+                                thumbnail: legacyClip.thumbnail,
+                                // Text / overlay
+                                content: legacyClip.content,
+                                color: legacyClip.color,
+                                fontSize: legacyClip.fontSize,
+                                fontFamily: legacyClip.fontFamily,
+                                fontWeight: legacyClip.fontWeight,
+                                fontStyle: legacyClip.fontStyle,
+                                textDecoration: legacyClip.textDecoration,
+                                textShadow: legacyClip.textShadow,
+                                stroke: legacyClip.stroke,
+                                textAlign: legacyClip.textAlign,
+                                position: legacyClip.position,
+                                style: legacyClip.style,
+                                // Transform
+                                x: legacyClip.x,
+                                y: legacyClip.y,
+                                scale: legacyClip.scale,
+                                scaleX: legacyClip.scaleX,
+                                scaleY: legacyClip.scaleY,
+                                rotation: legacyClip.rotation,
+                                opacity: legacyClip.opacity,
+                                keyframes: legacyClip.keyframes,
+                                // Grading / effects
+                                grading: legacyClip.grading,
+                                filter: legacyClip.filter,
+                                filterIntensity: legacyClip.filterIntensity,
+                                transition: legacyClip.transition,
                             }
                         }
                     });

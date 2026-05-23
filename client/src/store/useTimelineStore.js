@@ -20,6 +20,24 @@ import {
 // Module-level debounce timer — lives outside React so it survives re-renders
 let _autosaveTimer = null;
 
+// ── Synchronous pre-restore ────────────────────────────────────────────────
+// Populate timelineManager BEFORE React renders so the Revideo scene
+// compiles with the correct tracks on first mount (not empty "NO MEDIA").
+// If we waited for a useEffect, the scene would already be stuck in its
+// "no clips" branch by the time the restore fired.
+let _preRestoredProject = null;
+try {
+    const _raw = localStorage.getItem('vp_autosave');
+    if (_raw) {
+        const _saved = JSON.parse(_raw);
+        const _age = Date.now() - (_saved.timestamp || 0);
+        if (_age < 24 * 60 * 60 * 1000 && _saved.tracks?.some(t => t.clips?.length > 0)) {
+            timelineManager.fromLegacyTracks(_saved.tracks);
+            _preRestoredProject = _saved;
+        }
+    }
+} catch (_) { /* corrupted autosave — ignore */ }
+
 /**
  * Zustand store that syncs with TimelineStateManager
  */
@@ -50,12 +68,12 @@ const useTimelineStore = create(
 
             // Playback
             currentTime: 0,
-            duration: timelineManager.getState().metadata?.duration || 60,
+            duration: _preRestoredProject?.duration || timelineManager.getState().metadata?.duration || 60,
             isPlaying: false,
 
             // Timeline view
-            zoomLevel: timelineManager.getState().ui?.zoomLevel || 10,
-            aspectRatio: timelineManager.getState().metadata?.aspectRatio || '16:9',
+            zoomLevel: _preRestoredProject?.zoomLevel || timelineManager.getState().ui?.zoomLevel || 10,
+            aspectRatio: _preRestoredProject?.aspectRatio || timelineManager.getState().metadata?.aspectRatio || '16:9',
 
             // Tracks (legacy shape for UI)
             tracks: legacyTracks,
@@ -71,10 +89,10 @@ const useTimelineStore = create(
             // Clipboard
             clipboard: null,
 
-            // Assets & uploads (UI-only, not in timeline engine)
-            assets: [],
-            uploadedFile: null,
-            uploadedFilePath: null,
+            // Assets & uploads — pre-filled from autosave so proxyUrls are available immediately
+            assets: _preRestoredProject?.assets || [],
+            uploadedFile: _preRestoredProject?.uploadedFilePath ? { name: _preRestoredProject.uploadedFilePath } : null,
+            uploadedFilePath: _preRestoredProject?.uploadedFilePath || null,
             pacingSegments: [],
             beatMarkers: [],
             captions: [],
