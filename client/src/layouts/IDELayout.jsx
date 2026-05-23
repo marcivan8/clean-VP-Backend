@@ -94,6 +94,19 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         [tracks]
     );
 
+    // Convert legacy direct GCS URLs (stored in old autosaves) to go through
+    // our server proxy. The proxy has credentials; the browser doesn't.
+    const toProxyUrl = React.useCallback((url) => {
+        if (!url) return url;
+        const GCS = 'https://storage.googleapis.com/';
+        if (url.startsWith(GCS)) {
+            // strip "https://storage.googleapis.com/<bucket>/" → keep the object path
+            const withoutBucket = url.slice(GCS.length).split('/').slice(1).join('/');
+            return `/api/proxy/gcs-media/${withoutBucket}`;
+        }
+        return url;
+    }, []);
+
     const playerVariables = React.useMemo(() => {
         return {
             tracks: tracks.map((t, idx) => {
@@ -108,9 +121,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     order: t.order ?? idx,
                     clips: t.clips.map(c => {
                         const sourceAsset = assets.find(a => a.id === c.assetId);
-                        // Prefer proxy (GCS) → clip-level proxy → asset blob URL (in-memory,
-                        // valid while the tab is open) → stored fileUrl → clip's own url field
-                        const activeUrl = sourceAsset?.proxyUrl
+                        // Resolution order:
+                        // 1. proxyUrl (server-relative or blob) — already correct format
+                        // 2. asset blob URL (in-memory, valid while tab is open)
+                        // 3. stored fileUrl / clip url field
+                        // All GCS https:// URLs are rewritten to go through /api/proxy/gcs-media
+                        const rawUrl = sourceAsset?.proxyUrl
                             || c.proxyUrl
                             || sourceAsset?.url
                             || sourceAsset?.fileUrl
@@ -120,7 +136,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             ...c,
                             type: t.type || c.type,
                             globalVolume: trackVol,
-                            url: activeUrl || ""
+                            url: toProxyUrl(rawUrl) || ""
                         };
                     })
                 };
@@ -129,7 +145,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             aspectRatio: aspectRatio,
             fps: 30
         };
-    }, [tracks, duration, aspectRatio, assets]);
+    }, [tracks, duration, aspectRatio, assets, toProxyUrl]);
 
     const handleGradingChange = (key, value) => {
         if (!activeClip || !activeTrackId) return;

@@ -84,8 +84,7 @@ async function uploadToStorage(localFilePath, destinationPath) {
             destination: destinationPath,
             metadata: { cacheControl: 'public, max-age=31536000' },
         });
-        // Make the object publicly readable. Throws on uniform-bucket-level-access
-        // buckets — in that case the bucket IAM binding handles it instead.
+        // Try to make public (works on fine-grained-ACL buckets; no-op on uniform-access).
         try {
             await bucket.file(destinationPath).makePublic();
         } catch (err) {
@@ -93,7 +92,9 @@ async function uploadToStorage(localFilePath, destinationPath) {
                 console.warn(`[uploadToStorage] makePublic failed for ${destinationPath}:`, err.message);
             }
         }
-        return `https://storage.googleapis.com/${bucket.name}/${destinationPath}`;
+        // Always route through our server proxy so clients never hit GCS directly.
+        // This avoids 403s on private objects and keeps CORS handling server-side.
+        return `/api/proxy/gcs-media/${destinationPath}`;
     }
 }
 

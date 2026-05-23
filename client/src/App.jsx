@@ -8,20 +8,23 @@ import { supabase } from './lib/supabaseClient';
 import useSessionStore from './store/useSessionStore';
 
 function App() {
-    const { migrateSession, isAnonymous } = useSessionStore();
+    const { migrateSession } = useSessionStore();
 
     useEffect(() => {
         // When Supabase completes a sign-in (magic link, OAuth, email+password),
         // migrate any pending anonymous session to the authenticated user.
+        // Read isAnonymous from the store directly (not the closure) to avoid
+        // stale-closure bugs when the effect re-subscribes after migration.
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             async (event, session) => {
-                if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user && isAnonymous) {
-                    await migrateSession(session.user.id);
+                if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
+                    const { isAnonymous: stillAnonymous } = useSessionStore.getState();
+                    if (stillAnonymous) await migrateSession(session.user.id);
                 }
             }
         );
         return () => subscription.unsubscribe();
-    }, [isAnonymous, migrateSession]);
+    }, [migrateSession]);
 
     return (
         <BrowserRouter>

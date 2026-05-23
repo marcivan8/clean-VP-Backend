@@ -49,6 +49,11 @@ const useSessionStore = create((set, get) => ({
     // if it was wiped (e.g. after a Railway redeploy cleared the in-memory Map
     // before Supabase persistence was configured).
     getOrCreate: async () => {
+        // Authenticated users don't need an anonymous session — and creating one
+        // would call createSession() which unconditionally sets isAnonymous:true,
+        // showing the sign-in modal again on every page load after migration.
+        if (localStorage.getItem(LS_MIGRATED)) return null;
+
         const { sessionId, createSession } = get();
         if (!sessionId) return createSession();
 

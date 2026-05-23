@@ -158,4 +158,66 @@ router.post('/upload', authMiddleware, (req, res, next) => {
     }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/proxy/gcs-media/*
+// Streams any GCS object (or local file) through the server.
+// Avoids CORS and public-access issues — the server has credentials, clients don't.
+// Works for both .m3u8 playlist files and .ts HLS segment files; relative segment
+// URLs in a playlist resolve back to this route automatically.
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/gcs-media/*', async (req, res) => {
+    const gcsPath = req.params[0];
+    if (!gcsPath) return res.status(400).end();
+
+    const storageConfig = require('../config/storage');
+    const { bucket, useLocalStorage } = storageConfig;
+
+    const CONTENT_TYPES = {
+        '.m3u8': 'application/x-mpegURL',
+        '.ts':   'video/MP2T',
+        '.mp4':  'video/mp4',
+        '.webm': 'video/webm',
+        '.mov':  'video/quicktime',
+        '.json': 'application/json',
+    };
+    const ext = path.extname(gcsPath).toLowerCase();
+    const contentType = CONTENT_TYPES[ext] || 'application/octet-stream';
+
+    // ── Local storage fallback ────────────────────────────────────────────
+    if (useLocalStorage || !bucket) {
+        const localPath = safeResolve(gcsPath);
+        if (!localPath || !fs.existsSync(localPath)) return res.status(404).end();
+        return res.sendFile(localPath);
+    }
+
+    // ── GCS streaming ─────────────────────────────────────────────────────
+    try {
+        const file = bucket.file(gcsPath);
+        const [exists] = await file.exists();
+        if (!exists) return res.status(404).end();
+
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Cache-Control', 'public, max-age=31536000');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+
+        if (req.headers.range) {
+            const [metadata] = await file.getMetadata();
+            const fileSize = parseInt(metadata.size);
+            const [startStr, endStr] = req.headers.range.replace(/bytes=/, '').split('-');
+            const start = parseInt(startStr);
+            const end = endStr ? parseInt(endStr) : fileSize - 1;
+            res.status(206);
+            res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+            res.setHeader('Accept-Ranges', 'bytes');
+            res.setHeader('Content-Length', end - start + 1);
+            file.createReadStream({ start, end }).pipe(res);
+        } else {
+            file.createReadStream().pipe(res);
+        }
+    } catch (err) {
+        console.error('[proxy/gcs-media] Error streaming', gcsPath, ':', err.message);
+        res.status(500).end();
+    }
+});
+
 module.exports = router;
