@@ -179,6 +179,7 @@ app.use('/api/export', uploadLimiter, require('./routes/nleExport')); // NLE exp
 app.use('/api/jobs', require('./routes/jobRoutes')); // Job Queue SSE monitoring
 app.use('/api/session', require('./routes/sessionRoutes')); // Anonymous sessions
 app.use('/api/captions', require('./routes/captionRoutes')); // Caption generation
+app.use('/api/admin',   require('./routes/adminRoutes'));   // Temp admin ops (remove after use)
 
 
 

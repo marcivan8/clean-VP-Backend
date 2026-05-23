@@ -6,27 +6,12 @@
  * 3. Returns the raw Response (same signature as native fetch)
  */
 
-import { createClient } from '@supabase/supabase-js';
-
-// Re-use the app's existing Supabase client if available, otherwise create a
-// minimal one just to read the session token.
-let _supabase = null;
-function getSupabase() {
-    if (_supabase) return _supabase;
-    // Pull from env — Vite exposes VITE_* vars at build time
-    const url = import.meta.env?.VITE_SUPABASE_URL;
-    const key = import.meta.env?.VITE_SUPABASE_ANON_KEY;
-    if (url && key) {
-        _supabase = createClient(url, key);
-    }
-    return _supabase;
-}
+import { supabase } from '../lib/supabaseClient';
 
 export async function authFetch(url, options = {}) {
     // ── 1. Get the current session token ──────────────────────────────────
     let token = null;
     try {
-        const supabase = getSupabase();
         if (supabase) {
             const { data: { session } } = await supabase.auth.getSession();
             token = session?.access_token ?? null;
