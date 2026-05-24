@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { useState } from 'react';
 import useTimelineStore from '../store/useTimelineStore';
 import { Type, AlignLeft, AlignCenter, AlignRight, Plus, Bold, Italic, Underline, CheckSquare, Square } from 'lucide-react';
@@ -15,7 +16,14 @@ const FONTS = [
 ];
 
 const TextPanel = () => {
-    const { activeClipId, tracks, updateClip, addClip, addTextTrack, currentTime, setActiveClip } = useTimelineStore();
+    const { activeClipId, tracks, updateClip, addClip, addTextTrack, setActiveClip } = useTimelineStore(useShallow(state => ({
+    activeClipId: state.activeClipId,
+    tracks: state.tracks,
+    updateClip: state.updateClip,
+    addClip: state.addClip,
+    addTextTrack: state.addTextTrack,
+    setActiveClip: state.setActiveClip
+})));
     const [applyToAll, setApplyToAll] = useState(false);
 
     // Derive active clip
@@ -34,7 +42,7 @@ const TextPanel = () => {
         const id = `clip-text-${Date.now()}`;
         addClip(textTrack.id, {
             id,
-            start: currentTime,
+            start: useTimelineStore.getState().currentTime,
             duration: 5,
             name: preset.name,
             content: preset.content || 'New Text',

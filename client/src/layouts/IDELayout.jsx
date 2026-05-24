@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { useRef, useEffect } from 'react';
 import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Menu, Upload, Palette, Move } from 'lucide-react';
 import classNames from 'classnames';
@@ -75,11 +76,23 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
-    const {
-        isPlaying, setUploadedFile, updateClip, uploadedFile,
-        aspectRatio, assets, addAssets, addClip, zoomLevel, tracks, activeClipId,
-        setActiveClip, past, future, duration, currentTime
-    } = useTimelineStore();
+    const { isPlaying, setUploadedFile, updateClip, uploadedFile, aspectRatio, assets, addAssets, addClip, zoomLevel, tracks, activeClipId, setActiveClip, past, future, duration } = useTimelineStore(useShallow(state => ({
+    isPlaying: state.isPlaying,
+    setUploadedFile: state.setUploadedFile,
+    updateClip: state.updateClip,
+    uploadedFile: state.uploadedFile,
+    aspectRatio: state.aspectRatio,
+    assets: state.assets,
+    addAssets: state.addAssets,
+    addClip: state.addClip,
+    zoomLevel: state.zoomLevel,
+    tracks: state.tracks,
+    activeClipId: state.activeClipId,
+    setActiveClip: state.setActiveClip,
+    past: state.past,
+    future: state.future,
+    duration: state.duration
+})));
 
     const { activeClip, activeTrackId } = React.useMemo(() => {
         if (!activeClipId) return { activeClip: null, activeTrackId: null };
@@ -709,7 +722,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         <button onClick={() => { useTimelineStore.getState().redo(); setOpenMenu(null); }} disabled={future.length === 0} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors disabled:opacity-50">Redo (Ctrl+Y)</button>
                                         <div className="h-px bg-border my-1" />
                                         <button onClick={() => { useTimelineStore.getState().copyClip(activeClipId); setOpenMenu(null); }} disabled={!activeClip} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors disabled:opacity-50">Copy</button>
-                                        <button onClick={() => { useTimelineStore.getState().pasteClip(currentTime); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">Paste</button>
+                                        <button onClick={() => { useTimelineStore.getState().pasteClip(useTimelineStore.getState().currentTime); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">Paste</button>
                                         <button onClick={() => { if (activeClip && activeTrackId) { useTimelineStore.getState().removeClip(activeTrackId, activeClip.id); } setOpenMenu(null); }} disabled={!activeClip} className="px-4 py-2 text-xs text-left hover:bg-red-500/10 text-red-400 transition-colors disabled:opacity-50">Delete</button>
                                     </div>
                                 </>
@@ -816,7 +829,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                             {activeTab === 'effects' && (
                                 <section className="h-full bg-card">
-                                    <EffectsPanel targetId={activeClipId} playbackEngine={useTimelineStore.getState().playbackEngine} playhead={currentTime} className="h-full" />
+                                    <EffectsPanel targetId={activeClipId} playbackEngine={useTimelineStore.getState().playbackEngine} playhead={useTimelineStore.getState().currentTime} className="h-full" />
                                 </section>
                             )}
 
@@ -954,7 +967,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                                 onPlayerReady={handlePlayerReady}
                                                 playing={isPlaying}
                                                 controls={false}
-                                                currentTime={currentTime}
+                                                currentTime={useTimelineStore.getState().currentTime}
                                                 onTimeUpdate={(time) => {
                                                     useTimelineStore.setState({ currentTime: time });
                                                 }}

@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import React from 'react';
 import Track from './Track';
 import useTimelineStore from '../../store/useTimelineStore';
@@ -7,7 +8,14 @@ const RULER_H = 24;   // h-6 = 24px (ruler height)
 const LABEL_W = 128;  // w-32 = 128px (track label column)
 
 const Timeline = () => {
-    const { tracks, duration, zoomLevel, seek, setZoomLevel, addTrack } = useTimelineStore();
+    const { tracks, duration, zoomLevel, seek, setZoomLevel, addTrack } = useTimelineStore(useShallow(state => ({
+    tracks: state.tracks,
+    duration: state.duration,
+    zoomLevel: state.zoomLevel,
+    seek: state.seek,
+    setZoomLevel: state.setZoomLevel,
+    addTrack: state.addTrack
+})));
 
     const timeDisplayRef = React.useRef(null);
     const playheadLineRef = React.useRef(null);
