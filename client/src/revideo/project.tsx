@@ -125,9 +125,11 @@ const timelineScene = makeScene2D('timeline', function* (view) {
 
                 if (!layerRefs[track.id]) return;
 
-                let clipRef: any = null;
+                let wrapperRef: any = null;
+                let mediaRef: any = null;
                 if (clip.type === 'video') {
-                    
+                    wrapperRef = createRef<Node>();
+                    mediaRef = createRef<Video>();
                     const kf = clip.keyframes || {};
 
                     // FIX: Fall back to canvasWidth/canvasHeight (not 1920×1080)
