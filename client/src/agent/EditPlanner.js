@@ -198,8 +198,11 @@ export class EditPlanner {
             case 'build_from_rushes': return this.planLongFormEdit(planId, { ...constraints, editMode: 'FULL_BUILD' });
             case 'find_hook': return this.planFindHook(planId);
             case 'remove_repetition': return this.planRemoveRepetition(planId);
+            case 'chat': return this.planChat(planId, intent.message);
             case 'reorder_segment': return this.planReorderSegment(planId, constraints);
-            default: return null;
+            default:
+                console.warn(`[EditPlanner] Unhandled operation: ${operation}`);
+                return null;
         }
     }
 
@@ -375,7 +378,17 @@ export class EditPlanner {
     }
 
     static planRedo(planId) {
-        return this.buildPlan(planId, 'redo', [{ step_id: 'step_1', action: ACTIONS.REDO_ACTION }]);
+        return {
+            plan_id: planId, operation: 'redo', step_count: 1, requiresApproval: false,
+            steps: [{ step_id: 'step_1', action: 'redo_action' }]
+        };
+    }
+
+    static planChat(planId, message) {
+        return {
+            plan_id: planId, operation: 'chat', step_count: 1, requiresApproval: false,
+            steps: [{ step_id: 'step_1', action: 'chat', message: message || 'I am here to help.' }]
+        };
     }
 
     static planAnalyzeStructure(planId, constraints) {

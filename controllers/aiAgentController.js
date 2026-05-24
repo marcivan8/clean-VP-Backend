@@ -211,10 +211,10 @@ When intent is complete and safe:
   "intent": { ...fully structured intent with all fields populated... }
 }
 
-When the user is just chatting, asking a question, or requesting advice (not an editing command):
+When the user is just chatting, asking a question, requesting advice, or asking about the video's content/context (e.g., "what is this video about?", "what is the context?"):
 {
   "type": "CHAT",
-  "message": "Your helpful, conversational response here."
+  "message": "Your helpful, conversational, personalized response here. Use the transcriptSummary or MediaMetadata to directly answer questions about the video's content instead of executing an editing task."
 }
 
 DIRECT EDITING COMMANDS — parse them directly. You MUST understand professional video editing jargon.
@@ -301,7 +301,7 @@ These commands mean the user wants a FULL EDIT of their video. Map them to opera
 🔍 ANALYSIS COMMANDS
 ══════════════════════════════════════════════════
 
-- "analyze / analyse / understand the video / segment / structure / what's in this" → analyze_structure
+- "segment the video / generate chapters / extract semantic structure" → analyze_structure
 - "find the hook / best opening / strongest moment / hook me" → find_hook
 - "remove repetition / cut out duplicates / it repeats itself" → remove_repetition
 - "build from rushes / assemble from raw footage / build from raw" → build_from_rushes
@@ -934,8 +934,8 @@ function localParseIntent(prompt, context) {
         if (has('export', 'render', 'download', 'save', 'output')) {
             return { intent: 'export', operation: 'export_video', parameters: { format: 'mp4', quality: '1080p' }, confidence: 'HIGH', missingParameters: [] };
         }
-        if (has('analyze', 'analyse', 'understand the video', 'what\'s in this',
-                'break it down', 'segment', 'structure')) {
+        if (has('extract chapters', 'segment the video', 'generate chapters', 
+                'extract semantic structure', 'build a structure')) {
             return {
                 intent: 'analyze',
                 operation: 'analyze_structure',

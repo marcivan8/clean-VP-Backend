@@ -606,6 +606,13 @@ function compileReorderSegment(step, ctx) {
     ]);
 }
 
+function compileChat(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'chat', { message: step.message },
+            { source_step_id: step.step_id, description: `Chat: ${step.message.substring(0, 20)}...` }),
+    ]);
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // §7  COMMAND REGISTRY
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -662,6 +669,7 @@ const COMMAND_REGISTRY = new Map([
     ['find_hook', { compiler: compileFindHook }],
     ['remove_repetition', { compiler: compileRemoveRepetition }],
     ['reorder_segment', { compiler: compileReorderSegment }],
+    ['chat', { compiler: compileChat }],
 
     // Undo / Redo
     ['undo_action', { compiler: compileUndo }],

@@ -440,6 +440,7 @@ export class MediaExecutionEngine {
             case 'applyColorGrade':this._callStore(store, 'applyColorGrade', args.clipId, args.adjustments); return { action, success: true };
             case 'undo':           this._callStore(store, 'undo'); return { action, success: true };
             case 'redo':           this._callStore(store, 'redo'); return { action, success: true };
+            case 'chat':           return { action, success: true, message: args.message, isChat: true };
 
             // ── Playhead seek — handled directly without VideoEditorTools ─────────
             case 'seek_to': {
