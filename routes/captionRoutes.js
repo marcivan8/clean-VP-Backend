@@ -49,12 +49,17 @@ router.post('/generate', optionalAuth, async (req, res) => {
         }
 
         const userId = req.user?.id || null;
+        const uniqueJobId = `caption-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
         const job = await audioQueue.add('transcribe-audio', {
             action: 'transcribe',
             filename: path.basename(filePath),
             filePath,
             userId,
             language,
+        }, {
+            jobId: uniqueJobId,
+            attempts: 2,
+            backoff: { type: 'exponential', delay: 3000 }
         });
 
         res.json({ jobId: job.id, status: 'queued' });

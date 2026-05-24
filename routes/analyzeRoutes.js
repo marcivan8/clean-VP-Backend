@@ -90,6 +90,7 @@ router.post('/',
 
         console.log(`🎬 Enqueuing analysis for user ${userId}: ${videoPath}`);
 
+        const uniqueJobId = `analyze-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
         const job = await analysisQueue.add('analyze-video', {
             videoPath,
             title,
@@ -100,6 +101,7 @@ router.post('/',
             fileSize: req.file.size,
             filename: req.file.filename
         }, {
+            jobId: uniqueJobId,
             attempts: 3,
             backoff: { type: 'exponential', delay: 2000 }
         });

@@ -74,12 +74,14 @@ router.post('/generate', authMiddleware, async (req, res) => {
         // Pass the uploads-relative path to job
         const relativeVideoPath = path.relative(uploadsDir, safePath);
         
+        const uniqueJobId = `proxy-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
         const job = await videoQueue.add('generate-proxy', {
             filename: path.basename(safePath),
             userId,
             inputPath: relativeVideoPath,
             outputDir: `proxies/${userId}`
         }, {
+            jobId: uniqueJobId,
             attempts: 3,
             backoff: { type: 'exponential', delay: 2000 }
         });
@@ -240,12 +242,14 @@ router.post('/process-direct', authMiddleware, async (req, res) => {
         const filenameInGcs = path.basename(destPath);
         const pseudoInputPath = path.join('temp', filenameInGcs);
 
+        const uniqueJobId = `proxy2-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
         const job = await videoQueue.add('generate-proxy', {
             filename: filenameInGcs,
             userId,
             inputPath: pseudoInputPath,
             outputDir: `proxies/${userId}`
         }, {
+            jobId: uniqueJobId,
             attempts: 3,
             backoff: { type: 'exponential', delay: 2000 }
         });

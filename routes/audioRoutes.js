@@ -60,9 +60,12 @@ router.post('/denoise', optionalAuth, async (req, res) => {
 
         console.log(`🎧 Enqueuing Denoise: ${inputPath}`);
 
+        const uniqueJobId = `denoise-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
         const job = await audioQueue.add('denoise-audio', {
             action: 'denoise',
             filePath: inputPath
+        }, {
+            jobId: uniqueJobId
         });
 
         res.json({
@@ -117,9 +120,12 @@ router.post('/beat-detect', authenticateUser, async (req, res) => {
 
         console.log(`🥁 Enqueuing Beat Detection for: ${inputPath}`);
         
+        const uniqueJobId = `beat-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
         const job = await audioQueue.add('beat-detect', {
             action: 'beat-detect',
             filePath: inputPath
+        }, {
+            jobId: uniqueJobId
         });
 
         res.json({ success: true, jobId: job.id, status: 'queued' });
@@ -166,9 +172,12 @@ router.post('/normalize', optionalAuth, async (req, res) => {
 
         console.log(`🔊 Enqueuing Audio Normalization for: ${inputPath}`);
 
+        const uniqueJobId = `normalize-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
         const job = await audioQueue.add('normalize-audio', {
             action: 'normalize',
             filePath: inputPath
+        }, {
+            jobId: uniqueJobId
         });
 
         res.json({
@@ -235,11 +244,14 @@ router.post('/transcribe', authenticateUser, async (req, res) => {
         console.log(`🎙️ Enqueuing Transcription: ${inputPath}`);
 
         const userId = req.user?.id || (process.env.NODE_ENV !== 'production' ? 'dev-user' : null);
+        const uniqueJobId = `transcribe-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
         const job = await audioQueue.add('transcribe-audio', {
             action: 'transcribe',
             filename: path.basename(inputPath),
             filePath: inputPath,
             userId
+        }, {
+            jobId: uniqueJobId
         });
 
         res.json({
@@ -336,10 +348,13 @@ router.post('/filler/detect-upload', authenticateUser, fillerUpload.single('file
 
         console.log(`🔤 Enqueuing Filler detection (upload): ${tmpPath}`);
 
+        const uniqueJobId = `fillerup-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
         const job = await audioQueue.add('filler-detect', {
             action: 'filler-detect',
             filePath: tmpPath,
             language
+        }, {
+            jobId: uniqueJobId
         });
 
         res.json({ success: true, jobId: job.id, status: 'queued' });
