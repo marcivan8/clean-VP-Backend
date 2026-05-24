@@ -11,7 +11,7 @@
     "test:ai": "node scripts/test_agent.js",
     "setup:supabase": "node scripts/setup-database.js",
     "cleanup:expired": "node scripts/cleanup-expired-videos.js",
-    "postinstall": "node node_modules/@revideo/renderer/node_modules/puppeteer/install.mjs"
+    "postinstall": "node scripts/install-chrome.js"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.2.0",
