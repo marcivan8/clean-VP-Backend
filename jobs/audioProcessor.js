@@ -30,13 +30,19 @@ async function extractAudioForWhisper(inputPath, tempDir) {
     await new Promise((resolve, reject) => {
         ffmpeg(inputPath)
             .noVideo()
+            .outputOptions('-map', '0:a:0') // Force selecting the first audio stream
+            .audioCodec('libmp3lame')
             .audioChannels(1)
             .audioFrequency(16000)
             .audioBitrate('32k')
             .format('mp3')
             .output(outPath)
             .on('end', resolve)
-            .on('error', reject)
+            .on('error', (err, stdout, stderr) => {
+                console.error('[extractAudioForWhisper] FFmpeg error:', err.message);
+                console.error('[extractAudioForWhisper] FFmpeg stderr:', stderr);
+                reject(err);
+            })
             .run();
     });
     return outPath;
