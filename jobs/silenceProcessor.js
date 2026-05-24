@@ -6,7 +6,7 @@ const fs = require('fs');
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 module.exports = async function processSilenceJob(job) {
-    const { filename, filePath: jobFilePath, userId, threshold = '-30dB', duration = '0.5' } = job.data;
+    const { filename, filePath: jobFilePath, userId, threshold = '-30dB', duration = '0.5', transcript } = job.data;
 
     const uploadsDir = path.resolve(__dirname, '../uploads');
     const publicDir = path.resolve(__dirname, '../client/public');
@@ -51,9 +51,58 @@ module.exports = async function processSilenceJob(job) {
     console.log(`[Job ${job.id}] 🎤 Analyzing for silence: ${filename}`);
     await job.updateProgress(10);
 
-    const silenceSegments = [];
     let videoDuration = 0;
+    const activeSegments = [];
 
+    // ── Transcript-Aware Silence Detection ─────────────────────────────────
+    if (transcript && Array.isArray(transcript) && transcript.length > 0) {
+        console.log(`[Job ${job.id}] 📝 Using transcript-aware silence detection (${transcript.length} words, gap=${duration}s)`);
+        
+        // Get true video duration first
+        try {
+            videoDuration = await new Promise((resolve, reject) => {
+                ffmpeg.ffprobe(filePath, (err, metadata) => {
+                    if (err) return reject(err);
+                    resolve(metadata.format.duration);
+                });
+            });
+        } catch (err) {
+            console.warn(`[Job ${job.id}] ffprobe failed to get duration: ${err.message}`);
+            videoDuration = transcript[transcript.length - 1].end;
+        }
+
+        const minGap = parseFloat(duration);
+        let currentSegment = { start: transcript[0].start, end: transcript[0].end };
+
+        for (let i = 1; i < transcript.length; i++) {
+            const word = transcript[i];
+            const gap = word.start - currentSegment.end;
+
+            if (gap >= minGap) {
+                // Gap is large enough to be considered silence.
+                // Close the current segment and start a new one.
+                currentSegment.duration = currentSegment.end - currentSegment.start;
+                activeSegments.push(currentSegment);
+                currentSegment = { start: word.start, end: word.end };
+            } else {
+                // Gap is small, merge the word into the current segment.
+                currentSegment.end = word.end;
+            }
+        }
+        
+        // Push the final segment
+        currentSegment.duration = currentSegment.end - currentSegment.start;
+        activeSegments.push(currentSegment);
+
+        await job.updateProgress(100);
+        console.log(`[Job ${job.id}] ✅ Transcript-Aware Analysis Complete. Found ${activeSegments.length} active segments.`);
+        return { activeSegments, videoDuration };
+    }
+
+    // ── Fallback: FFmpeg Energy-Based Detection ────────────────────────────
+    console.log(`[Job ${job.id}] 🔊 Using FFmpeg energy-based silence detection (threshold=${threshold}, minDur=${duration}s)`);
+    
+    const silenceSegments = [];
     await new Promise((resolve, reject) => {
         ffmpeg(filePath)
             .audioFilters(`silencedetect=noise=${threshold}:d=${duration}`)
@@ -91,9 +140,7 @@ module.exports = async function processSilenceJob(job) {
 
     await job.updateProgress(80);
 
-    const activeSegments = [];
     let currentPos = 0;
-
     silenceSegments.forEach(silence => {
         if (silence.start > currentPos) {
             if (silence.start - currentPos > 0.1) {
@@ -116,7 +163,7 @@ module.exports = async function processSilenceJob(job) {
     }
 
     await job.updateProgress(100);
-    console.log(`[Job ${job.id}] ✅ Silence Analysis Complete. Found ${activeSegments.length} active segments.`);
+    console.log(`[Job ${job.id}] ✅ FFmpeg Silence Analysis Complete. Found ${activeSegments.length} active segments.`);
     
     return { activeSegments, videoDuration };
 };

@@ -5,6 +5,7 @@ import { Player } from '@revideo/player-react';
 import project from '../revideo/project';
 import SettingsPanel from '../components/SettingsPanel';
 import useTimelineStore from '../store/useTimelineStore';
+import { transcriptionManager } from '../agent/TranscriptionManager';
 import ErrorBoundary from '../components/ErrorBoundary';
 import Timeline from '../components/Timeline/Timeline';
 import ReasoningPanel from '../components/Assistant/ReasoningPanel';
@@ -363,6 +364,15 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             // fires on timeline events, so without this explicit call the
                             // proxyUrl would be missing from localStorage on page refresh.
                             useTimelineStore.getState().saveProject();
+
+                            if (data.originalPath) {
+                                useTimelineStore.getState().setUploadedFilePath(data.originalPath);
+                                // Start background transcription so all AI operations share one transcript
+                                transcriptionManager.startBackgroundTranscription(data.originalPath, {
+                                    platform: null,
+                                    targetDuration: null,
+                                });
+                            }
                             // Store uploads-relative raw file path so AI API calls (silence, filler,
                             // denoise) can locate the file on the server. proxyPath is returned by
                             // the worker; fall back to originalPath if an older worker omits it.

@@ -22,7 +22,7 @@ ffmpeg.setFfmpegPath(ffmpegPath);
  */
 router.post('/detect', optionalAuth, async (req, res) => {
     try {
-        const { filename, threshold = '-30dB', duration = '0.5' } = req.body;
+        const { filename, threshold = '-30dB', duration = '0.5', transcript } = req.body;
 
         if (!filename || typeof filename !== 'string') {
             return res.status(400).json({ error: 'Filename is required and must be a string' });
@@ -75,7 +75,8 @@ router.post('/detect', optionalAuth, async (req, res) => {
             filePath,
             userId,
             threshold,
-            duration
+            duration,
+            transcript
         }, {
             jobId:   uniqueJobId,   // ← prevents collision with videoQueue integer IDs
             attempts: 3,

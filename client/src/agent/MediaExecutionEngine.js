@@ -554,6 +554,15 @@ export class MediaExecutionEngine {
             }
         }
 
+        if (endpoint === '/api/silence/detect' && store.captions && store.captions.length > 0) {
+            resolvedPayload.transcript = store.captions.map(c => ({
+                start: c.start,
+                end: c.end,
+                word: c.content
+            }));
+            console.log(`[MediaExecutionEngine] Injected transcript (${resolvedPayload.transcript.length} words) into silence detection payload.`);
+        }
+
         const controller = new AbortController();
         const timeoutId  = setTimeout(() => controller.abort(), TIMEOUTS.API_CALL);
         job.signal.addEventListener('abort', () => controller.abort());
