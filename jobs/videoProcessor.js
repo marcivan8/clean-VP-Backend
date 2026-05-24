@@ -137,14 +137,14 @@ module.exports = async function processVideoJob(job) {
         fs.writeFileSync(waveformPath, JSON.stringify(waveform));
         await job.updateProgress(30);
 
-        // 2. Generate HLS Proxy
-        console.log(`[Job ${job.id}] Generating HLS proxy...`);
-        const m3u8Filename = 'proxy.m3u8';
-        const m3u8Path = path.join(tempDir, m3u8Filename);
+        // 2. Generate MP4 Proxy
+        console.log(`[Job ${job.id}] Generating MP4 proxy...`);
+        const mp4Filename = 'proxy.mp4';
+        const mp4Path = path.join(tempDir, mp4Filename);
 
         await new Promise((resolve, reject) => {
             ffmpeg(absoluteInputPath)
-                .output(m3u8Path)
+                .output(mp4Path)
                 .videoCodec('libx264')
                 .size('?x540')
                 .videoBitrate('1000k')
@@ -153,9 +153,9 @@ module.exports = async function processVideoJob(job) {
                 .outputOptions([
                     '-crf 28',
                     '-preset veryfast',
-                    '-hls_time 4',
-                    '-hls_list_size 0',
-                    '-f hls'
+                    '-movflags +faststart', // Crucial for web playback and MP4Demuxer
+                    '-pix_fmt yuv420p',     // Ensures compatibility across all browsers
+                    '-f mp4'
                 ])
                 .on('progress', (progress) => {
                     // Update progress between 30 and 80
@@ -177,7 +177,7 @@ module.exports = async function processVideoJob(job) {
         // Base destination path e.g., 'proxies/{userId}/{filename}/'
         const baseDestPath = `proxies/${userId || 'anonymous'}/${filename}`;
         
-        let m3u8Url = '';
+        let mp4Url = '';
         let waveformUrl = '';
 
         for (const file of files) {
@@ -185,7 +185,7 @@ module.exports = async function processVideoJob(job) {
             const destPath = `${baseDestPath}/${file}`;
             const url = await uploadToStorage(localFile, destPath);
             
-            if (file === m3u8Filename) m3u8Url = url;
+            if (file === mp4Filename) mp4Url = url;
             if (file === 'waveform.json') waveformUrl = url;
         }
 
@@ -193,7 +193,7 @@ module.exports = async function processVideoJob(job) {
         console.log(`[Job ${job.id}] Completed proxy generation.`);
 
         return {
-            proxyUrl: m3u8Url,
+            proxyUrl: mp4Url,
             waveformUrl: waveformUrl,
             originalPath: inputPath,
             // proxyPath = uploads-relative raw file path; audioRoutes resolves from uploads/ dir
