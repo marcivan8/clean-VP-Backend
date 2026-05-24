@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import useTimelineStore from '../store/useTimelineStore';
-import { Type, AlignLeft, AlignCenter, AlignRight, Plus, Bold, Italic, Underline } from 'lucide-react';
+import { Type, AlignLeft, AlignCenter, AlignRight, Plus, Bold, Italic, Underline, CheckSquare, Square } from 'lucide-react';
 import classNames from 'classnames';
 
 const FONTS = [
@@ -16,6 +16,7 @@ const FONTS = [
 
 const TextPanel = () => {
     const { activeClipId, tracks, updateClip, addClip, addTextTrack, currentTime, setActiveClip } = useTimelineStore();
+    const [applyToAll, setApplyToAll] = useState(false);
 
     // Derive active clip
     const activeTrack = tracks.find(t => t.clips.some(c => c.id === activeClipId));
@@ -45,12 +46,48 @@ const TextPanel = () => {
         setActiveClip(id);
     };
 
+    const handleUpdate = (updates) => {
+        if (!activeTrack || !activeClip) return;
+
+        if (applyToAll) {
+            // Split updates into styling and content
+            const styleUpdates = { ...updates };
+            delete styleUpdates.content; // Never apply content to all captions!
+
+            // Apply style updates to ALL text clips in the track
+            if (Object.keys(styleUpdates).length > 0) {
+                activeTrack.clips.forEach(clip => {
+                    updateClip(activeTrack.id, clip.id, styleUpdates);
+                });
+            }
+
+            // If there's a content update, only apply it to the active clip
+            if (updates.content !== undefined) {
+                updateClip(activeTrack.id, activeClip.id, { content: updates.content });
+            }
+        } else {
+            // Just apply to the active clip
+            updateClip(activeTrack.id, activeClip.id, updates);
+        }
+    };
+
     if (activeClip && isTextClip) {
         return (
             <div className="space-y-6">
                 <div className="flex items-center justify-between mb-2">
                     <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold">Text Properties</div>
-                    <div className="text-[10px] text-green-400 font-mono">EDITING</div>
+                    <div className="flex items-center gap-3">
+                        <label className="flex items-center gap-1.5 cursor-pointer group">
+                            <input 
+                                type="checkbox" 
+                                checked={applyToAll} 
+                                onChange={(e) => setApplyToAll(e.target.checked)}
+                                className="w-3.5 h-3.5 rounded-sm bg-secondary border-border text-primary focus:ring-primary/50"
+                            />
+                            <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold group-hover:text-white transition-colors">Apply to All</span>
+                        </label>
+                        <div className="text-[10px] text-green-400 font-mono">EDITING</div>
+                    </div>
                 </div>
 
                 {/* Content */}
@@ -58,12 +95,11 @@ const TextPanel = () => {
                     <label className="text-xs text-muted-foreground">Content</label>
                     <textarea
                         value={activeClip.content || ''}
-                        onChange={(e) => updateClip(activeTrack.id, activeClip.id, { content: e.target.value })}
+                        onChange={(e) => handleUpdate({ content: e.target.value })}
                         className="w-full bg-secondary rounded-md p-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
                         rows={3}
                     />
                 </div>
-
 
                 {/* Size & Scale */}
                 <div className="grid grid-cols-2 gap-2">
@@ -72,7 +108,7 @@ const TextPanel = () => {
                         <input
                             type="number"
                             value={activeClip.fontSize || 48}
-                            onChange={(e) => updateClip(activeTrack.id, activeClip.id, { fontSize: parseInt(e.target.value) })}
+                            onChange={(e) => handleUpdate({ fontSize: parseInt(e.target.value) })}
                             className="w-full bg-secondary rounded-md p-2 text-sm"
                         />
                     </div>
@@ -84,19 +120,18 @@ const TextPanel = () => {
                             min="0.1"
                             max="5.0"
                             value={activeClip.scale || 1.0}
-                            onChange={(e) => updateClip(activeTrack.id, activeClip.id, { scale: parseFloat(e.target.value) })}
+                            onChange={(e) => handleUpdate({ scale: parseFloat(e.target.value) })}
                             className="w-full bg-secondary rounded-md p-2 text-sm"
                         />
                     </div>
                 </div>
 
                 {/* Font Family */}
-                {/* Font Family */}
                 <div className="space-y-2">
                     <label className="text-xs text-muted-foreground">Font</label>
                     <select
                         value={activeClip.fontFamily || 'Inter'}
-                        onChange={(e) => updateClip(activeTrack.id, activeClip.id, { fontFamily: e.target.value })}
+                        onChange={(e) => handleUpdate({ fontFamily: e.target.value })}
                         className="w-full bg-secondary rounded-md p-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                     >
                         {FONTS.map(font => (
@@ -105,25 +140,24 @@ const TextPanel = () => {
                     </select>
                 </div>
 
-
                 {/* Text Styles (Bold, Italic, Shadow, Stroke) */}
-                < div className="flex gap-2 p-2 bg-secondary/30 rounded-lg" >
+                <div className="flex gap-2 p-2 bg-secondary/30 rounded-lg">
                     <button
-                        onClick={() => updateClip(activeTrack.id, activeClip.id, { fontWeight: activeClip.fontWeight === 'bold' ? 'normal' : 'bold' })}
+                        onClick={() => handleUpdate({ fontWeight: activeClip.fontWeight === 'bold' ? 'normal' : 'bold' })}
                         className={classNames("p-2 rounded hover:bg-white/10 transition-colors", activeClip.fontWeight === 'bold' ? "bg-white/20 text-white" : "text-muted-foreground")}
                         title="Bold"
                     >
                         <Bold className="w-4 h-4" />
                     </button>
                     <button
-                        onClick={() => updateClip(activeTrack.id, activeClip.id, { fontStyle: activeClip.fontStyle === 'italic' ? 'normal' : 'italic' })}
+                        onClick={() => handleUpdate({ fontStyle: activeClip.fontStyle === 'italic' ? 'normal' : 'italic' })}
                         className={classNames("p-2 rounded hover:bg-white/10 transition-colors", activeClip.fontStyle === 'italic' ? "bg-white/20 text-white" : "text-muted-foreground")}
                         title="Italic"
                     >
                         <Italic className="w-4 h-4" />
                     </button>
                     <button
-                        onClick={() => updateClip(activeTrack.id, activeClip.id, { textDecoration: activeClip.textDecoration === 'underline' ? 'none' : 'underline' })}
+                        onClick={() => handleUpdate({ textDecoration: activeClip.textDecoration === 'underline' ? 'none' : 'underline' })}
                         className={classNames("p-2 rounded hover:bg-white/10 transition-colors", activeClip.textDecoration === 'underline' ? "bg-white/20 text-white" : "text-muted-foreground")}
                         title="Underline"
                     >
@@ -134,7 +168,7 @@ const TextPanel = () => {
 
                     {/* Shadow Toggle */}
                     <button
-                        onClick={() => updateClip(activeTrack.id, activeClip.id, { textShadow: activeClip.textShadow ? null : '2px 2px 4px rgba(0,0,0,0.8)' })}
+                        onClick={() => handleUpdate({ textShadow: activeClip.textShadow ? null : '2px 2px 4px rgba(0,0,0,0.8)' })}
                         className={classNames("px-2 py-1 text-[10px] rounded hover:bg-white/10 transition-colors border border-transparent", activeClip.textShadow ? "bg-white/10 border-white/20 text-white" : "text-muted-foreground")}
                     >
                         Shadow
@@ -142,12 +176,12 @@ const TextPanel = () => {
 
                     {/* Stroke Toggle */}
                     <button
-                        onClick={() => updateClip(activeTrack.id, activeClip.id, { stroke: activeClip.stroke ? null : { width: 1, color: '#000000' } })}
+                        onClick={() => handleUpdate({ stroke: activeClip.stroke ? null : { width: 1, color: '#000000' } })}
                         className={classNames("px-2 py-1 text-[10px] rounded hover:bg-white/10 transition-colors border border-transparent", activeClip.stroke ? "bg-white/10 border-white/20 text-white" : "text-muted-foreground")}
                     >
                         Stroke
                     </button>
-                </div >
+                </div>
 
                 <div className="grid grid-cols-2 gap-2">
                     <div className="space-y-2">
@@ -156,7 +190,7 @@ const TextPanel = () => {
                             <input
                                 type="color"
                                 value={activeClip.color || '#ffffff'}
-                                onChange={(e) => updateClip(activeTrack.id, activeClip.id, { color: e.target.value })}
+                                onChange={(e) => handleUpdate({ color: e.target.value })}
                                 className="w-8 h-8 rounded cursor-pointer bg-transparent border-none"
                             />
                             <span className="text-xs font-mono opacity-50">{activeClip.color}</span>
@@ -171,7 +205,7 @@ const TextPanel = () => {
                         {['left', 'center', 'right'].map(align => (
                             <button
                                 key={align}
-                                onClick={() => updateClip(activeTrack.id, activeClip.id, { textAlign: align })}
+                                onClick={() => handleUpdate({ textAlign: align })}
                                 className={`flex-1 p-1 rounded hover:bg-white/10 flex justify-center ${activeClip.textAlign === align ? 'bg-white/20' : ''}`}
                             >
                                 {align === 'left' && <AlignLeft className="w-4 h-4" />}
@@ -190,7 +224,7 @@ const TextPanel = () => {
                         <input
                             type="range" min="0" max="100"
                             value={activeClip.x || 50}
-                            onChange={(e) => updateClip(activeTrack.id, activeClip.id, { x: parseInt(e.target.value) })}
+                            onChange={(e) => handleUpdate({ x: parseInt(e.target.value) })}
                             className="w-full h-1 bg-secondary rounded-lg appearance-none cursor-pointer"
                         />
                     </div>
@@ -199,13 +233,13 @@ const TextPanel = () => {
                         <input
                             type="range" min="0" max="100"
                             value={activeClip.y || 50}
-                            onChange={(e) => updateClip(activeTrack.id, activeClip.id, { y: parseInt(e.target.value) })}
+                            onChange={(e) => handleUpdate({ y: parseInt(e.target.value) })}
                             className="w-full h-1 bg-secondary rounded-lg appearance-none cursor-pointer"
                         />
                     </div>
                 </div>
 
-            </div >
+            </div>
         );
     }
 
