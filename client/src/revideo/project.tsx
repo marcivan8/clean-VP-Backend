@@ -127,7 +127,7 @@ const timelineScene = makeScene2D('timeline', function* (view) {
 
                 let clipRef: any = null;
                 if (clip.type === 'video') {
-                    clipRef = createRef<Video>();
+                    
                     const kf = clip.keyframes || {};
 
                     // FIX: Fall back to canvasWidth/canvasHeight (not 1920×1080)
@@ -142,8 +142,9 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     };
 
                     layerRefs[track.id]().add(
-                        <Video
-                            ref={clipRef}
+                        <Node ref={wrapperRef}>
+                            <Video
+                                ref={mediaRef}
                             src={clip.url}
                             width={fitted.w}
                             height={fitted.h}
@@ -163,20 +164,25 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                                 hue(() => getGrading()?.hueRotate ?? 0),
                             ]}
                         />
+                        </Node>
                     );
                 } else if (clip.type === 'audio') {
-                    clipRef = createRef<Audio>();
+                    wrapperRef = createRef<Node>();
+                    mediaRef = createRef<Audio>();
                     layerRefs[track.id]().add(
-                        <Audio
-                            ref={clipRef}
+                        <Node ref={wrapperRef}>
+                            <Audio
+                                ref={mediaRef}
                             src={clip.url}
                             time={() => playback.time - clip.start + (clip.offset || 0)}
                             play={true}
-                            volume={(clip.volume ?? 1) * (clip.globalVolume ?? 1)}
-                        />
+                                volume={(clip.volume ?? 1) * (clip.globalVolume ?? 1)}
+                            />
+                        </Node>
                     );
                 } else if (clip.type === 'image') {
-                    clipRef = createRef<Img>();
+                    wrapperRef = createRef<Node>();
+                    mediaRef = createRef<Img>();
                     const kf = clip.keyframes || {};
 
                     // FIX: Same canvas-relative fallback for images
@@ -190,8 +196,9 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     };
 
                     layerRefs[track.id]().add(
-                        <Img
-                            ref={clipRef}
+                        <Node ref={wrapperRef}>
+                            <Img
+                                ref={mediaRef}
                             src={clip.url}
                             width={fitted.w}
                             height={fitted.h}
@@ -208,13 +215,16 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                                 hue(() => getGrading()?.hueRotate ?? 0),
                             ]}
                         />
+                        </Node>
                     );
                 } else if (clip.type === 'text') {
-                    clipRef = createRef<Txt>();
+                    wrapperRef = createRef<Node>();
+                    mediaRef = createRef<Txt>();
                     const kf = clip.keyframes || {};
                     layerRefs[track.id]().add(
-                        <Txt
-                            ref={clipRef}
+                        <Node ref={wrapperRef}>
+                            <Txt
+                                ref={mediaRef}
                             text={clip.content || ''}
                             fill={clip.color || '#ffffff'}
                             fontSize={clip.fontSize || 48}
@@ -225,12 +235,13 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
                             rotation={() => evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
                             opacity={() => evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
-                        />
+                            />
+                        </Node>
                     );
                 }
 
                 // Keep the media alive for its duration and apply transitions if any
-                if (clipRef) {
+                if (wrapperRef) {
                     const trans = clip.transition;
                     if (trans && trans.duration > 0) {
                         const tDur = Math.min(trans.duration, clip.duration);
@@ -240,13 +251,13 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             yield* waitFor(waitTime);
                         }
 
-                        if (clipRef()) {
+                        if (wrapperRef()) {
                             if (trans.type === 'fade' || trans.type === 'crossfade') {
-                                yield* clipRef().opacity(0, tDur);
+                                yield* wrapperRef().opacity(0, tDur);
                             } else if (trans.type === 'slide') {
-                                yield* clipRef().x(-1920, tDur);
+                                yield* wrapperRef().x(-1920, tDur);
                             } else if (trans.type === 'zoom') {
-                                yield* clipRef().scale(0, tDur);
+                                yield* wrapperRef().scale(0, tDur);
                             } else {
                                 yield* waitFor(tDur);
                             }
@@ -255,11 +266,11 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                         yield* waitFor(clip.duration);
                     }
 
-                    if (clipRef()) {
-                        if (typeof clipRef().pause === 'function') {
-                            clipRef().pause();
+                    if (wrapperRef()) {
+                        if (mediaRef() && typeof mediaRef().pause === 'function') {
+                            mediaRef().pause();
                         }
-                        clipRef().remove();
+                        wrapperRef().remove();
                     }
                 }
             }());
