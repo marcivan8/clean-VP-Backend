@@ -108,7 +108,7 @@ function buildOTIOTimeline(tracks, fps, aspectRatio, projectName, lib) {
 
             // If speed != 1 we need to scale the source duration accordingly
             const speed        = clip.speed || 1;
-            const srcDuration  = durationSecs * speed; // raw source seconds consumed
+            const srcDuration  = durationSecs / speed; // 10s timeline / 0.5 = 20s source consumed
 
             return {
                 kind: 'clip',
@@ -116,11 +116,11 @@ function buildOTIOTimeline(tracks, fps, aspectRatio, projectName, lib) {
                 mediaReference: {
                     type:          'external',
                     name:          src.split('/').pop(),
-                    targetUrl:     src.startsWith('file://') ? src : `file://localhost${src.startsWith('/') ? '' : '/'}${src}`,
+                    targetUrl:     src.startsWith('file://') ? src : `file://localhost/${src.replace(/^\//, '')}`,
                     mediaKind:     kind,
                     availableRange: {
                         startTime: ZERO,
-                        duration:  secToRational(srcDuration + offsetSecs),
+                        duration:  secToRational((srcDuration + offsetSecs) * 3), // loose upper bound
                     },
                 },
                 sourceRange: {
