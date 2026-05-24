@@ -11,7 +11,8 @@
     "test:ai": "node scripts/test_agent.js",
     "setup:supabase": "node scripts/setup-database.js",
     "cleanup:expired": "node scripts/cleanup-expired-videos.js",
-    "postinstall": "npx puppeteer browsers install chrome && npm install --prefix revideo"
+    "postinstall": "npx puppeteer browsers install chrome",
+    "build": "npm install --prefix revideo"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.2.0",
