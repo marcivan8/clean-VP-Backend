@@ -338,7 +338,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         useTimelineStore.getState().updateAsset(assetId, { uploadPhase: 'processing' });
                     }, 5000);
 
-                    ProxyService.uploadAndGenerateProxy(file, 'demo-user')
+                    ProxyService.uploadAndGenerateProxy(file, 'demo-user', (progress) => {
+                        useTimelineStore.getState().updateAsset(assetId, { uploadProgress: progress });
+                    })
                         .then(data => {
                             clearTimeout(processingTimer);
                             if (!data) {

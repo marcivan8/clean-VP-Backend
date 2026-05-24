@@ -81,22 +81,104 @@ class ProxyService {
     }
 
     /**
+     * Upload directly to GCS via Resumable Session URL, then process.
+     */
+    static async uploadDirectToGCS(file, userId, onProgress) {
+        // 1. Get Resumable URL
+        const headers = await buildHeaders({ 'Content-Type': 'application/json' });
+        const initResponse = await fetch(`${API_URL}/api/proxy/upload-url`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ filename: file.name, contentType: file.type })
+        });
+
+        if (!initResponse.ok) {
+            const err = await initResponse.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to initialize direct upload');
+        }
+
+        const { sessionUrl, destPath } = await initResponse.json();
+
+        // 2. Upload directly to GCS using XMLHttpRequest for progress events
+        await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('PUT', sessionUrl, true);
+            xhr.setRequestHeader('Content-Type', file.type);
+            
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable && onProgress) {
+                    const percentComplete = Math.round((e.loaded / e.total) * 100);
+                    onProgress(percentComplete);
+                }
+            };
+
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    resolve();
+                } else {
+                    reject(new Error(`GCS direct upload failed: ${xhr.status} ${xhr.responseText}`));
+                }
+            };
+            
+            xhr.onerror = () => reject(new Error('GCS direct upload network error'));
+            xhr.send(file);
+        });
+
+        // 3. Notify backend to process the file
+        const processResponse = await fetch(`${API_URL}/api/proxy/process-direct`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ destPath, originalFilename: file.name })
+        });
+
+        if (!processResponse.ok) {
+            const err = await processResponse.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to trigger proxy processing');
+        }
+
+        const data = await processResponse.json();
+
+        if (data.jobId) {
+            console.log(`[ProxyService] Polling proxy job ${data.jobId}...`);
+            const result = await pollJobResult(data.jobId);
+            return result ?? data;
+        }
+        return data;
+    }
+
+    /**
      * Upload a video file to the server and trigger proxy generation.
      * Uses REST polling (not SSE) to track job completion — SSE is unreliable
      * behind Railway / Nginx reverse proxies (ERR_CONNECTION_RESET).
      *
      * @param {File} file - The video File object.
      * @param {string} userId - ID of the user.
+     * @param {Function} onProgress - Callback for upload progress (0-100).
      * @returns {Promise<{ proxyPath: string, proxyUrl: string }>}
      */
-    static async uploadAndGenerateProxy(file, userId) {
+    static async uploadAndGenerateProxy(file, userId, onProgress) {
         try {
+            // Attempt Direct to GCS first
+            try {
+                return await this.uploadDirectToGCS(file, userId, onProgress);
+            } catch (err) {
+                // If it fails because GCS is not configured, fallback to legacy upload
+                if (err.message === 'GCS not configured') {
+                    console.log('[ProxyService] GCS not configured, falling back to legacy upload...');
+                } else {
+                    throw err; // Rethrow actual upload errors
+                }
+            }
+
+            // Legacy Fallback
             const formData = new FormData();
             formData.append('video', file);
             if (userId) formData.append('userId', userId);
 
             const headers = await buildHeaders();
 
+            // Use XMLHttpRequest here too if we want fallback progress, 
+            // but standard fetch is fine for the fallback since it's mostly local.
             const response = await fetch(`${API_URL}/api/proxy/upload`, {
                 method: 'POST',
                 headers,
@@ -111,13 +193,9 @@ class ProxyService {
             const data = await response.json();
 
             // If the backend queued a job, poll until it completes.
-            // We use REST polling instead of EventSource (SSE) because SSE
-            // connections are killed by Railway's / Nginx's proxy after ~30s.
             if (data.jobId) {
                 console.log(`[ProxyService] Polling proxy job ${data.jobId}...`);
                 const result = await pollJobResult(data.jobId);
-                // result may be null if the job completed before the first poll;
-                // fall back to the original response data.
                 return result ?? data;
             }
 

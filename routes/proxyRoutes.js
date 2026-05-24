@@ -154,8 +154,9 @@ router.post('/upload', authMiddleware, (req, res, next) => {
         if (storageConfig.bucket && !storageConfig.useLocalStorage) {
             const destPath = `raw/${userId}/${req.file.filename}`;
             console.log(`[ProxyRoute] Uploading raw file to GCS: ${destPath}...`);
-            await storageConfig.bucket.upload(req.file.path, { destination: destPath });
-            console.log(`[ProxyRoute] Raw file uploaded to GCS.`);
+            storageConfig.bucket.upload(req.file.path, { destination: destPath })
+                .then(() => console.log(`[ProxyRoute] Raw file uploaded to GCS.`))
+                .catch(err => console.error(`[ProxyRoute] GCS upload failed:`, err));
             // Note: We don't delete the local file here in case there's a local worker
             // or the export node needs it. The storage will clean it up later.
         }
@@ -180,6 +181,83 @@ router.post('/upload', authMiddleware, (req, res, next) => {
     } catch (error) {
         console.error('[ProxyRoute Upload] Error:', error);
         res.status(500).json({ error: 'Failed to enqueue upload proxy generation' });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Direct to GCS Upload Routes
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * POST /api/proxy/upload-url
+ * Generate a Resumable Session URL for direct-to-GCS browser uploads.
+ */
+router.post('/upload-url', authMiddleware, async (req, res) => {
+    try {
+        const { filename, contentType } = req.body;
+        if (!storageConfig.bucket || storageConfig.useLocalStorage) {
+            return res.status(400).json({ error: 'GCS not configured' });
+        }
+        const userId = resolveUserId(req);
+        
+        // Use a timestamp to prevent filename collisions in GCS
+        const safeFilename = path.basename(filename || 'video.mp4').replace(/[^a-zA-Z0-9.\-_]/g, '');
+        const destPath = `raw/${userId}/${Date.now()}-${safeFilename}`;
+        const file = storageConfig.bucket.file(destPath);
+        
+        const [sessionUrl] = await file.createResumableUpload({
+            origin: req.headers.origin || '*',
+            metadata: {
+                contentType: contentType || 'application/octet-stream',
+            }
+        });
+        
+        res.json({ sessionUrl, destPath });
+    } catch (err) {
+        console.error('[ProxyRoute] upload-url error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * POST /api/proxy/process-direct
+ * Triggers the proxy generation job for a file that was just directly uploaded to GCS.
+ */
+router.post('/process-direct', authMiddleware, async (req, res) => {
+    try {
+        const { destPath, originalFilename } = req.body;
+        const userId = resolveUserId(req);
+        
+        if (!destPath || !destPath.startsWith(`raw/${userId}/`)) {
+            return res.status(403).json({ error: 'Invalid destination path' });
+        }
+
+        console.log(`[ProxyRoute] Enqueuing proxy generation for direct upload: ${destPath}`);
+
+        // The worker expects inputPath to be relative to 'uploads/'.
+        // By passing 'temp/filename', it fails local fs checks and falls back to GCS download
+        // using the job's filename (which we set exactly to the GCS basename).
+        const filenameInGcs = path.basename(destPath);
+        const pseudoInputPath = path.join('temp', filenameInGcs);
+
+        const job = await videoQueue.add('generate-proxy', {
+            filename: filenameInGcs,
+            userId,
+            inputPath: pseudoInputPath,
+            outputDir: `proxies/${userId}`
+        }, {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 2000 }
+        });
+
+        res.json({
+            jobId: job.id,
+            status: 'queued',
+            originalPath: pseudoInputPath
+        });
+    } catch (error) {
+        console.error('[ProxyRoute Process Direct] Error:', error);
+        res.status(500).json({ error: 'Failed to enqueue proxy generation' });
     }
 });
 

@@ -19,11 +19,21 @@ const ProxyingOverlay = ({ asset }) => {
 
     const phase = asset.uploadPhase || 'uploading';
     const phaseIdx = PHASES.indexOf(phase);
+    const progress = asset.uploadProgress || 0;
 
     return (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(1px)' }}>
-            <div className="flex flex-col items-center gap-2 px-3 py-2.5 rounded-xl" style={{ background: 'rgba(0,0,0,0.55)' }}>
-                <Loader2 className="w-4 h-4 animate-spin" style={{ color: 'var(--accent)' }} />
+            <div className="flex flex-col items-center gap-2 px-3 py-2.5 rounded-xl w-3/4 max-w-[120px]" style={{ background: 'rgba(0,0,0,0.55)' }}>
+                {phase === 'uploading' && typeof asset.uploadProgress === 'number' ? (
+                    <div className="w-full flex flex-col gap-1.5 items-center">
+                        <span className="text-[10px] font-bold text-white tracking-wide">{progress}%</span>
+                        <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden border border-white/10">
+                            <div className="h-full bg-[var(--accent)] transition-all duration-200" style={{ width: `${progress}%` }} />
+                        </div>
+                    </div>
+                ) : (
+                    <Loader2 className="w-4 h-4 animate-spin" style={{ color: 'var(--accent)' }} />
+                )}
                 {/* Step dots */}
                 <div className="flex items-center gap-1">
                     {PHASES.map((p, i) => (
