@@ -50,16 +50,12 @@ async function detectFillerWords(inputPath, language = 'en', tempDir = null) {
         'euh', 'ben', 'genre', 'voilà', 'bah',
     ]);
 
-    const stats = fs.statSync(inputPath);
-    let whisperPath = inputPath;
     let tempAudio = null;
 
-    if (stats.size > WHISPER_LIMIT) {
-        if (!tempDir) throw new Error('tempDir required to extract audio for large files');
-        console.log(`[detectFillerWords] File is ${(stats.size / 1024 / 1024).toFixed(1)} MB — extracting audio for Whisper...`);
-        tempAudio = await extractAudioForWhisper(inputPath, tempDir);
-        whisperPath = tempAudio;
-    }
+    if (!tempDir) throw new Error('tempDir required to extract audio');
+    console.log(`[detectFillerWords] Extracting audio for Whisper to ensure compatibility and speed...`);
+    tempAudio = await extractAudioForWhisper(inputPath, tempDir);
+    let whisperPath = tempAudio;
 
     try {
         const openai = getOpenAI();
@@ -216,14 +212,12 @@ module.exports = async function processAudioJob(job) {
 
         case 'transcribe': {
             console.log(`[Job ${job.id}] 🎙️ Transcribing with Whisper: ${inputPath}`);
-            const tStats = fs.statSync(inputPath);
-            let tWhisperPath = inputPath;
             let tTempAudio = null;
-            if (tStats.size > WHISPER_LIMIT) {
-                console.log(`[Job ${job.id}] File is ${(tStats.size / 1024 / 1024).toFixed(1)} MB — extracting audio for Whisper...`);
-                tTempAudio = await extractAudioForWhisper(inputPath, tempDir);
-                tWhisperPath = tTempAudio;
-            }
+            
+            console.log(`[Job ${job.id}] Extracting audio for Whisper to ensure compatibility and speed...`);
+            tTempAudio = await extractAudioForWhisper(inputPath, tempDir);
+            let tWhisperPath = tTempAudio;
+            
             try {
                 const openai = getOpenAI();
                 const transcription = await openai.audio.transcriptions.create({
