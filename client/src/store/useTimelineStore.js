@@ -96,6 +96,7 @@ const useTimelineStore = create(
             pacingSegments: [],
             beatMarkers: [],
             captions: [],
+            transcriptionAttempted: false,
 
             // Long-Form Intelligence Engine — stores ContentAnalyzer result
             contentAnalysis: null,
@@ -260,7 +261,7 @@ const useTimelineStore = create(
             })),
 
             // Captions / beats / pacing
-            setCaptions: (captions) => set({ captions }),
+            setCaptions: (captions) => set({ captions, transcriptionAttempted: true }),
             setBeatMarkers: (markers) => set({ beatMarkers: markers }),
             setPacingSegments: (segments) => set({ pacingSegments: segments }),
 
@@ -933,6 +934,7 @@ const useTimelineStore = create(
                     pacingSegments: state.pacingSegments,
                     beatMarkers: state.beatMarkers,
                     captions: state.captions,
+                    transcriptionAttempted: state.transcriptionAttempted,
                     assets: sanitizedAssets,
                     uploadedFilePath: state.uploadedFilePath || null,
                 };
@@ -957,6 +959,7 @@ const useTimelineStore = create(
                     pacingSegments: projectData.pacingSegments || [],
                     beatMarkers: projectData.beatMarkers || [],
                     captions: projectData.captions || [],
+                    transcriptionAttempted: projectData.transcriptionAttempted || false,
                     activeClipId: null,
                     currentTime: 0,
                     past: [],

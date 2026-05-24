@@ -633,10 +633,11 @@ export class MediaExecutionEngine {
             if (command.action === 'autoCaptions') {
                 const wordCount = result?.words?.length ?? 0;
                 console.log(`[MediaExecutionEngine] autoCaptions result: ${wordCount} words, text="${(result?.text || '').slice(0, 60)}"`);
+                
+                const store = useTimelineStore.getState();
+                if (store.setCaptions) store.setCaptions(result.words || []);
+                
                 if (wordCount > 0) {
-                    const store = useTimelineStore.getState();
-                    if (store.setCaptions) store.setCaptions(result.words);
-                    
                     const captions = groupWordsIntoCaptions(result.words);
                     console.log(`[MediaExecutionEngine] 💬 autoCaptions: adding ${captions.length} caption clips`);
                     store.addCaptionClips(captions);

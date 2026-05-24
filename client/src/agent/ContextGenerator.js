@@ -67,7 +67,7 @@ export class ContextGenerator {
      */
     static getStructuredContext() {
         const state = useTimelineStore.getState();
-        const { tracks, duration, currentTime, aspectRatio, activeClipId, captions, pacingSegments, beatMarkers, assets } = state;
+        const { tracks, duration, currentTime, aspectRatio, activeClipId, captions, pacingSegments, beatMarkers, assets, transcriptionAttempted } = state;
 
         // --- Collect all clips ---
         const allClips = [];
@@ -140,6 +140,7 @@ export class ContextGenerator {
                 clipType,
                 aspectRatio,
                 hasTranscript,
+                transcriptionAttempted: !!transcriptionAttempted,
                 transcriptSummary,
                 energyProfile,
                 hasBeatMarkers: beatMarkers && beatMarkers.length > 0
