@@ -18,7 +18,7 @@ router.post('/render', authenticateUser, async (req, res) => {
         // Dynamic import (ES module)
         const { renderVideo } = await import('@revideo/renderer');
 
-        const { clips = [], duration = 10, fps = 30 } = req.body;
+        const { tracks = [], duration = 10, fps = 30 } = req.body.timeline || req.body;
 
         // Whitelist aspectRatio to prevent injection
         const ALLOWED_RATIOS = ['16:9', '9:16', '1:1', '4:5'];
@@ -37,11 +37,11 @@ router.post('/render', authenticateUser, async (req, res) => {
 
         const outFile = `render_${Date.now()}.mp4`;
 
-        console.log(`🎬 Starting Revideo render: ${clips.length} clips, ${duration}s, ${width}x${height}`);
+        console.log(`🎬 Starting Revideo render: ${tracks.reduce((acc, t) => acc + t.clips.length, 0)} clips, ${duration}s, ${width}x${height}`);
 
         await renderVideo({
             projectFile: path.join(__dirname, '..', 'revideo', 'src', 'project.ts'),
-            variables: { clips, duration, aspectRatio, fps },
+            variables: { tracks, duration, aspectRatio, fps },
             settings: {
                 outFile,
                 outDir,

@@ -468,7 +468,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             } catch (_) { /* no token — dev mode, route uses optionalAuth */ }
 
             // POST to /api/render — the FFmpeg export engine mounted in exportRoutes.js
-            const response = await fetch('/api/render', {
+            const response = await fetch('/api/revideo/render', {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({ timeline: { tracks, duration }, settings })
