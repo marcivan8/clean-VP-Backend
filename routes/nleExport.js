@@ -95,7 +95,14 @@ function buildOTIOTimeline(tracks, fps, aspectRatio, projectName, lib) {
         const clips   = (track.clips || []).sort((a, b) => a.start - b.start);
 
         const items = clips.map((clip) => {
-            const src          = clip.src || clip.url || clip.name || 'media.mp4';
+            let src = clip.url || clip.src || clip.name || 'media.mp4';
+            
+            // If the URL is a blob, proxy, or external HTTP link, NLEs cannot open it directly.
+            // We strip it down to the raw filename so the user can easily "Relink Media" in Premiere/DaVinci.
+            if (src.startsWith('blob:') || src.startsWith('/api/') || src.startsWith('http')) {
+                src = clip.name || src.split('?')[0].split('/').pop() || 'media.mp4';
+            }
+
             const offsetSecs   = clip.offset  || 0;
             const durationSecs = clip.duration || 0;
 
