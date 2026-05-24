@@ -10,13 +10,17 @@
     "test": "jest",
     "test:ai": "node scripts/test_agent.js",
     "setup:supabase": "node scripts/setup-database.js",
-    "cleanup:expired": "node scripts/cleanup-expired-videos.js"
+    "cleanup:expired": "node scripts/cleanup-expired-videos.js",
+    "postinstall": "npx puppeteer browsers install chrome"
   },
   "dependencies": {
     "@chatoctopus/timeline": "^0.2.0",
     "@google-cloud/storage": "^7.16.0",
     "@paddle/paddle-node-sdk": "^3.2.0",
+    "@revideo/2d": "^0.10.4",
+    "@revideo/core": "^0.10.4",
     "@revideo/renderer": "^0.10.4",
+    "@revideo/ui": "^0.10.4",
     "@revideo/vite-plugin": "^0.10.4",
     "@supabase/storage-js": "^2.10.4",
     "@supabase/supabase-js": "^2.55.0",
