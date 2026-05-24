@@ -523,6 +523,18 @@ export class TimelineHistory {
             this.past = data.past || [];
             this.versions = new Map(data.versions || []);
 
+            // Strip out dead blob URLs from restored state since they don't persist across reloads
+            if (data.currentState && data.currentState.assets) {
+                data.currentState.assets = data.currentState.assets.map(asset => {
+                    if (asset.url && asset.url.startsWith('blob:')) {
+                        // Keep the asset, but clear the blob URL to prevent ERR_FILE_NOT_FOUND.
+                        // The app will fall back to proxyUrl or show a missing media state.
+                        return { ...asset, url: null };
+                    }
+                    return asset;
+                });
+            }
+
             // Don't override current state if already set
             if (!this.currentState && data.currentState) {
                 this.currentState = data.currentState;
