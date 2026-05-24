@@ -18,8 +18,12 @@ export const INTENT_TYPES = {
     OPTIMIZE: 'optimize',
 
     // Long-Form Intelligence Engine
+    // Long-Form Intelligence Engine
     ANALYZE: 'analyze',
     LONG_FORM_BUILD: 'long_form_build',
+    
+    // Conversational
+    CHAT: 'chat',
 };
 
 // Supported operations per intent
@@ -84,4 +88,7 @@ export const OPERATIONS = {
     REMOVE_REPETITION: 'remove_repetition',
     BUILD_FROM_RUSHES: 'build_from_rushes',
     REORDER_SEGMENT: 'reorder_segment',
+
+    // Conversational
+    CHAT: 'chat',
 };

@@ -245,8 +245,12 @@ Assistant: {"intent": "OPTIMIZE", "operation": "platform_optimize", "constraints
 User: "Export this to Premiere Pro so I can finish it."
 Assistant: {"intent": "EXPORT", "operation": "nle_export", "constraints": {"nleTarget": "premiere"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
 
+User: "How do I make my video more engaging?"
+Assistant: {"intent": "CHAT", "operation": "chat", "message": "To make it more engaging, consider using jump cuts to improve pacing, adding b-roll, or applying dynamic transitions.", "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
 Be liberal in interpretation. When in doubt, make a reasonable assumption rather than asking for clarification.
 If the user says "clean it up", assume silence_removal.
+If the user is asking a general question, use the CHAT intent.
 NEVER return an error when you can make a reasonable assumption.`;
 
 export class IntentParser {
@@ -916,6 +920,7 @@ export class IntentParser {
             constraints: result.constraints || {},
             needs_clarification: result.needs_clarification || false,
             reason: result.reason || null,
+            message: result.message || null,
             confidence: result.confidence || (result.needs_clarification ? 'LOW' : 'HIGH'),
             missingParameters: result.missingParameters || [],
             originalPrompt: result.originalPrompt || null,

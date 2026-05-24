@@ -99,30 +99,39 @@ const workflowMachine = createMachine({
                             const result = event.output;
 
                             if (result.success) {
-                                // Add success log
-                                useAIStore.getState().addLog({
-                                    id: 'job-success-' + Date.now(),
-                                    type: 'success',
-                                    message: result.message || 'Edit completed successfully',
-                                    data: {
-                                        jobId: result.jobId,
-                                        details: result.details,
-                                        validation: result.validation
-                                    },
-                                    timestamp: new Date().toLocaleTimeString()
-                                });
+                                if (result.operation === 'chat') {
+                                    useAIStore.getState().addLog({
+                                        id: 'chat-' + Date.now(),
+                                        type: 'assistant',
+                                        message: result.message || 'Sure thing!',
+                                        timestamp: new Date().toLocaleTimeString()
+                                    });
+                                } else {
+                                    // Add success log for edits
+                                    useAIStore.getState().addLog({
+                                        id: 'job-success-' + Date.now(),
+                                        type: 'success',
+                                        message: result.message || 'Edit completed successfully',
+                                        data: {
+                                            jobId: result.jobId,
+                                            details: result.details,
+                                            validation: result.validation
+                                        },
+                                        timestamp: new Date().toLocaleTimeString()
+                                    });
 
-                                // P5: seek to the first edit point so the user immediately
-                                // sees the result without having to manually press play.
-                                setTimeout(() => {
-                                    const ts = useTimelineStore.getState();
-                                    const firstClipStart = ts.tracks
-                                        ?.flatMap(t => t.clips || [])
-                                        .sort((a, b) => a.start - b.start)[0]?.start ?? 0;
-                                    ts.seek(firstClipStart);
-                                    ts.setIsPlaying(true);
-                                    setTimeout(() => useTimelineStore.getState().setIsPlaying(false), 4000);
-                                }, 300);
+                                    // P5: seek to the first edit point so the user immediately
+                                    // sees the result without having to manually press play.
+                                    setTimeout(() => {
+                                        const ts = useTimelineStore.getState();
+                                        const firstClipStart = ts.tracks
+                                            ?.flatMap(t => t.clips || [])
+                                            .sort((a, b) => a.start - b.start)[0]?.start ?? 0;
+                                        ts.seek(firstClipStart);
+                                        ts.setIsPlaying(true);
+                                        setTimeout(() => useTimelineStore.getState().setIsPlaying(false), 4000);
+                                    }, 300);
+                                }
 
                                 // Add suggestion for next actions
                                 if (result.suggestions && result.suggestions.length > 0) {

@@ -105,12 +105,11 @@ const parseIntentHandler = async (req, res) => {
         }
 
         const systemPrompt = `You are the Conversational Reasoning Layer of Viral Pilot, an AI-powered video editing IDE.
-You are NOT a generic chatbot. You are an AI video editor.
-You transform user prompts into structured, executable editing intent — safely and deterministically.
+You are a helpful, conversational, and creative assistant for video editing.
+You can answer general questions, help the user ideate, and provide guidance, OR you can transform user prompts into structured, executable editing intent.
 
-You are NOT the executor.
-You MUST NOT generate FFmpeg commands or timeline operations.
-You only interpret, clarify, and structure intent.
+You are NOT the executor. You MUST NOT generate FFmpeg commands or timeline operations directly.
+You only interpret, clarify, converse, and structure intent.
 
 ═══════════════════════════════════════════════════
 🔎 GROUNDING RULES (NON-NEGOTIABLE)
@@ -210,6 +209,12 @@ When intent is complete and safe:
 {
   "type": "READY",
   "intent": { ...fully structured intent with all fields populated... }
+}
+
+When the user is just chatting, asking a question, or requesting advice (not an editing command):
+{
+  "type": "CHAT",
+  "message": "Your helpful, conversational response here."
 }
 
 DIRECT EDITING COMMANDS — parse them directly. You MUST understand professional video editing jargon.
@@ -343,9 +348,9 @@ For direct commands with valid duration logic, return:
   }
 }
 
-TONE: Professional, calm, helpful, concise. Understand creative direction and production language.
+TONE: Professional, calm, helpful, conversational, concise. Understand creative direction and production language. Be friendly and personalized.
 STRICT: Never generate FFmpeg commands. Never modify timeline state. Never skip clarification for destructive edits. Never assume durations.
-Your job is to converge toward execution grounded in real media state.
+Your job is to act as a human-like creative assistant and converge toward execution grounded in real media state when an edit is requested.
 Output ONLY valid JSON. Include the word "json" in your response.`;
 
 
@@ -372,12 +377,12 @@ USER REQUEST:
                         properties: {
                             type: {
                                 type: "string",
-                                enum: ["READY", "CLARIFICATION"],
-                                description: "Whether the intent is fully understood (READY) or requires follow-up (CLARIFICATION)."
+                                enum: ["READY", "CLARIFICATION", "CHAT"],
+                                description: "Whether the intent is fully understood (READY), requires follow-up (CLARIFICATION), or is a conversational response (CHAT)."
                             },
                             message: {
                                 type: "string",
-                                description: "Optional friendly response to the user, or the clarification question."
+                                description: "The response to the user, the clarification question, or the conversational chat reply."
                             },
                             intent: {
                                 type: "object",
@@ -385,7 +390,7 @@ USER REQUEST:
                                 properties: {
                                     intent: {
                                         type: "string",
-                                        enum: ["edit", "cut", "apply_effect", "export", "creative_edit", "optimize", "undo", "redo", "analyze", "long_form_build"]
+                                        enum: ["edit", "cut", "apply_effect", "export", "creative_edit", "optimize", "undo", "redo", "analyze", "long_form_build", "chat"]
                                     },
                                     operation: {
                                         type: "string",
@@ -402,7 +407,9 @@ USER REQUEST:
                                             "auto_captions",
                                             // Long-form intelligence engine
                                             "long_form_edit", "analyze_structure", "find_hook",
-                                            "remove_repetition", "build_from_rushes", "reorder_segment"
+                                            "remove_repetition", "build_from_rushes", "reorder_segment",
+                                            // Conversational
+                                            "chat"
                                         ]
                                     },
                                     target_clip_id: { type: ["string", "null"] },
@@ -463,6 +470,14 @@ USER REQUEST:
 
         if (raw.type === 'READY' && raw.intent) {
             return res.json(raw.intent);
+        }
+
+        if (raw.type === 'CHAT') {
+            return res.json({
+                intent: 'chat',
+                operation: 'chat',
+                message: raw.message
+            });
         }
 
         // Fallback catch-all

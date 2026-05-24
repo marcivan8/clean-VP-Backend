@@ -80,6 +80,20 @@ export class EditJobManager {
                 };
             }
 
+            // ── Conversational Chat — no pipeline needed ───────────────────────
+            if (intentResult.operation === 'chat') {
+                actor.send({ type: 'PLAN_GENERATED', plan: { plan_id: jobId, steps: [] } });
+                actor.send({ type: 'EXECUTION_COMPLETE', result: { success: true } });
+                actor.send({ type: 'VALIDATION_COMPLETE', result: { success: true } });
+                return {
+                    success: true,
+                    jobId,
+                    operation: 'chat',
+                    message: intentResult.message,
+                    suggestions: [],
+                };
+            }
+
             if (intentResult.needs_clarification) {
                 actor.send({ type: 'CLARIFICATION_NEEDED', message: intentResult.reason });
                 return {
