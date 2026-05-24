@@ -132,7 +132,8 @@ export class ContextGenerator {
                 totalClips: allClips.length,
                 currentPlayhead: currentTime,
                 videoClipCount: videoClips.length,
-                audioClipCount: allClips.filter(c => c.trackType === 'audio').length
+                dedicatedAudioTrackClipCount: allClips.filter(c => c.trackType === 'audio').length,
+                note: "Video clips usually contain embedded audio. Do not assume a video lacks audio just because dedicatedAudioTrackClipCount is 0."
             },
             MediaMetadata: {
                 sourceDuration,

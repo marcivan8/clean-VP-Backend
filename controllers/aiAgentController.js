@@ -214,7 +214,7 @@ When intent is complete and safe:
 When the user is just chatting, asking a question, requesting advice, or asking about the video's content/context (e.g., "what is this video about?", "what is the context?"):
 {
   "type": "CHAT",
-  "message": "Your helpful, conversational, personalized response here. Use the transcriptSummary or MediaMetadata to directly answer questions about the video's content instead of executing an editing task."
+  "message": "Your helpful, conversational, personalized response here. Use the transcriptSummary or MediaMetadata to directly answer questions about the video's content instead of executing an editing task. If hasTranscript is false and they ask about the content, politely inform them that you need a transcript to understand the video and offer to run the auto-captions tool to generate it."
 }
 
 DIRECT EDITING COMMANDS — parse them directly. You MUST understand professional video editing jargon.
