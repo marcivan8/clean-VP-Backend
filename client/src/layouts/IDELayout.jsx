@@ -108,6 +108,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             const withoutBucket = url.slice(GCS.length).split('/').slice(1).join('/');
             return `/api/proxy/gcs-media/${withoutBucket}`;
         }
+        // If the backend returns a relative storage path (e.g., 'proxies/...' or 'raw/...'),
+        // we must route it through our proxy endpoint so the browser can fetch it.
+        if (url.startsWith('proxies/') || url.startsWith('raw/')) {
+            return `/api/proxy/gcs-media/${url}`;
+        }
         return url;
     }, []);
 

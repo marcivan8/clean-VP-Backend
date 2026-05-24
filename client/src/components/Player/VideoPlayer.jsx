@@ -73,8 +73,11 @@ const VideoPlayer = () => {
             const asset = assets.find(a => a.id === activeClip.assetId);
             // Prefer proxy for playback if available
             mediaUrl = asset?.proxyUrl || asset?.url;
+            if (mediaUrl && (mediaUrl.startsWith('proxies/') || mediaUrl.startsWith('raw/'))) {
+                mediaUrl = `/api/proxy/gcs-media/${mediaUrl}`;
+            }
             if (asset?.proxyUrl) {
-                console.log(`[VideoPlayer] Using Proxy: ${asset.proxyUrl}`);
+                console.log(`[VideoPlayer] Using Proxy: ${mediaUrl}`);
             }
         }
 
@@ -161,6 +164,9 @@ const VideoPlayer = () => {
                     if (!mediaUrl && clip.assetId) {
                         const asset = assets.find(a => a.id === clip.assetId);
                         mediaUrl = asset?.url;
+                        if (mediaUrl && (mediaUrl.startsWith('proxies/') || mediaUrl.startsWith('raw/'))) {
+                            mediaUrl = `/api/proxy/gcs-media/${mediaUrl}`;
+                        }
                     }
 
                     if (mediaUrl) {
