@@ -30,11 +30,11 @@ async function extractAudioForWhisper(inputPath, tempDir) {
     await new Promise((resolve, reject) => {
         ffmpeg(inputPath)
             .noVideo()
-            .outputOptions('-map', '0:a:0') // Force selecting the first audio stream
+            .audioFilters('loudnorm=I=-16:TP=-1.5:LRA=11') // Normalize audio to ensure Whisper hears faint speech
             .audioCodec('libmp3lame')
             .audioChannels(1)
             .audioFrequency(16000)
-            .audioBitrate('32k')
+            .audioBitrate('64k')
             .format('mp3')
             .output(outPath)
             .on('end', resolve)
@@ -229,6 +229,7 @@ module.exports = async function processAudioJob(job) {
                 const transcription = await openai.audio.transcriptions.create({
                     file: fs.createReadStream(tWhisperPath),
                     model: 'whisper-1',
+                    prompt: 'This is a video transcript. The speech might be faint, or there may be long pauses.',
                     response_format: 'verbose_json',
                     timestamp_granularities: ['word', 'segment']
                 });
