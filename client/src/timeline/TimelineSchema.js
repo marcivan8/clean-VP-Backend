@@ -233,7 +233,10 @@ export function createTimelineState(overrides = {}) {
         // Normalized Entities
         entities: {
             clips: {},
-            layers: {},
+            layers: {
+                'track-default-video': { id: 'track-default-video', name: 'Video 1', type: 'video', order: 0, visible: true, locked: false, muted: false, solo: false, volume: 1 },
+                'track-default-audio': { id: 'track-default-audio', name: 'Audio 1', type: 'audio', order: 1, visible: true, locked: false, muted: false, solo: false, volume: 1 }
+            },
             effects: {},
             transitions: {},
             placements: {}

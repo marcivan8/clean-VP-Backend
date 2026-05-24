@@ -31,9 +31,12 @@ try {
     if (_raw) {
         const _saved = JSON.parse(_raw);
         const _age = Date.now() - (_saved.timestamp || 0);
-        if (_age < 24 * 60 * 60 * 1000 && _saved.tracks?.some(t => t.clips?.length > 0)) {
+        if (_saved.version === '1.2' && _age < 24 * 60 * 60 * 1000 && _saved.tracks?.some(t => t.clips?.length > 0)) {
             timelineManager.fromLegacyTracks(_saved.tracks);
             _preRestoredProject = _saved;
+        } else {
+            // Wipe corrupted or old session (forces a completely clean state)
+            localStorage.removeItem('vp_autosave');
         }
     }
 } catch (_) { /* corrupted autosave — ignore */ }
@@ -443,6 +446,18 @@ const useTimelineStore = create(
 
                 targets.forEach(id => {
                     timelineManager.dispatch(TimelineActions.removePlacement(id));
+                });
+
+                // Clean up empty tracks (except defaults)
+                const currentPlacements = Object.values(timelineManager.getState().entities.placements);
+                const currentLayers = Object.values(timelineManager.getState().entities.layers);
+                
+                currentLayers.forEach(layer => {
+                    if (layer.id === 'track-default-video' || layer.id === 'track-default-audio') return;
+                    const hasClips = currentPlacements.some(p => p.layerId === layer.id);
+                    if (!hasClips) {
+                        timelineManager.dispatch(TimelineActions.removeLayer(layer.id));
+                    }
                 });
 
                 set({
@@ -924,10 +939,18 @@ const useTimelineStore = create(
                 // Strip blob URLs and File objects — they die on page reload.
                 // Keep proxyUrl / fileUrl which point to server-side files that survive.
                 const sanitizedAssets = (state.assets || []).map(({ file: _f, url: _u, ...rest }) => rest);
+                const sanitizedTracks = (state.tracks || []).map(track => ({
+                    ...track,
+                    clips: track.clips.map(clip => ({
+                        ...clip,
+                        url: clip.url?.startsWith('blob:') ? '' : clip.url,
+                        sourceUrl: clip.sourceUrl?.startsWith('blob:') ? '' : clip.sourceUrl
+                    }))
+                }));
                 const projectData = {
-                    version: '1.1',
+                    version: '1.2',
                     timestamp: Date.now(),
-                    tracks: state.tracks,
+                    tracks: sanitizedTracks,
                     duration: state.duration,
                     aspectRatio: state.aspectRatio,
                     zoomLevel: state.zoomLevel,

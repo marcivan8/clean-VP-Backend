@@ -949,12 +949,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         }
 
                                         return (
-                                            // FIX: Key only changes on aspectRatio, NOT on clip count.
-                                            // Previously keyed on tracks.reduce(...clips.length) which caused
-                                            // a full Revideo player remount (recompile) every time a clip
-                                            // was added. That broke playback and caused 3-5s stutters.
                                             <Player
-                                                key={`player-${aspectRatio}-${hasClips ? 'media' : 'empty'}`}
+                                                key={`player-${aspectRatio}-${hasClips ? 'media' : 'empty'}-${assets.map(a => a.proxyUrl ? '1' : '0').join('')}`}
                                                 onPlayerReady={handlePlayerReady}
                                                 playing={isPlaying}
                                                 controls={false}
