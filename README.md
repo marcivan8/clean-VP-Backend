@@ -8,6 +8,7 @@
 
 ### 🤖 Conversational AI Agent
 - Natural language editing commands parsed by GPT-4o (e.g. *"remove all filler words"*, *"make it cinematic"*, *"export for Final Cut"*)
+- Acts as a true conversational companion: answers video editing questions, helps ideate hooks, and provides guidance without executing phantom edits
 - Intent parser with spaCy NLP pre-analysis for clarity scoring and duration validation
 - Structured editing plan generation with user approval flow
 - Session memory and context-aware multi-turn conversations
@@ -39,6 +40,12 @@ Powered by `@chatoctopus/timeline` — no floating-point drift, rational time ma
 - GPT-4o analysis of hook, pacing, energy, and emotion
 - Platform-fit scores, editing tips, and ML-based virality prediction
 - Analysis history per user
+
+### ☁️ Direct-to-GCS Resumable Uploads
+- Direct-to-bucket uploads via Google Cloud Signed URLs
+- Resumable upload support using `XMLHttpRequest` for native progress tracking
+- Bypasses traditional server bottlenecks and 60-second reverse proxy timeouts (e.g., Railway 502 Bad Gateway errors)
+- Smart cloud fallback: Worker queues seamlessly pull media directly from GCS when local cache is unavailable
 
 ### 🔐 Security
 - Supabase JWT authentication on all API endpoints
@@ -192,7 +199,8 @@ Authorization: Bearer <supabase-jwt>
 | `POST` | `/api/audio/transcribe` | Whisper word-level transcription |
 | `POST` | `/api/audio/beat-detect` | BPM + beat timestamp detection |
 | `POST` | `/api/silence/detect` | Detect silence segments |
-| `POST` | `/api/proxy/upload` | Upload video + generate proxy |
+| `POST` | `/api/proxy/upload-url` | Generate a GCS Signed URL for direct upload |
+| `POST` | `/api/proxy/process-direct`| Process the video after direct GCS upload |
 | `GET` | `/api/presets/marketplace` | Get curated preset list |
 
 ### NLE Export — `POST /api/export/nle`
@@ -237,13 +245,15 @@ docker run -p 3000:3000 --env-file .env vibed-backend
 
 
 
-### ⚠️ Ephemeral Filesystem Warning
+### ⚠️ Ephemeral Filesystem Warning & Cloud Storage
 
 Railway's filesystem is **not persistent**. Any files written to `uploads/` (proxies, renders, temp files) **will be lost on every redeploy**.
 
-For production use, you must configure **Google Cloud Storage** (or S3):
+To solve this and prevent Railway's 60-second proxy timeout from dropping large file uploads, the app uses a **Direct-to-GCS Resumable Upload** architecture:
 - Set `GCS_BUCKET_NAME` and `GOOGLE_APPLICATION_CREDENTIALS` (or inject the JSON key directly as an env var).
-- The storage layer in `services/` will prefer GCS when configured, falling back to local disk only in development.
+- The client requests a Signed URL and uploads large files directly to the Google Cloud Storage bucket.
+- The backend worker queues pull from GCS natively whenever a file is missing from the local ephemeral disk.
+- **Important**: Your GCS bucket MUST have CORS configured to allow `PUT` requests from your frontend origin (with headers like `x-goog-resumable`).
 
 ---
 
