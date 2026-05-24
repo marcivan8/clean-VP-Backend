@@ -53,7 +53,8 @@ router.post('/detect', optionalAuth, async (req, res) => {
                 // On a distributed deployment (separate API + Worker services) the
                 // worker downloads from GCS, so the file may not be local here.
                 // Only hard-reject when we're sure it can't be found anywhere.
-                if (process.env.NODE_ENV === 'production') {
+                const storageConfig = require('../config/storage');
+                if (storageConfig.bucket && !storageConfig.useLocalStorage) {
                     console.warn(`[silenceRoutes] File not found locally (${filePath}); worker will attempt GCS download.`);
                     // Allow the job to be queued — the worker has its own GCS fallback
                 } else {

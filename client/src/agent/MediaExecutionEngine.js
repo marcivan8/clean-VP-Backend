@@ -311,8 +311,25 @@ export class MediaExecutionEngine {
                 args[key] = videoTrack?.clips?.[0]?.id || null;
             } else if (val === '$uploaded_file') {
                 // Prefer the server-side path stored after proxy upload
-                const serverPath = store.uploadedFilePath;
+                let serverPath = store.uploadedFilePath;
                 const fileName   = store.uploadedFile?.name;
+
+                // Fallback: If the user refreshed the page and lost uploadedFilePath,
+                // try to recover it from the video asset's proxy URL (if it's on GCS)
+                if (!serverPath && store.assets) {
+                    const videoAsset = store.assets.find(a => a.type === 'video');
+                    if (videoAsset && videoAsset.proxyUrl) {
+                        // If proxyUrl is "proxies/user/file.mp4", deduce the raw path
+                        if (videoAsset.proxyUrl.startsWith('proxies/')) {
+                            // "proxies/userId/filename/proxy.mp4" -> "raw/userId/filename"
+                            const parts = videoAsset.proxyUrl.split('/');
+                            if (parts.length >= 3) {
+                                serverPath = `raw/${parts[1]}/${parts[2]}`;
+                                console.log('[MediaExecutionEngine] Recovered missing uploadedFilePath from asset proxyUrl:', serverPath);
+                            }
+                        }
+                    }
+                }
 
                 if (serverPath) {
                     args[key] = serverPath;
@@ -507,7 +524,18 @@ export class MediaExecutionEngine {
         for (const [key, val] of Object.entries(resolvedPayload)) {
             if (val === '$uploaded_file') {
                 // Prefer server-side path; fall back to browser file name
-                resolvedPayload[key] = store.uploadedFilePath || store.uploadedFile?.name || 'video.mp4';
+                let serverPath = store.uploadedFilePath;
+                
+                // Fallback for page reloads where store.uploadedFilePath was lost
+                if (!serverPath && store.assets) {
+                    const videoAsset = store.assets.find(a => a.type === 'video');
+                    if (videoAsset && videoAsset.proxyUrl && videoAsset.proxyUrl.startsWith('proxies/')) {
+                        const parts = videoAsset.proxyUrl.split('/');
+                        if (parts.length >= 3) serverPath = `raw/${parts[1]}/${parts[2]}`;
+                    }
+                }
+
+                resolvedPayload[key] = serverPath || store.uploadedFile?.name || 'video.mp4';
                 console.log(`[MediaExecutionEngine] Resolved $uploaded_file → "${resolvedPayload[key]}"`);
             }
         }
