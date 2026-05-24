@@ -48,16 +48,33 @@ const useTimelineStore = create(
     subscribeWithSelector((set, get) => {
         // Subscribe to timeline events to update Zustand state
         timelineEvents.on('*', (event) => {
-            set({
+            const isPlaybackEvent = [
+                'timeline:playhead:moved',
+                'timeline:playback:started',
+                'timeline:playback:stopped',
+                'timeline:selection:changed',
+                'timeline:active:changed'
+            ].includes(event?.type);
+
+            const updates = {
                 _timelineState: timelineManager.getState(),
-                tracks: timelineManager.toLegacyTracks(),
                 _lastEvent: event
-            });
-            // Auto-save 1.5 s after the last change so rapid edits don't spam localStorage
-            clearTimeout(_autosaveTimer);
-            _autosaveTimer = setTimeout(() => {
-                useTimelineStore.getState().saveProject();
-            }, 1500);
+            };
+
+            // Only rebuild the heavy tracks array and trigger autosaves for structural changes!
+            // If we rebuild tracks on PLAYHEAD_MOVED (60fps), it destroys and recreates 
+            // the entire Revideo scene 60 times a second, causing massive lag!
+            if (!isPlaybackEvent) {
+                updates.tracks = timelineManager.toLegacyTracks();
+
+                // Auto-save 1.5 s after structural changes so rapid edits don't spam localStorage
+                clearTimeout(_autosaveTimer);
+                _autosaveTimer = setTimeout(() => {
+                    useTimelineStore.getState().saveProject();
+                }, 1500);
+            }
+
+            set(updates);
         });
 
         const legacyTracks = timelineManager.toLegacyTracks();
