@@ -1,9 +1,9 @@
 import { defineConfig } from 'vite';
-import motionCanvas from '@revideo/vite-plugin';
+import revideoPlugin from '@revideo/vite-plugin';
 
 export default defineConfig({
     plugins: [
-        motionCanvas({
+        revideoPlugin({
             project: './src/project.ts',
         }),
     ],
