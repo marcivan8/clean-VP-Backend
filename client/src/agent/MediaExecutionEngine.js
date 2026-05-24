@@ -634,9 +634,12 @@ export class MediaExecutionEngine {
                 const wordCount = result?.words?.length ?? 0;
                 console.log(`[MediaExecutionEngine] autoCaptions result: ${wordCount} words, text="${(result?.text || '').slice(0, 60)}"`);
                 if (wordCount > 0) {
+                    const store = useTimelineStore.getState();
+                    if (store.setCaptions) store.setCaptions(result.words);
+                    
                     const captions = groupWordsIntoCaptions(result.words);
                     console.log(`[MediaExecutionEngine] 💬 autoCaptions: adding ${captions.length} caption clips`);
-                    useTimelineStore.getState().addCaptionClips(captions);
+                    store.addCaptionClips(captions);
                 } else {
                     console.warn('[MediaExecutionEngine] ⚠️ autoCaptions: no word timestamps returned — captions cannot be placed');
                 }
