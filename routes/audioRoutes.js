@@ -6,6 +6,7 @@ const fs = require('fs');
 const { authenticateUser, optionalAuth } = require('../middleware/auth');
 const { audioQueue } = require('../queue/queues');
 const ffmpegPath = require('ffmpeg-static');
+const storageConfig = require('../config/storage');
 
 // Set ffmpeg path
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -50,10 +51,11 @@ router.post('/denoise', optionalAuth, async (req, res) => {
         }
 
         if (!fs.existsSync(inputPath)) {
-            if (process.env.NODE_ENV !== 'production') {
+            if (storageConfig.bucket && !storageConfig.useLocalStorage) {
+                console.warn(`[audioRoutes] File not found locally (${inputPath}); worker will attempt GCS download.`);
+            } else {
                 return res.status(404).json({ error: 'File not found on server' });
             }
-            console.warn(`[audioRoutes] File not found locally (${inputPath}); worker will attempt GCS download.`);
         }
 
         console.log(`🎧 Enqueuing Denoise: ${inputPath}`);
@@ -106,10 +108,11 @@ router.post('/beat-detect', authenticateUser, async (req, res) => {
             return res.status(403).json({ error: 'Access denied: invalid file path' });
         }
         if (!fs.existsSync(inputPath)) {
-            if (process.env.NODE_ENV !== 'production') {
+            if (storageConfig.bucket && !storageConfig.useLocalStorage) {
+                console.warn(`[audioRoutes] File not found locally (${inputPath}); worker will attempt GCS download.`);
+            } else {
                 return res.status(404).json({ error: 'File not found' });
             }
-            console.warn(`[audioRoutes] File not found locally (${inputPath}); worker will attempt GCS download.`);
         }
 
         console.log(`🥁 Enqueuing Beat Detection for: ${inputPath}`);
@@ -154,10 +157,11 @@ router.post('/normalize', optionalAuth, async (req, res) => {
             return res.status(403).json({ error: 'Access denied: invalid file path' });
         }
         if (!fs.existsSync(inputPath)) {
-            if (process.env.NODE_ENV !== 'production') {
+            if (storageConfig.bucket && !storageConfig.useLocalStorage) {
+                console.warn(`[audioRoutes] File not found locally (${inputPath}); worker will attempt GCS download.`);
+            } else {
                 return res.status(404).json({ error: 'File not found' });
             }
-            console.warn(`[audioRoutes] File not found locally (${inputPath}); worker will attempt GCS download.`);
         }
 
         console.log(`🔊 Enqueuing Audio Normalization for: ${inputPath}`);
@@ -220,10 +224,11 @@ router.post('/transcribe', authenticateUser, async (req, res) => {
             if (tempPath.startsWith(uploadsDir) && fs.existsSync(tempPath)) {
                 inputPath = tempPath;
             } else {
-                if (process.env.NODE_ENV !== 'production') {
+                if (storageConfig.bucket && !storageConfig.useLocalStorage) {
+                    console.warn(`[audioRoutes] File not found locally (${inputPath}); worker will attempt GCS download.`);
+                } else {
                     return res.status(404).json({ error: `File not found: ${filename || filePath}` });
                 }
-                console.warn(`[audioRoutes] File not found locally (${inputPath}); worker will attempt GCS download.`);
             }
         }
 
@@ -286,10 +291,11 @@ router.post('/filler/detect', authenticateUser, async (req, res) => {
             if (tempPath.startsWith(uploadsDir) && require('fs').existsSync(tempPath)) {
                 inputPath = tempPath;
             } else {
-                if (process.env.NODE_ENV !== 'production') {
+                if (storageConfig.bucket && !storageConfig.useLocalStorage) {
+                    console.warn(`[audioRoutes] File not found locally (${inputPath}); worker will attempt GCS download.`);
+                } else {
                     return res.status(404).json({ error: `File not found: ${filename || filePath}` });
                 }
-                console.warn(`[audioRoutes] File not found locally (${inputPath}); worker will attempt GCS download.`);
             }
         }
 

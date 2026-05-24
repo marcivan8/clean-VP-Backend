@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { audioQueue } = require('../queue/queues');
 const { optionalAuth } = require('../middleware/auth');
+const storageConfig = require('../config/storage');
 
 /**
  * POST /api/captions/generate
@@ -39,11 +40,11 @@ router.post('/generate', optionalAuth, async (req, res) => {
             } else {
                 // File missing locally. In production the worker will download from GCS.
                 // In dev, fail fast so the error is visible.
-                if (process.env.NODE_ENV !== 'production') {
+                if (storageConfig.bucket && !storageConfig.useLocalStorage) {
+                    console.warn(`[captionRoutes] File not found locally (${filePath}); worker will attempt GCS download.`);
+                } else {
                     return res.status(404).json({ error: `File not found: ${filename}` });
                 }
-                // Production: queue anyway — worker has GCS fallback (same as silenceProcessor.js)
-                console.warn(`[captionRoutes] File not found locally (${filePath}); worker will attempt GCS download.`);
             }
         }
 
