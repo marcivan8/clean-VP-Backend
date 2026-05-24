@@ -457,7 +457,20 @@ export class MediaExecutionEngine {
             case 'analyzeStructure':
             case 'apply_smart_zoom':
             case 'longFormEdit': {
-                const { VideoEditorTools } = await import('./VideoEditorTools.js');
+                let VideoEditorTools;
+                try {
+                    const module = await import('./VideoEditorTools.js');
+                    VideoEditorTools = module.VideoEditorTools;
+                } catch (err) {
+                    // Auto-recover if the server deployed a new version and this chunk's hash changed
+                    if (err.message && (err.message.includes('fetch dynamically imported module') || err.message.includes('MIME type'))) {
+                        console.warn('[MediaExecutionEngine] New app deployment detected. Reloading page to fetch the latest chunks...');
+                        useTimelineStore.getState().saveProject(); // save current state before reload
+                        window.location.reload();
+                        return { action: command.action, success: false, message: 'App updated. Reloading...', skipped: true };
+                    }
+                    throw err;
+                }
                 const tools = new VideoEditorTools();
                 // Convert camelCase / underscore action to the tool's snake_case name
                 const toolName = action
