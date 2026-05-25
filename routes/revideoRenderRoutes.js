@@ -45,11 +45,29 @@ router.post('/render', authenticateUser, async (req, res) => {
             return url;
         };
 
+        const encodeGCSUrl = (url) => {
+            if (!url) return url;
+            if (!url.startsWith('https://storage.googleapis.com')) return url;
+            // Don't double-encode already-encoded URLs
+            if (!url.includes(' ')) return url;
+            try {
+                const u = new URL(url);
+                // Encode each path segment individually, preserving slashes
+                u.pathname = u.pathname
+                    .split('/')
+                    .map(seg => encodeURIComponent(decodeURIComponent(seg)))
+                    .join('/');
+                return u.toString();
+            } catch {
+                return url.replace(/ /g, '%20');
+            }
+        };
+
         const normalizedTracks = tracks.map(track => ({
             ...track,
             clips: (track.clips || []).map(clip => ({
                 ...clip,
-                url: resolveUrl(clip),
+                url: encodeGCSUrl(resolveUrl(clip)),
             }))
         }));
 

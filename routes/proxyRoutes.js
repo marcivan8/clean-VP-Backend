@@ -154,7 +154,10 @@ router.post('/upload', authMiddleware, (req, res, next) => {
         // If using GCS, upload the raw file immediately so background workers
         // running on different nodes (e.g. Railway) can access it.
         if (storageConfig.bucket && !storageConfig.useLocalStorage) {
-            const destPath = `raw/${userId}/${req.file.filename}`;
+            const safeFilename = req.file.filename
+                .replace(/\s+/g, '_')
+                .replace(/[^a-zA-Z0-9._-]/g, '');
+            const destPath = `raw/${userId}/${safeFilename}`;
             console.log(`[ProxyRoute] Uploading raw file to GCS: ${destPath}...`);
             storageConfig.bucket.upload(req.file.path, { destination: destPath })
                 .then(() => console.log(`[ProxyRoute] Raw file uploaded to GCS.`))
@@ -178,7 +181,8 @@ router.post('/upload', authMiddleware, (req, res, next) => {
         res.json({
             jobId: job.id,
             status: 'queued',
-            originalPath: videoRelativePath
+            originalPath: videoRelativePath,
+            gcsPath: storageConfig.bucket && !storageConfig.useLocalStorage ? `raw/${userId}/${req.file.filename.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9._-]/g, '')}` : null
         });
     } catch (error) {
         console.error('[ProxyRoute Upload] Error:', error);
