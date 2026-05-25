@@ -12,6 +12,12 @@ const { authenticateUser } = require('../middleware/auth');
 
 // POST /api/revideo/render
 router.post('/render', authenticateUser, async (req, res) => {
+    console.log('[render] body keys:', Object.keys(req.body));
+    console.log('[render] sourceVideoUrl:', req.body.sourceVideoUrl);
+    console.log('[render] first clip sample:', JSON.stringify(
+        (req.body.timeline?.tracks?.[0]?.clips?.[0] || req.body.tracks?.[0]?.clips?.[0] || {}),
+        null, 2
+    ));
     try {
         const { RENDER_WORKER_URL, WORKER_SECRET } = process.env;
 
