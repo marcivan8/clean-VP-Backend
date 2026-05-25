@@ -48,7 +48,15 @@ router.post('/render', authenticateUser, async (req, res) => {
                 dimensions: [width, height],
                 logProgress: true,
             },
-            puppeteerLaunchArgs: ['--no-sandbox', '--disable-setuid-sandbox']
+            puppeteerLaunchArgs: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--no-zygote',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+            ]
         });
 
         const outputPath = path.join(outDir, outFile);
