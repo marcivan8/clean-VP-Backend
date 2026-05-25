@@ -26,6 +26,33 @@ router.post('/render', authenticateUser, async (req, res) => {
         const ALLOWED_RATIOS = ['16:9', '9:16', '1:1', '4:5'];
         const aspectRatio = ALLOWED_RATIOS.includes(req.body.aspectRatio) ? req.body.aspectRatio : '16:9';
 
+        // Resolve blob URLs to GCS URLs before proxying
+        const userId = req.user.id;
+        const bucket = process.env.GCS_BUCKET_NAME || 'viral-pilot_bucket';
+
+        const resolveUrl = (clip) => {
+            const url = clip.url || clip.src;
+            if (!url?.startsWith('blob:')) return url;
+            // Use the clip's stored GCS path first, then fall back to name
+            if (clip.gcsPath) {
+                return `https://storage.googleapis.com/${bucket}/${clip.gcsPath}`;
+            }
+            const filename = clip.originalName || clip.name;
+            if (filename) {
+                return `https://storage.googleapis.com/${bucket}/raw/${userId}/${filename}`;
+            }
+            console.warn(`[render] Cannot resolve blob URL for clip ${clip.id} — no name or gcsPath`);
+            return url;
+        };
+
+        const normalizedTracks = tracks.map(track => ({
+            ...track,
+            clips: (track.clips || []).map(clip => ({
+                ...clip,
+                url: resolveUrl(clip),
+            }))
+        }));
+
         console.log(`📡 Proxying render to worker: ${RENDER_WORKER_URL}`);
 
         // Forward the request to the worker
@@ -37,7 +64,7 @@ router.post('/render', authenticateUser, async (req, res) => {
                 'Content-Type': 'application/json'
             },
             data: { 
-                tracks, 
+                tracks: normalizedTracks, 
                 duration, 
                 fps, 
                 aspectRatio,
