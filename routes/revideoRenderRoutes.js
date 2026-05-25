@@ -37,30 +37,23 @@ router.post('/render', authenticateUser, async (req, res) => {
         const bucket = process.env.GCS_BUCKET_NAME || 'viral-pilot_bucket';
 
         const resolveUrl = (clip) => {
-            const raw = clip.url || clip.src || clip.videoUrl || clip.proxyUrl;
-
-            // Silence-removal segments: no URL, use the source video
-            if (!raw) {
-                if (sourceVideoUrl) return sourceVideoUrl;
-                console.warn(`[render] clip ${clip.id} has no URL and no sourceVideoUrl`);
-                return undefined;
+            // Use sourceUrl if populated
+            const raw = clip.sourceUrl || clip.url || clip.src || clip.videoUrl || clip.proxyUrl;
+            if (raw && raw !== '' && !raw.startsWith('blob:')) {
+                return encodeGCSUrl(raw);
             }
 
-            // Blob → GCS
-            if (raw.startsWith('blob:')) {
-                if (clip.gcsPath) {
-                    return `https://storage.googleapis.com/${bucket}/${clip.gcsPath
-                        .split('/').map(encodeURIComponent).join('/')}`;
-                }
-                const filename = clip.originalName || clip.name;
-                if (filename) {
-                    return `https://storage.googleapis.com/${bucket}/raw/${userId}/${encodeURIComponent(filename)}`;
-                }
-                return undefined;
+            // Blob or empty → build from filename
+            const filename = clip.name || clip.originalName;
+            if (filename) {
+                return `https://storage.googleapis.com/${bucket}/raw/${userId}/${encodeURIComponent(filename)}`;
             }
 
-            // Already a GCS URL — just return it (will be encoded below)
-            return raw;
+            // Last resort
+            if (sourceVideoUrl) return sourceVideoUrl;
+
+            console.warn(`[render] Cannot resolve URL for clip ${clip.id}`);
+            return undefined;
         };
 
         const encodeGCSUrl = (url) => {
