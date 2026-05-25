@@ -1,0 +1,19 @@
+{
+  "name": "revideo-render-lambda",
+  "version": "1.0.0",
+  "description": "AWS Lambda worker for Revideo rendering",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@revideo/renderer": "latest",
+    "@google-cloud/storage": "^7.16.0",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0",
+    "@types/aws-lambda": "^8.10.145"
+  }
+}

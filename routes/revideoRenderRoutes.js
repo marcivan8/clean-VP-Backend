@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const { authenticateUser } = require('../middleware/auth');
+const { LambdaClient, InvokeCommand } = require("@aws-sdk/client-lambda");
+const lambdaClient = new LambdaClient({ region: process.env.AWS_REGION || 'us-east-1' });
 const { Storage } = require('@google-cloud/storage');
 const gcs = new Storage();
 const gcsBucket = gcs.bucket(process.env.GCS_BUCKET_NAME || 'viral-pilot_bucket');
@@ -117,50 +119,59 @@ router.post('/render', authenticateUser, async (req, res) => {
             }))
         );
 
-        console.log(`📡 Proxying render to worker: ${RENDER_WORKER_URL}`);
+        console.log(`📡 Triggering AWS Lambda render for video`);
 
-        // Forward the request to the worker
-        const response = await axios({
-            method: 'POST',
-            url: `${RENDER_WORKER_URL}/render`,
-            headers: {
-                'x-worker-secret': WORKER_SECRET,
-                'Content-Type': 'application/json'
-            },
-            data: { 
-                tracks: signedTracks, 
-                duration, 
-                fps, 
-                aspectRatio,
-                backendUrl: process.env.FRONTEND_URL || process.env.PUBLIC_URL || 'https://your-railway-app.railway.app'
-            },
-            responseType: 'stream',
-            timeout: 300000 // 5 minute timeout for long renders
+        const backendUrl = process.env.FRONTEND_URL || process.env.PUBLIC_URL || 'https://your-railway-app.railway.app';
+        
+        // Setup payload for Lambda
+        const payload = {
+            tracks: signedTracks,
+            duration,
+            fps,
+            aspectRatio,
+            backendUrl,
+            webhookUrl: `${backendUrl}/api/revideo/webhook`
+        };
+
+        // Forward the request to the Lambda asynchronously
+        const command = new InvokeCommand({
+            FunctionName: process.env.AWS_LAMBDA_FUNCTION_NAME || 'revideo-render-lambda',
+            InvocationType: 'Event', // Asynchronous execution
+            Payload: Buffer.from(JSON.stringify(payload)),
         });
 
-        // Set the appropriate headers for an MP4 download
-        res.setHeader('Content-Type', 'video/mp4');
-        res.setHeader('Content-Disposition', response.headers['content-disposition'] || 'attachment; filename="render.mp4"');
+        await lambdaClient.send(command);
 
-        // Pipe the video stream directly back to the client
-        response.data.pipe(res);
+        res.status(202).json({
+            message: 'Rendering started successfully. A webhook will be sent upon completion.',
+            status: 'rendering'
+        });
 
     } catch (error) {
-        console.error('❌ Revideo proxy error:', error.message);
-        if (error.response) {
-            // Worker returned an error
-            res.status(error.response.status).json({
-                error: 'Render worker failed',
-                message: error.response.data?.message || error.message
-            });
-        } else {
-            // Network or timeout error
-            res.status(500).json({
-                error: 'Render proxy failed',
-                message: error.message
-            });
-        }
+        console.error('❌ AWS Lambda proxy error:', error.message);
+        res.status(500).json({
+            error: 'Render initialization failed',
+            message: error.message
+        });
     }
+});
+
+// POST /api/revideo/webhook
+// Receives completion notification from AWS Lambda
+router.post('/webhook', express.json(), async (req, res) => {
+    console.log('[webhook] Render Lambda callback received:', req.body);
+    
+    const { status, renderId, url, error } = req.body;
+    
+    if (status === 'success') {
+        // TODO: Update your database with the finalized GCS URL
+        // e.g. await db.exports.update({ where: { id: renderId }, data: { status: 'COMPLETED', url } })
+        console.log(`✅ Webhook: Render ${renderId} succeeded. Video at ${url}`);
+    } else {
+        console.log(`❌ Webhook: Render ${renderId || 'unknown'} failed. Error: ${error}`);
+    }
+
+    res.status(200).send('Webhook received');
 });
 
 // GET /api/revideo/health
