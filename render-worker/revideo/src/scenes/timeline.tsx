@@ -150,9 +150,13 @@ export default makeScene2D('timeline', function* (view) {
                     const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || canvasHeight;
                     const fitted = fitSize(srcW, srcH);
 
-                    const getGrading = () => {
-                        return tracks.flatMap((tr: any) => tr.clips || []).find((c: any) => c.id === clip.id)?.grading;
-                    };
+                    const g = clip.grading;
+                    const videoFilters = g ? [
+                        brightness((g.brightness ?? 100) / 100),
+                        contrast((g.contrast ?? 100) / 100),
+                        saturate((g.saturate ?? 100) / 100),
+                        hue(g.hueRotate ?? 0),
+                    ] : [];
 
                     layerRefs[track.id]().add(
                         <Node ref={wrapperRef}>
@@ -170,12 +174,7 @@ export default makeScene2D('timeline', function* (view) {
                             scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
                             rotation={() => evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
                             opacity={() => evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
-                            filters={[
-                                brightness(() => (getGrading()?.brightness ?? 100) / 100),
-                                contrast(() => (getGrading()?.contrast ?? 100) / 100),
-                                saturate(() => (getGrading()?.saturate ?? 100) / 100),
-                                hue(() => getGrading()?.hueRotate ?? 0),
-                            ]}
+                            filters={videoFilters}
                         />
                         </Node>
                     );
@@ -203,9 +202,13 @@ export default makeScene2D('timeline', function* (view) {
                     const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || canvasHeight;
                     const fitted = fitSize(srcW, srcH);
 
-                    const getGrading = () => {
-                        return tracks.flatMap((tr: any) => tr.clips || []).find((c: any) => c.id === clip.id)?.grading;
-                    };
+                    const gi = clip.grading;
+                    const imgFilters = gi ? [
+                        brightness((gi.brightness ?? 100) / 100),
+                        contrast((gi.contrast ?? 100) / 100),
+                        saturate((gi.saturate ?? 100) / 100),
+                        hue(gi.hueRotate ?? 0),
+                    ] : [];
 
                     layerRefs[track.id]().add(
                         <Node ref={wrapperRef}>
@@ -220,12 +223,7 @@ export default makeScene2D('timeline', function* (view) {
                             scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
                             rotation={() => evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
                             opacity={() => evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
-                            filters={[
-                                brightness(() => (getGrading()?.brightness ?? 100) / 100),
-                                contrast(() => (getGrading()?.contrast ?? 100) / 100),
-                                saturate(() => (getGrading()?.saturate ?? 100) / 100),
-                                hue(() => getGrading()?.hueRotate ?? 0),
-                            ]}
+                            filters={imgFilters}
                         />
                         </Node>
                     );

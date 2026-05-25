@@ -55,7 +55,6 @@ app.post('/render', async (req, res) => {
             });
         });
 
-        const totalFrames = Math.round(duration * fps);
         await renderVideo({
             projectFile: path.join(__dirname, 'revideo', 'src', 'project.ts'),
             variables: { tracks, duration, aspectRatio, fps, backendUrl },
@@ -64,7 +63,7 @@ app.post('/render', async (req, res) => {
                 outDir,
                 dimensions: [width, height],
                 logProgress: true,
-                range: [0, totalFrames],
+                range: [0, duration],
             },
             puppeteerLaunchArgs: [
                 '--no-sandbox',
