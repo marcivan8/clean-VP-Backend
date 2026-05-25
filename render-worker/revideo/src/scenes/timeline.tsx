@@ -1,5 +1,5 @@
 import { makeScene2D, Video, Audio, Img, Txt, Node, Rect, brightness, contrast, saturate, hue } from '@revideo/2d';
-import { waitFor, useScene, all, any, createRef } from '@revideo/core';
+import { waitFor, useScene, all, createRef } from '@revideo/core';
 
 /**
  * Evaluate a keyframe array at a given local clip time.
@@ -151,8 +151,7 @@ export default makeScene2D('timeline', function* (view) {
                     const fitted = fitSize(srcW, srcH);
 
                     const getGrading = () => {
-                        const t = typeof tracksSignal === 'function' ? tracksSignal() : (tracksSignal || []);
-                        return (t as any[]).flatMap((tr: any) => tr.clips || []).find((c: any) => c.id === clip.id)?.grading;
+                        return tracks.flatMap((tr: any) => tr.clips || []).find((c: any) => c.id === clip.id)?.grading;
                     };
 
                     layerRefs[track.id]().add(
@@ -205,8 +204,7 @@ export default makeScene2D('timeline', function* (view) {
                     const fitted = fitSize(srcW, srcH);
 
                     const getGrading = () => {
-                        const t = typeof tracksSignal === 'function' ? tracksSignal() : (tracksSignal || []);
-                        return (t as any[]).flatMap((tr: any) => tr.clips || []).find((c: any) => c.id === clip.id)?.grading;
+                        return tracks.flatMap((tr: any) => tr.clips || []).find((c: any) => c.id === clip.id)?.grading;
                     };
 
                     layerRefs[track.id]().add(
@@ -291,9 +289,9 @@ export default makeScene2D('timeline', function* (view) {
         });
     });
 
-    yield* any(
+    yield* all(
         waitFor(totalDuration),
-        all(...runningClips)
+        ...runningClips
     );
 
 });

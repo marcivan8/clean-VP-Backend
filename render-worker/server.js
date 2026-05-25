@@ -23,6 +23,10 @@ app.get('/health', (req, res) => {
 });
 
 app.post('/render', async (req, res) => {
+    console.log('[worker] sourceVideoUrl:', req.body.sourceVideoUrl);
+    console.log('[worker] clip[0] full object:', JSON.stringify(
+        req.body.tracks?.[0]?.clips?.[0] || {}, null, 2
+    ));
     try {
         const { renderVideo } = await import('@revideo/renderer');
         
@@ -44,6 +48,14 @@ app.post('/render', async (req, res) => {
 
         console.log(`🎬 Render start: ${duration}s, ${width}x${height}`);
 
+        console.log('📋 Clip URLs:');
+        tracks.forEach((t, ti) => {
+            (t.clips || []).forEach((c, ci) => {
+                console.log(`  track[${ti}].clips[${ci}]: ${c.url || c.src}`);
+            });
+        });
+
+        const totalFrames = Math.round(duration * fps);
         await renderVideo({
             projectFile: path.join(__dirname, 'revideo', 'src', 'project.ts'),
             variables: { tracks, duration, aspectRatio, fps, backendUrl },
@@ -52,6 +64,7 @@ app.post('/render', async (req, res) => {
                 outDir,
                 dimensions: [width, height],
                 logProgress: true,
+                range: [0, totalFrames],
             },
             puppeteerLaunchArgs: [
                 '--no-sandbox',
