@@ -37,19 +37,24 @@ function clipLocalTime(playbackTime: number, clipStart: number): number {
 
 export default makeScene2D('timeline', function* (view) {
     
-    const fixUrl = (url: string) => {
-        if (!url) return url;
-        if (url.startsWith('/api') || url.startsWith('/uploads')) {
-            return 'http://127.0.0.1:3000' + url;
-        }
-        return url;
-    };
-    
-    
     // ── Capture scene reference ONCE (safe inside generator body) ──
     const scene = useScene();
     const playback = scene.playback;
     const vars = scene.variables;
+
+    const backendUrlSignal = vars.get('backendUrl', 'http://127.0.0.1:3000');
+    const backendUrl: string = (typeof backendUrlSignal === 'function'
+        ? backendUrlSignal()
+        : backendUrlSignal) as string;
+
+    const fixUrl = (url: string) => {
+        if (!url) return url;
+        if (url.startsWith('blob:')) return url;
+        if (url.startsWith('/api') || url.startsWith('/uploads')) {
+            return backendUrl + url;
+        }
+        return url;
+    };
 
     const durationSignal = vars.get('duration', 10);
     const totalDuration: number = (durationSignal ? typeof durationSignal === 'function' ? durationSignal() : durationSignal : 10) as number;

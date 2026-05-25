@@ -36,7 +36,13 @@ router.post('/render', authenticateUser, async (req, res) => {
                 'x-worker-secret': WORKER_SECRET,
                 'Content-Type': 'application/json'
             },
-            data: { tracks, duration, fps, aspectRatio },
+            data: { 
+                tracks, 
+                duration, 
+                fps, 
+                aspectRatio,
+                backendUrl: process.env.FRONTEND_URL || process.env.PUBLIC_URL || 'https://your-railway-app.railway.app'
+            },
             responseType: 'stream',
             timeout: 300000 // 5 minute timeout for long renders
         });

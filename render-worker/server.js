@@ -26,7 +26,7 @@ app.post('/render', async (req, res) => {
     try {
         const { renderVideo } = await import('@revideo/renderer');
         
-        const { tracks = [], duration = 10, fps = 30, aspectRatio = '16:9' } = req.body;
+        const { tracks = [], duration = 10, fps = 30, aspectRatio = '16:9', backendUrl = '' } = req.body;
         
         // Compute dimensions
         const height = 1080;
@@ -46,7 +46,7 @@ app.post('/render', async (req, res) => {
 
         await renderVideo({
             projectFile: path.join(__dirname, 'revideo', 'src', 'project.ts'),
-            variables: { tracks, duration, aspectRatio, fps },
+            variables: { tracks, duration, aspectRatio, fps, backendUrl },
             settings: {
                 outFile,
                 outDir,
