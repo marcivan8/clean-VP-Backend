@@ -39,8 +39,6 @@ router.post('/render', authenticateUser, async (req, res) => {
 
         console.log(`🎬 Starting Revideo render: ${tracks.reduce((acc, t) => acc + t.clips.length, 0)} clips, ${duration}s, ${width}x${height}`);
 
-        process.env.PUPPETEER_LAUNCH_ARGS = '--no-sandbox --disable-setuid-sandbox';
-
         await renderVideo({
             projectFile: path.join(__dirname, '..', 'revideo', 'src', 'project.ts'),
             variables: { tracks, duration, aspectRatio, fps },
@@ -50,6 +48,7 @@ router.post('/render', authenticateUser, async (req, res) => {
                 dimensions: [width, height],
                 logProgress: true,
             },
+            puppeteerLaunchArgs: ['--no-sandbox', '--disable-setuid-sandbox']
         });
 
         const outputPath = path.join(outDir, outFile);
