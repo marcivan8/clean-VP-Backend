@@ -20,7 +20,7 @@ router.post('/render', authenticateUser, async (req, res) => {
             return res.status(500).json({ error: 'Render proxy not configured' });
         }
 
-        const { tracks = [], duration = 10, fps = 30 } = req.body.timeline || req.body;
+        const { tracks = [], duration = 10, fps = 30, sourceVideoUrl } = req.body.timeline || req.body;
 
         // Whitelist aspectRatio
         const ALLOWED_RATIOS = ['16:9', '9:16', '1:1', '4:5'];
@@ -31,18 +31,30 @@ router.post('/render', authenticateUser, async (req, res) => {
         const bucket = process.env.GCS_BUCKET_NAME || 'viral-pilot_bucket';
 
         const resolveUrl = (clip) => {
-            const url = clip.url || clip.src;
-            if (!url?.startsWith('blob:')) return url;
-            // Use the clip's stored GCS path first, then fall back to name
-            if (clip.gcsPath) {
-                return `https://storage.googleapis.com/${bucket}/${clip.gcsPath}`;
+            const raw = clip.url || clip.src || clip.videoUrl || clip.proxyUrl;
+
+            // Silence-removal segments: no URL, use the source video
+            if (!raw) {
+                if (sourceVideoUrl) return sourceVideoUrl;
+                console.warn(`[render] clip ${clip.id} has no URL and no sourceVideoUrl`);
+                return undefined;
             }
-            const filename = clip.originalName || clip.name;
-            if (filename) {
-                return `https://storage.googleapis.com/${bucket}/raw/${userId}/${filename}`;
+
+            // Blob → GCS
+            if (raw.startsWith('blob:')) {
+                if (clip.gcsPath) {
+                    return `https://storage.googleapis.com/${bucket}/${clip.gcsPath
+                        .split('/').map(encodeURIComponent).join('/')}`;
+                }
+                const filename = clip.originalName || clip.name;
+                if (filename) {
+                    return `https://storage.googleapis.com/${bucket}/raw/${userId}/${encodeURIComponent(filename)}`;
+                }
+                return undefined;
             }
-            console.warn(`[render] Cannot resolve blob URL for clip ${clip.id} — no name or gcsPath`);
-            return url;
+
+            // Already a GCS URL — just return it (will be encoded below)
+            return raw;
         };
 
         const encodeGCSUrl = (url) => {
