@@ -2,6 +2,29 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const { authenticateUser } = require('../middleware/auth');
+const { Storage } = require('@google-cloud/storage');
+const gcs = new Storage();
+const gcsBucket = gcs.bucket(process.env.GCS_BUCKET_NAME || 'viral-pilot_bucket');
+
+const toSignedUrl = async (gcsUrl) => {
+    if (!gcsUrl) return gcsUrl;
+    try {
+        // Extract path: "raw/userId/filename.mp4"
+        const url = new URL(gcsUrl);
+        const gcsPath = url.pathname.replace(`/${process.env.GCS_BUCKET_NAME || 'viral-pilot_bucket'}/`, '');
+        const decodedPath = decodeURIComponent(gcsPath);
+
+        const [signed] = await gcsBucket.file(decodedPath).getSignedUrl({
+            version: 'v4',
+            action:  'read',
+            expires: Date.now() + 60 * 60 * 1000, // 1 hour — enough for any render
+        });
+        return signed;
+    } catch (err) {
+        console.warn('[render] Could not sign URL:', gcsUrl, err.message);
+        return gcsUrl; // fall back to unsigned
+    }
+};
 
 /**
  * Revideo Render Proxy Routes
@@ -82,6 +105,18 @@ router.post('/render', authenticateUser, async (req, res) => {
             }))
         }));
 
+        const signedTracks = await Promise.all(
+            normalizedTracks.map(async track => ({
+                ...track,
+                clips: await Promise.all(
+                    (track.clips || []).map(async clip => ({
+                        ...clip,
+                        url: await toSignedUrl(clip.url),
+                    }))
+                ),
+            }))
+        );
+
         console.log(`📡 Proxying render to worker: ${RENDER_WORKER_URL}`);
 
         // Forward the request to the worker
@@ -93,7 +128,7 @@ router.post('/render', authenticateUser, async (req, res) => {
                 'Content-Type': 'application/json'
             },
             data: { 
-                tracks: normalizedTracks, 
+                tracks: signedTracks, 
                 duration, 
                 fps, 
                 aspectRatio,
