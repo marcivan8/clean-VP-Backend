@@ -7,13 +7,14 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@revideo/renderer": "latest",
     "@google-cloud/storage": "^7.16.0",
+    "@revideo/renderer": "latest",
     "uuid": "^10.0.0"
   },
   "devDependencies": {
-    "typescript": "^5.0.0",
+    "@types/aws-lambda": "^8.10.145",
     "@types/node": "^20.0.0",
-    "@types/aws-lambda": "^8.10.145"
+    "@types/uuid": "^10.0.0",
+    "typescript": "^5.0.0"
   }
 }

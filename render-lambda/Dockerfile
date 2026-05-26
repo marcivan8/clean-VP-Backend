@@ -24,8 +24,15 @@ RUN dnf update -y && \
     dbus-glib-devel \
     nss \
     mesa-libgbm \
-    ffmpeg \
+    tar \
+    xz \
     && dnf clean all
+
+# Install static FFmpeg
+RUN curl -L https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz | tar xJ && \
+    mv ffmpeg-*-static/ffmpeg /usr/local/bin/ && \
+    mv ffmpeg-*-static/ffprobe /usr/local/bin/ && \
+    rm -rf ffmpeg-*-static
 
 # Copy package.json and install production dependencies
 COPY package*.json ./

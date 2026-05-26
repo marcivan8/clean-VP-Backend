@@ -13,6 +13,7 @@
     "cleanup:expired": "node scripts/cleanup-expired-videos.js"
   },
   "dependencies": {
+    "@aws-sdk/client-lambda": "^3.1053.0",
     "@chatoctopus/timeline": "^0.2.0",
     "@google-cloud/storage": "^7.16.0",
     "@paddle/paddle-node-sdk": "^3.2.0",
