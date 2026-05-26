@@ -5,6 +5,8 @@ const fs = require('fs');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 const { authenticateUser, optionalAuth } = require('../middleware/auth');
+const storageConfig = require('../config/storage');
+const gcsBucket = storageConfig.bucket;
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -159,7 +161,7 @@ router.post('/', authMiddleware, async (req, res) => {
         fs.mkdirSync(tmpDir, { recursive: true });
 
         // --- Collect all video/image clips across tracks, sorted by start time ---
-        const allClips = [];
+        let allClips = [];
         for (const track of videoTracks) {
             for (const clip of track.clips) {
                 allClips.push({ ...clip, trackVolume: track.volume ?? 1.0 });
@@ -167,13 +169,45 @@ router.post('/', authMiddleware, async (req, res) => {
         }
         allClips.sort((a, b) => a.start - b.start);
 
+        // --- Resolve GCS URLs for all clips ---
+        const userId = req.user ? req.user.id : 'anonymous';
+        const bucketName = process.env.GCS_BUCKET_NAME || 'viral-pilot_bucket';
+
+        const resolveUrl = (clip) => {
+            const raw = clip.sourceUrl || clip.url || clip.src || clip.videoUrl || clip.proxyUrl;
+            if (raw && raw !== '' && !raw.startsWith('blob:')) return raw;
+            const filename = clip.name || clip.originalName;
+            if (filename) return `https://storage.googleapis.com/${bucketName}/raw/${userId}/${encodeURIComponent(filename)}`;
+            return undefined;
+        };
+
+        const signClipUrl = async (clip) => {
+            const rawUrl = resolveUrl(clip);
+            if (!rawUrl || !gcsBucket) return clip;
+            try {
+                const urlObj = new URL(rawUrl);
+                let filePath = decodeURIComponent(urlObj.pathname.replace(/^\/[^/]+\//, ''));
+                const [signedUrl] = await gcsBucket.file(filePath).getSignedUrl({
+                    version: 'v4', action: 'read', expires: Date.now() + 15 * 60 * 1000, 
+                });
+                return { ...clip, resolvedPath: signedUrl };
+            } catch (e) {
+                return clip;
+            }
+        };
+
+        allClips = await Promise.all(allClips.map(signClipUrl));
+        for (const track of audioTracks) {
+            track.clips = await Promise.all(track.clips.map(signClipUrl));
+        }
+
         const scaleFilter = buildScaleFilter(targetWidth, targetHeight);
 
         // --- STEP 1: Trim each clip into a temp segment ---
         const segments = [];
         for (let i = 0; i < allClips.length; i++) {
             const clip = allClips[i];
-            const src = resolveSourcePath(clip, uploadsDir, publicDir);
+            const src = clip.resolvedPath || resolveSourcePath(clip, uploadsDir, publicDir);
             if (!src) {
                 console.warn(`⚠️  Could not find source for clip "${clip.name}", skipping`);
                 continue;
@@ -254,7 +288,7 @@ router.post('/', authMiddleware, async (req, res) => {
                 const track = audioTracks[i];
                 for (let j = 0; j < track.clips.length; j++) {
                     const clip = track.clips[j];
-                    const src = resolveSourcePath(clip, uploadsDir, publicDir);
+                    const src = clip.resolvedPath || resolveSourcePath(clip, uploadsDir, publicDir);
                     if (!src) continue;
                     const aSegPath = path.join(tmpDir, `audio-${i}-${j}.aac`);
                     const vol = (clip.volume ?? 1.0) * (track.volume ?? 1.0);
