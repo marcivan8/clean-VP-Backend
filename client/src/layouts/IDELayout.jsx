@@ -467,8 +467,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 }
             } catch (_) { /* no token — dev mode, route uses optionalAuth */ }
 
-            // POST to /api/export — the pure FFmpeg export engine
-            const response = await fetch('/api/export', {
+            // POST to /api/render — the pure FFmpeg export engine
+            const response = await fetch('/api/render', {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({ 
