@@ -186,28 +186,50 @@ router.post('/', authMiddleware, async (req, res) => {
         const sanitizeFilename = (name) =>
             name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9._-]/g, '');
 
-        // Extract the GCS object path from a full storage.googleapis.com URL.
-        const gcsPathFromUrl = (url) => {
+        // Extract the GCS object path from a storage.googleapis.com URL.
+        const gcsPathFromStorageUrl = (url) => {
             if (!url || !url.startsWith(`https://storage.googleapis.com/${bucketName}/`)) return null;
             try {
                 return decodeURIComponent(new URL(url).pathname.replace(`/${bucketName}/`, ''));
             } catch (_) { return null; }
         };
 
+        // Extract the GCS object path from an /api/proxy/gcs-media/<path> proxy URL.
+        // These are the URLs that AI-generated segment clips carry — the GCS path is
+        // embedded directly in the proxy route.
+        const gcsPathFromProxyUrl = (url) => {
+            if (!url) return null;
+            const match = url.match(/\/api\/proxy\/gcs-media\/([^?#]+)/);
+            return match ? decodeURIComponent(match[1]) : null;
+        };
+
         // Resolve the GCS object path (within the bucket) for a clip.
         // Returns the path string or null.
         const resolveGcsPath = async (clip) => {
-            // 1. If clip already carries a direct storage.googleapis.com URL, extract path.
-            for (const raw of [clip.sourceUrl, clip.url, clip.src, clip.videoUrl]) {
-                const p = gcsPathFromUrl(raw);
-                if (p) return p;
+            const candidates = [clip.sourceUrl, clip.url, clip.src, clip.videoUrl, clip.proxyUrl];
+
+            // 1. Direct storage.googleapis.com URL — extract path.
+            for (const raw of candidates) {
+                const p = gcsPathFromStorageUrl(raw);
+                if (p) { console.log(`[export] GCS path from storage URL: ${p}`); return p; }
             }
 
+            // 2. Proxy URL (/api/proxy/gcs-media/<path>) — the path IS the GCS key.
+            //    AI-generated segment clips carry the source video's proxy URL here.
+            for (const raw of candidates) {
+                const p = gcsPathFromProxyUrl(raw);
+                if (p) { console.log(`[export] GCS path from proxy URL: ${p}`); return p; }
+            }
+
+            // 3. Fall back to matching by filename within the user's raw/ prefix.
             const filename = clip.name || clip.originalName;
-            if (!filename || !gcsBucket) return null;
+            if (!filename || !gcsBucket) {
+                console.warn(`[export] No URL or filename for clip "${clip.name}" — fields:`,
+                    JSON.stringify({ url: (clip.url||'').slice(0,80), sourceUrl: (clip.sourceUrl||'').slice(0,80), proxyUrl: (clip.proxyUrl||'').slice(0,80) }));
+                return null;
+            }
             const safeName = sanitizeFilename(filename);
 
-            // 2. Try exact sanitized path (legacy /api/proxy/upload stores files here).
             const exactPath = `raw/${userId}/${safeName}`;
             try {
                 const [exists] = await gcsBucket.file(exactPath).exists();
@@ -216,18 +238,16 @@ router.post('/', authMiddleware, async (req, res) => {
                 console.warn(`[export] GCS exists() error for "${exactPath}":`, e.message);
             }
 
-            // 3. Scan for timestamp-prefixed file (direct-to-GCS uploads use Date.now() prefix).
             try {
                 const [files] = await gcsBucket.getFiles({ prefix: `raw/${userId}/` });
-                console.log(`[export] GCS listing for raw/${userId}/: ${files.length} file(s):`, files.map(f => f.name));
                 const match = files.find(f => {
                     const base = f.name.split('/').pop();
                     return base === safeName || base.endsWith(`-${safeName}`);
                 });
                 if (match) { console.log(`[export] GCS listing match: ${match.name}`); return match.name; }
-                console.warn(`[export] No GCS file matched "${safeName}" for user ${userId}`);
+                console.warn(`[export] No GCS file matched "${safeName}" — available:`, files.map(f => f.name));
             } catch (e) {
-                console.warn(`[export] GCS getFiles() error for prefix "raw/${userId}/":`, e.message);
+                console.warn(`[export] GCS getFiles() error:`, e.message);
             }
 
             return null;
@@ -260,7 +280,8 @@ router.post('/', authMiddleware, async (req, res) => {
                 }
             }
 
-            console.warn(`[export] Cannot resolve source for clip "${clip.name}" (userId=${userId})`);
+            console.warn(`[export] Cannot resolve source for clip "${clip.name}" (userId=${userId}) — clip fields:`,
+                JSON.stringify({ url: (clip.url||'').slice(0,100), sourceUrl: (clip.sourceUrl||'').slice(0,100), proxyUrl: (clip.proxyUrl||'').slice(0,100), name: clip.name }));
             return null;
         };
 
