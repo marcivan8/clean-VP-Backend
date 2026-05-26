@@ -516,70 +516,7 @@ const Control = () => (
     </section>
 );
   
-const Testimonials = () => {
-    const quotes = [
-      {
-        quote: "Vibed feels like having a calm second editor in the room. It proposes — I accept, I reject, I refine. My footage still feels like mine.",
-        who: "Anders Vahl", role: "Documentary editor", studio: "Northcape Pictures",
-      },
-      {
-        quote: "We cut a four-part series in the time it used to take to assemble episode one. Nothing felt automated. Nothing felt cheap.",
-        who: "Priya Menon", role: "Showrunner", studio: "Foreword Studio",
-      },
-      {
-        quote: "The roundtrip into Resolve is the cleanest I have seen from any AI tool. Nodes intact. Bin metadata intact. No surprise re-encodes.",
-        who: "Marco Lemaître", role: "Senior colourist", studio: "Atelier Lumière",
-      },
-      {
-        quote: "Our agency now drafts thirty cut-downs from a single hero edit. The brand voice holds. The clients can’t tell which was the AI assist.",
-        who: "Kenji Howe", role: "ECD", studio: "Field & Forest",
-      },
-    ];
-    return (
-      <section id="testimonials" style={{ background: "var(--bg-2)" }}>
-        <div className="wrap">
-          <div className="section-head">
-            <h2 className="h-section">Trusted in <em>real</em> edit suites.</h2>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 20 }}>
-            {quotes.map((q) => (
-              <div key={q.who} className="card" style={{ padding: 28, display: "flex", flexDirection: "column", gap: 20, minHeight: 240 }}>
-                <p style={{
-                  fontFamily: "var(--f-display)", fontSize: 22, lineHeight: 1.25,
-                  letterSpacing: "-0.015em", margin: 0, color: "var(--fg)", textWrap: "balance",
-                }}>
-                  <span style={{ color: "var(--accent)" }}>“</span>{q.quote}<span style={{ color: "var(--accent)" }}>”</span>
-                </p>
-                <div style={{ marginTop: "auto", display: "flex", alignItems: "center", gap: 12 }}>
-                  <div style={{
-                    width: 38, height: 38, borderRadius: 50,
-                    background: `linear-gradient(135deg, var(--accent), oklch(0.6 0.16 295))`,
-                    color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
-                    fontFamily: "var(--f-display)", fontSize: 16,
-                  }}>{q.who.split(" ").map(s => s[0]).join("")}</div>
-                  <div style={{ display: "flex", flexDirection: "column" }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 500 }}>{q.who}</span>
-                    <span className="mono" style={{ fontSize: 10.5, color: "var(--fg-3)" }}>{q.role} · {q.studio}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-  
-          {/* Studio strip */}
-          <div style={{
-            marginTop: 64, display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "32px 56px",
-            opacity: 0.5, fontFamily: "var(--f-display)", fontSize: 22, letterSpacing: "-0.02em",
-          }}>
-            {["Northcape", "Foreword", "Atelier Lumière", "Field & Forest", "Salt Studio", "Halcyon Pictures", "Cinéma Brut"].map(n => (
-              <span key={n}>{n}</span>
-            ))}
-          </div>
-        </div>
-      </section>
-    );
-};
-  
+
 const FinalCTA = () => (
     <section style={{ position: "relative", overflow: "hidden", paddingTop: 140, paddingBottom: 140 }}>
       <div className="aurora" />
@@ -623,7 +560,9 @@ const Footer = () => {
                 <span className="tag"><span className="dot" />All systems normal</span>
               </div>
               <div style={{ display: "flex" }}>
-                <span className="tag" style={{ border: "0.5px solid var(--line-strong)", background: "var(--bg-2)" }}>GDPR Compliant · GCS Data Processor · 30-Day Retention</span>
+                <a href="/gdpr" style={{ textDecoration: 'none' }}>
+                  <span className="tag" style={{ border: "0.5px solid var(--line-strong)", background: "var(--bg-2)", cursor: "pointer" }}>GDPR Compliant · GCS Data Processor · 30-Day Retention</span>
+                </a>
               </div>
             </div>
           </div>
@@ -655,7 +594,6 @@ const HomePage = () => {
                 <Workflow />
                 <Exports />
                 <Control />
-                <Testimonials />
                 <FinalCTA />
             </main>
             <Footer />

@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, HardDrive, Lock, Eye, Trash2, Mail, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, HardDrive, Lock, Eye, Trash2, Mail, ShieldCheck, ChevronDown, ChevronUp } from 'lucide-react';
 
 const Logo = ({ size = 24 }) => (
     <svg width={size} height={size} viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -12,22 +12,8 @@ const Logo = ({ size = 24 }) => (
     </svg>
 );
 
-const Section = ({ icon: Icon, label, title, children }) => (
-    <div style={{ paddingBottom: 48, borderBottom: '0.5px solid var(--line-soft)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-            <div style={{
-                width: 32, height: 32, borderRadius: 8,
-                background: 'color-mix(in oklch, var(--accent) 12%, transparent)',
-                border: '0.5px solid color-mix(in oklch, var(--accent) 25%, transparent)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-            }}>
-                <Icon size={14} style={{ color: 'var(--accent)' }} />
-            </div>
-            <span style={{
-                fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)',
-                textTransform: 'uppercase', letterSpacing: '0.12em',
-            }}>{label}</span>
-        </div>
+const Section = ({ title, children }) => (
+    <div style={{ paddingBottom: 40, borderBottom: '0.5px solid var(--line-soft)' }}>
         <h2 style={{
             fontFamily: 'var(--f-sans)', fontSize: 20, fontWeight: 700,
             color: 'var(--fg)', marginBottom: 14, lineHeight: 1.3,
@@ -41,27 +27,36 @@ const Section = ({ icon: Icon, label, title, children }) => (
     </div>
 );
 
-const Callout = ({ children }) => (
-    <div style={{
-        background: 'color-mix(in oklch, var(--accent) 8%, transparent)',
-        border: '0.5px solid color-mix(in oklch, var(--accent) 20%, transparent)',
-        borderRadius: 10, padding: '14px 18px',
-        fontFamily: 'var(--f-sans)', fontSize: 13.5,
-        color: 'var(--fg-2)', lineHeight: 1.7,
-    }}>
-        {children}
-    </div>
-);
-
-const TechDetail = ({ label, value }) => (
-    <div style={{ display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
-        <span style={{
-            fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)',
-            textTransform: 'uppercase', letterSpacing: '0.1em', flexShrink: 0, minWidth: 120,
-        }}>{label}</span>
-        <span style={{ fontFamily: 'var(--f-sans)', fontSize: 14, color: 'var(--fg-2)' }}>{value}</span>
-    </div>
-);
+const FaqItem = ({ question, answer }) => {
+    const [open, setOpen] = useState(false);
+    return (
+        <div style={{
+            borderBottom: '0.5px solid var(--line-soft)',
+            padding: '16px 0',
+        }}>
+            <button
+                onClick={() => setOpen(!open)}
+                style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    width: '100%', background: 'none', border: 'none', padding: 0,
+                    cursor: 'pointer', textAlign: 'left',
+                }}
+            >
+                <span style={{ fontFamily: 'var(--f-sans)', fontSize: 15, fontWeight: 600, color: 'var(--fg)' }}>
+                    {question}
+                </span>
+                {open ? <ChevronUp size={16} color="var(--fg-3)" /> : <ChevronDown size={16} color="var(--fg-3)" />}
+            </button>
+            {open && (
+                <div style={{
+                    marginTop: 12, fontFamily: 'var(--f-sans)', fontSize: 14.5, color: 'var(--fg-2)', lineHeight: 1.7
+                }}>
+                    {answer}
+                </div>
+            )}
+        </div>
+    );
+};
 
 const DataPage = () => {
     const navigate = useNavigate();
@@ -109,192 +104,125 @@ const DataPage = () => {
                         fontFamily: 'var(--f-display)', fontSize: 'clamp(32px, 5vw, 48px)',
                         fontWeight: 800, lineHeight: 1.15, color: 'var(--fg)', marginBottom: 20,
                     }}>
-                        Plain English.<br />No fine print.
+                        Your data, your videos.
                     </h1>
                     <p style={{
                         fontFamily: 'var(--f-sans)', fontSize: 17, color: 'var(--fg-3)',
                         lineHeight: 1.75, maxWidth: 560,
                     }}>
-                        Here is exactly what happens to your videos and projects when you use Vibed.
-                        No vague promises — specific systems, specific timelines, specific rights.
+                        We built VIBED to edit your content — not to collect it.
+                        Here's exactly what happens to your files, in plain language.
                     </p>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 48 }}>
-
-                    {/* Storage */}
-                    <Section icon={HardDrive} label="Storage" title="Where your files live">
-                        <p>
-                            When you upload a video, it goes to <strong style={{ color: 'var(--fg)' }}>Google Cloud Storage</strong> — the same
-                            infrastructure used by YouTube, Spotify, and most major software companies.
-                            Your files are stored in the <strong style={{ color: 'var(--fg)' }}>us-central1</strong> region (Iowa).
-                        </p>
-                        <p>
-                            We also create a lightweight proxy version of your video — a smaller copy
-                            optimised for fast playback in the editor. Both your original file and
-                            the proxy live in GCS, in a private bucket only your account can access.
-                        </p>
-                        <Callout>
-                            <strong>Where exactly:</strong> Google Cloud Storage, bucket{' '}
-                            <code style={{ fontFamily: 'var(--f-mono)', fontSize: 12, color: 'var(--accent)' }}>
-                                vibed-uploads
-                            </code>{' '}
-                            / us-central1. Your files are stored under a path that includes your
-                            user or session ID — no other user's code can reach them.
-                        </Callout>
-                    </Section>
-
-                    {/* Encryption */}
-                    <Section icon={Lock} label="Encryption" title="How your files are protected">
-                        <p>
-                            Your files are protected in two states:
-                        </p>
-                        <div style={{
-                            display: 'flex', flexDirection: 'column', gap: 10,
-                            background: 'rgba(0,0,0,0.2)', border: '0.5px solid var(--line)',
-                            borderRadius: 10, padding: '16px 20px',
+                {/* Summary Grid */}
+                <div style={{
+                    display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16,
+                    marginBottom: 56
+                }}>
+                    {[
+                        { title: 'Storage', value: 'Google Cloud', detail: 'Encrypted at rest & in transit' },
+                        { title: 'Auto-deletion', value: '30 days', detail: 'Free plan · Pro keeps files longer' },
+                        { title: 'AI training', value: 'Never', detail: 'Your content stays yours' },
+                        { title: 'Data sold', value: 'Never', detail: 'No third-party sharing' }
+                    ].map(card => (
+                        <div key={card.title} style={{
+                            padding: 20, background: 'var(--bg-2)', border: '0.5px solid var(--line-soft)',
+                            borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 6
                         }}>
-                            <TechDetail label="At rest" value="AES-256 encryption, managed by Google Cloud KMS. This is the same standard used by banks." />
-                            <div style={{ height: '0.5px', background: 'var(--line-soft)' }} />
-                            <TechDetail label="In transit" value="TLS 1.3 for all connections between your browser, our servers, and Google Cloud. Nothing moves in plaintext." />
-                            <div style={{ height: '0.5px', background: 'var(--line-soft)' }} />
-                            <TechDetail label="Proxy creation" value="Your video is processed on our servers during the brief proxy generation step, then the original is not touched again." />
+                            <div style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)', textTransform: 'uppercase' }}>{card.title}</div>
+                            <div style={{ fontFamily: 'var(--f-sans)', fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>{card.value}</div>
+                            <div style={{ fontFamily: 'var(--f-sans)', fontSize: 13, color: 'var(--fg-3)' }}>{card.detail}</div>
                         </div>
+                    ))}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 40 }}>
+
+                    <Section title="When you upload a video">
                         <p>
-                            The encryption is not optional and not something you need to set up — it
-                            is on by default for every file, every upload, every session.
+                            Your file is uploaded directly to Google Cloud Storage — the same infrastructure used by millions of apps worldwide. It is encrypted in transit (TLS) and at rest (AES-256). We create a lightweight proxy version for smooth playback inside the editor. Your original file is never modified.
+                        </p>
+                        <p>
+                            Only you can access your files. VIBED staff cannot browse your projects. No one else sees your footage.
                         </p>
                     </Section>
 
-                    {/* Usage */}
-                    <Section icon={Eye} label="Usage" title="What we do with your files">
+                    <Section title="When the AI processes your video">
                         <p>
-                            Your videos are used for <strong style={{ color: 'var(--fg)' }}>one thing only</strong>: processing the edits
-                            you ask for. When you ask the AI to remove silences, we send the audio
-                            to our silence detection service. When you export, we compile your
-                            timeline. That's it.
+                            When you type a command — like "remove silences" or "clean up filler words" — your video is processed on our servers using FFmpeg, an industry-standard audio and video tool. The AI interprets your instruction and tells FFmpeg what to do. That's it.
                         </p>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                            {[
-                                ['Never sold', 'We do not sell your files or project data to anyone, ever.'],
-                                ['Never used to train models', 'Your footage, audio, and edits are not used to train AI models — ours or anyone else\'s. The AI features in Vibed run on general-purpose models (OpenAI, Google) that are not trained on your content.'],
-                                ['Never shared', 'Your files are not accessible to other users, not indexed by search engines, and not viewable by Vibed employees except when you explicitly request support and grant temporary access.'],
-                            ].map(([title, body]) => (
-                                <div key={title} style={{
-                                    display: 'flex', gap: 14,
-                                    padding: '14px 18px',
-                                    background: 'rgba(0,0,0,0.15)',
-                                    border: '0.5px solid var(--line-soft)',
-                                    borderRadius: 8,
-                                }}>
-                                    <ShieldCheck size={15} style={{ color: 'var(--accent)', marginTop: 3, flexShrink: 0 }} />
-                                    <div>
-                                        <div style={{ fontFamily: 'var(--f-sans)', fontSize: 14, fontWeight: 600, color: 'var(--fg)', marginBottom: 4 }}>
-                                            {title}
-                                        </div>
-                                        <div style={{ fontFamily: 'var(--f-sans)', fontSize: 13.5, color: 'var(--fg-3)', lineHeight: 1.6 }}>
-                                            {body}
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+                        <p>
+                            Your video is never sent to any AI training pipeline. It is never used to improve any model. The AI reads your command — not your footage.
+                        </p>
                     </Section>
 
-                    {/* Retention */}
-                    <Section icon={Trash2} label="Retention" title="How long we keep your files">
+                    <Section title="When your files are deleted">
                         <p>
-                            Files don't live on our servers forever by default. Here's the timeline:
+                            On the free plan, your project files are automatically deleted after 7 days of inactivity. We send you an email reminder 24 hours before deletion so you always have time to export first.
                         </p>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                            {[
-                                {
-                                    when: 'Immediately',
-                                    what: 'When you delete a project or click "Delete my files," both your original upload and the proxy are permanently removed from GCS. This is irreversible.',
-                                },
-                                {
-                                    when: 'After 30 days',
-                                    what: 'If a file has not been accessed and is not attached to an active project, it is automatically deleted. You will receive an email reminder 7 days before this happens.',
-                                },
-                                {
-                                    when: 'Anonymous sessions',
-                                    what: 'If you edit without creating an account, your files and session are deleted after 48 hours. Creating a free account resets this to the standard 30-day policy.',
-                                },
-                                {
-                                    when: 'Account deletion',
-                                    what: 'When you delete your Vibed account, all associated files, projects, and session data are deleted within 24 hours.',
-                                },
-                            ].map((row, i, arr) => (
-                                <div key={row.when} style={{
-                                    display: 'grid', gridTemplateColumns: '140px 1fr',
-                                    gap: 20, padding: '16px 0',
-                                    borderBottom: i < arr.length - 1 ? '0.5px solid var(--line-soft)' : 'none',
-                                    alignItems: 'start',
-                                }}>
-                                    <span style={{
-                                        fontFamily: 'var(--f-mono)', fontSize: 11,
-                                        color: 'var(--accent)', letterSpacing: '0.04em',
-                                    }}>{row.when}</span>
-                                    <span style={{ fontFamily: 'var(--f-sans)', fontSize: 14, color: 'var(--fg-2)', lineHeight: 1.65 }}>
-                                        {row.what}
-                                    </span>
-                                </div>
-                            ))}
-                        </div>
+                        <p>
+                            On Creator (€15/month), files are kept for 30 days. On Pro (€35/month), files are kept for 90 days and your projects persist as long as your subscription is active.
+                        </p>
+                        <p>
+                            You can delete any project or your entire account at any time from your dashboard. Deletion is permanent and immediate.
+                        </p>
                     </Section>
 
-                    {/* Rights */}
-                    <Section icon={Mail} label="Your rights" title="What you can ask us to do">
-                        <p>
-                            You can request any of the following at any time by emailing{' '}
-                            <a
-                                href="mailto:privacy@vibed.studio"
-                                style={{ color: 'var(--accent)', textDecoration: 'none' }}
-                                onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
-                                onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
-                            >
-                                privacy@vibed.studio
-                            </a>:
-                        </p>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            {[
-                                'Delete all my files and project data',
-                                'Send me a copy of everything you have on me',
-                                "Tell me exactly what data you're storing and where",
-                                'Remove my account completely',
-                            ].map(item => (
-                                <div key={item} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                                    <div style={{
-                                        width: 5, height: 5, borderRadius: '50%',
-                                        background: 'var(--accent)', flexShrink: 0,
-                                    }} />
-                                    <span style={{ fontFamily: 'var(--f-sans)', fontSize: 14, color: 'var(--fg-2)' }}>
-                                        {item}
-                                    </span>
-                                </div>
-                            ))}
+                    <div style={{ paddingTop: 16 }}>
+                        <h2 style={{
+                            fontFamily: 'var(--f-sans)', fontSize: 20, fontWeight: 700,
+                            color: 'var(--fg)', marginBottom: 20, lineHeight: 1.3,
+                        }}>Common questions</h2>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            <FaqItem 
+                                question="Who technically &quot;has&quot; my data?" 
+                                answer="You do. VIBED (the data controller) stores your files on Google Cloud Storage (the data processor). Google cannot access your content — they only provide the infrastructure. Your files are associated with your account and inaccessible to anyone else." 
+                            />
+                            <FaqItem 
+                                question="Does my account persist if I stop paying?" 
+                                answer="Yes. Your account remains active. Your project files follow the free plan retention rules (7-day inactivity deletion) until you resubscribe or export your work. You will never lose access to your account itself." 
+                            />
+                            <FaqItem 
+                                question="Can I export my data before deleting my account?" 
+                                answer="Yes. You can export any project as a video file or as a project file for Premiere Pro, Final Cut Pro, or DaVinci Resolve at any time from the editor. Your edit history is always available while your project exists." 
+                            />
+                            <FaqItem 
+                                question="Is VIBED GDPR compliant?" 
+                                answer={
+                                    <>
+                                        Yes. VIBED operates under French and EU law. You have the right to access, correct, and delete your personal data at any time. To exercise these rights, contact us at the address below. Our full privacy policy is available <a href="#" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>here</a>.
+                                    </>
+                                } 
+                            />
+                            <FaqItem 
+                                question="What data do you collect beyond my videos?" 
+                                answer="Your email address and authentication credentials (stored securely via Supabase), your project metadata (file names, durations, edit history), and basic usage analytics (which features you use, how often). We do not collect payment card details — those are handled entirely by Paddle, our payment processor." 
+                            />
                         </div>
-                        <Callout>
-                            We respond to all data requests within <strong>48 hours</strong> on business days.
-                            If you're in the EU, you have additional rights under GDPR — we honour
-                            those for everyone, not just EU residents.
-                        </Callout>
-                    </Section>
+                    </div>
 
-                    {/* Footer note */}
-                    <div style={{ paddingTop: 8 }}>
+                    <div style={{
+                        marginTop: 32, padding: 24, background: 'color-mix(in oklch, var(--accent) 8%, transparent)',
+                        border: '0.5px solid color-mix(in oklch, var(--accent) 20%, transparent)',
+                        borderRadius: 12, textAlign: 'center'
+                    }}>
                         <p style={{
-                            fontFamily: 'var(--f-sans)', fontSize: 13.5, color: 'var(--fg-4)',
-                            lineHeight: 1.75,
+                            fontFamily: 'var(--f-sans)', fontSize: 15, color: 'var(--fg)',
+                            marginBottom: 8, fontWeight: 500,
                         }}>
-                            This page is written for humans, not lawyers. It reflects our actual practices.
-                            If something here is unclear or you think we've missed something, email us at{' '}
-                            <a href="mailto:privacy@vibed.studio" style={{ color: 'var(--fg-3)' }}>
-                                privacy@vibed.studio
-                            </a>{' '}
-                            and we'll update it.{' '}
-                            Last updated: May 2026.
+                            Questions about your data? We'll respond within 48 hours.
                         </p>
+                        <a
+                            href="mailto:privacy@vibed.app"
+                            style={{
+                                fontFamily: 'var(--f-mono)', fontSize: 14, color: 'var(--accent)', textDecoration: 'none'
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                            onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                        >
+                            privacy@vibed.app
+                        </a>
                     </div>
 
                 </div>
