@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { detectBeats } = require('../analysis/beatDetector');
 const { OpenAI } = require('openai');
+const storageConfig = require('../config/storage');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -19,6 +20,36 @@ function getOpenAI() {
 }
 
 const WHISPER_LIMIT = 25 * 1024 * 1024; // 25 MB
+
+/**
+ * Upload a processed audio/video file to GCS (or local fallback) and return
+ * a server-proxied URL that works in any deployment topology.
+ * Deletes the local temp file afterwards.
+ */
+async function uploadProcessedAudio(localFilePath, userId, prefix) {
+    const { bucket, useLocalStorage } = storageConfig;
+    const basename = path.basename(localFilePath);
+    const destPath = `processed/${userId || 'anonymous'}/${prefix}-${basename}`;
+
+    try {
+        if (!useLocalStorage && bucket) {
+            await bucket.upload(localFilePath, {
+                destination: destPath,
+                metadata: { cacheControl: 'no-store' },
+            });
+            try { await bucket.file(destPath).makePublic(); } catch (_) { /* uniform-ACL bucket */ }
+            return `/api/proxy/gcs-media/${destPath}`;
+        } else {
+            // Local fallback: keep the file where it is — Express already serves /uploads
+            return `/uploads/audio_temp/${basename}`;
+        }
+    } finally {
+        // Clean up local temp file (best-effort) — the canonical copy is now on GCS
+        if (!useLocalStorage && bucket) {
+            try { fs.unlinkSync(localFilePath); } catch (_) { /* ignore */ }
+        }
+    }
+}
 
 /**
  * Extracts a mono 16kHz MP3 from any video/audio file.
@@ -188,8 +219,10 @@ module.exports = async function processAudioJob(job) {
                     .on('error', reject)
                     .run();
             });
+            await job.updateProgress(95);
+            const denoiseUrl = await uploadProcessedAudio(outputPath, userId, 'denoised');
             await job.updateProgress(100);
-            return { url: `/uploads/audio_temp/${path.basename(outputPath)}`, message: "Noise reduction applied successfully." };
+            return { url: denoiseUrl, message: "Noise reduction applied successfully." };
         }
 
         case 'normalize': {
@@ -205,8 +238,10 @@ module.exports = async function processAudioJob(job) {
                     .on('error', reject)
                     .run();
             });
+            await job.updateProgress(95);
+            const normalizeUrl = await uploadProcessedAudio(outputPath, userId, 'normalized');
             await job.updateProgress(100);
-            return { url: `/uploads/audio_temp/${path.basename(outputPath)}`, message: "Audio normalized to -16 LUFS." };
+            return { url: normalizeUrl, message: "Audio normalized to -16 LUFS." };
         }
 
         case 'beat-detect': {

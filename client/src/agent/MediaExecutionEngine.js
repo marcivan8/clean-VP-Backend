@@ -623,10 +623,18 @@ export class MediaExecutionEngine {
             if ((command.action === 'audioDenoise' || command.action === 'audioNormalize') && result?.url) {
                 const timelineStore = useTimelineStore.getState();
                 const videoTrack    = timelineStore.tracks?.find(t => t.type === 'video');
-                const firstClip     = videoTrack?.clips?.[0];
-                if (firstClip?.assetId) {
-                    timelineStore.updateAsset(firstClip.assetId, { proxyUrl: result.url });
-                    console.log(`[MediaExecutionEngine] ✅ Asset updated with processed audio`);
+                const assetId       = videoTrack?.clips?.[0]?.assetId;
+                if (assetId) {
+                    // Update the asset so future clip additions use the processed URL
+                    timelineStore.updateAsset(assetId, { proxyUrl: result.url });
+                    // Backfill ALL clips that reference this asset so the player
+                    // immediately reloads from the processed file (not the original).
+                    (videoTrack?.clips || []).forEach(clip => {
+                        if (clip.assetId === assetId) {
+                            timelineStore.updateClip(videoTrack.id, clip.id, { url: result.url }, { skipHistory: true });
+                        }
+                    });
+                    console.log(`[MediaExecutionEngine] ✅ Asset and ${videoTrack?.clips?.length ?? 0} clip(s) updated with processed audio`);
                 } else {
                     console.warn('[MediaExecutionEngine] No assetId found on first clip — cannot update proxy URL');
                 }
