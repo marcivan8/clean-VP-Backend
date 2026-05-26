@@ -297,6 +297,54 @@ router.post('/', authMiddleware, async (req, res) => {
             }
         }
 
+        // --- STEP 4: Add Text Overlays (drawtext) ---
+        const textTracks = timeline.tracks.filter(t => 
+            t.type === 'text' && t.clips?.length > 0
+        );
+
+        const textFilters = [];
+        for (const track of textTracks) {
+            for (const clip of track.clips) {
+                const startMs = clip.start;
+                const endMs   = clip.start + clip.duration;
+                // Escape text for FFmpeg drawtext: ' -> \' and : -> \:
+                const text    = (clip.content || clip.name || '').replace(/'/g, "\\'").replace(/:/g, '\\:');
+                const color   = (clip.color || '#ffffff').replace('#', '0x');
+                const size    = clip.fontSize || 48;
+
+                // Position mapping
+                let x = '(w-text_w)/2'; // center
+                let y = '(h-text_h)/2';
+                if (clip.position === 'bottom') y = 'h-text_h-80';
+                if (clip.position === 'top')    y = '80';
+                if (typeof clip.x === 'number') x = clip.x + (targetWidth / 2);
+                if (typeof clip.y === 'number') y = clip.y + (targetHeight / 2);
+
+                textFilters.push(
+                    `drawtext=text='${text}':fontsize=${size}:fontcolor=${color}:x=${x}:y=${y}:enable='between(t,${startMs},${endMs})'`
+                );
+            }
+        }
+
+        if (textFilters.length > 0) {
+            const textOverlayPath = path.join(tmpDir, 'with_text.mp4');
+            await new Promise((resolve, reject) => {
+                let cmd = ffmpeg(finalVideoPath);
+                
+                // Chain all drawtext filters together
+                cmd.videoFilters(textFilters.join(','));
+                
+                cmd
+                    .videoCodec(codec)
+                    .audioCodec('copy')
+                    .output(textOverlayPath)
+                    .on('end', () => { finalVideoPath = textOverlayPath; resolve(); })
+                    .on('error', reject)
+                    .run();
+            });
+            console.log('  ✅ Text overlays applied');
+        }
+
         // --- Final move if needed ---
         if (finalVideoPath !== outputPath) {
             fs.renameSync(finalVideoPath, outputPath);

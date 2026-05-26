@@ -467,57 +467,32 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 }
             } catch (_) { /* no token — dev mode, route uses optionalAuth */ }
 
-            // POST to /api/render — the FFmpeg export engine mounted in exportRoutes.js
-            const response = await fetch('/api/revideo/render', {
+            // POST to /api/export — the pure FFmpeg export engine
+            const response = await fetch('/api/export', {
                 method: 'POST',
                 headers,
-                body: JSON.stringify({ timeline: { tracks, duration }, settings })
+                body: JSON.stringify({ 
+                    timeline: { tracks, duration }, 
+                    settings: {
+                        platform: settings.aspectRatio === '9:16' ? 'tiktok' : 'youtube',
+                        quality: 'high',
+                        resolution: settings.resolution || '1080p'
+                    } 
+                })
             });
             const data = await response.json();
             
-            if (!response.ok) throw new Error(data.message || data.error || 'Export failed');
+            if (!response.ok) throw new Error(data.error || data.message || 'Export failed');
             
-            if (response.status === 202 && data.jobId) {
-                // Asynchronous render started on AWS Lambda - we need to poll
-                const jobId = data.jobId;
-                
-                // Poll every 3 seconds
-                const pollInterval = setInterval(async () => {
-                    try {
-                        const statusRes = await fetch(`/api/revideo/status/${jobId}`);
-                        const statusData = await statusRes.json();
-                        
-                        if (statusData.status === 'success') {
-                            clearInterval(pollInterval);
-                            setExportResult({ success: true, url: statusData.url });
-                            setExportUrl(statusData.url);
-                            setIsExporting(false);
-                        } else if (statusData.status === 'error') {
-                            clearInterval(pollInterval);
-                            setExportError(statusData.error || 'Render failed on AWS');
-                            setIsExporting(false);
-                        }
-                        // if status is 'rendering', we just wait for the next tick
-                    } catch (e) {
-                        console.error('Polling error:', e);
-                        // Don't kill the polling immediately on a single network blip
-                    }
-                }, 3000);
-                
-                // Return early so we don't set isExporting(false) in the finally block
-                return;
-            }
-
-            // Fallback for synchronous render (if any old endpoints are used)
-            if (!data.success && !data.url) throw new Error(data.error || 'Export failed');
-            setExportResult(data);
+            // FFmpeg route is completely synchronous, so we get the final URL immediately
+            setExportResult({ success: true, url: data.url });
             setExportUrl(data.url);
         } catch (err) {
             console.error('Export Failed:', err);
             setExportError(err.message);
+        } finally {
             setIsExporting(false);
         }
-        // Removed finally block because async polling needs to keep isExporting=true
     };
 
     const [activeDragItem, setActiveDragItem] = React.useState(null);
