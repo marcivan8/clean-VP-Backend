@@ -488,12 +488,12 @@ const Control = () => (
               <span className="mono" style={{ color: "var(--fg-4)" }}>v.143 · auto-saved</span>
             </div>
             {[
-              { who: "you", t: "Trimmed cold open by 1.2s", time: "just now", accent: true },
-              { who: "vibed", t: "Suggested J-cut on dialogue track 2", time: "12s", accent: false },
-              { who: "you", t: "Locked Mara’s line as protected", time: "1m", accent: true },
-              { who: "vibed", t: "Conformed B-roll · 4 clips relinked", time: "2m", accent: false },
-              { who: "you", t: "Forked variant ‘Director’s cut’", time: "4m", accent: true },
-              { who: "vibed", t: "Captured style guide from Ep. 02", time: "6m", accent: false },
+              { who: "you", t: "cut_segment: 00:04:12 to 00:05:01", time: "just now", accent: true },
+              { who: "vibed", t: "remove_silences: Applied to 12 clips", time: "12s", accent: false },
+              { who: "you", t: "split_clip: Track 1 at 00:02:14", time: "1m", accent: true },
+              { who: "vibed", t: "remove_repetition: 4 segments removed", time: "2m", accent: false },
+              { who: "you", t: "move_clip: B-roll to 00:01:00", time: "4m", accent: true },
+              { who: "vibed", t: "add_transitions: Crossfade (1s)", time: "6m", accent: false },
             ].map((e, i) => (
               <div key={i} style={{
                 display: "flex", alignItems: "center", gap: 12, padding: "10px 0",
@@ -539,7 +539,6 @@ const Testimonials = () => {
       <section id="testimonials" style={{ background: "var(--bg-2)" }}>
         <div className="wrap">
           <div className="section-head">
-            <span className="eyebrow">In production</span>
             <h2 className="h-section">Trusted in <em>real</em> edit suites.</h2>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 20 }}>
@@ -619,8 +618,13 @@ const Footer = () => {
             <p className="body" style={{ fontSize: 13.5, margin: 0, maxWidth: 280 }}>
               The creative operating system for modern storytellers, editors and studios.
             </p>
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <span className="tag"><span className="dot" />All systems normal</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
+              <div style={{ display: "flex" }}>
+                <span className="tag"><span className="dot" />All systems normal</span>
+              </div>
+              <div style={{ display: "flex" }}>
+                <span className="tag" style={{ border: "0.5px solid var(--line-strong)", background: "var(--bg-2)" }}>GDPR Compliant · GCS Data Processor · 30-Day Retention</span>
+              </div>
             </div>
           </div>
           {Object.entries(cols).map(([k, items]) => (
