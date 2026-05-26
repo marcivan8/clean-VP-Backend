@@ -336,6 +336,8 @@ router.post('/', authMiddleware, async (req, res) => {
             t.type === 'text' && t.clips?.length > 0
         );
 
+        const defaultFontPath = path.join(publicDir, 'fonts', 'Roboto-Regular.ttf');
+
         const textFilters = [];
         for (const track of textTracks) {
             for (const clip of track.clips) {
@@ -355,7 +357,7 @@ router.post('/', authMiddleware, async (req, res) => {
                 if (typeof clip.y === 'number') y = clip.y + (targetHeight / 2);
 
                 textFilters.push(
-                    `drawtext=text='${text}':fontsize=${size}:fontcolor=${color}:x=${x}:y=${y}:enable='between(t,${startMs},${endMs})'`
+                    `drawtext=fontfile='${defaultFontPath.replace(/\\/g, '/').replace(/:/g, '\\:')}':text='${text}':fontsize=${size}:fontcolor=${color}:x=${x}:y=${y}:enable='between(t,${startMs},${endMs})'`
                 );
             }
         }
