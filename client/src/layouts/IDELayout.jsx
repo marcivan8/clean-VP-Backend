@@ -475,7 +475,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             });
             const data = await response.json();
             
-            if (!response.ok) throw new Error(data.error || data.message || 'Export failed');
+            if (!response.ok) throw new Error(data.message || data.error || 'Export failed');
             
             if (response.status === 202 && data.jobId) {
                 // Asynchronous render started on AWS Lambda - we need to poll
