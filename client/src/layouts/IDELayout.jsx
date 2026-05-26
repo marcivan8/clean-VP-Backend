@@ -474,15 +474,50 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 body: JSON.stringify({ timeline: { tracks, duration }, settings })
             });
             const data = await response.json();
-            if (!response.ok || !data.success) throw new Error(data.error || 'Export failed');
+            
+            if (!response.ok) throw new Error(data.error || data.message || 'Export failed');
+            
+            if (response.status === 202 && data.jobId) {
+                // Asynchronous render started on AWS Lambda - we need to poll
+                const jobId = data.jobId;
+                
+                // Poll every 3 seconds
+                const pollInterval = setInterval(async () => {
+                    try {
+                        const statusRes = await fetch(`/api/revideo/status/${jobId}`);
+                        const statusData = await statusRes.json();
+                        
+                        if (statusData.status === 'success') {
+                            clearInterval(pollInterval);
+                            setExportResult({ success: true, url: statusData.url });
+                            setExportUrl(statusData.url);
+                            setIsExporting(false);
+                        } else if (statusData.status === 'error') {
+                            clearInterval(pollInterval);
+                            setExportError(statusData.error || 'Render failed on AWS');
+                            setIsExporting(false);
+                        }
+                        // if status is 'rendering', we just wait for the next tick
+                    } catch (e) {
+                        console.error('Polling error:', e);
+                        // Don't kill the polling immediately on a single network blip
+                    }
+                }, 3000);
+                
+                // Return early so we don't set isExporting(false) in the finally block
+                return;
+            }
+
+            // Fallback for synchronous render (if any old endpoints are used)
+            if (!data.success && !data.url) throw new Error(data.error || 'Export failed');
             setExportResult(data);
             setExportUrl(data.url);
         } catch (err) {
             console.error('Export Failed:', err);
             setExportError(err.message);
-        } finally {
             setIsExporting(false);
         }
+        // Removed finally block because async polling needs to keep isExporting=true
     };
 
     const [activeDragItem, setActiveDragItem] = React.useState(null);

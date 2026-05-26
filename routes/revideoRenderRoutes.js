@@ -4,6 +4,10 @@ const axios = require('axios');
 const { authenticateUser } = require('../middleware/auth');
 const { LambdaClient, InvokeCommand } = require("@aws-sdk/client-lambda");
 const lambdaClient = new LambdaClient({ region: process.env.AWS_REGION || 'us-east-1' });
+const { v4: uuidv4 } = require('uuid');
+
+// In-memory cache for render jobs
+const renderJobs = new Map();
 const storageConfig = require('../config/storage');
 const gcsBucket = storageConfig.bucket;
 
@@ -125,6 +129,9 @@ router.post('/render', authenticateUser, async (req, res) => {
 
         const backendUrl = process.env.FRONTEND_URL || process.env.PUBLIC_URL || 'https://your-railway-app.railway.app';
         
+        const jobId = uuidv4();
+        renderJobs.set(jobId, { status: 'rendering', progress: 0 });
+
         // Setup payload for Lambda
         const payload = {
             tracks: signedTracks,
@@ -132,7 +139,7 @@ router.post('/render', authenticateUser, async (req, res) => {
             fps,
             aspectRatio,
             backendUrl,
-            webhookUrl: `${backendUrl}/api/revideo/webhook`
+            webhookUrl: `${backendUrl}/api/revideo/webhook?jobId=${jobId}`
         };
 
         // Forward the request to the Lambda asynchronously
@@ -146,7 +153,8 @@ router.post('/render', authenticateUser, async (req, res) => {
 
         res.status(202).json({
             message: 'Rendering started successfully. A webhook will be sent upon completion.',
-            status: 'rendering'
+            status: 'rendering',
+            jobId
         });
 
     } catch (error) {
@@ -161,19 +169,32 @@ router.post('/render', authenticateUser, async (req, res) => {
 // POST /api/revideo/webhook
 // Receives completion notification from AWS Lambda
 router.post('/webhook', express.json(), async (req, res) => {
-    console.log('[webhook] Render Lambda callback received:', req.body);
+    console.log('[webhook] Render Lambda callback received:', req.body, req.query);
     
     const { status, renderId, url, error } = req.body;
+    const { jobId } = req.query;
     
-    if (status === 'success') {
-        // TODO: Update your database with the finalized GCS URL
-        // e.g. await db.exports.update({ where: { id: renderId }, data: { status: 'COMPLETED', url } })
-        console.log(`✅ Webhook: Render ${renderId} succeeded. Video at ${url}`);
-    } else {
-        console.log(`❌ Webhook: Render ${renderId || 'unknown'} failed. Error: ${error}`);
+    if (jobId) {
+        if (status === 'success') {
+            renderJobs.set(jobId, { status: 'success', url, renderId });
+            console.log(`✅ Webhook: Job ${jobId} succeeded. Video at ${url}`);
+        } else {
+            renderJobs.set(jobId, { status: 'error', error });
+            console.log(`❌ Webhook: Job ${jobId} failed. Error: ${error}`);
+        }
     }
 
     res.status(200).send('Webhook received');
+});
+
+// GET /api/revideo/status/:jobId
+// Frontend polling endpoint
+router.get('/status/:jobId', (req, res) => {
+    const job = renderJobs.get(req.params.jobId);
+    if (!job) {
+        return res.status(404).json({ error: 'Job not found' });
+    }
+    res.json(job);
 });
 
 // GET /api/revideo/health
