@@ -737,13 +737,18 @@ export class MediaExecutionEngine {
         });
 
         validSegs.forEach((seg, i) => {
+            // Prefer sourceUrl (persistent GCS URL) over url (may be a dead blob URL after reload)
+            const persistentUrl = baseClip.sourceUrl || baseClip.url || '';
             const newClip = {
                 ...baseClip,
-                id:       `clip_${prefix}_${ts}_${i}`,
-                start:    currentStartTime,
-                duration: seg.duration,
-                offset:   seg.start,
-                name:     `Segment ${i + 1}`
+                id:           `clip_${prefix}_${ts}_${i}`,
+                start:        currentStartTime,
+                duration:     seg.duration,
+                offset:       seg.start,
+                name:         `Segment ${i + 1}`,
+                originalName: baseClip.originalName || baseClip.name,
+                url:          persistentUrl,
+                sourceUrl:    baseClip.sourceUrl || persistentUrl,
             };
             timelineStore.addClip(videoTrack.id, newClip);
             currentStartTime += seg.duration;

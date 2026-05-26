@@ -471,7 +471,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     };
 
     const handleExportConfirm = async (settings) => {
-        const { tracks, duration } = useTimelineStore.getState();
+        const { tracks, duration, assets } = useTimelineStore.getState();
         setIsExporting(true);
         setExportResult(null);
         setExportError(null);
@@ -497,8 +497,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             const response = await fetch('/api/render', {
                 method: 'POST',
                 headers,
-                body: JSON.stringify({ 
-                    timeline: { tracks, duration }, 
+                body: JSON.stringify({
+                    timeline: { tracks, duration, assets: assets || [] },
                     settings: {
                         platform: settings.aspectRatio === '9:16' ? 'tiktok' : 'youtube',
                         quality: 'high',

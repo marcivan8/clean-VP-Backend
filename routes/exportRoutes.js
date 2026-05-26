@@ -122,6 +122,12 @@ router.post('/', authMiddleware, async (req, res) => {
             return res.status(400).json({ error: 'Invalid timeline data' });
         }
 
+        // Build an assetId→asset lookup from the assets array sent by the client.
+        // Used to recover source URLs for segment clips whose url/sourceUrl were cleared.
+        const sentAssets = Array.isArray(timeline.assets) ? timeline.assets : [];
+        const assetMap = {};
+        sentAssets.forEach(a => { if (a.id) assetMap[a.id] = a; });
+
         // --- resolve platform / resolution settings ---
         const platform = settings.platform && PLATFORM_PRESETS[settings.platform]
             ? PLATFORM_PRESETS[settings.platform]
@@ -206,7 +212,20 @@ router.post('/', authMiddleware, async (req, res) => {
         // Resolve the GCS object path (within the bucket) for a clip.
         // Returns the path string or null.
         const resolveGcsPath = async (clip) => {
-            const candidates = [clip.sourceUrl, clip.url, clip.src, clip.videoUrl, clip.proxyUrl];
+            // If the clip's own URL fields are empty but it has an assetId, pull URLs
+            // from the assets array the client sent (covers AI-generated segment clips
+            // whose blob URLs were cleared on page reload).
+            let effectiveClip = clip;
+            if (clip.assetId && assetMap[clip.assetId]) {
+                const asset = assetMap[clip.assetId];
+                const hasUrl = clip.sourceUrl || clip.url || clip.proxyUrl;
+                if (!hasUrl) {
+                    effectiveClip = { ...clip, sourceUrl: asset.sourceUrl, url: asset.proxyUrl || asset.url, proxyUrl: asset.proxyUrl };
+                    console.log(`[export] Recovered URLs for clip "${clip.name}" from asset ${clip.assetId}: sourceUrl=${asset.sourceUrl?.slice(0,60)}`);
+                }
+            }
+
+            const candidates = [effectiveClip.sourceUrl, effectiveClip.url, effectiveClip.src, effectiveClip.videoUrl, effectiveClip.proxyUrl];
 
             // 1. Direct storage.googleapis.com URL — extract path.
             for (const raw of candidates) {
@@ -222,7 +241,10 @@ router.post('/', authMiddleware, async (req, res) => {
             }
 
             // 3. Fall back to matching by filename within the user's raw/ prefix.
-            const filename = clip.name || clip.originalName;
+            // Prefer originalName (preserved from baseClip before AI renamed it "Segment N").
+            // Also try the asset's name if we have one from the asset map.
+            const assetForClip = clip.assetId ? assetMap[clip.assetId] : null;
+            const filename = effectiveClip.originalName || assetForClip?.name || effectiveClip.name || clip.name;
             if (!filename || !gcsBucket) {
                 console.warn(`[export] No URL or filename for clip "${clip.name}" — fields:`,
                     JSON.stringify({ url: (clip.url||'').slice(0,80), sourceUrl: (clip.sourceUrl||'').slice(0,80), proxyUrl: (clip.proxyUrl||'').slice(0,80) }));
@@ -257,9 +279,16 @@ router.post('/', authMiddleware, async (req, res) => {
         // Prefers GCS SDK (authenticated) over HTTPS download.
         // Returns the local file path or null.
         const fetchClipSource = async (clip, localPath) => {
+            // Enrich clip with asset URLs if its own URL fields are empty
+            let c = clip;
+            if (clip.assetId && assetMap[clip.assetId] && !(clip.sourceUrl || clip.url || clip.proxyUrl)) {
+                const asset = assetMap[clip.assetId];
+                c = { ...clip, sourceUrl: asset.sourceUrl, url: asset.proxyUrl || asset.url, proxyUrl: asset.proxyUrl };
+            }
+
             // GCS SDK path: authenticated, works for private buckets, no URL issues
             if (gcsBucket) {
-                const gcsPath = await resolveGcsPath(clip);
+                const gcsPath = await resolveGcsPath(c);
                 if (gcsPath) {
                     console.log(`[export] Downloading from GCS SDK: ${gcsPath} → ${path.basename(localPath)}`);
                     await gcsBucket.file(gcsPath).download({ destination: localPath });
@@ -268,11 +297,11 @@ router.post('/', authMiddleware, async (req, res) => {
             }
 
             // Try local filesystem first (dev environment or recently uploaded files)
-            const localSrc = resolveSourcePath(clip, uploadsDir);
+            const localSrc = resolveSourcePath(c, uploadsDir);
             if (localSrc) return localSrc;
 
             // Last resort: HTTP download for any absolute URL that isn't a blob/proxy
-            for (const raw of [clip.sourceUrl, clip.url, clip.src, clip.videoUrl]) {
+            for (const raw of [c.sourceUrl, c.url, c.src, c.videoUrl]) {
                 if (raw && !raw.startsWith('blob:') && !raw.includes('/api/proxy') && raw.startsWith('http')) {
                     console.log(`[export] HTTP download fallback: ${raw.slice(0, 80)}`);
                     await downloadToTemp(raw, localPath);
