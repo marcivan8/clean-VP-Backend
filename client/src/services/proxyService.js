@@ -141,9 +141,10 @@ class ProxyService {
         if (data.jobId) {
             console.log(`[ProxyService] Polling proxy job ${data.jobId}...`);
             const result = await pollJobResult(data.jobId);
-            return result ?? data;
+            // Attach the raw GCS path so callers can store it in clip.sourceUrl
+            return { ...(result ?? data), rawGcsPath: destPath };
         }
-        return data;
+        return { ...data, rawGcsPath: destPath };
     }
 
     /**
@@ -196,7 +197,9 @@ class ProxyService {
             if (data.jobId) {
                 console.log(`[ProxyService] Polling proxy job ${data.jobId}...`);
                 const result = await pollJobResult(data.jobId);
-                return result ?? data;
+                // Attach the raw GCS path (returned by the upload endpoint) so
+                // callers can store it in clip.sourceUrl for reliable export later.
+                return { ...(result ?? data), rawGcsPath: data.gcsPath ?? null };
             }
 
             return data;

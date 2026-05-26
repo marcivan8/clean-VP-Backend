@@ -368,11 +368,37 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 return;
                             }
                             console.log(`[IDELayout] Proxy Ready: ${data.proxyUrl}`);
+
+                            // Build the full raw GCS URL so the export route can
+                            // download the source directly without guessing the path.
+                            const GCS_BUCKET = import.meta.env.VITE_GCS_BUCKET_NAME || 'viral-pilot_bucket';
+                            const rawGcsUrl = data.rawGcsPath
+                                ? `https://storage.googleapis.com/${GCS_BUCKET}/${data.rawGcsPath}`
+                                : null;
+
                             useTimelineStore.getState().updateAsset(assetId, {
                                 proxyUrl: data.proxyUrl,
+                                sourceUrl: rawGcsUrl || undefined,
                                 isProxying: false,
                                 uploadPhase: 'ready'
                             });
+
+                            // Backfill sourceUrl on any clips already placed on the
+                            // timeline that belong to this asset — they were added
+                            // before the upload resolved, so they still have blob URLs.
+                            if (rawGcsUrl) {
+                                const { tracks } = useTimelineStore.getState();
+                                tracks.forEach(track => {
+                                    (track.clips || []).forEach(clip => {
+                                        if (clip.assetId === assetId) {
+                                            useTimelineStore.getState().updateClip(track.id, clip.id, {
+                                                sourceUrl: rawGcsUrl,
+                                                url: rawGcsUrl,
+                                            }, { skipHistory: true });
+                                        }
+                                    });
+                                });
+                            }
                             // Persist proxyUrl immediately — the debounced autosave only
                             // fires on timeline events, so without this explicit call the
                             // proxyUrl would be missing from localStorage on page refresh.

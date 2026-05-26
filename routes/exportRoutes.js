@@ -187,27 +187,70 @@ router.post('/', authMiddleware, async (req, res) => {
         const userId = req.user ? req.user.id : 'anonymous';
         const bucketName = process.env.GCS_BUCKET_NAME || 'viral-pilot_bucket';
 
-        const resolveUrl = (clip) => {
-            const raw = clip.sourceUrl || clip.url || clip.src || clip.videoUrl || clip.proxyUrl;
-            if (raw && raw !== '' && !raw.startsWith('blob:')) return raw;
+        // Sanitize filename the same way the upload routes do.
+        const sanitizeFilename = (name) =>
+            name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9._-]/g, '');
+
+        // Resolve the raw GCS URL for a clip.
+        // Clips stored in the timeline may only have a blob: URL or a proxy URL — we
+        // need the underlying GCS raw file.  Strategy:
+        //   1. Use clip.sourceUrl / url if it already points to storage.googleapis.com
+        //   2. Fall back to searching GCS for raw/${userId}/<name> (handles both
+        //      sanitized exact match and timestamp-prefixed uploads)
+        const resolveGcsUrl = async (clip) => {
+            const candidates = [clip.sourceUrl, clip.url, clip.src, clip.videoUrl];
+            for (const raw of candidates) {
+                if (raw && raw !== '' && !raw.startsWith('blob:') && !raw.startsWith('/api/')) {
+                    return raw; // already an absolute URL pointing to real storage
+                }
+            }
+
             const filename = clip.name || clip.originalName;
-            if (filename) return `https://storage.googleapis.com/${bucketName}/raw/${userId}/${encodeURIComponent(filename)}`;
-            return undefined;
+            if (!filename) return undefined;
+            const safeName = sanitizeFilename(filename);
+
+            if (gcsBucket) {
+                // Try exact sanitized path first (legacy upload stores files here)
+                const exactPath = `raw/${userId}/${safeName}`;
+                try {
+                    const [exists] = await gcsBucket.file(exactPath).exists();
+                    if (exists) return `https://storage.googleapis.com/${bucketName}/${exactPath}`;
+                } catch (_) {}
+
+                // Scan for a timestamp-prefixed file (direct-to-GCS uploads)
+                try {
+                    const [files] = await gcsBucket.getFiles({ prefix: `raw/${userId}/` });
+                    const match = files.find(f => {
+                        const base = f.name.split('/').pop();
+                        return base === safeName || base.endsWith(`-${safeName}`);
+                    });
+                    if (match) return `https://storage.googleapis.com/${bucketName}/${match.name}`;
+                } catch (_) {}
+            }
+
+            // Last resort: construct URL and hope it exists
+            return `https://storage.googleapis.com/${bucketName}/raw/${userId}/${encodeURIComponent(safeName)}`;
         };
 
         const signClipUrl = async (clip) => {
-            const rawUrl = resolveUrl(clip);
-            if (!rawUrl || !gcsBucket) return clip;
+            const rawUrl = await resolveGcsUrl(clip);
+            if (!rawUrl) return clip;
+
+            if (!gcsBucket) {
+                // No GCS client — use the URL as-is (will be downloaded by axios)
+                return { ...clip, resolvedPath: rawUrl };
+            }
             try {
                 const urlObj = new URL(rawUrl);
                 let filePath = decodeURIComponent(urlObj.pathname.replace(/^\/[^/]+\//, ''));
                 const [signedUrl] = await gcsBucket.file(filePath).getSignedUrl({
-                    version: 'v4', action: 'read', expires: Date.now() + 15 * 60 * 1000, 
+                    version: 'v4', action: 'read', expires: Date.now() + 15 * 60 * 1000,
                 });
                 return { ...clip, resolvedPath: signedUrl };
             } catch (e) {
                 console.warn('[export] Could not sign URL for clip:', clip.name, e.message);
-                return clip;
+                // Fall back to the unsigned URL so the download step can still try
+                return { ...clip, resolvedPath: rawUrl };
             }
         };
 
