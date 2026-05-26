@@ -173,7 +173,7 @@ app.use('/api/silence', require('./routes/silenceRoutes'));
 app.use('/api/ai', aiLimiter, require('./routes/aiRoutes')); // GPT-4o — expensive
 app.use('/api/effects', require('./routes/effectsRoutes'));
 app.use('/api/proxy', uploadLimiter, require('./routes/proxyRoutes'));
-app.use('/api/revideo', renderLimiter, require('./routes/revideoRenderRoutes')); // headless Chrome
+app.use('/api/revideo', require('./routes/revideoRenderRoutes')); // headless Chrome
 app.use('/api/presets', require('./routes/presetRoutes'));
 app.use('/api/export', uploadLimiter, require('./routes/nleExport')); // NLE export (OTIO)
 app.use('/api/jobs', require('./routes/jobRoutes')); // Job Queue SSE monitoring

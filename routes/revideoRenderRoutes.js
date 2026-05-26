@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
 const axios = require('axios');
 const { authenticateUser } = require('../middleware/auth');
 const { LambdaClient, InvokeCommand } = require("@aws-sdk/client-lambda");
@@ -41,8 +42,15 @@ const toSignedUrl = async (gcsUrl) => {
  * and streams the MP4 response back to the client.
  */
 
+// Heavy compute: 5 req/min
+const renderLimiter = rateLimit({
+  windowMs: 60_000, max: 5,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Render rate limit reached. Please wait before starting another render.' }
+});
+
 // POST /api/revideo/render
-router.post('/render', authenticateUser, async (req, res) => {
+router.post('/render', authenticateUser, renderLimiter, async (req, res) => {
     console.log('[render] body keys:', Object.keys(req.body));
     console.log('[render] sourceVideoUrl:', req.body.sourceVideoUrl);
     console.log('[render] first clip sample:', JSON.stringify(
