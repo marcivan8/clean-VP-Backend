@@ -95,15 +95,10 @@ const RESOLUTION_PRESETS = {
 // HELPERS
 // ============================================================================
 
-function resolveSourcePath(clip, uploadsDir, publicDir) {
+function resolveSourcePath(clip, uploadsDir) {
     if (clip.fsPath && fs.existsSync(clip.fsPath)) return clip.fsPath;
     const inUploads = path.join(uploadsDir, clip.name);
     if (fs.existsSync(inUploads)) return inUploads;
-    const inPublic = path.join(publicDir, clip.name);
-    if (fs.existsSync(inPublic)) return inPublic;
-    // fallback demo
-    const sample = path.join(publicDir, 'sample.mp4');
-    if (fs.existsSync(sample)) return sample;
     return null;
 }
 
@@ -253,7 +248,7 @@ router.post('/', authMiddleware, async (req, res) => {
             }
 
             // Try local filesystem first (dev environment or recently uploaded files)
-            const localSrc = resolveSourcePath(clip, uploadsDir, publicDir);
+            const localSrc = resolveSourcePath(clip, uploadsDir);
             if (localSrc) return localSrc;
 
             // Last resort: HTTP download for any absolute URL that isn't a blob/proxy
