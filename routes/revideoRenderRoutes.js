@@ -4,16 +4,18 @@ const axios = require('axios');
 const { authenticateUser } = require('../middleware/auth');
 const { LambdaClient, InvokeCommand } = require("@aws-sdk/client-lambda");
 const lambdaClient = new LambdaClient({ region: process.env.AWS_REGION || 'us-east-1' });
-const { Storage } = require('@google-cloud/storage');
-const gcs = new Storage();
-const gcsBucket = gcs.bucket(process.env.GCS_BUCKET_NAME || 'viral-pilot_bucket');
+const storageConfig = require('../config/storage');
+const gcsBucket = storageConfig.bucket;
 
 const toSignedUrl = async (gcsUrl) => {
     if (!gcsUrl) return gcsUrl;
     try {
+        if (!gcsBucket) return gcsUrl; // Fallback if GCS is not configured
+        
         // Extract path: "raw/userId/filename.mp4"
         const url = new URL(gcsUrl);
-        const gcsPath = url.pathname.replace(`/${process.env.GCS_BUCKET_NAME || 'viral-pilot_bucket'}/`, '');
+        const bucketName = process.env.GOOGLE_CLOUD_BUCKET_NAME || process.env.GCS_BUCKET_NAME || 'viral-pilot_bucket';
+        const gcsPath = url.pathname.replace(`/${bucketName}/`, '');
         const decodedPath = decodeURIComponent(gcsPath);
 
         const [signed] = await gcsBucket.file(decodedPath).getSignedUrl({
