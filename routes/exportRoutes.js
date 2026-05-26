@@ -183,105 +183,104 @@ router.post('/', authMiddleware, async (req, res) => {
         }
         allClips.sort((a, b) => a.start - b.start);
 
-        // --- Resolve GCS URLs for all clips ---
+        // --- Resolve and download clip sources ---
         const userId = req.user ? req.user.id : 'anonymous';
         const bucketName = process.env.GCS_BUCKET_NAME || 'viral-pilot_bucket';
 
-        // Sanitize filename the same way the upload routes do.
+        // Apply the same filename sanitization the upload routes use.
         const sanitizeFilename = (name) =>
             name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9._-]/g, '');
 
-        // Resolve the raw GCS URL for a clip.
-        // Clips stored in the timeline may only have a blob: URL or a proxy URL — we
-        // need the underlying GCS raw file.  Strategy:
-        //   1. Use clip.sourceUrl / url if it already points to storage.googleapis.com
-        //   2. Fall back to searching GCS for raw/${userId}/<name> (handles both
-        //      sanitized exact match and timestamp-prefixed uploads)
-        const resolveGcsUrl = async (clip) => {
-            const candidates = [clip.sourceUrl, clip.url, clip.src, clip.videoUrl];
-            for (const raw of candidates) {
-                if (raw && raw !== '' && !raw.startsWith('blob:') && !raw.startsWith('/api/')) {
-                    return raw; // already an absolute URL pointing to real storage
-                }
+        // Extract the GCS object path from a full storage.googleapis.com URL.
+        const gcsPathFromUrl = (url) => {
+            if (!url || !url.startsWith(`https://storage.googleapis.com/${bucketName}/`)) return null;
+            try {
+                return decodeURIComponent(new URL(url).pathname.replace(`/${bucketName}/`, ''));
+            } catch (_) { return null; }
+        };
+
+        // Resolve the GCS object path (within the bucket) for a clip.
+        // Returns the path string or null.
+        const resolveGcsPath = async (clip) => {
+            // 1. If clip already carries a direct storage.googleapis.com URL, extract path.
+            for (const raw of [clip.sourceUrl, clip.url, clip.src, clip.videoUrl]) {
+                const p = gcsPathFromUrl(raw);
+                if (p) return p;
             }
 
             const filename = clip.name || clip.originalName;
-            if (!filename) return undefined;
+            if (!filename || !gcsBucket) return null;
             const safeName = sanitizeFilename(filename);
 
-            if (gcsBucket) {
-                // Try exact sanitized path first (legacy upload stores files here)
-                const exactPath = `raw/${userId}/${safeName}`;
-                try {
-                    const [exists] = await gcsBucket.file(exactPath).exists();
-                    if (exists) return `https://storage.googleapis.com/${bucketName}/${exactPath}`;
-                } catch (_) {}
-
-                // Scan for a timestamp-prefixed file (direct-to-GCS uploads)
-                try {
-                    const [files] = await gcsBucket.getFiles({ prefix: `raw/${userId}/` });
-                    const match = files.find(f => {
-                        const base = f.name.split('/').pop();
-                        return base === safeName || base.endsWith(`-${safeName}`);
-                    });
-                    if (match) return `https://storage.googleapis.com/${bucketName}/${match.name}`;
-                } catch (_) {}
-            }
-
-            // Last resort: construct URL and hope it exists
-            return `https://storage.googleapis.com/${bucketName}/raw/${userId}/${encodeURIComponent(safeName)}`;
-        };
-
-        const signClipUrl = async (clip) => {
-            const rawUrl = await resolveGcsUrl(clip);
-            if (!rawUrl) return clip;
-
-            if (!gcsBucket) {
-                // No GCS client — use the URL as-is (will be downloaded by axios)
-                return { ...clip, resolvedPath: rawUrl };
-            }
+            // 2. Try exact sanitized path (legacy /api/proxy/upload stores files here).
+            const exactPath = `raw/${userId}/${safeName}`;
             try {
-                const urlObj = new URL(rawUrl);
-                let filePath = decodeURIComponent(urlObj.pathname.replace(/^\/[^/]+\//, ''));
-                const [signedUrl] = await gcsBucket.file(filePath).getSignedUrl({
-                    version: 'v4', action: 'read', expires: Date.now() + 15 * 60 * 1000,
-                });
-                return { ...clip, resolvedPath: signedUrl };
+                const [exists] = await gcsBucket.file(exactPath).exists();
+                if (exists) { console.log(`[export] GCS exact match: ${exactPath}`); return exactPath; }
             } catch (e) {
-                console.warn('[export] Could not sign URL for clip:', clip.name, e.message);
-                // Fall back to the unsigned URL so the download step can still try
-                return { ...clip, resolvedPath: rawUrl };
+                console.warn(`[export] GCS exists() error for "${exactPath}":`, e.message);
             }
+
+            // 3. Scan for timestamp-prefixed file (direct-to-GCS uploads use Date.now() prefix).
+            try {
+                const [files] = await gcsBucket.getFiles({ prefix: `raw/${userId}/` });
+                console.log(`[export] GCS listing for raw/${userId}/: ${files.length} file(s):`, files.map(f => f.name));
+                const match = files.find(f => {
+                    const base = f.name.split('/').pop();
+                    return base === safeName || base.endsWith(`-${safeName}`);
+                });
+                if (match) { console.log(`[export] GCS listing match: ${match.name}`); return match.name; }
+                console.warn(`[export] No GCS file matched "${safeName}" for user ${userId}`);
+            } catch (e) {
+                console.warn(`[export] GCS getFiles() error for prefix "raw/${userId}/":`, e.message);
+            }
+
+            return null;
         };
 
-        allClips = await Promise.all(allClips.map(signClipUrl));
-        for (const track of audioTracks) {
-            track.clips = await Promise.all(track.clips.map(signClipUrl));
-        }
+        // Download a clip's source to a local temp file.
+        // Prefers GCS SDK (authenticated) over HTTPS download.
+        // Returns the local file path or null.
+        const fetchClipSource = async (clip, localPath) => {
+            // GCS SDK path: authenticated, works for private buckets, no URL issues
+            if (gcsBucket) {
+                const gcsPath = await resolveGcsPath(clip);
+                if (gcsPath) {
+                    console.log(`[export] Downloading from GCS SDK: ${gcsPath} → ${path.basename(localPath)}`);
+                    await gcsBucket.file(gcsPath).download({ destination: localPath });
+                    return localPath;
+                }
+            }
+
+            // Try local filesystem first (dev environment or recently uploaded files)
+            const localSrc = resolveSourcePath(clip, uploadsDir, publicDir);
+            if (localSrc) return localSrc;
+
+            // Last resort: HTTP download for any absolute URL that isn't a blob/proxy
+            for (const raw of [clip.sourceUrl, clip.url, clip.src, clip.videoUrl]) {
+                if (raw && !raw.startsWith('blob:') && !raw.includes('/api/proxy') && raw.startsWith('http')) {
+                    console.log(`[export] HTTP download fallback: ${raw.slice(0, 80)}`);
+                    await downloadToTemp(raw, localPath);
+                    return localPath;
+                }
+            }
+
+            console.warn(`[export] Cannot resolve source for clip "${clip.name}" (userId=${userId})`);
+            return null;
+        };
 
         const scaleFilter = buildScaleFilter(targetWidth, targetHeight);
 
         // --- STEP 1: Trim each clip into a temp segment ---
         const segments = [];
-        const downloadedFiles = []; // track files to clean up
         for (let i = 0; i < allClips.length; i++) {
             const clip = allClips[i];
-            let src = clip.resolvedPath || resolveSourcePath(clip, uploadsDir, publicDir);
+            const ext = path.extname(clip.name || '.mp4') || '.mp4';
+            const dlPath = path.join(tmpDir, `dl-${i}${ext}`);
+            const src = await fetchClipSource(clip, dlPath);
             if (!src) {
                 console.warn(`⚠️  Could not find source for clip "${clip.name}", skipping`);
                 continue;
-            }
-
-            // Download remote URLs locally before passing to ffmpeg.
-            // ffmpeg-static's HTTPS support can be unreliable in cloud environments
-            // (GCS signed URLs with long query strings trigger SIGSEGV on some builds).
-            if (src.startsWith('http://') || src.startsWith('https://')) {
-                const ext = path.extname(src.split('?')[0]) || '.mp4';
-                const dlPath = path.join(tmpDir, `dl-${i}${ext}`);
-                console.log(`  ⬇️  Downloading clip ${i+1}/${allClips.length}...`);
-                await downloadToTemp(src, dlPath);
-                downloadedFiles.push(dlPath);
-                src = dlPath;
             }
 
             const segPath = path.join(tmpDir, `seg-${i}.mp4`);
@@ -387,15 +386,10 @@ router.post('/', authMiddleware, async (req, res) => {
                 const track = audioTracks[i];
                 for (let j = 0; j < track.clips.length; j++) {
                     const clip = track.clips[j];
-                    let src = clip.resolvedPath || resolveSourcePath(clip, uploadsDir, publicDir);
+                    const ext = path.extname(clip.name || '.mp3') || '.mp3';
+                    const aDlPath = path.join(tmpDir, `adl-${i}-${j}${ext}`);
+                    const src = await fetchClipSource(clip, aDlPath);
                     if (!src) continue;
-                    if (src.startsWith('http://') || src.startsWith('https://')) {
-                        const ext = path.extname(src.split('?')[0]) || '.mp3';
-                        const dlPath = path.join(tmpDir, `adl-${i}-${j}${ext}`);
-                        console.log(`  ⬇️  Downloading audio clip...`);
-                        await downloadToTemp(src, dlPath);
-                        src = dlPath;
-                    }
                     const aSegPath = path.join(tmpDir, `audio-${i}-${j}.aac`);
                     const vol = (clip.volume ?? 1.0) * (track.volume ?? 1.0);
                     await new Promise((resolve, reject) => {
