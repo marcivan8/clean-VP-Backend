@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
+const axios = require('axios');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 const { authenticateUser, optionalAuth } = require('../middleware/auth');
@@ -9,6 +10,19 @@ const storageConfig = require('../config/storage');
 const gcsBucket = storageConfig.bucket;
 
 ffmpeg.setFfmpegPath(ffmpegPath);
+
+// Download a URL to a local file using axios streaming.
+// Avoids ffmpeg-static HTTPS crashes when passing GCS signed URLs directly.
+async function downloadToTemp(url, destPath) {
+    const response = await axios({ url, method: 'GET', responseType: 'stream', timeout: 120000 });
+    await new Promise((resolve, reject) => {
+        const writer = fs.createWriteStream(destPath);
+        response.data.pipe(writer);
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+        response.data.on('error', reject);
+    });
+}
 
 // ============================================================================
 // PLATFORM PRESETS
@@ -192,6 +206,7 @@ router.post('/', authMiddleware, async (req, res) => {
                 });
                 return { ...clip, resolvedPath: signedUrl };
             } catch (e) {
+                console.warn('[export] Could not sign URL for clip:', clip.name, e.message);
                 return clip;
             }
         };
@@ -205,37 +220,71 @@ router.post('/', authMiddleware, async (req, res) => {
 
         // --- STEP 1: Trim each clip into a temp segment ---
         const segments = [];
+        const downloadedFiles = []; // track files to clean up
         for (let i = 0; i < allClips.length; i++) {
             const clip = allClips[i];
-            const src = clip.resolvedPath || resolveSourcePath(clip, uploadsDir, publicDir);
+            let src = clip.resolvedPath || resolveSourcePath(clip, uploadsDir, publicDir);
             if (!src) {
                 console.warn(`⚠️  Could not find source for clip "${clip.name}", skipping`);
                 continue;
             }
+
+            // Download remote URLs locally before passing to ffmpeg.
+            // ffmpeg-static's HTTPS support can be unreliable in cloud environments
+            // (GCS signed URLs with long query strings trigger SIGSEGV on some builds).
+            if (src.startsWith('http://') || src.startsWith('https://')) {
+                const ext = path.extname(src.split('?')[0]) || '.mp4';
+                const dlPath = path.join(tmpDir, `dl-${i}${ext}`);
+                console.log(`  ⬇️  Downloading clip ${i+1}/${allClips.length}...`);
+                await downloadToTemp(src, dlPath);
+                downloadedFiles.push(dlPath);
+                src = dlPath;
+            }
+
             const segPath = path.join(tmpDir, `seg-${i}.mp4`);
             const inPoint = clip.offset || 0;
             const dur     = clip.duration;
             const vol     = (clip.volume ?? 1.0) * (clip.trackVolume ?? 1.0);
             const speed   = clip.speed || 1.0;
+            const isImage = clip.type === 'image';
 
             await new Promise((resolve, reject) => {
-                let cmd = ffmpeg(src)
-                    .setStartTime(inPoint)
-                    .setDuration(dur / speed);
+                let cmd;
+                if (isImage) {
+                    // Images need -loop 1 so ffmpeg generates video frames for the full duration
+                    cmd = ffmpeg()
+                        .input(src)
+                        .inputOptions(['-loop', '1'])
+                        .setDuration(dur / speed);
+                } else {
+                    cmd = ffmpeg(src)
+                        .setStartTime(inPoint)
+                        .setDuration(dur / speed);
+                }
 
                 const vFilters = [scaleFilter];
                 const aFilters = [];
 
                 if (speed !== 1.0) {
                     vFilters.push(`setpts=${(1/speed).toFixed(4)}*PTS`);
-                    // audio speed: atempo only supports 0.5-2.0, chain for extremes
-                    const aTempo = Math.min(Math.max(speed, 0.5), 2.0);
-                    aFilters.push(`atempo=${aTempo.toFixed(4)}`);
+                    if (!isImage) {
+                        const aTempo = Math.min(Math.max(speed, 0.5), 2.0);
+                        aFilters.push(`atempo=${aTempo.toFixed(4)}`);
+                    }
                 }
-                if (vol !== 1.0) aFilters.push(`volume=${vol.toFixed(4)}`);
+                if (!isImage && vol !== 1.0) aFilters.push(`volume=${vol.toFixed(4)}`);
 
                 cmd.videoFilters(vFilters.join(','));
-                if (aFilters.length) cmd.audioFilters(aFilters.join(','));
+
+                if (isImage) {
+                    // Generate a silent audio track so all segments have the same streams,
+                    // which is required for the concat step.
+                    cmd
+                        .input(`anullsrc=channel_layout=stereo:sample_rate=44100`)
+                        .inputOptions(['-f', 'lavfi']);
+                } else if (aFilters.length) {
+                    cmd.audioFilters(aFilters.join(','));
+                }
 
                 cmd
                     .fps(targetFps)
@@ -243,10 +292,17 @@ router.post('/', authMiddleware, async (req, res) => {
                     .addOutputOption('-profile:v', profile)
                     .addOutputOption('-pix_fmt', 'yuv420p')
                     .addOutputOption('-movflags', '+faststart')
+                    .addOutputOption('-shortest')
                     .audioBitrate(audioBitrate)
                     .output(segPath)
+                    .on('start', (cmdLine) => console.log(`  [ffmpeg] ${cmdLine.slice(0, 120)}...`))
+                    .on('stderr', (line) => { if (line.includes('Error') || line.includes('error')) console.warn(`  [ffmpeg stderr] ${line}`); })
                     .on('end', () => { segments.push(segPath); resolve(); })
-                    .on('error', reject)
+                    .on('error', (err, stdout, stderr) => {
+                        console.error(`  ❌ ffmpeg failed for clip ${i+1}: ${err.message}`);
+                        if (stderr) console.error(`  [ffmpeg stderr]\n${stderr.slice(-2000)}`);
+                        reject(err);
+                    })
                     .run();
             });
             console.log(`  ✅ Segment ${i+1}/${allClips.length}: "${clip.name}"`);
@@ -288,8 +344,15 @@ router.post('/', authMiddleware, async (req, res) => {
                 const track = audioTracks[i];
                 for (let j = 0; j < track.clips.length; j++) {
                     const clip = track.clips[j];
-                    const src = clip.resolvedPath || resolveSourcePath(clip, uploadsDir, publicDir);
+                    let src = clip.resolvedPath || resolveSourcePath(clip, uploadsDir, publicDir);
                     if (!src) continue;
+                    if (src.startsWith('http://') || src.startsWith('https://')) {
+                        const ext = path.extname(src.split('?')[0]) || '.mp3';
+                        const dlPath = path.join(tmpDir, `adl-${i}-${j}${ext}`);
+                        console.log(`  ⬇️  Downloading audio clip...`);
+                        await downloadToTemp(src, dlPath);
+                        src = dlPath;
+                    }
                     const aSegPath = path.join(tmpDir, `audio-${i}-${j}.aac`);
                     const vol = (clip.volume ?? 1.0) * (track.volume ?? 1.0);
                     await new Promise((resolve, reject) => {
