@@ -50,6 +50,16 @@ const timelineScene = makeScene2D('timeline', function* (view) {
     const tracksSignal = vars.get('tracks', []);
     const tracks: any[] = (tracksSignal ? typeof tracksSignal === 'function' ? tracksSignal() : tracksSignal : []) as any[];
 
+    const backendUrlSignal = vars.get('backendUrl', '');
+    const backendUrl: string = (typeof backendUrlSignal === 'function' ? backendUrlSignal() : backendUrlSignal) as string;
+
+    const fixUrl = (url: string) => {
+        if (!url) return '';
+        if (url.startsWith('blob:') || url.startsWith('http')) return url;
+        const base = backendUrl ? backendUrl.replace(/\/$/, '') : '';
+        return url.startsWith('/') ? `${base}${url}` : `${base}/${url}`;
+    };
+
     const arSignal = vars.get('aspectRatio', '16:9');
     const ar: string = (typeof arSignal === 'function' ? arSignal() : arSignal) as string;
     const SIZE_MAP: Record<string, [number, number]> = {
@@ -147,7 +157,7 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                         <Node ref={wrapperRef}>
                             <Video
                                 ref={mediaRef}
-                            src={clip.url}
+                            src={fixUrl(clip.url)}
                             width={fitted.w}
                             height={fitted.h}
                             time={() => playback.time - clip.start + (clip.offset || 0)}
@@ -175,7 +185,7 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                         <Node ref={wrapperRef}>
                             <Audio
                                 ref={mediaRef}
-                            src={clip.url}
+                            src={fixUrl(clip.url)}
                             time={() => playback.time - clip.start + (clip.offset || 0)}
                             play={true}
                                 volume={(clip.volume ?? 1) * (clip.globalVolume ?? 1)}
@@ -201,7 +211,7 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                         <Node ref={wrapperRef}>
                             <Img
                                 ref={mediaRef}
-                            src={clip.url}
+                            src={fixUrl(clip.url)}
                             width={fitted.w}
                             height={fitted.h}
                             x={() => evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0)}
