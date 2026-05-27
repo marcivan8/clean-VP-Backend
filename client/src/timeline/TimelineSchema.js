@@ -219,7 +219,7 @@ export function createPlacement(overrides = {}) {
 /**
  * Create a new empty timeline state
  */
-export function createTimelineState(overrides = {}, emptyLayers = false) {
+export function createTimelineState(overrides = {}) {
     const now = Date.now();
 
     return {
@@ -233,7 +233,7 @@ export function createTimelineState(overrides = {}, emptyLayers = false) {
         // Normalized Entities
         entities: {
             clips: {},
-            layers: emptyLayers ? {} : {
+            layers: overrides.emptyLayers ? {} : {
                 'track-default-video': { id: 'track-default-video', name: 'Video 1', type: 'video', order: 0, visible: true, locked: false, muted: false, solo: false, volume: 1 },
                 'track-default-audio': { id: 'track-default-audio', name: 'Audio 1', type: 'audio', order: 1, visible: true, locked: false, muted: false, solo: false, volume: 1 }
             },

@@ -626,7 +626,9 @@ export class TimelineStateManager {
             }
 
             case ACTION_TYPES.RESET_STATE: {
-                return createTimelineState(payload.options, payload.emptyLayers);
+                // Pass emptyLayers through so fromLegacyTracks() can request a
+                // state with no default layers, preventing duplicate video/audio tracks.
+                return createTimelineState({ ...(payload.options || {}), emptyLayers: payload.emptyLayers });
             }
 
             default:

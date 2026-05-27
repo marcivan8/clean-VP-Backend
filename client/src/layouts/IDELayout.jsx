@@ -453,6 +453,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 // Single file: auto-place immediately. The player resolves proxy URL
                 // from the asset store once processing finishes — no extra work needed.
                 useTimelineStore.getState().addAssetToTimeline(processedAssets[0]);
+                // Always start preview from the beginning of the newly placed clip
+                useTimelineStore.getState().seek(0);
             } else {
                 // Multiple files: populate the media panel and let the AI suggest order.
                 const formatDur = (s) => {
@@ -1005,7 +1007,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                                         return (
                                             <Player
-                                                key={`player-${aspectRatio}-${hasClips ? 'media' : 'empty'}-${assets.map(a => a.proxyUrl ? '1' : '0').join('')}`}
+                                                key={`player-${aspectRatio}-${hasClips ? 'media' : 'empty'}`}
                                                 onPlayerReady={handlePlayerReady}
                                                 playing={isPlaying}
                                                 controls={false}

@@ -33,18 +33,24 @@ try {
         const _age = Date.now() - (_saved.timestamp || 0);
         if (_saved.version === '1.2' && _age < 24 * 60 * 60 * 1000 && _saved.tracks?.some(t => t.clips?.length > 0)) {
             // ── FIX: Deduplicate empty tracks from corrupted autosaves ─────────────
-            // Previous versions of fromLegacyTracks() created default layers
-            // (track-default-video, track-default-audio) via RESET_STATE, then
-            // added ALL saved tracks on top — resulting in 4+ tracks when there
-            // should be 2.  Clean up before importing so existing autosaves heal.
+            // Separate tracks into two buckets. Keep all tracks that have clips.
+            // Only keep an empty track if no clip-bearing track of that type exists.
+            const tracksWithClips = (_saved.tracks || []).filter(t => t.clips?.length > 0);
+            const typesWithClips = new Set(tracksWithClips.map(t => t.type));
+            
+            const emptyTracksToKeep = [];
             const seenEmptyTypes = new Set();
-            const cleanedTracks = (_saved.tracks || []).filter(track => {
-                if (track.clips?.length > 0) return true;   // Always keep tracks with clips
-                if (seenEmptyTypes.has(track.type)) return false; // Drop duplicate empty tracks
-                seenEmptyTypes.add(track.type);
-                return true;
-            });
-            _saved.tracks = cleanedTracks;
+            
+            for (const track of (_saved.tracks || [])) {
+                if (!track.clips?.length) {
+                    if (!typesWithClips.has(track.type) && !seenEmptyTypes.has(track.type)) {
+                        emptyTracksToKeep.push(track);
+                        seenEmptyTypes.add(track.type);
+                    }
+                }
+            }
+            
+            _saved.tracks = [...tracksWithClips, ...emptyTracksToKeep];
 
             timelineManager.fromLegacyTracks(_saved.tracks);
             _preRestoredProject = _saved;
