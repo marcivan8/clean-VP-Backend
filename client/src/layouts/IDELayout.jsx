@@ -190,7 +190,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const [showAI, setShowAI] = React.useState(false);
     
     const { isMobile } = useDeviceType();
-    const [mobileTab, setMobileTab] = React.useState('ai'); // Default to AI on mobile as per user preference
+    const [mobileTab, setMobileTab] = React.useState('editor'); // Default to editor on mobile
 
     const fileInputRef = useRef(null);
 
@@ -973,19 +973,19 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     {/* Center — Viewport & Timeline */}
                     <main className={classNames(
                         "flex-1 flex flex-col min-w-0 relative",
-                        isMobile && mobileTab !== 'player' && mobileTab !== 'edit' ? "hidden" : "flex"
+                        isMobile && mobileTab !== 'editor' ? "hidden" : "flex"
                     )}>
                         <div className={classNames(
-                            "flex-1 flex items-center justify-center md:p-8 p-4 relative overflow-hidden",
-                            isMobile && mobileTab === 'edit' ? "hidden" : "flex"
+                            "flex-1 flex items-center justify-center md:p-8 p-4 relative overflow-hidden flex-col gap-4",
+                            "flex"
                         )} style={{ background: "radial-gradient(60% 80% at 50% 40%, #1c1f24 0%, #0c0d10 100%)" }}>
                             <div className={classNames(
                                 "bg-black rounded-lg shadow-2xl relative border border-white/5 group overflow-hidden transition-all duration-500 ease-in-out",
                                 aspectRatio === '9:16'
-                                    ? 'aspect-[9/16] max-h-[70vh] md:max-h-[550px] w-auto'
+                                    ? 'aspect-[9/16] max-h-[45vh] md:max-h-[550px] w-auto'
                                     : aspectRatio === '1:1'
-                                        ? 'aspect-square max-h-[50vh] md:max-h-[450px] w-auto'
-                                        : 'aspect-video max-w-full max-h-full md:max-h-[60vh] w-auto'
+                                        ? 'aspect-square max-h-[40vh] md:max-h-[450px] w-auto'
+                                        : 'aspect-video max-w-full max-h-[35vh] md:max-h-[60vh] w-auto'
                             )}>
                                 <ErrorBoundary>
                                     {(() => {
@@ -1034,11 +1034,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             </div>
                         </div>
 
-                        {/* Always show timeline in desktop. On mobile, show only in edit tab. */}
-                        {mode === 'editor' && (!isMobile || mobileTab === 'edit') && (
+                        {/* Always show timeline in desktop. On mobile, show only in editor tab. */}
+                        {mode === 'editor' && (!isMobile || mobileTab === 'editor') && (
                             <div className={classNames(
                                 "border-t flex flex-col overflow-hidden shrink-0",
-                                isMobile ? "flex-1 h-full" : "h-48 md:h-72"
+                                isMobile ? "h-[40vh]" : "h-48 md:h-72"
                             )} style={{ background: "var(--bg-2)", borderColor: "var(--line-soft)" }}>
                                 <Timeline />
                             </div>

@@ -4,8 +4,7 @@ import classNames from 'classnames';
 
 const MobileBottomNav = ({ activeTab, onTabChange }) => {
     const tabs = [
-        { id: 'player', icon: Film, label: 'Player' },
-        { id: 'edit', icon: Scissors, label: 'Edit' },
+        { id: 'editor', icon: Film, label: 'Editor' },
         { id: 'media', icon: ImageIcon, label: 'Media' },
         { id: 'ai', icon: Sparkles, label: 'AI Agent' }
     ];
