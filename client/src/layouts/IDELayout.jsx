@@ -447,6 +447,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 // Single file: auto-place immediately. The player resolves proxy URL
                 // from the asset store once processing finishes — no extra work needed.
                 useTimelineStore.getState().addAssetToTimeline(processedAssets[0]);
+                if (isMobile) {
+                    setMobileTab('editor');
+                }
             } else {
                 // Multiple files: populate the media panel and let the AI suggest order.
                 const formatDur = (s) => {
@@ -555,8 +558,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         if (activeData?.type === 'asset' && targetData?.trackId) {
             const asset = activeData.asset;
             let trackId = targetData.trackId;
-            const dropTime = state.currentTime;
             const duration = asset.type === 'image' ? 5 : (asset.duration || asset.sourceDuration || 10);
+            
+            // Append to the end of the target track instead of dropping at currentTime to avoid collisions
+            const track = state.tracks.find(t => t.id === trackId);
+            const dropTime = track?.clips?.reduce((max, clip) => Math.max(max, clip.start + clip.duration), 0) || 0;
 
             if (checkOverlap(trackId, dropTime, duration)) {
                 trackId = state.addTrack(asset.type === 'audio' ? 'audio' : 'video');
