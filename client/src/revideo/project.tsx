@@ -80,7 +80,7 @@ const timelineScene = makeScene2D('timeline', function* (view) {
     // Loop quickly (0.5s) so the scene re-reads tracks as soon as a clip is
     // added — the player key also remounts on empty→media transition as a
     // belt-and-suspenders guard.
-    const hasClips = tracks.some(t => t.clips && t.clips.length > 0);
+    const hasClips = tracks.some(t => t.clips?.some((c: any) => c.url || c.type === 'text'));
     if (!hasClips) {
         yield view.add(
             <Txt
@@ -138,6 +138,9 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                 let wrapperRef: any = null;
                 let mediaRef: any = null;
                 if (clip.type === 'video') {
+                    const resolvedUrl = fixUrl(clip.url);
+                    if (!resolvedUrl) return;
+
                     wrapperRef = createRef<Node>();
                     mediaRef = createRef<Video>();
                     const kf = clip.keyframes || {};
@@ -148,16 +151,16 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || canvasHeight;
                     const fitted = fitSize(srcW, srcH);
 
-                    const getGrading = () => {
-                        const t = typeof tracksSignal === 'function' ? tracksSignal() : (tracksSignal || []);
-                        return (t as any[]).flatMap((tr: any) => tr.clips || []).find((c: any) => c.id === clip.id)?.grading;
-                    };
+                    // Read grading once at render time (static snapshot).
+                    // Reactive callbacks calling tracksSignal() inside filter lambdas
+                    // cause "scene not available" errors in Revideo's signal context.
+                    const g = clip.grading;
 
                     layerRefs[track.id]().add(
                         <Node ref={wrapperRef}>
                             <Video
                                 ref={mediaRef}
-                            src={fixUrl(clip.url)}
+                            src={resolvedUrl}
                             width={fitted.w}
                             height={fitted.h}
                             time={() => playback.time - clip.start + (clip.offset || 0)}
@@ -169,23 +172,26 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
                             rotation={() => evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
                             opacity={() => evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
-                            filters={[
-                                brightness(() => (getGrading()?.brightness ?? 100) / 100),
-                                contrast(() => (getGrading()?.contrast ?? 100) / 100),
-                                saturate(() => (getGrading()?.saturate ?? 100) / 100),
-                                hue(() => getGrading()?.hueRotate ?? 0),
-                            ]}
+                            filters={g ? [
+                                brightness((g.brightness ?? 100) / 100),
+                                contrast((g.contrast ?? 100) / 100),
+                                saturate((g.saturate ?? 100) / 100),
+                                hue(g.hueRotate ?? 0),
+                            ] : []}
                         />
                         </Node>
                     );
                 } else if (clip.type === 'audio') {
+                    const resolvedUrl = fixUrl(clip.url);
+                    if (!resolvedUrl) return;
+
                     wrapperRef = createRef<Node>();
                     mediaRef = createRef<Audio>();
                     layerRefs[track.id]().add(
                         <Node ref={wrapperRef}>
                             <Audio
                                 ref={mediaRef}
-                            src={fixUrl(clip.url)}
+                            src={resolvedUrl}
                             time={() => playback.time - clip.start + (clip.offset || 0)}
                             play={true}
                                 volume={(clip.volume ?? 1) * (clip.globalVolume ?? 1)}
@@ -193,6 +199,9 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                         </Node>
                     );
                 } else if (clip.type === 'image') {
+                    const resolvedUrl = fixUrl(clip.url);
+                    if (!resolvedUrl) return;
+
                     wrapperRef = createRef<Node>();
                     mediaRef = createRef<Img>();
                     const kf = clip.keyframes || {};
@@ -202,16 +211,13 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || canvasHeight;
                     const fitted = fitSize(srcW, srcH);
 
-                    const getGrading = () => {
-                        const t = typeof tracksSignal === 'function' ? tracksSignal() : (tracksSignal || []);
-                        return (t as any[]).flatMap((tr: any) => tr.clips || []).find((c: any) => c.id === clip.id)?.grading;
-                    };
+                    const g = clip.grading;
 
                     layerRefs[track.id]().add(
                         <Node ref={wrapperRef}>
                             <Img
                                 ref={mediaRef}
-                            src={fixUrl(clip.url)}
+                            src={resolvedUrl}
                             width={fitted.w}
                             height={fitted.h}
                             x={() => evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0)}
@@ -220,12 +226,12 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
                             rotation={() => evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
                             opacity={() => evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
-                            filters={[
-                                brightness(() => (getGrading()?.brightness ?? 100) / 100),
-                                contrast(() => (getGrading()?.contrast ?? 100) / 100),
-                                saturate(() => (getGrading()?.saturate ?? 100) / 100),
-                                hue(() => getGrading()?.hueRotate ?? 0),
-                            ]}
+                            filters={g ? [
+                                brightness((g.brightness ?? 100) / 100),
+                                contrast((g.contrast ?? 100) / 100),
+                                saturate((g.saturate ?? 100) / 100),
+                                hue(g.hueRotate ?? 0),
+                            ] : []}
                         />
                         </Node>
                     );

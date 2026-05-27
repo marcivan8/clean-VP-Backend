@@ -177,13 +177,16 @@ const useTimelineStore = create(
             setIsPlaying: (isPlaying) => set({ isPlaying }),
 
             seek: (time) => {
-                const { duration } = get();
+                const { duration, playerRef } = get();
                 const clamped = Math.max(0, Math.min(time, duration));
                 set({ currentTime: clamped });
                 timelineManager.dispatch(
                     TimelineActions.setPlayhead(clamped),
                     { skipHistory: true }
                 );
+                if (playerRef) {
+                    playerRef.dispatchEvent(new CustomEvent('seekto', { detail: clamped }));
+                }
             },
 
             // ==============================================================
