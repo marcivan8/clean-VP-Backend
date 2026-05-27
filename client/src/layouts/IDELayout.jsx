@@ -166,7 +166,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             }),
             duration: duration,
             aspectRatio: aspectRatio,
-            fps: 30
+            fps: 30,
+            // Tell the Revideo scene which origin to prefix /api/ and /uploads/ paths
+            // with. Without this the scene defaults to http://127.0.0.1:3000, which
+            // points to the user's own machine rather than the deployed backend.
+            backendUrl: window.location.origin
         };
     }, [deferredTracks, duration, aspectRatio, assets, toProxyUrl]);
 
@@ -303,8 +307,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             console.log("📂 Files Selected:", files.length);
 
             const processedAssets = [];
-            const hasExistingClips = useTimelineStore.getState().tracks.some(t => t.clips && t.clips.length > 0);
-            let ratioSet = hasExistingClips;
+            // Always detect aspect ratio from the first video in this batch.
+            // Using hasExistingClips to skip detection caused the ratio to stay
+            // locked to a stale autosaved value when the user starts a new video.
+            let ratioSet = false;
 
             for (const file of files) {
                 const url = URL.createObjectURL(file);

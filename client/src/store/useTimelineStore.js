@@ -223,9 +223,15 @@ const useTimelineStore = create(
                 assets: [...state.assets, ...newAssets],
                 uploadedFile: newAssets.find(a => a.type === 'video')?.file || state.uploadedFile
             })),
-            removeAsset: (assetId) => set((state) => ({
-                assets: state.assets.filter(a => a.id !== assetId)
-            })),
+            removeAsset: (assetId) => {
+                set((state) => ({
+                    assets: state.assets.filter(a => a.id !== assetId)
+                }));
+                // Immediately persist — the debounced autosave only fires on
+                // timeline-manager events, so without this the deleted asset
+                // would be restored from localStorage on page refresh.
+                get().saveProject();
+            },
             updateAsset: (assetId, updates) => set((state) => ({
                 assets: state.assets.map(a => a.id === assetId ? { ...a, ...updates } : a)
             })),
