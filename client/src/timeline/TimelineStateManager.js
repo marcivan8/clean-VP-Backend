@@ -626,7 +626,7 @@ export class TimelineStateManager {
             }
 
             case ACTION_TYPES.RESET_STATE: {
-                return createTimelineState(payload.options);
+                return createTimelineState(payload.options, payload.emptyLayers);
             }
 
             default:
@@ -931,8 +931,8 @@ export class TimelineStateManager {
         this.beginTransaction();
 
         try {
-            // Reset entities
-            this.dispatch({ type: ACTION_TYPES.RESET_STATE, payload: {} }, { skipHistory: true });
+            // Reset entities with empty layers so we don't duplicate tracks
+            this.dispatch({ type: ACTION_TYPES.RESET_STATE, payload: { emptyLayers: true } }, { skipHistory: true });
 
             tracks.forEach((track, trackIndex) => {
                 // Create layer

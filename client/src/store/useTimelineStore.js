@@ -32,8 +32,30 @@ try {
         const _saved = JSON.parse(_raw);
         const _age = Date.now() - (_saved.timestamp || 0);
         if (_saved.version === '1.2' && _age < 24 * 60 * 60 * 1000 && _saved.tracks?.some(t => t.clips?.length > 0)) {
+            // ── FIX: Deduplicate empty tracks from corrupted autosaves ─────────────
+            // Previous versions of fromLegacyTracks() created default layers
+            // (track-default-video, track-default-audio) via RESET_STATE, then
+            // added ALL saved tracks on top — resulting in 4+ tracks when there
+            // should be 2.  Clean up before importing so existing autosaves heal.
+            const seenEmptyTypes = new Set();
+            const cleanedTracks = (_saved.tracks || []).filter(track => {
+                if (track.clips?.length > 0) return true;   // Always keep tracks with clips
+                if (seenEmptyTypes.has(track.type)) return false; // Drop duplicate empty tracks
+                seenEmptyTypes.add(track.type);
+                return true;
+            });
+            _saved.tracks = cleanedTracks;
+
             timelineManager.fromLegacyTracks(_saved.tracks);
             _preRestoredProject = _saved;
+
+            // ── FIX: Reset aspect ratio if there are no video clips ───────────────
+            // Without this, a 9:16 project that has been cleared still restores its
+            // old ratio, leaving the player stuck in portrait mode.
+            const hasVideoClips = _saved.tracks.some(t => t.type === 'video' && t.clips?.length > 0);
+            if (!hasVideoClips) {
+                _preRestoredProject = { ..._preRestoredProject, aspectRatio: '16:9' };
+            }
         } else {
             // Wipe corrupted or old session (forces a completely clean state)
             localStorage.removeItem('vp_autosave');
@@ -223,13 +245,29 @@ const useTimelineStore = create(
                 assets: [...state.assets, ...newAssets],
                 uploadedFile: newAssets.find(a => a.type === 'video')?.file || state.uploadedFile
             })),
+            // ── FIX: Cascade-remove clips that reference the deleted asset ────────
+            // Previously only removed the asset entry; clips remained on the timeline
+            // so the asset would reappear from the autosave on the next page load.
             removeAsset: (assetId) => {
+                // 1. Remove any timeline placements that belong to this asset
+                const currentTracks = get().tracks;
+                currentTracks.forEach(track => {
+                    (track.clips || []).forEach(clip => {
+                        if (clip.assetId === assetId) {
+                            timelineManager.dispatch(TimelineActions.removePlacement(clip.id));
+                        }
+                    });
+                });
+
+                // 2. Remove from the asset list and sync updated track state
                 set((state) => ({
-                    assets: state.assets.filter(a => a.id !== assetId)
+                    assets: state.assets.filter(a => a.id !== assetId),
+                    tracks: timelineManager.toLegacyTracks(),
+                    activeClipId: null,
+                    selectedClipIds: [],
                 }));
-                // Immediately persist — the debounced autosave only fires on
-                // timeline-manager events, so without this the deleted asset
-                // would be restored from localStorage on page refresh.
+
+                // 3. Persist immediately so the deletion survives a refresh
                 get().saveProject();
             },
             updateAsset: (assetId, updates) => set((state) => ({
