@@ -302,9 +302,14 @@ const useTimelineStore = create(
                     trackId = get().addTrack(newType);
                 }
                 
-                // Find end of current clips on this track
+                // Find end of current clips on this track.
+                // Ignore ghost clips (empty URLs from a stale autosave) — they have
+                // no playable content, so a freshly uploaded video should start at 0
+                // rather than being pushed to the end of the ghost segments.
                 const finalTrack = get().tracks.find(t => t.id === trackId);
                 const currentEnd = finalTrack?.clips?.reduce((max, clip) => {
+                    const hasValidUrl = clip.url || clip.sourceUrl || clip.proxyUrl;
+                    if (!hasValidUrl) return max;
                     return Math.max(max, clip.start + clip.duration);
                 }, 0) || 0;
                 

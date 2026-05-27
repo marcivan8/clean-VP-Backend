@@ -450,6 +450,18 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             addAssets(processedAssets);
 
             if (processedAssets.length === 1) {
+                // Before auto-placing, evict ghost clips (stale segments from a
+                // previous session that have no URL). Without this the new clip
+                // overlaps them visually and `currentEnd` would push it far right
+                // even after the ghost-skip fix in addAssetToTimeline.
+                const tsState = useTimelineStore.getState();
+                tsState.tracks.forEach(track => {
+                    (track.clips || []).forEach(clip => {
+                        const hasValidUrl = clip.url || clip.sourceUrl || clip.proxyUrl;
+                        if (!hasValidUrl) tsState.removeClip(track.id, clip.id);
+                    });
+                });
+
                 // Single file: auto-place immediately. The player resolves proxy URL
                 // from the asset store once processing finishes — no extra work needed.
                 useTimelineStore.getState().addAssetToTimeline(processedAssets[0]);
