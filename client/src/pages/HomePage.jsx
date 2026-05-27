@@ -255,7 +255,6 @@ const Hero = () => {
                     </p>
                     <div className="fade-up fade-up-d3" style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", marginTop: 12 }}>
                         <button onClick={() => navigate('/editor')} className="btn btn-primary">Start creating <ArrowRight className="w-4 h-4 ml-1" /></button>
-                        <button className="btn btn-ghost"><Play className="w-4 h-4 mr-1" /> Watch the 90-second tour</button>
                     </div>
                     <div className="fade-up fade-up-d4 caption" style={{ marginTop: 8 }}>
                         Built for creators, editors, storytellers &amp; modern media teams.
@@ -530,11 +529,10 @@ const FinalCTA = () => (
           that takes its cues from you.
         </p>
         <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap", justifyContent: "center" }}>
-          <button className="btn btn-primary">Start creating <ArrowRight className="w-4 h-4 ml-1" /></button>
-          <button className="btn btn-ghost">Talk to the team</button>
+          <button onClick={() => navigate('/editor')} className="btn btn-primary">Start creating <ArrowRight className="w-4 h-4 ml-1" /></button>
         </div>
         <div className="caption" style={{ marginTop: 8 }}>
-          Private beta · 7-day creative trial · No credit card required
+          Private beta · 30-day storage · No credit card required
         </div>
       </div>
     </section>
@@ -542,10 +540,7 @@ const FinalCTA = () => (
   
 const Footer = () => {
     const cols = {
-      "Product": ["Studio", "Conversational editor", "Workflows", "Exports", "Changelog"],
-      "Resources": ["Documentation", "Style guides", "Roundtrip presets", "Community", "Status"],
-      "Company": ["Manifesto", "Studios", "Careers", "Press", "Contact"],
-      "Legal": ["Your data", "Terms"],
+      "Legal": ["Your data"],
     };
     return (
       <footer style={{ borderTop: "0.5px solid var(--line)", padding: "64px 0 32px", background: "var(--bg)" }}>

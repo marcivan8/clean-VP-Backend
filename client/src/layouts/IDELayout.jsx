@@ -976,8 +976,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         isMobile && mobileTab !== 'editor' ? "hidden" : "flex"
                     )}>
                         <div className={classNames(
-                            "flex-1 flex items-center justify-center md:p-8 p-4 relative overflow-hidden flex-col gap-4",
-                            "flex"
+                            "flex-1 flex items-center justify-center md:p-8 p-4 relative overflow-hidden"
                         )} style={{ background: "radial-gradient(60% 80% at 50% 40%, #1c1f24 0%, #0c0d10 100%)" }}>
                             <div className={classNames(
                                 "bg-black rounded-lg shadow-2xl relative border border-white/5 group overflow-hidden transition-all duration-500 ease-in-out",
