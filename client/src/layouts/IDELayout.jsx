@@ -418,10 +418,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     targetDuration: null,
                                 });
                             }
-                            // Store uploads-relative raw file path so AI API calls (silence, filler,
-                            // denoise) can locate the file on the server. proxyPath is returned by
-                            // the worker; fall back to originalPath if an older worker omits it.
-                            const rawFilePath = data.proxyPath || data.originalPath;
+                            // Store the GCS raw path so AI API calls (silence, filler, denoise)
+                            // can locate the file via the worker's GCS fallback.
+                            // rawGcsPath (e.g. "raw/{userId}/{filename}") is the canonical GCS key;
+                            // proxyPath / originalPath are temp-relative and only exist locally.
+                            const rawFilePath = data.rawGcsPath || data.proxyPath || data.originalPath;
                             if (rawFilePath) {
                                 useTimelineStore.getState().setUploadedFile({ name: rawFilePath });
                                 useTimelineStore.getState().setUploadedFilePath(rawFilePath);

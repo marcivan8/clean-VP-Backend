@@ -184,8 +184,12 @@ const useTimelineStore = create(
                     TimelineActions.setPlayhead(clamped),
                     { skipHistory: true }
                 );
-                if (playerRef) {
-                    playerRef.dispatchEvent(new CustomEvent('seekto', { detail: clamped }));
+                // playerRef is the Revideo Player instance (event.detail from 'playerready').
+                // The custom element (<revideo-player>) handles 'seekto' events, but we
+                // have direct access to the Player instance which exposes requestSeek(frame).
+                if (playerRef && typeof playerRef.requestSeek === 'function') {
+                    const fps = playerRef.playback?.fps ?? 30;
+                    playerRef.requestSeek(clamped * fps);
                 }
             },
 

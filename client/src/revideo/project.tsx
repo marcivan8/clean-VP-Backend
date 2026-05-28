@@ -166,6 +166,7 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             time={() => playback.time - clip.start + (clip.offset || 0)}
                             play={true}
                             volume={(clip.volume ?? 1) * (clip.globalVolume ?? 1)}
+                            allowVolumeAmplificationInPreview={true}
                             x={() => evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0)}
                             y={() => evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0)}
                             scaleX={() => evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
@@ -194,7 +195,8 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             src={resolvedUrl}
                             time={() => playback.time - clip.start + (clip.offset || 0)}
                             play={true}
-                                volume={(clip.volume ?? 1) * (clip.globalVolume ?? 1)}
+                            volume={(clip.volume ?? 1) * (clip.globalVolume ?? 1)}
+                            allowVolumeAmplificationInPreview={true}
                             />
                         </Node>
                     );

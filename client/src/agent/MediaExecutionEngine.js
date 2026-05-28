@@ -727,6 +727,24 @@ export class MediaExecutionEngine {
             return;
         }
 
+        // Sanity guard: if resulting active duration is < 10% of the original clip
+        // duration (and the original is > 30s), the detection almost certainly went
+        // wrong (e.g. wrong threshold, empty transcript, or file mismatch).
+        const originalDuration = baseClip.duration || 0;
+        const totalActiveTime = validSegs.reduce((t, s) => t + s.duration, 0);
+        if (originalDuration > 30 && totalActiveTime < originalDuration * 0.10) {
+            console.error(
+                `[MediaExecutionEngine] _applySegmentsToTimeline: REJECTED — active duration ${totalActiveTime.toFixed(1)}s is less than 10% of original ${originalDuration.toFixed(1)}s. Detection likely failed. No changes made.`
+            );
+            useAIStore.getState().addLog({
+                id: `step-sanity-${Date.now()}`,
+                type: 'error',
+                message: `Detection result rejected — only ${totalActiveTime.toFixed(1)}s active out of ${originalDuration.toFixed(1)}s. Try running again or adjusting settings.`,
+                timestamp: new Date().toLocaleTimeString()
+            });
+            return;
+        }
+
         // Remove ALL existing clips on the video track so we start fresh
         // (avoids leaving stale clips when there are multiple clips already)
         const allClipIds = videoTrack.clips.map(c => c.id);
