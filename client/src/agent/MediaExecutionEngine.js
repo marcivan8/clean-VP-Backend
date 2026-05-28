@@ -554,14 +554,37 @@ export class MediaExecutionEngine {
             }
         }
 
+        // Inject transcript for both silence and filler detection.
+        // Guards:
+        //   1. Source path: captions must belong to the currently uploaded video
+        //      (compared by basename to handle temp/ vs raw/{uid}/ prefix differences).
+        //   2. Coverage: last word must end at ≥ 30 % of the clip duration — captions
+        //      from a previous shorter video would stop early and make the rest of the
+        //      clip appear entirely silent.
         const isTranscriptEndpoint = endpoint === '/api/silence/detect' || endpoint === '/api/audio/filler/detect';
         if (isTranscriptEndpoint && store.captions && store.captions.length > 0) {
-            resolvedPayload.transcript = store.captions.map(c => ({
-                start: c.start,
-                end: c.end,
-                word: c.word || c.content || c.text || ''
-            }));
-            console.log(`[MediaExecutionEngine] Injected transcript (${resolvedPayload.transcript.length} words) into ${endpoint} payload.`);
+            const basename = (p) => (p || '').split(/[\\/]/).pop();
+            const captionsBase   = basename(store.captionsFilePath);
+            const uploadedBase   = basename(store.uploadedFilePath);
+            const pathMatches    = captionsBase && uploadedBase && captionsBase === uploadedBase;
+
+            const videoTrack     = store.tracks?.find(t => t.type === 'video');
+            const clipDuration   = videoTrack?.clips?.[0]?.duration ?? 0;
+            const lastWordEnd    = store.captions[store.captions.length - 1]?.end ?? 0;
+            const coverageOk     = clipDuration <= 0 || lastWordEnd >= clipDuration * 0.30;
+
+            if (pathMatches && coverageOk) {
+                resolvedPayload.transcript = store.captions.map(c => ({
+                    start: c.start,
+                    end: c.end,
+                    word: c.word || c.content || c.text || ''
+                }));
+                console.log(`[MediaExecutionEngine] Injected transcript (${resolvedPayload.transcript.length} words, coverage ${lastWordEnd.toFixed(1)}s / ${clipDuration.toFixed(1)}s) into ${endpoint} payload.`);
+            } else if (!pathMatches) {
+                console.warn(`[MediaExecutionEngine] Transcript skipped — captions are from "${captionsBase}", current upload is "${uploadedBase}". Using FFmpeg fallback.`);
+            } else {
+                console.warn(`[MediaExecutionEngine] Transcript skipped — last word at ${lastWordEnd.toFixed(1)}s covers only ${((lastWordEnd / clipDuration) * 100).toFixed(0)}% of ${clipDuration.toFixed(1)}s clip. Using FFmpeg fallback.`);
+            }
         }
 
         const controller = new AbortController();
@@ -783,6 +806,15 @@ export class MediaExecutionEngine {
         });
 
         console.log(`[MediaExecutionEngine] ✅ Timeline updated: ${validSegs.length} clips, total duration ${currentStartTime.toFixed(2)}s`);
+
+        // Auto-preview: seek to the start and play for 4 seconds so the user
+        // immediately sees the result without having to press play manually.
+        const ts2 = useTimelineStore.getState();
+        ts2.seek(0);
+        ts2.setIsPlaying(true);
+        setTimeout(() => {
+            useTimelineStore.getState().setIsPlaying(false);
+        }, 4000);
     }
 
     async verifyExecution(job) {

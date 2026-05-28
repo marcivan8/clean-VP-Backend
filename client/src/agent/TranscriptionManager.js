@@ -59,7 +59,7 @@ class TranscriptionManagerClass {
             if (signal.aborted) return;
 
             if (words && words.length > 0) {
-                useTimelineStore.getState().setCaptions(words);
+                useTimelineStore.getState().setCaptions(words, filename);
                 console.log(`[TranscriptionManager] Transcription complete — ${words.length} words`);
             } else {
                 console.warn('[TranscriptionManager] Transcription returned no words');

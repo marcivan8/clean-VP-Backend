@@ -144,6 +144,7 @@ const useTimelineStore = create(
             pacingSegments: [],
             beatMarkers: [],
             captions: [],
+            captionsFilePath: null,
             transcriptionAttempted: false,
 
             // Long-Form Intelligence Engine — stores ContentAnalyzer result
@@ -343,7 +344,7 @@ const useTimelineStore = create(
             })),
 
             // Captions / beats / pacing
-            setCaptions: (captions) => set({ captions, transcriptionAttempted: true }),
+            setCaptions: (captions, filePath) => set({ captions, captionsFilePath: filePath ?? null, transcriptionAttempted: true }),
             setBeatMarkers: (markers) => set({ beatMarkers: markers }),
             setPacingSegments: (segments) => set({ pacingSegments: segments }),
 
