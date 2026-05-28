@@ -90,6 +90,7 @@ async function detectFillerWords(inputPath, language = 'en', tempDir = null, pre
     let tempAudio = null;
     let words;
     let totalDuration;
+    let transcriptText = '';
 
     if (preExistingTranscript && preExistingTranscript.length > 0) {
         console.log(`[detectFillerWords] Using provided transcript (${preExistingTranscript.length} words) — skipping Whisper`);
@@ -112,6 +113,7 @@ async function detectFillerWords(inputPath, language = 'en', tempDir = null, pre
 
         words = transcription.words || [];
         totalDuration = transcription.duration || (words.length ? words[words.length - 1].end : 0);
+        transcriptText = transcription.text || '';
     }
 
     try {
@@ -153,7 +155,7 @@ async function detectFillerWords(inputPath, language = 'en', tempDir = null, pre
             fillerCount: fillerSpans.length,
             removedSegments: fillerSpans.map(s => ({ ...s, duration: s.end - s.start })),
             activeSegments,
-            transcript: transcription.text,
+            transcript: transcriptText,
             totalDuration,
         };
     } finally {
