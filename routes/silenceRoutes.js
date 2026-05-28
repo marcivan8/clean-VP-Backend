@@ -69,9 +69,13 @@ router.post('/detect', optionalAuth, async (req, res) => {
         // ── KEY FIX: unique string jobId prevents cross-queue ID collisions ──
         const uniqueJobId = `silence-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
+        // Preserve GCS-relative prefix so workers use the right GCS path.
+        const jobFilename = normalizedFilename.startsWith('raw/') || normalizedFilename.startsWith('temp/')
+            ? normalizedFilename
+            : path.basename(filePath);
         const job = await audioQueue.add('detect-silence', {
             action:    'silence-detect',
-            filename:  path.basename(filePath),
+            filename:  jobFilename,
             filePath,
             userId,
             threshold,

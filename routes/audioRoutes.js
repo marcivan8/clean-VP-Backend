@@ -245,9 +245,13 @@ router.post('/transcribe', authenticateUser, async (req, res) => {
 
         const userId = req.user?.id || (process.env.NODE_ENV !== 'production' ? 'dev-user' : null);
         const uniqueJobId = `transcribe-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
+        const normFn = (filename || '').replace(/\\/g, '/').replace(/^\//, '');
+        const transcribeJobFilename = normFn.startsWith('raw/') || normFn.startsWith('temp/')
+            ? normFn
+            : path.basename(inputPath);
         const job = await audioQueue.add('transcribe-audio', {
             action: 'transcribe',
-            filename: path.basename(inputPath),
+            filename: transcribeJobFilename,
             filePath: inputPath,
             userId
         }, {
@@ -315,9 +319,12 @@ router.post('/filler/detect', authenticateUser, async (req, res) => {
 
         const userId = req.user?.id || (process.env.NODE_ENV !== 'production' ? 'dev-user' : null);
         const uniqueJobId = `filler-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        const fillerJobFilename = normalizedFilename.startsWith('raw/') || normalizedFilename.startsWith('temp/')
+            ? normalizedFilename
+            : path.basename(inputPath);
         const job = await audioQueue.add('filler-detect', {
             action: 'filler-detect',
-            filename: path.basename(inputPath),
+            filename: fillerJobFilename,
             filePath: inputPath,
             userId,
             language,

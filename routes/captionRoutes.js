@@ -50,9 +50,14 @@ router.post('/generate', optionalAuth, async (req, res) => {
 
         const userId = req.user?.id || null;
         const uniqueJobId = `caption-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
+        // Preserve the GCS-relative prefix (e.g. "raw/{userId}/...") so workers can
+        // construct the correct GCS download path without guessing the userId.
+        const jobFilename = normalizedFilename.startsWith('raw/') || normalizedFilename.startsWith('temp/')
+            ? normalizedFilename
+            : path.basename(filePath);
         const job = await audioQueue.add('transcribe-audio', {
             action: 'transcribe',
-            filename: path.basename(filePath),
+            filename: jobFilename,
             filePath,
             userId,
             language,

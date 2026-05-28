@@ -32,7 +32,7 @@ module.exports = async function processAnalysisJob(job) {
     if (!fs.existsSync(absoluteVideoPath)) {
         if (storageConfig.bucket && filename) {
             console.log(`[Job ${job.id}] Local file not found, attempting to download from GCS...`);
-            const gcsRawPath = `raw/${userId}/${filename}`;
+            const gcsRawPath = filename.startsWith('raw/') ? filename : `raw/${userId}/${filename}`;
             try {
                 const dir = path.dirname(absoluteVideoPath);
                 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
