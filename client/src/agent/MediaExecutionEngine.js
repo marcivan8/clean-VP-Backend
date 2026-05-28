@@ -554,13 +554,14 @@ export class MediaExecutionEngine {
             }
         }
 
-        if (endpoint === '/api/silence/detect' && store.captions && store.captions.length > 0) {
+        const isTranscriptEndpoint = endpoint === '/api/silence/detect' || endpoint === '/api/audio/filler/detect';
+        if (isTranscriptEndpoint && store.captions && store.captions.length > 0) {
             resolvedPayload.transcript = store.captions.map(c => ({
                 start: c.start,
                 end: c.end,
-                word: c.content
+                word: c.word || c.content || c.text || ''
             }));
-            console.log(`[MediaExecutionEngine] Injected transcript (${resolvedPayload.transcript.length} words) into silence detection payload.`);
+            console.log(`[MediaExecutionEngine] Injected transcript (${resolvedPayload.transcript.length} words) into ${endpoint} payload.`);
         }
 
         const controller = new AbortController();

@@ -281,7 +281,7 @@ router.post('/transcribe', authenticateUser, async (req, res) => {
 // ── Route: filename-based (JSON body, file already on server) ─────────────────
 router.post('/filler/detect', authenticateUser, async (req, res) => {
     try {
-        const { filename, filePath, language = 'en' } = req.body;
+        const { filename, filePath, language = 'en', transcript } = req.body;
 
         if (!filename && !filePath) {
             return res.status(400).json({ error: 'Provide filename or filePath' });
@@ -320,7 +320,8 @@ router.post('/filler/detect', authenticateUser, async (req, res) => {
             filename: path.basename(inputPath),
             filePath: inputPath,
             userId,
-            language
+            language,
+            transcript: Array.isArray(transcript) && transcript.length > 0 ? transcript : null
         }, {
             jobId: uniqueJobId,
             attempts: 3,

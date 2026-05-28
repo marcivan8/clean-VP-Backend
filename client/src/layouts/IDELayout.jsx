@@ -46,14 +46,17 @@ const VideoTimeDisplay = () => {
 };
 
 const getPlayerDimensions = (ratio) => {
+    // Use half-resolution for the preview canvas — the scene coordinate system
+    // stays at full res (set via view.size in project.tsx), but rendering at
+    // 960×540 instead of 1920×1080 cuts pixel work to 1/4 and removes lag.
     switch (ratio) {
-        case '9:16': return { width: 1080, height: 1920 };
-        case '1:1':  return { width: 1080, height: 1080 };
-        case '4:3':  return { width: 1440, height: 1080 };
-        case '4:5':  return { width: 1080, height: 1350 };
-        case '21:9': return { width: 2560, height: 1080 };
+        case '9:16': return { width: 540, height: 960 };
+        case '1:1':  return { width: 720, height: 720 };
+        case '4:3':  return { width: 960, height: 720 };
+        case '4:5':  return { width: 540, height: 675 };
+        case '21:9': return { width: 960, height: 411 };
         case '16:9':
-        default:     return { width: 1920, height: 1080 };
+        default:     return { width: 960, height: 540 };
     }
 };
 

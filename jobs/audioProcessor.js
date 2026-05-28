@@ -79,7 +79,7 @@ async function extractAudioForWhisper(inputPath, tempDir) {
     return outPath;
 }
 
-async function detectFillerWords(inputPath, language = 'en', tempDir = null) {
+async function detectFillerWords(inputPath, language = 'en', tempDir = null, preExistingTranscript = null) {
     const FILLER_WORDS = new Set([
         'um', 'uh', 'ah', 'er', 'eh', 'hmm', 'hm',
         'like', 'basically', 'literally',
@@ -88,13 +88,19 @@ async function detectFillerWords(inputPath, language = 'en', tempDir = null) {
     ]);
 
     let tempAudio = null;
+    let words;
+    let totalDuration;
 
-    if (!tempDir) throw new Error('tempDir required to extract audio');
-    console.log(`[detectFillerWords] Extracting audio for Whisper to ensure compatibility and speed...`);
-    tempAudio = await extractAudioForWhisper(inputPath, tempDir);
-    let whisperPath = tempAudio;
+    if (preExistingTranscript && preExistingTranscript.length > 0) {
+        console.log(`[detectFillerWords] Using provided transcript (${preExistingTranscript.length} words) — skipping Whisper`);
+        words = preExistingTranscript;
+        totalDuration = words[words.length - 1].end || 0;
+    } else {
+        if (!tempDir) throw new Error('tempDir required to extract audio');
+        console.log(`[detectFillerWords] Extracting audio for Whisper...`);
+        tempAudio = await extractAudioForWhisper(inputPath, tempDir);
+        const whisperPath = tempAudio;
 
-    try {
         const openai = getOpenAI();
         const transcription = await openai.audio.transcriptions.create({
             file: fs.createReadStream(whisperPath),
@@ -104,8 +110,11 @@ async function detectFillerWords(inputPath, language = 'en', tempDir = null) {
             language: language === 'auto' ? undefined : language,
         });
 
-        const words = transcription.words || [];
-        const totalDuration = transcription.duration || (words.length ? words[words.length - 1].end : 0);
+        words = transcription.words || [];
+        totalDuration = transcription.duration || (words.length ? words[words.length - 1].end : 0);
+    }
+
+    try {
 
         const MERGE_GAP = 0.15;
         const fillerSpans = [];
@@ -282,7 +291,7 @@ module.exports = async function processAudioJob(job) {
 
         case 'filler-detect': {
             console.log(`[Job ${job.id}] 🔤 Filler detection: ${inputPath}`);
-            const result = await detectFillerWords(inputPath, language || 'en', tempDir);
+            const result = await detectFillerWords(inputPath, language || 'en', tempDir, job.data.transcript || null);
             await job.updateProgress(100);
             return result;
         }
