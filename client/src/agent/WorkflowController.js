@@ -16,6 +16,8 @@ import useTimelineStore from '../store/useTimelineStore.js';
  * 4. Results are added to AI logs for display
  */
 
+const PROCESSING_TIMEOUT_MS = 3 * 60 * 1000; // 3-minute hard cap
+
 const workflowMachine = createMachine({
     id: 'videoAgent',
     initial: 'idle',
@@ -63,25 +65,22 @@ const workflowMachine = createMachine({
                             context.lastResult = event.output;
                             context.currentJobId = event.output.jobId;
 
-
-                            // Log clarification request
-                            useAIStore.getState().addLog({
-                                id: 'clarification-' + Date.now(),
-                                type: 'info',
-                                message: event.output.message || 'Clarification needed',
-                                timestamp: new Date().toLocaleTimeString(),
-                                data: {
-                                    questions: event.output.questions,
-                                    jobId: event.output.jobId
-                                }
-                            });
-
-                            // Emit global event for UI Dialog
+                            // Emit first so any dialog subscriber can mount before the log appears
                             EventBus.emit(EVENT_TYPES.CLARIFICATION_NEEDED, {
                                 jobId: event.output.jobId,
                                 message: event.output.message,
                                 questions: event.output.questions,
                                 originalIntent: event.output.originalIntent
+                            });
+
+                            // Single authoritative log entry — type 'assistant' so it renders
+                            // as an agent bubble, not a generic info line. ClarificationDialog
+                            // must NOT add its own addLog for CLARIFICATION_NEEDED events.
+                            useAIStore.getState().addLog({
+                                id: 'clarification-' + Date.now(),
+                                type: 'assistant',
+                                message: event.output.message || 'Could you clarify a bit more?',
+                                timestamp: new Date().toLocaleTimeString(),
                             });
 
                             useAIStore.getState().setIsAnalyzing(false); // Stop spinner, wait for user
@@ -170,6 +169,23 @@ const workflowMachine = createMachine({
                         });
                     }
                 }
+            },
+            after: {
+                [PROCESSING_TIMEOUT_MS]: {
+                    target: 'idle',
+                    actions: () => {
+                        console.error('[Workflow] Processing timed out after 3 minutes');
+                        useAIStore.getState().setIsAnalyzing(false);
+                        useAIStore.getState().addLog({
+                            id: 'timeout-' + Date.now(),
+                            type: 'warning',
+                            message: '⏱ The operation took too long and was stopped. ' +
+                                     'This can happen with very long videos. Please try again, ' +
+                                     'or try a more specific request.',
+                            timestamp: new Date().toLocaleTimeString()
+                        });
+                    }
+                }
             }
         },
 
@@ -248,6 +264,20 @@ const workflowMachine = createMachine({
                         });
                     }
                 }
+            },
+            after: {
+                [PROCESSING_TIMEOUT_MS]: {
+                    target: 'idle',
+                    actions: () => {
+                        useAIStore.getState().setIsAnalyzing(false);
+                        useAIStore.getState().addLog({
+                            id: 'timeout-' + Date.now(),
+                            type: 'warning',
+                            message: '⏱ Operation timed out. Please try again.',
+                            timestamp: new Date().toLocaleTimeString()
+                        });
+                    }
+                }
             }
         },
 
@@ -289,6 +319,22 @@ export class WorkflowController {
             console.warn('[Workflow] Empty prompt ignored');
             return;
         }
+
+        const currentState = this.getState();
+
+        // If waiting for clarification, treat this as "user abandoned it and wants
+        // a fresh start". Cancel the stale job so the machine can accept START again.
+        if (currentState === 'clarifying') {
+            console.warn('[Workflow] processUserPrompt called while clarifying — cancelling stale job');
+            this.cancelCurrentJob();
+        }
+
+        // Prevent double-tap / double-call duplicates while already running.
+        if (currentState === 'processing' || currentState === 'resuming') {
+            console.warn('[Workflow] Already processing — ignoring duplicate processUserPrompt call');
+            return;
+        }
+
         this.actor.send({ type: 'START', prompt: prompt.trim() });
     }
 

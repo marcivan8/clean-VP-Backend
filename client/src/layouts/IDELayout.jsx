@@ -205,7 +205,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const [showExportModal, setShowExportModal] = React.useState(false);
 
     // ── Progressive auth ──────────────────────────────────────────────────
-    const { isAnonymous, hoursLeft, getOrCreate } = useSessionStore();
+    const { isAnonymous, hoursLeft, getOrCreate, sessionId } = useSessionStore();
     const [authPrompt, setAuthPrompt] = React.useState(null); // null | trigger string
     const authShownRef = React.useRef(false); // only show one prompt per session
 
@@ -363,7 +363,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         useTimelineStore.getState().updateAsset(assetId, { uploadPhase: 'processing' });
                     }, 5000);
 
-                    ProxyService.uploadAndGenerateProxy(file, 'demo-user', (progress) => {
+                    const userId = sessionId || 'anon';
+                    ProxyService.uploadAndGenerateProxy(file, userId, (progress) => {
                         useTimelineStore.getState().updateAsset(assetId, { uploadProgress: progress });
                     })
                         .then(data => {

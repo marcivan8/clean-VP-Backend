@@ -294,32 +294,44 @@ const ReasoningPanel = () => {
 
     // --- Command Handling Logic ---
     const inputRef = useRef(null);
+    const lastSubmitRef = useRef(0);
 
     const processCommand = async () => {
         const input = inputRef.current;
         if (!input) return;
+        const command = input.value.trim();
+        if (!command) return;
 
-        const command = input.value;
-        if (!command.trim()) return;
+        // Dedup guard: ignore if same message submitted < 300 ms ago
+        const now = Date.now();
+        if (now - lastSubmitRef.current < 300) return;
+        lastSubmitRef.current = now;
 
         input.value = '';
-        console.log("DEBUG: Processing command:", command);
 
         addLog({
-            id: 'user-' + Date.now(),
+            id: 'user-' + now,
             timestamp: new Date().toLocaleTimeString(),
             type: 'info',
             message: `You: ${command}`
         });
 
+        // If the agent is waiting for clarification, answer it directly.
+        // This prevents the "please clarify → please clarify" loop where each
+        // follow-up was starting a new job instead of resolving the pending one.
+        const wfState = workflowController.getState();
+        if (wfState === 'clarifying') {
+            workflowController.submitClarification({ answer: command });
+            return;
+        }
+
         setIsAnalyzing(true);
         const { uploadedFile, tracks } = useTimelineStore.getState();
         const hasClips = tracks?.some(t => t.clips?.length > 0);
 
-        // 🚨 Validation
         if (!uploadedFile && !hasClips && !command.toLowerCase().includes('sample')) {
             addLog({
-                id: 'agent-err-' + Date.now(),
+                id: 'agent-err-' + now,
                 timestamp: new Date().toLocaleTimeString(),
                 type: 'warning',
                 message: `Agent: No file selected. Please import a file first.`
@@ -328,19 +340,13 @@ const ReasoningPanel = () => {
             return;
         }
 
-        const filename = uploadedFile ? uploadedFile.name : 'sample.mp4';
-        console.log("🤖 Agent Command:", command, "for file:", filename);
-
         try {
-            // Delegate to WorkflowController (V2 pipeline)
-            // The controller handles: intent parsing → plan generation → compile → execute → validate
             workflowController.processUserPrompt(command);
-
         } catch (err) {
             setIsAnalyzing(false);
             console.error(err);
             addLog({
-                id: 'agent-crash-' + Date.now(),
+                id: 'agent-crash-' + now,
                 timestamp: new Date().toLocaleTimeString(),
                 type: 'warning',
                 message: `Agent Error: ${err.message}`
@@ -458,11 +464,24 @@ const ReasoningPanel = () => {
                             <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-2)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
                                 Agent working
                             </span>
-                            <span className="ml-auto flex gap-0.5">
-                                {[0, 1, 2].map(i => (
-                                    <span key={i} className="w-1 h-1 rounded-full" style={{ background: 'var(--accent)', opacity: 0.4, animation: `pulse-soft 1.2s ${i * 0.2}s infinite` }} />
-                                ))}
-                            </span>
+                            <button
+                                onClick={() => {
+                                    workflowController.cancelCurrentJob();
+                                    setIsAnalyzing(false);
+                                    addLog({
+                                        id: 'cancelled-' + Date.now(),
+                                        type: 'info',
+                                        message: 'Operation cancelled.',
+                                        timestamp: new Date().toLocaleTimeString()
+                                    });
+                                }}
+                                className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-colors hover:opacity-80"
+                                style={{ background: 'rgba(255,255,255,0.07)', color: 'var(--fg-3)', fontFamily: 'var(--f-mono)', border: '0.5px solid var(--line)' }}
+                                title="Cancel this operation"
+                            >
+                                <XCircle className="w-3 h-3" />
+                                Cancel
+                            </button>
                         </div>
                         <p className="text-[10px] leading-relaxed" style={{ color: 'var(--fg-4)', fontFamily: 'var(--f-sans)' }}>
                             Steps appear above as they complete. This can take 10–30 s for longer videos.

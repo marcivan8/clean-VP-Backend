@@ -473,11 +473,24 @@ export class MediaExecutionEngine {
                     throw err;
                 }
                 const tools = new VideoEditorTools();
-                // Convert camelCase / underscore action to the tool's snake_case name
                 const toolName = action
                     .replace(/([A-Z])/g, m => `_${m.toLowerCase()}`)
                     .replace(/^_/, '');
-                const result = await tools.execute({ name: toolName, args });
+
+                // 120 s cap per tool call — belt-and-suspenders below the 180 s
+                // WorkflowController timeout. Ensures a hanging ContentAnalyzer
+                // API call produces a clean rejection instead of a zombie promise.
+                const TOOL_TIMEOUT_MS = 120_000;
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(
+                        () => reject(new Error(`Tool '${toolName}' timed out after ${TOOL_TIMEOUT_MS / 1000}s`)),
+                        TOOL_TIMEOUT_MS
+                    )
+                );
+                const result = await Promise.race([
+                    tools.execute({ name: toolName, args }),
+                    timeoutPromise
+                ]);
                 return { action, success: result.success !== false, message: result.message || action, result };
             }
 

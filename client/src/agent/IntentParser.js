@@ -161,6 +161,20 @@ const NLP_MAP = {
         'filler', 'filler words', 'um', 'uh', 'ums', 'uhs', 'stutter',
         'clean up speech', 'remove hesitations', 'remove filler',
     ],
+    extractHighlights: [
+        'extract', 'pull out', 'find stories', 'personal stories', 'anecdotes',
+        'best parts', 'best moments', 'best clips', 'highlight', 'highlights',
+        'highlight reel', 'quotable', 'quotable moments', 'key moments',
+        'extract segments', 'find segments', 'extract clips',
+        'short video', 'short form', 'repurpose', 'clips for social',
+        'most engaging', 'impactful moments', 'memorable parts',
+    ],
+    conversational: [
+        'what is this', "what's this", 'what is the', 'tell me about',
+        'what did', 'what does', 'who is', 'who are', 'where is', 'where does',
+        'how does', 'why does', 'explain', 'describe',
+        'what are the', 'how many', 'show me', 'give me a summary',
+    ],
     improve: [
         'make it better', 'improve', 'enhance', 'polish', 'fix this',
         'clean up', 'make it look good', 'optimize', 'refine',
@@ -247,6 +261,24 @@ Assistant: {"intent": "EXPORT", "operation": "nle_export", "constraints": {"nleT
 
 User: "How do I make my video more engaging?"
 Assistant: {"intent": "CHAT", "operation": "chat", "message": "To make it more engaging, consider using jump cuts to improve pacing, adding b-roll, or applying dynamic transitions.", "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "What are the best parts for short video content?"
+Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constraints": {"editMode": "CLEAN_EDIT", "focus": "highlights"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "Extract personal stories or anecdotes"
+Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constraints": {"editMode": "CLEAN_EDIT", "focus": "personal_stories"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "I want to extract these segments"
+Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constraints": {"editMode": "CLEAN_EDIT"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "Find the most engaging moments"
+Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constraints": {"editMode": "CLEAN_EDIT", "focus": "highlights"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "i want you to extract these segments, and analyze the structure of the video to find these moments more precisely"
+Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constraints": {"editMode": "CLEAN_EDIT", "focus": "highlights"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "so what's this clip about?"
+Assistant: {"intent": "CHAT", "operation": "chat", "message": "Based on the transcript, this clip appears to be about...", "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
 
 Be liberal in interpretation. When in doubt, make a reasonable assumption rather than asking for clarification.
 If the user says "clean it up", assume silence_removal.
@@ -345,6 +377,26 @@ export class IntentParser {
             NLP_MAP[category]?.some(phrase => lower.includes(phrase)) ?? false;
 
         if (matches('nleExport')) return this.parseNLEExportIntent(lower);
+
+        // Pure conversational questions → route directly to CHAT, never spin up the pipeline.
+        if (matches('conversational') && !matches('extractHighlights') && !matches('silence')
+            && !matches('fillerWords') && !matches('analyze') && !matches('buildFromRushes')) {
+            return { ...this.createIntent(INTENT_TYPES.CHAT, OPERATIONS.CHAT, {}), message: null };
+        }
+
+        // "extract personal stories" / "best parts for social" etc.
+        // Maps to long_form_edit so clips are actually cut onto the timeline.
+        // analyze_structure only summarises — it never changes the timeline.
+        if (matches('extractHighlights')) {
+            return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.LONG_FORM_EDIT, {
+                constraints: {
+                    editMode: 'CLEAN_EDIT',
+                    focus: 'highlights',
+                    platform: this.inferPlatform(lower),
+                    targetDuration: this._extractTargetDuration(lower),
+                }
+            });
+        }
 
         if (matches('analyze')) {
             return this.createIntent(INTENT_TYPES.ANALYZE, OPERATIONS.ANALYZE_STRUCTURE, {
