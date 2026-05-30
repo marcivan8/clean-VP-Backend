@@ -31,7 +31,7 @@ module.exports = async function processSilenceJob(job) {
         const tempPath = path.resolve(uploadsDir, 'temp', path.basename(filePath));
         if (filePath !== tempPath && fs.existsSync(tempPath)) {
             filePath = tempPath;
-        } else if (storageConfig.bucket && userId && filename) {
+        } else if (storageConfig.bucket && filename && (userId || filename.startsWith('raw/'))) {
             // Distributed env: download the raw file from GCS
             console.log(`[Job ${job.id}] Local file missing, downloading from GCS...`);
             const gcsPath = filename.startsWith('raw/') ? filename : `raw/${userId}/${path.basename(filename)}`;

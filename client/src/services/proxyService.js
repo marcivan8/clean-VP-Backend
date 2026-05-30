@@ -1,46 +1,18 @@
 import { API_URL } from '../config';
 import { pollJobResult } from '../utils/jobPoller.js';
+import { supabase } from '../lib/supabaseClient';
 
 /**
- * Get the current session token from Supabase (or localStorage fallback).
- * Returns null if no session exists — callers must handle unauthenticated state.
- */
-async function getAuthToken() {
-    try {
-        // Auto-detect Supabase's own key (pattern: sb-*-auth-token)
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
-                const raw = localStorage.getItem(key);
-                if (raw) {
-                    const parsed = JSON.parse(raw);
-                    const token = parsed?.access_token;
-                    if (token && token !== 'null' && token !== 'undefined') {
-                        return token;
-                    }
-                }
-            }
-        }
-    } catch (_) {
-        // localStorage not available or JSON parse error — fall through
-    }
-
-    // Fallback: plain token stored under common dev key names
-    const stored = localStorage.getItem('sb-access-token')
-        || localStorage.getItem('access_token')
-        || localStorage.getItem('auth_token');
-    if (stored && stored !== 'null' && stored !== 'undefined') {
-        return stored;
-    }
-
-    return null;
-}
-
-/**
- * Build fetch headers, injecting Authorization if a token is available.
+ * Build fetch headers, injecting Authorization if a valid session exists.
+ * Uses supabase.auth.getSession() so expired tokens are auto-refreshed.
  */
 async function buildHeaders(extra = {}) {
-    const token = await getAuthToken();
+    let token = null;
+    try {
+        const { data: { session } } = await supabase.auth.getSession();
+        token = session?.access_token ?? null;
+    } catch (_) {}
+
     const headers = { ...extra };
     if (token) {
         headers['Authorization'] = `Bearer ${token}`;
@@ -83,7 +55,7 @@ class ProxyService {
     /**
      * Upload directly to GCS via Resumable Session URL, then process.
      */
-    static async uploadDirectToGCS(file, userId, onProgress) {
+    static async uploadDirectToGCS(file, onProgress) {
         // 1. Get Resumable URL
         const headers = await buildHeaders({ 'Content-Type': 'application/json' });
         const initResponse = await fetch(`${API_URL}/api/proxy/upload-url`, {
@@ -161,7 +133,7 @@ class ProxyService {
         try {
             // Attempt Direct to GCS first
             try {
-                return await this.uploadDirectToGCS(file, userId, onProgress);
+                return await this.uploadDirectToGCS(file, onProgress);
             } catch (err) {
                 // If it fails because GCS is not configured, fallback to legacy upload
                 if (err.message === 'GCS not configured') {
