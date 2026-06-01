@@ -24,7 +24,6 @@ export default function AuthPage() {
     const [tab, setTab]           = useState('signin'); // 'signin' | 'signup'
     const [email, setEmail]       = useState('');
     const [password, setPassword] = useState('');
-    const [fullName, setFullName] = useState('');
     const [loading, setLoading]   = useState(false);
     const [error, setError]       = useState(null);
     const [success, setSuccess]   = useState(null);
@@ -41,18 +40,34 @@ export default function AuthPage() {
         return () => subscription.unsubscribe();
     }, []);
 
+    const sanitizeEmail = (raw) => raw.trim().toLowerCase().slice(0, 254);
+
     const handleSignIn = async (e) => {
         e.preventDefault();
         setError(null);
+        const cleanEmail = sanitizeEmail(email);
+        if (!cleanEmail || !password) {
+            setError('Email et mot de passe requis.');
+            return;
+        }
         setLoading(true);
         try {
-            const { data, error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
+            const { data, error: signInErr } = await supabase.auth.signInWithPassword({
+                email: cleanEmail,
+                password,
+            });
             if (signInErr) throw signInErr;
-            // Migrate any pending anonymous session
             await migrateSession(data.user.id);
             navigate('/editor');
         } catch (err) {
-            setError(err.message);
+            // Return a generic message for invalid credentials to avoid user enumeration
+            if (err.message?.toLowerCase().includes('invalid login credentials')) {
+                setError('Email ou mot de passe incorrect.');
+            } else if (err.message?.toLowerCase().includes('rate limit') || err.status === 429) {
+                setError('Trop de tentatives. Réessaie dans quelques minutes.');
+            } else {
+                setError(err.message);
+            }
         } finally {
             setLoading(false);
         }
@@ -61,9 +76,21 @@ export default function AuthPage() {
     const handleSignUp = async (e) => {
         e.preventDefault();
         setError(null);
+        const cleanEmail = sanitizeEmail(email);
+        if (!cleanEmail) {
+            setError('Adresse email invalide.');
+            return;
+        }
+        if (password.length < 6) {
+            setError('Le mot de passe doit contenir au moins 6 caractères.');
+            return;
+        }
         setLoading(true);
         try {
-            const { data, error: signUpErr } = await supabase.auth.signUp({ email, password });
+            const { data, error: signUpErr } = await supabase.auth.signUp({
+                email: cleanEmail,
+                password,
+            });
             if (signUpErr) throw signUpErr;
 
             if (data.user && !data.user.identities?.length) {
@@ -78,16 +105,19 @@ export default function AuthPage() {
                         'Content-Type': 'application/json',
                         Authorization: `Bearer ${data.session.access_token}`,
                     },
-                    body: JSON.stringify({ email, fullName }),
+                    body: JSON.stringify({ email: cleanEmail }),
                 });
                 await migrateSession(data.user.id);
                 navigate('/editor');
             } else {
-                // Email confirmation required
                 setSuccess('Compte créé ! Vérifie ta boîte mail pour confirmer ton adresse.');
             }
         } catch (err) {
-            setError(err.message);
+            if (err.message?.toLowerCase().includes('rate limit') || err.status === 429) {
+                setError('Trop de tentatives. Réessaie dans quelques minutes.');
+            } else {
+                setError(err.message);
+            }
         } finally {
             setLoading(false);
         }
@@ -109,9 +139,6 @@ export default function AuthPage() {
                         <Avatar email={currentUser.email} />
                         <div>
                             <p style={{ margin: 0, fontWeight: 500, fontSize: 16, color: 'var(--fg)' }}>
-                                {currentUser.user_metadata?.full_name || currentUser.email}
-                            </p>
-                            <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--fg-3)' }}>
                                 {currentUser.email}
                             </p>
                         </div>
@@ -196,18 +223,6 @@ export default function AuthPage() {
 
                 {/* Form */}
                 <form onSubmit={tab === 'signin' ? handleSignIn : handleSignUp} style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    {tab === 'signup' && (
-                        <Field label="Nom complet" id="fullName">
-                            <input
-                                id="fullName"
-                                type="text"
-                                placeholder="Jean Dupont"
-                                value={fullName}
-                                onChange={e => setFullName(e.target.value)}
-                                style={inputStyle}
-                            />
-                        </Field>
-                    )}
                     <Field label="Email" id="email">
                         <input
                             id="email"
@@ -216,6 +231,9 @@ export default function AuthPage() {
                             value={email}
                             onChange={e => setEmail(e.target.value)}
                             required
+                            maxLength={254}
+                            autoComplete="email"
+                            spellCheck={false}
                             style={inputStyle}
                         />
                     </Field>
@@ -227,7 +245,9 @@ export default function AuthPage() {
                             value={password}
                             onChange={e => setPassword(e.target.value)}
                             required
+                            maxLength={128}
                             minLength={tab === 'signup' ? 6 : undefined}
+                            autoComplete={tab === 'signin' ? 'current-password' : 'new-password'}
                             style={inputStyle}
                         />
                     </Field>

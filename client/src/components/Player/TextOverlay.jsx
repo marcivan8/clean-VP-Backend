@@ -117,10 +117,23 @@ const TextOverlay = () => {
         window.addEventListener('pointerup', handleUp);
     };
 
+    // Resolve percentage-based position from the clip's position/x/y fields.
+    // Explicit x/y always win; otherwise map the 'position' preset.
+    const resolvePos = (clip) => {
+        if (typeof clip.x === 'number' && typeof clip.y === 'number') {
+            return { left: `${clip.x}%`, top: `${clip.y}%` };
+        }
+        if (clip.position === 'top')    return { left: '50%', top: '12%' };
+        if (clip.position === 'bottom') return { left: '50%', top: '85%' };
+        // 'center' or anything else
+        return { left: '50%', top: '50%' };
+    };
+
     return (
         <div ref={containerRef} className="absolute inset-0 pointer-events-none overflow-hidden z-10">
             {activeTextClips.map((clip) => {
                 const isActive = clip.id === activeClipId;
+                const { left, top } = resolvePos(clip);
 
                 return (
                     <div
@@ -128,8 +141,8 @@ const TextOverlay = () => {
                         onPointerDown={(e) => handleDragStart(e, clip)}
                         className={`absolute whitespace-pre-wrap select-none origin-center cursor-move transition-opacity hover:opacity-100 ${isActive ? 'ring-1 ring-primary ring-offset-1 ring-offset-transparent' : 'opacity-90'}`}
                         style={{
-                            left: `${clip.x || 50}%`,
-                            top: `${clip.y || 50}%`,
+                            left,
+                            top,
                             // Transform: Center (-50%) + Scale
                             transform: `translate(-50%, -50%) scale(${clip.scale || 1})`,
                             width: '80%',

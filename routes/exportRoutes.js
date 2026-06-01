@@ -526,11 +526,11 @@ router.post('/', authMiddleware, async (req, res) => {
                 if (typeof clip.x === 'number') x = clip.x + (targetWidth / 2);
                 if (typeof clip.y === 'number') y = clip.y + (targetHeight / 2);
 
-                // Use gte()*lte() instead of between() to avoid commas inside the enable
-                // expression — fluent-ffmpeg's videoFilters() splits on commas and would
-                // break 'between(t,x,y)' into separate (invalid) filter tokens.
+                // Single quotes protect the commas inside gte()/lte() from FFmpeg's
+                // filtergraph comma-splitter. Inside single quotes backslash is literal,
+                // so we must NOT escape the commas — plain commas work correctly here.
                 textFilters.push(
-                    `drawtext=fontfile='${fontPath.replace(/\\/g, '/').replace(/:/g, '\\:')}':text='${text}':fontsize=${size}:fontcolor=${color}:x=${x}:y=${y}:enable='gte(t\\,${startSec})*lte(t\\,${endSec})'`
+                    `drawtext=fontfile='${fontPath.replace(/\\/g, '/').replace(/:/g, '\\:')}':text='${text}':fontsize=${size}:fontcolor=${color}:x=${x}:y=${y}:enable='gte(t,${startSec})*lte(t,${endSec})'`
                 );
             }
         }

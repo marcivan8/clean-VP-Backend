@@ -24,7 +24,8 @@ const workflowMachine = createMachine({
     context: {
         userPrompt: '',
         currentJobId: null,
-        lastResult: null
+        lastResult: null,
+        initialHistoryLen: 0
     },
     states: {
         idle: {
@@ -38,6 +39,7 @@ const workflowMachine = createMachine({
                         console.log('[Workflow] Starting new job:', event.prompt);
                         useAIStore.getState().setIsAnalyzing(true);
                         context.userPrompt = event.prompt;
+                        context.initialHistoryLen = useTimelineStore.getState().past.length;
                     }
                 }
             }
@@ -106,15 +108,17 @@ const workflowMachine = createMachine({
                                         timestamp: new Date().toLocaleTimeString()
                                     });
                                 } else {
-                                    // Add success log for edits
+                                    const stepsApplied = useTimelineStore.getState().past.length - context.initialHistoryLen;
                                     useAIStore.getState().addLog({
-                                        id: 'job-success-' + Date.now(),
-                                        type: 'success',
+                                        id: 'task-complete-' + Date.now(),
+                                        type: 'task_complete',
                                         message: result.message || 'Edit completed successfully',
                                         data: {
                                             jobId: result.jobId,
                                             details: result.details,
-                                            validation: result.validation
+                                            validation: result.validation,
+                                            stepsApplied,
+                                            preTaskHistoryLen: context.initialHistoryLen,
                                         },
                                         timestamp: new Date().toLocaleTimeString()
                                     });
@@ -196,6 +200,7 @@ const workflowMachine = createMachine({
                     actions: ({ context, event }) => {
                         console.log('[Workflow] Resuming with answers:', event.answers);
                         useAIStore.getState().setIsAnalyzing(true);
+                        context.initialHistoryLen = useTimelineStore.getState().past.length;
                     }
                 }
             }
@@ -237,11 +242,16 @@ const workflowMachine = createMachine({
                             useAIStore.getState().setIsAnalyzing(false);
 
                             if (event.output.success) {
+                                const stepsApplied = useTimelineStore.getState().past.length - context.initialHistoryLen;
                                 useAIStore.getState().addLog({
-                                    id: 'job-success-' + Date.now(),
-                                    type: 'success',
+                                    id: 'task-complete-' + Date.now(),
+                                    type: 'task_complete',
                                     message: event.output.message,
-                                    data: { jobId: event.output.jobId }
+                                    data: {
+                                        jobId: event.output.jobId,
+                                        stepsApplied,
+                                        preTaskHistoryLen: context.initialHistoryLen,
+                                    }
                                 });
                             } else {
                                 useAIStore.getState().addLog({

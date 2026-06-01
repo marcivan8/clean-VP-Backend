@@ -33,9 +33,99 @@ const AssistantLogItem = ({ log }) => (
     </div>
 );
 
+const TaskCompletionCard = ({ log }) => {
+    const [dismissed, setDismissed] = useState(false);
+    const [rejecting, setRejecting] = useState(false);
+    const stepsApplied = log.data?.stepsApplied ?? 0;
+    const preTaskHistoryLen = log.data?.preTaskHistoryLen ?? 0;
+
+    if (dismissed) return null;
+
+    const handleAccept = () => setDismissed(true);
+
+    const handleReject = () => {
+        setRejecting(true);
+        const store = useTimelineStore.getState();
+        while (store.past.length > preTaskHistoryLen) {
+            useTimelineStore.getState().undo();
+        }
+        setDismissed(true);
+    };
+
+    return (
+        <div className="rounded-lg p-3 mb-2 animate-in fade-in slide-in-from-bottom-2 duration-300"
+             style={{ background: 'rgba(0,0,0,0.25)', border: '0.5px solid var(--line)' }}>
+            <div className="flex items-center gap-1.5 mb-2">
+                <Check className="w-3 h-3" style={{ color: 'var(--mint, #34d399)' }} />
+                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                    Terminé
+                </span>
+                {stepsApplied > 0 && (
+                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', marginLeft: 'auto' }}>
+                        {stepsApplied} modification{stepsApplied !== 1 ? 's' : ''}
+                    </span>
+                )}
+            </div>
+            <p className="mb-3 leading-relaxed whitespace-pre-wrap"
+               style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg-2)' }}>
+                {log.message}
+            </p>
+            {log.data?.details && log.data.details.length > 0 && (
+                <ul className="mb-3 space-y-1">
+                    {log.data.details.map((step, i) => (
+                        <li key={i} className="flex items-start gap-2"
+                            style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)' }}>
+                            <span style={{ color: step.status === 'success' ? 'var(--mint, #34d399)' : 'var(--coral, #f87171)' }}>
+                                {step.status === 'success' ? '✓' : '✗'}
+                            </span>
+                            <span>{step.action}{step.result?.message ? ` — ${step.result.message}` : ''}</span>
+                        </li>
+                    ))}
+                </ul>
+            )}
+            {stepsApplied > 0 ? (
+                <div className="flex gap-2">
+                    <button
+                        onClick={handleAccept}
+                        className="flex-1 text-xs py-1.5 rounded-md transition-all font-medium flex items-center justify-center gap-1.5"
+                        style={{
+                            background: 'color-mix(in oklch, var(--accent) 18%, transparent)',
+                            border: '0.5px solid color-mix(in oklch, var(--accent) 35%, transparent)',
+                            color: 'var(--accent)',
+                        }}
+                    >
+                        <Check className="w-3 h-3" /> Accepter
+                    </button>
+                    <button
+                        onClick={handleReject}
+                        disabled={rejecting}
+                        className="flex-1 text-xs py-1.5 rounded-md transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                        style={{
+                            background: 'rgba(255,255,255,0.04)',
+                            border: '0.5px solid var(--line)',
+                            color: 'var(--fg-3)',
+                        }}
+                    >
+                        <X className="w-3 h-3" /> {rejecting ? 'Annulation…' : 'Rejeter'}
+                    </button>
+                </div>
+            ) : (
+                <button
+                    onClick={handleAccept}
+                    className="text-xs px-3 py-1 rounded-md"
+                    style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--fg-3)', border: '0.5px solid var(--line)' }}
+                >
+                    OK
+                </button>
+            )}
+        </div>
+    );
+};
+
 const LogItem = ({ log }) => {
-    if (log.type === 'step')      return <StepLogItem log={log} />;
-    if (log.type === 'assistant') return <AssistantLogItem log={log} />;
+    if (log.type === 'step')          return <StepLogItem log={log} />;
+    if (log.type === 'assistant')     return <AssistantLogItem log={log} />;
+    if (log.type === 'task_complete') return <TaskCompletionCard log={log} />;
 
     const isSuccess = log.type === 'success';
     const isWarning = log.type === 'warning';

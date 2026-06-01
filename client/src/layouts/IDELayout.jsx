@@ -132,7 +132,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
     const playerVariables = React.useMemo(() => {
         return {
-            tracks: deferredTracks.map((t, idx) => {
+            // Text tracks are rendered exclusively by <TextOverlay />, which also
+            // handles interactive drag/resize. Passing them to the Revideo player
+            // would cause duplicate captions AND make every text-clip mutation
+            // (e.g. scale drag) reload the scene generator, jumping the playhead.
+            tracks: deferredTracks.filter(t => t.type !== 'text').map((t, idx) => {
                 const isAnySolo = deferredTracks.some(tr => tr.solo);
                 const shouldMute = t.muted || (isAnySolo && !t.solo);
                 const rawVol = t.volume !== undefined ? t.volume : 1;
