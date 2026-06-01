@@ -5,6 +5,7 @@ import EditorPage from './pages/EditorPage';
 import AnalyzerPage from './pages/AnalyzerPage';
 import DataPage from './pages/DataPage';
 import GdprPage from './pages/GdprPage';
+import AuthPage from './pages/AuthPage';
 import { supabase } from './lib/supabaseClient';
 import useSessionStore from './store/useSessionStore';
 
@@ -31,6 +32,7 @@ function App() {
         <BrowserRouter>
             <Routes>
                 <Route path="/"        element={<HomePage />} />
+                <Route path="/auth"    element={<AuthPage />} />
                 <Route path="/editor"  element={<EditorPage />} />
                 <Route path="/analyzer" element={<AnalyzerPage />} />
                 <Route path="/data"     element={<DataPage />} />

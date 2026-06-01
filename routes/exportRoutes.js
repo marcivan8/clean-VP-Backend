@@ -498,47 +498,64 @@ router.post('/', authMiddleware, async (req, res) => {
 
         const defaultFontPath = path.join(publicDir, 'fonts', 'Roboto-Regular.ttf');
 
+        const fontPath = fs.existsSync(defaultFontPath)
+            ? defaultFontPath
+            : ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+               '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+               '/System/Library/Fonts/Helvetica.ttc'].find(p => fs.existsSync(p)) || null;
+
         const textFilters = [];
         for (const track of textTracks) {
             for (const clip of track.clips) {
-                const startMs = clip.start;
-                const endMs   = clip.start + clip.duration;
-                // Escape text for FFmpeg drawtext: ' -> \' and : -> \:
-                const text    = (clip.content || clip.name || '').replace(/'/g, "\\'").replace(/:/g, '\\:');
-                const color   = (clip.color || '#ffffff').replace('#', '0x');
-                const size    = clip.fontSize || 48;
+                if (!fontPath) break;
+                const startSec = clip.start;
+                const endSec   = clip.start + clip.duration;
+                // Escape text for FFmpeg drawtext: backslash → \\, ' → \', : → \:, % → %%
+                const text = (clip.content || clip.name || '')
+                    .replace(/\\/g, '\\\\')
+                    .replace(/'/g, "\\'")
+                    .replace(/:/g, '\\:')
+                    .replace(/%/g, '%%');
+                const color = (clip.color || '#ffffff').replace('#', '0x');
+                const size  = clip.fontSize || 48;
 
-                // Position mapping
-                let x = '(w-text_w)/2'; // center
+                let x = '(w-text_w)/2';
                 let y = '(h-text_h)/2';
                 if (clip.position === 'bottom') y = 'h-text_h-80';
                 if (clip.position === 'top')    y = '80';
                 if (typeof clip.x === 'number') x = clip.x + (targetWidth / 2);
                 if (typeof clip.y === 'number') y = clip.y + (targetHeight / 2);
 
+                // Use gte()*lte() instead of between() to avoid commas inside the enable
+                // expression — fluent-ffmpeg's videoFilters() splits on commas and would
+                // break 'between(t,x,y)' into separate (invalid) filter tokens.
                 textFilters.push(
-                    `drawtext=fontfile='${defaultFontPath.replace(/\\/g, '/').replace(/:/g, '\\:')}':text='${text}':fontsize=${size}:fontcolor=${color}:x=${x}:y=${y}:enable='between(t,${startMs},${endMs})'`
+                    `drawtext=fontfile='${fontPath.replace(/\\/g, '/').replace(/:/g, '\\:')}':text='${text}':fontsize=${size}:fontcolor=${color}:x=${x}:y=${y}:enable='gte(t\\,${startSec})*lte(t\\,${endSec})'`
                 );
             }
         }
 
         if (textFilters.length > 0) {
             const textOverlayPath = path.join(tmpDir, 'with_text.mp4');
-            await new Promise((resolve, reject) => {
-                let cmd = ffmpeg(finalVideoPath);
-                
-                // Chain all drawtext filters together
-                cmd.videoFilters(textFilters.join(','));
-                
-                cmd
-                    .videoCodec(codec)
-                    .audioCodec('copy')
-                    .output(textOverlayPath)
-                    .on('end', () => { finalVideoPath = textOverlayPath; resolve(); })
-                    .on('error', reject)
-                    .run();
-            });
-            console.log('  ✅ Text overlays applied');
+            try {
+                await new Promise((resolve, reject) => {
+                    const vfString = textFilters.join(',');
+                    ffmpeg(finalVideoPath)
+                        // addOutputOption bypasses fluent-ffmpeg's comma-splitting of -vf values
+                        .addOutputOption('-vf', vfString)
+                        .videoCodec(codec)
+                        .audioCodec('copy')
+                        .output(textOverlayPath)
+                        .on('end', () => { finalVideoPath = textOverlayPath; resolve(); })
+                        .on('error', reject)
+                        .run();
+                });
+                console.log('  ✅ Text overlays applied');
+            } catch (textErr) {
+                console.warn(`  ⚠️  Text overlay failed (skipping): ${textErr.message}`);
+            }
+        } else if (textTracks.length > 0 && !fontPath) {
+            console.warn('  ⚠️  No font file found — text overlays skipped');
         }
 
         // --- Final move if needed ---

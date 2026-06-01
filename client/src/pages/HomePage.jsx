@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sparkles, ArrowRight, Play, CheckCircle2, MousePointerClick, Layers, LayoutGrid, Link as LinkIcon } from 'lucide-react';
+import { supabase } from '../lib/supabaseClient';
 
 const Logo = ({ size = 28 }) => (
     <svg width={size} height={size} viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -11,6 +12,7 @@ const Logo = ({ size = 28 }) => (
 
 const Nav = () => {
     const [scrolled, setScrolled] = useState(false);
+    const [user, setUser] = useState(null);
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -18,6 +20,12 @@ const Nav = () => {
         handleScroll();
         window.addEventListener("scroll", handleScroll);
         return () => window.removeEventListener("scroll", handleScroll);
+    }, []);
+
+    useEffect(() => {
+        supabase.auth.getSession().then(({ data: { session } }) => setUser(session?.user ?? null));
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => setUser(session?.user ?? null));
+        return () => subscription.unsubscribe();
     }, []);
 
     return (
@@ -42,9 +50,24 @@ const Nav = () => {
                     <a href="#workflow" className="hover:text-foreground transition-colors">Workflow</a>
                     <a href="#exports" className="hover:text-foreground transition-colors">Exports</a>
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                    <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/editor')}>Sign in</button>
-                    <button className="btn btn-primary" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/editor')}>Start creating</button>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    {user ? (
+                        <>
+                            <span style={{
+                                fontSize: 12.5, color: "var(--fg-3)", padding: "0 12px",
+                                display: "flex", alignItems: "center", gap: 6,
+                            }}>
+                                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--mint)", display: "inline-block" }} />
+                                {user.email}
+                            </span>
+                            <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/auth')}>Mon compte</button>
+                        </>
+                    ) : (
+                        <>
+                            <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/auth')}>Se connecter</button>
+                            <button className="btn btn-primary" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/auth')}>Commencer</button>
+                        </>
+                    )}
                 </div>
             </div>
         </nav>
