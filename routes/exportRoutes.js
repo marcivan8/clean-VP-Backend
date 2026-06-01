@@ -11,6 +11,10 @@ const gcsBucket = storageConfig.bucket;
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
+// Returns true only for URLs that a server-side process can actually fetch.
+// Blob URLs are client-only object references — useless outside the originating browser tab.
+const isServerUsableUrl = (u) => u && !u.startsWith('blob:');
+
 // Download a URL to a local file using axios streaming.
 // Avoids ffmpeg-static HTTPS crashes when passing GCS signed URLs directly.
 async function downloadToTemp(url, destPath) {
@@ -218,8 +222,8 @@ router.post('/', authMiddleware, async (req, res) => {
             let effectiveClip = clip;
             if (clip.assetId && assetMap[clip.assetId]) {
                 const asset = assetMap[clip.assetId];
-                const hasUrl = clip.sourceUrl || clip.url || clip.proxyUrl;
-                if (!hasUrl) {
+                const hasUsableUrl = isServerUsableUrl(clip.sourceUrl) || isServerUsableUrl(clip.url) || isServerUsableUrl(clip.proxyUrl);
+                if (!hasUsableUrl) {
                     effectiveClip = { ...clip, sourceUrl: asset.sourceUrl, url: asset.proxyUrl || asset.url, proxyUrl: asset.proxyUrl };
                     console.log(`[export] Recovered URLs for clip "${clip.name}" from asset ${clip.assetId}: sourceUrl=${asset.sourceUrl?.slice(0,60)}`);
                 }
@@ -252,7 +256,18 @@ router.post('/', authMiddleware, async (req, res) => {
             }
             const safeName = sanitizeFilename(filename);
 
-            const exactPath = `raw/${userId}/${safeName}`;
+            // When the request has no authenticated user, try to recover the real userId
+            // from a proxy URL embedded in the clip (e.g. /api/proxy/gcs-media/proxies/<userId>/...).
+            let listUserId = userId;
+            if (listUserId === 'anonymous') {
+                const proxyUrls = [effectiveClip.proxyUrl, effectiveClip.url, effectiveClip.sourceUrl, clip.proxyUrl, clip.url, clip.sourceUrl];
+                for (const raw of proxyUrls) {
+                    const m = raw?.match(/\/api\/proxy\/gcs-media\/(?:proxies|raw)\/([^/]+)\//);
+                    if (m) { listUserId = m[1]; break; }
+                }
+            }
+
+            const exactPath = `raw/${listUserId}/${safeName}`;
             try {
                 const [exists] = await gcsBucket.file(exactPath).exists();
                 if (exists) { console.log(`[export] GCS exact match: ${exactPath}`); return exactPath; }
@@ -261,7 +276,7 @@ router.post('/', authMiddleware, async (req, res) => {
             }
 
             try {
-                const [files] = await gcsBucket.getFiles({ prefix: `raw/${userId}/` });
+                const [files] = await gcsBucket.getFiles({ prefix: `raw/${listUserId}/` });
                 const match = files.find(f => {
                     const base = f.name.split('/').pop();
                     return base === safeName || base.endsWith(`-${safeName}`);
@@ -281,7 +296,7 @@ router.post('/', authMiddleware, async (req, res) => {
         const fetchClipSource = async (clip, localPath) => {
             // Enrich clip with asset URLs if its own URL fields are empty
             let c = clip;
-            if (clip.assetId && assetMap[clip.assetId] && !(clip.sourceUrl || clip.url || clip.proxyUrl)) {
+            if (clip.assetId && assetMap[clip.assetId] && !(isServerUsableUrl(clip.sourceUrl) || isServerUsableUrl(clip.url) || isServerUsableUrl(clip.proxyUrl))) {
                 const asset = assetMap[clip.assetId];
                 c = { ...clip, sourceUrl: asset.sourceUrl, url: asset.proxyUrl || asset.url, proxyUrl: asset.proxyUrl };
             }
