@@ -95,7 +95,7 @@ function mockParse(cmd) {
  */
 const parseIntentHandler = async (req, res) => {
     try {
-        const { prompt, context } = req.body;
+        const { prompt, context, conversationHistory = [] } = req.body;
         console.log("📝 [CRL] Parsing intent:", prompt);
 
 
@@ -440,9 +440,17 @@ USER REQUEST:
             }
         ];
 
+        // Sanitise history: only allow valid roles, cap length, strip empty content
+        const safeHistory = Array.isArray(conversationHistory)
+            ? conversationHistory
+                .filter(m => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
+                .slice(-10)
+            : [];
+
         const completion = await openai.chat.completions.create({
             messages: [
                 { role: "system", content: systemPrompt },
+                ...safeHistory,
                 { role: "user", content: userMessage }
             ],
             model: "gpt-4o",

@@ -17,6 +17,7 @@ import { EventBus, EVENT_TYPES } from './EventBus.js';
 import { IntentValidator } from './IntentValidator.js';
 import { INTENT_TYPES, OPERATIONS } from './CommandConstants.js';
 import { extractEditIntent } from '../utils/nlpFallback.js';
+import useAIStore from '../store/useAIStore.js';
 
 export { INTENT_TYPES, OPERATIONS };
 
@@ -343,11 +344,32 @@ export class IntentParser {
         const timeoutId = setTimeout(() => controller.abort(), 30000);
         if (signal) signal.addEventListener('abort', () => controller.abort());
 
+        // Build conversation history from the AI log so the model understands
+        // prior exchanges in the same session. We include the last 10 entries
+        // (5 turns) of user ↔ assistant pairs — excluding step/warning noise.
+        const conversationHistory = (() => {
+            const logs = useAIStore.getState().logs;
+            const relevant = logs.filter(l =>
+                (l.type === 'info' && l.message?.startsWith('You: ')) ||
+                l.type === 'assistant' ||
+                l.type === 'success'
+            );
+            // Drop the last entry if it IS the current prompt (just added before this call)
+            const withoutCurrent = relevant.length > 0 &&
+                relevant[relevant.length - 1].message === `You: ${prompt}`
+                    ? relevant.slice(0, -1)
+                    : relevant;
+            return withoutCurrent.slice(-10).map(l => ({
+                role: (l.type === 'info') ? 'user' : 'assistant',
+                content: (l.type === 'info') ? l.message.replace(/^You:\s*/, '') : l.message
+            }));
+        })();
+
         try {
             // FIX: was fetch('/api/ai/parse-intent', ...) — no auth → 401 in production
             const response = await authFetch('/api/ai/parse-intent', {
                 method: 'POST',
-                body: JSON.stringify({ prompt, context, systemPrompt: INTENT_SYSTEM_PROMPT }),
+                body: JSON.stringify({ prompt, context, conversationHistory }),
                 signal: controller.signal
             });
             clearTimeout(timeoutId);

@@ -177,8 +177,27 @@ const useTimelineStore = create(
             // ==============================================================
             // PLAYBACK ACTIONS
             // ==============================================================
-            togglePlay: () => set((s) => ({ isPlaying: !s.isPlaying })),
-            setIsPlaying: (isPlaying) => set({ isPlaying }),
+            togglePlay: () => {
+                const newIsPlaying = !get().isPlaying;
+                set({ isPlaying: newIsPlaying });
+                // Drive the Revideo core Player directly — the React prop chain
+                // (playing prop → useEffect → setPlaying → attribute change) adds
+                // two render cycles of latency and can miss under concurrent rendering.
+                // playerRef is the core Player instance from the 'playerready' event.
+                // togglePlayback(true)  = unpause (start)  when paused  = true
+                // togglePlayback(false) = pause   (stop)   when playing = false
+                const { playerRef } = get();
+                if (playerRef && typeof playerRef.togglePlayback === 'function') {
+                    playerRef.togglePlayback(newIsPlaying);
+                }
+            },
+            setIsPlaying: (isPlaying) => {
+                set({ isPlaying });
+                const { playerRef } = get();
+                if (playerRef && typeof playerRef.togglePlayback === 'function') {
+                    playerRef.togglePlayback(isPlaying);
+                }
+            },
 
             seek: (time) => {
                 const { duration, playerRef } = get();
