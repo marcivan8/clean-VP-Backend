@@ -309,8 +309,17 @@ export class EditPlanner {
 
     static planSilenceRemoval(planId, constraints) {
         const state = useTimelineStore.getState();
-        const videoTrack = state.tracks?.find(t => t.type === 'video');
-        const clips = (videoTrack?.clips || []).slice().sort((a, b) => a.start - b.start);
+
+        // Read clips directly from timelineManager to bypass potentially stale Zustand state.
+        // state.tracks is only updated when a structural timeline event fires, so it can lag
+        // behind the actual manager state when clips are added asynchronously (e.g. proxy ready).
+        const freshTracks = state.manager?.toLegacyTracks() || state.tracks || [];
+        const videoTracks = freshTracks.filter(t => t.type === 'video');
+        const clips = videoTracks
+            .flatMap(t => (t.clips || []))
+            .sort((a, b) => a.start - b.start);
+
+        console.log(`[EditPlanner] planSilenceRemoval: ${videoTracks.length} video track(s), ${clips.length} clip(s)`);
 
         // Single clip — use the global $uploaded_file symbol (resolved at execution time)
         if (clips.length <= 1) {
@@ -350,8 +359,12 @@ export class EditPlanner {
 
     static planFillerRemoval(planId) {
         const state = useTimelineStore.getState();
-        const videoTrack = state.tracks?.find(t => t.type === 'video');
-        const clips = (videoTrack?.clips || []).slice().sort((a, b) => a.start - b.start);
+
+        const freshTracks = state.manager?.toLegacyTracks() || state.tracks || [];
+        const videoTracks = freshTracks.filter(t => t.type === 'video');
+        const clips = videoTracks
+            .flatMap(t => (t.clips || []))
+            .sort((a, b) => a.start - b.start);
 
         if (clips.length <= 1) {
             return this.buildPlan(planId, 'remove_filler_words', [{ step_id: 'step_1', action: 'remove_filler_words' }]);

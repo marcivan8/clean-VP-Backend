@@ -810,6 +810,10 @@ export class MediaExecutionEngine {
         const basename = (p) => (p || '').split(/[\\/]/).pop();
         const processedBase = basename(timelineStore.uploadedFilePath || '');
 
+        // Strip server-side timestamp prefix (e.g. "1780602619818-IMG_7362.mov" → "IMG_7362.mov")
+        // so we can match against original browser filenames stored in clip/asset names.
+        const strippedBase = processedBase ? processedBase.replace(/^\d+-/, '') : '';
+
         let baseClip;
         if (targetClipId) {
             baseClip = videoTrack.clips.find(c => c.id === targetClipId);
@@ -820,17 +824,29 @@ export class MediaExecutionEngine {
         } else if (videoTrack.clips.length === 1) {
             baseClip = videoTrack.clips[0];
         } else {
-            // Try to match by filename
+            // Try to match by filename — check both the full timestamped name and the
+            // stripped original name to handle GCS paths like "1780602619818-IMG_7362.mov"
+            // where the clip asset is stored as "IMG_7362.mov".
             const sortedByStart = [...videoTrack.clips].sort((a, b) => a.start - b.start);
             if (processedBase) {
                 baseClip = sortedByStart.find(c => {
                     const assetName = basename(
                         timelineStore.assets?.find(a => a.id === c.assetId)?.name || ''
                     );
-                    return assetName === processedBase ||
-                           basename(c.name || '') === processedBase ||
-                           basename(c.url || '') === processedBase ||
-                           basename(c.sourceUrl || '') === processedBase;
+                    const strippedAsset = assetName.replace(/^\d+-/, '');
+                    const cName    = basename(c.name    || '');
+                    const cUrl     = basename(c.url     || '');
+                    const cSource  = basename(c.sourceUrl || '');
+                    return assetName    === processedBase  ||
+                           assetName    === strippedBase   ||
+                           strippedAsset === strippedBase  ||
+                           processedBase.endsWith(assetName) ||
+                           cName        === processedBase  ||
+                           cName        === strippedBase   ||
+                           cUrl         === processedBase  ||
+                           cUrl         === strippedBase   ||
+                           cSource      === processedBase  ||
+                           cSource      === strippedBase;
                 });
             }
 
@@ -839,7 +855,8 @@ export class MediaExecutionEngine {
                 // destroy all clips with mismatched timestamps.
                 console.error(
                     `[MediaExecutionEngine] _applySegmentsToTimeline: ${videoTrack.clips.length} clips on track ` +
-                    `but cannot match processed file "${processedBase}" to any clip. Skipping to prevent data loss.`
+                    `but cannot match processed file "${processedBase}" (stripped: "${strippedBase}") to any clip. ` +
+                    `Clip names: ${videoTrack.clips.map(c => basename(c.name || c.id)).join(', ')}. Skipping to prevent data loss.`
                 );
                 useAIStore.getState().addLog({
                     id: `step-multiclip-${Date.now()}`,
