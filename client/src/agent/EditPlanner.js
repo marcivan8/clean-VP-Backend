@@ -307,86 +307,81 @@ export class EditPlanner {
         ]);
     }
 
-    static planSilenceRemoval(planId, constraints) {
-        const state = useTimelineStore.getState();
-
-        // Read clips directly from timelineManager to bypass potentially stale Zustand state.
-        // state.tracks is only updated when a structural timeline event fires, so it can lag
-        // behind the actual manager state when clips are added asynchronously (e.g. proxy ready).
+    // ── Per-asset step builder ────────────────────────────────────────────────
+    // Groups timeline clips by assetId so we always generate 1 step per UNIQUE
+    // SOURCE FILE — not 1 step per clip. This prevents the step explosion when
+    // silence removal has already segmented the timeline into hundreds of clips:
+    // each clip group shares the same assetId, so they collapse back to 1 step.
+    static _buildPerAssetSteps(state, action, extraFields = {}) {
         const freshTracks = state.manager?.toLegacyTracks() || state.tracks || [];
         const videoTracks = freshTracks.filter(t => t.type === 'video');
-        const clips = videoTracks
+        const allClips = videoTracks
             .flatMap(t => (t.clips || []))
             .sort((a, b) => a.start - b.start);
 
-        console.log(`[EditPlanner] planSilenceRemoval: ${videoTracks.length} video track(s), ${clips.length} clip(s)`);
+        // Deduplicate by assetId (or sourceUrl as fallback)
+        const assetMap = new Map();
+        for (const clip of allClips) {
+            const key = clip.assetId || clip.sourceUrl || clip.id;
+            if (!assetMap.has(key)) {
+                const asset = state.assets?.find(a => a.id === clip.assetId);
+                assetMap.set(key, { firstClip: clip, asset });
+            }
+        }
 
-        // Single clip — use the global $uploaded_file symbol (resolved at execution time)
-        if (clips.length <= 1) {
+        const uniqueAssets = [...assetMap.values()];
+        console.log(`[EditPlanner] _buildPerAssetSteps(${action}): ${uniqueAssets.length} unique asset(s) across ${allClips.length} clip(s)`);
+
+        return uniqueAssets.map(({ firstClip, asset }, i) => {
+            let filePath = null;
+            if (asset?.proxyUrl?.startsWith('proxies/')) {
+                const parts = asset.proxyUrl.split('/');
+                if (parts.length >= 3) filePath = `raw/${parts[1]}/${parts[2]}`;
+            }
+            if (!filePath && firstClip.sourceUrl?.startsWith('raw/')) filePath = firstClip.sourceUrl;
+
+            return {
+                step_id: `step_${i + 1}`,
+                action,
+                ...extraFields,
+                asset_id:  firstClip.assetId || null, // replace ALL clips of this asset
+                file_path: filePath,                  // source file to send to backend
+            };
+        });
+    }
+
+    static planSilenceRemoval(planId, constraints) {
+        const state = useTimelineStore.getState();
+        const steps = this._buildPerAssetSteps(state, ACTIONS.SILENCE_REMOVAL, {
+            threshold:    constraints.threshold    || '-30dB',
+            min_duration: constraints.min_duration || 0.5,
+            padding:      constraints.padding      || 0.1,
+        });
+
+        if (steps.length === 0) {
             return this.buildPlan(planId, 'silence_removal', [
                 { step_id: 'step_1', action: ACTIONS.SILENCE_REMOVAL, threshold: constraints.threshold || '-30dB', min_duration: constraints.min_duration || 0.5, padding: constraints.padding || 0.1 }
             ]);
         }
 
-        // Multiple clips — one step per clip, each carrying its own file path so
-        // silence detection runs on the correct source file and _applySegmentsToTimeline
-        // only replaces that specific clip (not the whole track).
-        const steps = clips.map((clip, i) => {
-            const asset = state.assets?.find(a => a.id === clip.assetId);
-            let filePath = null;
-
-            // Derive raw GCS path from proxy URL: proxies/userId/file.mov/proxy.mp4 → raw/userId/file.mov
-            if (asset?.proxyUrl?.startsWith('proxies/')) {
-                const parts = asset.proxyUrl.split('/');
-                if (parts.length >= 3) filePath = `raw/${parts[1]}/${parts[2]}`;
-            }
-            // Fall back to sourceUrl if it already looks like a raw path
-            if (!filePath && clip.sourceUrl?.startsWith('raw/')) filePath = clip.sourceUrl;
-
-            return {
-                step_id: `step_${i + 1}`,
-                action: ACTIONS.SILENCE_REMOVAL,
-                threshold:    constraints.threshold   || '-30dB',
-                min_duration: constraints.min_duration || 0.5,
-                padding:      constraints.padding      || 0.1,
-                clip_id:   clip.id,    // which clip to replace after detection
-                file_path: filePath,   // which file to send to the backend
-            };
-        });
+        // Single asset — drop the asset_id / file_path so the executor uses the
+        // simpler $uploaded_file path (avoids issues with missing proxy URLs).
+        if (steps.length === 1) {
+            return this.buildPlan(planId, 'silence_removal', [
+                { step_id: 'step_1', action: ACTIONS.SILENCE_REMOVAL, threshold: constraints.threshold || '-30dB', min_duration: constraints.min_duration || 0.5, padding: constraints.padding || 0.1 }
+            ]);
+        }
 
         return this.buildPlan(planId, 'silence_removal', steps);
     }
 
     static planFillerRemoval(planId) {
         const state = useTimelineStore.getState();
+        const steps = this._buildPerAssetSteps(state, 'remove_filler_words');
 
-        const freshTracks = state.manager?.toLegacyTracks() || state.tracks || [];
-        const videoTracks = freshTracks.filter(t => t.type === 'video');
-        const clips = videoTracks
-            .flatMap(t => (t.clips || []))
-            .sort((a, b) => a.start - b.start);
-
-        if (clips.length <= 1) {
+        if (steps.length <= 1) {
             return this.buildPlan(planId, 'remove_filler_words', [{ step_id: 'step_1', action: 'remove_filler_words' }]);
         }
-
-        // Per-clip filler removal for multi-clip timelines (same pattern as silence removal)
-        const steps = clips.map((clip, i) => {
-            const asset = state.assets?.find(a => a.id === clip.assetId);
-            let filePath = null;
-            if (asset?.proxyUrl?.startsWith('proxies/')) {
-                const parts = asset.proxyUrl.split('/');
-                if (parts.length >= 3) filePath = `raw/${parts[1]}/${parts[2]}`;
-            }
-            if (!filePath && clip.sourceUrl?.startsWith('raw/')) filePath = clip.sourceUrl;
-
-            return {
-                step_id: `step_${i + 1}`,
-                action: 'remove_filler_words',
-                clip_id:   clip.id,
-                file_path: filePath,
-            };
-        });
 
         return this.buildPlan(planId, 'remove_filler_words', steps);
     }
@@ -482,32 +477,39 @@ export class EditPlanner {
         // which requires ContentAnalyzer (a 30-60 s GPT-4 call) and can timeout on
         // long videos. Direct ops are faster, more reliable, and produce correct results.
         if (editMode === 'CLEAN_EDIT') {
+            const state = useTimelineStore.getState();
             const steps = [];
-            let n = 1;
 
-            // Silence removal is always included for CLEAN_EDIT
+            // Silence removal is always included for CLEAN_EDIT.
+            // Use per-asset steps so a timeline that was already segmented by a
+            // previous silence removal doesn't explode into N×assets steps.
             const wantsSilence = actions.length === 0 || actions.some(a =>
                 a === 'silence_removal' || a === 'remove_silences');
             if (wantsSilence) {
-                steps.push({
-                    step_id: `step_${n++}`,
-                    action: 'silence_removal',
-                    threshold: '-30dB',
-                    min_duration: 0.5,
-                    padding: 0.1,
+                const silenceSteps = this._buildPerAssetSteps(state, 'silence_removal', {
+                    threshold: '-30dB', min_duration: 0.5, padding: 0.1,
                     reason: 'Remove dead air and long pauses',
                 });
+                // Single asset: omit asset_id / file_path (use $uploaded_file fallback)
+                if (silenceSteps.length <= 1) {
+                    steps.push({ step_id: `step_${steps.length + 1}`, action: 'silence_removal', threshold: '-30dB', min_duration: 0.5, padding: 0.1, reason: 'Remove dead air and long pauses' });
+                } else {
+                    silenceSteps.forEach(s => { s.step_id = `step_${steps.length + 1}`; steps.push(s); });
+                }
             }
 
             // Filler removal — always include unless only pacing was requested
             const wantsFiller = actions.length === 0 || actions.some(a =>
                 a === 'remove_filler_words' || a === 'filler');
             if (wantsFiller) {
-                steps.push({
-                    step_id: `step_${n++}`,
-                    action: 'remove_filler_words',
+                const fillerSteps = this._buildPerAssetSteps(state, 'remove_filler_words', {
                     reason: 'Remove ums, uhs, and filler phrases',
                 });
+                if (fillerSteps.length <= 1) {
+                    steps.push({ step_id: `step_${steps.length + 1}`, action: 'remove_filler_words', reason: 'Remove ums, uhs, and filler phrases' });
+                } else {
+                    fillerSteps.forEach(s => { s.step_id = `step_${steps.length + 1}`; steps.push(s); });
+                }
             }
 
             return {
@@ -516,6 +518,24 @@ export class EditPlanner {
                 step_count: steps.length,
                 requiresApproval: true,
                 steps,
+            };
+        }
+
+        // SMART_CLEANUP — semantic pass on existing timeline clips.
+        // Uses the transcript + GPT-4o to remove false starts, word-level
+        // repetitions, and non-speech content. Does NOT restructure the video.
+        if (editMode === 'SMART_CLEANUP') {
+            return {
+                plan_id: planId,
+                operation: 'long_form_edit',
+                step_count: 1,
+                requiresApproval: true,
+                approvalMessage: 'The AI will analyze the transcript of each segment and remove repetitions, false starts, and non-speech content. The overall flow and meaning will be preserved.',
+                steps: [{
+                    step_id: 'step_1',
+                    action: 'smart_cleanup',
+                    reason: 'Semantic cleanup — remove repetitions, false starts, and non-speech while preserving natural flow',
+                }],
             };
         }
 

@@ -483,6 +483,7 @@ export class MediaExecutionEngine {
             case 'add_transitions_to_sections':
             case 'analyzeStructure':
             case 'apply_smart_zoom':
+            case 'smart_cleanup':
             case 'longFormEdit': {
                 let VideoEditorTools;
                 try {
@@ -697,8 +698,9 @@ export class MediaExecutionEngine {
             // ── 4. Filler word removal ────────────────────────────────────
             if (command.action === 'fillerDetect' && result.activeSegments) {
                 console.log(`[MediaExecutionEngine] ✂️  fillerDetect: ${result.fillerCount} fillers removed, ${result.activeSegments.length} active segments`);
-                const fillerClipId = command.args?.clip_id || null;
-                this._applySegmentsToTimeline(result.activeSegments, 'filler', fillerClipId);
+                const fillerClipId  = command.args?.clip_id  || null;
+                const fillerAssetId = command.args?.asset_id || null;
+                this._applySegmentsToTimeline(result.activeSegments, 'filler', fillerClipId, fillerAssetId);
             }
 
             // ── 5. Audio denoise / normalize ──────────────────────────────
@@ -762,10 +764,9 @@ export class MediaExecutionEngine {
                     console.warn('[MediaExecutionEngine] ⚠️  silenceDetect returned no activeSegments — nothing to cut');
                 } else {
                     console.log(`[MediaExecutionEngine] ✂️  silenceDetect: applying ${activeSegments.length} segments`);
-                    // clip_id is set when EditPlanner generated a per-clip step (multi-clip
-                    // timeline) so we replace only that specific clip with the correct segments.
-                    const clipId = command.args?.clip_id || null;
-                    this._applySegmentsToTimeline(activeSegments, 'silence', clipId);
+                    const clipId  = command.args?.clip_id  || null;
+                    const assetId = command.args?.asset_id || null;
+                    this._applySegmentsToTimeline(activeSegments, 'silence', clipId, assetId);
                 }
             }
 
@@ -783,13 +784,18 @@ export class MediaExecutionEngine {
 
     /**
      * _applySegmentsToTimeline
-     * Shared helper: removes the first video clip and replaces it with
-     * one clip per active segment (same source media, different offset/duration).
      *
-     * @param {Array<{start,end,duration}>} segments
-     * @param {string} prefix  – used in generated clip IDs for debugging
+     * Replaces one or more timeline clips with segment-clips derived from the
+     * silence/filler detection result.
+     *
+     * @param {Array<{start,end,duration}>} segments  - active segments to keep
+     * @param {string}  prefix        - clip-ID prefix for debugging ('silence'|'filler')
+     * @param {string|null} targetClipId   - replace exactly this one clip (legacy per-clip steps)
+     * @param {string|null} targetAssetId  - replace ALL clips sharing this assetId (per-asset steps)
+     *
+     * Priority: targetAssetId > targetClipId > single-clip fallback > filename match
      */
-    _applySegmentsToTimeline(segments, prefix = 'seg', targetClipId = null) {
+    _applySegmentsToTimeline(segments, prefix = 'seg', targetClipId = null, targetAssetId = null) {
         const timelineStore = useTimelineStore.getState();
         const videoTrack    = timelineStore.tracks?.find(t => t.type === 'video');
 
@@ -802,57 +808,58 @@ export class MediaExecutionEngine {
             return;
         }
 
-        // ── Target clip resolution ────────────────────────────────────────────
-        // Priority 1: explicit clip ID from a per-clip step (multi-clip plans)
-        // Priority 2: match by processed filename (uploadedFilePath)
-        // Priority 3: only-clip on single-clip timelines
-        // Bail out (don't destroy the track) if multi-clip and no match found.
         const basename = (p) => (p || '').split(/[\\/]/).pop();
         const processedBase = basename(timelineStore.uploadedFilePath || '');
+        const strippedBase  = processedBase ? processedBase.replace(/^\d+-/, '') : '';
 
-        // Strip server-side timestamp prefix (e.g. "1780602619818-IMG_7362.mov" → "IMG_7362.mov")
-        // so we can match against original browser filenames stored in clip/asset names.
-        const strippedBase = processedBase ? processedBase.replace(/^\d+-/, '') : '';
+        // ── Resolve which clips to replace ───────────────────────────────────
+        // baseClip  = template for new clip properties (url, assetId, etc.)
+        // baseClips = the full list of clips to remove before inserting segments
+        let baseClip, baseClips;
 
-        let baseClip;
-        if (targetClipId) {
+        if (targetAssetId) {
+            // Per-asset mode: replace ALL clips that share this assetId.
+            // This correctly handles timelines where a previous silence removal
+            // already exploded one original clip into N small segments.
+            baseClips = videoTrack.clips
+                .filter(c => c.assetId === targetAssetId)
+                .sort((a, b) => a.start - b.start);
+            if (baseClips.length === 0) {
+                console.warn(`[MediaExecutionEngine] _applySegmentsToTimeline: no clips found for asset "${targetAssetId}" — skipping`);
+                return;
+            }
+            baseClip = baseClips[0];
+        } else if (targetClipId) {
             baseClip = videoTrack.clips.find(c => c.id === targetClipId);
             if (!baseClip) {
                 console.warn(`[MediaExecutionEngine] _applySegmentsToTimeline: clip "${targetClipId}" not found — skipping`);
                 return;
             }
+            baseClips = [baseClip];
         } else if (videoTrack.clips.length === 1) {
-            baseClip = videoTrack.clips[0];
+            baseClip  = videoTrack.clips[0];
+            baseClips = [baseClip];
         } else {
-            // Try to match by filename — check both the full timestamped name and the
-            // stripped original name to handle GCS paths like "1780602619818-IMG_7362.mov"
-            // where the clip asset is stored as "IMG_7362.mov".
+            // Filename fallback: check both the timestamped GCS name and the stripped
+            // original name (e.g. "1780602619818-IMG_7362.mov" → "IMG_7362.mov").
             const sortedByStart = [...videoTrack.clips].sort((a, b) => a.start - b.start);
             if (processedBase) {
                 baseClip = sortedByStart.find(c => {
-                    const assetName = basename(
-                        timelineStore.assets?.find(a => a.id === c.assetId)?.name || ''
-                    );
+                    const assetName    = basename(timelineStore.assets?.find(a => a.id === c.assetId)?.name || '');
                     const strippedAsset = assetName.replace(/^\d+-/, '');
-                    const cName    = basename(c.name    || '');
-                    const cUrl     = basename(c.url     || '');
-                    const cSource  = basename(c.sourceUrl || '');
-                    return assetName    === processedBase  ||
-                           assetName    === strippedBase   ||
-                           strippedAsset === strippedBase  ||
+                    const cName   = basename(c.name      || '');
+                    const cUrl    = basename(c.url        || '');
+                    const cSource = basename(c.sourceUrl  || '');
+                    return assetName     === processedBase  ||
+                           assetName     === strippedBase   ||
+                           strippedAsset === strippedBase   ||
                            processedBase.endsWith(assetName) ||
-                           cName        === processedBase  ||
-                           cName        === strippedBase   ||
-                           cUrl         === processedBase  ||
-                           cUrl         === strippedBase   ||
-                           cSource      === processedBase  ||
-                           cSource      === strippedBase;
+                           cName    === processedBase || cName    === strippedBase ||
+                           cUrl     === processedBase || cUrl     === strippedBase ||
+                           cSource  === processedBase || cSource  === strippedBase;
                 });
             }
-
             if (!baseClip) {
-                // Cannot safely identify the target clip — bail out rather than
-                // destroy all clips with mismatched timestamps.
                 console.error(
                     `[MediaExecutionEngine] _applySegmentsToTimeline: ${videoTrack.clips.length} clips on track ` +
                     `but cannot match processed file "${processedBase}" (stripped: "${strippedBase}") to any clip. ` +
@@ -867,7 +874,16 @@ export class MediaExecutionEngine {
                 });
                 return;
             }
+            baseClips = [baseClip];
         }
+
+        // ── Compute replacement range ─────────────────────────────────────────
+        // For per-asset mode, the "range" spans from the first clip's start to
+        // the last clip's end — covering all N previously-segmented pieces.
+        const lastBaseClip    = baseClips[baseClips.length - 1];
+        const rangeStart      = baseClip.start;
+        const rangeEnd        = lastBaseClip.start + (lastBaseClip.duration || 0);
+        const totalOriginalDuration = rangeEnd - rangeStart;
 
         // Filter out degenerate segments
         const validSegs = segments.filter(s => s.duration > 0.05);
@@ -876,19 +892,18 @@ export class MediaExecutionEngine {
             return;
         }
 
-        // Sanity guard: active duration < 10% of original clip → detection went wrong
-        const originalDuration = baseClip.duration || 0;
-        const totalActiveTime  = validSegs.reduce((t, s) => t + s.duration, 0);
-        if (originalDuration > 30 && totalActiveTime < originalDuration * 0.10) {
+        // Sanity guard: active duration < 10% of the source material → detection failed
+        const totalActiveTime = validSegs.reduce((t, s) => t + s.duration, 0);
+        if (totalOriginalDuration > 30 && totalActiveTime < totalOriginalDuration * 0.10) {
             console.error(
                 `[MediaExecutionEngine] _applySegmentsToTimeline: REJECTED — active duration ` +
-                `${totalActiveTime.toFixed(1)}s is less than 10% of original ${originalDuration.toFixed(1)}s.`
+                `${totalActiveTime.toFixed(1)}s is less than 10% of original ${totalOriginalDuration.toFixed(1)}s.`
             );
             useAIStore.getState().addLog({
                 id: `step-sanity-${Date.now()}`,
                 type: 'error',
                 message: `Detection result rejected — only ${totalActiveTime.toFixed(1)}s active out of ` +
-                    `${originalDuration.toFixed(1)}s. Try running again or adjusting settings.`,
+                    `${totalOriginalDuration.toFixed(1)}s. Try running again or adjusting settings.`,
                 timestamp: new Date().toLocaleTimeString()
             });
             return;
@@ -902,14 +917,16 @@ export class MediaExecutionEngine {
             timestamp: new Date().toLocaleTimeString()
         });
 
-        // Remove only the target clip (not all clips on the track)
-        timelineStore.removeClip(videoTrack.id, baseClip.id);
+        // Remove all clips in the range
+        for (const clip of baseClips) {
+            timelineStore.removeClip(videoTrack.id, clip.id);
+        }
 
-        // Insert replacement clips starting at baseClip's original timeline position
-        let currentStartTime = baseClip.start;
+        // Insert replacement clips starting at rangeStart
+        let currentStartTime = rangeStart;
+        const persistentUrl  = baseClip.sourceUrl || baseClip.url || '';
 
         validSegs.forEach((seg, i) => {
-            const persistentUrl = baseClip.sourceUrl || baseClip.url || '';
             const newClip = {
                 ...baseClip,
                 id:           `clip_${prefix}_${ts}_${i}`,
@@ -926,25 +943,27 @@ export class MediaExecutionEngine {
             console.log(`[MediaExecutionEngine]   clip_${prefix}_${i}: timeline ${newClip.start.toFixed(2)}s–${currentStartTime.toFixed(2)}s  source ${seg.start.toFixed(2)}s–${seg.end.toFixed(2)}s`);
         });
 
-        // Shift any clips that came AFTER the replaced clip to close or open the gap
-        const durationDiff = currentStartTime - (baseClip.start + originalDuration);
+        // Shift clips that came AFTER the replaced range
+        const durationDiff = currentStartTime - rangeEnd;
         if (Math.abs(durationDiff) > 0.01) {
-            const afterStart = baseClip.start + originalDuration;
             const freshTrack = useTimelineStore.getState().tracks?.find(t => t.id === videoTrack.id);
             (freshTrack?.clips || [])
-                .filter(c => c.start >= afterStart - 0.01 && !c.id.startsWith(`clip_${prefix}_${ts}_`))
+                .filter(c => c.start >= rangeEnd - 0.01 && !c.id.startsWith(`clip_${prefix}_${ts}_`))
                 .sort((a, b) => a.start - b.start)
                 .forEach(c => {
                     timelineStore.updateClip(videoTrack.id, c.id, { start: c.start + durationDiff }, { skipHistory: true });
                 });
         }
 
-        console.log(`[MediaExecutionEngine] ✅ Applied ${validSegs.length} segments to "${baseClip.name}", total active ${currentStartTime.toFixed(2)}s`);
+        const label = baseClips.length > 1
+            ? `${baseClips.length} clips (asset ${targetAssetId})`
+            : `"${baseClip.name}"`;
+        console.log(`[MediaExecutionEngine] ✅ Applied ${validSegs.length} segments to ${label}, total active ${currentStartTime.toFixed(2)}s`);
 
-        // Auto-preview: seek to the edited clip's start and briefly play
-        const ts2 = useTimelineStore.getState();
-        ts2.seek(baseClip.start);
-        ts2.setIsPlaying(true);
+        // Auto-preview: seek to start and briefly play
+        const freshStore = useTimelineStore.getState();
+        freshStore.seek(rangeStart);
+        freshStore.setIsPlaying(true);
         setTimeout(() => {
             useTimelineStore.getState().setIsPlaying(false);
         }, 4000);

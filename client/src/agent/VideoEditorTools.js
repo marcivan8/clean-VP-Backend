@@ -315,6 +315,7 @@ export class VideoEditorTools {
             // Long-Form Intelligence Engine
             case 'analyze_structure': return await this.analyzeStructure(action.args, action.signal);
             case 'long_form_edit': return await this.longFormEdit(action.args, action.signal);
+            case 'smart_cleanup': return await this.smartCleanup(action.args, action.signal);
             case 'find_hook': return await this.findHook();
             case 'remove_repetition': return await this.removeRepetition(action.args);
             case 'reorder_segment': return this.reorderSegment(action.args);
@@ -680,6 +681,106 @@ export class VideoEditorTools {
         return {
             success: true,
             message: `Moved clip "${clip.name}" to position ${targetPosition.toFixed(1)}s`,
+        };
+    }
+
+    /**
+     * Semantic cleanup: maps each timeline clip to its transcript text, asks GPT to
+     * identify false starts, word-level repetitions, and non-speech content, then
+     * removes those clips and re-packs the timeline with no gaps.
+     */
+    async smartCleanup(args = {}, signal = null) {
+        console.log('[VideoEditorTools] Running smart cleanup...');
+        const store = useTimelineStore.getState();
+
+        const videoTrack = store.tracks?.find(t => t.type === 'video');
+        if (!videoTrack || videoTrack.clips.length === 0) {
+            return { success: false, message: 'No video clips on the timeline to analyze.' };
+        }
+
+        const clips = [...videoTrack.clips].sort((a, b) => a.start - b.start);
+        const basename = (p) => (p || '').split(/[\\/]/).pop();
+
+        // Map each clip to its transcript text using the per-file transcripts map.
+        // Each clip has an assetId; the asset's name gives the file basename which
+        // keys into store.transcripts. Words are filtered by the clip's source offset.
+        const clipsWithText = clips.map((clip, index) => {
+            const asset      = store.assets?.find(a => a.id === clip.assetId);
+            const assetBase  = basename(asset?.name || clip.sourceUrl || '');
+            const assetWords = (store.transcripts?.[assetBase]) || store.captions || [];
+            const clipOffset = clip.offset || 0;
+
+            const words = assetWords
+                .filter(w => (w.start ?? 0) >= clipOffset - 0.05 &&
+                             (w.end   ?? 0) <= clipOffset + clip.duration + 0.05)
+                .map(w => w.word || w.content || w.text || '')
+                .filter(Boolean);
+
+            return {
+                index,
+                id:       clip.id,
+                duration: clip.duration,
+                text:     words.join(' ').trim(),
+            };
+        });
+
+        const hasText = clipsWithText.some(c => c.text.length > 2);
+        if (!hasText) {
+            return {
+                success: false,
+                message: 'No transcript available for semantic analysis. Run auto-captions first or wait for transcription to complete.',
+            };
+        }
+
+        const { authFetch } = await import('../utils/authFetch.js');
+        const response = await authFetch('/api/ai/smart-cleanup', {
+            method: 'POST',
+            body:   JSON.stringify({ clips: clipsWithText }),
+            signal,
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(`Smart cleanup API error: ${err.error || response.statusText}`);
+        }
+
+        const result = await response.json();
+        const removeIds = new Set(result.removeClipIds || []);
+
+        if (removeIds.size === 0) {
+            return {
+                success: true,
+                message: '✓ Semantic analysis complete — the timeline is already clean, nothing to remove.',
+            };
+        }
+
+        // Remove identified clips
+        const freshStore = useTimelineStore.getState();
+        const freshTrack = freshStore.tracks?.find(t => t.id === videoTrack.id);
+        if (freshTrack) {
+            for (const clipId of removeIds) {
+                try { freshStore.removeClip(freshTrack.id, clipId); }
+                catch (e) { console.warn(`[VideoEditorTools] Could not remove clip ${clipId}:`, e.message); }
+            }
+        }
+
+        // Re-pack: assign sequential start times so there are no gaps
+        const packedStore = useTimelineStore.getState();
+        const packedTrack = packedStore.tracks?.find(t => t.id === videoTrack.id);
+        if (packedTrack) {
+            const remaining = [...packedTrack.clips].sort((a, b) => a.start - b.start);
+            let cursor = 0;
+            for (const clip of remaining) {
+                if (Math.abs(clip.start - cursor) > 0.01) {
+                    packedStore.updateClip(packedTrack.id, clip.id, { start: cursor }, { skipHistory: true });
+                }
+                cursor += clip.duration;
+            }
+        }
+
+        return {
+            success: true,
+            message: `✓ Removed ${removeIds.size} of ${clips.length} segments. ${result.reasoning || ''}`,
         };
     }
 

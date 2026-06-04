@@ -1508,10 +1508,78 @@ function _buildSummary(contentType, editMode, segments, structure, editPlan) {
     };
 }
 
+// ─── Smart Cleanup ────────────────────────────────────────────────────────────
+// Receives timeline clips with their transcript text.
+// Uses GPT-4o to identify repetitions, false starts, and non-speech content.
+// Returns the indices (and IDs) of clips to remove — conservatively.
+const smartCleanupHandler = async (req, res) => {
+    try {
+        const { clips } = req.body;
+        if (!Array.isArray(clips) || clips.length === 0) {
+            return res.status(400).json({ error: 'clips array is required' });
+        }
+
+        if (!openai) {
+            return res.status(503).json({ error: 'OpenAI not configured' });
+        }
+
+        // Truncate transcript text per clip for token efficiency
+        const clipsText = clips
+            .map((c, i) => `[${i}] ${(c.duration || 0).toFixed(1)}s: "${(c.text || '').slice(0, 200)}"`)
+            .join('\n');
+
+        const prompt = `You are an expert video editor doing a final semantic cleanup pass on a podcast or interview recording.
+
+The video has already had silences and obvious filler words removed. Each segment below is a continuous speech chunk (index, duration, transcript text).
+
+YOUR TASK — identify segments to REMOVE:
+1. FALSE STARTS: Speaker begins a sentence, stops mid-way, then restarts it cleanly → remove the broken version
+2. WORD-LEVEL REPETITIONS: Same word or short phrase repeated 2+ times in immediate succession (e.g. "I I I wanted", "the the thing")
+3. NON-SPEECH: Audible laughs, coughs, throat-clearing with no meaningful words
+4. ABANDONED THOUGHTS: Sentence clearly trails off with no meaningful content ("um well I— anyway")
+
+DO NOT REMOVE:
+- Content said only once, even if imperfect
+- Intentional emphasis repetition ("really really important")
+- Transitions and filler phrases that carry meaning ("so", "right", "you know what I mean" when used for flow)
+- Anything you are unsure about — BE CONSERVATIVE
+
+Segments (${clips.length} total):
+${clipsText}
+
+Respond ONLY with valid JSON:
+{"removeIndices": [array of integer indices to remove], "reasoning": "one sentence summary of what was removed"}`;
+
+        const completion = await openai.chat.completions.create({
+            model: 'gpt-4o',
+            messages: [{ role: 'user', content: prompt }],
+            response_format: { type: 'json_object' },
+            temperature: 0.1,
+        });
+
+        const parsed = JSON.parse(completion.choices[0].message.content);
+        const removeIndices = (parsed.removeIndices || [])
+            .filter(i => Number.isInteger(i) && i >= 0 && i < clips.length);
+
+        return res.json({
+            removeIndices,
+            removeClipIds: removeIndices.map(i => clips[i]?.id).filter(Boolean),
+            reasoning: parsed.reasoning || '',
+            totalClips: clips.length,
+            removedCount: removeIndices.length,
+        });
+
+    } catch (err) {
+        console.error('[aiAgentController] smartCleanup error:', err);
+        return res.status(500).json({ error: err.message });
+    }
+};
+
 module.exports = {
     chatAgentHandler,
     agentPlanHandler,
     parseIntentHandler,
     generatePlanHandler,
-    analyzeContentHandler
+    analyzeContentHandler,
+    smartCleanupHandler,
 };

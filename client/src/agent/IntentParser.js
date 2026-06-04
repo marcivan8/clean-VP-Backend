@@ -279,6 +279,21 @@ Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constra
 User: "i want you to extract these segments, and analyze the structure of the video to find these moments more precisely"
 Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constraints": {"editMode": "CLEAN_EDIT", "focus": "highlights"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
 
+User: "I want you to select the best and well spoken segments. Remove repetitions and only keep the best one of each word or phrase and organize them to have the right context and meaning"
+Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constraints": {"editMode": "SMART_CLEANUP"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "remove repetitions, keep only the best takes, organize the segments so the meaning flows naturally"
+Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constraints": {"editMode": "SMART_CLEANUP"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "clean it up and remove all the repetitions and badly spoken parts"
+Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constraints": {"editMode": "SMART_CLEANUP"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "pick the best segments among these, remove the ones with repetitions, stutters or bad takes"
+Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constraints": {"editMode": "SMART_CLEANUP"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "keep only the cleanest version of each sentence and remove any stutters or repeated phrases"
+Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constraints": {"editMode": "SMART_CLEANUP"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
 User: "so what's this clip about?"
 Assistant: {"intent": "CHAT", "operation": "chat", "message": "Based on the transcript, this clip appears to be about...", "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
 

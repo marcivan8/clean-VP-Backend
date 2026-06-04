@@ -322,9 +322,6 @@ function compileSetAspectRatio(step, ctx) {
 // ── Audio commands ─────────────────────────────────────────────────────────────
 
 function compileSilenceRemoval(step, ctx) {
-    // When EditPlanner provides a specific file_path (multi-clip scenario), use it
-    // directly instead of the global $uploaded_file symbol. This ensures each clip's
-    // silence detection runs on its own source file, not the last-uploaded file.
     const filename     = step.file_path || '$uploaded_file';
     const symbolicRefs = filename === '$uploaded_file' ? ['$uploaded_file'] : [];
     return ok(step.step_id, [
@@ -332,13 +329,16 @@ function compileSilenceRemoval(step, ctx) {
             endpoint: '/api/silence/detect',
             method: 'POST',
             payload:  { filename, threshold: step.threshold || '-30dB', duration: step.min_duration || 0.5 },
-            clip_id:  step.clip_id || null,   // forwarded to _applySegmentsToTimeline
+            clip_id:  step.clip_id  || null, // single-clip target (legacy)
+            asset_id: step.asset_id || null, // replace ALL clips of this asset
         }, {
             source_step_id: step.step_id,
             symbolic_refs: symbolicRefs,
-            description: step.clip_id
-                ? `Silence detection (clip ${step.clip_id})`
-                : 'Silence detection',
+            description: step.asset_id
+                ? `Silence detection (asset ${step.asset_id})`
+                : step.clip_id
+                    ? `Silence detection (clip ${step.clip_id})`
+                    : 'Silence detection',
         }),
     ]);
 }
@@ -369,13 +369,16 @@ function compileRemoveFillerWords(step, ctx) {
             endpoint: '/api/audio/filler/detect',
             method: 'POST',
             payload:  { filename, language: step.language || 'en' },
-            clip_id:  step.clip_id || null,
+            clip_id:  step.clip_id  || null,
+            asset_id: step.asset_id || null,
         }, {
             source_step_id: step.step_id,
             symbolic_refs: symbolicRefs,
-            description: step.clip_id
-                ? `Remove filler words (clip ${step.clip_id})`
-                : 'Remove filler words (ums, uhs)',
+            description: step.asset_id
+                ? `Remove filler words (asset ${step.asset_id})`
+                : step.clip_id
+                    ? `Remove filler words (clip ${step.clip_id})`
+                    : 'Remove filler words (ums, uhs)',
         }),
     ]);
 }
@@ -605,6 +608,13 @@ function compileLongFormEdit(step, ctx) {
     ]);
 }
 
+function compileSmartCleanup(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'smart_cleanup', {},
+            { source_step_id: step.step_id, description: 'Semantic cleanup — remove repetitions and false starts' }),
+    ]);
+}
+
 function compileFindHook(step, ctx) {
     return ok(step.step_id, [
         cmd(ENGINE.STORE, 'findHook', {}, { source_step_id: step.step_id, description: 'Find best hook moment' }),
@@ -705,6 +715,7 @@ const COMMAND_REGISTRY = new Map([
     // Long-Form AI
     ['analyze_structure', { compiler: compileAnalyzeStructure }],
     ['long_form_edit', { compiler: compileLongFormEdit }],
+    ['smart_cleanup', { compiler: compileSmartCleanup }],
     ['find_hook', { compiler: compileFindHook }],
     ['remove_repetition', { compiler: compileRemoveRepetition }],
     ['reorder_segment', { compiler: compileReorderSegment }],
