@@ -200,6 +200,7 @@ export class EditPlanner {
             case 'remove_repetition': return this.planRemoveRepetition(planId);
             case 'chat': return this.planChat(planId, intent.message);
             case 'reorder_segment': return this.planReorderSegment(planId, constraints);
+            case 'organize_clips': return this.planOrganizeClips(planId, state, constraints);
             default:
                 console.warn(`[EditPlanner] Unhandled operation: ${operation}`);
                 return null;
@@ -424,6 +425,58 @@ export class EditPlanner {
         return {
             plan_id: planId, operation: 'reorder_segment', step_count: 1, requiresApproval: true,
             steps: [{ step_id: 'step_1', action: 'reorder_segment', clip_id: constraints.clipId, track_id: constraints.trackId, target_position: constraints.targetPosition ?? 0, reason: constraints.reason || 'Reorder segment for narrative structure' }]
+        };
+    }
+
+    static planOrganizeClips(planId, state, constraints) {
+        // Collect all video clips across all video tracks with their track id
+        const videoTracks = (state.tracks || []).filter(t => t.type === 'video');
+        const allClips = videoTracks.flatMap(t => (t.clips || []).map(c => ({ ...c, trackId: t.id })));
+
+        if (allClips.length === 0) {
+            return this.planChat(planId, 'The timeline has no video clips to organize. Please add your clips first.');
+        }
+        if (allClips.length === 1) {
+            return this.planChat(planId, 'There is only one clip on the timeline — nothing to separate into b-roll.');
+        }
+
+        // Sort descending by duration; longest = main clip
+        const sorted = [...allClips].sort((a, b) => (b.duration || 0) - (a.duration || 0));
+        const mainClip = sorted[0];
+        const brollClips = sorted.slice(1);
+
+        // Re-use an existing secondary video track, or mark one for creation
+        const secondaryTrack = videoTracks.find(t => t.id !== mainClip.trackId);
+        const brollTrackId = secondaryTrack?.id || `track-broll-${planId}`;
+
+        const steps = [];
+
+        if (!secondaryTrack) {
+            steps.push({
+                step_id: 'step_create_broll',
+                action: 'create_broll_track',
+                track_id: brollTrackId,
+                reason: 'Create a B-Roll track for secondary footage',
+            });
+        }
+
+        brollClips.forEach((clip, i) => {
+            steps.push({
+                step_id: `step_move_${i + 1}`,
+                action: 'move_clip_to_track',
+                clip_id: clip.id,
+                from_track_id: clip.trackId,
+                to_track_id: brollTrackId,
+                reason: `Move "${clip.name || clip.id}" (${(clip.duration || 0).toFixed(1)}s) to B-Roll`,
+            });
+        });
+
+        return {
+            plan_id: planId,
+            operation: 'organize_clips',
+            step_count: steps.length,
+            requiresApproval: false,
+            steps,
         };
     }
 

@@ -232,6 +232,7 @@ OPERATIONS you must recognize:
 - add_text: "add a title", "add text", "put a caption"
 - punch_in: "punch in", "zoom in closer", "emphasize this"
 - inject_broll: "inject broll", "add stock footage", "cover with b-roll"
+- organize_clips: "the longest is the main clip", "put the others as b-roll", "organize my clips", "arrange my footage", "set the longest as main video and the rest as b-rolls", "separate main footage from b-roll", "make [clip] the main clip and the others b-rolls"
 - adjust_volume: "louder", "quieter", "mute", "boost audio"
 - export_video: "export", "render", "finish", "save"
 - nle_export: "export for Premiere", "export for DaVinci", "export otio"
@@ -279,6 +280,15 @@ Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constra
 
 User: "so what's this clip about?"
 Assistant: {"intent": "CHAT", "operation": "chat", "message": "Based on the transcript, this clip appears to be about...", "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "the longest is the main clip and the others are b rolls"
+Assistant: {"intent": "EDIT", "operation": "organize_clips", "constraints": {"mainClipCriteria": "longest"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "put the shortest clips as b-roll and keep the long one as the main video"
+Assistant: {"intent": "EDIT", "operation": "organize_clips", "constraints": {"mainClipCriteria": "longest"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "I want you to organize them such as the longest is the main video and the rest are b rolls"
+Assistant: {"intent": "EDIT", "operation": "organize_clips", "constraints": {"mainClipCriteria": "longest"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
 
 Be liberal in interpretation. When in doubt, make a reasonable assumption rather than asking for clarification.
 If the user says "clean it up", assume silence_removal.

@@ -26,7 +26,8 @@ class TranscriptionManagerClass {
     constructor() {
         this._status = TRANSCRIPTION_STATUS.IDLE;
         this._progress = 0;
-        this._abortController = null;
+        // Map<filename, AbortController> — one controller per in-flight transcription
+        this._controllers = new Map();
         this._cachedAnalysis = null;
         this._currentFilename = null;
         this._error = null;
@@ -36,6 +37,8 @@ class TranscriptionManagerClass {
 
     /**
      * Start transcription + analysis in the background.
+     * Multiple clips can be transcribed concurrently — each gets its own abort
+     * controller and the results accumulate in store.transcripts.
      */
     async startBackgroundTranscription(filename, options = {}) {
         if (!filename) {
@@ -43,13 +46,17 @@ class TranscriptionManagerClass {
             return;
         }
 
-        this._cancel();
+        // If already transcribing this exact file, skip to avoid duplicate work
+        if (this._controllers.has(filename)) {
+            console.log(`[TranscriptionManager] Already transcribing "${filename}" — skipping duplicate`);
+            return;
+        }
 
         this._currentFilename = filename;
-        this._cachedAnalysis = null;
         this._error = null;
-        this._abortController = new AbortController();
-        const { signal } = this._abortController;
+        const controller = new AbortController();
+        this._controllers.set(filename, controller);
+        const { signal } = controller;
 
         console.log(`[TranscriptionManager] Starting background transcription for: ${filename}`);
         this._setStatus(TRANSCRIPTION_STATUS.TRANSCRIBING, 0);
@@ -88,24 +95,23 @@ class TranscriptionManagerClass {
 
         } catch (err) {
             if (err.name === 'AbortError' || signal.aborted) {
-                console.log('[TranscriptionManager] Job cancelled');
+                console.log(`[TranscriptionManager] Job cancelled for "${filename}"`);
                 this._setStatus(TRANSCRIPTION_STATUS.IDLE, 0);
-                return;
+            } else {
+                console.error('[TranscriptionManager] Failed:', err);
+                this._error = err.message;
+                this._setStatus(TRANSCRIPTION_STATUS.FAILED, 0);
+                EventBus.emit(EVENT_TYPES.TRANSCRIPTION_FAILED, { filename, error: err.message });
             }
-
-            console.error('[TranscriptionManager] Failed:', err);
-            this._error = err.message;
-            this._setStatus(TRANSCRIPTION_STATUS.FAILED, 0);
-
-            EventBus.emit(EVENT_TYPES.TRANSCRIPTION_FAILED, {
-                filename,
-                error: err.message,
-            });
+        } finally {
+            this._controllers.delete(filename);
         }
     }
 
     cancel() {
-        this._cancel();
+        // Cancel all in-flight transcriptions
+        this._controllers.forEach((ctrl) => ctrl.abort());
+        this._controllers.clear();
         this._setStatus(TRANSCRIPTION_STATUS.IDLE, 0);
     }
 
@@ -128,6 +134,8 @@ class TranscriptionManagerClass {
     }
 
     clearCache() {
+        this._controllers.forEach((ctrl) => ctrl.abort());
+        this._controllers.clear();
         this._cachedAnalysis = null;
         this._currentFilename = null;
         this._error = null;
@@ -219,13 +227,6 @@ class TranscriptionManagerClass {
         } catch (err) {
             clearTimeout(timeoutId);
             throw err;
-        }
-    }
-
-    _cancel() {
-        if (this._abortController) {
-            this._abortController.abort();
-            this._abortController = null;
         }
     }
 

@@ -441,6 +441,32 @@ export class MediaExecutionEngine {
             case 'undo':           this._callStore(store, 'undo'); return { action, success: true };
             case 'redo':           this._callStore(store, 'redo'); return { action, success: true };
             case 'chat':           return { action, success: true, message: args.message, isChat: true };
+            case 'createBrollTrack': {
+                const { trackId } = args;
+                const existing = store.tracks?.find(t => t.id === trackId);
+                if (!existing) {
+                    // addTrack returns the generated id; we need the caller's id so we
+                    // dispatch directly via the store's timelineManager-level addTrack.
+                    this._callStore(store, 'addTrack', 'video');
+                    // Rename the just-created track to "B-Roll"
+                    const fresh = store.tracks?.find(t => t.type === 'video' && t.id !== args._mainTrackId);
+                    if (fresh) this._callStore(store, 'renameTrack', fresh.id, 'B-Roll');
+                }
+                return { action, success: true };
+            }
+            case 'moveClipToTrack': {
+                const { fromTrackId, clipId, toTrackId } = args;
+                // Resolve the target track: if it was created by createBrollTrack in this
+                // same execution pass, look up the actual id (second video track).
+                let resolvedTrackId = toTrackId;
+                if (!store.tracks?.find(t => t.id === toTrackId)) {
+                    const secondVideoTrack = store.tracks?.filter(t => t.type === 'video')[1];
+                    if (secondVideoTrack) resolvedTrackId = secondVideoTrack.id;
+                }
+                if (!resolvedTrackId) return { action, success: false, message: 'B-Roll track not found' };
+                this._callStore(store, 'moveClipToTrack', fromTrackId, clipId, resolvedTrackId);
+                return { action, success: true, message: `Moved clip to b-roll track` };
+            }
 
             // ── Playhead seek — handled directly without VideoEditorTools ─────────
             case 'seek_to': {
@@ -567,36 +593,46 @@ export class MediaExecutionEngine {
             }
         }
 
-        // Inject transcript for both silence and filler detection.
-        // Guards:
-        //   1. Source path: captions must belong to the currently uploaded video
-        //      (compared by basename to handle temp/ vs raw/{uid}/ prefix differences).
-        //   2. Coverage: last word must end at ≥ 30 % of the clip duration — captions
-        //      from a previous shorter video would stop early and make the rest of the
-        //      clip appear entirely silent.
+        // Inject transcript for silence detection and filler-word removal.
+        // Look up the transcript that belongs to the SPECIFIC file being processed
+        // (resolved from $uploaded_file above) rather than the last globally-stored
+        // captions — this ensures multi-clip timelines each get the right words.
         const isTranscriptEndpoint = endpoint === '/api/silence/detect' || endpoint === '/api/audio/filler/detect';
-        if (isTranscriptEndpoint && store.captions && store.captions.length > 0) {
+        if (isTranscriptEndpoint) {
             const basename = (p) => (p || '').split(/[\\/]/).pop();
-            const captionsBase   = basename(store.captionsFilePath);
-            const uploadedBase   = basename(store.uploadedFilePath);
-            const pathMatches    = captionsBase && uploadedBase && captionsBase === uploadedBase;
+            // Identify the file being processed: prefer the already-resolved filename key,
+            // then fall back to uploadedFilePath (single-clip projects).
+            const processedFile = Object.entries(resolvedPayload).find(([, v]) => typeof v === 'string' && (v.startsWith('raw/') || v.startsWith('temp/')));
+            const processedBase = processedFile ? basename(processedFile[1]) : basename(store.uploadedFilePath);
 
-            const videoTrack     = store.tracks?.find(t => t.type === 'video');
-            const clipDuration   = videoTrack?.clips?.[0]?.duration ?? 0;
-            const lastWordEnd    = store.captions[store.captions.length - 1]?.end ?? 0;
-            const coverageOk     = clipDuration <= 0 || lastWordEnd >= clipDuration * 0.30;
+            // Look up per-file transcript map first, fall back to legacy captions for older sessions
+            const clipWords = (store.transcripts && processedBase && store.transcripts[processedBase])
+                ? store.transcripts[processedBase]
+                : (basename(store.captionsFilePath) === processedBase ? store.captions : null);
 
-            if (pathMatches && coverageOk) {
-                resolvedPayload.transcript = store.captions.map(c => ({
-                    start: c.start,
-                    end: c.end,
-                    word: c.word || c.content || c.text || ''
-                }));
-                console.log(`[MediaExecutionEngine] Injected transcript (${resolvedPayload.transcript.length} words, coverage ${lastWordEnd.toFixed(1)}s / ${clipDuration.toFixed(1)}s) into ${endpoint} payload.`);
-            } else if (!pathMatches) {
-                console.warn(`[MediaExecutionEngine] Transcript skipped — captions are from "${captionsBase}", current upload is "${uploadedBase}". Using FFmpeg fallback.`);
+            if (clipWords && clipWords.length > 0) {
+                const lastWordEnd  = clipWords[clipWords.length - 1]?.end ?? 0;
+                // Find the clip being processed to determine coverage
+                const videoTrack   = store.tracks?.find(t => t.type === 'video');
+                const matchedClip  = videoTrack?.clips?.find(c => {
+                    const assetName = store.assets?.find(a => a.id === c.assetId)?.name || '';
+                    return basename(assetName) === processedBase || basename(c.name || '') === processedBase;
+                });
+                const clipDuration = matchedClip?.duration ?? videoTrack?.clips?.[0]?.duration ?? 0;
+                const coverageOk   = clipDuration <= 0 || lastWordEnd >= clipDuration * 0.30;
+
+                if (coverageOk) {
+                    resolvedPayload.transcript = clipWords.map(c => ({
+                        start: c.start,
+                        end:   c.end,
+                        word:  c.word || c.content || c.text || ''
+                    }));
+                    console.log(`[MediaExecutionEngine] Injected transcript for "${processedBase}" (${resolvedPayload.transcript.length} words, coverage ${lastWordEnd.toFixed(1)}s/${clipDuration.toFixed(1)}s) into ${endpoint}`);
+                } else {
+                    console.warn(`[MediaExecutionEngine] Transcript for "${processedBase}" covers only ${((lastWordEnd / clipDuration) * 100).toFixed(0)}% — using FFmpeg fallback`);
+                }
             } else {
-                console.warn(`[MediaExecutionEngine] Transcript skipped — last word at ${lastWordEnd.toFixed(1)}s covers only ${((lastWordEnd / clipDuration) * 100).toFixed(0)}% of ${clipDuration.toFixed(1)}s clip. Using FFmpeg fallback.`);
+                console.warn(`[MediaExecutionEngine] No transcript found for "${processedBase}" — using FFmpeg fallback`);
             }
         }
 

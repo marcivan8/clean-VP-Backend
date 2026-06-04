@@ -146,6 +146,9 @@ const useTimelineStore = create(
             captions: [],
             captionsFilePath: null,
             transcriptionAttempted: false,
+            // Per-file transcript map: { [basename]: Word[] }
+            // Accumulates across all uploaded clips so the AI can understand the full timeline.
+            transcripts: {},
 
             // Long-Form Intelligence Engine — stores ContentAnalyzer result
             contentAnalysis: null,
@@ -344,7 +347,12 @@ const useTimelineStore = create(
             })),
 
             // Captions / beats / pacing
-            setCaptions: (captions, filePath) => set({ captions, captionsFilePath: filePath ?? null, transcriptionAttempted: true }),
+            setCaptions: (captions, filePath) => {
+                const basename = filePath ? filePath.split(/[\\/]/).pop() : null;
+                const newTranscripts = { ...get().transcripts };
+                if (basename && captions?.length > 0) newTranscripts[basename] = captions;
+                set({ captions, captionsFilePath: filePath ?? null, transcriptionAttempted: true, transcripts: newTranscripts });
+            },
             setBeatMarkers: (markers) => set({ beatMarkers: markers }),
             setPacingSegments: (segments) => set({ pacingSegments: segments }),
 
@@ -516,6 +524,19 @@ const useTimelineStore = create(
                 set({ tracks: timelineManager.toLegacyTracks() });
             },
 
+            // Move a clip (by its placement ID) from one track to another.
+            // In the legacy track format clip.id === placement.id, so callers pass the legacy clip id.
+            moveClipToTrack: (fromTrackId, clipId, toTrackId) => {
+                get()._saveHistory();
+                const placement = timelineManager.getEntity(ENTITY_TYPES.PLACEMENT, clipId);
+                if (!placement) {
+                    console.warn('[moveClipToTrack] Placement not found:', clipId);
+                    return;
+                }
+                timelineManager.dispatch(TimelineActions.movePlacement(clipId, placement.startTime, toTrackId));
+                set({ tracks: timelineManager.toLegacyTracks() });
+            },
+
             removeClip: (trackId, clipId) => {
                 get()._saveHistory();
 
@@ -654,6 +675,11 @@ const useTimelineStore = create(
                 }));
                 set({ tracks: timelineManager.toLegacyTracks() });
                 return id;
+            },
+
+            renameTrack: (trackId, name) => {
+                timelineManager.dispatch(TimelineActions.updateLayer(trackId, { name }));
+                set({ tracks: timelineManager.toLegacyTracks() });
             },
 
             addTextTrack: () => {

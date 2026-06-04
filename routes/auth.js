@@ -2,6 +2,7 @@ const express = require('express');
 const { supabaseAdmin } = require('../config/database');
 const { authenticateUser } = require('../middleware/auth');
 const UsageBasedPricingService = require('../services/UsageBasedPricingService');
+const storageConfig = require('../config/storage');
 const router = express.Router();
 
 // Create user profile after signup
@@ -228,6 +229,45 @@ router.patch('/profile', authenticateUser, async (req, res) => {
   } catch (error) {
     console.error('Profile update error:', error);
     res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+// Delete account — permanent, GDPR right to erasure
+// Order: GCS files → DB rows → Supabase Auth user (token invalidated last)
+router.delete('/account', authenticateUser, async (req, res) => {
+  const userId = req.user.id;
+  console.log(`[auth] DELETE account requested for user: ${userId}`);
+
+  try {
+    // 1. Delete GCS files (raw + proxy)
+    const bucket = storageConfig.bucket;
+    if (bucket) {
+      for (const prefix of [`raw/${userId}/`, `proxies/${userId}/`]) {
+        try {
+          const [files] = await bucket.getFiles({ prefix });
+          await Promise.all(files.map(f => f.delete().catch(() => {})));
+          console.log(`[auth] Deleted ${files.length} GCS files under ${prefix}`);
+        } catch (gcsErr) {
+          // Non-fatal — proceed with DB + auth deletion even if GCS fails
+          console.warn(`[auth] GCS deletion failed for ${prefix}: ${gcsErr.message}`);
+        }
+      }
+    }
+
+    // 2. Delete DB rows (non-fatal individually)
+    await supabaseAdmin.from('video_analyses').delete().eq('user_id', userId);
+    await supabaseAdmin.from('profiles').delete().eq('id', userId);
+
+    // 3. Delete from Supabase Auth last (invalidates the token used for this request)
+    const { error: authErr } = await supabaseAdmin.auth.admin.deleteUser(userId);
+    if (authErr) throw authErr;
+
+    console.log(`[auth] Account fully deleted for user: ${userId}`);
+    res.json({ success: true });
+
+  } catch (err) {
+    console.error('[auth] Account deletion error:', err);
+    res.status(500).json({ error: 'Account deletion failed. Please contact support.' });
   }
 });
 

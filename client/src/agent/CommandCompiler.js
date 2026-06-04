@@ -613,6 +613,24 @@ function compileChat(step, ctx) {
     ]);
 }
 
+function compileCreateBrollTrack(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'createBrollTrack', { trackId: step.track_id },
+            { source_step_id: step.step_id, description: 'Create B-Roll track' }),
+    ]);
+}
+
+function compileMoveClipToTrack(step, ctx) {
+    if (!step.clip_id)      return skipped(step.step_id, 'move_clip_to_track requires clip_id');
+    if (!step.from_track_id) return skipped(step.step_id, 'move_clip_to_track requires from_track_id');
+    if (!step.to_track_id)  return skipped(step.step_id, 'move_clip_to_track requires to_track_id');
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'moveClipToTrack',
+            { fromTrackId: step.from_track_id, clipId: step.clip_id, toTrackId: step.to_track_id },
+            { source_step_id: step.step_id, description: step.reason || `Move clip ${step.clip_id} to b-roll track` }),
+    ]);
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // §7  COMMAND REGISTRY
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -670,6 +688,10 @@ const COMMAND_REGISTRY = new Map([
     ['remove_repetition', { compiler: compileRemoveRepetition }],
     ['reorder_segment', { compiler: compileReorderSegment }],
     ['chat', { compiler: compileChat }],
+
+    // Organize / B-Roll
+    ['create_broll_track', { compiler: compileCreateBrollTrack }],
+    ['move_clip_to_track', { compiler: compileMoveClipToTrack }],
 
     // Undo / Redo
     ['undo_action', { compiler: compileUndo }],

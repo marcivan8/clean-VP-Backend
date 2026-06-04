@@ -28,6 +28,8 @@ export default function AuthPage() {
     const [error, setError]       = useState(null);
     const [success, setSuccess]   = useState(null);
     const [currentUser, setCurrentUser] = useState(undefined); // undefined = loading
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [deleteLoading, setDeleteLoading] = useState(false);
 
     // Check current session on mount
     useEffect(() => {
@@ -130,6 +132,32 @@ export default function AuthPage() {
         setLoading(false);
     };
 
+    const handleDeleteAccount = async () => {
+        setDeleteLoading(true);
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            const res = await fetch('/api/auth/account', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+                },
+            });
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.error || 'Erreur lors de la suppression.');
+            }
+            await supabase.auth.signOut();
+            clearSession();
+            navigate('/');
+        } catch (err) {
+            setError(err.message);
+            setShowDeleteConfirm(false);
+        } finally {
+            setDeleteLoading(false);
+        }
+    };
+
     // ── Logged-in view ────────────────────────────────────────────────────────
     if (currentUser) {
         return (
@@ -159,6 +187,68 @@ export default function AuthPage() {
                             >
                                 {loading ? <Spinner /> : 'Se déconnecter'}
                             </button>
+                        </div>
+
+                        {/* Danger zone */}
+                        <div style={{
+                            width: '100%', borderTop: '0.5px solid var(--glass-stroke)',
+                            paddingTop: 20, marginTop: 4,
+                        }}>
+                            {!showDeleteConfirm ? (
+                                <button
+                                    onClick={() => setShowDeleteConfirm(true)}
+                                    style={{
+                                        width: '100%', background: 'none', border: 'none',
+                                        cursor: 'pointer', fontSize: 13, fontFamily: 'inherit',
+                                        color: 'var(--fg-4)', padding: '6px 0',
+                                        transition: 'color 0.15s',
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.color = 'var(--coral)'}
+                                    onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-4)'}
+                                >
+                                    Supprimer mon compte
+                                </button>
+                            ) : (
+                                <div style={{
+                                    padding: '14px 16px', borderRadius: 12,
+                                    background: 'color-mix(in oklch, var(--coral) 10%, transparent)',
+                                    border: '0.5px solid color-mix(in oklch, var(--coral) 28%, transparent)',
+                                    display: 'flex', flexDirection: 'column', gap: 12,
+                                }}>
+                                    <p style={{ margin: 0, fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.5 }}>
+                                        Cette action est <strong>permanente et irréversible</strong>. Tous tes fichiers et projets seront supprimés immédiatement.
+                                    </p>
+                                    <div style={{ display: 'flex', gap: 8 }}>
+                                        <button
+                                            onClick={handleDeleteAccount}
+                                            disabled={deleteLoading}
+                                            style={{
+                                                flex: 1, height: 36, borderRadius: 8, border: 'none',
+                                                cursor: deleteLoading ? 'not-allowed' : 'pointer',
+                                                background: 'var(--coral)', color: '#fff',
+                                                fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                                                opacity: deleteLoading ? 0.7 : 1,
+                                            }}
+                                        >
+                                            {deleteLoading ? <Spinner /> : 'Confirmer la suppression'}
+                                        </button>
+                                        <button
+                                            onClick={() => setShowDeleteConfirm(false)}
+                                            disabled={deleteLoading}
+                                            style={{
+                                                flex: 1, height: 36, borderRadius: 8,
+                                                border: '0.5px solid var(--glass-stroke)',
+                                                cursor: 'pointer', background: 'var(--bg-3)',
+                                                color: 'var(--fg-2)', fontSize: 13,
+                                                fontFamily: 'inherit',
+                                            }}
+                                        >
+                                            Annuler
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </Card>

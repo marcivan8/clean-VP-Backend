@@ -103,12 +103,30 @@ export class ContextGenerator {
             else clipType = 'generic_video';
         }
 
-        // --- Transcript Summary ---
-        const hasTranscript = captions && captions.length > 0;
+        // --- Transcript Summary (all clips, timeline order) ---
+        // Build by iterating video clips in start-time order and looking up each
+        // clip's transcript in the per-file map. Falls back to the legacy captions
+        // array for sessions that pre-date the transcripts map.
+        const basename = (p) => (p || '').split(/[\\/]/).pop();
+        const sortedVideoClips = [...videoClips].sort((a, b) => a.start - b.start);
+        const allWords = [];
+        sortedVideoClips.forEach(clip => {
+            const clipBase = basename(clip.name || '');
+            const asset    = assets?.find(a => a.id === clip.assetId);
+            const assetBase = basename(asset?.name || '');
+            const key = (state.transcripts && (state.transcripts[clipBase] || state.transcripts[assetBase]))
+                ? (state.transcripts[clipBase] ? clipBase : assetBase)
+                : null;
+            const words = key ? state.transcripts[key] : [];
+            if (words.length > 0) allWords.push(...words);
+        });
+        // Fallback: if no per-file transcripts yet, use legacy captions
+        const transcriptWords = allWords.length > 0 ? allWords : (captions || []);
+        const hasTranscript = transcriptWords.length > 0;
         let transcriptSummary = '';
         if (hasTranscript) {
-            transcriptSummary = captions.slice(0, 40).map(c => c.word).join(' ');
-            if (captions.length > 40) transcriptSummary += '...';
+            transcriptSummary = transcriptWords.slice(0, 120).map(c => c.word || '').join(' ');
+            if (transcriptWords.length > 120) transcriptSummary += '...';
         }
 
         // --- Energy Profile from pacing segments ---
