@@ -10,6 +10,7 @@ import useJobStore from '../store/useJobStore.js';
 import { transcriptionManager } from './TranscriptionManager.js';
 import { editSessionMemory } from './EditSessionMemory.js';
 import useAIStore from '../store/useAIStore.js';
+import { EventBus, EVENT_TYPES } from './EventBus.js';
 
 const logStep = (message) => useAIStore.getState().addLog({
     id: `step-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -229,6 +230,56 @@ export class EditJobManager {
         }
 
         actor.send({ type: 'PLAN_GENERATED', plan: planResult.plan });
+
+        // ── Approval gate ─────────────────────────────────────────────────────
+        // If the plan is marked requiresApproval, pause and wait for the user to
+        // confirm before executing. The ApprovalDialog component in IDELayout
+        // listens for APPROVAL_REQUIRED on the EventBus and shows Approve/Cancel.
+        if (planResult.plan?.requiresApproval) {
+            logStep('Waiting for your approval…');
+            useAIStore.getState().setIsAnalyzing(false); // stop spinner while waiting
+
+            const stepLines = (planResult.plan.steps || [])
+                .map(s => s.reason || s.action)
+                .filter(Boolean)
+                .map(l => `• ${l}`)
+                .join('\n');
+
+            EventBus.emit(EVENT_TYPES.APPROVAL_REQUIRED, {
+                jobId,
+                title: 'Approve AI Edit Plan',
+                description: planResult.plan.approvalMessage ||
+                    `The AI wants to make ${planResult.plan.step_count} edit(s) to your timeline.`,
+                actions: stepLines || null,
+                reasons: ['These changes will modify your timeline. You can undo afterwards.'],
+            });
+
+            const approved = await new Promise((resolve) => {
+                const unsubGrant = EventBus.on(EVENT_TYPES.APPROVAL_GRANTED, ({ jobId: id }) => {
+                    if (id !== jobId) return;
+                    unsubGrant(); unsubDeny();
+                    resolve(true);
+                });
+                const unsubDeny = EventBus.on(EVENT_TYPES.APPROVAL_DENIED, ({ jobId: id }) => {
+                    if (id !== jobId) return;
+                    unsubGrant(); unsubDeny();
+                    resolve(false);
+                });
+            });
+
+            useAIStore.getState().setIsAnalyzing(true); // resume spinner after decision
+
+            if (!approved) {
+                return {
+                    success: false,
+                    jobId,
+                    operation: 'chat',
+                    message: 'Edit plan cancelled. Let me know if you want a different approach.',
+                };
+            }
+
+            logStep('Approved — starting execution…');
+        }
 
         // ── Record to session memory (before execution) ───────────────────────
         editSessionMemory.recordEdit(

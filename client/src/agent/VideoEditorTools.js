@@ -313,8 +313,8 @@ export class VideoEditorTools {
             case 'undo_action': return this.undo();
 
             // Long-Form Intelligence Engine
-            case 'analyze_structure': return await this.analyzeStructure(action.args);
-            case 'long_form_edit': return await this.longFormEdit(action.args);
+            case 'analyze_structure': return await this.analyzeStructure(action.args, action.signal);
+            case 'long_form_edit': return await this.longFormEdit(action.args, action.signal);
             case 'find_hook': return await this.findHook();
             case 'remove_repetition': return await this.removeRepetition(action.args);
             case 'reorder_segment': return this.reorderSegment(action.args);
@@ -487,9 +487,9 @@ export class VideoEditorTools {
     /**
      * Run ContentAnalyzer and return the full analysis for approval.
      */
-    async analyzeStructure({ platform = null, targetDuration = null } = {}) {
+    async analyzeStructure({ platform = null, targetDuration = null } = {}, signal = null) {
         console.log('[VideoEditorTools] Running ContentAnalyzer...');
-        const result = await ContentAnalyzer.analyze({ platform, targetDuration });
+        const result = await ContentAnalyzer.analyze({ platform, targetDuration, signal });
         return {
             success: result.success,
             message: result.success
@@ -509,14 +509,20 @@ export class VideoEditorTools {
      *      so the video was always left unchanged. Now the sub-plan is compiled
      *      and executed directly here.
      */
-    async longFormEdit({ editMode, platform, targetDuration } = {}) {
+    async longFormEdit({ editMode, platform, targetDuration } = {}, signal = null) {
         console.log('[VideoEditorTools] Building LongFormEditPlanner plan...');
 
-        // Get or run content analysis
+        // Get or run content analysis — pass signal so the backend fetch is
+        // cancelled if the outer 120 s tool timeout fires.
         let analysis = ContentAnalyzer.getCachedAnalysis();
         if (!analysis?.success) {
             console.log('[VideoEditorTools] No cached analysis. Running ContentAnalyzer first...');
-            analysis = await ContentAnalyzer.analyze({ platform, targetDuration });
+            analysis = await ContentAnalyzer.analyze({ platform, targetDuration, signal });
+        }
+
+        // Bail out immediately if the caller timed out while we were analysing.
+        if (signal?.aborted) {
+            return { success: false, message: 'Cancelled (timed out during content analysis).' };
         }
 
         if (!analysis?.success) {
@@ -566,9 +572,17 @@ export class VideoEditorTools {
             };
         }
 
+        // Guard again — compilation can be slow on large plans.
+        if (signal?.aborted) {
+            return { success: false, message: 'Cancelled (timed out during plan compilation).' };
+        }
+
         console.log(`[VideoEditorTools] Compiled ${compileResult.commands.length} commands — executing...`);
 
-        const executionResult = await mediaExecutionEngine.execute(compileResult.commands, null);
+        // Pass signal into the inner execution so its poller is cancelled when
+        // the outer 120 s timeout fires — prevents ghost _applySegmentsToTimeline
+        // calls on an already-abandoned job.
+        const executionResult = await mediaExecutionEngine.execute(compileResult.commands, null, signal);
 
         return {
             success: executionResult.success,

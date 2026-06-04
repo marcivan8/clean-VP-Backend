@@ -506,15 +506,23 @@ export class MediaExecutionEngine {
                 // 120 s cap per tool call — belt-and-suspenders below the 180 s
                 // WorkflowController timeout. Ensures a hanging ContentAnalyzer
                 // API call produces a clean rejection instead of a zombie promise.
+                //
+                // toolAbortController is aborted when the timeout fires so the
+                // orphaned tools.execute() promise actually stops: ContentAnalyzer
+                // cancels its fetch and the inner mediaExecutionEngine job cancels
+                // its poller — preventing ghost _applySegmentsToTimeline calls.
                 const TOOL_TIMEOUT_MS = 120_000;
+                const toolAbortController = new AbortController();
                 const timeoutPromise = new Promise((_, reject) =>
-                    setTimeout(
-                        () => reject(new Error(`Tool '${toolName}' timed out after ${TOOL_TIMEOUT_MS / 1000}s`)),
-                        TOOL_TIMEOUT_MS
-                    )
+                    setTimeout(() => {
+                        toolAbortController.abort();
+                        reject(new Error(`Tool '${toolName}' timed out after ${TOOL_TIMEOUT_MS / 1000}s`));
+                    }, TOOL_TIMEOUT_MS)
                 );
+                // Also abort if the outer job is cancelled (e.g. user presses stop)
+                job.signal.addEventListener('abort', () => toolAbortController.abort(), { once: true });
                 const result = await Promise.race([
-                    tools.execute({ name: toolName, args }),
+                    tools.execute({ name: toolName, args, signal: toolAbortController.signal }),
                     timeoutPromise
                 ]);
                 return { action, success: result.success !== false, message: result.message || action, result };
@@ -790,7 +798,50 @@ export class MediaExecutionEngine {
             return;
         }
 
-        const baseClip = videoTrack.clips[0];
+        // ── Multi-clip source matching ────────────────────────────────────────
+        // When there is more than one video clip, we must identify WHICH clip the
+        // processed file belongs to and only replace that clip. Replacing all clips
+        // with segments from a single file produces wrong timestamps for the other
+        // clips and destroys them. The matching key is `uploadedFilePath` (set by
+        // the media proxy upload) compared against each clip's asset name / url.
+        const basename = (p) => (p || '').split(/[\\/]/).pop();
+        const processedBase = basename(timelineStore.uploadedFilePath || '');
+
+        let baseClip;
+        if (videoTrack.clips.length === 1) {
+            baseClip = videoTrack.clips[0];
+        } else {
+            // Try to match by filename
+            const sortedByStart = [...videoTrack.clips].sort((a, b) => a.start - b.start);
+            if (processedBase) {
+                baseClip = sortedByStart.find(c => {
+                    const assetName = basename(
+                        timelineStore.assets?.find(a => a.id === c.assetId)?.name || ''
+                    );
+                    return assetName === processedBase ||
+                           basename(c.name || '') === processedBase ||
+                           basename(c.url || '') === processedBase ||
+                           basename(c.sourceUrl || '') === processedBase;
+                });
+            }
+
+            if (!baseClip) {
+                // Cannot safely identify the target clip — bail out rather than
+                // destroy all clips with mismatched timestamps.
+                console.error(
+                    `[MediaExecutionEngine] _applySegmentsToTimeline: ${videoTrack.clips.length} clips on track ` +
+                    `but cannot match processed file "${processedBase}" to any clip. Skipping to prevent data loss.`
+                );
+                useAIStore.getState().addLog({
+                    id: `step-multiclip-${Date.now()}`,
+                    type: 'warning',
+                    message: `Could not identify which clip to edit (${videoTrack.clips.length} clips on track). ` +
+                        `Please select the clip you want to process and run the operation again.`,
+                    timestamp: new Date().toLocaleTimeString()
+                });
+                return;
+            }
+        }
 
         // Filter out degenerate segments
         const validSegs = segments.filter(s => s.duration > 0.05);
@@ -799,35 +850,25 @@ export class MediaExecutionEngine {
             return;
         }
 
-        // Sanity guard: if resulting active duration is < 10% of the original clip
-        // duration (and the original is > 30s), the detection almost certainly went
-        // wrong (e.g. wrong threshold, empty transcript, or file mismatch).
+        // Sanity guard: active duration < 10% of original clip → detection went wrong
         const originalDuration = baseClip.duration || 0;
-        const totalActiveTime = validSegs.reduce((t, s) => t + s.duration, 0);
+        const totalActiveTime  = validSegs.reduce((t, s) => t + s.duration, 0);
         if (originalDuration > 30 && totalActiveTime < originalDuration * 0.10) {
             console.error(
-                `[MediaExecutionEngine] _applySegmentsToTimeline: REJECTED — active duration ${totalActiveTime.toFixed(1)}s is less than 10% of original ${originalDuration.toFixed(1)}s. Detection likely failed. No changes made.`
+                `[MediaExecutionEngine] _applySegmentsToTimeline: REJECTED — active duration ` +
+                `${totalActiveTime.toFixed(1)}s is less than 10% of original ${originalDuration.toFixed(1)}s.`
             );
             useAIStore.getState().addLog({
                 id: `step-sanity-${Date.now()}`,
                 type: 'error',
-                message: `Detection result rejected — only ${totalActiveTime.toFixed(1)}s active out of ${originalDuration.toFixed(1)}s. Try running again or adjusting settings.`,
+                message: `Detection result rejected — only ${totalActiveTime.toFixed(1)}s active out of ` +
+                    `${originalDuration.toFixed(1)}s. Try running again or adjusting settings.`,
                 timestamp: new Date().toLocaleTimeString()
             });
             return;
         }
 
-        // Remove ALL existing clips on the video track so we start fresh
-        // (avoids leaving stale clips when there are multiple clips already)
-        const allClipIds = videoTrack.clips.map(c => c.id);
-        allClipIds.forEach(id => {
-            timelineStore.removeClip(videoTrack.id, id);
-        });
-
-        // Re-fetch the track to get the latest state
-        let currentStartTime = 0;
         const ts = Date.now();
-
         useAIStore.getState().addLog({
             id: `step-seg-${ts}`,
             type: 'step',
@@ -835,8 +876,13 @@ export class MediaExecutionEngine {
             timestamp: new Date().toLocaleTimeString()
         });
 
+        // Remove only the target clip (not all clips on the track)
+        timelineStore.removeClip(videoTrack.id, baseClip.id);
+
+        // Insert replacement clips starting at baseClip's original timeline position
+        let currentStartTime = baseClip.start;
+
         validSegs.forEach((seg, i) => {
-            // Prefer sourceUrl (persistent GCS URL) over url (may be a dead blob URL after reload)
             const persistentUrl = baseClip.sourceUrl || baseClip.url || '';
             const newClip = {
                 ...baseClip,
@@ -854,12 +900,24 @@ export class MediaExecutionEngine {
             console.log(`[MediaExecutionEngine]   clip_${prefix}_${i}: timeline ${newClip.start.toFixed(2)}s–${currentStartTime.toFixed(2)}s  source ${seg.start.toFixed(2)}s–${seg.end.toFixed(2)}s`);
         });
 
-        console.log(`[MediaExecutionEngine] ✅ Timeline updated: ${validSegs.length} clips, total duration ${currentStartTime.toFixed(2)}s`);
+        // Shift any clips that came AFTER the replaced clip to close or open the gap
+        const durationDiff = currentStartTime - (baseClip.start + originalDuration);
+        if (Math.abs(durationDiff) > 0.01) {
+            const afterStart = baseClip.start + originalDuration;
+            const freshTrack = useTimelineStore.getState().tracks?.find(t => t.id === videoTrack.id);
+            (freshTrack?.clips || [])
+                .filter(c => c.start >= afterStart - 0.01 && !c.id.startsWith(`clip_${prefix}_${ts}_`))
+                .sort((a, b) => a.start - b.start)
+                .forEach(c => {
+                    timelineStore.updateClip(videoTrack.id, c.id, { start: c.start + durationDiff }, { skipHistory: true });
+                });
+        }
 
-        // Auto-preview: seek to the start and play for 4 seconds so the user
-        // immediately sees the result without having to press play manually.
+        console.log(`[MediaExecutionEngine] ✅ Applied ${validSegs.length} segments to "${baseClip.name}", total active ${currentStartTime.toFixed(2)}s`);
+
+        // Auto-preview: seek to the edited clip's start and briefly play
         const ts2 = useTimelineStore.getState();
-        ts2.seek(0);
+        ts2.seek(baseClip.start);
         ts2.setIsPlaying(true);
         setTimeout(() => {
             useTimelineStore.getState().setIsPlaying(false);

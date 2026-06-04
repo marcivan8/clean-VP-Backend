@@ -400,9 +400,66 @@ export class EditPlanner {
     }
 
     static planLongFormEdit(planId, constraints) {
+        const editMode = constraints?.editMode || 'CLEAN_EDIT';
+        const actions   = constraints?.actions || [];
+
+        // CLEAN_EDIT = "clean up" / "remove silences" / "remove filler" type requests.
+        // Route to direct operations instead of the long_form_edit VideoEditorTool,
+        // which requires ContentAnalyzer (a 30-60 s GPT-4 call) and can timeout on
+        // long videos. Direct ops are faster, more reliable, and produce correct results.
+        if (editMode === 'CLEAN_EDIT') {
+            const steps = [];
+            let n = 1;
+
+            // Silence removal is always included for CLEAN_EDIT
+            const wantsSilence = actions.length === 0 || actions.some(a =>
+                a === 'silence_removal' || a === 'remove_silences');
+            if (wantsSilence) {
+                steps.push({
+                    step_id: `step_${n++}`,
+                    action: 'silence_removal',
+                    threshold: '-30dB',
+                    min_duration: 0.5,
+                    padding: 0.1,
+                    reason: 'Remove dead air and long pauses',
+                });
+            }
+
+            // Filler removal — always include unless only pacing was requested
+            const wantsFiller = actions.length === 0 || actions.some(a =>
+                a === 'remove_filler_words' || a === 'filler');
+            if (wantsFiller) {
+                steps.push({
+                    step_id: `step_${n++}`,
+                    action: 'remove_filler_words',
+                    reason: 'Remove ums, uhs, and filler phrases',
+                });
+            }
+
+            return {
+                plan_id: planId,
+                operation: 'long_form_edit',
+                step_count: steps.length,
+                requiresApproval: true,
+                steps,
+            };
+        }
+
+        // FULL_BUILD / YOUTUBE_OPTIMIZED — keep the full ContentAnalyzer pipeline
         return {
-            plan_id: planId, operation: 'long_form_edit', step_count: 1, requiresApproval: true, constraints: constraints || {},
-            steps: [{ step_id: 'step_1', action: 'long_form_edit', editMode: constraints?.editMode || 'CLEAN_EDIT', platform: constraints?.platform || null, targetDuration: constraints?.targetDuration || null, reason: 'Long-form edit plan will be generated and shown for approval' }]
+            plan_id: planId,
+            operation: 'long_form_edit',
+            step_count: 1,
+            requiresApproval: true,
+            constraints: constraints || {},
+            steps: [{
+                step_id: 'step_1',
+                action: 'long_form_edit',
+                editMode,
+                platform: constraints?.platform || null,
+                targetDuration: constraints?.targetDuration || null,
+                reason: `Full ${editMode} edit — content analysis + structural rebuild`,
+            }],
         };
     }
 
