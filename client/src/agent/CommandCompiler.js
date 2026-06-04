@@ -322,12 +322,24 @@ function compileSetAspectRatio(step, ctx) {
 // ── Audio commands ─────────────────────────────────────────────────────────────
 
 function compileSilenceRemoval(step, ctx) {
+    // When EditPlanner provides a specific file_path (multi-clip scenario), use it
+    // directly instead of the global $uploaded_file symbol. This ensures each clip's
+    // silence detection runs on its own source file, not the last-uploaded file.
+    const filename     = step.file_path || '$uploaded_file';
+    const symbolicRefs = filename === '$uploaded_file' ? ['$uploaded_file'] : [];
     return ok(step.step_id, [
         cmd(ENGINE.API, 'silenceDetect', {
             endpoint: '/api/silence/detect',
             method: 'POST',
-            payload: { filename: '$uploaded_file', threshold: step.threshold || '-30dB', duration: step.min_duration || 0.5 },
-        }, { source_step_id: step.step_id, symbolic_refs: ['$uploaded_file'], description: 'Silence detection' }),
+            payload:  { filename, threshold: step.threshold || '-30dB', duration: step.min_duration || 0.5 },
+            clip_id:  step.clip_id || null,   // forwarded to _applySegmentsToTimeline
+        }, {
+            source_step_id: step.step_id,
+            symbolic_refs: symbolicRefs,
+            description: step.clip_id
+                ? `Silence detection (clip ${step.clip_id})`
+                : 'Silence detection',
+        }),
     ]);
 }
 
@@ -350,12 +362,21 @@ function compileMuteClip(step, ctx) {
 }
 
 function compileRemoveFillerWords(step, ctx) {
+    const filename     = step.file_path || '$uploaded_file';
+    const symbolicRefs = filename === '$uploaded_file' ? ['$uploaded_file'] : [];
     return ok(step.step_id, [
         cmd(ENGINE.API, 'fillerDetect', {
             endpoint: '/api/audio/filler/detect',
             method: 'POST',
-            payload: { filename: '$uploaded_file', language: step.language || 'en' },
-        }, { source_step_id: step.step_id, symbolic_refs: ['$uploaded_file'], description: 'Remove filler words (ums, uhs)' }),
+            payload:  { filename, language: step.language || 'en' },
+            clip_id:  step.clip_id || null,
+        }, {
+            source_step_id: step.step_id,
+            symbolic_refs: symbolicRefs,
+            description: step.clip_id
+                ? `Remove filler words (clip ${step.clip_id})`
+                : 'Remove filler words (ums, uhs)',
+        }),
     ]);
 }
 

@@ -308,13 +308,74 @@ export class EditPlanner {
     }
 
     static planSilenceRemoval(planId, constraints) {
-        return this.buildPlan(planId, 'silence_removal', [
-            { step_id: 'step_1', action: ACTIONS.SILENCE_REMOVAL, threshold: constraints.threshold || '-30dB', min_duration: constraints.min_duration || 0.5, padding: constraints.padding || 0.1 }
-        ]);
+        const state = useTimelineStore.getState();
+        const videoTrack = state.tracks?.find(t => t.type === 'video');
+        const clips = (videoTrack?.clips || []).slice().sort((a, b) => a.start - b.start);
+
+        // Single clip — use the global $uploaded_file symbol (resolved at execution time)
+        if (clips.length <= 1) {
+            return this.buildPlan(planId, 'silence_removal', [
+                { step_id: 'step_1', action: ACTIONS.SILENCE_REMOVAL, threshold: constraints.threshold || '-30dB', min_duration: constraints.min_duration || 0.5, padding: constraints.padding || 0.1 }
+            ]);
+        }
+
+        // Multiple clips — one step per clip, each carrying its own file path so
+        // silence detection runs on the correct source file and _applySegmentsToTimeline
+        // only replaces that specific clip (not the whole track).
+        const steps = clips.map((clip, i) => {
+            const asset = state.assets?.find(a => a.id === clip.assetId);
+            let filePath = null;
+
+            // Derive raw GCS path from proxy URL: proxies/userId/file.mov/proxy.mp4 → raw/userId/file.mov
+            if (asset?.proxyUrl?.startsWith('proxies/')) {
+                const parts = asset.proxyUrl.split('/');
+                if (parts.length >= 3) filePath = `raw/${parts[1]}/${parts[2]}`;
+            }
+            // Fall back to sourceUrl if it already looks like a raw path
+            if (!filePath && clip.sourceUrl?.startsWith('raw/')) filePath = clip.sourceUrl;
+
+            return {
+                step_id: `step_${i + 1}`,
+                action: ACTIONS.SILENCE_REMOVAL,
+                threshold:    constraints.threshold   || '-30dB',
+                min_duration: constraints.min_duration || 0.5,
+                padding:      constraints.padding      || 0.1,
+                clip_id:   clip.id,    // which clip to replace after detection
+                file_path: filePath,   // which file to send to the backend
+            };
+        });
+
+        return this.buildPlan(planId, 'silence_removal', steps);
     }
 
     static planFillerRemoval(planId) {
-        return this.buildPlan(planId, 'remove_filler_words', [{ step_id: 'step_1', action: 'remove_filler_words' }]);
+        const state = useTimelineStore.getState();
+        const videoTrack = state.tracks?.find(t => t.type === 'video');
+        const clips = (videoTrack?.clips || []).slice().sort((a, b) => a.start - b.start);
+
+        if (clips.length <= 1) {
+            return this.buildPlan(planId, 'remove_filler_words', [{ step_id: 'step_1', action: 'remove_filler_words' }]);
+        }
+
+        // Per-clip filler removal for multi-clip timelines (same pattern as silence removal)
+        const steps = clips.map((clip, i) => {
+            const asset = state.assets?.find(a => a.id === clip.assetId);
+            let filePath = null;
+            if (asset?.proxyUrl?.startsWith('proxies/')) {
+                const parts = asset.proxyUrl.split('/');
+                if (parts.length >= 3) filePath = `raw/${parts[1]}/${parts[2]}`;
+            }
+            if (!filePath && clip.sourceUrl?.startsWith('raw/')) filePath = clip.sourceUrl;
+
+            return {
+                step_id: `step_${i + 1}`,
+                action: 'remove_filler_words',
+                clip_id:   clip.id,
+                file_path: filePath,
+            };
+        });
+
+        return this.buildPlan(planId, 'remove_filler_words', steps);
     }
 
     static planAudioDenoise(planId, constraints) {

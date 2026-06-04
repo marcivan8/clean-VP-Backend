@@ -697,7 +697,8 @@ export class MediaExecutionEngine {
             // ── 4. Filler word removal ────────────────────────────────────
             if (command.action === 'fillerDetect' && result.activeSegments) {
                 console.log(`[MediaExecutionEngine] ✂️  fillerDetect: ${result.fillerCount} fillers removed, ${result.activeSegments.length} active segments`);
-                this._applySegmentsToTimeline(result.activeSegments, 'filler');
+                const fillerClipId = command.args?.clip_id || null;
+                this._applySegmentsToTimeline(result.activeSegments, 'filler', fillerClipId);
             }
 
             // ── 5. Audio denoise / normalize ──────────────────────────────
@@ -761,7 +762,10 @@ export class MediaExecutionEngine {
                     console.warn('[MediaExecutionEngine] ⚠️  silenceDetect returned no activeSegments — nothing to cut');
                 } else {
                     console.log(`[MediaExecutionEngine] ✂️  silenceDetect: applying ${activeSegments.length} segments`);
-                    this._applySegmentsToTimeline(activeSegments, 'silence');
+                    // clip_id is set when EditPlanner generated a per-clip step (multi-clip
+                    // timeline) so we replace only that specific clip with the correct segments.
+                    const clipId = command.args?.clip_id || null;
+                    this._applySegmentsToTimeline(activeSegments, 'silence', clipId);
                 }
             }
 
@@ -785,7 +789,7 @@ export class MediaExecutionEngine {
      * @param {Array<{start,end,duration}>} segments
      * @param {string} prefix  – used in generated clip IDs for debugging
      */
-    _applySegmentsToTimeline(segments, prefix = 'seg') {
+    _applySegmentsToTimeline(segments, prefix = 'seg', targetClipId = null) {
         const timelineStore = useTimelineStore.getState();
         const videoTrack    = timelineStore.tracks?.find(t => t.type === 'video');
 
@@ -798,17 +802,22 @@ export class MediaExecutionEngine {
             return;
         }
 
-        // ── Multi-clip source matching ────────────────────────────────────────
-        // When there is more than one video clip, we must identify WHICH clip the
-        // processed file belongs to and only replace that clip. Replacing all clips
-        // with segments from a single file produces wrong timestamps for the other
-        // clips and destroys them. The matching key is `uploadedFilePath` (set by
-        // the media proxy upload) compared against each clip's asset name / url.
+        // ── Target clip resolution ────────────────────────────────────────────
+        // Priority 1: explicit clip ID from a per-clip step (multi-clip plans)
+        // Priority 2: match by processed filename (uploadedFilePath)
+        // Priority 3: only-clip on single-clip timelines
+        // Bail out (don't destroy the track) if multi-clip and no match found.
         const basename = (p) => (p || '').split(/[\\/]/).pop();
         const processedBase = basename(timelineStore.uploadedFilePath || '');
 
         let baseClip;
-        if (videoTrack.clips.length === 1) {
+        if (targetClipId) {
+            baseClip = videoTrack.clips.find(c => c.id === targetClipId);
+            if (!baseClip) {
+                console.warn(`[MediaExecutionEngine] _applySegmentsToTimeline: clip "${targetClipId}" not found — skipping`);
+                return;
+            }
+        } else if (videoTrack.clips.length === 1) {
             baseClip = videoTrack.clips[0];
         } else {
             // Try to match by filename
