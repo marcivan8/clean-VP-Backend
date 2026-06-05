@@ -60,6 +60,9 @@ const Timeline = () => {
                 width: Math.abs(dx),
                 height: Math.abs(dy),
             });
+            const zl = useTimelineStore.getState().zoomLevel;
+            const curTime = Math.max(0, (cur.x - LABEL_W) / zl);
+            useTimelineStore.getState().seek(curTime);
         };
 
         const onUp = (me) => {

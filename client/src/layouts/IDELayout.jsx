@@ -23,7 +23,6 @@ import { ClarificationDialog } from '../components/ClarificationDialog';
 import { ApprovalDialog } from '../components/ApprovalDialog';
 import { probeMedia } from '../utils/mediaProbe';
 import ProxyService from '../services/proxyService';
-import { AutonomousEditingPanel } from '../components/AutonomousEditingPanel';
 import useAIStore from '../store/useAIStore';
 import useSessionStore from '../store/useSessionStore';
 import AuthPromptModal from '../components/AuthPromptModal';
@@ -708,8 +707,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 </div>
             )}
 
-            <AutonomousEditingPanel />
-
             <div className="h-screen w-screen overflow-hidden flex flex-col font-sans selection:bg-primary/30 text-foreground" style={{ background: "linear-gradient(180deg, var(--bg-2), var(--bg-3))" }}>
                 {/* ── Background Aurora Glows ── */}
                 <div className="pointer-events-none fixed inset-0 overflow-hidden z-0" aria-hidden="true">
@@ -810,8 +807,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         <button onClick={() => setActiveTab('settings')} className={classNames("hidden md:block p-2 hover:bg-secondary rounded-full transition-colors", activeTab === 'settings' ? "bg-secondary text-foreground" : "")}>
                             <Settings className="w-4 h-4 text-muted-foreground" />
                         </button>
-
-                        <span className="studio-mono-label hidden md:inline" style={{ padding: "3px 8px", borderRadius: 5, border: "0.5px solid var(--line)" }}>⌘K</span>
 
                         <button
                             onClick={() => {
