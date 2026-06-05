@@ -445,9 +445,16 @@ const ReasoningPanel = () => {
     };
 
     const handleKeyDown = (e) => {
-        if (e.key === 'Enter') {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
             processCommand();
         }
+    };
+
+    const handleInput = (e) => {
+        const el = e.target;
+        el.style.height = 'auto';
+        el.style.height = Math.min(el.scrollHeight, 160) + 'px';
     };
 
     return (
@@ -581,25 +588,33 @@ const ReasoningPanel = () => {
             </div>
 
             {/* Input Area */}
-            <div className="p-3 border-t" style={{ borderColor: 'var(--line-soft)', background: 'var(--glass)' }}>
-                <div className="relative group">
-                    <input
+            <div className="p-4 border-t" style={{ borderColor: 'var(--line-soft)', background: 'var(--glass)' }}>
+                <div className="relative group rounded-lg overflow-hidden transition-all"
+                    style={{ border: '1px solid var(--line)', background: 'rgba(0,0,0,0.35)' }}
+                    onFocusCapture={e => e.currentTarget.style.border = '1px solid var(--accent)'}
+                    onBlurCapture={e => e.currentTarget.style.border = '1px solid var(--line)'}
+                >
+                    <textarea
                         ref={inputRef}
-                        type="text"
+                        rows={3}
                         disabled={isAnalyzing}
                         onKeyDown={handleKeyDown}
+                        onInput={handleInput}
                         placeholder={isAnalyzing ? "Agent is working…" : contextualSuggestion ? `Try: ${contextualSuggestion}` : "Tell the agent what to do…"}
-                        className="w-full rounded-md pl-3 pr-10 py-2 text-xs focus:outline-none focus:ring-1 transition-all disabled:opacity-50"
-                        style={{ background: 'rgba(0,0,0,0.3)', border: '0.5px solid var(--line)', color: 'var(--fg)', fontFamily: 'var(--f-sans)' }}
+                        className="w-full resize-none px-4 pt-3 pb-10 text-sm focus:outline-none transition-all disabled:opacity-50 placeholder:opacity-40"
+                        style={{ background: 'transparent', color: 'var(--fg)', fontFamily: 'var(--f-sans)', lineHeight: '1.5', minHeight: '88px', maxHeight: '160px' }}
                     />
-                    <button
-                        onClick={processCommand}
-                        disabled={isAnalyzing}
-                        className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded transition-opacity disabled:opacity-50"
-                        style={{ background: 'var(--accent)' }}
-                    >
-                        <ArrowRight className="w-3 h-3 text-white" />
-                    </button>
+                    <div className="absolute bottom-2.5 right-2.5 flex items-center gap-2">
+                        <span className="text-[10px] opacity-30" style={{ color: 'var(--fg)', fontFamily: 'var(--f-mono)' }}>⇧↵ newline</span>
+                        <button
+                            onClick={processCommand}
+                            disabled={isAnalyzing}
+                            className="p-1.5 rounded-md transition-all disabled:opacity-40 hover:opacity-90"
+                            style={{ background: 'var(--accent)' }}
+                        >
+                            <ArrowRight className="w-3.5 h-3.5 text-white" />
+                        </button>
+                    </div>
                 </div>
             </div>
         </aside>
