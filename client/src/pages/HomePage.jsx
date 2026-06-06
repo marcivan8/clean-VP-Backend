@@ -74,38 +74,6 @@ const Nav = () => {
     );
 };
 
-const TimelineTracks = () => {
-    const tracks = [
-        { color: "var(--accent)", clips: [[0, 12], [14, 28], [32, 22], [58, 18], [80, 14]] },
-        { color: "oklch(0.6 0.16 295)", clips: [[2, 18], [24, 34], [62, 20], [86, 10]] }, // violet
-        { color: "oklch(0.78 0.13 32)",  clips: [[0, 96]] }, // coral
-    ];
-    return (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {tracks.map((t, i) => (
-                <div key={i} style={{ position: "relative", height: 18, background: "var(--bg-2)", borderRadius: 4, overflow: "hidden" }}>
-                    {t.clips.map(([x, w], j) => (
-                        <div key={j} style={{
-                            position: "absolute", left: `${x}%`, width: `${w}%`, top: 2, bottom: 2,
-                            background: i === 2
-                                ? `repeating-linear-gradient(90deg, ${t.color} 0 1px, transparent 1px 4px)`
-                                : `linear-gradient(180deg, color-mix(in oklch, ${t.color} 70%, white) 0%, ${t.color} 100%)`,
-                            opacity: i === 2 ? 0.6 : 0.85,
-                            borderRadius: 3,
-                            border: i === 2 ? "0" : `0.5px solid color-mix(in oklch, ${t.color} 60%, black)`,
-                        }} />
-                    ))}
-                </div>
-            ))}
-            {/* Playhead */}
-            <div style={{ position: "relative", height: 4 }}>
-                <div style={{ position: "absolute", left: "38%", top: -68, height: 80, width: 1, background: "var(--fg)" }} />
-                <div style={{ position: "absolute", left: "calc(38% - 5px)", top: -72,
-                    width: 10, height: 10, borderRadius: 50, background: "var(--fg)" }} />
-            </div>
-        </div>
-    );
-};
 
 const HeroFrame = () => (
     <div style={{
@@ -113,144 +81,15 @@ const HeroFrame = () => (
         borderRadius: 28,
         overflow: "hidden",
         border: "0.5px solid var(--glass-stroke)",
-        background: "linear-gradient(180deg, var(--bg-2), var(--bg-3))",
         boxShadow: "var(--shadow-card)",
         aspectRatio: "16/9",
+        background: "var(--bg-2)",
     }}>
-        {/* Window chrome */}
-        <div style={{
-            display: "flex", alignItems: "center", gap: 12, padding: "14px 18px",
-            borderBottom: "0.5px solid var(--line-soft)",
-            background: "var(--glass)",
-        }}>
-            <div style={{ display: "flex", gap: 6 }}>
-                {["#ff5f57", "#febc2e", "#28c840"].map(c => (
-                    <div key={c} style={{ width: 11, height: 11, borderRadius: 50, background: c, opacity: 0.7 }} />
-                ))}
-            </div>
-            <div style={{ flex: 1, textAlign: "center", fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--fg-3)" }}>
-                vibed/studio &nbsp;·&nbsp; <span style={{ color: "var(--fg-2)" }}>“The North Wind” — Episode 03</span> · 04:18:22
-            </div>
-            <div className="mono" style={{ color: "var(--fg-3)" }}>⌘K</div>
-        </div>
-
-        {/* Canvas */}
-        <div style={{ display: "grid", gridTemplateColumns: "240px 1fr 280px", height: "calc(100% - 44px)" }}>
-            {/* Bin */}
-            <div className="hidden md:flex" style={{
-                borderRight: "0.5px solid var(--line-soft)",
-                padding: 16,
-                background: "linear-gradient(180deg, var(--glass), transparent)",
-                flexDirection: "column", gap: 10,
-            }}>
-                <div className="mono" style={{ color: "var(--fg-4)" }}>BIN · 38 CLIPS</div>
-                {["Cold open", "Interview · Mara", "B-roll · harbour", "Drone · sunrise", "Score · stems", "Voiceover v3"].map((n, i) => (
-                    <div key={n} style={{
-                        display: "flex", alignItems: "center", gap: 10, padding: "8px 10px",
-                        borderRadius: 10, background: i === 1 ? "var(--glass-2)" : "transparent",
-                        border: i === 1 ? "0.5px solid var(--glass-stroke)" : "0.5px solid transparent",
-                        fontSize: 12.5,
-                    }}>
-                        <div style={{
-                            width: 22, height: 22, borderRadius: 5,
-                            background: `linear-gradient(135deg, var(--accent), oklch(0.6 0.16 295))`,
-                            opacity: 0.5 + (i % 3) * 0.15,
-                        }} />
-                        <span>{n}</span>
-                        <span style={{ marginLeft: "auto", color: "var(--fg-4)", fontFamily: "var(--f-mono)", fontSize: 10 }}>
-                            {`00:${20 + i * 7}`}
-                        </span>
-                    </div>
-                ))}
-            </div>
-
-            {/* Viewer + timeline */}
-            <div style={{ display: "flex", flexDirection: "column" }}>
-                <div style={{ flex: 1, position: "relative", overflow: "hidden",
-                    background: "radial-gradient(60% 80% at 50% 40%, #1c1f24 0%, #0c0d10 100%)" }}>
-                    <div style={{
-                        position: "absolute", inset: 24, borderRadius: 8,
-                        background: `linear-gradient(180deg, oklch(0.4 0.05 268) 0%, oklch(0.2 0.04 268) 60%, oklch(0.12 0.02 260) 100%)`,
-                        overflow: "hidden", border: "0.5px solid rgba(255,255,255,0.06)",
-                    }}>
-                        <div style={{ position: "absolute", left: 0, right: 0, top: "62%", height: 1,
-                            background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent)" }} />
-                        <div style={{ position: "absolute", left: "30%", top: "32%", width: 6, height: "30%",
-                            background: "linear-gradient(180deg, oklch(0.85 0.08 60), transparent)" }} />
-                        <div className="mono" style={{ position: "absolute", left: 12, top: 10, color: "rgba(255,255,255,0.7)", fontSize: 10 }}>
-                            A001_C012 · 01:14:22:08
-                        </div>
-                        <div className="mono" style={{ position: "absolute", right: 12, top: 10, color: "rgba(255,255,255,0.5)", fontSize: 10 }}>
-                            ARRI 4.6K · ProRes 422 HQ
-                        </div>
-                        
-                        {/* floating AI suggestion */}
-                        <div style={{
-                            position: "absolute", right: 16, bottom: 16,
-                            padding: "10px 14px", borderRadius: 14,
-                            background: "rgba(20, 22, 26, 0.7)",
-                            backdropFilter: "blur(20px)",
-                            border: "0.5px solid rgba(255,255,255,0.12)",
-                            display: "flex", alignItems: "center", gap: 10,
-                            fontSize: 12,
-                        }}>
-                            <Sparkles className="w-4 h-4" style={{ color: "var(--accent)" }} />
-                            <span style={{ color: "rgba(255,255,255,0.9)" }}>Suggest a 4-frame J-cut into Mara’s line?</span>
-                            <span style={{
-                                fontFamily: "var(--f-mono)", fontSize: 10, color: "rgba(255,255,255,0.5)",
-                                padding: "2px 6px", borderRadius: 4, border: "0.5px solid rgba(255,255,255,0.18)",
-                            }}>↵ accept</span>
-                        </div>
-                    </div>
-                </div>
-                {/* Timeline */}
-                <div style={{ height: 130, padding: "12px 16px", borderTop: "0.5px solid var(--line-soft)",
-                    display: "flex", flexDirection: "column", gap: 8 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 11, color: "var(--fg-3)", fontFamily: "var(--f-mono)" }}>
-                        <span>00:00</span>
-                        <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
-                        <span>02:30</span>
-                        <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
-                        <span>05:00</span>
-                    </div>
-                    <TimelineTracks />
-                </div>
-            </div>
-
-            {/* Inspector */}
-            <div className="hidden lg:flex" style={{
-                borderLeft: "0.5px solid var(--line-soft)",
-                padding: 16,
-                background: "linear-gradient(180deg, var(--glass), transparent)",
-                flexDirection: "column", gap: 14,
-            }}>
-                <div className="mono" style={{ color: "var(--fg-4)" }}>INSPECTOR</div>
-                <div className="card card-pad" style={{ padding: 14, gap: 10, display: "flex", flexDirection: "column" }}>
-                    <div style={{ fontSize: 12.5, color: "var(--fg-2)" }}>Pacing</div>
-                    <div style={{ position: "relative", height: 6, borderRadius: 999, background: "var(--bg-3)" }}>
-                        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "62%",
-                            background: "linear-gradient(90deg, var(--accent), oklch(0.6 0.16 295))", borderRadius: 999 }} />
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--fg-3)", fontFamily: "var(--f-mono)" }}>
-                        <span>calm</span><span>cinematic</span><span>urgent</span>
-                    </div>
-                </div>
-                <div className="card card-pad" style={{ padding: 14, gap: 10, display: "flex", flexDirection: "column" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                        <div style={{ fontSize: 12.5, color: "var(--fg-2)" }}>Story beats</div>
-                        <span className="mono" style={{ color: "var(--fg-4)" }}>4 / 6</span>
-                    </div>
-                    {["Hook", "Setup", "Tension"].map(b => (
-                        <div key={b} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
-                            <CheckCircle2 className="w-3.5 h-3.5" style={{ color: "var(--accent)" }} /> {b}
-                        </div>
-                    ))}
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--fg-3)" }}>
-                        <div className="w-1.5 h-1.5 rounded-full bg-white/20" /> Reveal · drafting
-                    </div>
-                </div>
-            </div>
-        </div>
+        <img
+            src="/editor-preview.png"
+            alt="Vibed Studio editor"
+            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        />
     </div>
 );
 
@@ -265,7 +104,7 @@ const Hero = () => {
                         <span className="dot" />
                         <span>Vibed Studio · Private beta</span>
                         <span style={{ color: "var(--fg-4)" }}>—</span>
-                        <span>v0.6 “Cinema”</span>
+                        <span>v0.6 "Cinema"</span>
                     </div>
                     <h1 className="display fade-up fade-up-d1">
                         Create at the<br />
