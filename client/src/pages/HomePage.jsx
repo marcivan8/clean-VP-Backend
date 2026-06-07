@@ -436,7 +436,7 @@ const Footer = () => {
         </div>
         <div className="wrap" style={{ marginTop: 56, paddingTop: 24, borderTop: "0.5px solid var(--line-soft)",
           display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-          <span className="caption">© 2026 Vibed Studios — All footage in this page is illustrative.</span>
+          <span className="caption">© 2026 Vibed Studios</span>
           <span className="caption">Made with care, for makers.</span>
         </div>
       </footer>
