@@ -191,7 +191,7 @@ const DataPage = () => {
                                 question="Is VIBED GDPR compliant?" 
                                 answer={
                                     <>
-                                        Yes. VIBED operates under French and EU law. You have the right to access, correct, and delete your personal data at any time. To exercise these rights, contact us at the address below. Our full privacy policy is available <a href="#" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>here</a>.
+                                        Yes. VIBED operates under French and EU law. You have the right to access, correct, and delete your personal data at any time. To exercise these rights, contact us at the address below. Our full privacy policy is available <a href="/privacy" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>here</a>.
                                     </>
                                 } 
                             />
@@ -214,14 +214,14 @@ const DataPage = () => {
                             Questions about your data? We'll respond within 48 hours.
                         </p>
                         <a
-                            href="mailto:privacy@vibed.app"
+                            href="mailto:mariojaris2@gmail.com"
                             style={{
                                 fontFamily: 'var(--f-mono)', fontSize: 14, color: 'var(--accent)', textDecoration: 'none'
                             }}
                             onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
                             onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
                         >
-                            privacy@vibed.app
+                            mariojaris2@gmail.com
                         </a>
                     </div>
 

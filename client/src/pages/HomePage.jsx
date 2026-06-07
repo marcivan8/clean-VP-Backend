@@ -49,6 +49,7 @@ const Nav = () => {
                     <a href="#product" className="hover:text-foreground transition-colors">Product</a>
                     <a href="#workflow" className="hover:text-foreground transition-colors">Workflow</a>
                     <a href="#exports" className="hover:text-foreground transition-colors">Exports</a>
+                    <a href="/about" className="hover:text-foreground transition-colors">About</a>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     {user ? (
@@ -402,7 +403,8 @@ const FinalCTA = () => (
   
 const Footer = () => {
     const cols = {
-      "Legal": ["Your data"],
+      "Company": ["About"],
+      "Legal": ["Your data", "Privacy Policy"],
     };
     return (
       <footer style={{ borderTop: "0.5px solid var(--line)", padding: "64px 0 32px", background: "var(--bg)" }}>
@@ -427,7 +429,7 @@ const Footer = () => {
             <div key={k} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <div className="mono" style={{ color: "var(--fg-4)" }}>{k.toUpperCase()}</div>
               {items.map(it => (
-                <a key={it} href={it === 'Your data' ? '/data' : '#'} style={{ fontSize: 13.5, color: "var(--fg-2)" }} className="hover:text-foreground transition-colors">{it}</a>
+                <a key={it} href={it === 'Your data' ? '/data' : it === 'Privacy Policy' ? '/privacy' : it === 'About' ? '/about' : '#'} style={{ fontSize: 13.5, color: "var(--fg-2)" }} className="hover:text-foreground transition-colors">{it}</a>
               ))}
             </div>
           ))}

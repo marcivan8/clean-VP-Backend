@@ -354,6 +354,11 @@ export default function AuthPage() {
                     </button>
                 </form>
 
+                {/* AI Transparency Notice */}
+                <p style={{ margin: '20px 0 0', textAlign: 'center', fontSize: 12, color: 'var(--fg-4)', lineHeight: 1.4, padding: '0 10px' }}>
+                    VIBED utilise l'IA pour analyser et modifier votre contenu vidéo.
+                </p>
+
                 {/* Footer link */}
                 <p style={{ margin: '20px 0 0', textAlign: 'center', fontSize: 13, color: 'var(--fg-3)' }}>
                     {tab === 'signin'
