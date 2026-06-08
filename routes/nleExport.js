@@ -61,11 +61,30 @@ function resolveDimensions(aspectRatio) {
 }
 
 /**
+ * Extract the original source filename from a clip.
+ * GCS direct-upload paths are: raw/userId/TIMESTAMP-originalname.ext
+ * We strip the timestamp prefix so DaVinci can relink to the file on disk.
+ */
+function extractSourceFilename(clip) {
+    const candidates = [clip.sourceUrl, clip.url, clip.src].filter(Boolean);
+    for (const url of candidates) {
+        // Skip blob and proxy URLs — they have no useful filename
+        if (url.startsWith('blob:') || url.startsWith('/api/proxy')) continue;
+        // Extract last path segment before any query string
+        const raw = url.split('?')[0].split('/').pop();
+        if (!raw || raw === 'proxy.mp4') continue;
+        // Strip GCS timestamp prefix (10-13 digit unix ms prefix followed by a dash)
+        return raw.replace(/^\d{10,13}-/, '');
+    }
+    return null;
+}
+
+/**
  * Convert a Vibed track list into the OTIO-first Timeline model
  * expected by @chatoctopus/timeline.
  *
  * Vibed clip schema:
- *   { id, name, src|url, start, duration, offset, speed, volume, type }
+ *   { id, name, src|url, sourceUrl, start, duration, offset, speed, volume, type }
  *
  * OTIO clip schema:
  *   { kind: "clip", name, mediaReference: { type:"external", targetUrl, ... },
@@ -95,12 +114,13 @@ function buildOTIOTimeline(tracks, fps, aspectRatio, projectName, lib) {
         const clips   = (track.clips || []).sort((a, b) => a.start - b.start);
 
         const items = clips.map((clip) => {
-            let src = clip.url || clip.src || clip.name || 'media.mp4';
-            
-            // If the URL is a blob, proxy, or external HTTP link, NLEs cannot open it directly.
-            // We strip it down to the raw filename so the user can easily "Relink Media" in Premiere/DaVinci.
-            if (src.startsWith('blob:') || src.startsWith('/api/') || src.startsWith('http')) {
-                src = clip.name || src.split('?')[0].split('/').pop() || 'media.mp4';
+            // Use the original source filename (e.g. IMG_7447.MOV) so DaVinci can relink
+            // to the file on disk. Segment names like "Segment 1" go in clip.name only.
+            const originalFilename = extractSourceFilename(clip);
+
+            let src = clip.url || clip.src || '';
+            if (!src || src.startsWith('blob:') || src.startsWith('/api/') || src.startsWith('http')) {
+                src = originalFilename || clip.name || 'media.mp4';
             }
 
             const offsetSecs   = clip.offset  || 0;
@@ -110,13 +130,15 @@ function buildOTIOTimeline(tracks, fps, aspectRatio, projectName, lib) {
             const speed        = clip.speed || 1;
             const srcDuration  = durationSecs / speed; // 10s timeline / 0.5 = 20s source consumed
 
+            const mediaFilename = originalFilename || src.split('/').pop() || 'media.mp4';
+
             return {
                 kind: 'clip',
                 name: clip.name || `clip_${clip.id || Math.random().toString(36).slice(2)}`,
                 mediaReference: {
                     type:          'external',
-                    name:          src.split('/').pop(),
-                    targetUrl:     src.startsWith('file://') ? src : `file://localhost/${src.replace(/^\//, '')}`,
+                    name:          mediaFilename,
+                    targetUrl:     `file://localhost/${mediaFilename}`,
                     mediaKind:     kind,
                     availableRange: {
                         startTime: ZERO,
