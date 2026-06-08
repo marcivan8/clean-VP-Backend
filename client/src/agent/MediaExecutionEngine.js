@@ -150,6 +150,49 @@ function groupWordsIntoCaptions(words, maxWords = 6, pauseThreshold = 0.4) {
     return captions;
 }
 
+/**
+ * Re-map word timestamps from source-file time to timeline time.
+ *
+ * After silence/filler removal the video track has many short clips, each with:
+ *   clip.offset   — where in the source file the clip starts (seconds)
+ *   clip.start    — where on the timeline the clip is placed (seconds)
+ *   clip.duration — how long it plays
+ *
+ * Words that fall entirely within a kept segment are shifted so their
+ * timestamps describe their position on the edited timeline, not the raw file.
+ * Words that were cut are dropped.
+ */
+function deriveTimelineTranscript(tracks, originalWords) {
+    if (!originalWords?.length) return null;
+    const videoTrack = tracks?.find(t => t.type === 'video');
+    if (!videoTrack?.clips?.length) return null;
+
+    const clips = [...videoTrack.clips]
+        .sort((a, b) => a.start - b.start)
+        .filter(c => c.duration > 0);
+
+    const timelineWords = [];
+    for (const clip of clips) {
+        const srcStart = clip.offset || 0;
+        const srcEnd   = srcStart + clip.duration;
+        const tlBase   = clip.start;
+        const speed    = clip.speed || 1;
+
+        for (const w of originalWords) {
+            const wStart = w.start ?? 0;
+            const wEnd   = w.end   ?? wStart;
+            if (wStart >= srcStart - 0.01 && wEnd <= srcEnd + 0.01) {
+                timelineWords.push({
+                    word:  w.word || w.content || w.text || '',
+                    start: tlBase + (wStart - srcStart) / speed,
+                    end:   tlBase + (wEnd   - srcStart) / speed,
+                });
+            }
+        }
+    }
+    return timelineWords.length > 0 ? timelineWords : null;
+}
+
 // ─── MediaExecutionEngine ────────────────────────────────────────────────────
 
 export class MediaExecutionEngine {
@@ -611,23 +654,27 @@ export class MediaExecutionEngine {
             }
         }
 
-        // Short-circuit /api/captions/generate if we already have a transcript in the
-        // store (produced by a previous transcription or silence-detection run on the
-        // same file). This avoids a redundant Whisper API call.
+        // If we already have a Whisper transcript for this file, derive caption
+        // timestamps directly from the current timeline clip positions instead of
+        // calling Whisper again. This handles both fresh sessions (single clip,
+        // timestamps match 1:1) and edited timelines (silence/filler removed,
+        // timestamps re-mapped through clip offsets so captions land correctly).
         if (endpoint === '/api/captions/generate') {
-            const basename = (p) => (p || '').split(/[\\/]/).pop();
+            const bname = (p) => (p || '').split(/[\\/]/).pop();
             const processedFile = Object.entries(resolvedPayload).find(([, v]) => typeof v === 'string' && (v.startsWith('raw/') || v.startsWith('temp/')));
-            const processedBase = processedFile ? basename(processedFile[1]) : basename(store.uploadedFilePath);
+            const processedBase = processedFile ? bname(processedFile[1]) : bname(store.uploadedFilePath);
 
-            // Priority: per-file transcript map → captionsFilePath match → any cached captions
-            const cachedWords = (store.transcripts && processedBase && store.transcripts[processedBase])
+            const originalWords = (store.transcripts && processedBase && store.transcripts[processedBase])
                 ? store.transcripts[processedBase]
-                : (processedBase && basename(store.captionsFilePath) === processedBase ? store.captions : null)
+                : (processedBase && bname(store.captionsFilePath) === processedBase ? store.captions : null)
                 ?? (store.captions?.length > 0 ? store.captions : null);
 
-            if (cachedWords && cachedWords.length > 0) {
-                const words = cachedWords.map(c => ({ word: c.word || c.content || c.text || '', start: c.start, end: c.end }));
-                console.log(`[MediaExecutionEngine] ⚡ autoCaptions: using cached transcript (${words.length} words) — skipping Whisper`);
+            if (originalWords?.length > 0) {
+                // Re-map word timestamps through the current clip positions so captions
+                // are in sync with the edited timeline (not the raw source file).
+                const timelineWords = deriveTimelineTranscript(store.tracks, originalWords);
+                const words = timelineWords || originalWords.map(c => ({ word: c.word || c.content || c.text || '', start: c.start, end: c.end }));
+                console.log(`[MediaExecutionEngine] ⚡ autoCaptions: derived ${words.length} words from timeline — skipping Whisper`);
                 return { engine: 'api', success: true, endpoint, result: { text: words.map(w => w.word).join(' '), words } };
             }
         }
@@ -731,6 +778,15 @@ export class MediaExecutionEngine {
                 const fillerClipId  = command.args?.clip_id  || null;
                 const fillerAssetId = command.args?.asset_id || null;
                 this._applySegmentsToTimeline(result.activeSegments, 'filler', fillerClipId, fillerAssetId);
+
+                // Re-derive timeline transcript from the updated clip positions
+                const fillerPostStore = useTimelineStore.getState();
+                const fillerSrcWords  = (result?.transcript?.length > 0) ? result.transcript
+                    : (fillerPostStore.captions?.length > 0 ? fillerPostStore.captions : null);
+                if (fillerSrcWords?.length > 0) {
+                    const tlWords = deriveTimelineTranscript(fillerPostStore.tracks, fillerSrcWords);
+                    if (tlWords) fillerPostStore.setCaptions(tlWords, resolvedPayload?.filename || null);
+                }
             }
 
             // ── 5. Audio denoise / normalize ──────────────────────────────
@@ -806,6 +862,15 @@ export class MediaExecutionEngine {
                     const clipId  = command.args?.clip_id  || null;
                     const assetId = command.args?.asset_id || null;
                     this._applySegmentsToTimeline(activeSegments, 'silence', clipId, assetId);
+
+                    // After the timeline is restructured, re-derive the timeline transcript
+                    // from the new clip positions so future caption requests are in sync.
+                    const postStore = useTimelineStore.getState();
+                    const srcWords  = (result?.words?.length > 0) ? result.words : postStore.captions;
+                    if (srcWords?.length > 0) {
+                        const tlWords = deriveTimelineTranscript(postStore.tracks, srcWords);
+                        if (tlWords) postStore.setCaptions(tlWords, resolvedPayload?.filename || null);
+                    }
                 }
             }
 
