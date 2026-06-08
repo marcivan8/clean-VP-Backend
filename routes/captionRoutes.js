@@ -63,8 +63,10 @@ router.post('/generate', optionalAuth, async (req, res) => {
             language,
         }, {
             jobId: uniqueJobId,
-            attempts: 2,
-            backoff: { type: 'exponential', delay: 3000 }
+            attempts: 4,
+            backoff: { type: 'exponential', delay: 10_000 }, // 10s, 20s, 40s between retries
+            removeOnComplete: { age: 3600 }, // keep result for 1h so polling always finds it
+            removeOnFail: { age: 3600 },
         });
 
         res.json({ jobId: job.id, status: 'queued' });

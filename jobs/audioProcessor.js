@@ -14,7 +14,11 @@ function getOpenAI() {
         if (!process.env.OPENAI_API_KEY) {
             throw new Error('OPENAI_API_KEY environment variable is missing.');
         }
-        openaiInstance = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        openaiInstance = new OpenAI({
+            apiKey: process.env.OPENAI_API_KEY,
+            timeout: 300_000, // 5-min per request — Whisper on long videos can be slow
+            maxRetries: 3,    // SDK-level retries for transient connection errors
+        });
     }
     return openaiInstance;
 }
