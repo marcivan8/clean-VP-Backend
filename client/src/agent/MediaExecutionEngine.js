@@ -611,6 +611,27 @@ export class MediaExecutionEngine {
             }
         }
 
+        // Short-circuit /api/captions/generate if we already have a transcript in the
+        // store (produced by a previous transcription or silence-detection run on the
+        // same file). This avoids a redundant Whisper API call.
+        if (endpoint === '/api/captions/generate') {
+            const basename = (p) => (p || '').split(/[\\/]/).pop();
+            const processedFile = Object.entries(resolvedPayload).find(([, v]) => typeof v === 'string' && (v.startsWith('raw/') || v.startsWith('temp/')));
+            const processedBase = processedFile ? basename(processedFile[1]) : basename(store.uploadedFilePath);
+
+            // Priority: per-file transcript map → captionsFilePath match → any cached captions
+            const cachedWords = (store.transcripts && processedBase && store.transcripts[processedBase])
+                ? store.transcripts[processedBase]
+                : (processedBase && basename(store.captionsFilePath) === processedBase ? store.captions : null)
+                ?? (store.captions?.length > 0 ? store.captions : null);
+
+            if (cachedWords && cachedWords.length > 0) {
+                const words = cachedWords.map(c => ({ word: c.word || c.content || c.text || '', start: c.start, end: c.end }));
+                console.log(`[MediaExecutionEngine] ⚡ autoCaptions: using cached transcript (${words.length} words) — skipping Whisper`);
+                return { engine: 'api', success: true, endpoint, result: { text: words.map(w => w.word).join(' '), words } };
+            }
+        }
+
         // Inject transcript for silence detection and filler-word removal.
         // Look up the transcript that belongs to the SPECIFIC file being processed
         // (resolved from $uploaded_file above) rather than the last globally-stored
@@ -743,9 +764,11 @@ export class MediaExecutionEngine {
             if (command.action === 'autoCaptions') {
                 const wordCount = result?.words?.length ?? 0;
                 console.log(`[MediaExecutionEngine] autoCaptions result: ${wordCount} words, text="${(result?.text || '').slice(0, 60)}"`);
-                
+
                 const store = useTimelineStore.getState();
-                if (store.setCaptions) store.setCaptions(result.words || []);
+                // Store with filename so subsequent caption requests short-circuit via transcripts map
+                const captionFilename = resolvedPayload?.filename || null;
+                if (store.setCaptions) store.setCaptions(result.words || [], captionFilename);
                 
                 if (wordCount > 0) {
                     const captions = groupWordsIntoCaptions(result.words);
@@ -758,6 +781,13 @@ export class MediaExecutionEngine {
 
             // ── 8. Silence detection ──────────────────────────────────────
             if (command.action === 'silenceDetect') {
+                // Cache the transcript so future caption requests can reuse it without Whisper
+                if (result?.words?.length > 0) {
+                    const silenceFilename = resolvedPayload?.filename || null;
+                    const silenceStore = useTimelineStore.getState();
+                    if (silenceStore.setCaptions) silenceStore.setCaptions(result.words, silenceFilename);
+                }
+
                 let activeSegments = result.activeSegments;
 
                 // Fallback: derive from word timestamps if backend sent words[]
