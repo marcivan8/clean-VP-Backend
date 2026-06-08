@@ -332,13 +332,23 @@ export class EditPlanner {
         const uniqueAssets = [...assetMap.values()];
         console.log(`[EditPlanner] _buildPerAssetSteps(${action}): ${uniqueAssets.length} unique asset(s) across ${allClips.length} clip(s)`);
 
+        // Extract GCS-relative raw path from any URL format the asset might store.
+        // Handles: "raw/…", full HTTPS GCS URL, "/api/proxy/gcs-media/proxies/…" API URL.
+        const toGcsRawPath = (url) => {
+            if (!url) return null;
+            if (url.startsWith('raw/') || url.startsWith('temp/')) return url;
+            const m = url.match(/\/(raw\/[^?#]+)/);
+            if (m) return m[1];
+            const p = url.match(/\/api\/proxy\/gcs-media\/proxies\/([^/]+)\/([^/]+)/);
+            if (p) return `raw/${p[1]}/${p[2]}`;
+            return null;
+        };
+
         return uniqueAssets.map(({ firstClip, asset }, i) => {
-            let filePath = null;
-            if (asset?.proxyUrl?.startsWith('proxies/')) {
-                const parts = asset.proxyUrl.split('/');
-                if (parts.length >= 3) filePath = `raw/${parts[1]}/${parts[2]}`;
-            }
-            if (!filePath && firstClip.sourceUrl?.startsWith('raw/')) filePath = firstClip.sourceUrl;
+            const filePath = toGcsRawPath(asset?.sourceUrl)
+                || toGcsRawPath(firstClip.sourceUrl)
+                || toGcsRawPath(asset?.proxyUrl)
+                || null;
 
             return {
                 step_id: `step_${i + 1}`,

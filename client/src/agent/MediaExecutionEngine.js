@@ -314,20 +314,21 @@ export class MediaExecutionEngine {
                 let serverPath = store.uploadedFilePath;
                 const fileName   = store.uploadedFile?.name;
 
-                // Fallback: If the user refreshed the page and lost uploadedFilePath,
-                // try to recover it from the video asset's proxy URL (if it's on GCS)
+                // Fallback: recover GCS raw path from any URL format stored on the asset.
                 if (!serverPath && store.assets) {
                     const videoAsset = store.assets.find(a => a.type === 'video');
-                    if (videoAsset && videoAsset.proxyUrl) {
-                        // If proxyUrl is "proxies/user/file.mp4", deduce the raw path
-                        if (videoAsset.proxyUrl.startsWith('proxies/')) {
-                            // "proxies/userId/filename/proxy.mp4" -> "raw/userId/filename"
-                            const parts = videoAsset.proxyUrl.split('/');
-                            if (parts.length >= 3) {
-                                serverPath = `raw/${parts[1]}/${parts[2]}`;
-                                console.log('[MediaExecutionEngine] Recovered missing uploadedFilePath from asset proxyUrl:', serverPath);
-                            }
-                        }
+                    if (videoAsset) {
+                        const toGcsRawPath = (url) => {
+                            if (!url) return null;
+                            if (url.startsWith('raw/') || url.startsWith('temp/')) return url;
+                            const m = url.match(/\/(raw\/[^?#]+)/);
+                            if (m) return m[1];
+                            const p = url.match(/\/api\/proxy\/gcs-media\/proxies\/([^/]+)\/([^/]+)/);
+                            if (p) return `raw/${p[1]}/${p[2]}`;
+                            return null;
+                        };
+                        serverPath = toGcsRawPath(videoAsset.sourceUrl) || toGcsRawPath(videoAsset.proxyUrl);
+                        if (serverPath) console.log('[MediaExecutionEngine] Recovered GCS path from asset URLs:', serverPath);
                     }
                 }
 
@@ -591,9 +592,17 @@ export class MediaExecutionEngine {
                 // Fallback for page reloads where store.uploadedFilePath was lost
                 if (!serverPath && store.assets) {
                     const videoAsset = store.assets.find(a => a.type === 'video');
-                    if (videoAsset && videoAsset.proxyUrl && videoAsset.proxyUrl.startsWith('proxies/')) {
-                        const parts = videoAsset.proxyUrl.split('/');
-                        if (parts.length >= 3) serverPath = `raw/${parts[1]}/${parts[2]}`;
+                    if (videoAsset) {
+                        const toGcsRawPath = (url) => {
+                            if (!url) return null;
+                            if (url.startsWith('raw/') || url.startsWith('temp/')) return url;
+                            const m = url.match(/\/(raw\/[^?#]+)/);
+                            if (m) return m[1];
+                            const p = url.match(/\/api\/proxy\/gcs-media\/proxies\/([^/]+)\/([^/]+)/);
+                            if (p) return `raw/${p[1]}/${p[2]}`;
+                            return null;
+                        };
+                        serverPath = toGcsRawPath(videoAsset.sourceUrl) || toGcsRawPath(videoAsset.proxyUrl);
                     }
                 }
 
