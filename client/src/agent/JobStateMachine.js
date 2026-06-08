@@ -14,8 +14,9 @@ import { JOB_STATES } from '../store/useJobStore.js';
  *                                         ↘ TIMEOUT
  */
 
-// Timeout configuration
-const EXECUTION_TIMEOUT_MS = 30000; // 30 seconds
+// Timeout configuration — must be long enough for transcription/caption jobs (1-3 min).
+// MediaExecutionEngine's own API_CALL timeout is 6 min; this is the outer job deadline.
+const EXECUTION_TIMEOUT_MS = 420000; // 7 minutes
 
 /**
  * Create the job state machine definition

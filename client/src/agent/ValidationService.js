@@ -84,12 +84,12 @@ export class ValidationService {
         }
 
         // Operations that intentionally restructure the timeline (silence removal,
-        // smart cleanup, etc.) produce tightly-packed multi-segment layouts that
+        // smart cleanup, captions, etc.) produce tightly-packed multi-segment layouts that
         // are valid by design but look like overlaps/gaps to the integrity checker.
         // Skip it for those operations so they never trigger an erroneous rollback.
         const RESTRUCTURING_OPS = new Set([
             'silence_removal', 'remove_filler_words', 'long_form_edit',
-            'smart_cleanup', 'remove_repetition',
+            'smart_cleanup', 'remove_repetition', 'auto_captions', 'generate_captions', 'generate_transcript',
         ]);
         const opKey = plan.operation || plan.steps?.[0]?.action;
         const skipIntegrityCheck = RESTRUCTURING_OPS.has(opKey);
@@ -213,6 +213,9 @@ export class ValidationService {
             case 'remove_repetition':
             case 'smart_cleanup':
             case 'long_form_edit':
+            case 'auto_captions':
+            case 'generate_captions':
+            case 'generate_transcript':
                 return { outputs: [], issues: [], warnings: [] };
 
             default:
@@ -507,6 +510,8 @@ export class ValidationService {
 
         for (const track of state.tracks || []) {
             if (!track.clips || track.clips.length === 0) continue;
+            // Caption and text tracks are non-contiguous by design — skip overlap/gap checks
+            if (track.type === 'caption' || track.type === 'text') continue;
 
             const clips = [...track.clips].sort((a, b) => a.start - b.start);
             let lastEnd = 0;
