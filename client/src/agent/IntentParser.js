@@ -294,6 +294,18 @@ Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constra
 User: "keep only the cleanest version of each sentence and remove any stutters or repeated phrases"
 Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constraints": {"editMode": "SMART_CLEANUP"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
 
+User: "remove repetitions"
+Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constraints": {"editMode": "SMART_CLEANUP"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "remove repetition"
+Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constraints": {"editMode": "SMART_CLEANUP"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "cut out repetitions"
+Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constraints": {"editMode": "SMART_CLEANUP"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
+User: "remove the repeated parts"
+Assistant: {"intent": "LONG_FORM_BUILD", "operation": "long_form_edit", "constraints": {"editMode": "SMART_CLEANUP"}, "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
+
 User: "so what's this clip about?"
 Assistant: {"intent": "CHAT", "operation": "chat", "message": "Based on the transcript, this clip appears to be about...", "needs_clarification": false, "confidence": "HIGH", "missingParameters": []}
 
@@ -485,7 +497,7 @@ export class IntentParser {
         }
 
         if (matches('removeRepetition')) {
-            return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.REMOVE_REPETITION, { constraints: {} });
+            return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.LONG_FORM_EDIT, { constraints: { editMode: 'SMART_CLEANUP' } });
         }
 
         if (matches('undo')) return this.createIntent(INTENT_TYPES.UNDO, 'undo_action');
