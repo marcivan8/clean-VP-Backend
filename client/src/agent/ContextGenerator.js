@@ -103,31 +103,46 @@ export class ContextGenerator {
             else clipType = 'generic_video';
         }
 
-        // --- Transcript Summary (all clips, timeline order) ---
-        // Build by iterating video clips in start-time order and looking up each
-        // clip's transcript in the per-file map. Falls back to the legacy captions
-        // array for sessions that pre-date the transcripts map.
+        // --- Transcript: timeline-mapped words ---
+        // store.captions holds timeline-derived words (re-mapped through clip offsets
+        // after silence/filler removal). store.transcripts holds original Whisper words
+        // keyed by filename. Use captions as the primary source for context since it
+        // reflects what the viewer will actually hear on the edited timeline.
         const basename = (p) => (p || '').split(/[\\/]/).pop();
         const sortedVideoClips = [...videoClips].sort((a, b) => a.start - b.start);
-        const allWords = [];
-        sortedVideoClips.forEach(clip => {
-            const clipBase = basename(clip.name || '');
-            const asset    = assets?.find(a => a.id === clip.assetId);
-            const assetBase = basename(asset?.name || '');
-            const key = (state.transcripts && (state.transcripts[clipBase] || state.transcripts[assetBase]))
-                ? (state.transcripts[clipBase] ? clipBase : assetBase)
-                : null;
-            const words = key ? state.transcripts[key] : [];
-            if (words.length > 0) allWords.push(...words);
-        });
-        // Fallback: if no per-file transcripts yet, use legacy captions
-        const transcriptWords = allWords.length > 0 ? allWords : (captions || []);
-        const hasTranscript = transcriptWords.length > 0;
-        let transcriptSummary = '';
-        if (hasTranscript) {
-            transcriptSummary = transcriptWords.slice(0, 120).map(c => c.word || '').join(' ');
-            if (transcriptWords.length > 120) transcriptSummary += '...';
-        }
+
+        // Timeline transcript: prefer store.captions (derived), fall back to per-file originals
+        const timelineWords = captions?.length > 0 ? captions : (() => {
+            const words = [];
+            sortedVideoClips.forEach(clip => {
+                const asset = assets?.find(a => a.id === clip.assetId);
+                const key   = basename(asset?.name || clip.name || '');
+                const orig  = state.transcripts?.[key] || [];
+                const offset = clip.offset || 0;
+                orig.filter(w => w.start >= offset - 0.05 && w.end <= offset + clip.duration + 0.05)
+                    .forEach(w => words.push(w));
+            });
+            return words;
+        })();
+
+        const hasTranscript = timelineWords.length > 0;
+
+        // Full transcript text — used for "what's this about?" and reorganization prompts.
+        // Up to 2000 words to stay within GPT context budget while giving full coverage.
+        const transcriptSummary = hasTranscript
+            ? timelineWords.slice(0, 2000).map(c => c.word || c.content || c.text || '').join(' ')
+            : '';
+
+        // Per-clip text breakdown — enables SMART_CLEANUP and clip reorganization.
+        // Groups nearby clips (within 0.2s) into logical segments so GPT sees readable chunks.
+        const clipTranscript = hasTranscript ? sortedVideoClips.map((clip, i) => {
+            const tlStart = clip.start;
+            const tlEnd   = tlStart + clip.duration;
+            const words   = timelineWords
+                .filter(w => (w.start ?? 0) >= tlStart - 0.05 && (w.end ?? 0) <= tlEnd + 0.05)
+                .map(w => w.word || w.content || w.text || '').filter(Boolean);
+            return words.length > 0 ? { index: i, id: clip.id, start: tlStart, duration: clip.duration, text: words.join(' ') } : null;
+        }).filter(Boolean) : [];
 
         // --- Energy Profile from pacing segments ---
         let energyProfile = 'unknown';
@@ -163,6 +178,11 @@ export class ContextGenerator {
                 energyProfile,
                 hasBeatMarkers: beatMarkers && beatMarkers.length > 0
             },
+
+            // Per-clip text breakdown of the edited timeline.
+            // Used by SMART_CLEANUP, reorganization, and "what's this about?" queries.
+            // Only sent when a transcript is available to avoid inflating token count.
+            ...(clipTranscript.length > 0 ? { ClipTranscript: clipTranscript } : {}),
 
             // Long-Form Intelligence Engine context (populated after ContentAnalyzer runs)
             LongFormContext: state.contentAnalysis ? {

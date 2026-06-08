@@ -158,6 +158,21 @@ const NLP_MAP = {
         'remove duplicate parts', 'cut repeated content', 'remove repeats',
         'no repetition', 'clean up repetition', 'deduplicate',
     ],
+    reorderClips: [
+        'reorder clips', 'reorder the clips', 'rearrange clips', 'rearrange the clips',
+        'put the best', 'put the hook', 'put the most important',
+        'move the strongest', 'lead with', 'start with',
+    ],
+    reorganize: [
+        'reorganize', 're-organize', 'reorganise', 'reorganize the',
+        'restructure', 'restructure the', 'rearrange', 'rearrange the',
+        'reorder by', 'order by topic', 'group by topic', 'order by theme',
+    ],
+    reorderSegments: [
+        'reorder segments', 'rearrange segments', 'reorder the segments',
+        'change the order', 'swap the order', 'flip the order',
+        'put this first', 'put that first', 'move to front',
+    ],
     fillerWords: [
         'filler', 'filler words', 'um', 'uh', 'ums', 'uhs', 'stutter',
         'clean up speech', 'remove hesitations', 'remove filler',
@@ -498,6 +513,10 @@ export class IntentParser {
 
         if (matches('removeRepetition')) {
             return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.LONG_FORM_EDIT, { constraints: { editMode: 'SMART_CLEANUP' } });
+        }
+
+        if (matches('reorderClips') || matches('reorganize') || matches('reorderSegments')) {
+            return this.createIntent(INTENT_TYPES.EDIT, OPERATIONS.REORDER_CLIPS, { constraints: { prompt: lower } });
         }
 
         if (matches('undo')) return this.createIntent(INTENT_TYPES.UNDO, 'undo_action');

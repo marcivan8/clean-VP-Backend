@@ -318,6 +318,7 @@ export class VideoEditorTools {
             case 'smart_cleanup': return await this.smartCleanup(action.args, action.signal);
             case 'find_hook': return await this.findHook();
             case 'remove_repetition': return await this.removeRepetition(action.args);
+            case 'reorder_clips': return await this.reorderClips(action.args, action.signal);
             case 'reorder_segment': return this.reorderSegment(action.args);
             case 'cut_segment': return this.cutSegment(action.args);
 
@@ -705,22 +706,31 @@ export class VideoEditorTools {
         // Each clip has an assetId; the asset's name gives the file basename which
         // keys into store.transcripts. Words are filtered by the clip's source offset.
         const clipsWithText = clips.map((clip, index) => {
-            const asset      = store.assets?.find(a => a.id === clip.assetId);
-            const assetBase  = basename(asset?.name || clip.sourceUrl || '');
-            const assetWords = (store.transcripts?.[assetBase]) || store.captions || [];
-            const clipOffset = clip.offset || 0;
+            const asset     = store.assets?.find(a => a.id === clip.assetId);
+            const assetBase = basename(asset?.name || clip.sourceUrl || '');
 
-            const words = assetWords
-                .filter(w => (w.start ?? 0) >= clipOffset - 0.05 &&
-                             (w.end   ?? 0) <= clipOffset + clip.duration + 0.05)
-                .map(w => w.word || w.content || w.text || '')
-                .filter(Boolean);
+            // Prefer per-file original transcript (source timestamps) → filter by offset.
+            // Fall back to store.captions (timeline-derived) → filter by timeline position.
+            let words;
+            const origWords = store.transcripts?.[assetBase];
+            if (origWords?.length > 0) {
+                const offset = clip.offset || 0;
+                words = origWords.filter(w =>
+                    (w.start ?? 0) >= offset - 0.05 &&
+                    (w.end   ?? 0) <= offset + clip.duration + 0.05
+                );
+            } else {
+                words = (store.captions || []).filter(w =>
+                    (w.start ?? 0) >= clip.start - 0.05 &&
+                    (w.end   ?? 0) <= clip.start + clip.duration + 0.05
+                );
+            }
 
             return {
                 index,
                 id:       clip.id,
                 duration: clip.duration,
-                text:     words.join(' ').trim(),
+                text:     words.map(w => w.word || w.content || w.text || '').filter(Boolean).join(' ').trim(),
             };
         });
 
@@ -781,6 +791,78 @@ export class VideoEditorTools {
         return {
             success: true,
             message: `✓ Removed ${removeIds.size} of ${clips.length} segments. ${result.reasoning || ''}`,
+        };
+    }
+
+    /**
+     * Reorder timeline clips semantically using the transcript and user prompt.
+     * Sends per-clip text to /api/ai/reorder-clips, applies the returned ordering.
+     */
+    async reorderClips(args = {}, signal = null) {
+        const { prompt: userPrompt } = args;
+        if (!userPrompt) return { success: false, message: 'A prompt describing how to reorder is required.' };
+
+        const store = useTimelineStore.getState();
+        const videoTrack = store.tracks?.find(t => t.type === 'video');
+        if (!videoTrack || videoTrack.clips.length < 2) {
+            return { success: false, message: 'Need at least 2 clips on the timeline to reorder.' };
+        }
+
+        const clips = [...videoTrack.clips].sort((a, b) => a.start - b.start);
+        const basename = (p) => (p || '').split(/[\\/]/).pop();
+
+        const clipsWithText = clips.map((clip, index) => {
+            const asset     = store.assets?.find(a => a.id === clip.assetId);
+            const assetBase = basename(asset?.name || clip.sourceUrl || '');
+            const origWords = store.transcripts?.[assetBase];
+            let words;
+            if (origWords?.length > 0) {
+                const offset = clip.offset || 0;
+                words = origWords.filter(w => (w.start ?? 0) >= offset - 0.05 && (w.end ?? 0) <= offset + clip.duration + 0.05);
+            } else {
+                words = (store.captions || []).filter(w => (w.start ?? 0) >= clip.start - 0.05 && (w.end ?? 0) <= clip.start + clip.duration + 0.05);
+            }
+            return { index, id: clip.id, duration: clip.duration, text: words.map(w => w.word || w.content || '').filter(Boolean).join(' ').trim() };
+        });
+
+        const hasText = clipsWithText.some(c => c.text.length > 2);
+        if (!hasText) {
+            return { success: false, message: 'No transcript available for semantic reordering. Run auto-captions or remove silences first.' };
+        }
+
+        const { authFetch } = await import('../utils/authFetch.js');
+        const response = await authFetch('/api/ai/reorder-clips', {
+            method: 'POST',
+            body: JSON.stringify({ clips: clipsWithText, prompt: userPrompt }),
+            signal,
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(`Reorder API error: ${err.error || response.statusText}`);
+        }
+
+        const result = await response.json();
+        const newOrder = result.newOrder || [];
+        if (newOrder.length === 0) return { success: false, message: 'Could not determine a new order.' };
+
+        // Apply new order: re-assign start times in sequence
+        const freshStore = useTimelineStore.getState();
+        const freshTrack = freshStore.tracks?.find(t => t.id === videoTrack.id);
+        if (!freshTrack) return { success: false, message: 'Video track not found.' };
+
+        const clipById = Object.fromEntries(freshTrack.clips.map(c => [c.id, c]));
+        let cursor = 0;
+        for (const id of newOrder) {
+            const clip = clipById[id];
+            if (!clip) continue;
+            freshStore.updateClip(freshTrack.id, id, { start: cursor }, { skipHistory: false });
+            cursor += clip.duration;
+        }
+
+        return {
+            success: true,
+            message: `✓ Reordered ${newOrder.length} clips. ${result.reasoning || ''}`,
         };
     }
 

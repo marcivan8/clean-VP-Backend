@@ -88,6 +88,7 @@ export const OPERATIONS = {
     REMOVE_REPETITION: 'remove_repetition',
     BUILD_FROM_RUSHES: 'build_from_rushes',
     REORDER_SEGMENT: 'reorder_segment',
+    REORDER_CLIPS: 'reorder_clips',
 
     // Conversational
     CHAT: 'chat',

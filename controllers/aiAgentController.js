@@ -1575,6 +1575,63 @@ Respond ONLY with valid JSON:
     }
 };
 
+// Reorder clips semantically using GPT-4o.
+// Receives per-clip text built from the timeline transcript and returns a new
+// ordering of clip IDs that satisfies the user's prompt.
+const reorderClipsHandler = async (req, res) => {
+    try {
+        const { clips, prompt: userPrompt } = req.body;
+        if (!Array.isArray(clips) || clips.length === 0) {
+            return res.status(400).json({ error: 'clips array is required' });
+        }
+        if (!userPrompt) {
+            return res.status(400).json({ error: 'prompt is required' });
+        }
+        if (!openai) {
+            return res.status(503).json({ error: 'OpenAI not configured' });
+        }
+
+        const clipsText = clips
+            .map((c, i) => `[${i}] id="${c.id}" ${(c.duration || 0).toFixed(1)}s: "${(c.text || '').slice(0, 200)}"`)
+            .join('\n');
+
+        const systemPrompt = `You are an expert video editor. You will be given a list of video clips with their transcript text and asked to reorder them to best satisfy the user's intent.
+
+Rules:
+- Return ALL clip IDs in your preferred order (never drop clips)
+- Be conservative — only reorder when the intent is clear
+- For "put the best/hook/most impactful moment first", move the strongest clip to position 0
+- For topic-based grouping, cluster clips that discuss the same subject
+- If the current order already satisfies the intent, return it unchanged
+
+Respond ONLY with valid JSON: {"newOrder": ["id1","id2",...], "reasoning": "one sentence"}`;
+
+        const completion = await openai.chat.completions.create({
+            model: 'gpt-4o',
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: `User instruction: "${userPrompt}"\n\nClips (${clips.length} total):\n${clipsText}` },
+            ],
+            response_format: { type: 'json_object' },
+            temperature: 0.2,
+        });
+
+        const parsed = JSON.parse(completion.choices[0].message.content);
+        const allIds = new Set(clips.map(c => c.id));
+        const newOrder = (parsed.newOrder || []).filter(id => allIds.has(id));
+
+        // If GPT missed any clips, append them at the end in original order
+        const inResult = new Set(newOrder);
+        clips.forEach(c => { if (!inResult.has(c.id)) newOrder.push(c.id); });
+
+        return res.json({ newOrder, reasoning: parsed.reasoning || '', totalClips: clips.length });
+
+    } catch (err) {
+        console.error('[aiAgentController] reorderClips error:', err);
+        return res.status(500).json({ error: err.message });
+    }
+};
+
 module.exports = {
     chatAgentHandler,
     agentPlanHandler,
@@ -1582,4 +1639,5 @@ module.exports = {
     generatePlanHandler,
     analyzeContentHandler,
     smartCleanupHandler,
+    reorderClipsHandler,
 };

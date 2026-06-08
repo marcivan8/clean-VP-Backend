@@ -200,6 +200,7 @@ export class EditPlanner {
             case 'remove_repetition': return this.planRemoveRepetition(planId);
             case 'chat': return this.planChat(planId, intent.message);
             case 'reorder_segment': return this.planReorderSegment(planId, constraints);
+            case 'reorder_clips': return this.planReorderClips(planId, constraints);
             case 'organize_clips': return this.planOrganizeClips(planId, state, constraints);
             default:
                 console.warn(`[EditPlanner] Unhandled operation: ${operation}`);
@@ -578,6 +579,23 @@ export class EditPlanner {
         return {
             plan_id: planId, operation: 'remove_repetition', step_count: 1, requiresApproval: true,
             steps: [{ step_id: 'step_1', action: 'remove_repetition', importance_threshold: 0.3, reason: 'Remove segments flagged as low-value or repetitive' }]
+        };
+    }
+
+    static planReorderClips(planId, constraints) {
+        const prompt = constraints?.prompt || constraints?.userPrompt || 'reorganize for better flow';
+        return {
+            plan_id: planId,
+            operation: 'reorder_clips',
+            step_count: 1,
+            requiresApproval: true,
+            approvalMessage: `AI will semantically reorder your clips: "${prompt}"`,
+            steps: [{
+                step_id: 'step_1',
+                action:  'reorder_clips',
+                prompt,
+                reason:  'Reorder clips based on transcript content and user intent',
+            }],
         };
     }
 

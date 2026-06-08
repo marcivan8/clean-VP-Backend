@@ -779,13 +779,15 @@ export class MediaExecutionEngine {
                 const fillerAssetId = command.args?.asset_id || null;
                 this._applySegmentsToTimeline(result.activeSegments, 'filler', fillerClipId, fillerAssetId);
 
-                // Re-derive timeline transcript from the updated clip positions
+                // Re-derive timeline transcript — keep original in transcripts index,
+                // push derived words to store.captions via setTimelineTranscript.
                 const fillerPostStore = useTimelineStore.getState();
-                const fillerSrcWords  = (result?.transcript?.length > 0) ? result.transcript
-                    : (fillerPostStore.captions?.length > 0 ? fillerPostStore.captions : null);
-                if (fillerSrcWords?.length > 0) {
-                    const tlWords = deriveTimelineTranscript(fillerPostStore.tracks, fillerSrcWords);
-                    if (tlWords) fillerPostStore.setCaptions(tlWords, resolvedPayload?.filename || null);
+                const fillerBase  = (resolvedPayload?.filename || '').split(/[\\/]/).pop();
+                const fillerOrig  = (fillerBase && fillerPostStore.transcripts?.[fillerBase])
+                    ? fillerPostStore.transcripts[fillerBase] : null;
+                if (fillerOrig?.length > 0) {
+                    const tlWords = deriveTimelineTranscript(fillerPostStore.tracks, fillerOrig);
+                    if (tlWords && fillerPostStore.setTimelineTranscript) fillerPostStore.setTimelineTranscript(tlWords);
                 }
             }
 
@@ -863,13 +865,15 @@ export class MediaExecutionEngine {
                     const assetId = command.args?.asset_id || null;
                     this._applySegmentsToTimeline(activeSegments, 'silence', clipId, assetId);
 
-                    // After the timeline is restructured, re-derive the timeline transcript
-                    // from the new clip positions so future caption requests are in sync.
+                    // Store original Whisper words indexed by filename (offset-based filtering
+                    // in smartCleanup depends on source timestamps being preserved here).
+                    // Then store the timeline-derived version in store.captions only.
                     const postStore = useTimelineStore.getState();
-                    const srcWords  = (result?.words?.length > 0) ? result.words : postStore.captions;
+                    const srcWords  = result?.words?.length > 0 ? result.words : null;
                     if (srcWords?.length > 0) {
+                        postStore.setCaptions(srcWords, resolvedPayload?.filename || null);
                         const tlWords = deriveTimelineTranscript(postStore.tracks, srcWords);
-                        if (tlWords) postStore.setCaptions(tlWords, resolvedPayload?.filename || null);
+                        if (tlWords && postStore.setTimelineTranscript) postStore.setTimelineTranscript(tlWords);
                     }
                 }
             }

@@ -372,6 +372,11 @@ const useTimelineStore = create(
                 if (basename && captions?.length > 0) newTranscripts[basename] = captions;
                 set({ captions, captionsFilePath: filePath ?? null, transcriptionAttempted: true, transcripts: newTranscripts });
             },
+            // Store timeline-derived words without touching the per-file transcripts index.
+            // Use this after segment operations so store.transcripts[file] keeps original
+            // Whisper timestamps (needed for offset-based filtering) while store.captions
+            // reflects the current edited timeline.
+            setTimelineTranscript: (words) => set({ captions: words }),
             setBeatMarkers: (markers) => set({ beatMarkers: markers }),
             setPacingSegments: (segments) => set({ pacingSegments: segments }),
 

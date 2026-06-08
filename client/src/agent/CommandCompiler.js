@@ -628,6 +628,13 @@ function compileRemoveRepetition(step, ctx) {
     ]);
 }
 
+function compileReorderClips(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'reorder_clips', { prompt: step.prompt || '' },
+            { source_step_id: step.step_id, description: `Reorder clips: "${(step.prompt || '').slice(0, 40)}"` }),
+    ]);
+}
+
 function compileReorderSegment(step, ctx) {
     const clipRef = step.clip_id || '$first_clip';
     const trackRef = step.track_id || `$track_of(${clipRef})`;
@@ -719,6 +726,7 @@ const COMMAND_REGISTRY = new Map([
     ['find_hook', { compiler: compileFindHook }],
     ['remove_repetition', { compiler: compileRemoveRepetition }],
     ['reorder_segment', { compiler: compileReorderSegment }],
+    ['reorder_clips',   { compiler: compileReorderClips }],
     ['chat', { compiler: compileChat }],
 
     // Organize / B-Roll

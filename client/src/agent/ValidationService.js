@@ -90,6 +90,7 @@ export class ValidationService {
         const RESTRUCTURING_OPS = new Set([
             'silence_removal', 'remove_filler_words', 'long_form_edit',
             'smart_cleanup', 'remove_repetition', 'auto_captions', 'generate_captions', 'generate_transcript',
+            'reorder_clips',
         ]);
         const opKey = plan.operation || plan.steps?.[0]?.action;
         const skipIntegrityCheck = RESTRUCTURING_OPS.has(opKey);
@@ -216,6 +217,7 @@ export class ValidationService {
             case 'auto_captions':
             case 'generate_captions':
             case 'generate_transcript':
+            case 'reorder_clips':
                 return { outputs: [], issues: [], warnings: [] };
 
             default:
