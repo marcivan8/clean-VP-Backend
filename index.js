@@ -32,30 +32,60 @@ try {
   // Non-fatal: the server still starts, but audio/video routes will fail
 }
 
-// ── Security & CORS ──────────────────────────────────────────────────────────
+// ── Security headers ─────────────────────────────────────────────────────────
 app.use(helmet({
-  crossOriginResourcePolicy: false, // Required to serve images/videos from /uploads
-  contentSecurityPolicy: false      // Temporarily disabled to allow frontend to function smoothly
+  // Allow cross-origin loads for media served from /uploads and GCS signed URLs.
+  // Setting the header explicitly (cross-origin) is safer than disabling it (false).
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc:              ["'self'"],
+      scriptSrc:               ["'self'"],
+      styleSrc:                ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc:                 ["'self'", "https://fonts.gstatic.com"],
+      imgSrc:                  ["'self'", "data:", "blob:", "https://storage.googleapis.com"],
+      mediaSrc:                ["'self'", "blob:", "https://storage.googleapis.com"],
+      connectSrc: [
+        "'self'",
+        "https://*.supabase.co",
+        "wss://*.supabase.co",
+        "https://storage.googleapis.com",
+        ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
+      ],
+      objectSrc:               ["'none'"],
+      frameSrc:                ["'none'"],
+      baseUri:                 ["'self'"],
+      upgradeInsecureRequests: [],
+    },
+  },
+
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
 }));
 
+// ── CORS ─────────────────────────────────────────────────────────────────────
 const allowedOrigins = process.env.NODE_ENV === 'production'
   ? [process.env.FRONTEND_URL, process.env.PUBLIC_URL].filter(Boolean)
   : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'];
 
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production'
     ? (origin, callback) => {
         if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
         callback(new Error(`CORS: origin '${origin}' not allowed`));
       }
-    : '*',
+    : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
   exposedHeaders: ['Content-Length', 'Content-Type', 'X-Export-Filename', 'X-Export-Target'],
-  maxAge: 86400
-}));
-app.options('*', cors());
+  maxAge: 86400,
+};
+
+const corsMiddleware = cors(corsOptions);
+app.use(corsMiddleware);
+// Reuse the same configured middleware for preflight — never allow wildcard here.
+app.options('*', corsMiddleware);
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 // Global: 120 req/min per IP
@@ -85,6 +115,15 @@ const uploadLimiter = rateLimit({
   windowMs: 60_000, max: 10,
   standardHeaders: true, legacyHeaders: false,
   message: { error: 'Upload rate limit reached. Please wait a moment.' }
+});
+
+// Auth routes: 20 attempts per 15 min per IP, counting only failures.
+// Prevents brute-force against profile creation and token-based endpoints.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60_000, max: 20,
+  standardHeaders: true, legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { error: 'Too many authentication attempts. Please try again in 15 minutes.' },
 });
 
 // Body parsing middleware
@@ -162,7 +201,7 @@ app.get('/api/analyze/test', (req, res) => {
 });
 
 // Mount API routes — rate limiters applied to expensive endpoints
-app.use('/api/auth', authRoutes);
+app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/analyze', uploadLimiter, analyzeRoutes);
 app.use('/api/v2/analyze', uploadLimiter, analyzeRoutes);
 app.use('/analyze', uploadLimiter, analyzeRoutes);          // legacy/proxy
