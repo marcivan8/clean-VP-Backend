@@ -526,6 +526,7 @@ export class MediaExecutionEngine {
             case 'removeRepetition':
             case 'add_transitions_to_sections':
             case 'analyzeStructure':
+            case 'apply_zoom':        // alias — server fallback generates this for "zoom in/out"
             case 'apply_smart_zoom':
             case 'smart_cleanup':
             case 'longFormEdit': {

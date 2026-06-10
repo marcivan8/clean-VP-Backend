@@ -297,6 +297,7 @@ export class VideoEditorTools {
             case 'normalize_audio': return await performAudioNormalization(getFilename());
             case 'sync_clips_to_beat': return this.syncClipsToBeats();
             case 'auto_captions': return await performAutoCaptions(getFilename());
+            case 'apply_zoom':        // alias — server fallback generates this for "zoom in/out"
             case 'apply_smart_zoom': return await this.applySmartZoom(action.args);
 
             // Visual / Project
