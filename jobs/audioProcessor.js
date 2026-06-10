@@ -83,13 +83,139 @@ async function extractAudioForWhisper(inputPath, tempDir) {
     return outPath;
 }
 
-async function detectFillerWords(inputPath, language = 'en', tempDir = null, preExistingTranscript = null) {
+// ── Micro-padding (same logic as silenceProcessor) ──────────────────────────────────────
+function applyPaddingToSegments(segments, padding, totalDuration) {
+    if (!padding || padding <= 0) return segments;
+    return segments.map(seg => ({
+        start:    Math.max(0, seg.start - padding),
+        end:      Math.min(totalDuration || Infinity, seg.end + padding),
+        duration: Math.min(totalDuration || Infinity, seg.end + padding) - Math.max(0, seg.start - padding),
+    }));
+}
+
+// ── GPT-4o semantic filler analysis ──────────────────────────────────────────────────
+// Sends the full word-timestamp list to GPT-4o and gets back a list of ranges
+// to cut, with per-range confidence scores (0–1). Cuts with confidence >= 0.75
+// are applied; lower-confidence cuts are silently skipped (conservative).
+async function gptSemanticFillerAnalysis(words, openai) {
+    // Build a compact representation: index, start, end, word
+    const wordList = words.map((w, i) => ({
+        i,
+        s: parseFloat((w.start || 0).toFixed(3)),
+        e: parseFloat((w.end   || 0).toFixed(3)),
+        w: w.word,
+    }));
+
+    const prompt = `You are an expert video editor. Below is a word-level transcript with timestamps.
+
+Your task: identify time ranges that should be CUT from the final video.
+
+Identify and mark as CUT:
+1. Genuine filler words/phrases that add NO meaning in context:
+   - "um", "uh", "ah", "er", "hmm" — almost always fillers
+   - "like", "you know", "I mean", "kind of", "sort of", "basically", "literally" — ONLY when used as hesitation padding, not as meaningful content
+     Example CUT: "you know, like, the thing is..."
+     Example KEEP: "do you know what I mean?" or "I like this idea"
+2. Immediate word repetitions that are NOT for emphasis:
+   - "I I wanted" → CUT the duplicate "I"
+   - "the the thing" → CUT the duplicate "the"
+   - "really really important" → KEEP (intentional emphasis)
+3. Clear false starts where the speaker restarts a sentence:
+   - "I was going to — anyway, the point is" → CUT everything up to the restart
+4. Pauses between complete thoughts (gap >= 0.5s between words) that interrupt flow → CUT the gap
+
+DO NOT CUT:
+- Content said only once, even if imperfect
+- Intentional callbacks or repetition for emphasis
+- Anything you are not confident about (confidence < 0.75)
+- Never cut mid-sentence unless it is a clear false start
+
+Words (JSON array with index i, start s, end e, word w):
+${JSON.stringify(wordList)}
+
+Respond ONLY with valid JSON:
+{
+  "cuts": [
+    { "start": <float>, "end": <float>, "reason": "<short reason>", "confidence": <0.0-1.0> }
+  ]
+}`;
+
+    try {
+        const completion = await openai.chat.completions.create({
+            model: 'gpt-4o',
+            messages: [{ role: 'user', content: prompt }],
+            response_format: { type: 'json_object' },
+            temperature: 0.1,
+            max_tokens: 4096,
+        }, { timeout: 45_000 });
+
+        const parsed = JSON.parse(completion.choices[0].message.content);
+        const cuts = (parsed.cuts || []).filter(c =>
+            typeof c.start === 'number' &&
+            typeof c.end   === 'number' &&
+            c.end > c.start &&
+            (c.confidence ?? 1) >= 0.75
+        );
+        console.log(`[gptSemanticFiller] GPT-4o returned ${parsed.cuts?.length || 0} cuts, ${cuts.length} above confidence threshold`);
+        return cuts;
+    } catch (err) {
+        console.warn('[gptSemanticFiller] GPT-4o call failed, using keyword fallback:', err.message);
+        return null; // triggers fallback
+    }
+}
+
+// ── Keyword-set fallback (original logic, preserved) ──────────────────────────────────────
+function keywordFillerSpans(words) {
     const FILLER_WORDS = new Set([
         'um', 'uh', 'ah', 'er', 'eh', 'hmm', 'hm',
         'like', 'basically', 'literally',
         'you know', 'i mean', 'kind of', 'sort of',
         'euh', 'ben', 'genre', 'voilà', 'bah',
     ]);
+    const MERGE_GAP = 0.15;
+    const spans = [];
+    let current = null;
+
+    for (const w of words) {
+        const token = w.word.toLowerCase().replace(/[^a-zàâéèêëîïôùûüç ]/g, '').trim();
+        const isFiller = FILLER_WORDS.has(token);
+
+        if (isFiller) {
+            if (current && w.start - current.end <= MERGE_GAP) {
+                current.end = w.end;
+            } else {
+                if (current) spans.push(current);
+                current = { start: w.start, end: w.end };
+            }
+        } else {
+            if (current) { spans.push(current); current = null; }
+        }
+    }
+    if (current) spans.push(current);
+    return spans;
+}
+
+// ── Build activeSegments by inverting cut spans ──────────────────────────────────────────────
+function invertCutsToSegments(cutSpans, totalDuration) {
+    // Sort cut spans ascending
+    const sorted = [...cutSpans].sort((a, b) => a.start - b.start);
+    const active = [];
+    let cursor = 0;
+
+    for (const span of sorted) {
+        if (span.start > cursor + 0.01) {
+            active.push({ start: cursor, end: span.start, duration: span.start - cursor });
+        }
+        cursor = Math.max(cursor, span.end);
+    }
+    if (cursor < totalDuration - 0.01) {
+        active.push({ start: cursor, end: totalDuration, duration: totalDuration - cursor });
+    }
+    return active;
+}
+
+async function detectFillerWords(inputPath, language = 'en', tempDir = null, preExistingTranscript = null, paddingMs = 100) {
+    const PADDING = paddingMs / 1000;
 
     let tempAudio = null;
     let words;
@@ -121,46 +247,38 @@ async function detectFillerWords(inputPath, language = 'en', tempDir = null, pre
     }
 
     try {
+        let cutSpans;
 
-        const MERGE_GAP = 0.15;
-        const fillerSpans = [];
-        let current = null;
-
-        for (const w of words) {
-            const token = w.word.toLowerCase().replace(/[^a-zàâéèêëîïôùûüç ]/g, '').trim();
-            const isFiller = FILLER_WORDS.has(token);
-
-            if (isFiller) {
-                if (current && w.start - current.end <= MERGE_GAP) {
-                    current.end = w.end;
-                } else {
-                    if (current) fillerSpans.push(current);
-                    current = { start: w.start, end: w.end };
-                }
-            } else {
-                if (current) { fillerSpans.push(current); current = null; }
+        // ── Stage B: GPT-4o semantic analysis (primary path) ──────────────────────
+        let usedGPT = false;
+        try {
+            const openai = getOpenAI();
+            const gptCuts = await gptSemanticFillerAnalysis(words, openai);
+            if (gptCuts !== null) {
+                cutSpans  = gptCuts;
+                usedGPT   = true;
+                console.log(`[detectFillerWords] 🤖 GPT-4o semantic pass: ${cutSpans.length} cuts identified`);
             }
+        } catch (gptErr) {
+            console.warn('[detectFillerWords] GPT-4o unavailable, using keyword fallback:', gptErr.message);
         }
-        if (current) fillerSpans.push(current);
 
-        const activeSegments = [];
-        let cursor = 0;
-        for (const span of fillerSpans) {
-            if (span.start > cursor + 0.01) {
-                activeSegments.push({ start: cursor, end: span.start, duration: span.start - cursor });
-            }
-            cursor = span.end;
+        // ── Keyword fallback ────────────────────────────────────────────────────────────
+        if (!usedGPT) {
+            cutSpans = keywordFillerSpans(words);
+            console.log(`[detectFillerWords] 📝 Keyword fallback: ${cutSpans.length} filler spans identified`);
         }
-        if (cursor < totalDuration - 0.01) {
-            activeSegments.push({ start: cursor, end: totalDuration, duration: totalDuration - cursor });
-        }
+
+        const activeSegments = invertCutsToSegments(cutSpans, totalDuration);
+        const paddedSegments = applyPaddingToSegments(activeSegments, PADDING, totalDuration);
 
         return {
-            fillerCount: fillerSpans.length,
-            removedSegments: fillerSpans.map(s => ({ ...s, duration: s.end - s.start })),
-            activeSegments,
-            transcript: transcriptText,
+            fillerCount:      cutSpans.length,
+            removedSegments:  cutSpans.map(s => ({ ...s, duration: s.end - s.start })),
+            activeSegments:   paddedSegments,
+            transcript:       transcriptText,
             totalDuration,
+            method: usedGPT ? 'gpt4o-semantic' : 'keyword-fallback',
         };
     } finally {
         if (tempAudio && fs.existsSync(tempAudio)) fs.unlinkSync(tempAudio);

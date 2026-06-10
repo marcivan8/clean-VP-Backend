@@ -720,6 +720,32 @@ export class MediaExecutionEngine {
             } else {
                 console.warn(`[MediaExecutionEngine] No transcript found for "${processedBase}" — using FFmpeg fallback`);
             }
+
+            // Pass micro-padding config through to the worker
+            if (!resolvedPayload.padding_ms) resolvedPayload.padding_ms = 100;
+        }
+
+        // Inject word list + duration for repeated-take detection.
+        // The backend expects { words: [{word, start, end}], totalDuration } rather
+        // than a filename — it operates on the pre-existing transcript, not the audio file.
+        if (endpoint === '/api/ai/detect-repeated-takes') {
+            const allWords = store.captions?.length > 0
+                ? store.captions
+                : Object.values(store.transcripts || {}).flat();
+
+            if (allWords?.length > 0) {
+                resolvedPayload.words = allWords.map(w => ({
+                    word:  w.word || w.content || w.text || '',
+                    start: w.start,
+                    end:   w.end,
+                }));
+                resolvedPayload.totalDuration = allWords[allWords.length - 1]?.end || 0;
+                // Remove filename field — endpoint doesn't use it
+                delete resolvedPayload.filename;
+                console.log(`[MediaExecutionEngine] Injected ${resolvedPayload.words.length} words for detect-repeated-takes`);
+            } else {
+                console.warn('[MediaExecutionEngine] detect-repeated-takes: no transcript in store — endpoint will return no cuts');
+            }
         }
 
         const controller = new AbortController();

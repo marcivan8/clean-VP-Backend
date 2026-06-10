@@ -8,7 +8,9 @@ const {
     analyzeContentHandler,
     smartCleanupHandler,
     reorderClipsHandler,
+    detectRepeatedTakesHandler,
 } = require('../controllers/aiAgentController');
+const { authenticateUser } = require('../middleware/auth');
 
 router.post('/chat', chatAgentHandler);
 router.post('/agent-plan', agentPlanHandler);
@@ -25,6 +27,9 @@ router.post('/smart-cleanup', smartCleanupHandler);
 
 // Semantic reorder: receives clips with transcript text + user prompt, returns new clip order
 router.post('/reorder-clips', reorderClipsHandler);
+
+// Repeated take detection: embedding similarity + GPT-4o arbitration
+router.post('/detect-repeated-takes', authenticateUser, detectRepeatedTakesHandler);
 
 module.exports = router;
 

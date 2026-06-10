@@ -3,10 +3,25 @@ const ffmpegPath = require('ffmpeg-static');
 const path = require('path');
 const fs = require('fs');
 
+// ── Micro-padding helpers ──────────────────────────────────────────────────────
+// Add `padding` seconds of breathing room to both edges of every active segment.
+// This prevents hard cuts from landing exactly on phoneme boundaries, which
+// produce the "robotic" feel. Default: 100 ms (0.1 s).
+function applyPaddingToSegments(segments, padding, videoDuration) {
+    if (!padding || padding <= 0) return segments;
+    return segments.map(seg => ({
+        start:    Math.max(0, seg.start - padding),
+        end:      Math.min(videoDuration || Infinity, seg.end + padding),
+        duration: Math.min(videoDuration || Infinity, seg.end + padding) - Math.max(0, seg.start - padding),
+    }));
+}
+
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 module.exports = async function processSilenceJob(job) {
-    const { filename, filePath: jobFilePath, userId, threshold = '-30dB', duration = '0.5', transcript } = job.data;
+    const { filename, filePath: jobFilePath, userId, threshold = '-30dB', duration = '0.5', transcript,
+            padding_ms = 100 } = job.data;
+    const PADDING = padding_ms / 1000; // convert ms → seconds
 
     const uploadsDir = path.resolve(__dirname, '../uploads');
     const publicDir = path.resolve(__dirname, '../client/public');
@@ -94,9 +109,12 @@ module.exports = async function processSilenceJob(job) {
         currentSegment.duration = currentSegment.end - currentSegment.start;
         activeSegments.push(currentSegment);
 
+        // Apply micro-padding so cuts land on breath points, not hard phoneme edges
+        const paddedSegments = applyPaddingToSegments(activeSegments, PADDING, videoDuration);
+
         await job.updateProgress(100);
-        console.log(`[Job ${job.id}] ✅ Transcript-Aware Analysis Complete. Found ${activeSegments.length} active segments.`);
-        return { activeSegments, videoDuration };
+        console.log(`[Job ${job.id}] ✅ Transcript-Aware Analysis Complete. Found ${paddedSegments.length} active segments (padding=${padding_ms}ms).`);
+        return { activeSegments: paddedSegments, videoDuration };
     }
 
     // ── Fallback: FFmpeg Energy-Based Detection ────────────────────────────
@@ -162,8 +180,11 @@ module.exports = async function processSilenceJob(job) {
         });
     }
 
+    // Apply micro-padding to FFmpeg segments as well — both paths must behave identically
+    const ffmpegPadded = applyPaddingToSegments(activeSegments, PADDING, videoDuration);
+
     await job.updateProgress(100);
-    console.log(`[Job ${job.id}] ✅ FFmpeg Silence Analysis Complete. Found ${activeSegments.length} active segments.`);
+    console.log(`[Job ${job.id}] ✅ FFmpeg Silence Analysis Complete. Found ${ffmpegPadded.length} active segments (padding=${padding_ms}ms).`);
     
-    return { activeSegments, videoDuration };
+    return { activeSegments: ffmpegPadded, videoDuration };
 };
