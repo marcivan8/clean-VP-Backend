@@ -16,7 +16,9 @@ import useTimelineStore from '../store/useTimelineStore.js';
  * 4. Results are added to AI logs for display
  */
 
-const PROCESSING_TIMEOUT_MS = 3 * 60 * 1000; // 3-minute hard cap
+// Must exceed JobStateMachine's EXECUTION_TIMEOUT_MS (7 min) plus startup overhead.
+// Silence + filler on a 12-min video takes ~5 min combined; 15 min gives ample margin.
+const PROCESSING_TIMEOUT_MS = 15 * 60 * 1000;
 
 const workflowMachine = createMachine({
     id: 'videoAgent',
@@ -178,7 +180,7 @@ const workflowMachine = createMachine({
                 [PROCESSING_TIMEOUT_MS]: {
                     target: 'idle',
                     actions: () => {
-                        console.error('[Workflow] Processing timed out after 3 minutes');
+                        console.error('[Workflow] Processing timed out after 15 minutes');
                         useAIStore.getState().setIsAnalyzing(false);
                         useAIStore.getState().addLog({
                             id: 'timeout-' + Date.now(),
