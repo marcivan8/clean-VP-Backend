@@ -494,10 +494,36 @@ USER REQUEST:
     } catch (error) {
         console.error("❌ [CRL] Parse Intent Error:", error);
 
+        // For 429 / quota errors: don't surface a 500 — try the local parser first,
+        // then return a safe CLEAN_EDIT intent so the client can still proceed.
+        const isQuotaError = error?.status === 429 ||
+                             error?.code === 'insufficient_quota' ||
+                             (error?.message || '').includes('quota');
+
         try {
             const localResult = localParseIntent(req.body.prompt, req.body.context);
+            if (isQuotaError) {
+                console.warn('[CRL] OpenAI quota exceeded — using local parser fallback');
+            }
             return res.json(localResult);
         } catch (e) {
+            if (isQuotaError) {
+                // Quota error: return a best-effort CLEAN_EDIT so the client isn't stuck
+                console.warn('[CRL] Local parser also failed — returning CLEAN_EDIT fallback for quota error');
+                return res.json({
+                    intent: 'long_form_build',
+                    operation: 'long_form_edit',
+                    parameters: {
+                        editMode: 'CLEAN_EDIT',
+                        actions: ['silence_removal', 'remove_filler_words'],
+                        reason: 'OpenAI quota exceeded — best-effort CLEAN_EDIT fallback',
+                    },
+                    confidence: 'MEDIUM',
+                    missingParameters: [],
+                    _fallback: true,
+                    _fallbackReason: 'openai_quota_exceeded',
+                });
+            }
             res.status(500).json({
                 intent: 'clarification_required',
                 message: 'Failed to parse your request. Please try again.'
@@ -852,6 +878,24 @@ function localParseIntent(prompt, context) {
                 target_clip_id: activeClip?.id || null,
                 target_track_id: activeClip?.trackId || null,
                 parameters: { mode },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+        // ── Compound: "remove silences AND filler words" (must come BEFORE individual checks) ──
+        // "remove filler words and silences" hits has('filler') below and would return early
+        // without the silence half. Check compound first so both operations are captured.
+        const _wantsSilenceHere = has('silence', 'dead air', 'pauses', 'quiet parts', 'silences');
+        const _wantsFillerHere  = has('filler', 'filler word', 'um', 'uh', 'ums', 'uhs');
+        if (_wantsSilenceHere && _wantsFillerHere) {
+            return {
+                intent: 'long_form_build',
+                operation: 'long_form_edit',
+                parameters: {
+                    editMode: 'CLEAN_EDIT',
+                    actions: ['silence_removal', 'remove_filler_words'],
+                    reason: 'Compound: silence removal + filler word removal',
+                },
                 confidence: 'HIGH',
                 missingParameters: []
             };
