@@ -675,6 +675,17 @@ export class MediaExecutionEngine {
                 const timelineWords = deriveTimelineTranscript(store.tracks, originalWords);
                 const words = timelineWords || originalWords.map(c => ({ word: c.word || c.content || c.text || '', start: c.start, end: c.end }));
                 console.log(`[MediaExecutionEngine] ⚡ autoCaptions: derived ${words.length} words from timeline — skipping Whisper`);
+
+                // Apply captions inline — the normal autoCaptions handler at the bottom
+                // of this function is never reached when we return early, so we must
+                // call setCaptions and addCaptionClips here before returning.
+                if (store.setCaptions) store.setCaptions(words, processedBase || null);
+                if (words.length > 0) {
+                    const captions = groupWordsIntoCaptions(words);
+                    console.log(`[MediaExecutionEngine] 💬 autoCaptions (short-circuit): adding ${captions.length} caption clips`);
+                    store.addCaptionClips(captions);
+                }
+
                 return { engine: 'api', success: true, endpoint, result: { text: words.map(w => w.word).join(' '), words } };
             }
         }
