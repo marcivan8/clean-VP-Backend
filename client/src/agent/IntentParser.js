@@ -224,6 +224,15 @@ const NLP_MAP = {
         'normalize', 'normalize audio', 'level audio', 'audio level',
         'match volume', 'standardize audio'
     ],
+    // ── Auto-captions: must be a dedicated category so it is caught BEFORE
+    // the generic 'text' category, which maps to add_text_overlay.
+    autoCaptions: [
+        'add captions', 'add caption', 'auto captions', 'auto caption',
+        'captions', 'generate captions', 'add subtitles', 'subtitles',
+        'transcribe', 'transcription', 'closed captions', 'cc captions',
+        'burn in captions', 'burn captions', 'caption the video',
+        'subtitle the video', 'add closed captions', 'create captions',
+    ],
 };
 
 export const INTENT_SYSTEM_PROMPT = `You are a video editing assistant that converts natural language into structured JSON intents.
@@ -349,6 +358,18 @@ export class IntentParser {
         const prompt = userPrompt.trim();
         const structuredContext = ContextGenerator.getStructuredContext();
 
+        // ── Fast local-first check ───────────────────────────────────────────────────────────────
+        // For deterministic single-operation commands (captions, silence, filler
+        // words, undo/redo, export) we skip the API entirely. This avoids GPT
+        // conversation-history pollution that can misclassify clear commands
+        // (e.g. "add captions" being returned as "remove_filler_words" when the
+        // prior turn involved filler detection).
+        const localFirst = this.tryLocalFirst(prompt);
+        if (localFirst) {
+            console.log('[IntentParser] Local-first match (skipped API):', localFirst.operation);
+            return this.validateAndNormalize(localFirst);
+        }
+
         try {
             console.log('[IntentParser] Attempting API parse...');
             const apiResult = await this.parseViaAPI(prompt, structuredContext, signal);
@@ -381,9 +402,51 @@ export class IntentParser {
         return this.localParse(prompt, ContextGenerator.getTimelineContext());
     }
 
+    /**
+     * Deterministic local-first parser for unambiguous single-operation commands.
+     * Returns a result if the prompt clearly maps to one operation, null otherwise.
+     * Runs BEFORE the API call to prevent conversation-history contamination.
+     */
+    static tryLocalFirst(prompt) {
+        const lower = prompt.toLowerCase().trim();
+        const matches = (category) =>
+            NLP_MAP[category]?.some(phrase => lower === phrase || lower.startsWith(phrase + ' ') || lower.endsWith(' ' + phrase) || lower.includes(' ' + phrase + ' ')) ?? false;
+
+        // ── Caption / transcription (highest priority — most misclassified) ──
+        if (matches('autoCaptions')) {
+            return {
+                intent: 'edit',
+                operation: 'auto_captions',
+                parameters: {},
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+
+        // ── Undo / Redo (always deterministic) ──
+        if (matches('undo')) return { intent: 'undo', operation: 'undo_action', parameters: {}, confidence: 'HIGH', missingParameters: [] };
+        if (matches('redo')) return { intent: 'redo', operation: 'redo_action', parameters: {}, confidence: 'HIGH', missingParameters: [] };
+
+        // ── Silence removal (unambiguous verb + object) ──
+        if (lower.match(/^(remove|cut|delete|trim)\s+(silence|silences|dead\s*air|pauses|quiet\s*parts|gaps)$/)) {
+            return { intent: 'edit', operation: 'silence_removal', parameters: { threshold: '-30dB' }, confidence: 'HIGH', missingParameters: [] };
+        }
+
+        // ── Filler words (unambiguous) ──
+        if (lower.match(/^(remove|cut|delete)\s+(filler|filler\s*words?|ums?|uhs?|hesitations?)$/)) {
+            return { intent: 'edit', operation: 'remove_filler_words', parameters: {}, confidence: 'HIGH', missingParameters: [] };
+        }
+
+        return null; // let the API handle it
+    }
+
     static async parseViaAPI(prompt, context, signal) {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        // Default timeout — must be long enough for Whisper + GPT on a 30-min video.
+        // Previous value (30s) was too short: heavy jobs like caption/filler-detect
+        // take 60-120s on large files, causing TIMEOUT → invalid-transition spam.
+        const DEFAULT_TIMEOUT_MS = 180000; // 3 minutes
+        const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
         if (signal) signal.addEventListener('abort', () => controller.abort());
 
         // Build conversation history from the AI log so the model understands

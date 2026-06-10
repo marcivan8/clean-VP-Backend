@@ -19,8 +19,11 @@ export const JOB_STATES = {
 // Terminal states - job is complete
 export const TERMINAL_STATES = [JOB_STATES.DONE, JOB_STATES.FAILED, JOB_STATES.TIMEOUT];
 
-// Default timeout (30 seconds)
-const DEFAULT_TIMEOUT_MS = 30000;
+// Timeout for the EXECUTING state — must cover the worst case: Whisper transcription
+// + GPT-4o filler analysis on a 30-minute raw iPhone video (~2–3 min total).
+// The previous 30s value caused valid long-running jobs to fire TIMEOUT → invalid
+// transition spam as execution completed after the timer.
+const DEFAULT_TIMEOUT_MS = 180_000; // 3 minutes
 
 /**
  * Job Store
