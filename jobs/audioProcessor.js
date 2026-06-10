@@ -17,10 +17,19 @@ function getOpenAI() {
         openaiInstance = new OpenAI({
             apiKey: process.env.OPENAI_API_KEY,
             timeout: 300_000, // 5-min per request — Whisper on long videos can be slow
-            maxRetries: 3,    // SDK-level retries for transient connection errors
+            maxRetries: 0,    // BullMQ handles job-level retries; let 429s surface immediately
         });
     }
     return openaiInstance;
+}
+
+/**
+ * Returns true if an OpenAI error is a quota/rate-limit error that
+ * should NOT be retried (the key is exhausted, not temporarily busy).
+ */
+function isQuotaExhausted(err) {
+    return err?.status === 429 &&
+        (err?.code === 'insufficient_quota' || err?.type === 'insufficient_quota');
 }
 
 const WHISPER_LIMIT = 25 * 1024 * 1024; // 25 MB
@@ -159,7 +168,11 @@ Respond ONLY with valid JSON:
         console.log(`[gptSemanticFiller] GPT-4o returned ${parsed.cuts?.length || 0} cuts, ${cuts.length} above confidence threshold`);
         return cuts;
     } catch (err) {
-        console.warn('[gptSemanticFiller] GPT-4o call failed, using keyword fallback:', err.message);
+        if (isQuotaExhausted(err)) {
+            console.warn('[gptSemanticFiller] OpenAI quota exhausted — using keyword fallback immediately');
+        } else {
+            console.warn('[gptSemanticFiller] GPT-4o call failed, using keyword fallback:', err.message);
+        }
         return null; // triggers fallback
     }
 }
@@ -385,7 +398,7 @@ module.exports = async function processAudioJob(job) {
         }
 
         case 'transcribe': {
-            console.log(`[Job ${job.id}] 🎙️ Transcribing with Whisper: ${inputPath}`);
+            console.log(`[Job ${job.id}] 🎤 Transcribing with Whisper: ${inputPath}`);
             let tTempAudio = null;
             
             console.log(`[Job ${job.id}] Extracting audio for Whisper to ensure compatibility and speed...`);
@@ -394,13 +407,26 @@ module.exports = async function processAudioJob(job) {
             
             try {
                 const openai = getOpenAI();
-                const transcription = await openai.audio.transcriptions.create({
-                    file: fs.createReadStream(tWhisperPath),
-                    model: 'whisper-1',
-                    prompt: 'This is a video transcript. The speech might be faint, or there may be long pauses.',
-                    response_format: 'verbose_json',
-                    timestamp_granularities: ['word', 'segment']
-                });
+                let transcription;
+                try {
+                    transcription = await openai.audio.transcriptions.create({
+                        file: fs.createReadStream(tWhisperPath),
+                        model: 'whisper-1',
+                        prompt: 'This is a video transcript. The speech might be faint, or there may be long pauses.',
+                        response_format: 'verbose_json',
+                        timestamp_granularities: ['word', 'segment']
+                    });
+                } catch (whisperErr) {
+                    if (isQuotaExhausted(whisperErr)) {
+                        const fatal = new Error(
+                            'OpenAI quota exceeded — captions cannot be generated until the API key is recharged. ' +
+                            'Please top up at https://platform.openai.com/settings/billing'
+                        );
+                        fatal.unrecoverable = true;
+                        throw fatal;
+                    }
+                    throw whisperErr;
+                }
                 await job.updateProgress(100);
                 // Some Whisper API versions return words at top level; others nest them inside segments
                 const topWords = transcription.words || [];
