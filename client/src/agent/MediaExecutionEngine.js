@@ -866,7 +866,12 @@ export class MediaExecutionEngine {
                 if (store.setCaptions) store.setCaptions(result.words || [], captionFilename);
                 
                 if (wordCount > 0) {
-                    const captions = groupWordsIntoCaptions(result.words);
+                    // Re-map Whisper's source-file timestamps through the current clip offsets
+                    // so captions land on the correct timeline positions after any trimming or
+                    // silence removal. Same remapping the short-circuit path already applies.
+                    const timelineWords = deriveTimelineTranscript(store.tracks, result.words);
+                    const words = timelineWords || result.words;
+                    const captions = groupWordsIntoCaptions(words);
                     console.log(`[MediaExecutionEngine] 💬 autoCaptions: adding ${captions.length} caption clips`);
                     store.addCaptionClips(captions);
                 } else {
