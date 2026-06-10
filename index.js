@@ -277,9 +277,12 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start server
-const server = app.listen(port, '0.0.0.0', async () => {
-  console.log(`
+// Only bind a port when the file is run directly (node index.js / npm start).
+// When required by tests, supertest creates its own ephemeral server,
+// so we must not call app.listen() — it causes EADDRINUSE across test workers.
+if (require.main === module) {
+  const server = app.listen(port, '0.0.0.0', async () => {
+    console.log(`
 ╔═══════════════════════════════════════════════╗
 ║                                               ║
 ║      🚀 Viral Pilot Backend Server v2.0      ║
@@ -292,23 +295,21 @@ const server = app.listen(port, '0.0.0.0', async () => {
 ║  API URL:    http://localhost:${port}/api        ║
 ║  Health:     http://localhost:${port}/health     ║
 ╚═══════════════════════════════════════════════╝
-  `);
-  
-  // Start daily cleanup job
-  const runCleanup = require('./scripts/cleanup');
-  runCleanup(); // Run once on startup
-  setInterval(runCleanup, 24 * 60 * 60 * 1000); // Then run every 24 hours
+    `);
 
-  // When using local storage (no GCS), web + worker must share a filesystem.
-  // Auto-start the BullMQ workers in-process so uploaded files are accessible.
-  // When GCS is configured, a dedicated worker service can run separately instead.
-  const storageConfig = require('./config/storage');
-  if (storageConfig.useLocalStorage || !storageConfig.bucket || process.env.WORKER_INLINE === 'true') {
+    // Start daily cleanup job
+    const runCleanup = require('./scripts/cleanup');
+    runCleanup();
+    setInterval(runCleanup, 24 * 60 * 60 * 1000);
+
+    // When using local storage (no GCS), web + worker must share a filesystem.
+    const storageConfig = require('./config/storage');
+    if (storageConfig.useLocalStorage || !storageConfig.bucket || process.env.WORKER_INLINE === 'true') {
       console.log('👷 Starting inline workers (local storage mode — no GCS configured)...');
       console.log('   ⚠️  If you have a separate Railway worker service, shut it down — it cannot access local files.');
       require('./worker');
-  }
-});
-
+    }
+  });
+}
 
 module.exports = app;
