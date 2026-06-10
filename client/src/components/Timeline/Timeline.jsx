@@ -4,8 +4,10 @@ import Track from './Track';
 import useTimelineStore from '../../store/useTimelineStore';
 import { Scissors, ZoomIn, ZoomOut, Copy, Type, Palette } from 'lucide-react';
 
-const RULER_H = 24;   // h-6 = 24px (ruler height)
-const LABEL_W = 128;  // w-32 = 128px (track label column)
+const RULER_H    = 24;   // h-6 = 24px (ruler height)
+const LABEL_W    = 128;  // w-32 = 128px (track label column)
+const EDGE_ZONE  = 60;   // px from edge that triggers auto-scroll
+const SCROLL_SPD = 10;   // base px/frame; scales with proximity to edge
 
 const Timeline = () => {
     const { tracks, duration, zoomLevel, seek, setZoomLevel, addTrack } = useTimelineStore(useShallow(state => ({
@@ -48,34 +50,79 @@ const Timeline = () => {
         const start = getContentPos(e.clientX, e.clientY);
         selDragRef.current = { ...start, moved: false };
 
-        const onMove = (me) => {
-            const cur = getContentPos(me.clientX, me.clientY);
+        // Track cursor position so the scroll RAF can access it without closure issues
+        let cursorX = e.clientX;
+        let cursorY = e.clientY;
+        let scrollRafId = null;
+
+        // Recompute and paint the selection box from the latest cursor + scroll position
+        const refreshSelBox = () => {
+            const cur = getContentPos(cursorX, cursorY);
             const dx = cur.x - selDragRef.current.x;
             const dy = cur.y - selDragRef.current.y;
-            if (!selDragRef.current.moved && Math.hypot(dx, dy) < 5) return;
-            selDragRef.current.moved = true;
             setSelBox({
-                left: Math.min(selDragRef.current.x, cur.x),
-                top: Math.min(selDragRef.current.y, cur.y),
-                width: Math.abs(dx),
+                left:   Math.min(selDragRef.current.x, cur.x),
+                top:    Math.min(selDragRef.current.y, cur.y),
+                width:  Math.abs(dx),
                 height: Math.abs(dy),
             });
             const zl = useTimelineStore.getState().zoomLevel;
-            const curTime = Math.max(0, (cur.x - LABEL_W) / zl);
-            useTimelineStore.getState().seek(curTime);
+            useTimelineStore.getState().seek(Math.max(0, (cur.x - LABEL_W) / zl));
+        };
+
+        // Edge-scroll loop: runs every animation frame while cursor is in the edge zone
+        const scrollTick = () => {
+            const areaRect = area.getBoundingClientRect();
+            const relX     = cursorX - areaRect.left;
+            let   delta    = 0;
+
+            if (relX < LABEL_W + EDGE_ZONE) {
+                // Left edge — the closer to the label column, the faster
+                const proximity = Math.max(0, relX - LABEL_W) / EDGE_ZONE; // 0 = very left, 1 = edge zone boundary
+                delta = -SCROLL_SPD * (1 + (1 - proximity) * 2);
+            } else if (relX > areaRect.width - EDGE_ZONE) {
+                // Right edge — the closer to the right wall, the faster
+                const proximity = (areaRect.width - relX) / EDGE_ZONE; // 0 = very right, 1 = edge zone boundary
+                delta = SCROLL_SPD * (1 + (1 - proximity) * 2);
+            }
+
+            if (delta !== 0) {
+                area.scrollLeft = Math.max(0, area.scrollLeft + delta);
+                refreshSelBox();
+                scrollRafId = requestAnimationFrame(scrollTick);
+            } else {
+                scrollRafId = null;
+            }
+        };
+
+        const onMove = (me) => {
+            cursorX = me.clientX;
+            cursorY = me.clientY;
+
+            const cur = getContentPos(me.clientX, me.clientY);
+            const dx  = cur.x - selDragRef.current.x;
+            const dy  = cur.y - selDragRef.current.y;
+            if (!selDragRef.current.moved && Math.hypot(dx, dy) < 5) return;
+            selDragRef.current.moved = true;
+
+            refreshSelBox();
+
+            // Kick off the scroll loop only if it is not already running
+            if (scrollRafId === null) scrollTick();
         };
 
         const onUp = (me) => {
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
+            if (scrollRafId !== null) { cancelAnimationFrame(scrollRafId); scrollRafId = null; }
 
             if (selDragRef.current?.moved) {
                 const cur = getContentPos(me.clientX, me.clientY);
-                const x1 = Math.min(selDragRef.current.x, cur.x);
-                const x2 = Math.max(selDragRef.current.x, cur.x);
-                const zl = useTimelineStore.getState().zoomLevel;
+                const x1  = Math.min(selDragRef.current.x, cur.x);
+                const x2  = Math.max(selDragRef.current.x, cur.x);
+                const zl  = useTimelineStore.getState().zoomLevel;
                 const tStart = Math.max(0, (x1 - LABEL_W) / zl);
-                const tEnd = (x2 - LABEL_W) / zl;
+                const tEnd   = (x2 - LABEL_W) / zl;
 
                 const ids = [];
                 for (const track of useTimelineStore.getState().tracks) {

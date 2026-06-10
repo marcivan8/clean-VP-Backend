@@ -690,9 +690,20 @@ const useTimelineStore = create(
                 get()._saveHistory();
                 const layers = timelineManager.getEntitiesArray(ENTITY_TYPES.LAYER);
                 const count = layers.filter(l => l.type === type).length;
-                const order = layers.length;
                 const id = `track-${Date.now()}`;
                 const name = `${type.charAt(0).toUpperCase() + type.slice(1)} Track ${count + 1}`;
+
+                // Video tracks stack upward  → new track gets a lower order (floats above existing)
+                // Audio tracks stack downward → new track gets a higher order (sinks below existing)
+                const sameType = layers.filter(l => l.type === type);
+                let order;
+                if (type === 'audio') {
+                    const maxOrder = sameType.length > 0 ? Math.max(...sameType.map(l => l.order ?? 0)) : -1;
+                    order = maxOrder + 1;
+                } else {
+                    const minOrder = sameType.length > 0 ? Math.min(...sameType.map(l => l.order ?? 0)) : 1;
+                    order = minOrder - 1;
+                }
 
                 timelineManager.dispatch(TimelineActions.addLayer({
                     id, name, type, order
