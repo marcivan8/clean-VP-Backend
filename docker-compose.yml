@@ -12,8 +12,30 @@ services:
       # - SUPABASE_URL=...
       # - SUPABASE_SERVICE_KEY=...
       # - OPENAI_API_KEY=...
+      - DIARIZE_SERVICE_URL=http://diarize:5001
     volumes:
       - uploads_data:/usr/src/app/uploads
+    depends_on:
+      - diarize
+
+  diarize:
+    build: ./diarize-service
+    restart: always
+    # Port not exposed to host — only reachable by the backend service
+    environment:
+      # Required for pyannote speaker diarization (gated HuggingFace model)
+      # Get your token at https://huggingface.co/settings/tokens
+      # Then accept https://huggingface.co/pyannote/speaker-diarization-3.1
+      - HF_TOKEN=${HF_TOKEN:-}
+      - WHISPERX_MODEL=${WHISPERX_MODEL:-base}
+      - WHISPERX_DEVICE=cpu
+      - WHISPERX_COMPUTE=int8
+      - MAX_SPEAKERS=${MAX_SPEAKERS:-10}
+      - PORT=5001
+    volumes:
+      # Cache downloaded models between container restarts
+      - diarize_models:/root/.cache
 
 volumes:
   uploads_data:
+  diarize_models:

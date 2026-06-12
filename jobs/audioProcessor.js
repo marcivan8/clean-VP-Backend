@@ -446,6 +446,44 @@ module.exports = async function processAudioJob(job) {
             return result;
         }
 
+        case 'diarize': {
+            console.log(`[Job ${job.id}] 🎙️ Speaker diarization via WhisperX: ${inputPath}`);
+            const DiarizeService = require('../services/DiarizeService');
+
+            if (!DiarizeService.isAvailable) {
+                throw new Error('DIARIZE_SERVICE_URL is not configured — cannot run speaker diarization');
+            }
+
+            await job.updateProgress(5);
+
+            // Extract a mono 16 kHz WAV for WhisperX — reduces file size and ensures
+            // compatibility across all audio codecs (AAC/MP4, MOV, etc.)
+            const wavPath = path.join(tempDir, `diarize-${job.id}.wav`);
+            await new Promise((resolve, reject) => {
+                ffmpeg(inputPath)
+                    .audioChannels(1)
+                    .audioFrequency(16000)
+                    .format('wav')
+                    .output(wavPath)
+                    .on('end', resolve)
+                    .on('error', reject)
+                    .run();
+            });
+
+            await job.updateProgress(15);
+
+            let result;
+            try {
+                result = await DiarizeService.diarize(wavPath, language || null);
+            } finally {
+                if (fs.existsSync(wavPath)) fs.unlinkSync(wavPath);
+            }
+
+            await job.updateProgress(100);
+            console.log(`[Job ${job.id}] ✅ Diarization complete: ${result.words.length} words, ${result.speakers.length} speakers`);
+            return result;
+        }
+
         default:
             throw new Error(`Unknown audio action: ${action}`);
     }

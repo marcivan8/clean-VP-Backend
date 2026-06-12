@@ -1,0 +1,10 @@
+flask==3.0.3
+gunicorn==22.0.0
+# WhisperX — includes faster-whisper under the hood
+whisperx==3.1.5
+# pyannote.audio is pulled in by WhisperX but pin it to avoid surprises
+pyannote.audio==3.3.2
+# torch is a transitive dep but pin CPU-only to keep the image lean.
+# Remove the +cpu suffix and add a CUDA index URL in Dockerfile for GPU builds.
+torch==2.3.1+cpu
+torchaudio==2.3.1+cpu

@@ -373,4 +373,68 @@ router.post('/filler/detect-upload', authenticateUser, fillerUpload.single('file
     }
 });
 
+/**
+ * POST /api/audio/diarize
+ * Transcribes audio AND attaches speaker labels using WhisperX + pyannote.
+ * Requires DIARIZE_SERVICE_URL to point at the deployed diarize-service container.
+ * Falls back with a clear error when the service is not configured.
+ *
+ * Body: { filename?, filePath?, language? }
+ * Response: { jobId, status: 'queued' }
+ * Poll /api/jobs/:jobId/status → result: { words, speakers, language }
+ */
+router.post('/diarize', authenticateUser, async (req, res) => {
+    try {
+        const { filename, filePath, language } = req.body;
+
+        if (!filename && !filePath) {
+            return res.status(400).json({ error: 'filename or filePath is required' });
+        }
+
+        const DiarizeService = require('../services/DiarizeService');
+        if (!DiarizeService.isAvailable) {
+            return res.status(503).json({
+                error: 'Speaker diarization is not available — DIARIZE_SERVICE_URL is not configured.',
+                code: 'DIARIZE_NOT_CONFIGURED',
+            });
+        }
+
+        const uploadsDir = path.resolve(__dirname, '../uploads');
+        let inputPath = filePath;
+        if (filename && !inputPath) {
+            const normFn = filename.replace(/\\/g, '/').replace(/^\//, '');
+            inputPath = path.resolve(uploadsDir, normFn);
+            if (!inputPath.startsWith(uploadsDir)) {
+                return res.status(403).json({ error: 'Access denied: invalid file path' });
+            }
+        }
+
+        // Allow GCS-backed files — worker will download them
+        if (!fs.existsSync(inputPath)) {
+            const tempPath = path.resolve(uploadsDir, 'temp', path.basename(inputPath));
+            if (tempPath.startsWith(uploadsDir) && fs.existsSync(tempPath)) {
+                inputPath = tempPath;
+            } else if (storageConfig.useLocalStorage) {
+                return res.status(404).json({ error: `File not found: ${filename || filePath}` });
+            }
+        }
+
+        const userId      = req.user?.id || null;
+        const uniqueJobId = `diarize-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
+        const job = await audioQueue.add('diarize', {
+            action:   'diarize',
+            filePath: inputPath,
+            filename: filename || path.basename(inputPath),
+            language: language || null,
+            userId,
+        }, { jobId: uniqueJobId });
+
+        res.json({ success: true, jobId: job.id, status: 'queued' });
+
+    } catch (err) {
+        console.error('[audioRoutes] /diarize error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;
