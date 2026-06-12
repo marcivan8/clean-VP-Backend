@@ -13,6 +13,7 @@ import ReasoningPanel from '../components/Assistant/ReasoningPanel';
 import { DndContext, DragOverlay, useSensor, useSensors, PointerSensor } from '@dnd-kit/core';
 import DraggableAsset from '../components/DraggableAsset';
 import TextPanel from '../components/TextPanel';
+import TranscriptPanel from '../components/TranscriptPanel';
 import TextOverlay from '../components/Player/TextOverlay';
 import MobileBottomNav from '../components/MobileBottomNav';
 import useDeviceType from '../hooks/useDeviceType';
@@ -844,24 +845,32 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         <input type="file" ref={fileInputRef} onChange={handleFileImport} className="hidden" accept="video/*,audio/*,image/*" multiple />
 
                         <div className="p-2 border-b flex gap-1 overflow-x-auto no-scrollbar" style={{ borderColor: "var(--line-soft)" }}>
-                            {['media', 'color', 'text', 'audio', 'transform', 'settings'].map(tab => (
+                            {['media', 'transcript', 'color', 'text', 'audio', 'transform', 'settings'].map(tab => (
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab)}
                                     className={classNames("studio-tab-btn", activeTab === tab && "active")}
                                 >
-                                    {tab === 'media' && <Layers className="w-2.5 h-2.5" />}
-                                    {tab === 'color' && <Palette className="w-2.5 h-2.5" />}
-                                    {tab === 'text' && <Type className="w-2.5 h-2.5" />}
-                                    {tab === 'audio' && <span style={{ fontSize: 9 }}>🎤</span>}
-                                    {tab === 'transform' && <Move className="w-2.5 h-2.5" />}
-                                    {tab === 'settings' && <Settings className="w-2.5 h-2.5" />}
+                                    {tab === 'media'      && <Layers   className="w-2.5 h-2.5" />}
+                                    {tab === 'transcript' && <span style={{ fontSize: 9 }}>📝</span>}
+                                    {tab === 'color'      && <Palette  className="w-2.5 h-2.5" />}
+                                    {tab === 'text'       && <Type     className="w-2.5 h-2.5" />}
+                                    {tab === 'audio'      && <span style={{ fontSize: 9 }}>🎤</span>}
+                                    {tab === 'transform'  && <Move     className="w-2.5 h-2.5" />}
+                                    {tab === 'settings'   && <Settings className="w-2.5 h-2.5" />}
                                     {tab}
                                 </button>
                             ))}
                         </div>
 
-                        <div className="flex-1 overflow-y-auto pb-24 md:pb-20">
+                        {/* Transcript panel manages its own internal scroll */}
+                        {activeTab === 'transcript' && (
+                            <div className="flex-1 overflow-hidden" style={{ minHeight: 0 }}>
+                                <TranscriptPanel />
+                            </div>
+                        )}
+
+                        <div className={classNames("flex-1 overflow-y-auto pb-24 md:pb-20", activeTab === 'transcript' && "hidden")}>
                             {activeTab === 'media' && (
                                 <section className="p-4 border-b" style={{ borderColor: "var(--line-soft)" }}>
                                     <div className="flex items-center justify-between mb-4">

@@ -519,6 +519,20 @@ export class MediaExecutionEngine {
                 return { action, success: true, message: `Seeked to ${time}s` };
             }
 
+            // ── Phrase-range cut — removes a source-file span from the timeline ──
+            case 'cut_source_range': {
+                const srcStart = command.src_start ?? args.src_start ?? args.srcStart;
+                const srcEnd   = command.src_end   ?? args.src_end   ?? args.srcEnd;
+                if (typeof srcStart !== 'number' || typeof srcEnd !== 'number' || srcEnd <= srcStart) {
+                    return { action, success: false, message: `cut_source_range: invalid range ${srcStart}–${srcEnd}` };
+                }
+                if (typeof store.cutSourceRange === 'function') {
+                    store.cutSourceRange(srcStart, srcEnd);
+                    return { action, success: true, message: `Cut source range ${srcStart.toFixed(1)}s–${srcEnd.toFixed(1)}s` };
+                }
+                return { action, success: false, message: 'cutSourceRange not available in store' };
+            }
+
             // ── All long-form semantic actions — delegate to VideoEditorTools ─────
             case 'cutSegment':
             case 'reorderSegment':

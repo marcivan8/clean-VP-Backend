@@ -550,6 +550,81 @@ function localParseIntent(prompt, context) {
         // ── Helper: multi-keyword match ──────────────────────────────────────
         const has = (...words) => words.some(w => cmd.includes(w));
 
+        // ── Phrase-range detection: "cut/remove from <X> to <Y>" ─────────────
+        // Matches prompts like:
+        //   "cut from so anyway to alright let's move on"
+        //   "remove everything from I don't know to yeah exactly"
+        // Uses fuzzy matching (normalised levenshtein) against the word array so
+        // punctuation and minor transcription differences don't break the lookup.
+        const phraseRangeMatch = cmd.match(
+            /^(?:cut|remove|delete|trim)\s+(?:from\s+)?"?(.+?)"?\s+to\s+"?(.+?)"?\s*$/i
+        );
+        const words = context?.captions || context?.words || [];
+        if (phraseRangeMatch && words.length > 0) {
+            const phraseA = phraseRangeMatch[1].trim().toLowerCase();
+            const phraseB = phraseRangeMatch[2].trim().toLowerCase();
+
+            // Normalise a string: lowercase, strip punctuation, collapse whitespace
+            const norm = s => s.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+
+            // Sliding-window Levenshtein distance (character-level) for short phrases.
+            // Returns the best match position {idx, score} in the words array.
+            const levenshtein = (a, b) => {
+                const m = a.length, n = b.length;
+                const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+                for (let j = 0; j <= n; j++) dp[0][j] = j;
+                for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) {
+                    dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1]
+                        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+                }
+                return dp[m][n];
+            };
+
+            const findPhrase = (phrase) => {
+                const pNorm   = norm(phrase);
+                const pWords  = pNorm.split(' ');
+                const winSize = pWords.length;
+                let bestIdx   = -1;
+                let bestScore = Infinity;
+
+                for (let i = 0; i <= words.length - winSize; i++) {
+                    const window = words.slice(i, i + winSize)
+                        .map(w => norm(w.word || w.text || ''))
+                        .join(' ');
+                    const score = levenshtein(pNorm, window) / Math.max(pNorm.length, 1);
+                    if (score < bestScore) { bestScore = score; bestIdx = i; }
+                }
+                // Accept match only if edit distance is < 40% of phrase length
+                return bestScore < 0.4 ? { idx: bestIdx, score: bestScore } : null;
+            };
+
+            const matchA = findPhrase(phraseA);
+            const matchB = findPhrase(phraseB);
+
+            if (matchA && matchB) {
+                const startWord = words[matchA.idx];
+                const endWord   = words[matchB.idx + phraseB.split(' ').length - 1] || words[matchB.idx];
+                const srcStart  = startWord.start;
+                const srcEnd    = endWord.end;
+
+                if (srcEnd > srcStart) {
+                    return {
+                        intent:    'edit',
+                        operation: 'cut_source_range',
+                        parameters: {
+                            srcStart,
+                            srcEnd,
+                            phraseA,
+                            phraseB,
+                            reason: `Cut phrase range "${phraseA}" → "${phraseB}" (${srcStart.toFixed(1)}s–${srcEnd.toFixed(1)}s)`,
+                        },
+                        confidence: 'HIGH',
+                        missingParameters: [],
+                    };
+                }
+            }
+        }
+
         // ──────────────────────────────────────────────────────────────────────
         // 1. HIGH-LEVEL PRODUCTION COMMANDS
         //    "fully edit this", "you're a pro editor", "edit this clip", etc.
@@ -1156,6 +1231,19 @@ function generateLocalPlan(intent, context, planId) {
         case 'undo_action':
             steps = [{ step_id: 'undo', action: 'undo_action' }];
             break;
+
+        case 'cut_source_range': {
+            // Phrase-range cut: removes [srcStart, srcEnd] from all video clips.
+            // Executed client-side by useTimelineStore.cutSourceRange().
+            steps = [{
+                step_id:  'cut_range',
+                action:   'cut_source_range',
+                src_start: params.srcStart,
+                src_end:   params.srcEnd,
+                reason:    params.reason || `Cut ${params.srcStart?.toFixed(1)}s–${params.srcEnd?.toFixed(1)}s`,
+            }];
+            break;
+        }
 
         case 'trim_clip': {
             const trimFrom = params.trimFrom || params.trim_from || 'end';

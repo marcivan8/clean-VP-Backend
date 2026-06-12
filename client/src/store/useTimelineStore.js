@@ -1231,7 +1231,64 @@ const useTimelineStore = create(
                 );
                 timelineManager.fromLegacyTracks(allTracks);
                 set({ tracks: timelineManager.toLegacyTracks() });
-            }
+            },
+
+            /**
+             * cutSourceRange — removes a span of source-file time from all video clips.
+             * Used by TranscriptPanel when the user selects a word range and clicks Cut.
+             * @param {number} srcStart  - start time in source file (seconds)
+             * @param {number} srcEnd    - end time in source file (seconds)
+             */
+            cutSourceRange: (srcStart, srcEnd) => {
+                if (srcEnd <= srcStart) return;
+                const { tracks } = get();
+                get()._saveHistory();
+
+                const videoTrack = tracks.find(t => t.type === 'video');
+                if (!videoTrack) return;
+
+                const newClips = [];
+                for (const clip of videoTrack.clips) {
+                    const cSrcStart = clip.offset ?? 0;
+                    const cSrcEnd   = cSrcStart + (clip.duration ?? 0);
+
+                    // No overlap → keep as-is
+                    if (srcEnd <= cSrcStart || srcStart >= cSrcEnd) {
+                        newClips.push(clip);
+                        continue;
+                    }
+                    // Fully consumed → drop
+                    if (srcStart <= cSrcStart && srcEnd >= cSrcEnd) continue;
+
+                    // Left remnant
+                    if (srcStart > cSrcStart) {
+                        newClips.push({ ...clip, id: `${clip.id}-L`, duration: srcStart - cSrcStart });
+                    }
+                    // Right remnant
+                    if (srcEnd < cSrcEnd) {
+                        newClips.push({
+                            ...clip,
+                            id:       `${clip.id}-R`,
+                            offset:   srcEnd,
+                            duration: cSrcEnd - srcEnd,
+                        });
+                    }
+                }
+
+                // Re-layout: pack clips left-to-right with no gaps
+                let cursor = 0;
+                const reordered = newClips.map(c => {
+                    const laid = { ...c, start: cursor };
+                    cursor += c.duration;
+                    return laid;
+                });
+
+                const allTracks = tracks.map(t =>
+                    t.type === 'video' ? { ...t, clips: reordered } : t
+                );
+                timelineManager.fromLegacyTracks(allTracks);
+                set({ tracks: timelineManager.toLegacyTracks() });
+            },
         };
     })
 );
