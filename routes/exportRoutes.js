@@ -192,7 +192,8 @@ router.post('/', authMiddleware, async (req, res) => {
         const userId = req.user ? req.user.id : 'anonymous';
         const bucketName = process.env.GCS_BUCKET_NAME || 'viral-pilot_bucket';
 
-        // Apply the same filename sanitization the upload routes use.
+        // Sanitize for GCS key matching — mirrors what the proxy upload route stores.
+        // Spaces are replaced with underscores; other unsafe characters are stripped.
         const sanitizeFilename = (name) =>
             name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9._-]/g, '');
 
@@ -254,7 +255,10 @@ router.post('/', authMiddleware, async (req, res) => {
                     JSON.stringify({ url: (clip.url||'').slice(0,80), sourceUrl: (clip.sourceUrl||'').slice(0,80), proxyUrl: (clip.proxyUrl||'').slice(0,80) }));
                 return null;
             }
+            // Try both the original filename (proxyRoutes stores originalname as-is, spaces
+            // intact) AND the sanitized variant (analyzeRoutes renames files on upload).
             const safeName = sanitizeFilename(filename);
+            const rawName  = filename; // may contain spaces — valid GCS object key
 
             // When the request has no authenticated user, try to recover the real userId
             // from a proxy URL embedded in the clip (e.g. /api/proxy/gcs-media/proxies/<userId>/...).
@@ -267,22 +271,27 @@ router.post('/', authMiddleware, async (req, res) => {
                 }
             }
 
-            const exactPath = `raw/${listUserId}/${safeName}`;
-            try {
-                const [exists] = await gcsBucket.file(exactPath).exists();
-                if (exists) { console.log(`[export] GCS exact match: ${exactPath}`); return exactPath; }
-            } catch (e) {
-                console.warn(`[export] GCS exists() error for "${exactPath}":`, e.message);
+            // Check exact paths — original first (covers filenames with spaces), then sanitized.
+            for (const name of [rawName, safeName]) {
+                if (!name) continue;
+                const exactPath = `raw/${listUserId}/${name}`;
+                try {
+                    const [exists] = await gcsBucket.file(exactPath).exists();
+                    if (exists) { console.log(`[export] GCS exact match: ${exactPath}`); return exactPath; }
+                } catch (e) {
+                    console.warn(`[export] GCS exists() error for "${exactPath}":`, e.message);
+                }
             }
 
             try {
                 const [files] = await gcsBucket.getFiles({ prefix: `raw/${listUserId}/` });
                 const match = files.find(f => {
                     const base = f.name.split('/').pop();
-                    return base === safeName || base.endsWith(`-${safeName}`);
+                    return base === rawName || base === safeName
+                        || base.endsWith(`-${rawName}`) || base.endsWith(`-${safeName}`);
                 });
                 if (match) { console.log(`[export] GCS listing match: ${match.name}`); return match.name; }
-                console.warn(`[export] No GCS file matched "${safeName}" — available:`, files.map(f => f.name));
+                console.warn(`[export] No GCS file matched "${rawName}" — available:`, files.map(f => f.name));
             } catch (e) {
                 console.warn(`[export] GCS getFiles() error:`, e.message);
             }
@@ -315,11 +324,20 @@ router.post('/', authMiddleware, async (req, res) => {
             const localSrc = resolveSourcePath(c, uploadsDir);
             if (localSrc) return localSrc;
 
-            // Last resort: HTTP download for any absolute URL that isn't a blob/proxy
+            // Last resort: HTTP download for any absolute URL that isn't a blob/proxy.
+            // Re-encode the URL so filenames with spaces don't break axios/fetch.
             for (const raw of [c.sourceUrl, c.url, c.src, c.videoUrl]) {
                 if (raw && !raw.startsWith('blob:') && !raw.includes('/api/proxy') && raw.startsWith('http')) {
-                    console.log(`[export] HTTP download fallback: ${raw.slice(0, 80)}`);
-                    await downloadToTemp(raw, localPath);
+                    let safeUrl = raw;
+                    try {
+                        // Parse → reconstruct so only the path/query components are encoded,
+                        // leaving the host and existing percent-encoding untouched.
+                        const parsed = new URL(raw);
+                        parsed.pathname = parsed.pathname.split('/').map(seg => encodeURIComponent(decodeURIComponent(seg))).join('/');
+                        safeUrl = parsed.toString();
+                    } catch (_) { /* leave raw as-is */ }
+                    console.log(`[export] HTTP download fallback: ${safeUrl.slice(0, 80)}`);
+                    await downloadToTemp(safeUrl, localPath);
                     return localPath;
                 }
             }

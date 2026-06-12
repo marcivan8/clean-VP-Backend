@@ -2,26 +2,25 @@
 const User = require('../models/User');
 const VideoAnalysis = require('../models/VideoAnalysis');
 const { supabaseAdmin } = require('../config/database');
+const PolarService = require('./PolarService');
 
 class UsageBasedPricingService {
   constructor() {
-    this.tiers = {
-      explorer: {
-        id: 'explorer',
-        name: 'Explorer',
-        limits: {
-          videoAnalyses: 20, // Match the limit in User.js
-        },
-        period: 'monthly'
-      },
-    };
+    // Mirror PolarService's tier catalogue so callers that reference
+    // UsageBasedPricingService.tiers still work without modification.
+    this.tiers = PolarService.getTiers();
   }
 
-  async getUserTier(userId) {
-    // For now, everyone is on the Explorer tier
-    // In the future, we can fetch this from the User profile
+  /**
+   * Resolve the user's active tier via Polar.sh.
+   * Falls back to explorer when Polar is unconfigured or the API fails.
+   * Requires the user's email to look up their Polar customer record.
+   */
+  async getUserTier(userId, userEmail = null) {
+    const { tier, source } = await PolarService.getUserTier(userEmail);
+    console.log(`[UsageBasedPricingService] User ${userId} tier=${tier.name} (source=${source})`);
     return {
-      tier: this.tiers.explorer,
+      tier: { ...tier, id: tier.id ?? tier.name.toLowerCase() },
       expiresAt: null,
       usage: {},
     };
@@ -34,40 +33,39 @@ class UsageBasedPricingService {
     };
   }
 
-  async getUsageStatistics(userId) {
+  async getUsageStatistics(userId, userEmail = null) {
     try {
-      // 1. Get User Usage & Limits
       const userUsage = await User.getUsage(userId);
-      const tier = this.tiers.explorer;
+      const { tier } = await PolarService.getUserTier(userEmail);
 
-      // 2. Get Recent History
-      const history = await VideoAnalysis.findByUser(userId, 5); // Get last 5 analyses
+      const history = await VideoAnalysis.findByUser(userId, 5);
 
-      // 3. Calculate percentages
       const limit = userUsage.limit || tier.limits.videoAnalyses;
-      const used = userUsage.analyses;
-      const percentage = limit > 0 ? Math.round((used / limit) * 100) : 0;
+      const used  = userUsage.analyses;
+      const percentage = isFinite(limit) && limit > 0
+          ? Math.round((used / limit) * 100)
+          : 0;
 
       return {
         tier: {
-          name: tier.name,
-          id: tier.id,
+          name:   tier.name,
+          id:     tier.id ?? tier.name.toLowerCase(),
           period: tier.period,
         },
         usage: {
           videoAnalyses: {
-            used: used,
-            limit: limit,
+            used,
+            limit:     isFinite(limit) ? limit : null,
             remaining: userUsage.remaining,
-            percentage: percentage,
+            percentage,
           },
         },
-        recommendations: [], // Can be added later
+        recommendations: [],
         history: history.map(analysis => ({
-          id: analysis.id,
-          date: analysis.created_at,
-          title: analysis.title,
-          score: analysis.virality_score,
+          id:       analysis.id,
+          date:     analysis.created_at,
+          title:    analysis.title,
+          score:    analysis.virality_score,
           platform: analysis.best_platform
         })),
         projections: {},
@@ -85,15 +83,14 @@ class UsageBasedPricingService {
       const { error } = await supabaseAdmin
         .from('usage_logs')
         .insert({
-          user_id: userId,
-          action: action,
-          metadata: metadata, // Changed from 'details' to 'metadata' to match schema
+          user_id:    userId,
+          action:     action,
+          metadata:   metadata,
           created_at: new Date().toISOString()
         });
 
       if (error) {
         console.error('Error logging usage:', error);
-        // Don't throw error to avoid disrupting the main flow
         return { success: false, error };
       }
 
@@ -104,16 +101,28 @@ class UsageBasedPricingService {
     }
   }
 
-  async checkUsageLimit(userId, feature) {
-    // Delegate to User model which has the logic
+  /**
+   * Check whether a user is allowed to perform a billable action.
+   * Pass userEmail so getUserTier can query Polar.
+   */
+  async checkUsageLimit(userId, feature, userEmail = null) {
     if (feature === 'videoAnalysis' || feature === 'videoAnalyses') {
       const check = await User.checkUsageLimits(userId);
+
+      // If the user's DB limit already accounts for their tier, honour it.
+      // Otherwise ask Polar for the real entitlement.
+      const { tier } = await PolarService.getUserTier(userEmail);
+      const tierLimit = isFinite(tier.limits.videoAnalyses)
+          ? tier.limits.videoAnalyses
+          : Infinity;
+
+      const allowed = check.usage < tierLimit;
       return {
-        allowed: check.canAnalyze,
-        limit: check.limit,
-        used: check.usage,
-        remaining: check.remaining,
-        reason: check.canAnalyze ? null : 'limit_reached'
+        allowed,
+        limit:     isFinite(tierLimit) ? tierLimit : null,
+        used:      check.usage,
+        remaining: isFinite(tierLimit) ? Math.max(0, tierLimit - check.usage) : null,
+        reason:    allowed ? null : 'limit_reached',
       };
     }
 

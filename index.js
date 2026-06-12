@@ -1,4 +1,16 @@
 // ===== index.js =====
+const Sentry = require('@sentry/node');
+
+// Must be initialised before any other require so Sentry can instrument them.
+// SENTRY_DSN is set in Railway environment variables — no-op when absent.
+if (process.env.SENTRY_DSN) {
+    Sentry.init({
+        dsn: process.env.SENTRY_DSN,
+        environment: process.env.NODE_ENV || 'development',
+        tracesSampleRate: 0.1,
+    });
+}
+
 const express    = require('express');
 const cors       = require('cors');
 const helmet     = require('helmet');
@@ -268,6 +280,11 @@ app.use((req, res) => {
     method: req.method
   });
 });
+
+// Sentry error handler — must be registered before any other error middleware.
+if (process.env.SENTRY_DSN) {
+    Sentry.setupExpressErrorHandler(app);
+}
 
 // Error handler
 app.use((err, req, res, next) => {

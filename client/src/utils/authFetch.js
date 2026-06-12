@@ -3,10 +3,24 @@
  * Authenticated fetch wrapper that:
  * 1. Always sets Content-Type: application/json for POST/PUT/PATCH
  * 2. Attaches the Supabase JWT Bearer token
- * 3. Returns the raw Response (same signature as native fetch)
+ * 3. On 401, attempts one silent token refresh then retries once
+ * 4. Returns the raw Response (same signature as native fetch)
  */
 
 import { supabase } from '../lib/supabaseClient';
+
+async function buildHeaders(token, options) {
+    const method = (options.method || 'GET').toUpperCase();
+    const needsContentType = ['POST', 'PUT', 'PATCH'].includes(method) && options.body;
+    const anonSessionId = !token ? (localStorage.getItem('vp_session') ?? null) : null;
+
+    return {
+        ...(needsContentType ? { 'Content-Type': 'application/json' } : {}),
+        ...(token           ? { Authorization:  `Bearer ${token}` }   : {}),
+        ...(anonSessionId   ? { 'X-Session-Id': anonSessionId }       : {}),
+        ...(options.headers || {}),
+    };
+}
 
 export async function authFetch(url, options = {}) {
     // ── 1. Get the current session token ──────────────────────────────────
@@ -20,24 +34,27 @@ export async function authFetch(url, options = {}) {
         console.warn('[authFetch] Could not retrieve session token:', err.message);
     }
 
-    // ── 2. Anonymous session fallback ─────────────────────────────────────
-    // When there's no JWT, attach the anonymous session ID so the server can
-    // associate uploads and operations with this user's project.
-    const anonSessionId = !token ? (localStorage.getItem('vp_session') ?? null) : null;
+    // ── 2. First attempt ───────────────────────────────────────────────────
+    const headers = await buildHeaders(token, options);
+    let response = await fetch(url, { ...options, headers });
 
-    // ── 3. Build headers ──────────────────────────────────────────────────
-    const method = (options.method || 'GET').toUpperCase();
-    const needsContentType = ['POST', 'PUT', 'PATCH'].includes(method) && options.body;
+    // ── 3. Silent token refresh on 401 ────────────────────────────────────
+    // Returning users whose JWT expired get a seamless refresh instead of
+    // hitting a wall of silent failures across every protected route.
+    if (response.status === 401 && supabase && token) {
+        try {
+            const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+            if (!refreshError && refreshData?.session?.access_token) {
+                const newToken = refreshData.session.access_token;
+                const retryHeaders = await buildHeaders(newToken, options);
+                response = await fetch(url, { ...options, headers: retryHeaders });
+            }
+        } catch (err) {
+            console.warn('[authFetch] Token refresh failed:', err.message);
+        }
+    }
 
-    const headers = {
-        ...(needsContentType ? { 'Content-Type': 'application/json' } : {}),
-        ...(token          ? { Authorization:  `Bearer ${token}` }   : {}),
-        ...(anonSessionId  ? { 'X-Session-Id': anonSessionId }       : {}),
-        ...(options.headers || {}),
-    };
-
-    // ── 4. Execute fetch ──────────────────────────────────────────────────
-    return fetch(url, { ...options, headers });
+    return response;
 }
 
 export default authFetch;

@@ -17,11 +17,13 @@
     "@chatoctopus/timeline": "^0.2.0",
     "@google-cloud/storage": "^7.16.0",
     "@paddle/paddle-node-sdk": "^3.2.0",
+    "@polar-sh/sdk": "^0.48.1",
     "@revideo/2d": "^0.10.4",
     "@revideo/core": "^0.10.4",
     "@revideo/renderer": "^0.10.4",
     "@revideo/ui": "^0.10.4",
     "@revideo/vite-plugin": "^0.10.4",
+    "@sentry/node": "^10.57.0",
     "@supabase/storage-js": "^2.10.4",
     "@supabase/supabase-js": "^2.55.0",
     "@tensorflow-models/coco-ssd": "^2.2.3",
@@ -70,16 +72,25 @@
   "license": "MIT",
   "jest": {
     "testEnvironment": "node",
-    "setupFilesAfterEnv": ["./tests/setup.js"],
-    "testMatch": ["**/tests/**/*.test.js"],
+    "setupFilesAfterEnv": [
+      "./tests/setup.js"
+    ],
+    "testMatch": [
+      "**/tests/**/*.test.js"
+    ],
     "testTimeout": 15000,
     "verbose": true,
     "moduleNameMapper": {
-      "^ioredis$":          "<rootDir>/tests/mocks/ioredis.js",
-      "^bullmq$":           "<rootDir>/tests/mocks/bullmq.js",
-      "^openai$":           "<rootDir>/tests/mocks/openai.js",
-      "^ffmpeg-static$":    "<rootDir>/tests/mocks/ffmpeg-static.js"
+      "^ioredis$": "<rootDir>/tests/mocks/ioredis.js",
+      "^bullmq$": "<rootDir>/tests/mocks/bullmq.js",
+      "^openai$": "<rootDir>/tests/mocks/openai.js",
+      "^ffmpeg-static$": "<rootDir>/tests/mocks/ffmpeg-static.js"
     },
-    "testPathIgnorePatterns": ["/node_modules/", "/client/", "/revideo/", "/render-lambda/"]
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/client/",
+      "/revideo/",
+      "/render-lambda/"
+    ]
   }
 }

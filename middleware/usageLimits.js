@@ -11,11 +11,12 @@ const checkUsageLimits = async (req, res, next) => {
       });
     }
 
-    const userId = req.user.id;
+    const userId    = req.user.id;
+    const userEmail = req.user.email ?? null; // populated by authenticateUser middleware
     console.log(`🔍 Checking usage limits for user: ${userId}`);
 
-    // Check usage via smart pricing service
-    const usageCheck = await UsageBasedPricingService.checkUsageLimit(userId, 'videoAnalysis');
+    // Pass email so PolarService can resolve the user's actual Polar subscription.
+    const usageCheck = await UsageBasedPricingService.checkUsageLimit(userId, 'videoAnalysis', userEmail);
 
     if (!usageCheck.allowed) {
       console.log(`❌ Usage limit reached for user ${userId}:`, usageCheck);
