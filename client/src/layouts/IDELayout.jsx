@@ -715,7 +715,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     <div className="absolute rounded-full blur-[120px]" style={{ width: "40vw", height: "40vw", bottom: "-30vw", left: "-10vw", background: "var(--violet)", opacity: 0.10 }} />
                 </div>
                 {/* Top Bar */}
-                <header className="h-11 border-b flex items-center justify-start gap-6 px-4 z-20 shrink-0" style={{ background: "var(--glass)", borderColor: "var(--line-soft)", backdropFilter: "blur(20px) saturate(160%)" }}>
+                <header className="h-11 border-b flex items-center justify-start gap-6 px-4 z-40 shrink-0" style={{ background: "var(--glass)", borderColor: "var(--line-soft)", backdropFilter: "blur(20px) saturate(160%)" }}>
                     <div className="flex items-center gap-3">
 
                         <button className="md:hidden p-2 -ml-2 text-muted-foreground hover:text-foreground" onClick={() => setShowSidebar(!showSidebar)}>

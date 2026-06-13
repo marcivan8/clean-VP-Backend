@@ -546,6 +546,14 @@ const useTimelineStore = create(
                 }
 
                 set({ tracks: timelineManager.toLegacyTracks() });
+
+                // Force the player to redraw the current frame if paused
+                // This prevents the screen from going dark after scale/position edits
+                if (!get().isPlaying) {
+                    setTimeout(() => {
+                        get().seek(get().currentTime);
+                    }, 10);
+                }
             },
 
             // Move a clip (by its placement ID) from one track to another.
@@ -1287,7 +1295,15 @@ const useTimelineStore = create(
                     t.type === 'video' ? { ...t, clips: reordered } : t
                 );
                 timelineManager.fromLegacyTracks(allTracks);
-                set({ tracks: timelineManager.toLegacyTracks() });
+
+                // Drop captions that fall inside the removed range so the
+                // TranscriptPanel stays in sync with the timeline.
+                const { captions } = get();
+                const newCaptions = captions?.length
+                    ? captions.filter(w => w.end <= srcStart || w.start >= srcEnd)
+                    : captions;
+
+                set({ tracks: timelineManager.toLegacyTracks(), captions: newCaptions });
             },
         };
     })

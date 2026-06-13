@@ -2,6 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sparkles, ArrowRight, Play, CheckCircle2, MousePointerClick, Layers, LayoutGrid, Link as LinkIcon, MessageSquare, Mic, Scissors, UserCheck, Zap } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
+import {
+  EditorHeroShot,
+  CommandToEditFlow,
+  NLEExportShowcase,
+} from '../components/landing/ProductShowcase';
 
 async function createCheckout(plan) {
     const { data: { session } } = await supabase.auth.getSession();
@@ -124,7 +129,7 @@ const Hero = () => {
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 28 }}>
                     <div className="tag fade-up">
                         <span className="dot" />
-                        <span>Vibed Studio · Private beta</span>
+                        <span>Vibed Studio</span>
                         <span style={{ color: "var(--fg-4)" }}>—</span>
                         <span>v0.6 "Cinema"</span>
                     </div>
@@ -145,7 +150,7 @@ const Hero = () => {
                     </div>
                 </div>
                 <div className="fade-up fade-up-d4" style={{ marginTop: 72 }}>
-                    <HeroFrame />
+                    <EditorHeroShot />
                 </div>
             </div>
         </section>
@@ -305,27 +310,7 @@ const Exports = () => {
               </div>
             </div>
   
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
-              {tools.map((t) => {
-                const Icon = ExportIcon[t.key];
-                return (
-                  <div key={t.key} className="card" style={{ padding: 20, display: "flex", alignItems: "center", gap: 14 }}>
-                    <div style={{
-                      width: 48, height: 48, borderRadius: 12, background: "var(--bg-3)",
-                      border: "0.5px solid var(--line)", color: "var(--fg)",
-                      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                    }}>
-                      <Icon />
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 500 }}>{t.name}</div>
-                      <div className="mono" style={{ color: "var(--fg-3)", fontSize: 10.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.fmt}</div>
-                    </div>
-                    <div style={{ marginLeft: "auto", color: "var(--fg-4)" }}><ArrowRight className="w-4 h-4" /></div>
-                  </div>
-                );
-              })}
-            </div>
+            <NLEExportShowcase />
           </div>
         </div>
       </section>
@@ -605,6 +590,21 @@ const HomePage = () => {
             <main>
                 <Hero />
                 <FeatureMoments />
+
+                {/* AI command flow — real product screenshots */}
+                <section style={{ padding: "100px 0", background: "var(--bg-2)" }}>
+                    <div className="wrap">
+                        <div className="section-head" style={{ alignItems: "center", textAlign: "center", marginBottom: 60 }}>
+                            <span className="eyebrow">In action</span>
+                            <h2 className="h-section">Type a command.<br /><em>Watch the edit.</em></h2>
+                            <p className="body-lg" style={{ maxWidth: 540, margin: 0 }}>
+                                One sentence removes 49 silences from a 10-minute interview. You accept or reject the entire batch in one click.
+                            </p>
+                        </div>
+                        <CommandToEditFlow />
+                    </div>
+                </section>
+
                 <AntiDescript />
                 <Exports />
                 <Pricing />

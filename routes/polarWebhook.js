@@ -116,8 +116,15 @@ async function handleCheckout(req, res) {
         return res.status(503).json({ error: `Product ID for plan "${plan}" is not configured.` });
     }
 
+    const baseUrl    = process.env.PUBLIC_URL || process.env.FRONTEND_URL || 'https://www.viralpilot.fr';
     const successUrl = process.env.POLAR_SUCCESS_URL ||
-        `${process.env.PUBLIC_URL || process.env.FRONTEND_URL || ''}/upgrade/success?checkout_id={CHECKOUT_ID}`;
+        `${baseUrl}/success?checkout_id={CHECKOUT_ID}`;
+
+    // Polar requires an absolute URL — catch relative fallbacks before the API call
+    if (!successUrl.startsWith('http')) {
+        console.error('[PolarCheckout] successUrl is not absolute:', successUrl);
+        return res.status(500).json({ error: 'POLAR_SUCCESS_URL must be an absolute URL (https://...)' });
+    }
 
     try {
         const checkout = await polar.checkouts.create({
