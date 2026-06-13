@@ -9,6 +9,7 @@ import AuthPage from './pages/AuthPage';
 import PrivacyPage from './pages/PrivacyPage';
 import AboutPage from './pages/AboutPage';
 import SuccessPage from './pages/SuccessPage';
+import CookiePolicyPage from './pages/CookiePolicyPage';
 import { supabase } from './lib/supabaseClient';
 import useSessionStore from './store/useSessionStore';
 
@@ -42,7 +43,8 @@ function App() {
                 <Route path="/gdpr"     element={<GdprPage />} />
                 <Route path="/privacy"  element={<PrivacyPage />} />
                 <Route path="/about"    element={<AboutPage />} />
-                <Route path="/success"  element={<SuccessPage />} />
+                <Route path="/success"       element={<SuccessPage />} />
+                <Route path="/cookie-policy" element={<CookiePolicyPage />} />
             </Routes>
         </BrowserRouter>
     );

@@ -121,17 +121,21 @@ async function handleCheckout(req, res) {
 
     try {
         const checkout = await polar.checkouts.create({
-            products:   [productId],
+            products:      [productId],
             successUrl,
-            // Pre-fill the customer email so Polar can link the subscription to the right account
             customerEmail: req.user.email ?? undefined,
         });
 
         console.log(`[PolarCheckout] Created checkout for ${req.user.email} → plan=${plan} url=${checkout.url}`);
         res.json({ url: checkout.url, checkoutUrl: checkout.url });
     } catch (err) {
-        console.error('[PolarCheckout] Failed to create checkout:', err.message);
-        res.status(500).json({ error: 'Failed to create checkout session' });
+        // Log the full Polar SDK error — it carries status + body, not just message
+        const detail = err?.body ?? err?.rawResponse ?? err?.message ?? String(err);
+        console.error('[PolarCheckout] Failed to create checkout:', JSON.stringify(detail, null, 2));
+        res.status(500).json({
+            error:  'Failed to create checkout session',
+            detail: process.env.NODE_ENV !== 'production' ? detail : undefined,
+        });
     }
 }
 

@@ -53,20 +53,25 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc:              ["'self'"],
-      scriptSrc:               ["'self'"],
+      scriptSrc:               ["'self'", "https://cdn.iubenda.com",
+                                // Hash of the Iubenda config inline script in the old build.
+                                // Safe to remove once the frontend is rebuilt (the new build
+                                // loads /iubenda-config.js as an external file instead).
+                                "'sha256-nkFQkdgl82bXmdiehongvIXI8phjn3IWsIBf7u/rHH8='"],
       styleSrc:                ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       fontSrc:                 ["'self'", "https://fonts.gstatic.com"],
-      imgSrc:                  ["'self'", "data:", "blob:", "https://storage.googleapis.com"],
+      imgSrc:                  ["'self'", "data:", "blob:", "https://storage.googleapis.com", "https://*.iubenda.com"],
       mediaSrc:                ["'self'", "blob:", "https://storage.googleapis.com"],
       connectSrc: [
         "'self'",
         "https://*.supabase.co",
         "wss://*.supabase.co",
         "https://storage.googleapis.com",
+        "https://*.iubenda.com",
         ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
       ],
       objectSrc:               ["'none'"],
-      frameSrc:                ["'none'"],
+      frameSrc:                ["'self'", "https://*.iubenda.com"],
       baseUri:                 ["'self'"],
       upgradeInsecureRequests: [],
     },

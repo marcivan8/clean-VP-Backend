@@ -11,31 +11,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=Roboto:wght@300;400;500;700&family=Lato:wght@300;400;700&family=Montserrat:wght@300;400;500;600;700&family=Oswald:wght@300;400;500;600;700&family=Merriweather:ital,wght@0,300;0,400;0,700;1,400&family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Dancing+Script:wght@400;700&display=swap" rel="stylesheet">
     <title>Vibed — Vibe Editing</title>
 
-    <!-- Iubenda Cookie Solution — replace the siteId and cookiePolicyId values with
-         the ones from your Iubenda dashboard after generating the policy. -->
-    <script type="text/javascript">
-      var _iub = _iub || [];
-      _iub.csConfiguration = {
-        siteId:         window.__IUBENDA_SITE_ID__       || 0,
-        cookiePolicyId: window.__IUBENDA_COOKIE_POLICY__ || 0,
-        lang:           'en',
-        storage:        { useSiteId: true },
-        banner: {
-          position:              'bottom',
-          textColor:             '#ffffff',
-          backgroundColor:       '#0a0e1a',
-          acceptButtonDisplay:    true,
-          customizeButtonDisplay: true,
-          rejectButtonDisplay:    true,
-          acceptButtonColor:      '#6c63ff',
-          acceptButtonCaptionColor: '#ffffff',
-        }
-      };
-    </script>
-    <script type="text/javascript"
-      src="//cdn.iubenda.com/cs/iubenda_cs.js"
-      async></script>
-    <!-- End Iubenda -->
+    <!-- Iubenda Cookie Solution — config in /public/iubenda-config.js -->
+    <script src="/iubenda-config.js"></script>
+    <script src="https://cdn.iubenda.com/cs/iubenda_cs.js" async></script>
   </head>
   <body>
     <div id="root"></div>
