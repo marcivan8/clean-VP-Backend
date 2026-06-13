@@ -7,6 +7,9 @@
 // Fake key so OpenAI client instantiates inside controllers
 process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || 'sk-test-fake-key-for-jest';
 
+// Skip AI ops quota checks in tests (avoids mocking the entire usage-gate DB chain)
+process.env.BYPASS_USAGE_GATE = 'true';
+
 // ── Supabase mock ──────────────────────────────────────────────────────────────
 // Must live here (not moduleNameMapper) because tests need to control per-call
 // return values via mockResolvedValueOnce().

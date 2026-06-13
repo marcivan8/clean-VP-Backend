@@ -1,6 +1,9 @@
 /**
- * Routes with optionalAuth — silence, captions
- * These endpoints must accept requests WITHOUT a token (unauthenticated usage).
+ * Routes with optionalAuth — silence detection
+ * These endpoints must accept requests WITHOUT a token.
+ *
+ * Note: /api/captions/generate requires auth (requireAuth middleware) because
+ * caption generation is a tracked AI operation. Those tests are in ai.test.js.
  */
 const request = require('supertest');
 const app     = require('../index');
@@ -20,16 +23,16 @@ describe('POST /api/silence/detect (optionalAuth)', () => {
     });
 });
 
-describe('POST /api/captions/generate (optionalAuth)', () => {
-    it('reachable without Authorization header', async () => {
+describe('POST /api/captions/generate (requireAuth)', () => {
+    it('returns 401 without Authorization header', async () => {
         const res = await request(app)
             .post('/api/captions/generate')
             .send({ videoUrl: 'https://storage.googleapis.com/bucket/test.mp4' });
-        expect(res.status).not.toBe(401);
+        expect(res.status).toBe(401);
     });
 
-    it('400 or 202 when body is empty', async () => {
+    it('returns 401 when body is empty and no auth', async () => {
         const res = await request(app).post('/api/captions/generate').send({});
-        expect([400, 202, 200]).toContain(res.status);
+        expect(res.status).toBe(401);
     });
 });

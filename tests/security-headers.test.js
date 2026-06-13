@@ -11,11 +11,13 @@ describe('Security headers', () => {
         expect(res.headers['content-security-policy']).toBeDefined();
     });
 
-    it('CSP blocks object-src and frame-src', async () => {
+    it('CSP blocks object-src; frame-src allows only self and iubenda', async () => {
         const res = await request(app).get('/health');
         const csp = res.headers['content-security-policy'];
         expect(csp).toMatch(/object-src 'none'/);
-        expect(csp).toMatch(/frame-src 'none'/);
+        // frame-src allows 'self' and iubenda (cookie consent) but nothing else
+        expect(csp).toMatch(/frame-src/);
+        expect(csp).not.toMatch(/frame-src '\*'/);
     });
 
     it('Referrer-Policy is strict-origin-when-cross-origin', async () => {

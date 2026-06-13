@@ -61,3 +61,4 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: stub-key
           SUPABASE_ANON_KEY: stub-anon-key
           OPENAI_API_KEY: stub-openai-key
+          BYPASS_USAGE_GATE: 'true'
