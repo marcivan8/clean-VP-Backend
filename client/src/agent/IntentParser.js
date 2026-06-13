@@ -232,6 +232,9 @@ const NLP_MAP = {
         'transcribe', 'transcription', 'closed captions', 'cc captions',
         'burn in captions', 'burn captions', 'caption the video',
         'subtitle the video', 'add closed captions', 'create captions',
+        'transcript', 'generate transcript', 'generate the transcript',
+        'create transcript', 'make transcript', 'run transcript',
+        'get transcript', 'show transcript', 'extract transcript',
     ],
 };
 
@@ -405,6 +408,14 @@ export class IntentParser {
             NLP_MAP[category]?.some(phrase => lower.includes(phrase)) ?? false;
 
         if (matches('nleExport')) return this.parseNLEExportIntent(lower);
+
+        // ── Caption / transcription — highest priority in localParse too.
+        // tryLocalFirst handles the direct case; this covers re-parses that come
+        // through resumeJob (where the prompt is a combined string like
+        // "generate the transcript. Clarification answers: {...}").
+        if (matches('autoCaptions')) {
+            return this.createIntent(INTENT_TYPES.EDIT, 'auto_captions', { constraints: {} });
+        }
 
         // Pure conversational questions → route directly to CHAT, never spin up the pipeline.
         if (matches('conversational') && !matches('extractHighlights') && !matches('silence')

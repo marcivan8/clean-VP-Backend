@@ -204,6 +204,16 @@ const workflowMachine = createMachine({
                         useAIStore.getState().setIsAnalyzing(true);
                         context.initialHistoryLen = useTimelineStore.getState().past.length;
                     }
+                },
+                // If the user sends a NEW prompt while we are waiting for clarification,
+                // treat it as "abandon this clarification and start fresh". Transition back
+                // to idle so the next START event is accepted.
+                CANCEL: {
+                    target: 'idle',
+                    actions: () => {
+                        console.log('[Workflow] Clarification cancelled — returning to idle');
+                        useAIStore.getState().setIsAnalyzing(false);
+                    }
                 }
             }
         },
@@ -335,10 +345,12 @@ export class WorkflowController {
         const currentState = this.getState();
 
         // If waiting for clarification, treat this as "user abandoned it and wants
-        // a fresh start". Cancel the stale job so the machine can accept START again.
+        // a fresh start". Cancel the stale job and transition the machine back to idle
+        // so it can accept the new START event.
         if (currentState === 'clarifying') {
             console.warn('[Workflow] processUserPrompt called while clarifying — cancelling stale job');
             this.cancelCurrentJob();
+            this.actor.send({ type: 'CANCEL' }); // transition clarifying → idle
         }
 
         // Prevent double-tap / double-call duplicates while already running.
