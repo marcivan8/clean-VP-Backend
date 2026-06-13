@@ -8,23 +8,13 @@
 
 FROM python:3.11-slim
 
-# ffmpeg binary  — used by whisperx at runtime
-# libav*-dev + pkg-config — required to compile PyAV (av==11.*) from source,
-# which faster-whisper pulls in as a dependency
+# ffmpeg binary — used by whisperx at runtime
+# git — needed to install whisperX directly from GitHub
+# (libav*-dev build headers removed: faster-whisper>=1.1.0 uses av>=12
+#  which ships pre-built manylinux wheels, so no source compilation needed)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         git \
-        pkg-config \
-        gcc \
-        g++ \
-        make \
-        libavformat-dev \
-        libavcodec-dev \
-        libavdevice-dev \
-        libavutil-dev \
-        libavfilter-dev \
-        libswscale-dev \
-        libswresample-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -42,10 +32,6 @@ COPY app.py .
 ENV PORT=5001
 EXPOSE 5001
 
-# Use gunicorn with a single worker — model inference is not thread-safe.
-# Increase timeout to 600 s for long audio files.
-CMD gunicorn app:app \
-        --bind 0.0.0.0:${PORT} \
-        --workers 1 \
-        --timeout 600 \
-        --log-level info
+# JSON exec form — gunicorn receives OS signals (SIGTERM) directly.
+# sh -c is required to expand the ${PORT} shell variable at runtime.
+CMD ["sh", "-c", "exec gunicorn app:app --bind 0.0.0.0:${PORT} --workers 1 --timeout 600 --log-level info"]

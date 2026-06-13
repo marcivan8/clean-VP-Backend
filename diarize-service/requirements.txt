@@ -1,9 +1,18 @@
 flask==3.0.3
 gunicorn==22.0.0
-# WhisperX — includes faster-whisper under the hood
-whisperx==3.1.5
-# pyannote.audio is pulled in by WhisperX but pin it to avoid surprises
+
+# faster-whisper>=1.1.0 uses av>=12 which ships pre-built manylinux wheels.
+# This avoids the av==11.* source-compile failure against FFmpeg 6+ headers.
+faster-whisper>=1.1.0,<2.0
+
+# Install whisperX directly from its GitHub repo.
+# The PyPI release (3.1.5) was an unofficial third-party upload and has been yanked.
+# The official repo is the only reliable source.
+git+https://github.com/m-bain/whisperX.git
+
+# pyannote.audio provides the speaker diarization pipeline (requires HF_TOKEN)
 pyannote.audio==3.1.1
+
 # torch is a transitive dep but pin CPU-only to keep the image lean.
 # Remove the +cpu suffix and add a CUDA index URL in Dockerfile for GPU builds.
 torch==2.3.1+cpu
