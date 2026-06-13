@@ -85,13 +85,14 @@ async function sessionMigrate(id, userId) {
     }
 }
 
-// Purge expired in-memory sessions once per hour
+// Purge expired in-memory sessions once per hour.
+// .unref() lets Jest (and any other test runner) exit without waiting for this timer.
 setInterval(() => {
     const now = Date.now();
     for (const [id, s] of memSessions) {
         if (s.expiresAt.getTime() < now) memSessions.delete(id);
     }
-}, 3_600_000);
+}, 3_600_000).unref();
 
 // ── Rate limits ───────────────────────────────────────────────────────────────
 const createLimiter = rateLimit({ windowMs: 60_000, max: 5, message: { error: 'Too many session creation requests.' } });

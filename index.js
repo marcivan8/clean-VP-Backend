@@ -327,7 +327,7 @@ if (require.main === module) {
     // Start daily cleanup job
     const runCleanup = require('./scripts/cleanup');
     runCleanup();
-    setInterval(runCleanup, 24 * 60 * 60 * 1000);
+    setInterval(runCleanup, 24 * 60 * 60 * 1000).unref();
 
     // When using local storage (no GCS), web + worker must share a filesystem.
     const storageConfig = require('./config/storage');
