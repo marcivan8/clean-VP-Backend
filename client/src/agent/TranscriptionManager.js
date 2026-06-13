@@ -161,8 +161,16 @@ class TranscriptionManagerClass {
 
             if (!response.ok) {
                 const errorData = await response.clone().json().catch(() => null);
-                if (response.status === 503 || errorData?.code === 'DIARIZE_NOT_CONFIGURED') {
-                    console.log('[TranscriptionManager] Diarization service unavailable, falling back to standard transcribe');
+                // Fall back to standard transcription when diarization is not configured
+                // or when the service is temporarily unavailable (any 5xx).
+                // 4xx errors (401, 403, 404) propagate as real errors — they indicate
+                // an auth or routing problem that would affect /transcribe equally.
+                const shouldFallback =
+                    response.status === 503 ||
+                    errorData?.code === 'DIARIZE_NOT_CONFIGURED' ||
+                    (response.status >= 500 && response.status !== 401 && response.status !== 403);
+                if (shouldFallback) {
+                    console.log(`[TranscriptionManager] Diarization unavailable (${response.status}), falling back to standard transcribe`);
                     response = await authFetch('/api/audio/transcribe', {
                         method: 'POST',
                         body: JSON.stringify({ filename }),

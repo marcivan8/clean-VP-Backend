@@ -8,10 +8,20 @@
 
 FROM python:3.11-slim
 
-# ffmpeg is required by whisperx to load non-wav audio files
+# ffmpeg binary  — used by whisperx at runtime
+# libav*-dev + pkg-config — required to compile PyAV (av==11.*) from source,
+# which faster-whisper pulls in as a dependency
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         git \
+        pkg-config \
+        libavformat-dev \
+        libavcodec-dev \
+        libavdevice-dev \
+        libavutil-dev \
+        libavfilter-dev \
+        libswscale-dev \
+        libswresample-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
