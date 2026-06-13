@@ -68,6 +68,9 @@ app.use(helmet({
         "wss://*.supabase.co",
         "https://storage.googleapis.com",
         "https://*.iubenda.com",
+        // Sentry error reporting — both ingest domains (EU + global)
+        "https://*.ingest.sentry.io",
+        "https://*.ingest.de.sentry.io",
         ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
       ],
       objectSrc:               ["'none'"],
