@@ -257,14 +257,14 @@ const AboutPage = () => {
                             Questions, feedback, or just want to talk about the build?
                         </p>
                         <a
-                            href="mailto:mariojaris2@gmail.com"
+                            href="mailto:marc@vibedstudio.com"
                             style={{
                                 fontFamily: 'var(--f-mono)', fontSize: 14, color: 'var(--accent)', textDecoration: 'none'
                             }}
                             onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
                             onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
                         >
-                            mariojaris2@gmail.com
+                            marc@vibedstudio.com
                         </a>
                     </div>
 

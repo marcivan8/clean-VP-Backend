@@ -3,7 +3,8 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs');
 const { audioQueue } = require('../queue/queues');
-const { optionalAuth } = require('../middleware/auth');
+const { authenticateUser } = require('../middleware/auth');
+const { aiGate } = require('../middleware/usageGate');
 const storageConfig = require('../config/storage');
 
 /**
@@ -12,7 +13,7 @@ const storageConfig = require('../config/storage');
  * The client polls /api/jobs/:jobId for the result, which is:
  *   { text: string, words: [{ word, start, end }] }
  */
-router.post('/generate', optionalAuth, async (req, res) => {
+router.post('/generate', authenticateUser, aiGate, async (req, res) => {
     try {
         const { filename, language = 'en' } = req.body;
 

@@ -144,8 +144,8 @@ const GdprPage = () => {
                             <p style={{ fontFamily: 'var(--f-sans)', fontSize: 15, color: 'var(--fg)', marginBottom: 8, fontWeight: 500 }}>
                                 Submit a GDPR Data Request
                             </p>
-                            <a href="mailto:mariojaris2@gmail.com" style={{ fontFamily: 'var(--f-mono)', fontSize: 14, color: 'var(--accent)', textDecoration: 'none' }}>
-                                mariojaris2@gmail.com
+                            <a href="mailto:marc@vibedstudio.com" style={{ fontFamily: 'var(--f-mono)', fontSize: 14, color: 'var(--accent)', textDecoration: 'none' }}>
+                                marc@vibedstudio.com
                             </a>
                         </div>
                     </Section>

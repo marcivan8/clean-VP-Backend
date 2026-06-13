@@ -15,6 +15,7 @@
 const express = require('express');
 const router  = express.Router();
 const { authenticateUser } = require('../middleware/auth');
+const { nleGate } = require('../middleware/usageGate');
 
 // Cache the ESM module after first load (package is ESM-only — no require() support)
 let _timeline = null;
@@ -181,7 +182,7 @@ const FORMAT_META = {
 // ─────────────────────────────────────────────────────────────────────────────
 // ROUTE
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/nle', authenticateUser, async (req, res) => {
+router.post('/nle', authenticateUser, nleGate, async (req, res) => {
     const {
         target,
         tracks        = [],

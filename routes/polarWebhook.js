@@ -1,0 +1,138 @@
+// routes/polarWebhook.js
+// Receives Polar subscription lifecycle events and keeps profiles.plan in sync.
+//
+// Setup in Polar dashboard → Webhooks:
+//   URL:    https://your-backend.up.railway.app/api/polar/webhook
+//   Events: subscription.created, subscription.updated, subscription.active,
+//           subscription.canceled, subscription.revoked
+//   Secret: copy the generated secret → POLAR_WEBHOOK_SECRET env var
+//
+// The route must receive the raw body (not JSON-parsed) for signature verification,
+// so it uses express.raw() instead of express.json().
+
+const express = require('express');
+const router  = express.Router();
+const { Polar } = require('@polar-sh/sdk');
+const { validateEvent, WebhookVerificationError } = require('@polar-sh/sdk/webhooks');
+const { supabaseAdmin } = require('../config/database');
+const { authenticateUser } = require('../middleware/auth');
+
+const polar = new Polar({ accessToken: process.env.POLAR_ACCESS_TOKEN });
+
+const PLAN_TO_PRODUCT = {
+    creator: process.env.POLAR_PRODUCT_CREATOR,
+    pro:     process.env.POLAR_PRODUCT_PRO,
+};
+
+// Product ID → plan key mapping (mirrors PolarService.js)
+const PRODUCT_TO_PLAN = Object.fromEntries([
+    [process.env.POLAR_PRODUCT_PRO,     'pro'],
+    [process.env.POLAR_PRODUCT_CREATOR, 'creator'],
+].filter(([k]) => k));
+
+async function setPlan(customerEmail, plan) {
+    if (!customerEmail) return;
+    const { error } = await supabaseAdmin
+        .from('profiles')
+        .update({ plan })
+        .eq('email', customerEmail);
+    if (error) console.error(`[PolarWebhook] Failed to set plan=${plan} for ${customerEmail}:`, error.message);
+    else console.log(`[PolarWebhook] ${customerEmail} → plan=${plan}`);
+}
+
+router.post(
+    '/webhook',
+    express.raw({ type: 'application/json' }), // must be raw for HMAC verification
+    async (req, res) => {
+        const secret = process.env.POLAR_WEBHOOK_SECRET;
+        if (!secret) {
+            console.warn('[PolarWebhook] POLAR_WEBHOOK_SECRET not set — skipping signature check');
+        } else {
+            try {
+                validateEvent(req.body, req.headers, secret);
+            } catch (err) {
+                if (err instanceof WebhookVerificationError) {
+                    console.warn('[PolarWebhook] Invalid signature:', err.message);
+                    return res.status(403).json({ error: 'Invalid webhook signature' });
+                }
+                throw err;
+            }
+        }
+
+        let event;
+        try {
+            event = JSON.parse(req.body.toString());
+        } catch {
+            return res.status(400).json({ error: 'Invalid JSON body' });
+        }
+
+        const { type, data } = event;
+        const email     = data?.customer?.email ?? data?.customerEmail ?? null;
+        const productId = data?.productId ?? data?.product?.id ?? null;
+
+        console.log(`[PolarWebhook] ${type} | email=${email} | product=${productId}`);
+
+        switch (type) {
+            case 'subscription.created':
+            case 'subscription.updated':
+            case 'subscription.active': {
+                const plan = PRODUCT_TO_PLAN[productId];
+                if (plan && email) await setPlan(email, plan);
+                break;
+            }
+            case 'subscription.canceled':
+            case 'subscription.revoked':
+            case 'subscription.uncanceled': {
+                // uncanceled = user re-subscribed before period ended — keep the plan
+                if (type !== 'subscription.uncanceled' && email) {
+                    await setPlan(email, 'free');
+                }
+                break;
+            }
+            default:
+                // Ignore other event types (order.created, benefit.granted, etc.)
+                break;
+        }
+
+        res.json({ received: true });
+    }
+);
+
+// POST /api/polar/checkout  or  POST /api/checkout/create
+// Creates a Polar checkout session and returns the URL.
+// Body: { plan: 'creator' | 'pro' }
+router.post('/create', authenticateUser, async (req, res) => handleCheckout(req, res));
+router.post('/checkout', authenticateUser, async (req, res) => handleCheckout(req, res));
+
+async function handleCheckout(req, res) {
+    const { plan } = req.body;
+
+    if (!PLAN_TO_PRODUCT[plan]) {
+        return res.status(400).json({ error: `Invalid plan "${plan}". Must be "creator" or "pro".` });
+    }
+
+    const productId = PLAN_TO_PRODUCT[plan];
+    if (!productId) {
+        return res.status(503).json({ error: `Product ID for plan "${plan}" is not configured.` });
+    }
+
+    const successUrl = process.env.POLAR_SUCCESS_URL ||
+        `${process.env.PUBLIC_URL || process.env.FRONTEND_URL || ''}/upgrade/success?checkout_id={CHECKOUT_ID}`;
+
+    try {
+        const checkout = await polar.checkouts.create({
+            products:   [productId],
+            successUrl,
+            // Pre-fill the customer email so Polar can link the subscription to the right account
+            customerEmail: req.user.email ?? undefined,
+        });
+
+        console.log(`[PolarCheckout] Created checkout for ${req.user.email} → plan=${plan} url=${checkout.url}`);
+        res.json({ url: checkout.url, checkoutUrl: checkout.url });
+    } catch (err) {
+        console.error('[PolarCheckout] Failed to create checkout:', err.message);
+        res.status(500).json({ error: 'Failed to create checkout session' });
+    }
+}
+
+module.exports = router;

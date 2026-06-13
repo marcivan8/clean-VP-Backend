@@ -4,6 +4,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
 const { authenticateUser, optionalAuth } = require('../middleware/auth');
+const { aiGate } = require('../middleware/usageGate');
 const { audioQueue } = require('../queue/queues');
 const ffmpegPath = require('ffmpeg-static');
 const storageConfig = require('../config/storage');
@@ -202,7 +203,7 @@ const fillerUpload = multer({ storage: multer.memoryStorage(), limits: { fileSiz
  * Transcribes an audio file using OpenAI Whisper and returns word-level timestamps.
  * Useful for filler word and bad-take detection.
  */
-router.post('/transcribe', authenticateUser, async (req, res) => {
+router.post('/transcribe', authenticateUser, aiGate, async (req, res) => {
     try {
         const { filename, filePath } = req.body;
 
@@ -283,7 +284,7 @@ router.post('/transcribe', authenticateUser, async (req, res) => {
  */
 
 // ── Route: filename-based (JSON body, file already on server) ─────────────────
-router.post('/filler/detect', authenticateUser, async (req, res) => {
+router.post('/filler/detect', authenticateUser, aiGate, async (req, res) => {
     try {
         const { filename, filePath, language = 'en', transcript } = req.body;
 
@@ -383,7 +384,7 @@ router.post('/filler/detect-upload', authenticateUser, fillerUpload.single('file
  * Response: { jobId, status: 'queued' }
  * Poll /api/jobs/:jobId/status → result: { words, speakers, language }
  */
-router.post('/diarize', authenticateUser, async (req, res) => {
+router.post('/diarize', authenticateUser, aiGate, async (req, res) => {
     try {
         const { filename, filePath, language } = req.body;
 

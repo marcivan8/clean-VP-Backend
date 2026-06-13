@@ -1,7 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, ArrowRight, Play, CheckCircle2, MousePointerClick, Layers, LayoutGrid, Link as LinkIcon } from 'lucide-react';
+import { Sparkles, ArrowRight, Play, CheckCircle2, MousePointerClick, Layers, LayoutGrid, Link as LinkIcon, MessageSquare, Mic, Scissors, UserCheck, Zap } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
+
+async function createCheckout(plan) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { window.location.href = '/auth?next=/'; return; }
+    const res = await fetch('/api/checkout/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ plan }),
+    });
+    if (!res.ok) { console.error('[checkout] failed', await res.text()); return; }
+    const { url } = await res.json();
+    window.location.href = url;
+}
 
 const Logo = ({ size = 28 }) => (
     <svg width={size} height={size} viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -47,7 +60,6 @@ const Nav = () => {
                 <Logo />
                 <div style={{ display: "flex", gap: 22, fontSize: 13.5, color: "var(--fg-2)" }} className="hidden sm:flex font-medium">
                     <a href="#product" className="hover:text-foreground transition-colors">Product</a>
-                    <a href="#workflow" className="hover:text-foreground transition-colors">Workflow</a>
                     <a href="#exports" className="hover:text-foreground transition-colors">Exports</a>
                     <a href="/about" className="hover:text-foreground transition-colors">About</a>
                 </div>
@@ -61,12 +73,12 @@ const Nav = () => {
                                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--mint)", display: "inline-block" }} />
                                 {user.email}
                             </span>
-                            <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/auth')}>Mon compte</button>
+                            <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/auth')}>Account</button>
                         </>
                     ) : (
                         <>
-                            <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/auth')}>Se connecter</button>
-                            <button className="btn btn-primary" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/auth')}>Commencer</button>
+                            <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/auth')}>Log in</button>
+                            <button className="btn btn-primary" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => window.location.href='/auth'}>Start free</button>
                         </>
                     )}
                 </div>
@@ -85,17 +97,26 @@ const HeroFrame = () => (
         boxShadow: "var(--shadow-card)",
         aspectRatio: "16/9",
         background: "var(--bg-2)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center"
     }}>
         <img
-            src="/editor-preview.png"
-            alt="Vibed Studio editor"
+            src="/hero-loop.gif"
+            alt="15-second loop: type command -> highlight -> cut -> export"
             style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+            onError={(e) => {
+                e.target.style.display = 'none';
+                e.target.nextSibling.style.display = 'block';
+            }}
         />
+        <div style={{ position: "absolute", color: "var(--fg-3)", display: "none" }}>
+            [ Hero Loop GIF Placeholder ]
+        </div>
     </div>
 );
 
 const Hero = () => {
-    const navigate = useNavigate();
     return (
         <section style={{ paddingTop: 140, paddingBottom: 40, position: "relative", overflow: "hidden" }}>
             <div className="aurora" />
@@ -114,13 +135,13 @@ const Hero = () => {
                     <p className="body-lg fade-up fade-up-d2" style={{ maxWidth: 620, margin: 0, fontSize: 19 }}>
                         Vibed is the creative operating system for storytellers and editors.
                         Edit, organize and refine your footage in conversation with an assistant that
-                        respects your taste — and exports anywhere you finish.
+                        respects your taste. Every edit lands as a named, reversible action.
                     </p>
                     <div className="fade-up fade-up-d3" style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", marginTop: 12 }}>
-                        <button onClick={() => navigate('/editor')} className="btn btn-primary">Start creating <ArrowRight className="w-4 h-4 ml-1" /></button>
+                        <button onClick={() => window.location.href='#pricing'} className="btn btn-primary">See plans <ArrowRight className="w-4 h-4 ml-1" /></button>
                     </div>
                     <div className="fade-up fade-up-d4 caption" style={{ marginTop: 8 }}>
-                        Built for creators, editors, storytellers &amp; modern media teams.
+                        No credit card required. Bring your own clips.
                     </div>
                 </div>
                 <div className="fade-up fade-up-d4" style={{ marginTop: 72 }}>
@@ -131,111 +152,100 @@ const Hero = () => {
     );
 };
 
-const ValueCard = ({ tag, title, body, icon: Icon }) => (
-    <div style={{
-      background: "var(--bg)", padding: 32, display: "flex", flexDirection: "column", gap: 16,
-      minHeight: 240, position: "relative", overflow: "hidden",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{
-          width: 36, height: 36, borderRadius: 10, background: "var(--bg-2)", border: "0.5px solid var(--line)",
-          display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)",
-        }}>
-          <Icon className="w-5 h-5" />
-        </div>
-        <span className="mono" style={{ color: "var(--fg-4)" }}>{tag}</span>
-      </div>
-      <h3 className="h-card" style={{ marginTop: "auto" }}>{title}</h3>
-      <p className="body" style={{ margin: 0, fontSize: 14.5 }}>{body}</p>
-    </div>
-);
-
-const ValueProps = () => {
-    const items = [
-      { tag: "01", title: "Conversational editing", body: "Tell Vibed what you want — pacing, mood, length — in plain language. Every edit lands on a real timeline you can override.", icon: MousePointerClick },
-      { tag: "02", title: "Timeline intelligence",  body: "Beats, energy, faces, dialogue and silences are read continuously, so suggestions match the shape of your story.", icon: Layers },
-      { tag: "03", title: "Creative control",        body: "Nothing happens without an accept. Every action is a granular edit you can revert, fork, or refine.", icon: CheckCircle2 },
-      { tag: "04", title: "Cross-platform publish",  body: "Render verticals, horizontals and squares from a single edit. Captions, safe areas and aspect-aware reframes built in.", icon: LayoutGrid },
-      { tag: "05", title: "AI-assisted workflows",   body: "Boilerplate — relinks, conforms, multicam syncs, transcript cleanup — handled before you sit down.", icon: Sparkles },
-      { tag: "06", title: "Professional export",     body: "Roundtrip XML, EDL, OTIO and DRP. Pick the suite where you finish; Vibed hands the project off cleanly.", icon: LinkIcon },
+const FeatureMoments = () => {
+    const moments = [
+        {
+            title: "Conversational Editing",
+            copy: "Tell the AI what to do, and watch the timeline update.",
+            img: "/conversational-edit.gif",
+            icon: MessageSquare
+        },
+        {
+            title: "Your transcript is your timeline",
+            copy: "Click a sentence, the playhead is already there.",
+            img: "/transcript-timeline.gif",
+            icon: Layers
+        },
+        {
+            title: "Type what you want to cut",
+            copy: "Show 'cut from so anyway to let's move on' → the cut appears.",
+            img: "/type-cut.gif",
+            icon: Scissors
+        },
+        {
+            title: "Speaker-scoped commands",
+            copy: "Cut all of Marc's stumbles — VIBED highlights segments and removes them.",
+            img: "/speaker-commands.gif",
+            icon: UserCheck
+        }
     ];
-    return (
-      <section id="product">
-        <div className="wrap">
-          <div className="section-head">
-            <span className="eyebrow">The platform</span>
-            <h2 className="h-section">AI that works <em>with</em> your creativity — never around it.</h2>
-            <p className="body-lg">Six surfaces, one mental model. Vibed never disappears your decisions
-              inside a black box; every move is visible, named, and reversible.</p>
-          </div>
-  
-          <div style={{
-            display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 1,
-            border: "0.5px solid var(--line)", borderRadius: 24, overflow: "hidden", background: "var(--line)",
-          }}>
-            {items.map((it) => (
-              <ValueCard key={it.tag} {...it} />
-            ))}
-          </div>
-        </div>
-      </section>
-    );
-};
 
-const Workflow = () => {
-    const steps = [
-      { k: "Idea",    body: "Drop a script, prompt, voice memo or rough cut. Vibed indexes everything in seconds." },
-      { k: "Script",  body: "Outline beats, hooks and pacing. The script and timeline stay in lockstep." },
-      { k: "Edit",    body: "Conversational cuts, smart trims, multicam sync — without leaving the canvas." },
-      { k: "Refine",  body: "Captions, colour, sound design, motion polish. Each refinement is a clear, named edit." },
-      { k: "Export",  body: "Render flat, or roundtrip to Premiere · Resolve · Final Cut · After Effects · CapCut." },
-      { k: "Publish", body: "Schedule, ship and monitor across vertical and horizontal destinations." },
-    ];
     return (
-      <section id="workflow">
-        <div className="wrap">
-          <div className="section-head">
-            <span className="eyebrow">The workflow</span>
-            <h2 className="h-section">One workspace for the <em>entire</em> creative process.</h2>
-            <p className="body-lg">A single project graph, from the first voice memo to the final
-              delivery — no exports between thinking and shipping.</p>
-          </div>
-  
-          <div style={{ position: "relative" }}>
-            <div style={{
-              position: "absolute", left: 24, right: 24, top: 38, height: 1,
-              background: "linear-gradient(90deg, transparent, var(--line-strong), transparent)",
-            }} className="hidden md:block" />
-            <div style={{
-              display: "grid", gap: 16, position: "relative",
-            }} className="grid-cols-2 md:grid-cols-6 md:gap-4">
-              {steps.map((s, i) => (
-                <div key={s.k} style={{ display: "flex", flexDirection: "column", gap: 16, alignItems: "flex-start" }}>
-                  <div style={{
-                    width: 76, height: 76, borderRadius: 18,
-                    background: i === 2 ? "linear-gradient(135deg, var(--accent), oklch(0.6 0.16 295))" : "var(--bg-2)",
-                    border: i === 2 ? "0" : "0.5px solid var(--line)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontFamily: "var(--f-display)", fontSize: 32,
-                    color: i === 2 ? "#fff" : "var(--fg)",
-                    position: "relative", zIndex: 1,
-                  }}>
-                    {i + 1}
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <div style={{ fontFamily: "var(--f-display)", fontSize: 22, letterSpacing: "-0.02em" }}>
-                      {s.k}
-                    </div>
-                    <p className="body" style={{ margin: 0, fontSize: 13.5 }}>{s.body}</p>
-                  </div>
+        <section id="product" style={{ paddingTop: 80, paddingBottom: 80 }}>
+            <div className="wrap">
+                <div className="section-head text-center" style={{ marginBottom: 60, alignItems: "center" }}>
+                    <span className="eyebrow">The workflow</span>
+                    <h2 className="h-section">AI that works <em>with</em> your creativity.</h2>
                 </div>
-              ))}
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 64 }}>
+                    {moments.map((m, i) => (
+                        <div key={i} style={{
+                            display: "grid",
+                            gridTemplateColumns: i % 2 === 0 ? "1fr 1.2fr" : "1.2fr 1fr",
+                            gap: 48,
+                            alignItems: "center"
+                        }} className="md:grid-cols-[1fr_1fr] grid-cols-1">
+                            <div style={{ order: i % 2 === 0 ? 1 : 2 }} className="md:order-none order-2">
+                                <div style={{
+                                    width: 48, height: 48, borderRadius: 12, background: "var(--bg-2)", border: "0.5px solid var(--line)",
+                                    display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)",
+                                    marginBottom: 20
+                                }}>
+                                    <m.icon className="w-6 h-6" />
+                                </div>
+                                <h3 className="h-section" style={{ fontSize: 32, marginBottom: 12 }}>{m.title}</h3>
+                                <p className="body-lg" style={{ color: "var(--fg-2)" }}>{m.copy}</p>
+                            </div>
+                            <div style={{ order: i % 2 === 0 ? 2 : 1 }} className="md:order-none order-1">
+                                <div style={{
+                                    borderRadius: 16, border: "0.5px solid var(--line)", background: "var(--bg-2)",
+                                    aspectRatio: "16/9", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center",
+                                    boxShadow: "var(--shadow-card)"
+                                }}>
+                                    <img
+                                        src={m.img}
+                                        alt={m.title}
+                                        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                                        onError={(e) => {
+                                            e.target.style.display = 'none';
+                                            e.target.nextSibling.style.display = 'block';
+                                        }}
+                                    />
+                                    <div style={{ color: "var(--fg-4)", fontSize: 13, display: "none" }}>
+                                        [ {m.title} Visual ]
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
             </div>
-          </div>
-        </div>
-      </section>
+        </section>
     );
 };
+
+const AntiDescript = () => (
+    <section style={{ padding: "80px 0", background: "var(--bg-2)", borderTop: "0.5px solid var(--line)", borderBottom: "0.5px solid var(--line)" }}>
+        <div className="wrap">
+            <div style={{ maxWidth: 800, margin: "0 auto", textAlign: "center" }}>
+                <p style={{ fontSize: "clamp(24px, 3vw, 32px)", lineHeight: 1.4, fontWeight: 500, margin: 0, letterSpacing: "-0.01em" }}>
+                    Descript invented transcript editing. It's genuinely great — until you need to finish in Premiere or Final Cut, at which point you're stuck. <span style={{ color: "var(--accent)" }}>VIBED does the same thing and hands you a real FCPXML or Premiere XML at the end.</span> That combination doesn't exist anywhere else.
+                </p>
+            </div>
+        </div>
+    </section>
+);
   
 const ExportIcon = {
     premiere: () => (
@@ -278,7 +288,7 @@ const Exports = () => {
       { key: "otio",     name: "OpenTimelineIO",   fmt: "Open standard" },
     ];
     return (
-      <section id="exports" style={{ background: "var(--bg-2)" }}>
+      <section id="exports" style={{ padding: "100px 0" }}>
         <div className="wrap">
           <div style={{ display: "grid", gap: 80, alignItems: "center" }} className="grid-cols-1 md:grid-cols-2">
             <div className="section-head" style={{ marginBottom: 0 }}>
@@ -286,10 +296,12 @@ const Exports = () => {
               <h2 className="h-section">Works with the suite you <em>already</em> finish in.</h2>
               <p className="body-lg">Vibed isn’t the last app you’ll ever open — it’s the first.
                 Hand off cleanly to professional editing tools the moment you’re ready to polish.</p>
-              <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
+              <p className="body-lg" style={{ marginTop: 16, fontWeight: 500 }}>
+                The transcript edit happens in VIBED. The finishing happens where you've always finished.
+              </p>
+              <div style={{ display: "flex", gap: 12, marginTop: 24, flexWrap: "wrap" }}>
                 <span className="tag"><span className="dot" />XML · FCPXML · EDL · OTIO</span>
                 <span className="tag">Bin metadata preserved</span>
-                <span className="tag">Non-destructive</span>
               </div>
             </div>
   
@@ -320,82 +332,221 @@ const Exports = () => {
     );
 };
   
-const Control = () => (
-    <section>
-      <div className="wrap">
-        <div style={{ display: "grid", gap: 64, alignItems: "center" }} className="grid-cols-1 md:grid-cols-2">
-          <div className="section-head" style={{ marginBottom: 0 }}>
-            <span className="eyebrow">Creative control</span>
-            <h2 className="h-section">You stay in <em>control.</em><br />The AI suggests. You decide.</h2>
-            <p className="body-lg">No silent rewrites. Every edit lands as a named, reversible action — and
-              your draft style, brand voice and visual direction travel with the project.</p>
-            <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
-              {[
-                "Every AI action is logged as a discrete edit",
-                "Style guides travel with each project",
-                "Brand kits lock typography, palette and motion",
-                "Variants live side-by-side — never overwritten",
-              ].map(t => (
-                <li key={t} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 15, color: "var(--fg-2)" }}>
-                  <CheckCircle2 className="w-4 h-4 text-accent" /> {t}
-                </li>
-              ))}
-            </ul>
-          </div>
-  
-          {/* Edit-log card */}
-          <div className="card" style={{ padding: 22, display: "flex", flexDirection: "column", gap: 4 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingBottom: 14, borderBottom: "0.5px solid var(--line-soft)" }}>
-              <div style={{ fontSize: 13.5, fontWeight: 500 }}>Edit history</div>
-              <span className="mono" style={{ color: "var(--fg-4)" }}>v.143 · auto-saved</span>
+const PLANS = [
+    {
+        key:     'free',
+        name:    'Free',
+        price:   '€0',
+        period:  '',
+        tagline: 'Edit your first project. Feel what conversational editing is.',
+        cta:     'Start free',
+        ctaStyle: 'btn-ghost',
+        features: [
+            '2 active projects',
+            'Videos up to 20 minutes',
+            '7-day storage',
+            '10 AI operations / month',
+            'Silence removal & trim — unlimited',
+            'MP4 export — no watermark',
+        ],
+        locked: ['NLE export', 'Transcript intelligence'],
+    },
+    {
+        key:     'creator',
+        name:    'Creator',
+        price:   '€15',
+        period:  '/ month',
+        tagline: 'Edit every week. Export to any tool you already use.',
+        cta:     'Get Creator',
+        ctaStyle: 'btn-primary',
+        highlight: true,
+        features: [
+            'Unlimited projects',
+            'Videos up to 90 minutes',
+            '30-day storage',
+            '100 AI operations / month',
+            'All AI commands — filler, captions, best moments',
+            'Full transcript + content intelligence',
+            'MP4 export',
+            'NLE export — Premiere, Final Cut, DaVinci, OTIO',
+        ],
+        locked: [],
+    },
+    {
+        key:     'pro',
+        name:    'Pro',
+        price:   '€35',
+        period:  '/ month',
+        tagline: 'Edit without limits. Bring your team.',
+        cta:     'Get Pro',
+        ctaStyle: 'btn-ghost',
+        features: [
+            'Everything in Creator',
+            'Videos up to 4 hours',
+            '90-day storage',
+            'Unlimited AI operations',
+            'Priority processing queue',
+            '2 team seats',
+            'Virality scoring + performance analysis',
+            'Early access to new features',
+        ],
+        locked: [],
+    },
+];
+
+const Pricing = () => {
+    const navigate = useNavigate();
+    const [loading, setLoading] = useState(null);
+
+    const handleUpgrade = async (plan) => {
+        if (plan === 'free') { navigate('/editor'); return; }
+        setLoading(plan);
+        await createCheckout(plan);
+        setLoading(null);
+    };
+
+    return (
+        <section id="pricing" style={{ padding: '120px 0 80px', background: 'var(--bg)' }}>
+            <div className="wrap">
+                <div style={{ textAlign: 'center', marginBottom: 64 }}>
+                    <div className="tag" style={{ display: 'inline-flex', marginBottom: 20 }}>
+                        <Zap className="w-3 h-3" style={{ color: 'var(--accent)' }} />
+                        <span>Simple pricing</span>
+                    </div>
+                    <h2 className="display" style={{ fontSize: 'clamp(36px, 5vw, 64px)', margin: '0 0 16px' }}>
+                        One tool. Three speeds.
+                    </h2>
+                    <p className="body-lg" style={{ margin: 0, color: 'var(--fg-2)', maxWidth: 520, marginInline: 'auto' }}>
+                        Start free. Upgrade when the product earns it.
+                    </p>
+                </div>
+
+                <div style={{ display: 'grid', gap: 20 }} className="grid-cols-1 md:grid-cols-3">
+                    {PLANS.map(plan => (
+                        <div key={plan.key} style={{
+                            padding: 32,
+                            borderRadius: 16,
+                            border: plan.highlight
+                                ? '1px solid var(--accent)'
+                                : '0.5px solid var(--line)',
+                            background: plan.highlight ? 'var(--bg-2)' : 'var(--bg)',
+                            display: 'flex', flexDirection: 'column', gap: 24,
+                            position: 'relative',
+                        }}>
+                            {plan.highlight && (
+                                <div style={{
+                                    position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)',
+                                    background: 'var(--accent)', color: '#fff',
+                                    fontSize: 11, fontWeight: 600, letterSpacing: '0.08em',
+                                    padding: '3px 14px', borderRadius: 999, whiteSpace: 'nowrap',
+                                }}>
+                                    MOST POPULAR
+                                </div>
+                            )}
+
+                            <div>
+                                <div className="mono" style={{ color: 'var(--fg-4)', fontSize: 11, letterSpacing: '0.1em', marginBottom: 8 }}>
+                                    {plan.name.toUpperCase()}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                                    <span style={{ fontSize: 40, fontWeight: 700, letterSpacing: '-0.02em' }}>{plan.price}</span>
+                                    {plan.period && <span style={{ color: 'var(--fg-3)', fontSize: 14 }}>{plan.period}</span>}
+                                </div>
+                                <p style={{ margin: '10px 0 0', fontSize: 13.5, color: 'var(--fg-2)', lineHeight: 1.5 }}>
+                                    {plan.tagline}
+                                </p>
+                            </div>
+
+                            <button
+                                className={`btn ${plan.ctaStyle}`}
+                                style={{ width: '100%', height: 44, fontSize: 14 }}
+                                onClick={() => handleUpgrade(plan.key)}
+                                disabled={loading === plan.key}
+                            >
+                                {loading === plan.key ? 'Redirecting…' : plan.cta}
+                            </button>
+
+                            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                {plan.features.map(f => (
+                                    <li key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13.5 }}>
+                                        <CheckCircle2 size={15} strokeWidth={2} style={{ color: 'var(--mint)', flexShrink: 0, marginTop: 2 }} />
+                                        <span>{f}</span>
+                                    </li>
+                                ))}
+                                {plan.locked.map(f => (
+                                    <li key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13.5, opacity: 0.35 }}>
+                                        <CheckCircle2 size={15} strokeWidth={2} style={{ flexShrink: 0, marginTop: 2 }} />
+                                        <span>{f}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    ))}
+                </div>
             </div>
-            {[
-              { who: "you", t: "cut_segment: 00:04:12 to 00:05:01", time: "just now", accent: true },
-              { who: "vibed", t: "remove_silences: Applied to 12 clips", time: "12s", accent: false },
-              { who: "you", t: "split_clip: Track 1 at 00:02:14", time: "1m", accent: true },
-              { who: "vibed", t: "remove_repetition: 4 segments removed", time: "2m", accent: false },
-              { who: "you", t: "move_clip: B-roll to 00:01:00", time: "4m", accent: true },
-              { who: "vibed", t: "add_transitions: Crossfade (1s)", time: "6m", accent: false },
-            ].map((e, i) => (
-              <div key={i} style={{
-                display: "flex", alignItems: "center", gap: 12, padding: "10px 0",
-                borderBottom: i === 5 ? "0" : "0.5px solid var(--line-soft)", fontSize: 13.5,
-              }}>
-                <div style={{
-                  width: 6, height: 6, borderRadius: 50,
-                  background: e.accent ? "var(--accent)" : "var(--fg-4)", flexShrink: 0,
-                }} />
-                <span className="mono" style={{ width: 50, color: "var(--fg-3)", fontSize: 10.5, textTransform: "uppercase" }}>
-                  {e.who}
-                </span>
-                <span style={{ color: "var(--fg)" }}>{e.t}</span>
-                <span style={{ marginLeft: "auto", color: "var(--fg-4)", fontSize: 12 }}>{e.time}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </section>
-);
-  
+        </section>
+    );
+};
+
+const SocialProof = () => {
+    return (
+        <section style={{ padding: "80px 0", background: "var(--bg-2)" }}>
+            <div className="wrap">
+                <div style={{ display: "grid", gap: 32 }} className="grid-cols-1 md:grid-cols-2">
+                    <div className="card" style={{ padding: 40, border: "0.5px solid var(--line)" }}>
+                        <div style={{ color: "var(--accent)", marginBottom: 20 }}>
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/>
+                            </svg>
+                        </div>
+                        <p style={{ fontSize: 20, fontStyle: "italic", lineHeight: 1.5, marginBottom: 24 }}>
+                            "Finally, an AI editor that knows when to get out of the way. It lets me work at the speed of thought without messing up my timeline."
+                        </p>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                            <div style={{ width: 40, height: 40, borderRadius: "50%", background: "var(--line)", flexShrink: 0 }} />
+                            <div>
+                                <div style={{ fontWeight: 600, fontSize: 15 }}>Alex</div>
+                                <div style={{ color: "var(--fg-3)", fontSize: 14 }}>Senior Video Editor</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="card" style={{ padding: 40, border: "0.5px solid var(--line)" }}>
+                        <div style={{ color: "var(--accent)", marginBottom: 20 }}>
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/>
+                            </svg>
+                        </div>
+                        <p style={{ fontSize: 20, fontStyle: "italic", lineHeight: 1.5, marginBottom: 24 }}>
+                            "The fact that I can dump it straight into Resolve when the rough cut is done is a complete game-changer for my agency workflow."
+                        </p>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                            <div style={{ width: 40, height: 40, borderRadius: "50%", background: "var(--line)", flexShrink: 0 }} />
+                            <div>
+                                <div style={{ fontWeight: 600, fontSize: 15 }}>Sarah</div>
+                                <div style={{ color: "var(--fg-3)", fontSize: 14 }}>Creative Director</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    );
+};
 
 const FinalCTA = () => (
     <section style={{ position: "relative", overflow: "hidden", paddingTop: 140, paddingBottom: 140 }}>
       <div className="aurora" />
       <div className="wrap" style={{ position: "relative", zIndex: 2, textAlign: "center", display: "flex", flexDirection: "column", gap: 28, alignItems: "center" }}>
-        <span className="eyebrow">What comes next</span>
         <h2 className="display" style={{ fontSize: "clamp(48px, 6.4vw, 96px)" }}>
           The future of editing<br /><em>is collaborative.</em>
         </h2>
-        <p className="body-lg" style={{ maxWidth: 580, margin: 0 }}>
-          AI should amplify the artist — not replace them. Start editing with a partner
-          that takes its cues from you.
-        </p>
         <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap", justifyContent: "center" }}>
-          <button onClick={() => navigate('/editor')} className="btn btn-primary">Start creating <ArrowRight className="w-4 h-4 ml-1" /></button>
+          <button onClick={() => window.location.href='#pricing'} className="btn btn-primary" style={{ padding: "0 32px", height: 48, fontSize: 16 }}>
+            See plans <ArrowRight className="w-5 h-5 ml-1" />
+          </button>
         </div>
         <div className="caption" style={{ marginTop: 8 }}>
-          Private beta · 30-day storage · No credit card required
+          Start free. No credit card. Bring your own clips.
         </div>
       </div>
     </section>
@@ -404,7 +555,7 @@ const FinalCTA = () => (
 const Footer = () => {
     const cols = {
       "Company": ["About"],
-      "Legal": ["Your data", "Privacy Policy"],
+      "Legal": ["Privacy Policy", "Cookie Policy", "Your data"],
     };
     return (
       <footer style={{ borderTop: "0.5px solid var(--line)", padding: "64px 0 32px", background: "var(--bg)" }}>
@@ -416,9 +567,6 @@ const Footer = () => {
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
               <div style={{ display: "flex" }}>
-                <span className="tag"><span className="dot" />All systems normal</span>
-              </div>
-              <div style={{ display: "flex" }}>
                 <a href="/gdpr" style={{ textDecoration: 'none' }}>
                   <span className="tag" style={{ border: "0.5px solid var(--line-strong)", background: "var(--bg-2)", cursor: "pointer" }}>GDPR Compliant · GCS Data Processor · 30-Day Retention</span>
                 </a>
@@ -428,9 +576,16 @@ const Footer = () => {
           {Object.entries(cols).map(([k, items]) => (
             <div key={k} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <div className="mono" style={{ color: "var(--fg-4)" }}>{k.toUpperCase()}</div>
-              {items.map(it => (
-                <a key={it} href={it === 'Your data' ? '/data' : it === 'Privacy Policy' ? '/privacy' : it === 'About' ? '/about' : '#'} style={{ fontSize: 13.5, color: "var(--fg-2)" }} className="hover:text-foreground transition-colors">{it}</a>
-              ))}
+              {items.map(it => {
+                  let href = '#';
+                  if (it === 'Your data') href = '/data';
+                  if (it === 'Privacy Policy') href = '/privacy';
+                  if (it === 'Cookie Policy') href = '/cookie-policy';
+                  if (it === 'About') href = '/about';
+                  return (
+                    <a key={it} href={href} style={{ fontSize: 13.5, color: "var(--fg-2)" }} className="hover:text-foreground transition-colors">{it}</a>
+                  )
+              })}
             </div>
           ))}
         </div>
@@ -449,10 +604,11 @@ const HomePage = () => {
             <Nav />
             <main>
                 <Hero />
-                <ValueProps />
-                <Workflow />
+                <FeatureMoments />
+                <AntiDescript />
                 <Exports />
-                <Control />
+                <Pricing />
+                <SocialProof />
                 <FinalCTA />
             </main>
             <Footer />

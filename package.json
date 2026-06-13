@@ -68,7 +68,7 @@
     "social-media",
     "content-creation"
   ],
-  "author": "Viral Pilot Team",
+  "author": "Vibed Studio <marc@vibedstudio.com>",
   "license": "MIT",
   "jest": {
     "testEnvironment": "node",

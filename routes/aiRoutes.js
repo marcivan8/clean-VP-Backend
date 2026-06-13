@@ -11,25 +11,16 @@ const {
     detectRepeatedTakesHandler,
 } = require('../controllers/aiAgentController');
 const { authenticateUser } = require('../middleware/auth');
+const { aiGate } = require('../middleware/usageGate');
 
-router.post('/chat', chatAgentHandler);
-router.post('/agent-plan', agentPlanHandler);
-
-// New pipeline endpoints
-router.post('/parse-intent', parseIntentHandler);
-router.post('/generate-plan', generatePlanHandler);
-
-// Long-Form Intelligence Engine endpoint
-router.post('/analyze-content', analyzeContentHandler);
-
-// Semantic cleanup: receives clips with transcript text, returns clip IDs to remove
-router.post('/smart-cleanup', smartCleanupHandler);
-
-// Semantic reorder: receives clips with transcript text + user prompt, returns new clip order
-router.post('/reorder-clips', reorderClipsHandler);
-
-// Repeated take detection: embedding similarity + GPT-4o arbitration
-router.post('/detect-repeated-takes', authenticateUser, detectRepeatedTakesHandler);
+router.post('/chat',               authenticateUser, aiGate, chatAgentHandler);
+router.post('/agent-plan',         authenticateUser, aiGate, agentPlanHandler);
+router.post('/parse-intent',       authenticateUser, aiGate, parseIntentHandler);
+router.post('/generate-plan',      authenticateUser, aiGate, generatePlanHandler);
+router.post('/analyze-content',    authenticateUser, aiGate, analyzeContentHandler);
+router.post('/smart-cleanup',      authenticateUser, aiGate, smartCleanupHandler);
+router.post('/reorder-clips',      authenticateUser, aiGate, reorderClipsHandler);
+router.post('/detect-repeated-takes', authenticateUser, aiGate, detectRepeatedTakesHandler);
 
 module.exports = router;
 

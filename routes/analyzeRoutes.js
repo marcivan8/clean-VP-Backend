@@ -5,7 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { authenticateUser } = require('../middleware/auth');
-const { checkUsageLimits } = require('../middleware/usageLimits');
+const { aiGate } = require('../middleware/usageGate');
 const { analyzeVideoHandler } = require('../controllers/mainController');
 
 // Ensure uploads directory exists
@@ -65,7 +65,7 @@ const storageConfig = require('../config/storage');
 // Main video analysis endpoint
 router.post('/',
   authenticateUser,          // Real authentication — verified Supabase JWT
-  checkUsageLimits,          // Check plan limits
+  aiGate,                    // Check plan limits
   upload.single('video'),    // Upload the video file
   async (req, res) => {
     try {
