@@ -164,10 +164,6 @@ const useTimelineStore = create(
             audioLevels: {},
             waveforms: {},
 
-            // History (expose for UI disabled-state)
-            past: [],
-            future: [],
-
             // Manager access
             manager: timelineManager,
 
@@ -417,16 +413,6 @@ const useTimelineStore = create(
             // ==============================================================
             // CLIP MANAGEMENT (legacy-compatible API)
             // ==============================================================
-
-            toggleTrackMute: (trackId) => {
-                timelineManager.dispatch({ type: ACTION_TYPES.LAYER_MUTE, payload: { layerId: trackId } });
-                set({ tracks: timelineManager.toLegacyTracks() });
-            },
-
-            toggleTrackSolo: (trackId) => {
-                timelineManager.dispatch({ type: ACTION_TYPES.LAYER_SOLO, payload: { layerId: trackId } });
-                set({ tracks: timelineManager.toLegacyTracks() });
-            },
 
             setTrackVolume: (trackId, volume) => {
                 timelineManager.dispatch({ type: ACTION_TYPES.LAYER_UPDATE, payload: { layerId: trackId, updates: { volume } } });
