@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, staging]
+
+jobs:
+  # ── Lint & build the client ────────────────────────────────────────────────
+  client:
+    name: Client — lint + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+        env:
+          # DSN is not needed for a build-only check; the plugin is skipped when absent.
+          VITE_SENTRY_DSN: ''
+
+  # ── Test the server ────────────────────────────────────────────────────────
+  server:
+    name: Server — tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+        env:
+          NODE_ENV: test
+          # Provide stub values so modules that import from .env don't throw.
+          SUPABASE_URL: https://stub.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: stub-key
+          SUPABASE_ANON_KEY: stub-anon-key
+          OPENAI_API_KEY: stub-openai-key

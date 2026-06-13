@@ -1,0 +1,101 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main      # → production
+      - staging   # → staging
+
+# Only one deploy per environment at a time.
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Wait for CI to pass before deploying ──────────────────────────────────
+  # We reuse the same lint/build/test steps rather than waiting on the
+  # separate CI workflow, so this job is self-contained and always runs
+  # the checks before touching Railway.
+  build-and-deploy:
+    name: Build → Deploy (${{ github.ref_name }})
+    runs-on: ubuntu-latest
+
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Node setup ────────────────────────────────────────────────────────
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # ── Install server deps ───────────────────────────────────────────────
+      - name: Install server dependencies
+        run: npm ci
+
+      # ── Run server tests (gate) ───────────────────────────────────────────
+      - name: Run server tests
+        run: npm test
+        env:
+          NODE_ENV: test
+          SUPABASE_URL: https://stub.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: stub-key
+          SUPABASE_ANON_KEY: stub-anon-key
+          OPENAI_API_KEY: stub-openai-key
+
+      # ── Install + build client ────────────────────────────────────────────
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install client dependencies
+        run: npm ci
+        working-directory: client
+
+      - name: Build client (with source maps)
+        run: npm run build
+        working-directory: client
+        env:
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+
+      # ── Deploy to Railway ─────────────────────────────────────────────────
+      # Railway deploys are environment-scoped by the token you pass.
+      # Create two tokens in Railway: one scoped to the staging environment,
+      # one scoped to production, and store them as GitHub secrets:
+      #   RAILWAY_TOKEN_STAGING
+      #   RAILWAY_TOKEN_PRODUCTION
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to staging
+        if: github.ref_name == 'staging'
+        run: railway up --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_STAGING }}
+
+      - name: Deploy to production
+        if: github.ref_name == 'main'
+        run: railway up --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
+
+      # ── Create a Sentry release ───────────────────────────────────────────
+      # Associates deployed commits with Sentry issues for better context.
+      # Requires SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT secrets.
+      - name: Create Sentry release
+        if: ${{ secrets.SENTRY_AUTH_TOKEN != '' }}
+        uses: getsentry/action-release@v1
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        with:
+          environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
