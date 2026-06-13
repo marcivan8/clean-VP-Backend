@@ -152,12 +152,24 @@ class TranscriptionManagerClass {
         signal.addEventListener('abort', () => controller.abort());
 
         try {
-            // FIX: was fetch('/api/audio/transcribe', ...) — no auth header → 401 in production
-            const response = await authFetch('/api/audio/transcribe', {
+            // Try diarization first, fall back to standard transcription
+            let response = await authFetch('/api/audio/diarize', {
                 method: 'POST',
                 body: JSON.stringify({ filename }),
                 signal: controller.signal,
             });
+
+            if (!response.ok) {
+                const errorData = await response.clone().json().catch(() => null);
+                if (response.status === 503 || errorData?.code === 'DIARIZE_NOT_CONFIGURED') {
+                    console.log('[TranscriptionManager] Diarization service unavailable, falling back to standard transcribe');
+                    response = await authFetch('/api/audio/transcribe', {
+                        method: 'POST',
+                        body: JSON.stringify({ filename }),
+                        signal: controller.signal,
+                    });
+                }
+            }
 
             clearTimeout(timeoutId);
 
