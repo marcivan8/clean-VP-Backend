@@ -20,6 +20,7 @@
     "@revideo/player-react": "^0.10.4",
     "@revideo/ui": "^0.10.4",
     "@revideo/vite-plugin": "^0.10.4",
+    "@sentry/react": "^8.55.2",
     "@supabase/supabase-js": "^2.49.8",
     "classnames": "^2.5.1",
     "compromise": "^14.15.0",
@@ -39,6 +40,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@sentry/vite-plugin": "^2.0.0",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
