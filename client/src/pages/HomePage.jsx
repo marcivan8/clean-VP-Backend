@@ -88,33 +88,53 @@ const Nav = () => {
 };
 
 
-const HeroFrame = () => (
-    <div style={{
-        position: "relative",
-        borderRadius: 28,
-        overflow: "hidden",
-        border: "0.5px solid var(--glass-stroke)",
-        boxShadow: "var(--shadow-card)",
-        aspectRatio: "16/9",
-        background: "var(--bg-2)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center"
-    }}>
-        <img
-            src="/hero-loop.gif"
-            alt="15-second loop: type command -> highlight -> cut -> export"
-            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-            onError={(e) => {
-                e.target.style.display = 'none';
-                e.target.nextSibling.style.display = 'block';
-            }}
-        />
-        <div style={{ position: "absolute", color: "var(--fg-3)", display: "none" }}>
-            [ Hero Loop GIF Placeholder ]
+const HeroFrame = () => {
+    const images = [
+        "/Hero Editor.png",
+        "/AI commands.png",
+        "/Transcript editing.png",
+        "/AI edit timeline.png",
+        "/NLE Export.png"
+    ];
+    const [activeIndex, setActiveIndex] = useState(0);
+
+    useEffect(() => {
+        const timer = setInterval(() => {
+            setActiveIndex(i => (i + 1) % images.length);
+        }, 3000);
+        return () => clearInterval(timer);
+    }, []);
+
+    return (
+        <div style={{
+            position: "relative",
+            borderRadius: 28,
+            overflow: "hidden",
+            border: "0.5px solid var(--glass-stroke)",
+            boxShadow: "var(--shadow-card)",
+            aspectRatio: "16/9",
+            background: "var(--bg-2)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
+        }}>
+            {images.map((src, i) => (
+                <img
+                    key={src}
+                    src={src}
+                    alt={`Hero sequence frame ${i}`}
+                    style={{
+                        position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover",
+                        opacity: activeIndex === i ? 1 : 0,
+                        transform: activeIndex === i ? "scale(1.05)" : "scale(1.0)",
+                        transition: "opacity 1s ease-in-out, transform 4s cubic-bezier(0.25, 1, 0.5, 1)",
+                        pointerEvents: "none"
+                    }}
+                />
+            ))}
         </div>
-    </div>
-);
+    );
+};
 
 const Hero = () => {
     return (
@@ -157,25 +177,25 @@ const FeatureMoments = () => {
         {
             title: "Conversational Editing",
             copy: "Tell the AI what to do, and watch the timeline update.",
-            img: "/conversational-edit.gif",
+            img: "/AI commands.png",
             icon: MessageSquare
         },
         {
             title: "Your transcript is your timeline",
             copy: "Click a sentence, the playhead is already there.",
-            img: "/transcript-timeline.gif",
+            img: "/Transcript editing.png",
             icon: Layers
         },
         {
             title: "Type what you want to cut",
             copy: "Show 'cut from so anyway to let's move on' → the cut appears.",
-            img: "/type-cut.gif",
+            img: "/AI edit timeline.png",
             icon: Scissors
         },
         {
             title: "Speaker-scoped commands",
             copy: "Cut all of Marc's stumbles — VIBED highlights segments and removes them.",
-            img: "/speaker-commands.gif",
+            img: "/AI acceptreject.png",
             icon: UserCheck
         }
     ];
