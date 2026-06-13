@@ -794,6 +794,12 @@ export class MediaExecutionEngine {
                 let errorMessage = response.statusText;
                 try {
                     const errorBody = await response.json();
+                    if (response.status === 402 || errorBody.error === 'AI_OPS_LIMIT') {
+                        // Quota exhausted — surface a user-friendly upgrade message
+                        const msg = errorBody.message || "You've used all your AI operations this month.";
+                        const upgrade = errorBody.upgradeRequired ? ` Upgrade to ${errorBody.upgradeRequired} to continue.` : '';
+                        throw new Error(`${msg}${upgrade}`);
+                    }
                     if (errorBody.error === 'Route not found' && response.status === 404) {
                         console.warn(`[MediaExecutionEngine] Endpoint ${endpoint} not registered — skipping`);
                         return { action: command.action, success: true, skipped: true, message: `${endpoint} not implemented` };

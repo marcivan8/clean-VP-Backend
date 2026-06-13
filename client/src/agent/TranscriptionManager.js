@@ -161,6 +161,21 @@ class TranscriptionManagerClass {
 
             if (!response.ok) {
                 const errorData = await response.clone().json().catch(() => null);
+
+                // 402 = quota exhausted — stop immediately, don't waste a second call.
+                if (response.status === 402 || errorData?.error === 'AI_OPS_LIMIT') {
+                    console.warn('[TranscriptionManager] AI ops limit reached — skipping background transcription');
+                    this._setStatus(TRANSCRIPTION_STATUS.IDLE, 0);
+                    EventBus.emit(EVENT_TYPES.TRANSCRIPTION_PROGRESS, {
+                        status: 'quota_exceeded',
+                        progress: 0,
+                        filename,
+                        message: errorData?.message || "You've used all your AI operations this month.",
+                        upgradeRequired: errorData?.upgradeRequired,
+                    });
+                    return;
+                }
+
                 // Fall back to standard transcription when diarization is not configured
                 // or when the service is temporarily unavailable (any 5xx).
                 // 4xx errors (401, 403, 404) propagate as real errors — they indicate

@@ -51,7 +51,14 @@ async function recordUsageEvent(userId, operation) {
 
 // Checks AI op limit, records the event, then calls next().
 // Fails open on internal errors so a DB hiccup never blocks a paying user.
+//
+// Set BYPASS_USAGE_GATE=true in .env to skip quota checks during local dev/testing.
+// Never set this in production.
 const aiGate = async (req, res, next) => {
+    if (process.env.BYPASS_USAGE_GATE === 'true') {
+        return next();
+    }
+
     if (!req.user?.id) {
         return res.status(401).json({ error: 'Authentication required', code: 'AUTH_REQUIRED' });
     }
