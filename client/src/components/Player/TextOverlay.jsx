@@ -143,7 +143,6 @@ const TextOverlay = () => {
                         style={{
                             left,
                             top,
-                            // Transform: Center (-50%) + Scale
                             transform: `translate(-50%, -50%) scale(${clip.scale || 1})`,
                             width: '80%',
                             fontFamily: FONT_MAP[clip.fontFamily] || 'Inter, sans-serif',
@@ -155,8 +154,11 @@ const TextOverlay = () => {
                             textAlign: clip.textAlign || 'center',
                             textShadow: clip.textShadow || 'none',
                             WebkitTextStroke: clip.stroke ? `${clip.stroke.width}px ${clip.stroke.color}` : 'none',
+                            backgroundColor: clip.bgColor || 'transparent',
                             opacity: clip.opacity ?? 1,
-                            pointerEvents: 'auto'
+                            pointerEvents: 'auto',
+                            padding: clip.bgColor ? '4px 8px' : undefined,
+                            borderRadius: clip.bgColor ? '4px' : undefined,
                         }}
                     >
                         {clip.content || 'New Text'}

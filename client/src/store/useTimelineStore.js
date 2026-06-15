@@ -508,7 +508,8 @@ const useTimelineStore = create(
                 if (updates.textDecoration !== undefined) clipUpdates.textDecoration = updates.textDecoration;
                 if (updates.textShadow !== undefined) clipUpdates.textShadow = updates.textShadow;
                 if (updates.stroke !== undefined) clipUpdates.stroke = updates.stroke;
-                if (updates.color !== undefined) clipUpdates.color = updates.color;
+                if (updates.color   !== undefined) clipUpdates.color   = updates.color;
+                if (updates.bgColor !== undefined) clipUpdates.bgColor = updates.bgColor;
                 if (updates.textAlign !== undefined) clipUpdates.textAlign = updates.textAlign;
                 if (updates.position !== undefined) clipUpdates.position = updates.position;
                 if (updates.style !== undefined) clipUpdates.style = updates.style;
