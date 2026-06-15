@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sparkles, ArrowRight, Play, CheckCircle2, MousePointerClick, Layers, LayoutGrid, Link as LinkIcon, MessageSquare, Mic, Scissors, UserCheck, Zap } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
@@ -15,6 +15,23 @@ async function createCheckout(plan) {
     const { url } = await res.json();
     window.location.href = url;
 }
+
+// ── Scroll-triggered reveal hook ──────────────────────────────────────────────
+const useReveal = (threshold = 0.15) => {
+    const ref = useRef(null);
+    const [visible, setVisible] = useState(false);
+    useEffect(() => {
+        const el = ref.current;
+        if (!el) return;
+        const obs = new IntersectionObserver(
+            ([entry]) => { if (entry.isIntersecting) { setVisible(true); obs.disconnect(); } },
+            { threshold }
+        );
+        obs.observe(el);
+        return () => obs.disconnect();
+    }, [threshold]);
+    return [ref, visible];
+};
 
 const Logo = ({ size = 28 }) => (
     <svg width={size} height={size} viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -86,7 +103,6 @@ const Nav = () => {
         </nav>
     );
 };
-
 
 const HeroFrame = () => {
     const images = [
@@ -172,6 +188,108 @@ const Hero = () => {
     );
 };
 
+// ── NEW: Problem Section ──────────────────────────────────────────────────────
+const ProblemSection = () => {
+    const [ref, visible] = useReveal();
+
+    const pains = [
+        {
+            num: "01",
+            headline: "Every minute of silence costs you two.",
+            body: "A 10-minute talking-head video contains 3–4 minutes of silence, stumbles, and filler words — all cut manually, one by one.",
+        },
+        {
+            num: "02",
+            headline: "One video. Four exports. Endless hours.",
+            body: "The same video needs to be reformatted, re-encoded, and re-captioned for every platform — a process that can take as long as the original edit.",
+        },
+        {
+            num: "03",
+            headline: "Pro tools are built for pros, not creators.",
+            body: "Professional tools are powerful but designed for full-time editors, not creators who edit as part of a larger job.",
+        },
+    ];
+
+    return (
+        <section style={{
+            padding: "100px 0",
+            background: "var(--bg-2)",
+            borderTop: "0.5px solid var(--line)",
+            borderBottom: "0.5px solid var(--line)",
+        }}>
+            <div className="wrap">
+                <div style={{ textAlign: "center", marginBottom: 72 }}>
+                    <span className="eyebrow">The reality</span>
+                    <h2 className="h-section" style={{ marginTop: 16, maxWidth: 600, marginInline: "auto" }}>
+                        You shouldn't spend your weekend editing.
+                    </h2>
+                </div>
+
+                <div ref={ref} style={{ display: "flex", flexDirection: "column" }}>
+                    {pains.map((p, i) => (
+                        <div key={i} style={{
+                            display: "grid",
+                            gridTemplateColumns: "72px 1fr",
+                            gap: 36,
+                            padding: "40px 0",
+                            borderTop: "0.5px solid var(--line)",
+                            opacity: visible ? 1 : 0,
+                            transform: visible ? "translateY(0)" : "translateY(20px)",
+                            transition: `opacity 0.65s ease ${i * 0.13}s, transform 0.65s ease ${i * 0.13}s`,
+                        }}>
+                            <div className="mono" style={{
+                                fontSize: 12, fontWeight: 600, letterSpacing: "0.12em",
+                                color: "var(--fg-4)", paddingTop: 5,
+                            }}>
+                                {p.num}
+                            </div>
+                            <div>
+                                <h3 style={{
+                                    fontSize: "clamp(19px, 2vw, 22px)", fontWeight: 600,
+                                    letterSpacing: "-0.01em", marginBottom: 10, lineHeight: 1.3,
+                                }}>
+                                    {p.headline}
+                                </h3>
+                                <p style={{
+                                    fontSize: 15.5, color: "var(--fg-2)", lineHeight: 1.7,
+                                    margin: 0, maxWidth: 680,
+                                }}>
+                                    {p.body}
+                                </p>
+                            </div>
+                        </div>
+                    ))}
+
+                    {/* Kicker */}
+                    <div style={{
+                        borderTop: "0.5px solid var(--line)",
+                        paddingTop: 52,
+                        textAlign: "center",
+                        opacity: visible ? 1 : 0,
+                        transform: visible ? "translateY(0)" : "translateY(16px)",
+                        transition: "opacity 0.65s ease 0.42s, transform 0.65s ease 0.42s",
+                    }}>
+                        <p style={{
+                            fontSize: "clamp(18px, 2.2vw, 25px)",
+                            fontWeight: 500,
+                            fontStyle: "italic",
+                            color: "var(--fg-2)",
+                            maxWidth: 700,
+                            margin: "0 auto",
+                            lineHeight: 1.55,
+                            letterSpacing: "-0.01em",
+                        }}>
+                            The result: you either publish content that isn't as good as it could be,{" "}
+                            <span style={{ color: "var(--fg)" }}>or spend your weekend editing.</span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    );
+};
+
+// ── Existing: Feature Moments ─────────────────────────────────────────────────
 const FeatureMoments = () => {
     const moments = [
         {
@@ -255,6 +373,216 @@ const FeatureMoments = () => {
     );
 };
 
+// ── NEW: Before / After Section ───────────────────────────────────────────────
+const BeforeAfterSection = () => {
+    const [ref, visible] = useReveal(0.1);
+
+    const rows = [
+        { without: "Scrub recording for silences", withoutTime: "45 min", with: "AI silence detection & auto-cut", withTime: "2 min" },
+        { without: "Cut filler words one by one",  withoutTime: "30 min", with: "AI filler removal pass",          withTime: "1 min" },
+        { without: "Manual audio normalization",   withoutTime: "15 min", with: "One-click normalize",             withTime: "30 sec" },
+        { without: "Type and sync captions manually", withoutTime: "60 min", with: "Auto-captions with word timestamps", withTime: "2 min" },
+        { without: "Re-export for each platform separately", withoutTime: "30 min", with: "Parallel platform exports", withTime: "3 min" },
+    ];
+
+    return (
+        <section style={{ padding: "100px 0" }}>
+            <div className="wrap">
+                {/* Headline */}
+                <div style={{ textAlign: "center", marginBottom: 64 }}>
+                    <span className="eyebrow">The difference</span>
+                    <h2 className="h-section" style={{ marginTop: 16 }}>
+                        Your 3-hour edit.<br /><em>Done in 20 minutes.</em>
+                    </h2>
+                    <p className="body-lg" style={{ color: "var(--fg-2)", maxWidth: 480, margin: "20px auto 0" }}>
+                        What changes when you edit with VIBED
+                    </p>
+                </div>
+
+                {/* Table */}
+                <div ref={ref} style={{ borderRadius: 16, overflow: "hidden", border: "0.5px solid var(--line)" }}>
+                    {/* Header row */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", background: "var(--bg-2)" }}>
+                        <div style={{ padding: "18px 28px", borderRight: "0.5px solid var(--line)", display: "flex", alignItems: "center", gap: 10 }}>
+                            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#EF4444", flexShrink: 0 }} />
+                            <span className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", color: "var(--fg-3)" }}>WITHOUT VIBED</span>
+                        </div>
+                        <div style={{ padding: "18px 28px", display: "flex", alignItems: "center", gap: 10 }}>
+                            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--mint)", flexShrink: 0 }} />
+                            <span className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", color: "var(--accent)" }}>WITH VIBED</span>
+                        </div>
+                    </div>
+
+                    {/* Data rows */}
+                    {rows.map((row, i) => (
+                        <div key={i} style={{
+                            display: "grid",
+                            gridTemplateColumns: "1fr 1fr",
+                            borderTop: "0.5px solid var(--line)",
+                            opacity: visible ? 1 : 0,
+                            transform: visible ? "translateX(0)" : "translateX(-12px)",
+                            transition: `opacity 0.55s ease ${i * 0.07}s, transform 0.55s ease ${i * 0.07}s`,
+                        }}>
+                            <div style={{
+                                padding: "20px 28px", borderRight: "0.5px solid var(--line)",
+                                display: "flex", justifyContent: "space-between", alignItems: "center",
+                                background: "rgba(239, 68, 68, 0.025)",
+                            }}>
+                                <span style={{ fontSize: 14, color: "var(--fg-2)", lineHeight: 1.4 }}>{row.without}</span>
+                                <span style={{ fontSize: 14, fontWeight: 700, color: "#EF4444", flexShrink: 0, marginLeft: 20 }}>{row.withoutTime}</span>
+                            </div>
+                            <div style={{
+                                padding: "20px 28px",
+                                display: "flex", justifyContent: "space-between", alignItems: "center",
+                                background: "rgba(16, 185, 129, 0.025)",
+                            }}>
+                                <span style={{ fontSize: 14, color: "var(--fg-2)", lineHeight: 1.4 }}>{row.with}</span>
+                                <span style={{ fontSize: 14, fontWeight: 700, color: "var(--mint)", flexShrink: 0, marginLeft: 20 }}>{row.withTime}</span>
+                            </div>
+                        </div>
+                    ))}
+
+                    {/* Total row */}
+                    <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        borderTop: "0.5px solid var(--line)",
+                        background: "var(--bg-2)",
+                    }}>
+                        <div style={{
+                            padding: "28px 28px", borderRight: "0.5px solid var(--line)",
+                            display: "flex", justifyContent: "space-between", alignItems: "center",
+                        }}>
+                            <span style={{ fontSize: 15, fontWeight: 600, color: "var(--fg)" }}>Total per video</span>
+                            <span style={{ fontSize: 22, fontWeight: 700, color: "#EF4444", letterSpacing: "-0.02em" }}>~3 hours</span>
+                        </div>
+                        <div style={{
+                            padding: "28px 28px",
+                            display: "flex", justifyContent: "space-between", alignItems: "center",
+                        }}>
+                            <span style={{ fontSize: 15, fontWeight: 600, color: "var(--fg)" }}>Total per video</span>
+                            <span style={{ fontSize: 22, fontWeight: 700, color: "var(--mint)", letterSpacing: "-0.02em" }}>~25 min</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    );
+};
+
+// ── NEW: Who It's For ─────────────────────────────────────────────────────────
+const PersonasSection = () => {
+    const [ref, visible] = useReveal(0.1);
+
+    const personas = [
+        {
+            Icon: Mic,
+            role: "The Solo Creator",
+            description: "Records and edits everything alone. Publishes 2–5 videos a week.",
+            before: "3–5 hours editing per video",
+            after: "20–40 minutes. AI handles cleanup; you focus only on content decisions.",
+        },
+        {
+            Icon: Layers,
+            role: "The Podcast Producer",
+            description: "Long-form interviews, multiple guests, 30–90 minute episodes.",
+            before: "Manual scrubbing, separate transcription service, clip selection by ear",
+            after: "Filler and silence cleaned in minutes. Speaker-colored transcript makes multi-guest editing feel like working in a text document.",
+        },
+        {
+            Icon: UserCheck,
+            role: "The Production Team",
+            description: "Agencies and studios delivering corporate video, events, brand campaigns.",
+            before: "Junior editors spend 50% of their time on cleanup before a senior editor sees the footage",
+            after: "AI cleanup runs unattended. Senior editor gets a pre-cleaned rough cut with FCPXML ready for Final Cut or DaVinci.",
+        },
+    ];
+
+    return (
+        <section style={{
+            padding: "100px 0",
+            background: "var(--bg-2)",
+            borderTop: "0.5px solid var(--line)",
+            borderBottom: "0.5px solid var(--line)",
+        }}>
+            <div className="wrap">
+                <div style={{ textAlign: "center", marginBottom: 64 }}>
+                    <span className="eyebrow">Who it's for</span>
+                    <h2 className="h-section" style={{ marginTop: 16, maxWidth: 560, marginInline: "auto" }}>
+                        Built for everyone<br />who creates with video.
+                    </h2>
+                </div>
+
+                <div ref={ref} style={{ display: "grid", gap: 20 }} className="grid-cols-1 md:grid-cols-3">
+                    {personas.map((p, i) => (
+                        <div key={i} className="card" style={{
+                            padding: "32px 28px",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 24,
+                            opacity: visible ? 1 : 0,
+                            transform: visible ? "translateY(0)" : "translateY(28px)",
+                            transition: `opacity 0.65s ease ${i * 0.14}s, transform 0.65s ease ${i * 0.14}s`,
+                        }}>
+                            {/* Icon */}
+                            <div style={{
+                                width: 48, height: 48, borderRadius: 12,
+                                background: "var(--bg-3)", border: "0.5px solid var(--line)",
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                color: "var(--accent)",
+                            }}>
+                                <p.Icon size={20} strokeWidth={1.6} />
+                            </div>
+
+                            {/* Role + description */}
+                            <div>
+                                <div className="mono" style={{ fontSize: 10.5, letterSpacing: "0.1em", color: "var(--fg-4)", marginBottom: 8 }}>
+                                    PERSONA
+                                </div>
+                                <h3 style={{ fontSize: 19, fontWeight: 600, letterSpacing: "-0.01em", marginBottom: 8, lineHeight: 1.3 }}>
+                                    {p.role}
+                                </h3>
+                                <p style={{ fontSize: 13.5, color: "var(--fg-3)", lineHeight: 1.6, margin: 0 }}>
+                                    {p.description}
+                                </p>
+                            </div>
+
+                            {/* Before / After */}
+                            <div style={{ borderTop: "0.5px solid var(--line)", paddingTop: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+                                {/* Before */}
+                                <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                                    <div style={{
+                                        width: 20, height: 20, borderRadius: "50%", flexShrink: 0, marginTop: 1,
+                                        background: "rgba(239,68,68,0.1)", border: "0.5px solid rgba(239,68,68,0.25)",
+                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                    }}>
+                                        <div style={{ width: 7, height: 1.5, background: "#EF4444", borderRadius: 1 }} />
+                                    </div>
+                                    <p style={{ fontSize: 13.5, color: "var(--fg-3)", lineHeight: 1.55, margin: 0 }}>{p.before}</p>
+                                </div>
+                                {/* After */}
+                                <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                                    <div style={{
+                                        width: 20, height: 20, borderRadius: "50%", flexShrink: 0, marginTop: 1,
+                                        background: "rgba(16,185,129,0.1)", border: "0.5px solid rgba(16,185,129,0.25)",
+                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                    }}>
+                                        <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
+                                            <path d="M1 3.5l2.3 2.3 4.4-4.6" stroke="#10B981" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                                        </svg>
+                                    </div>
+                                    <p style={{ fontSize: 13.5, color: "var(--fg)", lineHeight: 1.55, margin: 0 }}>{p.after}</p>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </section>
+    );
+};
+
+// ── Existing: AntiDescript (moved to after Exports) ───────────────────────────
 const AntiDescript = () => (
     <section style={{ padding: "80px 0", background: "var(--bg-2)", borderTop: "0.5px solid var(--line)", borderBottom: "0.5px solid var(--line)" }}>
         <div className="wrap">
@@ -266,92 +594,124 @@ const AntiDescript = () => (
         </div>
     </section>
 );
-  
+
 const ExportIcon = {
     premiere: () => (
-      <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="6" width="26" height="20" rx="2" />
-        <path d="M3 11h26M3 21h26" />
-        <path d="M7 6v-2M11 6v-2M15 6v-2M19 6v-2M23 6v-2M27 6v-2" />
-        <path d="M7 28v-2M11 28v-2M15 28v-2M19 28v-2M23 28v-2M27 28v-2" />
-        <path d="M13 14l6 2-6 2v-4z" fill="currentColor" stroke="none" />
-      </svg>
+        <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="6" width="26" height="20" rx="2" />
+            <path d="M3 11h26M3 21h26" />
+            <path d="M7 6v-2M11 6v-2M15 6v-2M19 6v-2M23 6v-2M27 6v-2" />
+            <path d="M7 28v-2M11 28v-2M15 28v-2M19 28v-2M23 28v-2M27 28v-2" />
+            <path d="M13 14l6 2-6 2v-4z" fill="currentColor" stroke="none" />
+        </svg>
     ),
     resolve: () => (
-      <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4">
-        <circle cx="16" cy="16" r="10" />
-        <circle cx="16" cy="16" r="3" />
-        <path d="M16 6v4M16 22v4M6 16h4M22 16h4M9 9l2.8 2.8M20.2 20.2L23 23M9 23l2.8-2.8M20.2 11.8L23 9" strokeLinecap="round" />
-      </svg>
+        <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4">
+            <circle cx="16" cy="16" r="10" />
+            <circle cx="16" cy="16" r="3" />
+            <path d="M16 6v4M16 22v4M6 16h4M22 16h4M9 9l2.8 2.8M20.2 20.2L23 23M9 23l2.8-2.8M20.2 11.8L23 9" strokeLinecap="round" />
+        </svg>
     ),
     finalcut: () => (
-      <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round">
-        <rect x="4" y="4" width="24" height="24" rx="5" />
-        <path d="M12 11v10l9-5-9-5z" fill="currentColor" stroke="none" />
-      </svg>
+        <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round">
+            <rect x="4" y="4" width="24" height="24" rx="5" />
+            <path d="M12 11v10l9-5-9-5z" fill="currentColor" stroke="none" />
+        </svg>
     ),
     otio: () => (
-      <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4">
-        <circle cx="7" cy="9" r="2.5" />
-        <circle cx="25" cy="9" r="2.5" />
-        <circle cx="16" cy="23" r="2.5" />
-        <path d="M9 10.5l5.5 10M23 10.5l-5.5 10M9.5 9h13" strokeLinecap="round" />
-      </svg>
+        <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4">
+            <circle cx="7" cy="9" r="2.5" />
+            <circle cx="25" cy="9" r="2.5" />
+            <circle cx="16" cy="23" r="2.5" />
+            <path d="M9 10.5l5.5 10M23 10.5l-5.5 10M9.5 9h13" strokeLinecap="round" />
+        </svg>
     ),
 };
-  
+
 const Exports = () => {
     const tools = [
-      { key: "premiere", name: "Premiere Pro",     fmt: "XML · MOGRT" },
-      { key: "resolve",  name: "DaVinci Resolve",  fmt: "DRP · OFX" },
-      { key: "finalcut", name: "Final Cut Pro",    fmt: "FCPXML · iCloud" },
-      { key: "otio",     name: "OpenTimelineIO",   fmt: "Open standard" },
+        { key: "premiere", name: "Premiere Pro",    fmt: "XML · MOGRT" },
+        { key: "resolve",  name: "DaVinci Resolve", fmt: "DRP · OFX" },
+        { key: "finalcut", name: "Final Cut Pro",   fmt: "FCPXML · iCloud" },
+        { key: "otio",     name: "OpenTimelineIO",  fmt: "Open standard" },
     ];
     return (
-      <section id="exports" style={{ padding: "100px 0" }}>
-        <div className="wrap">
-          <div style={{ display: "grid", gap: 80, alignItems: "center" }} className="grid-cols-1 md:grid-cols-2">
-            <div className="section-head" style={{ marginBottom: 0 }}>
-              <span className="eyebrow">Roundtrip-ready</span>
-              <h2 className="h-section">Works with the suite you <em>already</em> finish in.</h2>
-              <p className="body-lg">Vibed isn’t the last app you’ll ever open — it’s the first.
-                Hand off cleanly to professional editing tools the moment you’re ready to polish.</p>
-              <p className="body-lg" style={{ marginTop: 16, fontWeight: 500 }}>
-                The transcript edit happens in VIBED. The finishing happens where you've always finished.
-              </p>
-              <div style={{ display: "flex", gap: 12, marginTop: 24, flexWrap: "wrap" }}>
-                <span className="tag"><span className="dot" />XML · FCPXML · EDL · OTIO</span>
-                <span className="tag">Bin metadata preserved</span>
-              </div>
-            </div>
-  
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
-              {tools.map((t) => {
-                const Icon = ExportIcon[t.key];
-                return (
-                  <div key={t.key} className="card" style={{ padding: 20, display: "flex", alignItems: "center", gap: 14 }}>
-                    <div style={{
-                      width: 48, height: 48, borderRadius: 12, background: "var(--bg-3)",
-                      border: "0.5px solid var(--line)", color: "var(--fg)",
-                      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                    }}>
-                      <Icon />
+        <section id="exports" style={{ padding: "100px 0" }}>
+            <div className="wrap">
+                <div style={{ display: "grid", gap: 80, alignItems: "center" }} className="grid-cols-1 md:grid-cols-2">
+                    <div className="section-head" style={{ marginBottom: 0 }}>
+                        <span className="eyebrow">Roundtrip-ready</span>
+                        <h2 className="h-section">Works with the suite you <em>already</em> finish in.</h2>
+                        <p className="body-lg">Vibed isn't the last app you'll ever open — it's the first.
+                            Hand off cleanly to professional editing tools the moment you're ready to polish.</p>
+                        <p className="body-lg" style={{ marginTop: 16, fontWeight: 500 }}>
+                            The transcript edit happens in VIBED. The finishing happens where you've always finished.
+                        </p>
+                        <div style={{ display: "flex", gap: 12, marginTop: 24, flexWrap: "wrap" }}>
+                            <span className="tag"><span className="dot" />XML · FCPXML · EDL · OTIO</span>
+                            <span className="tag">Bin metadata preserved</span>
+                        </div>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 500 }}>{t.name}</div>
-                      <div className="mono" style={{ color: "var(--fg-3)", fontSize: 10.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.fmt}</div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+                        {tools.map((t) => {
+                            const Icon = ExportIcon[t.key];
+                            return (
+                                <div key={t.key} className="card" style={{ padding: 20, display: "flex", alignItems: "center", gap: 14 }}>
+                                    <div style={{
+                                        width: 48, height: 48, borderRadius: 12, background: "var(--bg-3)",
+                                        border: "0.5px solid var(--line)", color: "var(--fg)",
+                                        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                                    }}>
+                                        <Icon />
+                                    </div>
+                                    <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                                        <div style={{ fontSize: 14, fontWeight: 500 }}>{t.name}</div>
+                                        <div className="mono" style={{ color: "var(--fg-3)", fontSize: 10.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.fmt}</div>
+                                    </div>
+                                    <div style={{ marginLeft: "auto", color: "var(--fg-4)" }}><ArrowRight className="w-4 h-4" /></div>
+                                </div>
+                            );
+                        })}
                     </div>
-                    <div style={{ marginLeft: "auto", color: "var(--fg-4)" }}><ArrowRight className="w-4 h-4" /></div>
-                  </div>
-                );
-              })}
+                </div>
             </div>
-          </div>
-        </div>
-      </section>
+        </section>
     );
 };
-  
+
+// ── NEW: ROI line — sits just above Pricing ───────────────────────────────────
+const ROILine = () => {
+    const [ref, visible] = useReveal(0.3);
+    return (
+        <div style={{
+            padding: "56px 0",
+            borderTop: "0.5px solid var(--line)",
+            borderBottom: "0.5px solid var(--line)",
+            background: "var(--bg)",
+        }}>
+            <div className="wrap" style={{ textAlign: "center" }}>
+                <p ref={ref} style={{
+                    fontSize: "clamp(16px, 1.8vw, 21px)",
+                    fontWeight: 500,
+                    lineHeight: 1.65,
+                    color: "var(--fg-2)",
+                    maxWidth: 700,
+                    margin: "0 auto",
+                    opacity: visible ? 1 : 0,
+                    transform: visible ? "translateY(0)" : "translateY(14px)",
+                    transition: "opacity 0.6s ease, transform 0.6s ease",
+                }}>
+                    At 2.5 hours saved per video and 3 videos per week,{" "}
+                    <span style={{ color: "var(--fg)", fontWeight: 600 }}>VIBED saves you 30 hours a month.</span>
+                    {" "}The Creator plan costs less than{" "}
+                    <span style={{ color: "var(--accent)", fontWeight: 600 }}>one hour of your time.</span>
+                </p>
+            </div>
+        </div>
+    );
+};
+
 const PLANS = [
     {
         key:     'free',
@@ -555,78 +915,83 @@ const SocialProof = () => {
 
 const FinalCTA = () => (
     <section style={{ position: "relative", overflow: "hidden", paddingTop: 140, paddingBottom: 140 }}>
-      <div className="aurora" />
-      <div className="wrap" style={{ position: "relative", zIndex: 2, textAlign: "center", display: "flex", flexDirection: "column", gap: 28, alignItems: "center" }}>
-        <h2 className="display" style={{ fontSize: "clamp(48px, 6.4vw, 96px)" }}>
-          The future of editing<br /><em>is collaborative.</em>
-        </h2>
-        <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap", justifyContent: "center" }}>
-          <button onClick={() => window.location.href='#pricing'} className="btn btn-primary" style={{ padding: "0 32px", height: 48, fontSize: 16 }}>
-            See plans <ArrowRight className="w-5 h-5 ml-1" />
-          </button>
+        <div className="aurora" />
+        <div className="wrap" style={{ position: "relative", zIndex: 2, textAlign: "center", display: "flex", flexDirection: "column", gap: 28, alignItems: "center" }}>
+            <h2 className="display" style={{ fontSize: "clamp(48px, 6.4vw, 96px)" }}>
+                The future of editing<br /><em>is collaborative.</em>
+            </h2>
+            <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                <button onClick={() => window.location.href='#pricing'} className="btn btn-primary" style={{ padding: "0 32px", height: 48, fontSize: 16 }}>
+                    See plans <ArrowRight className="w-5 h-5 ml-1" />
+                </button>
+            </div>
+            <div className="caption" style={{ marginTop: 8 }}>
+                Start free. No credit card. Bring your own clips.
+            </div>
         </div>
-        <div className="caption" style={{ marginTop: 8 }}>
-          Start free. No credit card. Bring your own clips.
-        </div>
-      </div>
     </section>
 );
-  
+
 const Footer = () => {
     const cols = {
-      "Company": ["About"],
-      "Legal": ["Privacy Policy", "Cookie Policy", "Your data"],
+        "Company": ["About"],
+        "Legal": ["Privacy Policy", "Cookie Policy", "Your data"],
     };
     return (
-      <footer style={{ borderTop: "0.5px solid var(--line)", padding: "64px 0 32px", background: "var(--bg)" }}>
-        <div className="wrap grid-cols-2 md:grid-cols-[1.4fr_1fr_1fr_1fr]" style={{ display: "grid", gap: 56 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <Logo size={32} />
-            <p className="body" style={{ fontSize: 13.5, margin: 0, maxWidth: 280 }}>
-              The creative operating system for modern storytellers, editors and studios.
-            </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
-              <div style={{ display: "flex" }}>
-                <a href="/gdpr" style={{ textDecoration: 'none' }}>
-                  <span className="tag" style={{ border: "0.5px solid var(--line-strong)", background: "var(--bg-2)", cursor: "pointer" }}>GDPR Compliant · GCS Data Processor · 30-Day Retention</span>
-                </a>
-              </div>
+        <footer style={{ borderTop: "0.5px solid var(--line)", padding: "64px 0 32px", background: "var(--bg)" }}>
+            <div className="wrap grid-cols-2 md:grid-cols-[1.4fr_1fr_1fr_1fr]" style={{ display: "grid", gap: 56 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    <Logo size={32} />
+                    <p className="body" style={{ fontSize: 13.5, margin: 0, maxWidth: 280 }}>
+                        The creative operating system for modern storytellers, editors and studios.
+                    </p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
+                        <div style={{ display: "flex" }}>
+                            <a href="/gdpr" style={{ textDecoration: 'none' }}>
+                                <span className="tag" style={{ border: "0.5px solid var(--line-strong)", background: "var(--bg-2)", cursor: "pointer" }}>GDPR Compliant · GCS Data Processor · 30-Day Retention</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                {Object.entries(cols).map(([k, items]) => (
+                    <div key={k} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        <div className="mono" style={{ color: "var(--fg-4)" }}>{k.toUpperCase()}</div>
+                        {items.map(it => {
+                            let href = '#';
+                            if (it === 'Your data') href = '/data';
+                            if (it === 'Privacy Policy') href = '/privacy';
+                            if (it === 'Cookie Policy') href = '/cookie-policy';
+                            if (it === 'About') href = '/about';
+                            return (
+                                <a key={it} href={href} style={{ fontSize: 13.5, color: "var(--fg-2)" }} className="hover:text-foreground transition-colors">{it}</a>
+                            );
+                        })}
+                    </div>
+                ))}
             </div>
-          </div>
-          {Object.entries(cols).map(([k, items]) => (
-            <div key={k} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div className="mono" style={{ color: "var(--fg-4)" }}>{k.toUpperCase()}</div>
-              {items.map(it => {
-                  let href = '#';
-                  if (it === 'Your data') href = '/data';
-                  if (it === 'Privacy Policy') href = '/privacy';
-                  if (it === 'Cookie Policy') href = '/cookie-policy';
-                  if (it === 'About') href = '/about';
-                  return (
-                    <a key={it} href={href} style={{ fontSize: 13.5, color: "var(--fg-2)" }} className="hover:text-foreground transition-colors">{it}</a>
-                  )
-              })}
+            <div className="wrap" style={{ marginTop: 56, paddingTop: 24, borderTop: "0.5px solid var(--line-soft)",
+                display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+                <span className="caption">© 2026 Vibed Studios</span>
+                <span className="caption">Made with care, for makers.</span>
             </div>
-          ))}
-        </div>
-        <div className="wrap" style={{ marginTop: 56, paddingTop: 24, borderTop: "0.5px solid var(--line-soft)",
-          display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-          <span className="caption">© 2026 Vibed Studios</span>
-          <span className="caption">Made with care, for makers.</span>
-        </div>
-      </footer>
+        </footer>
     );
 };
 
+// ── Page composition ──────────────────────────────────────────────────────────
 const HomePage = () => {
     return (
         <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)] font-sans selection:bg-accent selection:text-white">
             <Nav />
             <main>
                 <Hero />
+                <ProblemSection />       {/* NEW — between Hero and features */}
                 <FeatureMoments />
-                <AntiDescript />
+                <BeforeAfterSection />   {/* NEW — after workflow */}
+                <PersonasSection />      {/* NEW — after Before/After */}
                 <Exports />
+                <AntiDescript />         {/* moved — after Exports */}
+                <ROILine />              {/* NEW — just above pricing */}
                 <Pricing />
                 <SocialProof />
                 <FinalCTA />
