@@ -1,5 +1,6 @@
 import { useShallow } from 'zustand/react/shallow';
 import React from 'react';
+import { useDroppable, useDndContext } from '@dnd-kit/core';
 import Track from './Track';
 import useTimelineStore from '../../store/useTimelineStore';
 import { Scissors, ZoomIn, ZoomOut, Copy, Type, Palette } from 'lucide-react';
@@ -27,6 +28,13 @@ const Timeline = () => {
     const tracksAreaRef = React.useRef(null);
     const selDragRef = React.useRef(null);
     const [selBox, setSelBox] = React.useState(null);
+
+    // "Create new track" drop zone — shown above the track list while dragging a clip
+    const { active: dndActive } = useDndContext();
+    const isDraggingClip = dndActive?.data?.current?.clip != null;
+    const { setNodeRef: newTrackDropRef, isOver: isOverNewTrack } = useDroppable({
+        id: 'new-track-drop-zone',
+    });
 
     const getContentPos = React.useCallback((clientX, clientY) => {
         const area = tracksAreaRef.current;
@@ -138,6 +146,9 @@ const Timeline = () => {
                     useTimelineStore.getState().clearSelection();
                 }
             } else {
+                // Single click without drag — seek to the clicked position and clear selection
+                const zl = useTimelineStore.getState().zoomLevel;
+                useTimelineStore.getState().seek(Math.max(0, (selDragRef.current.x - LABEL_W) / zl));
                 useTimelineStore.getState().clearSelection();
             }
 
@@ -224,14 +235,6 @@ const Timeline = () => {
         const secs = Math.floor(seconds % 60);
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
-
-    const handleSeekClick = (e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const clickedTime = x / zoomLevel;
-        seek(clickedTime);
-    };
-
 
     return (
         <div className="flex-1 bg-transparent flex flex-col relative h-full select-none" onKeyDown={handleKeyDown} tabIndex={0}>
@@ -386,7 +389,14 @@ const Timeline = () => {
                     <div
                         className="flex-1 relative cursor-pointer"
                         style={{ width: `${duration * zoomLevel}px`, minWidth: '100%' }}
-                        onClick={handleSeekClick}
+                        onMouseDown={(e) => {
+                            if (e.button !== 0) return;
+                            // Stop propagation so the tracks-area rubber-band handler
+                            // doesn't also fire and compete with the ruler seek.
+                            e.stopPropagation();
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            seek(Math.max(0, (e.clientX - rect.left) / zoomLevel));
+                        }}
                     >
                         {/* Ruler ticks */}
                         {Array.from({ length: Math.ceil(duration / 5) }).map((_, i) => (
@@ -423,6 +433,19 @@ const Timeline = () => {
                     >
                         <div className="absolute -top-1 -left-1.5 w-3 h-3 bg-red-500 rotate-45 transform shadow-sm"></div>
                     </div>
+
+                    {/* New-track drop zone — appears above all tracks while dragging a clip */}
+                    {isDraggingClip && (
+                        <div
+                            ref={newTrackDropRef}
+                            className={`flex items-center justify-center h-9 mx-1 my-0.5 rounded border-2 border-dashed transition-all text-xs font-medium select-none pointer-events-auto
+                                ${isOverNewTrack
+                                    ? 'border-blue-400 bg-blue-400/15 text-blue-400'
+                                    : 'border-white/20 text-white/30'}`}
+                        >
+                            ↑ Drop here to create a new track
+                        </div>
+                    )}
 
                     {tracks.map(track => (
                         <Track key={track.id} track={track} />

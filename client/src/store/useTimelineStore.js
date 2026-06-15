@@ -555,6 +555,46 @@ const useTimelineStore = create(
                 set({ tracks: timelineManager.toLegacyTracks() });
             },
 
+            // Ripple delete: removes the clip and shifts all subsequent clips left
+            // to close the gap, preserving relative spacing.
+            rippleDeleteClip: (trackId, clipId) => {
+                get()._saveHistory();
+
+                const placement = timelineManager.getState().entities.placements[clipId];
+                if (!placement) return;
+
+                const { startTime, duration } = placement;
+                const gapEnd = startTime + duration;
+
+                // Remove the clip
+                timelineManager.dispatch(TimelineActions.removePlacement(clipId));
+
+                // Shift every placement that starts at or after the gap end
+                const allPlacements = Object.values(timelineManager.getState().entities.placements);
+                allPlacements.forEach(p => {
+                    if (p.startTime >= gapEnd) {
+                        timelineManager.dispatch(
+                            TimelineActions.updatePlacement(p.id, { startTime: p.startTime - duration })
+                        );
+                    }
+                });
+
+                // Clean up empty tracks (except defaults)
+                const remaining = Object.values(timelineManager.getState().entities.placements);
+                Object.values(timelineManager.getState().entities.layers).forEach(layer => {
+                    if (layer.id === 'track-default-video' || layer.id === 'track-default-audio') return;
+                    if (!remaining.some(p => p.layerId === layer.id)) {
+                        timelineManager.dispatch(TimelineActions.removeLayer(layer.id));
+                    }
+                });
+
+                set({
+                    tracks: timelineManager.toLegacyTracks(),
+                    activeClipId: null,
+                    selectedClipIds: [],
+                });
+            },
+
             removeClip: (trackId, clipId) => {
                 get()._saveHistory();
 

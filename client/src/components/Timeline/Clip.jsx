@@ -4,11 +4,13 @@ import { CSS } from '@dnd-kit/utilities';
 import useTimelineStore from '../../store/useTimelineStore';
 import classNames from 'classnames';
 import Waveform from './Waveform';
+import ClipContextMenu from './ClipContextMenu';
 
 const Clip = ({ clip, trackId }) => {
     const { zoomLevel, removeClip, activeClipId, selectedClipIds, setActiveClip, toggleClipSelection, waveforms } = useTimelineStore();
     const isActive = activeClipId === clip.id;
     const isSelected = selectedClipIds && selectedClipIds.includes(clip.id);
+    const [ctxMenu, setCtxMenu] = React.useState(null); // null | { x, y }
 
     // Waveform Data
     // For now we map by trackId (Audio tracks) or clipId/assetId?
@@ -141,6 +143,12 @@ const Clip = ({ clip, trackId }) => {
                     setActiveClip(clip.id);
                 }
             }}
+            onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setActiveClip(clip.id);
+                setCtxMenu({ x: e.clientX, y: e.clientY });
+            }}
         >
             {/* Left Handle */}
             <div
@@ -212,6 +220,15 @@ const Clip = ({ clip, trackId }) => {
                 onMouseDown={(e) => handleResize(e, 'right')}
                 onTouchStart={(e) => handleResize(e, 'right')}
             ></div>
+
+            {ctxMenu && (
+                <ClipContextMenu
+                    clip={clip}
+                    trackId={trackId}
+                    position={ctxMenu}
+                    onClose={() => setCtxMenu(null)}
+                />
+            )}
         </div>
     );
 };

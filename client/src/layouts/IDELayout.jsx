@@ -605,6 +605,20 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             });
         }
 
+        // Drop clip onto the "new track" zone (user dragged clip above all tracks)
+        if (activeData?.clip && over?.id === 'new-track-drop-zone') {
+            const activeClipId = active.id;
+            const currentClip = activeData.clip;
+            const deltaSeconds = delta.x / state.zoomLevel;
+            const newStart = Math.max(0, currentClip.start + deltaSeconds);
+            const newTrackId = state.addTrack(currentClip.type === 'audio' ? 'audio' : 'video');
+            state.updateClip(activeData.trackId, activeClipId, {
+                start: newStart,
+                layerId: newTrackId,
+            });
+            return;
+        }
+
         // Move existing CLIP
         if (activeData?.clip && targetData?.trackId) {
             const activeClipId = active.id;
