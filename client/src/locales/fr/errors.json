@@ -1,0 +1,24 @@
+{
+  "generic": "Une erreur s'est produite. Veuillez réessayer.",
+  "upload": {
+    "tooLarge": "Le fichier est trop volumineux. Taille maximale : {{max}}.",
+    "unsupportedFormat": "Format de fichier non pris en charge.",
+    "failed": "Échec du téléversement. Vérifiez votre connexion et réessayez."
+  },
+  "export": {
+    "failed": "Échec de l'export. Veuillez réessayer.",
+    "timeout": "L'export a expiré. Votre fichier est peut-être trop volumineux."
+  },
+  "ai": {
+    "failed": "L'opération IA a échoué. Veuillez réessayer.",
+    "quotaExceeded": "Vous avez utilisé toutes vos opérations IA ce mois-ci. Passez à la version supérieure pour continuer.",
+    "timeout": "L'IA a mis trop de temps à répondre. Essayez une commande plus simple."
+  },
+  "auth": {
+    "sessionExpired": "Votre session a expiré. Veuillez vous reconnecter.",
+    "unauthorized": "Vous n'avez pas la permission de faire cela."
+  },
+  "checkout": {
+    "failed": "Échec du paiement. Réessayez ou contactez le support."
+  }
+}

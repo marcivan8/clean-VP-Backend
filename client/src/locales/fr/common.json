@@ -1,0 +1,41 @@
+{
+  "nav": {
+    "product": "Produit",
+    "exports": "Exports",
+    "about": "À propos",
+    "logIn": "Connexion",
+    "startFree": "Commencer",
+    "account": "Mon compte"
+  },
+  "actions": {
+    "export": "Exporter",
+    "import": "Importer",
+    "accept": "Accepter",
+    "reject": "Rejeter",
+    "cancel": "Annuler",
+    "save": "Enregistrer",
+    "delete": "Supprimer",
+    "seePlans": "Voir les offres",
+    "redirecting": "Redirection…"
+  },
+  "plans": {
+    "free": "Gratuit",
+    "creator": "Créateur",
+    "pro": "Pro",
+    "mostPopular": "PLUS POPULAIRE"
+  },
+  "footer": {
+    "tagline": "Le système d'exploitation créatif pour les créateurs, monteurs et studios modernes.",
+    "gdpr": "Conforme RGPD · Processeur de données GCS · Rétention 30 jours",
+    "company": "Entreprise",
+    "legal": "Légal",
+    "links": {
+      "about": "À propos",
+      "privacyPolicy": "Politique de confidentialité",
+      "cookiePolicy": "Politique des cookies",
+      "yourData": "Vos données"
+    },
+    "copyright": "© 2026 Vibed Studios",
+    "madeWith": "Fait avec soin, pour les créateurs."
+  }
+}

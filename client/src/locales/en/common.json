@@ -1,0 +1,41 @@
+{
+  "nav": {
+    "product": "Product",
+    "exports": "Exports",
+    "about": "About",
+    "logIn": "Log in",
+    "startFree": "Start free",
+    "account": "Account"
+  },
+  "actions": {
+    "export": "Export",
+    "import": "Import",
+    "accept": "Accept",
+    "reject": "Reject",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "seePlans": "See plans",
+    "redirecting": "Redirecting…"
+  },
+  "plans": {
+    "free": "Free",
+    "creator": "Creator",
+    "pro": "Pro",
+    "mostPopular": "MOST POPULAR"
+  },
+  "footer": {
+    "tagline": "The creative operating system for modern storytellers, editors and studios.",
+    "gdpr": "GDPR Compliant · GCS Data Processor · 30-Day Retention",
+    "company": "Company",
+    "legal": "Legal",
+    "links": {
+      "about": "About",
+      "privacyPolicy": "Privacy Policy",
+      "cookiePolicy": "Cookie Policy",
+      "yourData": "Your data"
+    },
+    "copyright": "© 2026 Vibed Studios",
+    "madeWith": "Made with care, for makers."
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "assistant": {
+    "ready": "Ready",
+    "working": "Agent Working...",
+    "placeholder": "Tell the agent what to do...",
+    "tryThis": "Try this",
+    "quickActions": "Quick Actions",
+    "planning": "Planning edits...",
+    "executing": "Executing {{count}} operation(s)...",
+    "applying": "Applying {{count}} segment(s) to timeline...",
+    "verifying": "Verifying edits...",
+    "done": "Done",
+    "modifications": "{{count}} modifications"
+  },
+  "timeline": {
+    "videoTrack": "Video {{number}}",
+    "audioTrack": "Audio {{number}}",
+    "addTrack": "+ Track",
+    "addTransition": "+ Transition"
+  },
+  "quickActions": {
+    "removeSilences": "Remove silences",
+    "cleanUpSpeech": "Clean up speech",
+    "trimIntro": "Trim the intro",
+    "exportYouTube": "Export for YouTube"
+  },
+  "inspector": {
+    "audio": "Audio",
+    "transform": "Transform",
+    "settings": "Settings",
+    "scale": "Scale",
+    "positionX": "Position X",
+    "positionY": "Position Y",
+    "rotation": "Rotation",
+    "opacity": "Opacity",
+    "resetTransform": "Reset Transform"
+  },
+  "transcript": {
+    "words": "{{count}} words",
+    "cutWords": "Cut {{count}} words",
+    "noTranscript": "No transcript available",
+    "generating": "Generating transcript..."
+  },
+  "export": {
+    "title": "Export Media",
+    "subtitle": "VIDEO RENDER · NLE PROJECT",
+    "videoFile": "Video File",
+    "nleProject": "NLE Project",
+    "download": "Download",
+    "nleDescription": "Export your timeline as a project file that can be imported directly into your editing software. No re-encoding — your original media stays intact."
+  },
+  "approval": {
+    "title": "Review Edits",
+    "accept": "Accept",
+    "reject": "Reject",
+    "acceptAll": "Accept all",
+    "rejectAll": "Reject all"
+  }
+}

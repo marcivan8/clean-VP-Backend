@@ -1,0 +1,209 @@
+{
+  "hero": {
+    "badge": "Vibed Studio",
+    "version": "v0.6 « Cinema »",
+    "headline": "Créez à la\nvitesse de la pensée.",
+    "body": "Vibed est le système d'exploitation créatif pour les créateurs et monteurs. Montez, organisez et affinez vos prises en conversation avec un assistant qui respecte votre goût. Chaque modification est nommée et réversible.",
+    "cta": "Voir les offres",
+    "caption": "Sans carte bancaire. Importez vos propres clips."
+  },
+
+  "problem": {
+    "eyebrow": "La réalité",
+    "headline": "Vous ne devriez pas passer votre week-end à monter.",
+    "pains": [
+      {
+        "num": "01",
+        "headline": "Chaque minute de silence vous en coûte deux.",
+        "body": "Une vidéo de 10 minutes contient 3 à 4 minutes de silence, d'hésitations et de mots parasites — tous coupés manuellement, un par un.",
+        "bodyAccent": "3 à 4 minutes",
+        "bodyBold": "manuellement, un par un."
+      },
+      {
+        "num": "02",
+        "headline": "Une vidéo. Quatre exports. Des heures sans fin.",
+        "body": "La même vidéo doit être reformatée, réencodée et sous-titrée pour chaque plateforme — un processus qui peut prendre autant de temps que le montage original.",
+        "bodyAccent": "reformatée, réencodée et sous-titrée",
+        "bodyBold": "autant de temps que le montage original."
+      },
+      {
+        "num": "03",
+        "headline": "Les outils pro sont conçus pour les pros, pas pour les créateurs.",
+        "body": "Les outils professionnels sont puissants mais conçus pour les monteurs à temps plein, pas pour les créateurs qui montent en plus d'un travail plus large.",
+        "bodyAccent": "monteurs à temps plein",
+        "bodyBold": "en plus d'un travail plus large."
+      }
+    ],
+    "kicker": "Le résultat : vous publiez un contenu qui n'est pas aussi bon qu'il pourrait l'être, ou vous passez votre week-end à monter.",
+    "kickerBoldFg": "n'est pas aussi bon qu'il pourrait l'être",
+    "kickerAccent": "week-end",
+    "kickerBoldFg2": "à monter."
+  },
+
+  "workflow": {
+    "eyebrow": "Le workflow",
+    "headline": "Une IA qui travaille avec votre créativité.",
+    "moments": [
+      {
+        "title": "Montage conversationnel",
+        "copy": "Dites à l'IA quoi faire et regardez la timeline se mettre à jour."
+      },
+      {
+        "title": "Votre transcription est votre timeline",
+        "copy": "Cliquez sur une phrase, la tête de lecture est déjà là."
+      },
+      {
+        "title": "Tapez ce que vous voulez couper",
+        "copy": "Écrivez 'couper de donc voilà à passons à la suite' → la coupe apparaît."
+      },
+      {
+        "title": "Commandes par intervenant",
+        "copy": "Supprimer toutes les hésitations de Marc — VIBED surligne les segments et les supprime."
+      }
+    ]
+  },
+
+  "beforeAfter": {
+    "eyebrow": "La différence",
+    "headline": "Votre montage de 3h.\nTerminé en 20 minutes.",
+    "subtitle": "Ce qui change quand vous montez avec VIBED",
+    "withoutHeader": "SANS VIBED",
+    "withHeader": "AVEC VIBED",
+    "rows": [
+      { "without": "Parcourir l'enregistrement pour les silences", "withoutTime": "45 min",  "with": "Détection des silences par IA & coupe auto",   "withTime": "2 min"  },
+      { "without": "Couper les mots parasites un par un",         "withoutTime": "30 min",  "with": "Suppression des mots parasites par IA",        "withTime": "1 min"  },
+      { "without": "Normalisation audio manuelle",                "withoutTime": "15 min",  "with": "Normalisation en un clic",                     "withTime": "30 s"   },
+      { "without": "Saisir et synchroniser les sous-titres manuellement", "withoutTime": "60 min", "with": "Sous-titres auto avec horodatage par mot", "withTime": "2 min" },
+      { "without": "Réexporter pour chaque plateforme séparément","withoutTime": "30 min",  "with": "Exports parallèles multi-plateformes",          "withTime": "3 min"  }
+    ],
+    "totalLabel": "Total par vidéo",
+    "totalWithout": "~3 heures",
+    "totalWith": "~25 min"
+  },
+
+  "personas": {
+    "eyebrow": "Pour qui",
+    "headline": "Conçu pour tous ceux\nqui créent avec la vidéo.",
+    "personaLabel": "PROFIL",
+    "list": [
+      {
+        "role": "Le Créateur Solo",
+        "description": "Enregistre et monte tout seul. Publie 2 à 5 vidéos par semaine.",
+        "before": "3 à 5 heures de montage par vidéo",
+        "beforeAccent": "3 à 5 heures",
+        "after": "20 à 40 minutes. L'IA gère le nettoyage ; vous vous concentrez sur les décisions créatives.",
+        "afterMint": "20 à 40 minutes.",
+        "afterBold": "décisions créatives."
+      },
+      {
+        "role": "Le Producteur de Podcast",
+        "description": "Interviews longues, plusieurs invités, épisodes de 30 à 90 minutes.",
+        "before": "Défilement manuel, transcription séparée, sélection des extraits à l'oreille",
+        "beforeAccent": "sélection des extraits à l'oreille",
+        "after": "Mots parasites et silences nettoyés en minutes. La transcription colorée par intervenant rend le montage multi-invités aussi simple qu'un traitement de texte.",
+        "afterMint": "minutes.",
+        "afterBold": "aussi simple qu'un traitement de texte."
+      },
+      {
+        "role": "L'Équipe de Production",
+        "description": "Agences et studios livrant des vidéos corporate, événements et campagnes de marque.",
+        "before": "Les monteurs juniors passent 50% de leur temps sur le nettoyage avant qu'un senior voie les rushes",
+        "beforeAccent": "50% de leur temps",
+        "after": "Le nettoyage par IA tourne sans surveillance. Le monteur senior reçoit un rough cut pré-nettoyé avec FCPXML prêt pour Final Cut ou DaVinci.",
+        "afterBold": "FCPXML",
+        "afterMint": "Final Cut ou DaVinci."
+      }
+    ]
+  },
+
+  "roi": {
+    "body": "En économisant 2,5 heures par vidéo et 3 vidéos par semaine, VIBED vous fait gagner 30 heures par mois. Le plan Créateur coûte moins d'une heure de votre temps.",
+    "boldPart": "VIBED vous fait gagner 30 heures par mois.",
+    "accentPart": "une heure de votre temps."
+  },
+
+  "exports": {
+    "eyebrow": "Prêt pour l'aller-retour",
+    "headline": "Fonctionne avec la suite dans laquelle vous finissez déjà.",
+    "body1": "Vibed n'est pas la dernière application que vous ouvrirez — c'est la première. Transmettez proprement aux outils de montage professionnels dès que vous êtes prêt à peaufiner.",
+    "body2": "Le montage par transcription se fait dans VIBED. La finition se fait là où vous avez toujours fini.",
+    "formatTag": "XML · FCPXML · EDL · OTIO",
+    "metadataTag": "Métadonnées des bacs préservées",
+    "tools": {
+      "premiere": { "name": "Premiere Pro",    "fmt": "XML · MOGRT" },
+      "resolve":  { "name": "DaVinci Resolve", "fmt": "DRP · OFX"  },
+      "finalcut": { "name": "Final Cut Pro",   "fmt": "FCPXML · iCloud" },
+      "otio":     { "name": "OpenTimelineIO",  "fmt": "Standard ouvert" }
+    }
+  },
+
+  "pricing": {
+    "eyebrow": "Tarifs simples",
+    "headline": "Un outil. Trois vitesses.",
+    "subtitle": "Commencez gratuitement. Passez à la version supérieure quand le produit le mérite.",
+    "plans": {
+      "free": {
+        "tagline": "Montez votre premier projet. Découvrez le montage conversationnel.",
+        "cta": "Commencer",
+        "features": [
+          "2 projets actifs",
+          "Vidéos jusqu'à 20 minutes",
+          "Stockage 7 jours",
+          "10 opérations IA / mois",
+          "Suppression des silences & coupe — illimité",
+          "Export MP4 — sans filigrane"
+        ],
+        "locked": ["Export NLE", "Intelligence de transcription"]
+      },
+      "creator": {
+        "tagline": "Montez chaque semaine. Exportez vers n'importe quel outil que vous utilisez déjà.",
+        "cta": "Obtenir Créateur",
+        "features": [
+          "Projets illimités",
+          "Vidéos jusqu'à 90 minutes",
+          "Stockage 30 jours",
+          "100 opérations IA / mois",
+          "Toutes les commandes IA — parasites, sous-titres, meilleurs moments",
+          "Transcription complète + intelligence de contenu",
+          "Export MP4",
+          "Export NLE — Premiere, Final Cut, DaVinci, OTIO"
+        ]
+      },
+      "pro": {
+        "tagline": "Montez sans limites. Invitez votre équipe.",
+        "cta": "Obtenir Pro",
+        "features": [
+          "Tout dans Créateur",
+          "Vidéos jusqu'à 4 heures",
+          "Stockage 90 jours",
+          "Opérations IA illimitées",
+          "File de traitement prioritaire",
+          "2 sièges d'équipe",
+          "Score de viralité + analyse de performance",
+          "Accès anticipé aux nouvelles fonctionnalités"
+        ]
+      }
+    }
+  },
+
+  "socialProof": {
+    "quotes": [
+      {
+        "text": "Enfin, un éditeur IA qui sait quand s'effacer. Il me permet de travailler à la vitesse de la pensée sans perturber ma timeline.",
+        "author": "Alex",
+        "role": "Monteur Vidéo Senior"
+      },
+      {
+        "text": "Le fait de pouvoir l'importer directement dans Resolve quand le rough cut est prêt est un vrai changement de jeu pour mon workflow en agence.",
+        "author": "Sarah",
+        "role": "Directrice Créative"
+      }
+    ]
+  },
+
+  "finalCta": {
+    "headline": "L'avenir du montage\nest collaboratif.",
+    "cta": "Voir les offres",
+    "caption": "Commencez gratuitement. Sans carte bancaire. Importez vos clips."
+  }
+}

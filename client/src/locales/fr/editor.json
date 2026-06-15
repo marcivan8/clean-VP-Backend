@@ -1,0 +1,59 @@
+{
+  "assistant": {
+    "ready": "Prêt",
+    "working": "Agent en cours...",
+    "placeholder": "Dites à l'agent quoi faire...",
+    "tryThis": "Essayez",
+    "quickActions": "Actions rapides",
+    "planning": "Planification des modifications...",
+    "executing": "Exécution de {{count}} opération(s)...",
+    "applying": "Application de {{count}} segment(s) à la timeline...",
+    "verifying": "Vérification des modifications...",
+    "done": "Terminé",
+    "modifications": "{{count}} modifications"
+  },
+  "timeline": {
+    "videoTrack": "Vidéo {{number}}",
+    "audioTrack": "Audio {{number}}",
+    "addTrack": "+ Piste",
+    "addTransition": "+ Transition"
+  },
+  "quickActions": {
+    "removeSilences": "Supprimer les silences",
+    "cleanUpSpeech": "Nettoyer la parole",
+    "trimIntro": "Couper l'intro",
+    "exportYouTube": "Exporter pour YouTube"
+  },
+  "inspector": {
+    "audio": "Audio",
+    "transform": "Transformation",
+    "settings": "Paramètres",
+    "scale": "Échelle",
+    "positionX": "Position X",
+    "positionY": "Position Y",
+    "rotation": "Rotation",
+    "opacity": "Opacité",
+    "resetTransform": "Réinitialiser"
+  },
+  "transcript": {
+    "words": "{{count}} mots",
+    "cutWords": "Couper {{count}} mots",
+    "noTranscript": "Aucune transcription disponible",
+    "generating": "Génération de la transcription..."
+  },
+  "export": {
+    "title": "Exporter le média",
+    "subtitle": "RENDU VIDÉO · PROJET NLE",
+    "videoFile": "Fichier vidéo",
+    "nleProject": "Projet NLE",
+    "download": "Télécharger",
+    "nleDescription": "Exportez votre timeline sous forme de fichier projet importable directement dans votre logiciel de montage. Sans réencodage — vos médias originaux restent intacts."
+  },
+  "approval": {
+    "title": "Réviser les modifications",
+    "accept": "Accepter",
+    "reject": "Rejeter",
+    "acceptAll": "Tout accepter",
+    "rejectAll": "Tout rejeter"
+  }
+}
