@@ -291,7 +291,10 @@ const useTimelineStore = create(
                     });
                 });
 
-                // 2. Remove from the asset list and sync updated track state
+                // 2. Clean up any tracks that became empty after the removal
+                get()._cleanEmptyTracks();
+
+                // 3. Remove from the asset list and sync updated track state
                 set((state) => ({
                     assets: state.assets.filter(a => a.id !== assetId),
                     tracks: timelineManager.toLegacyTracks(),
@@ -299,7 +302,7 @@ const useTimelineStore = create(
                     selectedClipIds: [],
                 }));
 
-                // 3. Persist immediately so the deletion survives a refresh
+                // 4. Persist immediately so the deletion survives a refresh
                 get().saveProject();
             },
             updateAsset: (assetId, updates) => set((state) => ({
@@ -579,15 +582,7 @@ const useTimelineStore = create(
                     }
                 });
 
-                // Clean up empty tracks (except defaults)
-                const remaining = Object.values(timelineManager.getState().entities.placements);
-                Object.values(timelineManager.getState().entities.layers).forEach(layer => {
-                    if (layer.id === 'track-default-video' || layer.id === 'track-default-audio') return;
-                    if (!remaining.some(p => p.layerId === layer.id)) {
-                        timelineManager.dispatch(TimelineActions.removeLayer(layer.id));
-                    }
-                });
-
+                get()._cleanEmptyTracks();
                 set({
                     tracks: timelineManager.toLegacyTracks(),
                     activeClipId: null,
@@ -607,18 +602,7 @@ const useTimelineStore = create(
                     timelineManager.dispatch(TimelineActions.removePlacement(id));
                 });
 
-                // Clean up empty tracks (except defaults)
-                const currentPlacements = Object.values(timelineManager.getState().entities.placements);
-                const currentLayers = Object.values(timelineManager.getState().entities.layers);
-                
-                currentLayers.forEach(layer => {
-                    if (layer.id === 'track-default-video' || layer.id === 'track-default-audio') return;
-                    const hasClips = currentPlacements.some(p => p.layerId === layer.id);
-                    if (!hasClips) {
-                        timelineManager.dispatch(TimelineActions.removeLayer(layer.id));
-                    }
-                });
-
+                get()._cleanEmptyTracks();
                 set({
                     tracks: timelineManager.toLegacyTracks(),
                     activeClipId: null,
@@ -1039,6 +1023,19 @@ const useTimelineStore = create(
                 };
                 const newPast = [...state.past, snapshot].slice(-50);
                 set({ past: newPast, future: [] });
+            },
+
+            // Remove every layer that has no placements. Called after any clip
+            // removal so empty tracks disappear immediately, including the two
+            // default tracks (track-default-video / track-default-audio).
+            _cleanEmptyTracks: () => {
+                const placements = Object.values(timelineManager.getState().entities.placements);
+                const layers = Object.values(timelineManager.getState().entities.layers);
+                layers.forEach(layer => {
+                    if (!placements.some(p => p.layerId === layer.id)) {
+                        timelineManager.dispatch(TimelineActions.removeLayer(layer.id));
+                    }
+                });
             },
 
             // Public alias used by TextOverlay and other UI components

@@ -74,14 +74,28 @@ const Clip = ({ clip, trackId }) => {
             const deltaX = currentX - startX;
             const deltaSeconds = deltaX / zoomLevel;
 
+            // Neighbour clips on this track — used to clamp so we never overlap
+            const trackState = useTimelineStore.getState().tracks.find(t => t.id === trackId);
+            const others = (trackState?.clips || []).filter(c => c.id !== clip.id);
+
             let updates = {};
 
             if (direction === 'right') {
-                const newDuration = Math.max(0.1, startDuration + deltaSeconds);
+                // Clamp new end to the start of the next clip on this track
+                const nextClip = others
+                    .filter(c => c.start >= startStart)
+                    .sort((a, b) => a.start - b.start)[0];
+                const maxEnd = nextClip ? nextClip.start : Infinity;
+                const newDuration = Math.max(0.1, Math.min(startDuration + deltaSeconds, maxEnd - startStart));
                 updates = { duration: newDuration };
             } else if (direction === 'left') {
+                // Clamp new start to the end of the previous clip on this track
+                const prevClip = others
+                    .filter(c => c.start + c.duration <= startStart + startDuration)
+                    .sort((a, b) => (b.start + b.duration) - (a.start + a.duration))[0];
+                const minStart = prevClip ? prevClip.start + prevClip.duration : 0;
                 const maxDelta = startDuration - 0.1;
-                const safeDelta = Math.min(deltaSeconds, maxDelta);
+                const safeDelta = Math.max(Math.min(deltaSeconds, maxDelta), minStart - startStart);
                 updates = {
                     start: startStart + safeDelta,
                     duration: startDuration - safeDelta,

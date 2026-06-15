@@ -666,13 +666,14 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             const isMultiDrag = selectedIds.length > 1 && selectedIds.includes(activeClipId);
 
             if (isMultiDrag) {
-                // Move all selected clips by the same snapped delta; only the primary clip
-                // can switch tracks (dragging across tracks with a multi-selection moves
-                // the whole group to the same new track).
+                // Move all selected clips by the same snapped delta.
+                // Each companion stays on its own track unless its new position
+                // would overlap a non-selected clip — in that case a new track is
+                // created for it.  The primary (dragged) clip also inherits the
+                // track-switch that happened above via targetTrackId.
                 const trackChanged = targetTrackId !== activeData.trackId;
 
                 selectedIds.forEach(clipId => {
-                    // Find which track this clip currently lives on
                     let clipTrackId = null;
                     let clip = null;
                     for (const t of state.tracks) {
@@ -682,11 +683,19 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     if (!clipTrackId || !clip) return;
 
                     const companionStart = Math.max(0, clip.start + snappedDeltaSeconds);
+
+                    // For the primary clip honour an explicit track switch; companions stay put.
+                    let destTrackId = clipTrackId;
+                    if (clipId === activeClipId && trackChanged) destTrackId = targetTrackId;
+
+                    // Push to a new track rather than overlapping a non-selected clip
+                    if (checkOverlap(destTrackId, companionStart, clip.duration, clipId)) {
+                        destTrackId = state.addTrack(clip.type === 'audio' ? 'audio' : 'video');
+                    }
+
                     state.updateClip(clipTrackId, clipId, {
                         start: companionStart,
-                        ...(trackChanged && clipId === activeClipId
-                            ? { layerId: targetTrackId }
-                            : {}),
+                        ...(destTrackId !== clipTrackId ? { layerId: destTrackId } : {}),
                     });
                 });
             } else {
