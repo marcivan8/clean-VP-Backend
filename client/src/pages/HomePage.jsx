@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Sparkles, ArrowRight, Play, CheckCircle2, MousePointerClick, Layers, LayoutGrid, Link as LinkIcon, MessageSquare, Mic, Scissors, UserCheck, Zap } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useTranslation } from 'react-i18next';
+import { LanguageSwitcher } from '../components/LanguageSwitcher';
 
 const renderHighlightedText = (text, accent, bold, mint, boldFg) => {
     if (!text) return null;
@@ -55,6 +56,7 @@ const Nav = () => {
     const [scrolled, setScrolled] = useState(false);
     const [user, setUser] = useState(null);
     const navigate = useNavigate();
+    const { t } = useTranslation('common');
 
     useEffect(() => {
         const handleScroll = () => setScrolled(window.scrollY > 24);
@@ -87,11 +89,12 @@ const Nav = () => {
             }}>
                 <Logo />
                 <div style={{ display: "flex", gap: 22, fontSize: 13.5, color: "var(--fg-2)" }} className="hidden sm:flex font-medium">
-                    <a href="#product" className="hover:text-foreground transition-colors">Product</a>
-                    <a href="#exports" className="hover:text-foreground transition-colors">Exports</a>
-                    <a href="/about" className="hover:text-foreground transition-colors">About</a>
+                    <a href="#product" className="hover:text-foreground transition-colors">{t('nav.product')}</a>
+                    <a href="#exports" className="hover:text-foreground transition-colors">{t('nav.exports')}</a>
+                    <a href="/about" className="hover:text-foreground transition-colors">{t('nav.about')}</a>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <LanguageSwitcher />
                     {user ? (
                         <>
                             <span style={{
@@ -101,12 +104,12 @@ const Nav = () => {
                                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--mint)", display: "inline-block" }} />
                                 {user.email}
                             </span>
-                            <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/auth')}>Account</button>
+                            <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/auth')}>{t('nav.account')}</button>
                         </>
                     ) : (
                         <>
-                            <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/auth')}>Log in</button>
-                            <button className="btn btn-primary" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => window.location.href='/auth'}>Start free</button>
+                            <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/auth')}>{t('nav.logIn')}</button>
+                            <button className="btn btn-primary" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => window.location.href='/auth'}>{t('nav.startFree')}</button>
                         </>
                     )}
                 </div>
