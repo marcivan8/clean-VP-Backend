@@ -188,12 +188,14 @@ const Hero = () => {
     );
 };
 
+// ── Inline emphasis helpers (module-level to avoid "component created during render") ──
+const A = ({ children }) => <span style={{ color: "var(--accent)", fontWeight: 600 }}>{children}</span>;
+const G = ({ children }) => <span style={{ color: "var(--mint)", fontWeight: 600 }}>{children}</span>;
+const W = ({ children }) => <span style={{ color: "var(--fg)", fontWeight: 600 }}>{children}</span>;
+
 // ── NEW: Problem Section ──────────────────────────────────────────────────────
 const ProblemSection = () => {
     const [ref, visible] = useReveal();
-
-    const A = ({ children }) => <span style={{ color: "var(--accent)", fontWeight: 600 }}>{children}</span>;
-    const W = ({ children }) => <span style={{ color: "var(--fg)", fontWeight: 600 }}>{children}</span>;
 
     const pains = [
         {
@@ -479,10 +481,6 @@ const BeforeAfterSection = () => {
 // ── NEW: Who It's For ─────────────────────────────────────────────────────────
 const PersonasSection = () => {
     const [ref, visible] = useReveal(0.1);
-
-    const A = ({ children }) => <span style={{ color: "var(--accent)", fontWeight: 600 }}>{children}</span>;
-    const G = ({ children }) => <span style={{ color: "var(--mint)", fontWeight: 600 }}>{children}</span>;
-    const W = ({ children }) => <span style={{ color: "var(--fg)", fontWeight: 600 }}>{children}</span>;
 
     const personas = [
         {
