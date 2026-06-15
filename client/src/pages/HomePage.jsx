@@ -904,46 +904,54 @@ const FinalCTA = () => {
 };
 
 const Footer = () => {
-    const cols = {
-        "Company": ["About"],
-        "Legal": ["Privacy Policy", "Cookie Policy", "Your data"],
-    };
+    const { t } = useTranslation('common');
+
+    const cols = [
+        {
+            key: 'company',
+            label: t('footer.company'),
+            items: [{ label: t('footer.links.about'), href: '/about' }],
+        },
+        {
+            key: 'legal',
+            label: t('footer.legal'),
+            items: [
+                { label: t('footer.links.privacyPolicy'), href: '/privacy' },
+                { label: t('footer.links.cookiePolicy'), href: '/cookie-policy' },
+                { label: t('footer.links.yourData'), href: '/data' },
+            ],
+        },
+    ];
+
     return (
         <footer style={{ borderTop: "0.5px solid var(--line)", padding: "64px 0 32px", background: "var(--bg)" }}>
             <div className="wrap grid-cols-2 md:grid-cols-[1.4fr_1fr_1fr_1fr]" style={{ display: "grid", gap: 56 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                     <Logo size={32} />
                     <p className="body" style={{ fontSize: 13.5, margin: 0, maxWidth: 280 }}>
-                        The creative operating system for modern storytellers, editors and studios.
+                        {t('footer.tagline')}
                     </p>
                     <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
                         <div style={{ display: "flex" }}>
                             <a href="/gdpr" style={{ textDecoration: 'none' }}>
-                                <span className="tag" style={{ border: "0.5px solid var(--line-strong)", background: "var(--bg-2)", cursor: "pointer" }}>GDPR Compliant · GCS Data Processor · 30-Day Retention</span>
+                                <span className="tag" style={{ border: "0.5px solid var(--line-strong)", background: "var(--bg-2)", cursor: "pointer" }}>{t('footer.gdpr')}</span>
                             </a>
                         </div>
                     </div>
                 </div>
-                {Object.entries(cols).map(([k, items]) => (
-                    <div key={k} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                        <div className="mono" style={{ color: "var(--fg-4)" }}>{k.toUpperCase()}</div>
-                        {items.map(it => {
-                            let href = '#';
-                            if (it === 'Your data') href = '/data';
-                            if (it === 'Privacy Policy') href = '/privacy';
-                            if (it === 'Cookie Policy') href = '/cookie-policy';
-                            if (it === 'About') href = '/about';
-                            return (
-                                <a key={it} href={href} style={{ fontSize: 13.5, color: "var(--fg-2)" }} className="hover:text-foreground transition-colors">{it}</a>
-                            );
-                        })}
+                {cols.map(col => (
+                    <div key={col.key} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        <div className="mono" style={{ color: "var(--fg-4)" }}>{col.label.toUpperCase()}</div>
+                        {col.items.map(item => (
+                            <a key={item.href} href={item.href} style={{ fontSize: 13.5, color: "var(--fg-2)" }} className="hover:text-foreground transition-colors">{item.label}</a>
+                        ))}
                     </div>
                 ))}
             </div>
             <div className="wrap" style={{ marginTop: 56, paddingTop: 24, borderTop: "0.5px solid var(--line-soft)",
                 display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-                <span className="caption">© 2026 Vibed Studios</span>
-                <span className="caption">Made with care, for makers.</span>
+                <span className="caption">{t('footer.copyright')}</span>
+                <span className="caption">{t('footer.madeWith')}</span>
             </div>
         </footer>
     );
