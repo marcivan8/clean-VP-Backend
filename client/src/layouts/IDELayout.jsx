@@ -619,7 +619,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             return;
         }
 
-        // Move existing CLIP
+        // Move existing CLIP (single or multi-selection)
         if (activeData?.clip && targetData?.trackId) {
             const activeClipId = active.id;
             let targetTrackId = targetData.trackId;
@@ -628,7 +628,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             const deltaSeconds = delta.x / state.zoomLevel;
             let newStart = Math.max(0, currentClip.start + deltaSeconds);
 
-            // Snapping
+            // Snapping (against the primary dragged clip)
             const SNAP_THRESHOLD_PX = 10;
             const snapThresholdTime = SNAP_THRESHOLD_PX / state.zoomLevel;
             let closestSnap = null;
@@ -659,14 +659,47 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
             if (closestSnap !== null) newStart = closestSnap;
 
-            if (checkOverlap(targetTrackId, newStart, currentClip.duration, activeClipId)) {
-                targetTrackId = state.addTrack(currentClip.type === 'audio' ? 'audio' : 'video');
-            }
+            // Recalculate actual delta after snapping so companions move by the same amount
+            const snappedDeltaSeconds = newStart - currentClip.start;
 
-            state.updateClip(activeData.trackId, activeClipId, { 
-                start: newStart,
-                layerId: targetTrackId !== activeData.trackId ? targetTrackId : undefined
-            });
+            const selectedIds = state.selectedClipIds ?? [];
+            const isMultiDrag = selectedIds.length > 1 && selectedIds.includes(activeClipId);
+
+            if (isMultiDrag) {
+                // Move all selected clips by the same snapped delta; only the primary clip
+                // can switch tracks (dragging across tracks with a multi-selection moves
+                // the whole group to the same new track).
+                const trackChanged = targetTrackId !== activeData.trackId;
+
+                selectedIds.forEach(clipId => {
+                    // Find which track this clip currently lives on
+                    let clipTrackId = null;
+                    let clip = null;
+                    for (const t of state.tracks) {
+                        const found = t.clips.find(c => c.id === clipId);
+                        if (found) { clipTrackId = t.id; clip = found; break; }
+                    }
+                    if (!clipTrackId || !clip) return;
+
+                    const companionStart = Math.max(0, clip.start + snappedDeltaSeconds);
+                    state.updateClip(clipTrackId, clipId, {
+                        start: companionStart,
+                        ...(trackChanged && clipId === activeClipId
+                            ? { layerId: targetTrackId }
+                            : {}),
+                    });
+                });
+            } else {
+                // Single clip drag — original behaviour
+                if (checkOverlap(targetTrackId, newStart, currentClip.duration, activeClipId)) {
+                    targetTrackId = state.addTrack(currentClip.type === 'audio' ? 'audio' : 'video');
+                }
+
+                state.updateClip(activeData.trackId, activeClipId, {
+                    start: newStart,
+                    layerId: targetTrackId !== activeData.trackId ? targetTrackId : undefined,
+                });
+            }
         }
 
         // Drop EFFECT onto CLIP

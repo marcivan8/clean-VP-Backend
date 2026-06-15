@@ -1,5 +1,5 @@
 import React from 'react';
-import { useDraggable, useDroppable } from '@dnd-kit/core';
+import { useDraggable, useDroppable, useDndContext } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import useTimelineStore from '../../store/useTimelineStore';
 import classNames from 'classnames';
@@ -22,6 +22,22 @@ const Clip = ({ clip, trackId }) => {
         data: { clip, trackId }
     });
 
+    // Companion drag — when another selected clip is being dragged, move this one visually too
+    const { active: dndActive } = useDndContext();
+    const activeClipData = dndActive?.data?.current;
+    const isCompanionDrag =
+        !isDragging &&
+        dndActive !== null &&
+        activeClipData?.clip != null &&
+        isSelected &&
+        (selectedClipIds ?? []).includes(dndActive.id);
+
+    let companionDx = 0;
+    if (isCompanionDrag && dndActive.rect.current) {
+        const { initial, translated } = dndActive.rect.current;
+        if (initial && translated) companionDx = translated.left - initial.left;
+    }
+
     const { setNodeRef: setDroppableRef } = useDroppable({
         id: `drop-clip-${clip.id}`,
         data: {
@@ -32,10 +48,15 @@ const Clip = ({ clip, trackId }) => {
     });
 
     const style = {
-        left: `${clip.start * zoomLevel}px`, // Keep original left positioning
+        left: `${clip.start * zoomLevel}px`,
         width: `${clip.duration * zoomLevel}px`,
-        transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
-        cursor: 'grab'
+        transform: transform
+            ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
+            : isCompanionDrag
+            ? `translate3d(${companionDx}px, 0, 0)`
+            : undefined,
+        cursor: 'grab',
+        ...(isCompanionDrag && { opacity: 0.5, zIndex: 29 }),
     };
 
     const handleResize = (e, direction) => {
