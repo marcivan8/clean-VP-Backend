@@ -2,6 +2,17 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sparkles, ArrowRight, Play, CheckCircle2, MousePointerClick, Layers, LayoutGrid, Link as LinkIcon, MessageSquare, Mic, Scissors, UserCheck, Zap } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
+import { useTranslation } from 'react-i18next';
+
+const renderHighlightedText = (text, accent, bold, mint, boldFg) => {
+    if (!text) return null;
+    let parts = [text];
+    if (accent) parts = parts.flatMap((p, idx) => typeof p === 'string' ? p.split(accent).reduce((acc, val, i, arr) => i < arr.length - 1 ? acc.concat(val, <A key={`a-${idx}-${i}`}>{accent}</A>) : acc.concat(val), []) : [p]);
+    if (bold) parts = parts.flatMap((p, idx) => typeof p === 'string' ? p.split(bold).reduce((acc, val, i, arr) => i < arr.length - 1 ? acc.concat(val, <W key={`w-${idx}-${i}`}>{bold}</W>) : acc.concat(val), []) : [p]);
+    if (mint) parts = parts.flatMap((p, idx) => typeof p === 'string' ? p.split(mint).reduce((acc, val, i, arr) => i < arr.length - 1 ? acc.concat(val, <G key={`g-${idx}-${i}`}>{mint}</G>) : acc.concat(val), []) : [p]);
+    if (boldFg) parts = parts.flatMap((p, idx) => typeof p === 'string' ? p.split(boldFg).reduce((acc, val, i, arr) => i < arr.length - 1 ? acc.concat(val, <span key={`bf-${idx}-${i}`} style={{ color: "var(--fg)", fontWeight: 600 }}>{boldFg}</span>) : acc.concat(val), []) : [p]);
+    return parts;
+};
 
 async function createCheckout(plan) {
     const { data: { session } } = await supabase.auth.getSession();
@@ -153,6 +164,7 @@ const HeroFrame = () => {
 };
 
 const Hero = () => {
+    const { t } = useTranslation('landing');
     return (
         <section style={{ paddingTop: 140, paddingBottom: 40, position: "relative", overflow: "hidden" }}>
             <div className="aurora" />
@@ -160,24 +172,26 @@ const Hero = () => {
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 28 }}>
                     <div className="tag fade-up">
                         <span className="dot" />
-                        <span>Vibed Studio</span>
+                        <span>{t('hero.badge')}</span>
                         <span style={{ color: "var(--fg-4)" }}>—</span>
-                        <span>v0.6 "Cinema"</span>
+                        <span>{t('hero.version')}</span>
                     </div>
-                    <h1 className="display fade-up fade-up-d1">
-                        Create at the<br />
-                        <em>speed of thought.</em>
+                    <h1 className="display fade-up fade-up-d1" style={{ whiteSpace: "pre-line" }}>
+                        {t('hero.headline').split('\n').map((line, i, arr) => (
+                            <React.Fragment key={i}>
+                                {i === arr.length - 1 ? <em>{line}</em> : line}
+                                {i < arr.length - 1 && <br />}
+                            </React.Fragment>
+                        ))}
                     </h1>
                     <p className="body-lg fade-up fade-up-d2" style={{ maxWidth: 620, margin: 0, fontSize: 19 }}>
-                        Vibed is the creative operating system for storytellers and editors.
-                        Edit, organize and refine your footage in conversation with an assistant that
-                        respects your taste. Every edit lands as a named, reversible action.
+                        {t('hero.body')}
                     </p>
                     <div className="fade-up fade-up-d3" style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", marginTop: 12 }}>
-                        <button onClick={() => window.location.href='#pricing'} className="btn btn-primary">See plans <ArrowRight className="w-4 h-4 ml-1" /></button>
+                        <button onClick={() => window.location.href='#pricing'} className="btn btn-primary">{t('hero.cta')} <ArrowRight className="w-4 h-4 ml-1" /></button>
                     </div>
                     <div className="fade-up fade-up-d4 caption" style={{ marginTop: 8 }}>
-                        No credit card required. Bring your own clips.
+                        {t('hero.caption')}
                     </div>
                 </div>
                 <div className="fade-up fade-up-d4" style={{ marginTop: 72 }}>
@@ -195,25 +209,10 @@ const W = ({ children }) => <span style={{ color: "var(--fg)", fontWeight: 600 }
 
 // ── NEW: Problem Section ──────────────────────────────────────────────────────
 const ProblemSection = () => {
+    const { t } = useTranslation('landing');
     const [ref, visible] = useReveal();
 
-    const pains = [
-        {
-            num: "01",
-            headline: "Every minute of silence costs you two.",
-            body: <>A 10-minute video contains <A>3–4 minutes</A> of silence, stumbles, and filler words — all cut <W>manually, one by one.</W></>,
-        },
-        {
-            num: "02",
-            headline: "One video. Four exports. Endless hours.",
-            body: <>The same video needs to be <A>reformatted, re-encoded, and re-captioned</A> for every platform — a process that can take <W>as long as the original edit.</W></>,
-        },
-        {
-            num: "03",
-            headline: "Pro tools are built for pros, not creators.",
-            body: <>Professional tools are powerful but designed for <A>full-time editors</A>, not creators who edit <W>as part of a larger job.</W></>,
-        },
-    ];
+    const pains = t('problem.pains', { returnObjects: true });
 
     return (
         <section style={{
@@ -224,9 +223,9 @@ const ProblemSection = () => {
         }}>
             <div className="wrap">
                 <div style={{ textAlign: "center", marginBottom: 72 }}>
-                    <span className="eyebrow">The reality</span>
+                    <span className="eyebrow">{t('problem.eyebrow')}</span>
                     <h2 className="h-section" style={{ marginTop: 16, maxWidth: 600, marginInline: "auto" }}>
-                        You shouldn't spend your weekend editing.
+                        {t('problem.headline')}
                     </h2>
                 </div>
 
@@ -259,7 +258,7 @@ const ProblemSection = () => {
                                     fontSize: 15.5, color: "var(--fg-2)", lineHeight: 1.7,
                                     margin: 0, maxWidth: 680,
                                 }}>
-                                    {p.body}
+                                    {renderHighlightedText(p.body, p.bodyAccent, p.bodyBold)}
                                 </p>
                             </div>
                         </div>
@@ -284,11 +283,8 @@ const ProblemSection = () => {
                             lineHeight: 1.55,
                             letterSpacing: "-0.01em",
                         }}>
-                            The result: you either publish content that{" "}
-                            <span style={{ color: "var(--fg)", fontWeight: 600 }}>isn't as good as it could be</span>
-                            , or spend your{" "}
-                            <span style={{ color: "var(--accent)", fontWeight: 700 }}>weekend</span>
-                            <span style={{ color: "var(--fg)", fontWeight: 600 }}> editing.</span>
+                            {renderHighlightedText(t('problem.kicker'), t('problem.kickerAccent'), null, null, t('problem.kickerBoldFg'))}
+                            {t('problem.kickerBoldFg2') && <span style={{ color: "var(--fg)", fontWeight: 600 }}> {t('problem.kickerBoldFg2')}</span>}
                         </p>
                     </div>
                 </div>
@@ -299,28 +295,31 @@ const ProblemSection = () => {
 
 // ── Existing: Feature Moments ─────────────────────────────────────────────────
 const FeatureMoments = () => {
+    const { t } = useTranslation('landing');
+    const translatedMoments = t('workflow.moments', { returnObjects: true });
+    
     const moments = [
         {
-            title: "Conversational Editing",
-            copy: "Tell the AI what to do, and watch the timeline update.",
+            title: translatedMoments[0]?.title || "Conversational Editing",
+            copy: translatedMoments[0]?.copy || "Tell the AI what to do, and watch the timeline update.",
             img: "/AI commands.png",
             icon: MessageSquare
         },
         {
-            title: "Your transcript is your timeline",
-            copy: "Click a sentence, the playhead is already there.",
+            title: translatedMoments[1]?.title || "Your transcript is your timeline",
+            copy: translatedMoments[1]?.copy || "Click a sentence, the playhead is already there.",
             img: "/Transcript editing.png",
             icon: Layers
         },
         {
-            title: "Type what you want to cut",
-            copy: "Show 'cut from so anyway to let's move on' → the cut appears.",
+            title: translatedMoments[2]?.title || "Type what you want to cut",
+            copy: translatedMoments[2]?.copy || "Show 'cut from so anyway to let's move on' → the cut appears.",
             img: "/AI edit timeline.png",
             icon: Scissors
         },
         {
-            title: "Speaker-scoped commands",
-            copy: "Cut all of Marc's stumbles — VIBED highlights segments and removes them.",
+            title: translatedMoments[3]?.title || "Speaker-scoped commands",
+            copy: translatedMoments[3]?.copy || "Cut all of Marc's stumbles — VIBED highlights segments and removes them.",
             img: "/AI acceptreject.png",
             icon: UserCheck
         }
@@ -330,8 +329,15 @@ const FeatureMoments = () => {
         <section id="product" style={{ paddingTop: 80, paddingBottom: 80 }}>
             <div className="wrap">
                 <div className="section-head text-center" style={{ marginBottom: 60, alignItems: "center" }}>
-                    <span className="eyebrow">The workflow</span>
-                    <h2 className="h-section">AI that works <em>with</em> your creativity.</h2>
+                    <span className="eyebrow">{t('workflow.eyebrow')}</span>
+                    <h2 className="h-section">
+                        {t('workflow.headline').split('with').map((part, i, arr) => (
+                            <React.Fragment key={i}>
+                                {part}
+                                {i < arr.length - 1 && <em>with</em>}
+                            </React.Fragment>
+                        ))}
+                    </h2>
                 </div>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 64 }}>
@@ -383,27 +389,27 @@ const FeatureMoments = () => {
 
 // ── NEW: Before / After Section ───────────────────────────────────────────────
 const BeforeAfterSection = () => {
+    const { t } = useTranslation('landing');
     const [ref, visible] = useReveal(0.1);
 
-    const rows = [
-        { without: "Scrub recording for silences", withoutTime: "45 min", with: "AI silence detection & auto-cut", withTime: "2 min" },
-        { without: "Cut filler words one by one",  withoutTime: "30 min", with: "AI filler removal pass",          withTime: "1 min" },
-        { without: "Manual audio normalization",   withoutTime: "15 min", with: "One-click normalize",             withTime: "30 sec" },
-        { without: "Type and sync captions manually", withoutTime: "60 min", with: "Auto-captions with word timestamps", withTime: "2 min" },
-        { without: "Re-export for each platform separately", withoutTime: "30 min", with: "Parallel platform exports", withTime: "3 min" },
-    ];
+    const rows = t('beforeAfter.rows', { returnObjects: true }) || [];
 
     return (
         <section style={{ padding: "100px 0" }}>
             <div className="wrap">
                 {/* Headline */}
                 <div style={{ textAlign: "center", marginBottom: 64 }}>
-                    <span className="eyebrow">The difference</span>
+                    <span className="eyebrow">{t('beforeAfter.eyebrow')}</span>
                     <h2 className="h-section" style={{ marginTop: 16 }}>
-                        Your 3-hour edit.<br /><em>Done in 20 minutes.</em>
+                        {t('beforeAfter.headline').split('\n').map((line, i, arr) => (
+                            <React.Fragment key={i}>
+                                {i === arr.length - 1 ? <em>{line}</em> : line}
+                                {i < arr.length - 1 && <br />}
+                            </React.Fragment>
+                        ))}
                     </h2>
                     <p className="body-lg" style={{ color: "var(--fg-2)", maxWidth: 480, margin: "20px auto 0" }}>
-                        What changes when you edit with VIBED
+                        {t('beforeAfter.subtitle')}
                     </p>
                 </div>
 
@@ -413,11 +419,11 @@ const BeforeAfterSection = () => {
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", background: "var(--bg-2)" }}>
                         <div style={{ padding: "18px 28px", borderRight: "0.5px solid var(--line)", display: "flex", alignItems: "center", gap: 10 }}>
                             <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#EF4444", flexShrink: 0 }} />
-                            <span className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", color: "var(--fg-3)" }}>WITHOUT VIBED</span>
+                            <span className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", color: "var(--fg-3)" }}>{t('beforeAfter.withoutHeader')}</span>
                         </div>
                         <div style={{ padding: "18px 28px", display: "flex", alignItems: "center", gap: 10 }}>
                             <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--mint)", flexShrink: 0 }} />
-                            <span className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", color: "var(--accent)" }}>WITH VIBED</span>
+                            <span className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", color: "var(--accent)" }}>{t('beforeAfter.withHeader')}</span>
                         </div>
                     </div>
 
@@ -461,15 +467,15 @@ const BeforeAfterSection = () => {
                             padding: "28px 28px", borderRight: "0.5px solid var(--line)",
                             display: "flex", justifyContent: "space-between", alignItems: "center",
                         }}>
-                            <span style={{ fontSize: 15, fontWeight: 600, color: "var(--fg)" }}>Total per video</span>
-                            <span style={{ fontSize: 22, fontWeight: 700, color: "#EF4444", letterSpacing: "-0.02em" }}>~3 hours</span>
+                            <span style={{ fontSize: 15, fontWeight: 600, color: "var(--fg)" }}>{t('beforeAfter.totalLabel')}</span>
+                            <span style={{ fontSize: 22, fontWeight: 700, color: "#EF4444", letterSpacing: "-0.02em" }}>{t('beforeAfter.totalWithout')}</span>
                         </div>
                         <div style={{
                             padding: "28px 28px",
                             display: "flex", justifyContent: "space-between", alignItems: "center",
                         }}>
-                            <span style={{ fontSize: 15, fontWeight: 600, color: "var(--fg)" }}>Total per video</span>
-                            <span style={{ fontSize: 22, fontWeight: 700, color: "var(--mint)", letterSpacing: "-0.02em" }}>~25 min</span>
+                            <span style={{ fontSize: 15, fontWeight: 600, color: "var(--fg)" }}>{t('beforeAfter.totalLabel')}</span>
+                            <span style={{ fontSize: 22, fontWeight: 700, color: "var(--mint)", letterSpacing: "-0.02em" }}>{t('beforeAfter.totalWith')}</span>
                         </div>
                     </div>
                 </div>
@@ -480,30 +486,15 @@ const BeforeAfterSection = () => {
 
 // ── NEW: Who It's For ─────────────────────────────────────────────────────────
 const PersonasSection = () => {
+    const { t } = useTranslation('landing');
     const [ref, visible] = useReveal(0.1);
 
+    const translatedPersonas = t('personas.list', { returnObjects: true }) || [];
+
     const personas = [
-        {
-            Icon: Mic,
-            role: "The Solo Creator",
-            description: "Records and edits everything alone. Publishes 2–5 videos a week.",
-            before: <><A>3–5 hours</A> editing per video</>,
-            after: <><G>20–40 minutes.</G> AI handles cleanup; you focus only on <W>content decisions.</W></>,
-        },
-        {
-            Icon: Layers,
-            role: "The Podcast Producer",
-            description: "Long-form interviews, multiple guests, 30–90 minute episodes.",
-            before: <>Manual scrubbing, separate transcription, <A>clip selection by ear</A></>,
-            after: <>Filler and silence cleaned in <G>minutes.</G> Speaker-colored transcript makes multi-guest editing feel like <W>working in a text document.</W></>,
-        },
-        {
-            Icon: UserCheck,
-            role: "The Production Team",
-            description: "Agencies and studios delivering corporate video, events, brand campaigns.",
-            before: <>Junior editors spend <A>50% of their time</A> on cleanup before a senior editor sees the footage</>,
-            after: <>AI cleanup runs unattended. Senior editor gets a pre-cleaned rough cut with <W>FCPXML</W> ready for <G>Final Cut or DaVinci.</G></>,
-        },
+        { Icon: Mic, ...translatedPersonas[0] },
+        { Icon: Layers, ...translatedPersonas[1] },
+        { Icon: UserCheck, ...translatedPersonas[2] },
     ];
 
     return (
@@ -515,9 +506,14 @@ const PersonasSection = () => {
         }}>
             <div className="wrap">
                 <div style={{ textAlign: "center", marginBottom: 64 }}>
-                    <span className="eyebrow">Who it's for</span>
+                    <span className="eyebrow">{t('personas.eyebrow')}</span>
                     <h2 className="h-section" style={{ marginTop: 16, maxWidth: 560, marginInline: "auto" }}>
-                        Built for everyone<br />who creates with video.
+                        {t('personas.headline').split('\n').map((line, i, arr) => (
+                            <React.Fragment key={i}>
+                                {line}
+                                {i < arr.length - 1 && <br />}
+                            </React.Fragment>
+                        ))}
                     </h2>
                 </div>
 
@@ -539,13 +535,13 @@ const PersonasSection = () => {
                                 display: "flex", alignItems: "center", justifyContent: "center",
                                 color: "var(--accent)",
                             }}>
-                                <p.Icon size={20} strokeWidth={1.6} />
+                                {p.Icon && <p.Icon size={20} strokeWidth={1.6} />}
                             </div>
 
                             {/* Role + description */}
                             <div>
                                 <div className="mono" style={{ fontSize: 10.5, letterSpacing: "0.1em", color: "var(--fg-4)", marginBottom: 8 }}>
-                                    PERSONA
+                                    {t('personas.personaLabel')}
                                 </div>
                                 <h3 style={{ fontSize: 19, fontWeight: 600, letterSpacing: "-0.01em", marginBottom: 8, lineHeight: 1.3 }}>
                                     {p.role}
@@ -566,7 +562,9 @@ const PersonasSection = () => {
                                     }}>
                                         <div style={{ width: 7, height: 1.5, background: "#EF4444", borderRadius: 1 }} />
                                     </div>
-                                    <p style={{ fontSize: 13.5, color: "var(--fg-3)", lineHeight: 1.55, margin: 0 }}>{p.before}</p>
+                                    <p style={{ fontSize: 13.5, color: "var(--fg-3)", lineHeight: 1.55, margin: 0 }}>
+                                        {renderHighlightedText(p.before, p.beforeAccent)}
+                                    </p>
                                 </div>
                                 {/* After */}
                                 <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
@@ -579,7 +577,9 @@ const PersonasSection = () => {
                                             <path d="M1 3.5l2.3 2.3 4.4-4.6" stroke="#10B981" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                                         </svg>
                                     </div>
-                                    <p style={{ fontSize: 13.5, color: "var(--fg)", lineHeight: 1.55, margin: 0 }}>{p.after}</p>
+                                    <p style={{ fontSize: 13.5, color: "var(--fg)", lineHeight: 1.55, margin: 0 }}>
+                                        {renderHighlightedText(p.after, null, p.afterBold, p.afterMint)}
+                                    </p>
                                 </div>
                             </div>
                         </div>
@@ -591,20 +591,20 @@ const PersonasSection = () => {
 };
 
 // ── ROI Statement (after Exports) ────────────────────────────────────────────
-const AntiDescript = () => (
-    <section style={{ padding: "80px 0", background: "var(--bg-2)", borderTop: "0.5px solid var(--line)", borderBottom: "0.5px solid var(--line)" }}>
-        <div className="wrap">
-            <div style={{ maxWidth: 800, margin: "0 auto", textAlign: "center" }}>
-                <p style={{ fontSize: "clamp(24px, 3vw, 32px)", lineHeight: 1.4, fontWeight: 500, margin: 0, letterSpacing: "-0.01em" }}>
-                    At 2.5 hours saved per video and 3 videos per week,{" "}
-                    <span style={{ color: "var(--fg)", fontWeight: 700 }}>VIBED saves you 30 hours a month.</span>
-                    {" "}The Creator plan costs less than{" "}
-                    <span style={{ color: "var(--accent)", fontWeight: 700 }}>one hour of your time.</span>
-                </p>
+const AntiDescript = () => {
+    const { t } = useTranslation('landing');
+    return (
+        <section style={{ padding: "80px 0", background: "var(--bg-2)", borderTop: "0.5px solid var(--line)", borderBottom: "0.5px solid var(--line)" }}>
+            <div className="wrap">
+                <div style={{ maxWidth: 800, margin: "0 auto", textAlign: "center" }}>
+                    <p style={{ fontSize: "clamp(24px, 3vw, 32px)", lineHeight: 1.4, fontWeight: 500, margin: 0, letterSpacing: "-0.01em" }}>
+                        {renderHighlightedText(t('roi.body'), t('roi.accentPart'), null, null, t('roi.boldPart'))}
+                    </p>
+                </div>
             </div>
-        </div>
-    </section>
-);
+        </section>
+    );
+};
 
 const ExportIcon = {
     premiere: () => (
@@ -640,27 +640,41 @@ const ExportIcon = {
 };
 
 const Exports = () => {
+    const { t } = useTranslation('landing');
+    const translatedTools = t('exports.tools', { returnObjects: true }) || {};
+
     const tools = [
-        { key: "premiere", name: "Premiere Pro",    fmt: "XML · MOGRT" },
-        { key: "resolve",  name: "DaVinci Resolve", fmt: "DRP · OFX" },
-        { key: "finalcut", name: "Final Cut Pro",   fmt: "FCPXML · iCloud" },
-        { key: "otio",     name: "OpenTimelineIO",  fmt: "Open standard" },
+        { key: "premiere", name: translatedTools.premiere?.name || "Premiere Pro",    fmt: translatedTools.premiere?.fmt || "XML · MOGRT" },
+        { key: "resolve",  name: translatedTools.resolve?.name || "DaVinci Resolve", fmt: translatedTools.resolve?.fmt || "DRP · OFX" },
+        { key: "finalcut", name: translatedTools.finalcut?.name || "Final Cut Pro",   fmt: translatedTools.finalcut?.fmt || "FCPXML · iCloud" },
+        { key: "otio",     name: translatedTools.otio?.name || "OpenTimelineIO",  fmt: translatedTools.otio?.fmt || "Open standard" },
     ];
     return (
         <section id="exports" style={{ padding: "100px 0" }}>
             <div className="wrap">
                 <div style={{ display: "grid", gap: 80, alignItems: "center" }} className="grid-cols-1 md:grid-cols-2">
                     <div className="section-head" style={{ marginBottom: 0 }}>
-                        <span className="eyebrow">Roundtrip-ready</span>
-                        <h2 className="h-section">Works with the suite you <em>already</em> finish in.</h2>
-                        <p className="body-lg">Vibed isn't the last app you'll ever open — it's the first.
-                            Hand off cleanly to professional editing tools the moment you're ready to polish.</p>
+                        <span className="eyebrow">{t('exports.eyebrow')}</span>
+                        <h2 className="h-section">
+                            {t('exports.headline').split('already').map((part, i, arr) => (
+                                <React.Fragment key={`en-${i}`}>
+                                    {part.split('déjà').map((subPart, j, subArr) => (
+                                        <React.Fragment key={`fr-${j}`}>
+                                            {subPart}
+                                            {j < subArr.length - 1 && <em>déjà</em>}
+                                        </React.Fragment>
+                                    ))}
+                                    {i < arr.length - 1 && <em>already</em>}
+                                </React.Fragment>
+                            ))}
+                        </h2>
+                        <p className="body-lg">{t('exports.body1')}</p>
                         <p className="body-lg" style={{ marginTop: 16, fontWeight: 500 }}>
-                            The transcript edit happens in VIBED. The finishing happens where you've always finished.
+                            {t('exports.body2')}
                         </p>
                         <div style={{ display: "flex", gap: 12, marginTop: 24, flexWrap: "wrap" }}>
-                            <span className="tag"><span className="dot" />XML · FCPXML · EDL · OTIO</span>
-                            <span className="tag">Bin metadata preserved</span>
+                            <span className="tag"><span className="dot" />{t('exports.formatTag')}</span>
+                            <span className="tag">{t('exports.metadataTag')}</span>
                         </div>
                     </div>
 
@@ -692,71 +706,49 @@ const Exports = () => {
 };
 
 
-const PLANS = [
-    {
-        key:     'free',
-        name:    'Free',
-        price:   '€0',
-        period:  '',
-        tagline: 'Edit your first project. Feel what conversational editing is.',
-        cta:     'Start free',
-        ctaStyle: 'btn-ghost',
-        features: [
-            '2 active projects',
-            'Videos up to 20 minutes',
-            '7-day storage',
-            '10 AI operations / month',
-            'Silence removal & trim — unlimited',
-            'MP4 export — no watermark',
-        ],
-        locked: ['NLE export', 'Transcript intelligence'],
-    },
-    {
-        key:     'creator',
-        name:    'Creator',
-        price:   '€15',
-        period:  '/ month',
-        tagline: 'Edit every week. Export to any tool you already use.',
-        cta:     'Get Creator',
-        ctaStyle: 'btn-primary',
-        highlight: true,
-        features: [
-            'Unlimited projects',
-            'Videos up to 90 minutes',
-            '30-day storage',
-            '100 AI operations / month',
-            'All AI commands — filler, captions, best moments',
-            'Full transcript + content intelligence',
-            'MP4 export',
-            'NLE export — Premiere, Final Cut, DaVinci, OTIO',
-        ],
-        locked: [],
-    },
-    {
-        key:     'pro',
-        name:    'Pro',
-        price:   '€35',
-        period:  '/ month',
-        tagline: 'Edit without limits. Bring your team.',
-        cta:     'Get Pro',
-        ctaStyle: 'btn-ghost',
-        features: [
-            'Everything in Creator',
-            'Videos up to 4 hours',
-            '90-day storage',
-            'Unlimited AI operations',
-            'Priority processing queue',
-            '2 team seats',
-            'Virality scoring + performance analysis',
-            'Early access to new features',
-        ],
-        locked: [],
-    },
-];
-
 const Pricing = () => {
+    const { t } = useTranslation('landing');
     const navigate = useNavigate();
     const [loading, setLoading] = useState(null);
+
+    const translatedPlans = t('pricing.plans', { returnObjects: true }) || {};
+
+    const PLANS = [
+        {
+            key:     'free',
+            name:    'Free',
+            price:   '€0',
+            period:  '',
+            tagline: translatedPlans.free?.tagline,
+            cta:     translatedPlans.free?.cta,
+            ctaStyle: 'btn-ghost',
+            features: translatedPlans.free?.features || [],
+            locked: translatedPlans.free?.locked || [],
+        },
+        {
+            key:     'creator',
+            name:    'Creator',
+            price:   '€15',
+            period:  '/ mois',
+            tagline: translatedPlans.creator?.tagline,
+            cta:     translatedPlans.creator?.cta,
+            ctaStyle: 'btn-primary',
+            highlight: true,
+            features: translatedPlans.creator?.features || [],
+            locked: translatedPlans.creator?.locked || [],
+        },
+        {
+            key:     'pro',
+            name:    'Pro',
+            price:   '€35',
+            period:  '/ mois',
+            tagline: translatedPlans.pro?.tagline,
+            cta:     translatedPlans.pro?.cta,
+            ctaStyle: 'btn-ghost',
+            features: translatedPlans.pro?.features || [],
+            locked: translatedPlans.pro?.locked || [],
+        },
+    ];
 
     const handleUpgrade = async (plan) => {
         if (plan === 'free') { navigate('/editor'); return; }
@@ -771,13 +763,13 @@ const Pricing = () => {
                 <div style={{ textAlign: 'center', marginBottom: 64 }}>
                     <div className="tag" style={{ display: 'inline-flex', marginBottom: 20 }}>
                         <Zap className="w-3 h-3" style={{ color: 'var(--accent)' }} />
-                        <span>Simple pricing</span>
+                        <span>{t('pricing.eyebrow')}</span>
                     </div>
                     <h2 className="display" style={{ fontSize: 'clamp(36px, 5vw, 64px)', margin: '0 0 16px' }}>
-                        One tool. Three speeds.
+                        {t('pricing.headline')}
                     </h2>
                     <p className="body-lg" style={{ margin: 0, color: 'var(--fg-2)', maxWidth: 520, marginInline: 'auto' }}>
-                        Start free. Upgrade when the product earns it.
+                        {t('pricing.subtitle')}
                     </p>
                 </div>
 
@@ -849,68 +841,64 @@ const Pricing = () => {
 };
 
 const SocialProof = () => {
+    const { t } = useTranslation('landing');
+    const quotes = t('socialProof.quotes', { returnObjects: true }) || [];
+
     return (
         <section style={{ padding: "80px 0", background: "var(--bg-2)" }}>
             <div className="wrap">
                 <div style={{ display: "grid", gap: 32 }} className="grid-cols-1 md:grid-cols-2">
-                    <div className="card" style={{ padding: 40, border: "0.5px solid var(--line)" }}>
-                        <div style={{ color: "var(--accent)", marginBottom: 20 }}>
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/>
-                            </svg>
-                        </div>
-                        <p style={{ fontSize: 20, fontStyle: "italic", lineHeight: 1.5, marginBottom: 24 }}>
-                            "Finally, an AI editor that knows when to get out of the way. It lets me work at the speed of thought without messing up my timeline."
-                        </p>
-                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                            <div style={{ width: 40, height: 40, borderRadius: "50%", background: "var(--line)", flexShrink: 0 }} />
-                            <div>
-                                <div style={{ fontWeight: 600, fontSize: 15 }}>Alex</div>
-                                <div style={{ color: "var(--fg-3)", fontSize: 14 }}>Senior Video Editor</div>
+                    {quotes.map((q, i) => (
+                        <div key={i} className="card" style={{ padding: 40, border: "0.5px solid var(--line)" }}>
+                            <div style={{ color: "var(--accent)", marginBottom: 20 }}>
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/>
+                                </svg>
+                            </div>
+                            <p style={{ fontSize: 20, fontStyle: "italic", lineHeight: 1.5, marginBottom: 24 }}>
+                                "{q.text}"
+                            </p>
+                            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                                <div style={{ width: 40, height: 40, borderRadius: "50%", background: "var(--line)", flexShrink: 0 }} />
+                                <div>
+                                    <div style={{ fontWeight: 600, fontSize: 15 }}>{q.author}</div>
+                                    <div style={{ color: "var(--fg-3)", fontSize: 14 }}>{q.role}</div>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <div className="card" style={{ padding: 40, border: "0.5px solid var(--line)" }}>
-                        <div style={{ color: "var(--accent)", marginBottom: 20 }}>
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/>
-                            </svg>
-                        </div>
-                        <p style={{ fontSize: 20, fontStyle: "italic", lineHeight: 1.5, marginBottom: 24 }}>
-                            "The fact that I can dump it straight into Resolve when the rough cut is done is a complete game-changer for my agency workflow."
-                        </p>
-                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                            <div style={{ width: 40, height: 40, borderRadius: "50%", background: "var(--line)", flexShrink: 0 }} />
-                            <div>
-                                <div style={{ fontWeight: 600, fontSize: 15 }}>Sarah</div>
-                                <div style={{ color: "var(--fg-3)", fontSize: 14 }}>Creative Director</div>
-                            </div>
-                        </div>
-                    </div>
+                    ))}
                 </div>
             </div>
         </section>
     );
 };
 
-const FinalCTA = () => (
-    <section style={{ position: "relative", overflow: "hidden", paddingTop: 140, paddingBottom: 140 }}>
-        <div className="aurora" />
-        <div className="wrap" style={{ position: "relative", zIndex: 2, textAlign: "center", display: "flex", flexDirection: "column", gap: 28, alignItems: "center" }}>
-            <h2 className="display" style={{ fontSize: "clamp(48px, 6.4vw, 96px)" }}>
-                The future of editing<br /><em>is collaborative.</em>
-            </h2>
-            <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap", justifyContent: "center" }}>
-                <button onClick={() => window.location.href='#pricing'} className="btn btn-primary" style={{ padding: "0 32px", height: 48, fontSize: 16 }}>
-                    See plans <ArrowRight className="w-5 h-5 ml-1" />
-                </button>
+const FinalCTA = () => {
+    const { t } = useTranslation('landing');
+    return (
+        <section style={{ position: "relative", overflow: "hidden", paddingTop: 140, paddingBottom: 140 }}>
+            <div className="aurora" />
+            <div className="wrap" style={{ position: "relative", zIndex: 2, textAlign: "center", display: "flex", flexDirection: "column", gap: 28, alignItems: "center" }}>
+                <h2 className="display" style={{ fontSize: "clamp(48px, 6.4vw, 96px)" }}>
+                    {t('finalCta.headline').split('\n').map((line, i, arr) => (
+                        <React.Fragment key={i}>
+                            {i === arr.length - 1 ? <em>{line}</em> : line}
+                            {i < arr.length - 1 && <br />}
+                        </React.Fragment>
+                    ))}
+                </h2>
+                <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                    <button onClick={() => window.location.href='#pricing'} className="btn btn-primary" style={{ padding: "0 32px", height: 48, fontSize: 16 }}>
+                        {t('finalCta.cta')} <ArrowRight className="w-5 h-5 ml-1" />
+                    </button>
+                </div>
+                <div className="caption" style={{ marginTop: 8 }}>
+                    {t('finalCta.caption')}
+                </div>
             </div>
-            <div className="caption" style={{ marginTop: 8 }}>
-                Start free. No credit card. Bring your own clips.
-            </div>
-        </div>
-    </section>
-);
+        </section>
+    );
+};
 
 const Footer = () => {
     const cols = {
