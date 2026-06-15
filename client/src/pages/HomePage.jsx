@@ -192,21 +192,24 @@ const Hero = () => {
 const ProblemSection = () => {
     const [ref, visible] = useReveal();
 
+    const A = ({ children }) => <span style={{ color: "var(--accent)", fontWeight: 600 }}>{children}</span>;
+    const W = ({ children }) => <span style={{ color: "var(--fg)", fontWeight: 600 }}>{children}</span>;
+
     const pains = [
         {
             num: "01",
             headline: "Every minute of silence costs you two.",
-            body: "A 10-minute talking-head video contains 3–4 minutes of silence, stumbles, and filler words — all cut manually, one by one.",
+            body: <>A 10-minute video contains <A>3–4 minutes</A> of silence, stumbles, and filler words — all cut <W>manually, one by one.</W></>,
         },
         {
             num: "02",
             headline: "One video. Four exports. Endless hours.",
-            body: "The same video needs to be reformatted, re-encoded, and re-captioned for every platform — a process that can take as long as the original edit.",
+            body: <>The same video needs to be <A>reformatted, re-encoded, and re-captioned</A> for every platform — a process that can take <W>as long as the original edit.</W></>,
         },
         {
             num: "03",
             headline: "Pro tools are built for pros, not creators.",
-            body: "Professional tools are powerful but designed for full-time editors, not creators who edit as part of a larger job.",
+            body: <>Professional tools are powerful but designed for <A>full-time editors</A>, not creators who edit <W>as part of a larger job.</W></>,
         },
     ];
 
@@ -279,8 +282,11 @@ const ProblemSection = () => {
                             lineHeight: 1.55,
                             letterSpacing: "-0.01em",
                         }}>
-                            The result: you either publish content that isn't as good as it could be,{" "}
-                            <span style={{ color: "var(--fg)" }}>or spend your weekend editing.</span>
+                            The result: you either publish content that{" "}
+                            <span style={{ color: "var(--fg)", fontWeight: 600 }}>isn't as good as it could be</span>
+                            , or spend your{" "}
+                            <span style={{ color: "var(--accent)", fontWeight: 700 }}>weekend</span>
+                            <span style={{ color: "var(--fg)", fontWeight: 600 }}> editing.</span>
                         </p>
                     </div>
                 </div>
@@ -474,27 +480,31 @@ const BeforeAfterSection = () => {
 const PersonasSection = () => {
     const [ref, visible] = useReveal(0.1);
 
+    const A = ({ children }) => <span style={{ color: "var(--accent)", fontWeight: 600 }}>{children}</span>;
+    const G = ({ children }) => <span style={{ color: "var(--mint)", fontWeight: 600 }}>{children}</span>;
+    const W = ({ children }) => <span style={{ color: "var(--fg)", fontWeight: 600 }}>{children}</span>;
+
     const personas = [
         {
             Icon: Mic,
             role: "The Solo Creator",
             description: "Records and edits everything alone. Publishes 2–5 videos a week.",
-            before: "3–5 hours editing per video",
-            after: "20–40 minutes. AI handles cleanup; you focus only on content decisions.",
+            before: <><A>3–5 hours</A> editing per video</>,
+            after: <><G>20–40 minutes.</G> AI handles cleanup; you focus only on <W>content decisions.</W></>,
         },
         {
             Icon: Layers,
             role: "The Podcast Producer",
             description: "Long-form interviews, multiple guests, 30–90 minute episodes.",
-            before: "Manual scrubbing, separate transcription service, clip selection by ear",
-            after: "Filler and silence cleaned in minutes. Speaker-colored transcript makes multi-guest editing feel like working in a text document.",
+            before: <>Manual scrubbing, separate transcription, <A>clip selection by ear</A></>,
+            after: <>Filler and silence cleaned in <G>minutes.</G> Speaker-colored transcript makes multi-guest editing feel like <W>working in a text document.</W></>,
         },
         {
             Icon: UserCheck,
             role: "The Production Team",
             description: "Agencies and studios delivering corporate video, events, brand campaigns.",
-            before: "Junior editors spend 50% of their time on cleanup before a senior editor sees the footage",
-            after: "AI cleanup runs unattended. Senior editor gets a pre-cleaned rough cut with FCPXML ready for Final Cut or DaVinci.",
+            before: <>Junior editors spend <A>50% of their time</A> on cleanup before a senior editor sees the footage</>,
+            after: <>AI cleanup runs unattended. Senior editor gets a pre-cleaned rough cut with <W>FCPXML</W> ready for <G>Final Cut or DaVinci.</G></>,
         },
     ];
 
@@ -582,13 +592,16 @@ const PersonasSection = () => {
     );
 };
 
-// ── Existing: AntiDescript (moved to after Exports) ───────────────────────────
+// ── ROI Statement (after Exports) ────────────────────────────────────────────
 const AntiDescript = () => (
     <section style={{ padding: "80px 0", background: "var(--bg-2)", borderTop: "0.5px solid var(--line)", borderBottom: "0.5px solid var(--line)" }}>
         <div className="wrap">
             <div style={{ maxWidth: 800, margin: "0 auto", textAlign: "center" }}>
                 <p style={{ fontSize: "clamp(24px, 3vw, 32px)", lineHeight: 1.4, fontWeight: 500, margin: 0, letterSpacing: "-0.01em" }}>
-                    Descript invented transcript editing. It's genuinely great — until you need to finish in Premiere or Final Cut, at which point you're stuck. <span style={{ color: "var(--accent)" }}>VIBED does the same thing and hands you a real FCPXML or Premiere XML at the end.</span> That combination doesn't exist anywhere else.
+                    At 2.5 hours saved per video and 3 videos per week,{" "}
+                    <span style={{ color: "var(--fg)", fontWeight: 700 }}>VIBED saves you 30 hours a month.</span>
+                    {" "}The Creator plan costs less than{" "}
+                    <span style={{ color: "var(--accent)", fontWeight: 700 }}>one hour of your time.</span>
                 </p>
             </div>
         </div>
@@ -680,37 +693,6 @@ const Exports = () => {
     );
 };
 
-// ── NEW: ROI line — sits just above Pricing ───────────────────────────────────
-const ROILine = () => {
-    const [ref, visible] = useReveal(0.3);
-    return (
-        <div style={{
-            padding: "56px 0",
-            borderTop: "0.5px solid var(--line)",
-            borderBottom: "0.5px solid var(--line)",
-            background: "var(--bg)",
-        }}>
-            <div className="wrap" style={{ textAlign: "center" }}>
-                <p ref={ref} style={{
-                    fontSize: "clamp(16px, 1.8vw, 21px)",
-                    fontWeight: 500,
-                    lineHeight: 1.65,
-                    color: "var(--fg-2)",
-                    maxWidth: 700,
-                    margin: "0 auto",
-                    opacity: visible ? 1 : 0,
-                    transform: visible ? "translateY(0)" : "translateY(14px)",
-                    transition: "opacity 0.6s ease, transform 0.6s ease",
-                }}>
-                    At 2.5 hours saved per video and 3 videos per week,{" "}
-                    <span style={{ color: "var(--fg)", fontWeight: 600 }}>VIBED saves you 30 hours a month.</span>
-                    {" "}The Creator plan costs less than{" "}
-                    <span style={{ color: "var(--accent)", fontWeight: 600 }}>one hour of your time.</span>
-                </p>
-            </div>
-        </div>
-    );
-};
 
 const PLANS = [
     {
@@ -990,8 +972,7 @@ const HomePage = () => {
                 <BeforeAfterSection />   {/* NEW — after workflow */}
                 <PersonasSection />      {/* NEW — after Before/After */}
                 <Exports />
-                <AntiDescript />         {/* moved — after Exports */}
-                <ROILine />              {/* NEW — just above pricing */}
+                <AntiDescript />         {/* ROI statement — after Exports */}
                 <Pricing />
                 <SocialProof />
                 <FinalCTA />
