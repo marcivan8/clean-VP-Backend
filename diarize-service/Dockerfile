@@ -24,6 +24,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir \
         torch==2.8.0+cpu \
         torchaudio==2.8.0+cpu \
+        torchvision==0.23.0+cpu \
         --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements.txt
 
