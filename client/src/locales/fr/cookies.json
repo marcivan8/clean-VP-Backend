@@ -1,0 +1,48 @@
+{
+  "back": "Retour",
+  "eyebrow": "LÉGAL",
+  "title": "Politique des cookies",
+  "lastUpdated": "Dernière mise à jour : juin 2026 · Vibed Studio",
+  "whatAreCookies": {
+    "title": "Que sont les cookies ?",
+    "body": "Les cookies sont de petits fichiers texte placés sur votre appareil lorsque vous visitez un site web. Ils sont largement utilisés pour faire fonctionner les sites web, ou les faire fonctionner plus efficacement, et pour fournir des informations aux propriétaires de sites."
+  },
+  "cookiesWeUse": {
+    "title": "Cookies que nous utilisons",
+    "duration": "Durée : {{value}}",
+    "items": [
+      {
+        "name": "Authentification (Supabase)",
+        "type": "Strictement nécessaire",
+        "purpose": "Vous maintient connecté pendant votre session. Sans ce cookie, vous seriez déconnecté à chaque page.",
+        "duration": "Session / 1 an",
+        "canOptOut": false
+      },
+      {
+        "name": "Consentement aux cookies (Iubenda)",
+        "type": "Strictement nécessaire",
+        "purpose": "Stocke vos préférences de consentement aux cookies pour ne pas afficher la bannière à chaque visite.",
+        "duration": "1 an",
+        "canOptOut": false
+      },
+      {
+        "name": "Analytique",
+        "type": "Optionnel",
+        "purpose": "Nous n'utilisons actuellement aucun cookie analytique tiers. Si cela change, nous mettrons à jour cette politique et demanderons un nouveau consentement.",
+        "duration": "N/A",
+        "canOptOut": true
+      }
+    ]
+  },
+  "managing": {
+    "title": "Gérer vos préférences",
+    "p1": "Vous pouvez consulter et modifier vos préférences de cookies à tout moment en cliquant sur le lien de paramètres des cookies dans le pied de page. Vous pouvez également supprimer les cookies via les paramètres de votre navigateur — notez que cela peut affecter le fonctionnement du site.",
+    "p2Prefix": "Pour plus de détails sur la façon dont nous traitons vos données personnelles, consultez notre ",
+    "p2Link": "Politique de confidentialité",
+    "p2Suffix": "."
+  },
+  "contact": {
+    "title": "Contact",
+    "body": "Des questions sur cette politique ?"
+  }
+}

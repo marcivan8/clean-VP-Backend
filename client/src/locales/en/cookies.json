@@ -1,0 +1,48 @@
+{
+  "back": "Back",
+  "eyebrow": "LEGAL",
+  "title": "Cookie Policy",
+  "lastUpdated": "Last updated: June 2026 · Vibed Studio",
+  "whatAreCookies": {
+    "title": "What are cookies?",
+    "body": "Cookies are small text files placed on your device when you visit a website. They are widely used to make websites work, or work more efficiently, and to provide information to website owners."
+  },
+  "cookiesWeUse": {
+    "title": "Cookies we use",
+    "duration": "Duration: {{value}}",
+    "items": [
+      {
+        "name": "Authentication (Supabase)",
+        "type": "Strictly necessary",
+        "purpose": "Keeps you signed in during your session. Without this cookie you would be logged out on every page.",
+        "duration": "Session / 1 year",
+        "canOptOut": false
+      },
+      {
+        "name": "Cookie consent (Iubenda)",
+        "type": "Strictly necessary",
+        "purpose": "Stores your cookie consent preferences so we do not show the banner on every visit.",
+        "duration": "1 year",
+        "canOptOut": false
+      },
+      {
+        "name": "Analytics",
+        "type": "Optional",
+        "purpose": "We do not currently use any third-party analytics cookies. If this changes we will update this policy and request fresh consent.",
+        "duration": "N/A",
+        "canOptOut": true
+      }
+    ]
+  },
+  "managing": {
+    "title": "Managing your preferences",
+    "p1": "You can review and change your cookie preferences at any time by clicking the cookie settings link in the footer. You can also delete cookies through your browser settings — note that doing so may affect how the site works.",
+    "p2Prefix": "For more detail on how we handle your personal data, see our ",
+    "p2Link": "Privacy Policy",
+    "p2Suffix": "."
+  },
+  "contact": {
+    "title": "Contact",
+    "body": "Questions about this policy?"
+  }
+}

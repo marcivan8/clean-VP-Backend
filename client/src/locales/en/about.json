@@ -1,0 +1,69 @@
+{
+  "back": "Back to Vibed",
+  "eyebrow": "Our Story",
+  "headline": "Built by a creator who got tired of editing the hard way.",
+  "intro1": "VIBED started with a frustration. Not a business plan but a frustration. The kind that comes from spending hours in a timeline doing the same mechanical work over and over: cutting silences, trimming pauses, cleaning up speech, exporting to yet another format. Work that has nothing to do with the story you're trying to tell.",
+  "intro2": "The idea was simple: what if you could just describe the edit? Not click through menus. Not drag handles on a timeline. Just say what you want — and have it done.",
+  "intro3": "That question became VIBED.",
+  "journey": {
+    "title": "The Journey",
+    "items": [
+      {
+        "date": "2024 · Istanbul, Turkey",
+        "title": "The origin",
+        "body": "The idea for a smarter video editing workflow starts here — before there was a line of code, before there was a company name. Just an observation about how much time creators lose to mechanical editing."
+      },
+      {
+        "date": "2025 · Paris, France — Epitech",
+        "title": "The build",
+        "body": "Arriving in France with one goal: learn to build what was imagined in Turkey. The technical skills come together at Epitech — one of France's leading engineering schools — where the first real versions of the product are built, broken, and rebuilt."
+      },
+      {
+        "date": "The metamorphosis",
+        "title": "From analysis tool to editing IDE",
+        "body": "The project pivots. What started as a video analysis tool — something that scored footage for virality — becomes something more interesting: a conversational editing environment. An IDE for video, validated by a mentor and teacher who saw the gap in the market clearly."
+      },
+      {
+        "date": "2026",
+        "title": "VIBED launches",
+        "body": "The first version is live. Podcasters, YouTubers, and documentary makers can now edit by describing what they want — and export to the tools they already use."
+      }
+    ]
+  },
+  "beliefs": {
+    "title": "What We Believe",
+    "items": [
+      {
+        "title": "You stay in control",
+        "body": "The AI suggests and executes. You decide. Every action is visible, named, and reversible. Nothing happens inside a black box."
+      },
+      {
+        "title": "Work in your tools",
+        "body": "You don't have to abandon Premiere, Final Cut, or DaVinci. VIBED works with the suite you already finish in — not instead of it."
+      },
+      {
+        "title": "Editing is creative work",
+        "body": "The mechanical parts — silence removal, cleanup, formatting — shouldn't take your attention. The story should."
+      },
+      {
+        "title": "Your footage is yours",
+        "body": "We store it, we process it, we delete it on your schedule. We never train on it, we never share it, we never monetise it."
+      }
+    ]
+  },
+  "audience": {
+    "title": "Who We're Building For",
+    "p1": "VIBED is built for long-form creators who edit their own content — podcasters, YouTubers, interviewers, documentary makers. People who have a story to tell and a timeline full of raw footage standing between them and telling it.",
+    "p2": "Not for teams with dedicated editors. Not for short-form content factories. For the solo creator who films something real, sits down to edit it themselves, and wants the process to get out of the way of the work."
+  },
+  "founder": {
+    "title": "The Founder",
+    "role": "Founder & builder — VIBED Studio",
+    "location": "Paris, France",
+    "bio": "From Istanbul to Paris. Master's student in AI at Epitech. Solo founder building VIBED — a conversational video editing IDE for long-form creators. Previously: video analysis tools, hackathons, and a lot of time spent learning what not to build.",
+    "tags": ["Epitech Master's AI", "Solo founder", "Long-form content", "Building in public", "Paris, France"]
+  },
+  "contact": {
+    "prompt": "Questions, feedback, or just want to talk about the build?"
+  }
+}

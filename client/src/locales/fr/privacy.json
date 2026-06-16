@@ -1,0 +1,77 @@
+{
+  "back": "Retour à Vibed",
+  "eyebrow": "Document légal",
+  "title": "Politique de confidentialité",
+  "lastUpdated": "Dernière mise à jour :",
+  "sections": {
+    "controller": {
+      "title": "1. Identité du responsable du traitement des données",
+      "intro": "Aux fins du Règlement général sur la protection des données (RGPD) et des autres lois applicables en matière de protection des données, le responsable du traitement de vos informations personnelles est :"
+    },
+    "legalBasis": {
+      "title": "2. Base légale du traitement",
+      "intro": "Nous ne traitons vos données personnelles que lorsque nous disposons d'une base légale valide. Nos principales bases légales sont :",
+      "contractual": {
+        "label": "Nécessité contractuelle :",
+        "body": "Nous traitons votre adresse e-mail, vos identifiants d'authentification et vos fichiers vidéo pour vous fournir le service de montage Vibed, gérer votre compte et traiter les paiements. Sans ce traitement, nous ne pouvons pas fournir notre service principal."
+      },
+      "legitimate": {
+        "label": "Intérêt légitime :",
+        "body": "Nous traitons des analyses d'utilisation de base (par exemple, les fonctionnalités utilisées) pour améliorer notre produit, assurer la sécurité de notre plateforme et résoudre les problèmes. Ce traitement ne prévaut pas sur vos droits et libertés fondamentaux."
+      },
+      "consent": {
+        "label": "Consentement :",
+        "body": "Lorsque la loi l'exige, nous obtiendrons votre consentement explicite avant de traiter des données pour certaines activités marketing ou de déployer des cookies non essentiels."
+      }
+    },
+    "retention": {
+      "title": "3. Conservation et stockage des données",
+      "intro": "Nous conservons vos données personnelles uniquement le temps nécessaire pour atteindre les objectifs décrits dans cette politique.",
+      "account": {
+        "label": "Données de compte :",
+        "body": "Conservées tant que votre compte est actif. Si vous supprimez votre compte, ces données sont immédiatement et définitivement supprimées."
+      },
+      "free": {
+        "label": "Fichiers de projet (plan gratuit) :",
+        "body": "Supprimés automatiquement après 7 jours d'inactivité."
+      },
+      "creator": {
+        "label": "Fichiers de projet (plan Créateur) :",
+        "body": "Conservés pendant 30 jours."
+      },
+      "pro": {
+        "label": "Fichiers de projet (plan Pro) :",
+        "body": "Conservés pendant 90 jours et persistants tant que votre abonnement est actif."
+      },
+      "storage": "Vos données sont stockées de manière sécurisée via Google Cloud Storage (notre sous-traitant) dans des centres de données chiffrés."
+    },
+    "rights": {
+      "title": "4. Vos droits en tant que personne concernée",
+      "intro": "En vertu du RGPD, vous disposez de droits spécifiques concernant vos données personnelles :",
+      "access": {
+        "label": "Droit d'accès :",
+        "body": "Vous pouvez demander une copie des données personnelles que nous détenons vous concernant."
+      },
+      "erasure": {
+        "label": "Droit à l'effacement (suppression) :",
+        "body": "Vous pouvez demander la suppression définitive de toutes vos données personnelles, fichiers de projet et informations de compte. Vous pouvez également le faire directement depuis votre tableau de bord."
+      },
+      "portability": {
+        "label": "Droit à la portabilité des données :",
+        "body": "Vous pouvez demander vos données dans un format structuré, couramment utilisé et lisible par machine. Vous pouvez également exporter vos projets vidéo directement depuis l'éditeur à tout moment."
+      },
+      "rectification": {
+        "label": "Droit de rectification :",
+        "body": "Vous pouvez nous demander de corriger des données inexactes ou incomplètes."
+      },
+      "object": {
+        "label": "Droit d'opposition / de restriction :",
+        "body": "Vous pouvez vous opposer ou demander la restriction du traitement de vos données, notamment en ce qui concerne les analyses ou le marketing direct."
+      },
+      "footer": "Pour exercer l'un de ces droits, veuillez nous contacter à l'adresse e-mail fournie ci-dessous. Nous traitons toutes les demandes dans un délai de 30 jours, gratuitement."
+    }
+  },
+  "contact": {
+    "prompt": "Pour exercer vos droits sur vos données, contactez-nous à :"
+  }
+}

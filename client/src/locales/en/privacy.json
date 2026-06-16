@@ -1,0 +1,77 @@
+{
+  "back": "Back to Vibed",
+  "eyebrow": "Legal Document",
+  "title": "Privacy Policy",
+  "lastUpdated": "Last Updated:",
+  "sections": {
+    "controller": {
+      "title": "1. Identity of the Data Controller",
+      "intro": "For the purposes of the General Data Protection Regulation (GDPR) and other applicable data protection laws, the Data Controller responsible for your personal information is:"
+    },
+    "legalBasis": {
+      "title": "2. Legal Basis for Processing",
+      "intro": "We only process your personal data when we have a valid legal basis to do so. Our primary legal bases are:",
+      "contractual": {
+        "label": "Contractual Necessity:",
+        "body": "We process your email, authentication credentials, and video files to provide you with the Vibed editing service, manage your account, and process payments. Without this processing, we cannot provide our core service."
+      },
+      "legitimate": {
+        "label": "Legitimate Interest:",
+        "body": "We process basic usage analytics (e.g., which features are used) to improve our product, ensure the security of our platform, and troubleshoot issues. This processing does not override your fundamental rights and freedoms."
+      },
+      "consent": {
+        "label": "Consent:",
+        "body": "Where required by law, we will obtain your explicit consent before processing data for certain marketing activities or deploying non-essential cookies."
+      }
+    },
+    "retention": {
+      "title": "3. Data Retention and Storage",
+      "intro": "We retain your personal data only for as long as necessary to fulfill the purposes outlined in this policy.",
+      "account": {
+        "label": "Account Data:",
+        "body": "Retained for as long as your account is active. If you delete your account, this data is immediately and permanently removed."
+      },
+      "free": {
+        "label": "Project Files (Free Tier):",
+        "body": "Automatically deleted after 7 days of inactivity."
+      },
+      "creator": {
+        "label": "Project Files (Creator Tier):",
+        "body": "Retained for 30 days."
+      },
+      "pro": {
+        "label": "Project Files (Pro Tier):",
+        "body": "Retained for 90 days and persist as long as your subscription remains active."
+      },
+      "storage": "Your data is stored securely using Google Cloud Storage (our Data Processor) in encrypted data centers."
+    },
+    "rights": {
+      "title": "4. Your Rights as a Data Subject",
+      "intro": "Under the GDPR, you possess specific rights regarding your personal data:",
+      "access": {
+        "label": "Right to Access:",
+        "body": "You can request a copy of the personal data we hold about you."
+      },
+      "erasure": {
+        "label": "Right to Erasure (Deletion):",
+        "body": "You can request that we delete all your personal data, project files, and account information permanently. You can also self-serve this directly from your account dashboard."
+      },
+      "portability": {
+        "label": "Right to Data Portability:",
+        "body": "You can request your data in a structured, commonly used, and machine-readable format. You may also export your video projects directly from the editor at any time."
+      },
+      "rectification": {
+        "label": "Right to Rectification:",
+        "body": "You can ask us to correct inaccurate or incomplete data."
+      },
+      "object": {
+        "label": "Right to Object / Restrict:",
+        "body": "You may object to or request the restriction of our processing of your data, particularly regarding analytics or direct marketing."
+      },
+      "footer": "To exercise any of these rights, please contact us at the email address provided below. We process all requests within 30 days, free of charge."
+    }
+  },
+  "contact": {
+    "prompt": "To exercise your data rights, contact us at:"
+  }
+}
