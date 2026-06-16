@@ -10,6 +10,7 @@
  */
 
 import { authFetch } from '../utils/authFetch.js';
+import { pollJobResult } from '../utils/jobPoller.js';
 import { EventBus, EVENT_TYPES } from './EventBus.js';
 import { ContentAnalyzer } from './ContentAnalyzer.js';
 import useTimelineStore from '../store/useTimelineStore.js';
@@ -206,46 +207,12 @@ class TranscriptionManagerClass {
             let words = [];
 
             if (data.jobId) {
-                // If it's queued, subscribe to SSE
-                words = await new Promise((resolve, reject) => {
-                    const source = new EventSource(`/api/jobs/${data.jobId}/progress`);
-                    
-                    source.onmessage = (e) => {
-                        try {
-                            const eventData = JSON.parse(e.data);
-                            if (eventData.error) {
-                                source.close();
-                                return reject(new Error(eventData.error));
-                            }
-                            
-                            // Map progress (0-100) to our state progress range (5-50)
-                            if (eventData.progress !== undefined) {
-                                this._setStatus(TRANSCRIPTION_STATUS.TRANSCRIBING, 5 + Math.floor(eventData.progress * 0.45));
-                            }
-                            
-                            if (eventData.state === 'completed') {
-                                source.close();
-                                resolve(eventData.result.words || []);
-                            } else if (eventData.state === 'failed') {
-                                source.close();
-                                reject(new Error(eventData.error || 'Transcription job failed'));
-                            }
-                        } catch (err) {
-                            console.error('[TranscriptionManager] Error parsing SSE message:', err);
-                        }
-                    };
-
-                    source.onerror = (err) => {
-                        source.close();
-                        reject(new Error('SSE connection failed'));
-                    };
-                    
-                    // Abort support for long SSE
-                    signal.addEventListener('abort', () => {
-                        source.close();
-                        reject(new Error('AbortError'));
-                    });
-                });
+                // Poll /api/jobs/:jobId/status — more reliable than SSE behind Railway's proxy.
+                // SSE (EventSource) drops on Railway because the reverse-proxy buffers
+                // long-lived streaming connections.
+                this._setStatus(TRANSCRIPTION_STATUS.TRANSCRIBING, 20);
+                const result = await pollJobResult(data.jobId, signal);
+                words = result?.words || [];
             } else {
                 words = data.words || [];
             }
