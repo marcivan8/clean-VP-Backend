@@ -24,6 +24,7 @@ Optional:
 import os
 import sys
 import logging
+import tempfile
 import traceback
 
 from flask import Flask, request, jsonify
@@ -87,15 +88,30 @@ def health():
 
 @app.route("/diarize", methods=["POST"])
 def diarize():
-    body = request.get_json(force=True, silent=True) or {}
-    file_path = body.get("filePath") or body.get("file_path")
-    language  = body.get("language") or None  # None → auto-detect
+    # Accept multipart upload (Railway / isolated containers) OR legacy JSON file path
+    # (docker-compose with shared volume).
+    tmp_path  = None
+    file_path = None
 
-    if not file_path:
-        return jsonify({"error": "filePath is required"}), 400
-
-    if not os.path.isfile(file_path):
-        return jsonify({"error": f"File not found: {file_path}"}), 404
+    if request.content_type and "multipart/form-data" in request.content_type:
+        uploaded = request.files.get("file")
+        if not uploaded:
+            return jsonify({"error": "multipart request must include a 'file' field"}), 400
+        language = request.form.get("language") or None
+        # Save to a temp WAV so WhisperX can load it by path
+        fd, tmp_path = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+        uploaded.save(tmp_path)
+        file_path = tmp_path
+        log.info(f"Received multipart upload → saved to {tmp_path}")
+    else:
+        body = request.get_json(force=True, silent=True) or {}
+        file_path = body.get("filePath") or body.get("file_path")
+        language  = body.get("language") or None
+        if not file_path:
+            return jsonify({"error": "filePath is required"}), 400
+        if not os.path.isfile(file_path):
+            return jsonify({"error": f"File not found: {file_path}"}), 404
 
     try:
         import whisperx
@@ -177,6 +193,9 @@ def diarize():
     except Exception as e:
         log.error(f"Diarization failed: {e}\n{traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

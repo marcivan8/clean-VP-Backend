@@ -6,7 +6,10 @@
 // Leave it unset to disable speaker diarization gracefully — the transcription
 // pipeline still runs via OpenAI Whisper, just without speaker labels.
 
-const axios = require('axios');
+const axios    = require('axios');
+const fs       = require('fs');
+const path     = require('path');
+const FormData = require('form-data');
 
 const BASE_URL   = process.env.DIARIZE_SERVICE_URL || null;
 const TIMEOUT_MS = parseInt(process.env.DIARIZE_TIMEOUT_MS || '600000', 10); // 10 min default
@@ -41,12 +44,18 @@ class DiarizeServiceClass {
 
         console.log(`[DiarizeService] POST /diarize  filePath=${filePath}`);
 
-        const body = { filePath };
-        if (language) body.language = language;
+        // Upload the WAV file as multipart so the diarize container doesn't
+        // need access to this container's filesystem (required on Railway).
+        const form = new FormData();
+        form.append('file', fs.createReadStream(filePath), {
+            filename: path.basename(filePath),
+            contentType: 'audio/wav',
+        });
+        if (language) form.append('language', language);
 
-        const response = await axios.post(`${BASE_URL}/diarize`, body, {
+        const response = await axios.post(`${BASE_URL}/diarize`, form, {
             timeout: TIMEOUT_MS,
-            headers: { 'Content-Type': 'application/json' },
+            headers: form.getHeaders(),
         });
 
         const { words, speakers, language: detectedLang } = response.data;
