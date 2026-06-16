@@ -53,10 +53,28 @@ class DiarizeServiceClass {
         });
         if (language) form.append('language', language);
 
-        const response = await axios.post(`${BASE_URL}/diarize`, form, {
-            timeout: TIMEOUT_MS,
-            headers: form.getHeaders(),
-        });
+        // Retry up to 3 times on 502/503 — the Python container may be
+        // momentarily restarting after an OOM kill.
+        let response;
+        const MAX_RETRIES = 3;
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                response = await axios.post(`${BASE_URL}/diarize`, form, {
+                    timeout: TIMEOUT_MS,
+                    headers: form.getHeaders(),
+                });
+                break; // success
+            } catch (err) {
+                const status = err.response?.status;
+                if ((status === 502 || status === 503) && attempt < MAX_RETRIES) {
+                    const delayMs = attempt * 15_000; // 15s, 30s
+                    console.warn(`[DiarizeService] ${status} on attempt ${attempt}/${MAX_RETRIES} — retrying in ${delayMs / 1000}s`);
+                    await new Promise(r => setTimeout(r, delayMs));
+                    continue;
+                }
+                throw err; // non-retryable or exhausted retries
+            }
+        }
 
         const { words, speakers, language: detectedLang } = response.data;
         console.log(

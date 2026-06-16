@@ -3,8 +3,8 @@ const { Worker } = require('bullmq');
 const { connection } = require('./queue/connection');
 
 // Import job handlers
-const processVideoJob = require('./jobs/videoProcessor');
-const processAudioJob = require('./jobs/audioProcessor');
+const processVideoJob    = require('./jobs/videoProcessor');
+const processAudioJob    = require('./jobs/audioProcessor');
 const processAnalysisJob = require('./jobs/analysisProcessor');
 
 console.log('👷 Worker service starting...');
@@ -47,6 +47,22 @@ analysisWorker.on('completed', job => {
 });
 analysisWorker.on('failed', (job, err) => {
     console.error(`❌ [AnalysisQueue] Job ${job.id} failed:`, err.message);
+});
+
+// 4. Diarize Worker — concurrency 1 intentionally.
+// WhisperX + pyannote can only run one inference at a time on CPU without
+// OOM-crashing the container. Serialising here prevents concurrent HTTP
+// requests to the Python service and the resulting 502s.
+const diarizeWorker = new Worker('diarize-processing', processAudioJob, {
+    connection,
+    concurrency: 1,
+});
+
+diarizeWorker.on('completed', job => {
+    console.log(`✅ [DiarizeQueue] Job ${job.id} completed`);
+});
+diarizeWorker.on('failed', (job, err) => {
+    console.error(`❌ [DiarizeQueue] Job ${job.id} failed:`, err.message);
 });
 
 console.log('👷 Worker service is running and listening to queues.');

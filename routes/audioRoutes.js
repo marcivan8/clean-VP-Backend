@@ -422,7 +422,10 @@ router.post('/diarize', authenticateUser, aiGate, async (req, res) => {
 
         const userId      = req.user?.id || null;
         const uniqueJobId = `diarize-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
-        const job = await audioQueue.add('diarize', {
+        // Use the dedicated diarize queue (concurrency 1) — prevents concurrent
+        // WhisperX requests which OOM-crash the CPU container and cause 502s.
+        const { diarizeQueue } = require('../queue/queues');
+        const job = await diarizeQueue.add('diarize', {
             action:   'diarize',
             filePath: inputPath,
             filename: filename || path.basename(inputPath),
