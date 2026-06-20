@@ -655,9 +655,10 @@ class PlaybackEngine {
             }
             this.pushFrame(payload.data, payload.timestamp);
         } else if (type === 'AUDIO_DATA') {
-            // Forward Waveform Data if present
+            // Forward Waveform Data if present — keyed as 'video_main' so
+            // audio track clips can look it up via waveforms['video_main'].
             if (payload.peaks && this.onWaveformUpdate) {
-                // this.onWaveformUpdate(payload.peaks, payload.timestamp, payload.duration);
+                this.onWaveformUpdate(payload.peaks, payload.timestamp, payload.duration, 'video_main');
             }
 
             // QUEUE AUDIO FOR STREAMING (Flow Control)

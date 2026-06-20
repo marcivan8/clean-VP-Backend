@@ -1,5 +1,5 @@
 import { useShallow } from 'zustand/react/shallow';
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useCallback } from 'react';
 import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Menu, Upload, Palette, Move } from 'lucide-react';
 import classNames from 'classnames';
 import { Player } from '@revideo/player-react';
@@ -60,12 +60,39 @@ const getPlayerDimensions = (ratio) => {
 const IDELayout = ({ children, mode = 'editor' }) => {
     useEffect(() => {
         const handleKeyDown = (e) => {
+            const tag = document.activeElement?.tagName;
+            const inText = tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable;
+
+            // ── Spacebar: play / pause (Premiere Pro behaviour) ──────────────
+            // Fires when focus is anywhere except a text field so the user can
+            // hit space while hovering the timeline or the monitor.
+            if (e.key === ' ' && !inText && !e.ctrlKey && !e.metaKey) {
+                e.preventDefault();
+                useTimelineStore.getState().togglePlay();
+                return;
+            }
+
+            // ── Undo / Redo ───────────────────────────────────────────────────
             if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
                 e.preventDefault();
                 if (e.shiftKey) {
                     useTimelineStore.getState().redo();
                 } else {
-                    useTimelineStore.getState().undo();
+                    // Smart undo: if CMD+Z is pressed immediately after an AI job
+                    // completed (past.length === lastAIJob.after), undo the entire
+                    // AI batch atomically instead of one micro-step at a time.
+                    const { lastAIJob, clearLastAIJob } = useAIStore.getState();
+                    const currentLen = useTimelineStore.getState().past.length;
+
+                    if (lastAIJob && currentLen === lastAIJob.after && lastAIJob.after > lastAIJob.before) {
+                        while (useTimelineStore.getState().past.length > lastAIJob.before) {
+                            useTimelineStore.getState().undo();
+                        }
+                        clearLastAIJob();
+                    } else {
+                        if (lastAIJob && currentLen <= lastAIJob.before) clearLastAIJob();
+                        useTimelineStore.getState().undo();
+                    }
                 }
             } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
                 e.preventDefault();
@@ -255,11 +282,15 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const projectLoaderRef = useRef(null);
     const playerRef = useRef(null);
 
-    const handlePlayerReady = (revideoPlayer) => {
+    const handlePlayerReady = useCallback((revideoPlayer) => {
         playerRef.current = revideoPlayer;
         useTimelineStore.getState().setPlayerRef(revideoPlayer);
         console.log("[IDELayout] Revideo Player Ready", revideoPlayer);
-    };
+    }, []);
+
+    const handleTimeUpdate = useCallback((time) => {
+        useTimelineStore.setState({ currentTime: time });
+    }, []);
 
     const handleSelectiveGradingChange = (range, key, value) => {
         if (!activeClip || !activeTrackId) return;
@@ -1076,13 +1107,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 <ErrorBoundary>
                                     {(() => {
                                         const dims = getPlayerDimensions(aspectRatio);
-                                        // Sync project canvas size to current aspect ratio
-                                        if (project && project.settings && project.settings.shared) {
-                                            const v = project.settings.shared.size;
-                                            if (v) { v.x = dims.width; v.y = dims.height; }
-                                            else { project.settings.shared.size = { x: dims.width, y: dims.height }; }
-                                        }
-
                                         return (
                                             <Player
                                                 key={`player-${aspectRatio}-${hasClips ? 'media' : 'empty'}`}
@@ -1090,9 +1114,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                                 playing={isPlaying}
                                                 controls={false}
                                                 currentTime={useTimelineStore.getState().currentTime}
-                                                onTimeUpdate={(time) => {
-                                                    useTimelineStore.setState({ currentTime: time });
-                                                }}
+                                                onTimeUpdate={handleTimeUpdate}
                                                 project={project}
                                                 variables={playerVariables}
                                                 width={dims.width}

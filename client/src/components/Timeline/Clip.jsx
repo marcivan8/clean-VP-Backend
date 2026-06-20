@@ -12,10 +12,10 @@ const Clip = ({ clip, trackId }) => {
     const isSelected = selectedClipIds && selectedClipIds.includes(clip.id);
     const [ctxMenu, setCtxMenu] = React.useState(null); // null | { x, y }
 
-    // Waveform Data
-    // For now we map by trackId (Audio tracks) or clipId/assetId?
-    // PlaybackEngine uses trackId for audio tracks.
-    const waveformData = waveforms ? waveforms[trackId] : null;
+    // Waveform Data — PlaybackEngine emits under 'video_main' (the embedded
+    // audio stream). Fall back to that key so audio track clips get the waveform
+    // even though their trackId doesn't match 'video_main'.
+    const waveformData = waveforms ? (waveforms[trackId] ?? waveforms['video_main'] ?? null) : null;
 
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: clip.id,

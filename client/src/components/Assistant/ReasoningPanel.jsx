@@ -12,10 +12,13 @@ import { workflowController } from '../../agent/WorkflowController.js';
 
 // --- Sub-components ---
 
-const StepLogItem = ({ log }) => (
+const StepLogItem = ({ log, isDone }) => (
     <div className="flex items-center gap-2 py-1.5 animate-in fade-in slide-in-from-bottom-1 duration-200">
-        <Loader2 className="w-3 h-3 shrink-0 animate-spin" style={{ color: 'var(--accent)' }} />
-        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)', letterSpacing: '0.04em' }}>
+        {isDone
+            ? <Check className="w-3 h-3 shrink-0" style={{ color: 'var(--mint, #34d399)' }} />
+            : <Loader2 className="w-3 h-3 shrink-0 animate-spin" style={{ color: 'var(--accent)' }} />
+        }
+        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: isDone ? 'var(--fg-4)' : 'var(--fg-3)', letterSpacing: '0.04em' }}>
             {log.message}
         </span>
     </div>
@@ -122,8 +125,8 @@ const TaskCompletionCard = ({ log }) => {
     );
 };
 
-const LogItem = ({ log }) => {
-    if (log.type === 'step')          return <StepLogItem log={log} />;
+const LogItem = ({ log, isDone }) => {
+    if (log.type === 'step')          return <StepLogItem log={log} isDone={isDone} />;
     if (log.type === 'assistant')     return <AssistantLogItem log={log} />;
     if (log.type === 'task_complete') return <TaskCompletionCard log={log} />;
 
@@ -529,9 +532,18 @@ const ReasoningPanel = () => {
                 )}
 
                 {/* Logs Stream */}
-                {logs.map(log => (
-                    <LogItem key={log.id} log={log} />
-                ))}
+                {(() => {
+                    // Find the index of the last 'step' log so we can show a spinner
+                    // only on the active step and a ✓ on all completed ones.
+                    const lastStepIdx = logs.reduce((acc, l, i) => l.type === 'step' ? i : acc, -1);
+                    return logs.map((log, i) => (
+                        <LogItem
+                            key={log.id}
+                            log={log}
+                            isDone={log.type === 'step' && (!isAnalyzing || i < lastStepIdx)}
+                        />
+                    ));
+                })()}
 
                 {/* Active Suggestions */}
                 {suggestions.map(suggestion => (

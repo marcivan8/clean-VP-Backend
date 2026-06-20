@@ -211,8 +211,34 @@ class TranscriptionManagerClass {
                 // SSE (EventSource) drops on Railway because the reverse-proxy buffers
                 // long-lived streaming connections.
                 this._setStatus(TRANSCRIPTION_STATUS.TRANSCRIBING, 20);
-                const result = await pollJobResult(data.jobId, signal);
-                words = result?.words || [];
+                try {
+                    const result = await pollJobResult(data.jobId, signal);
+                    words = result?.words || [];
+                } catch (pollErr) {
+                    // If the user aborted, propagate — don't silently swallow cancellations.
+                    if (signal?.aborted || pollErr.message === 'Polling cancelled') throw pollErr;
+
+                    // Diarize job failed (Python service error, GCS download issue, etc.).
+                    // Fall back to standard Whisper transcription so the transcript tab
+                    // still populates even when the diarize microservice is unhealthy.
+                    console.warn('[TranscriptionManager] Diarize job failed — falling back to /transcribe:', pollErr.message);
+                    const fallbackRes = await authFetch('/api/audio/transcribe', {
+                        method: 'POST',
+                        body: JSON.stringify({ filename }),
+                        signal: controller.signal,
+                    });
+                    if (!fallbackRes.ok) {
+                        const text = await fallbackRes.text().catch(() => fallbackRes.statusText);
+                        throw new Error(`Transcription fallback error ${fallbackRes.status}: ${text}`);
+                    }
+                    const fallbackData = await fallbackRes.json();
+                    if (fallbackData.jobId) {
+                        const fallbackResult = await pollJobResult(fallbackData.jobId, signal);
+                        words = fallbackResult?.words || [];
+                    } else {
+                        words = fallbackData.words || [];
+                    }
+                }
             } else {
                 words = data.words || [];
             }

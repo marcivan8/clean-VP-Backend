@@ -237,7 +237,7 @@ const Timeline = () => {
     };
 
     return (
-        <div className="flex-1 bg-transparent flex flex-col relative h-full select-none" onKeyDown={handleKeyDown} tabIndex={0}>
+        <div className="flex-1 bg-transparent flex flex-col relative h-full select-none" onKeyDown={handleKeyDown} onContextMenu={e => e.preventDefault()} tabIndex={0}>
             {/* Toolbar */}
             <div className="h-10 border-b flex items-center px-4 justify-between z-20 shrink-0" style={{ background: "var(--glass)", borderColor: "var(--line-soft)" }}>
                 <div className="flex items-center gap-4">

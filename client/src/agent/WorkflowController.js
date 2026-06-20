@@ -110,7 +110,13 @@ const workflowMachine = createMachine({
                                         timestamp: new Date().toLocaleTimeString()
                                     });
                                 } else {
-                                    const stepsApplied = useTimelineStore.getState().past.length - context.initialHistoryLen;
+                                    const afterLen = useTimelineStore.getState().past.length;
+                                    const stepsApplied = afterLen - context.initialHistoryLen;
+                                    if (stepsApplied > 0) {
+                                        // Expose history boundaries so CMD+Z can undo the
+                                        // entire AI batch atomically (not one step at a time).
+                                        useAIStore.getState().setLastAIJob(context.initialHistoryLen, afterLen);
+                                    }
                                     useAIStore.getState().addLog({
                                         id: 'task-complete-' + Date.now(),
                                         type: 'task_complete',
@@ -254,7 +260,11 @@ const workflowMachine = createMachine({
                             useAIStore.getState().setIsAnalyzing(false);
 
                             if (event.output.success) {
-                                const stepsApplied = useTimelineStore.getState().past.length - context.initialHistoryLen;
+                                const afterLen = useTimelineStore.getState().past.length;
+                                const stepsApplied = afterLen - context.initialHistoryLen;
+                                if (stepsApplied > 0) {
+                                    useAIStore.getState().setLastAIJob(context.initialHistoryLen, afterLen);
+                                }
                                 useAIStore.getState().addLog({
                                     id: 'task-complete-' + Date.now(),
                                     type: 'task_complete',

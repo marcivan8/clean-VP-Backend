@@ -370,6 +370,15 @@ const useTimelineStore = create(
                 const newTranscripts = { ...get().transcripts };
                 if (basename && captions?.length > 0) newTranscripts[basename] = captions;
                 set({ captions, captionsFilePath: filePath ?? null, transcriptionAttempted: true, transcripts: newTranscripts });
+                // Transcription finishes async — persist immediately so captions survive
+                // a page reload. The autosave timer only fires on structural timeline events
+                // and would otherwise miss this update.
+                if (captions?.length > 0) {
+                    clearTimeout(_autosaveTimer);
+                    _autosaveTimer = setTimeout(() => {
+                        useTimelineStore.getState().saveProject();
+                    }, 500);
+                }
             },
             // Store timeline-derived words without touching the per-file transcripts index.
             // Use this after segment operations so store.transcripts[file] keeps original
