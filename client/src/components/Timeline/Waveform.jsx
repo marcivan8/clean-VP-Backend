@@ -1,92 +1,105 @@
 import React, { useRef, useEffect, useState } from 'react';
 
-const Waveform = ({ peaks, duration, offset, zoomLevel, height = 40, color = '#ffffff' }) => {
+/**
+ * Waveform — canvas-based peak renderer for timeline clips.
+ *
+ * Accepts two peak formats:
+ *   New: peaks = [[minAmp, maxAmp], ...]   — min/max pairs, both in [-1, 1]
+ *   Old: peaks = [scalar, ...]             — single amplitude value in [0, 1]
+ *
+ * The new format produces a symmetric waveform (bar extends both above and
+ * below the centre line). The old scalar format is rendered as a symmetric
+ * bar where top = +scalar and bottom = -scalar, so both formats look correct.
+ *
+ * Props:
+ *   peaks       — array of [min,max] pairs or scalars
+ *   duration    — total audio duration in seconds (used to map pixels → peaks)
+ *   offset      — clip trim offset in seconds (start within the source audio)
+ *   zoomLevel   — pixels per second on the timeline (drives horizontal scale)
+ *   color       — fill colour (CSS string)
+ */
+const Waveform = ({ peaks, duration, offset = 0, zoomLevel, color = 'rgba(255,255,255,0.85)' }) => {
     const canvasRef = useRef(null);
-    const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+    const [cssSize, setCssSize] = useState({ w: 0, h: 0 });
 
-    const draw = () => {
-        const canvas = canvasRef.current;
-        if (!canvas || !peaks) return;
-
-        const ctx = canvas.getContext('2d');
-        const dpr = window.devicePixelRatio || 1;
-
-        // Dimensions from state 
-        const { width: cssWidth, height: cssHeight } = dimensions;
-        if (cssWidth === 0) return;
-
-        // Ensure canvas buffer matches visual size * DPR
-        canvas.width = cssWidth * dpr;
-        canvas.height = cssHeight * dpr;
-
-        // Logical dimensions for drawing
-        const width = canvas.width / dpr;
-        const h = canvas.height / dpr;
-
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        ctx.fillStyle = color;
-        ctx.beginPath();
-
-        // Waveform Logic
-        const peaksPerSec = peaks.length / duration;
-
-        // We draw pixels from x=0 to width.
-        // pixel 0 corresponds to time = offset.
-        // pixel W corresponds to time = offset + (width / zoomLevel).
-
-        const startSec = offset;
-
-        // Optimization: Step > 1 if density is too high?
-        // 1px step is fine.
-
-        for (let x = 0; x < width; x++) {
-            // Map pixel x to Time relative to Offset
-            const time = startSec + (x / zoomLevel);
-
-            // Map Time to Peak Index
-            const peakIndex = Math.floor(time * peaksPerSec);
-
-            if (peakIndex >= 0 && peakIndex < peaks.length) {
-                const val = peaks[peakIndex];
-
-                // Draw 1px bar.
-                // Scale height: 0.9 to leave some margin
-                const barHeight = val * h * 0.9;
-                const y = (h - barHeight) / 2;
-
-                // Draw rect at x*dpr, y*dpr, 1*dpr wide, height*dpr tall
-                ctx.fillRect(x * dpr, y * dpr, 1 * dpr, barHeight * dpr);
-            }
-        }
-    };
-
-    // Draw when dependencies change or dimensions update
-    useEffect(() => {
-        draw();
-    }, [peaks, duration, offset, zoomLevel, height, color, dimensions]);
-
-    // Handle Resize
+    // ── Measure the canvas element whenever it resizes ────────────────────────
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-
-        const resizeObserver = new ResizeObserver(entries => {
+        const ro = new ResizeObserver(entries => {
             for (const entry of entries) {
                 const { width, height } = entry.contentRect;
-                setDimensions({ width, height });
+                setCssSize({ w: width, h: height });
             }
         });
-
-        resizeObserver.observe(canvas);
-        return () => resizeObserver.disconnect();
+        ro.observe(canvas);
+        return () => ro.disconnect();
     }, []);
+
+    // ── Re-draw whenever anything changes ────────────────────────────────────
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas || !peaks?.length || !duration || !zoomLevel || cssSize.w === 0) return;
+
+        const dpr    = window.devicePixelRatio || 1;
+        const width  = cssSize.w;
+        const height = cssSize.h;
+
+        // Resize the backing buffer to match the CSS display size * DPR
+        canvas.width  = Math.round(width  * dpr);
+        canvas.height = Math.round(height * dpr);
+
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const SCALE      = 0.88;       // leave a tiny margin at top/bottom
+        const midY       = height / 2; // centre line in CSS pixels
+        const peaksPerSec = peaks.length / duration;
+
+        // Determine whether we have the new [min, max] format or old scalar format
+        const isPairs = Array.isArray(peaks[0]);
+
+        ctx.fillStyle = color;
+
+        for (let x = 0; x < width; x++) {
+            // Convert pixel position → source audio time
+            const t          = offset + x / zoomLevel;
+            const peakIndex  = Math.floor(t * peaksPerSec);
+            if (peakIndex < 0 || peakIndex >= peaks.length) continue;
+
+            let minAmp, maxAmp;
+            if (isPairs) {
+                // New format: [minAmp, maxAmp] where minAmp ≤ 0 ≤ maxAmp
+                [minAmp, maxAmp] = peaks[peakIndex];
+            } else {
+                // Legacy scalar: treat as symmetric (bar mirrors above and below)
+                const v = Math.abs(peaks[peakIndex]);
+                minAmp = -v;
+                maxAmp =  v;
+            }
+
+            // Map amplitude to canvas Y (CSS pixels):
+            //   maxAmp > 0 → bar extends UP   from centre (smaller Y value)
+            //   minAmp < 0 → bar extends DOWN from centre (larger  Y value)
+            const topY    = midY - maxAmp * midY * SCALE;  // above centre
+            const bottomY = midY - minAmp * midY * SCALE;  // below centre
+            const barH    = Math.max(1, bottomY - topY);   // always ≥ 1px visible
+
+            // Draw a 1 CSS-pixel wide bar (scaled by DPR for sharpness)
+            ctx.fillRect(
+                Math.round(x * dpr),
+                Math.round(topY * dpr),
+                Math.max(1, dpr),
+                Math.round(barH * dpr),
+            );
+        }
+    }, [peaks, duration, offset, zoomLevel, color, cssSize]);
 
     return (
         <canvas
             ref={canvasRef}
-            className="w-full h-full block opacity-70 canvas-waveform"
-            style={{ width: '100%', height: '100%' }}
+            className="absolute inset-0 w-full h-full block"
+            style={{ imageRendering: 'pixelated' }}
         />
     );
 };

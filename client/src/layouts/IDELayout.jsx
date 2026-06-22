@@ -176,16 +176,24 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     clips: t.clips.map(c => {
                         const sourceAsset = assets.find(a => a.id === c.assetId);
                         // Resolution order:
-                        // 1. proxyUrl (server-relative or blob) — already correct format
-                        // 2. asset blob URL (in-memory, valid while tab is open)
-                        // 3. stored fileUrl / clip url field
+                        // 1. proxyUrl (server-relative) — preferred, always accessible
+                        // 2. stored fileUrl / clip url field (GCS or server paths)
+                        // NOTE: blob: URLs are intentionally excluded. Revideo renders
+                        // in an OffscreenCanvas Web Worker; blob URLs created in the
+                        // main thread are NOT accessible from worker contexts and cause
+                        // ERR_FILE_NOT_FOUND. If only a blob URL is available (video
+                        // still uploading), the clip URL is "" and the Video node is
+                        // skipped (project.tsx: `if (!resolvedUrl) return`) — the clip
+                        // renders as invisible until the proxy job completes.
                         // All GCS https:// URLs are rewritten to go through /api/proxy/gcs-media
-                        const rawUrl = sourceAsset?.proxyUrl
-                            || c.proxyUrl
-                            || sourceAsset?.url
-                            || sourceAsset?.fileUrl
-                            || c.url
-                            || c.fileUrl;
+                        const nb = (u) => (u && !u.startsWith('blob:') ? u : null); // no-blob helper
+                        const rawUrl = nb(sourceAsset?.proxyUrl)
+                            || nb(c.proxyUrl)
+                            || nb(sourceAsset?.fileUrl)
+                            || nb(c.url)
+                            || nb(c.fileUrl)
+                            || nb(sourceAsset?.sourceUrl)
+                            || nb(c.sourceUrl);
                         return {
                             ...c,
                             type: t.type || c.type,

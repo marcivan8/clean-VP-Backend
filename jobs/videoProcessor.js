@@ -1,5 +1,6 @@
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
+const { spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const storageConfig = require('../config/storage');
@@ -7,65 +8,62 @@ const storageConfig = require('../config/storage');
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 /**
- * Extracts waveform data from a video file.
- * Returns an array of peak values.
+ * Extracts waveform peak data from a video/audio file.
+ *
+ * Uses the same technique as Premiere, Descript, and Audacity:
+ *   1. FFmpeg decodes the audio stream to raw PCM (mono, 8 kHz) in one pass
+ *   2. We bucket the Int16 samples into windows and record [min, max] per bucket
+ *   3. The result is stored as waveform.json and cached on GCS — never recomputed
+ *
+ * Returns { peaks: [[min, max], ...], duration }
+ *   peaks[i] = [minAmplitude, maxAmplitude] for window i, both in [-1, 1]
+ *
+ * @param {string} inputPath  Absolute path to the source video/audio file
+ * @param {number} [peaksPerSecond=50]  Resolution — 50 peaks/s gives ~1 bar per 20ms,
+ *   which renders crisply at any zoom level without blowing up the JSON size.
  */
-async function generateWaveform(inputPath) {
-    return new Promise((resolve, reject) => {
-        const peaks = [];
-        let duration = 0;
-        
-        ffmpeg(inputPath)
-            .audioFilters('aresample=8000,astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level')
-            .format('null')
-            .output('-')
-            .on('stderr', (line) => {
-                // Parse duration
-                if (line.includes('Duration:')) {
-                    const match = line.match(/Duration: (\d{2}):(\d{2}):(\d{2}\.\d{2})/);
-                    if (match) {
-                        const hours = parseFloat(match[1]);
-                        const mins = parseFloat(match[2]);
-                        const secs = parseFloat(match[3]);
-                        duration = (hours * 3600) + (mins * 60) + secs;
-                    }
-                }
-                // Parse astats output
-                // Example: [Parsed_ametadata_2 @ 0x...] lavfi.astats.Overall.RMS_level=-25.432
-                if (line.includes('lavfi.astats.Overall.RMS_level')) {
-                    const match = line.match(/RMS_level=([-\d\.]+)/);
-                    if (match) {
-                        const db = parseFloat(match[1]);
-                        // Normalize roughly between -60dB (0) and 0dB (1)
-                        const normalized = Math.max(0, Math.min(1, (db + 60) / 60));
-                        peaks.push(normalized);
-                    }
-                }
-            })
-            .on('end', () => {
-                // Return roughly 1 value per second if there are many peaks
-                // astats with reset=1 outputs per frame. We need to subsample it.
-                // Assuming ~30 fps or frame rate, let's just bucket it to ~1 second bins.
-                const sampledPeaks = [];
-                if (duration > 0 && peaks.length > 0) {
-                    const samplesPerSec = peaks.length / duration;
-                    const step = Math.max(1, Math.floor(samplesPerSec));
-                    for (let i = 0; i < peaks.length; i += step) {
-                        sampledPeaks.push(peaks[i]);
-                    }
-                } else {
-                    sampledPeaks.push(...peaks);
-                }
-                
-                resolve({
-                    peaks: sampledPeaks,
-                    duration,
-                    sampleRate: 8000
-                });
-            })
-            .on('error', reject)
-            .run();
-    });
+function generateWaveform(inputPath, peaksPerSecond = 50) {
+    const SAMPLE_RATE = 8000; // 8 kHz mono — enough to capture amplitude shape, tiny buffer
+
+    // spawnSync pipes raw PCM straight to stdout. We capture it as a Buffer.
+    // FFmpeg always writes diagnostic info to stderr; stdout is pure sample data.
+    const result = spawnSync(
+        ffmpegPath,
+        [
+            '-i', inputPath,
+            '-ac', '1',                // downmix to mono
+            '-ar', String(SAMPLE_RATE),
+            '-f', 's16le',             // signed 16-bit little-endian PCM
+            '-acodec', 'pcm_s16le',
+            '-',                       // write to stdout
+        ],
+        { maxBuffer: 1024 * 1024 * 200 } // 200 MB — enough for ~3.5 h at 8 kHz
+    );
+
+    if (!result.stdout?.length) {
+        const errStr = result.stderr?.toString('utf8').slice(-800) || '(no stderr)';
+        throw new Error(`FFmpeg waveform extraction produced no output.\n${errStr}`);
+    }
+
+    const raw     = result.stdout;
+    const samples = new Int16Array(raw.buffer, raw.byteOffset, Math.floor(raw.length / 2));
+    const duration = samples.length / SAMPLE_RATE;
+    const perPeak  = Math.max(1, Math.floor(SAMPLE_RATE / peaksPerSecond));
+    const peaks    = [];
+
+    for (let i = 0; i < samples.length; i += perPeak) {
+        let min = 0, max = 0;
+        const end = Math.min(i + perPeak, samples.length);
+        for (let j = i; j < end; j++) {
+            const v = samples[j] / 32768;
+            if (v < min) min = v;
+            if (v > max) max = v;
+        }
+        peaks.push([+min.toFixed(3), +max.toFixed(3)]);
+    }
+
+    console.log(`[generateWaveform] ${peaks.length} peaks  duration=${duration.toFixed(2)}s  file=${path.basename(inputPath)}`);
+    return { peaks, duration };
 }
 
 /**
