@@ -968,7 +968,12 @@ export class MediaExecutionEngine {
      */
     _applySegmentsToTimeline(segments, prefix = 'seg', targetClipId = null, targetAssetId = null) {
         const timelineStore = useTimelineStore.getState();
-        const videoTrack    = timelineStore.tracks?.find(t => t.type === 'video');
+        // Prefer the video track that actually has clips — an empty "extra" track
+        // added via "+ Track" sorts before the main track and would otherwise be
+        // picked first, causing the "video track has no clips" bail-out.
+        const videoTrack =
+            timelineStore.tracks?.find(t => t.type === 'video' && t.clips.length > 0) ??
+            timelineStore.tracks?.find(t => t.type === 'video');
 
         if (!videoTrack) {
             console.warn(`[MediaExecutionEngine] _applySegmentsToTimeline: no video track found`);

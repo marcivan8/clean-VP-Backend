@@ -425,23 +425,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 uploadPhase: 'ready'
                             });
 
-                            // Fetch the pre-computed waveform from the server and populate
-                            // the waveforms store so Clip.jsx can render it immediately.
-                            // VideoPlayer/PlaybackEngine would normally do this at decode time,
-                            // but the current layout uses Revideo's <Player> which never calls
-                            // onWaveformUpdate. The videoProcessor already ran ffmpeg astats and
-                            // uploaded waveform.json — we just need to fetch and store it.
-                            if (data.waveformUrl) {
-                                fetch(data.waveformUrl)
-                                    .then(r => r.ok ? r.json() : null)
-                                    .then(wf => {
-                                        if (wf?.peaks?.length) {
-                                            useTimelineStore.getState().addWaveform('video_main', wf.peaks, wf.duration);
-                                        }
-                                    })
-                                    .catch(() => { /* non-fatal — waveform is cosmetic */ });
-                            }
-
                             // Backfill sourceUrl on any clips already placed on the
                             // timeline that belong to this asset — they were added
                             // before the upload resolved, so they still have blob URLs.

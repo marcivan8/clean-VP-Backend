@@ -447,9 +447,20 @@ const Timeline = () => {
                         </div>
                     )}
 
-                    {tracks.map(track => (
-                        <Track key={track.id} track={track} />
-                    ))}
+                    {tracks
+                        // Hide extra (non-default) tracks when they have no clips.
+                        // 'track-1' (Video Track 1) and 'track-2' (Audio Track 1) are
+                        // the seeded defaults and are always kept visible so there's
+                        // always somewhere to drop a file.
+                        .filter(track =>
+                            track.clips.length > 0 ||
+                            track.id === 'track-1' ||
+                            track.id === 'track-2'
+                        )
+                        .map(track => (
+                            <Track key={track.id} track={track} />
+                        ))
+                    }
 
                     {/* Rubber-band selection box */}
                     {selBox && (
