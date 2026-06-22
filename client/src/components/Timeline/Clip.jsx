@@ -7,7 +7,7 @@ import Waveform from './Waveform';
 import ClipContextMenu from './ClipContextMenu';
 
 const Clip = ({ clip, trackId }) => {
-    const { zoomLevel, removeClip, activeClipId, selectedClipIds, setActiveClip, toggleClipSelection, waveforms } = useTimelineStore();
+    const { zoomLevel, removeClip, activeClipId, selectedClipIds, setActiveClip, toggleClipSelection, waveforms, assets, addWaveform } = useTimelineStore();
     const isActive = activeClipId === clip.id;
     const isSelected = selectedClipIds && selectedClipIds.includes(clip.id);
     const [ctxMenu, setCtxMenu] = React.useState(null); // null | { x, y }
@@ -16,6 +16,32 @@ const Clip = ({ clip, trackId }) => {
     // audio stream). Fall back to that key so audio track clips get the waveform
     // even though their trackId doesn't match 'video_main'.
     const waveformData = waveforms ? (waveforms[trackId] ?? waveforms['video_main'] ?? null) : null;
+
+    // Fetch waveform from the asset's waveformUrl when not yet in store.
+    // Runs on mount and whenever the asset or store entry changes.
+    // This handles both fresh uploads (waveformUrl set after proxy job) and
+    // reloaded projects (waveformUrl persisted in asset, no VideoWorker running).
+    React.useEffect(() => {
+        if (waveformData) return; // already loaded
+        const asset = assets?.find(a => a.id === clip.assetId);
+        if (!asset?.waveformUrl) return;
+
+        let cancelled = false;
+        fetch(asset.waveformUrl)
+            .then(r => r.ok ? r.json() : null)
+            .then(wf => {
+                if (!cancelled && wf?.peaks?.length) {
+                    addWaveform(trackId, wf.peaks, wf.duration);
+                    // Also store under 'video_main' so audio-track clips sharing the
+                    // same asset pick it up via the fallback lookup in Clip.jsx.
+                    addWaveform('video_main', wf.peaks, wf.duration);
+                }
+            })
+            .catch(err => console.warn('[Clip] Waveform fetch failed:', err.message));
+
+        return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [clip.assetId, !!waveformData]);
 
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: clip.id,

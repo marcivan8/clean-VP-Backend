@@ -420,6 +420,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                             useTimelineStore.getState().updateAsset(assetId, {
                                 proxyUrl: data.proxyUrl,
+                                waveformUrl: data.waveformUrl || null,
                                 sourceUrl: rawGcsUrl || undefined,
                                 isProxying: false,
                                 uploadPhase: 'ready'
