@@ -472,15 +472,38 @@ module.exports = async function processAudioJob(job) {
 
             await job.updateProgress(15);
 
+            // minSpeakers=2 is a critical default for interview/podcast content:
+            // pyannote will NOT collapse two distinct voices into one speaker when
+            // it knows there are at least 2. Without this, single-speaker detection
+            // is often returned for content with obvious speaker changes.
+            // Override via job.data.minSpeakers if the caller knows the speaker count.
+            const minSpeakers = job.data.minSpeakers ?? 2;
+            const maxSpeakers = job.data.maxSpeakers ?? 10;
+
             let result;
             try {
-                result = await DiarizeService.diarize(wavPath, language || null);
+                result = await DiarizeService.diarize(wavPath, language || null, { minSpeakers, maxSpeakers });
             } finally {
                 if (fs.existsSync(wavPath)) fs.unlinkSync(wavPath);
             }
 
             await job.updateProgress(100);
-            console.log(`[Job ${job.id}] ✅ Diarization complete: ${result.words.length} words, ${result.speakers.length} speakers`);
+
+            if (!result.diarizationRan) {
+                // Diarization pipeline didn't load on the Python side — most likely
+                // HF_TOKEN is missing. Surface this as a job warning in the result
+                // so the client can inform the user.
+                console.warn(`[Job ${job.id}] ⚠️  Diarization skipped — no speaker labels. Check HF_TOKEN on diarize-service.`);
+                return {
+                    words:           result.words,
+                    speakers:        [],
+                    language:        result.language,
+                    diarizationRan:  false,
+                    warning:         'Speaker separation did not run. Set HF_TOKEN in the diarize-service Railway Variables and accept the pyannote model terms at https://huggingface.co/pyannote/speaker-diarization-3.1',
+                };
+            }
+
+            console.log(`[Job ${job.id}] ✅ Diarization complete: ${result.words.length} words, ${result.speakers.length} speakers: ${result.speakers.join(', ')}`);
             return result;
         }
 

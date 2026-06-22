@@ -1,6 +1,19 @@
 # diarize-service/Dockerfile
 # Deploy this as a SEPARATE Railway service from the Node backend.
-# Set HF_TOKEN, WHISPERX_MODEL, and PORT in Railway's Variables dashboard.
+#
+# REQUIRED Railway Variables:
+#   HF_TOKEN        — HuggingFace access token for pyannote gated models.
+#                     Without this, diarization will NOT run (transcription still works).
+#                     You must also accept terms at:
+#                       https://huggingface.co/pyannote/speaker-diarization-3.1
+#                       https://huggingface.co/pyannote/segmentation-3.0
+#
+# OPTIONAL Railway Variables:
+#   WHISPERX_MODEL  — "tiny" | "base" | "small" (default) | "medium" | "large-v2"
+#                     IMPORTANT: "base" has poor word alignment, which causes many words
+#                     to get no speaker label. Use "small" (default) or "medium" for
+#                     reliable speaker diarization. "medium" is recommended for accuracy.
+#   PORT            — Server port (default: 5001, set automatically by Railway)
 #
 # CPU build (default) — ~2-3x realtime. Suitable for background jobs.
 # For GPU: swap base image to pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime

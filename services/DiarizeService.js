@@ -28,21 +28,27 @@ class DiarizeServiceClass {
     /**
      * Run WhisperX transcription + pyannote diarization on a local audio file.
      *
-     * @param {string} filePath  - Absolute path to the audio/video file on the
-     *                             server filesystem (already downloaded from GCS).
-     * @param {string} [language] - ISO-639-1 language code, e.g. "en". Omit for auto-detect.
+     * @param {string} filePath      - Absolute path to the audio/video file on the
+     *                                 server filesystem (already downloaded from GCS).
+     * @param {string} [language]    - ISO-639-1 language code, e.g. "en". Omit for auto-detect.
+     * @param {object} [opts]
+     * @param {number} [opts.minSpeakers=2] - Minimum number of speakers to detect.
+     *   Setting this to 2 dramatically improves accuracy for interview/podcast content
+     *   because pyannote won't collapse two distinct speakers into one.
+     * @param {number} [opts.maxSpeakers=10] - Maximum number of speakers to detect.
      * @returns {Promise<{
-     *   words:    Array<{ word: string, start: number, end: number, speaker: string|null }>,
-     *   speakers: string[],
-     *   language: string,
+     *   words:           Array<{ word: string, start: number, end: number, speaker: string|null }>,
+     *   speakers:        string[],
+     *   language:        string,
+     *   diarizationRan:  boolean,   // false when HF_TOKEN not set on the Python service
      * }>}
      */
-    async diarize(filePath, language = null) {
+    async diarize(filePath, language = null, { minSpeakers = 2, maxSpeakers = 10 } = {}) {
         if (!this.isAvailable) {
             throw new Error('Diarization service is not configured (DIARIZE_SERVICE_URL not set)');
         }
 
-        console.log(`[DiarizeService] POST /diarize  filePath=${filePath}`);
+        console.log(`[DiarizeService] POST /diarize  filePath=${filePath}  minSpeakers=${minSpeakers}  maxSpeakers=${maxSpeakers}`);
 
         // Upload the WAV file as multipart so the diarize container doesn't
         // need access to this container's filesystem (required on Railway).
@@ -52,6 +58,8 @@ class DiarizeServiceClass {
             contentType: 'audio/wav',
         });
         if (language) form.append('language', language);
+        form.append('min_speakers', String(minSpeakers));
+        form.append('max_speakers', String(maxSpeakers));
 
         // Retry up to 3 times on 502/503 — the Python container may be
         // momentarily restarting after an OOM kill.
@@ -76,13 +84,24 @@ class DiarizeServiceClass {
             }
         }
 
-        const { words, speakers, language: detectedLang } = response.data;
-        console.log(
-            `[DiarizeService] Done — ${words.length} words, ` +
-            `${speakers.length} speaker(s): ${speakers.join(', ')}, lang=${detectedLang}`
-        );
+        const { words, speakers, language: detectedLang, diarization_ran: diarizationRan } = response.data;
 
-        return { words, speakers, language: detectedLang };
+        if (!diarizationRan) {
+            console.warn(
+                `[DiarizeService] ⚠️  Diarization did NOT run on the Python service — all speaker fields will be null. ` +
+                `This usually means HF_TOKEN is not set in the diarize-service container. ` +
+                `Set HF_TOKEN in Railway Variables and redeploy diarize-service. ` +
+                `Also ensure you have accepted the pyannote model terms at ` +
+                `https://huggingface.co/pyannote/speaker-diarization-3.1`
+            );
+        } else {
+            console.log(
+                `[DiarizeService] Done — ${words.length} words, ` +
+                `${speakers.length} speaker(s): ${speakers.join(', ')}, lang=${detectedLang}`
+            );
+        }
+
+        return { words, speakers, language: detectedLang, diarizationRan: Boolean(diarizationRan) };
     }
 
     /**

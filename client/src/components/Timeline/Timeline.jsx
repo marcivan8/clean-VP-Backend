@@ -459,20 +459,28 @@ const Timeline = () => {
                         </div>
                     )}
 
-                    {tracks
-                        // Hide extra (non-default) tracks when they have no clips.
-                        // 'track-1' (Video Track 1) and 'track-2' (Audio Track 1) are
-                        // the seeded defaults and are always kept visible so there's
-                        // always somewhere to drop a file.
-                        .filter(track =>
-                            track.clips.length > 0 ||
-                            track.id === 'track-1' ||
-                            track.id === 'track-2'
-                        )
-                        .map(track => (
-                            <Track key={track.id} track={track} />
-                        ))
-                    }
+                    {(() => {
+                        // Identify the baseline video and audio tracks — always kept
+                        // visible as drop targets, even when empty.
+                        //
+                        // Tracks are sorted by order ascending. New video tracks get
+                        // minOrder-1 (float above), so the original main video track
+                        // has the highest order → it is LAST in the video list.
+                        // New audio tracks get maxOrder+1 (sink below), so the main
+                        // audio track has the lowest order → FIRST in the audio list.
+                        const videoTracks = tracks.filter(t => t.type === 'video');
+                        const audioTracks = tracks.filter(t => t.type === 'audio');
+                        const mainVideoId = videoTracks.at(-1)?.id ?? null;
+                        const mainAudioId = audioTracks[0]?.id ?? null;
+
+                        return tracks
+                            .filter(track =>
+                                track.clips.length > 0 ||
+                                track.id === mainVideoId ||
+                                track.id === mainAudioId
+                            )
+                            .map(track => <Track key={track.id} track={track} />);
+                    })()}
 
                     {/* Rubber-band selection box */}
                     {selBox && (

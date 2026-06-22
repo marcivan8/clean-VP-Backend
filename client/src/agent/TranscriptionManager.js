@@ -218,6 +218,21 @@ class TranscriptionManagerClass {
                     // plain Whisper (which has no speaker labels) prematurely.
                     const result = await pollJobResult(data.jobId, signal, DIARIZE_TIMEOUT_MS);
                     words = result?.words || [];
+
+                    // Surface a warning when pyannote diarization didn't run on the
+                    // Python service (most likely because HF_TOKEN is not set there).
+                    // The transcript still contains words — just no speaker labels.
+                    if (result && result.diarizationRan === false) {
+                        const msg = result.warning ||
+                            'Speaker separation did not run. HF_TOKEN may not be set on the diarize-service — all words will have no speaker label.';
+                        console.warn('[TranscriptionManager] ⚠️ ' + msg);
+                        EventBus.emit(EVENT_TYPES.TRANSCRIPTION_PROGRESS, {
+                            status: 'diarization_skipped',
+                            progress: 45,
+                            filename,
+                            message: msg,
+                        });
+                    }
                 } catch (pollErr) {
                     // If the user aborted, propagate — don't silently swallow cancellations.
                     if (signal?.aborted || pollErr.message === 'Polling cancelled') throw pollErr;
