@@ -223,6 +223,18 @@ const Timeline = () => {
         if ((e.metaKey || e.ctrlKey) && e.key === 'v') {
             pasteClip(currentTime);
         }
+
+        // Arrow keys — frame-by-frame scrubbing (no modifier key)
+        // Shift+Arrow = jump 10 frames
+        if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.metaKey && !e.ctrlKey) {
+            e.preventDefault();
+            const { seek, duration, playerRef } = useTimelineStore.getState();
+            // Prefer fps from the live Revideo player; fall back to 30
+            const fps = playerRef?.playback?.fps ?? 30;
+            const frames = e.shiftKey ? 10 : 1;
+            const step = (frames / fps) * (e.key === 'ArrowLeft' ? -1 : 1);
+            seek(Math.max(0, Math.min(duration, currentTime + step)));
+        }
     }, []);
 
     React.useEffect(() => {

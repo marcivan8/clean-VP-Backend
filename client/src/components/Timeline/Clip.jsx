@@ -17,17 +17,24 @@ const Clip = ({ clip, trackId }) => {
     // even though their trackId doesn't match 'video_main'.
     const waveformData = waveforms ? (waveforms[trackId] ?? waveforms['video_main'] ?? null) : null;
 
-    // Fetch waveform from the asset's waveformUrl when not yet in store.
-    // Runs on mount and whenever the asset or store entry changes.
-    // This handles both fresh uploads (waveformUrl set after proxy job) and
-    // reloaded projects (waveformUrl persisted in asset, no VideoWorker running).
+    // Resolve waveform URL — prefer explicit waveformUrl on the asset, fall back
+    // to deriving it from proxyUrl for assets uploaded before waveformUrl was stored.
+    // proxyUrl pattern: .../proxies/{userId}/{videoFile}/proxy.mp4
+    // waveformUrl:      .../proxies/{userId}/{videoFile}/waveform.json
+    const asset = assets?.find(a => a.id === clip.assetId);
+    const resolvedWaveformUrl = asset?.waveformUrl ||
+        (asset?.proxyUrl ? asset.proxyUrl.replace(/\/proxy\.[^/]+$/, '/waveform.json') : null);
+
+    // Fetch waveform peaks whenever the URL is available and not yet in store.
+    // Adding resolvedWaveformUrl to deps means the effect re-runs as soon as
+    // the proxy job sets the URL (without it the effect fires once on mount,
+    // sees no URL, and never retries even after the asset is updated).
     React.useEffect(() => {
         if (waveformData) return; // already loaded
-        const asset = assets?.find(a => a.id === clip.assetId);
-        if (!asset?.waveformUrl) return;
+        if (!resolvedWaveformUrl) return;
 
         let cancelled = false;
-        fetch(asset.waveformUrl)
+        fetch(resolvedWaveformUrl)
             .then(r => r.ok ? r.json() : null)
             .then(wf => {
                 if (!cancelled && wf?.peaks?.length) {
@@ -41,7 +48,7 @@ const Clip = ({ clip, trackId }) => {
 
         return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [clip.assetId, !!waveformData]);
+    }, [resolvedWaveformUrl, !!waveformData]);
 
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: clip.id,
