@@ -744,7 +744,15 @@ export class MediaExecutionEngine {
                     console.warn(`[MediaExecutionEngine] Transcript for "${processedBase}" covers only ${((lastWordEnd / clipDuration) * 100).toFixed(0)}% — using FFmpeg fallback`);
                 }
             } else {
-                console.warn(`[MediaExecutionEngine] No transcript found for "${processedBase}" — using FFmpeg fallback`);
+                // Block silence/filler detection when no transcript is available.
+                // The FFmpeg audio-level fallback uses a fixed dB threshold that is
+                // far too aggressive on talking-head footage and will wipe the entire
+                // clip if the recorded levels are low. Abort here and ask the user to
+                // transcribe first — the transcript-based path is much safer.
+                throw new Error(
+                    `No transcript found for "${processedBase}". ` +
+                    `Please wait for transcription to finish (or ask the AI to transcribe the clip) before running silence or filler removal.`
+                );
             }
 
             // Pass micro-padding config through to the worker

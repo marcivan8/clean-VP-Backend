@@ -706,7 +706,11 @@ export class VideoEditorTools {
         console.log('[VideoEditorTools] Running smart cleanup...');
         const store = useTimelineStore.getState();
 
-        const videoTrack = store.tracks?.find(t => t.type === 'video');
+        // Prefer video track that has clips — an empty extra track added via
+        // "+ Track" sorts before the main track and would otherwise be selected.
+        const videoTrack =
+            store.tracks?.find(t => t.type === 'video' && t.clips.length > 0) ??
+            store.tracks?.find(t => t.type === 'video');
         if (!videoTrack || videoTrack.clips.length === 0) {
             return { success: false, message: 'No video clips on the timeline to analyze.' };
         }

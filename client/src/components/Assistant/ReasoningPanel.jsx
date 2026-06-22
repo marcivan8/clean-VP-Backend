@@ -48,8 +48,12 @@ const TaskCompletionCard = ({ log }) => {
 
     const handleReject = () => {
         setRejecting(true);
-        const store = useTimelineStore.getState();
-        while (store.past.length > preTaskHistoryLen) {
+        // Re-read the store on every iteration — the initial snapshot goes stale
+        // after the first undo() call, so checking store.past.length from the
+        // closure freezes the loop at the pre-undo depth forever.
+        // Cap at 200 iterations as a safety guard against any edge-case cycle.
+        let safety = 200;
+        while (useTimelineStore.getState().past.length > preTaskHistoryLen && safety-- > 0) {
             useTimelineStore.getState().undo();
         }
         setDismissed(true);

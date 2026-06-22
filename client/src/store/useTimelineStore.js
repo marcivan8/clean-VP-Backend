@@ -1139,6 +1139,12 @@ const useTimelineStore = create(
                     pacingSegments: state.pacingSegments,
                     beatMarkers: state.beatMarkers,
                     captions: state.captions,
+                    // Persist per-file transcript map so AI operations (silence detection,
+                    // filler removal) survive page reloads without re-running transcription.
+                    // Without this, MediaExecutionEngine falls back to destructive FFmpeg
+                    // silence detection which can wipe the entire clip.
+                    transcripts: state.transcripts || {},
+                    captionsFilePath: state.captionsFilePath || null,
                     transcriptionAttempted: state.transcriptionAttempted,
                     assets: sanitizedAssets,
                     uploadedFilePath: state.uploadedFilePath || null,
@@ -1164,6 +1170,10 @@ const useTimelineStore = create(
                     pacingSegments: projectData.pacingSegments || [],
                     beatMarkers: projectData.beatMarkers || [],
                     captions: projectData.captions || [],
+                    // Restore per-file transcript map so AI silence/filler detection
+                    // can use transcript-based timing instead of FFmpeg fallback.
+                    transcripts: projectData.transcripts || {},
+                    captionsFilePath: projectData.captionsFilePath || null,
                     transcriptionAttempted: projectData.transcriptionAttempted || false,
                     activeClipId: null,
                     currentTime: 0,
