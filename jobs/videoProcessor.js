@@ -119,7 +119,14 @@ module.exports = async function processVideoJob(job) {
                 throw new Error(`Input file not found locally and failed to download from GCS: ${err.message}`);
             }
         } else {
-            throw new Error(`Input file not found: ${absoluteInputPath}`);
+            // This happens when the client uploaded directly to GCS but the worker
+            // service lacks GCS credentials (GOOGLE_APPLICATION_CREDENTIALS_JSON /
+            // GOOGLE_CLOUD_BUCKET_NAME not set on the Railway worker service), so
+            // storage.js fell back to local storage and the file is unreachable.
+            throw new Error(
+                `Input file not found locally (${absoluteInputPath}) and GCS is unavailable on this worker. ` +
+                `Ensure GOOGLE_APPLICATION_CREDENTIALS_JSON and GOOGLE_CLOUD_BUCKET_NAME are set on the worker Railway service.`
+            );
         }
     }
 

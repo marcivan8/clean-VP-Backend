@@ -135,12 +135,16 @@ class ProxyService {
             try {
                 return await this.uploadDirectToGCS(file, onProgress);
             } catch (err) {
-                // If it fails because GCS is not configured, fallback to legacy upload
-                if (err.message === 'GCS not configured') {
-                    console.log('[ProxyService] GCS not configured, falling back to legacy upload...');
-                } else {
-                    throw err; // Rethrow actual upload errors
-                }
+                // Fall back to legacy server upload for any GCS failure:
+                //  - 'GCS not configured'  → upload-url endpoint disabled
+                //  - job failure errors    → worker can't reach GCS (missing credentials
+                //                           on the Railway worker service), but the legacy
+                //                           path uploads the file directly to the server so
+                //                           the worker can find it on the local filesystem
+                //  - XHR network errors   → transient GCS connectivity issue
+                // Only hard auth rejections (401/403) from our own API would also fail
+                // on the legacy path, so there's no harm in always trying it.
+                console.warn('[ProxyService] Direct GCS upload failed, falling back to legacy upload:', err.message);
             }
 
             // Legacy Fallback
