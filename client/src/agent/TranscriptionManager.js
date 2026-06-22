@@ -10,7 +10,7 @@
  */
 
 import { authFetch } from '../utils/authFetch.js';
-import { pollJobResult } from '../utils/jobPoller.js';
+import { pollJobResult, DIARIZE_TIMEOUT_MS } from '../utils/jobPoller.js';
 import { EventBus, EVENT_TYPES } from './EventBus.js';
 import { ContentAnalyzer } from './ContentAnalyzer.js';
 import useTimelineStore from '../store/useTimelineStore.js';
@@ -212,7 +212,11 @@ class TranscriptionManagerClass {
                 // long-lived streaming connections.
                 this._setStatus(TRANSCRIPTION_STATUS.TRANSCRIBING, 20);
                 try {
-                    const result = await pollJobResult(data.jobId, signal);
+                    // Diarize jobs (WhisperX + pyannote on CPU) can take 8-10 min
+                    // for long videos. Use the extended deadline so the client waits
+                    // out the full server-side timeout instead of falling back to
+                    // plain Whisper (which has no speaker labels) prematurely.
+                    const result = await pollJobResult(data.jobId, signal, DIARIZE_TIMEOUT_MS);
                     words = result?.words || [];
                 } catch (pollErr) {
                     // If the user aborted, propagate — don't silently swallow cancellations.

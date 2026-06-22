@@ -12,8 +12,12 @@ import { authFetch } from './authFetch.js';
 const MIN_POLL_INTERVAL_MS  = 1500;   // start polling every 1.5s
 const MAX_POLL_INTERVAL_MS  = 5000;   // back off to every 5s for long jobs
 const BACKOFF_FACTOR        = 1.3;    // multiply interval by this after each poll
-const DEFAULT_TIMEOUT_MS    = 300_000; // give up after 5 minutes
-                                       // (Whisper on a 30-min video can take 3+ min)
+const DEFAULT_TIMEOUT_MS    = 300_000; // 5 min — fast jobs (proxy, plain transcribe)
+
+// Diarize jobs run WhisperX alignment + pyannote on CPU; a 20-min video can take
+// 8-10 minutes. Use a separate constant so the diarize path waits the full window
+// the server allows (DIARIZE_TIMEOUT_MS env = 600 s) before giving up.
+export const DIARIZE_TIMEOUT_MS = 660_000; // 11 min — slightly over server's 10 min
 
 /**
  * Poll /api/jobs/:jobId/status until state is 'completed' or 'failed'.
@@ -22,11 +26,12 @@ const DEFAULT_TIMEOUT_MS    = 300_000; // give up after 5 minutes
  * don't hammer the API for long-running jobs (transcription, silence detect).
  *
  * @param {string}      jobId
- * @param {AbortSignal} [signal]   – optional cancellation token
- * @returns {Promise<any>}         – resolves with the job's returnValue
+ * @param {AbortSignal} [signal]      – optional cancellation token
+ * @param {number}      [timeoutMs]   – override the default 5-minute deadline
+ * @returns {Promise<any>}            – resolves with the job's returnValue
  */
-export async function pollJobResult(jobId, signal = null) {
-    const deadline    = Date.now() + DEFAULT_TIMEOUT_MS;
+export async function pollJobResult(jobId, signal = null, timeoutMs = DEFAULT_TIMEOUT_MS) {
+    const deadline    = Date.now() + timeoutMs;
     let   intervalMs  = MIN_POLL_INTERVAL_MS;
 
     while (true) {
@@ -36,7 +41,7 @@ export async function pollJobResult(jobId, signal = null) {
         }
 
         if (Date.now() > deadline) {
-            throw new Error(`Job ${jobId} timed out after ${DEFAULT_TIMEOUT_MS / 1000}s`);
+            throw new Error(`Job ${jobId} timed out after ${timeoutMs / 1000}s`);
         }
 
         // Fetch current job state
