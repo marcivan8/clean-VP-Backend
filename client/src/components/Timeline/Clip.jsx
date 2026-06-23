@@ -238,14 +238,20 @@ const Clip = ({ clip, trackId }) => {
             </div>
 
             {/* Waveform Visualization */}
-            <div className="flex-1 w-full bg-black/10 relative">
+            <div className="flex-1 w-full relative overflow-hidden">
                 {waveformData && (
                     <Waveform
                         peaks={waveformData.peaks}
                         duration={waveformData.duration}
                         offset={clip.offset || 0}
                         zoomLevel={zoomLevel}
-                        color="rgba(255, 255, 255, 0.8)"
+                        // Green for video, amber for audio — matches the pro DAW look
+                        waveColor={
+                            clip.type === 'audio'
+                                ? 'rgba(251, 146, 60, 0.80)'   // orange-400
+                                : 'rgba(74, 222, 128, 0.78)'   // emerald-400
+                        }
+                        bgColor="rgba(0, 0, 0, 0.50)"
                     />
                 )}
             </div>
