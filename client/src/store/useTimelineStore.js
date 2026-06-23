@@ -37,10 +37,10 @@ try {
             // Only keep an empty track if no clip-bearing track of that type exists.
             const tracksWithClips = (_saved.tracks || []).filter(t => t.clips?.length > 0);
             const typesWithClips = new Set(tracksWithClips.map(t => t.type));
-            
+
             const emptyTracksToKeep = [];
             const seenEmptyTypes = new Set();
-            
+
             for (const track of (_saved.tracks || [])) {
                 if (!track.clips?.length) {
                     if (!typesWithClips.has(track.type) && !seenEmptyTypes.has(track.type)) {
@@ -49,7 +49,7 @@ try {
                     }
                 }
             }
-            
+
             _saved.tracks = [...tracksWithClips, ...emptyTracksToKeep];
 
             timelineManager.fromLegacyTracks(_saved.tracks);
@@ -311,27 +311,27 @@ const useTimelineStore = create(
             })),
             setUploadedFile: (file) => set({ uploadedFile: file }),
             setUploadedFilePath: (path) => set({ uploadedFilePath: path }),
-            
+
             // Add asset to timeline (used primarily by mobile tap-to-add interface)
             addAssetToTimeline: (asset) => {
                 const state = get();
                 const tracks = timelineManager.toLegacyTracks();
-                
+
                 // Find target track (first video track for video/image, first audio for audio)
                 let targetTrack = tracks.find(t => t.type === asset.type);
-                
+
                 // Or fallback to first track if type matches roughly
                 if (!targetTrack && (asset.type === 'video' || asset.type === 'image')) {
                     targetTrack = tracks.find(t => t.type === 'video');
                 }
-                
+
                 // If no track exists, create one
                 let trackId = targetTrack?.id;
                 if (!trackId) {
                     const newType = asset.type === 'audio' ? 'audio' : 'video';
                     trackId = get().addTrack(newType);
                 }
-                
+
                 // Find end of current clips on this track.
                 // Ignore ghost clips (empty URLs from a stale autosave) — they have
                 // no playable content, so a freshly uploaded video should start at 0
@@ -342,7 +342,7 @@ const useTimelineStore = create(
                     if (!hasValidUrl) return max;
                     return Math.max(max, clip.start + clip.duration);
                 }, 0) || 0;
-                
+
                 // Add the clip at the end
                 get().addClip(trackId, {
                     assetId: asset.id,
@@ -354,7 +354,7 @@ const useTimelineStore = create(
                     sourceUrl: asset.sourceUrl || asset.url,
                     type: asset.type
                 });
-                
+
                 // Seek to the new clip
                 get().seek(currentEnd);
             },
@@ -518,7 +518,7 @@ const useTimelineStore = create(
                 if (updates.textDecoration !== undefined) clipUpdates.textDecoration = updates.textDecoration;
                 if (updates.textShadow !== undefined) clipUpdates.textShadow = updates.textShadow;
                 if (updates.stroke !== undefined) clipUpdates.stroke = updates.stroke;
-                if (updates.color   !== undefined) clipUpdates.color   = updates.color;
+                if (updates.color !== undefined) clipUpdates.color = updates.color;
                 if (updates.bgColor !== undefined) clipUpdates.bgColor = updates.bgColor;
                 if (updates.textAlign !== undefined) clipUpdates.textAlign = updates.textAlign;
                 if (updates.position !== undefined) clipUpdates.position = updates.position;
@@ -601,7 +601,7 @@ const useTimelineStore = create(
                 });
             },
 
-            removeClip: (trackId, clipId) => {
+            removeClip: (trackId, clipId, options = {}) => {
                 get()._saveHistory();
 
                 const state = get();
@@ -621,7 +621,14 @@ const useTimelineStore = create(
                     }
                 });
 
-                get()._cleanEmptyTracks();
+                // skipCleanup: true when called from bulk operations (e.g. silence removal)
+                // that remove clips and immediately re-add segments to the same layer.
+                // Without this guard, _cleanEmptyTracks() deletes the now-empty video layer,
+                // and the subsequent addClip() calls silently orphan their placements (they
+                // reference a layer that no longer exists) → timeline appears empty.
+                if (!options.skipCleanup) {
+                    get()._cleanEmptyTracks();
+                }
                 set({
                     tracks: timelineManager.toLegacyTracks(),
                     activeClipId: null,
@@ -1310,7 +1317,7 @@ const useTimelineStore = create(
                 const newClips = [];
                 for (const clip of videoTrack.clips) {
                     const cSrcStart = clip.offset ?? 0;
-                    const cSrcEnd   = cSrcStart + (clip.duration ?? 0);
+                    const cSrcEnd = cSrcStart + (clip.duration ?? 0);
 
                     // No overlap → keep as-is
                     if (srcEnd <= cSrcStart || srcStart >= cSrcEnd) {
@@ -1328,8 +1335,8 @@ const useTimelineStore = create(
                     if (srcEnd < cSrcEnd) {
                         newClips.push({
                             ...clip,
-                            id:       `${clip.id}-R`,
-                            offset:   srcEnd,
+                            id: `${clip.id}-R`,
+                            offset: srcEnd,
                             duration: cSrcEnd - srcEnd,
                         });
                     }

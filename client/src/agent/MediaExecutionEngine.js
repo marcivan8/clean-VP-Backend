@@ -1107,9 +1107,12 @@ export class MediaExecutionEngine {
             timestamp: new Date().toLocaleTimeString()
         });
 
-        // Remove all clips in the range
+        // Remove all clips in the range.
+        // skipCleanup: true prevents _cleanEmptyTracks() from deleting the video layer
+        // while it is temporarily empty. If the layer is deleted here, the addClip()
+        // calls below silently orphan their placements and the timeline appears empty.
         for (const clip of baseClips) {
-            timelineStore.removeClip(videoTrack.id, clip.id);
+            timelineStore.removeClip(videoTrack.id, clip.id, { skipCleanup: true });
         }
 
         // Insert replacement clips starting at rangeStart
@@ -1144,6 +1147,9 @@ export class MediaExecutionEngine {
                     timelineStore.updateClip(videoTrack.id, c.id, { start: c.start + durationDiff }, { skipHistory: true });
                 });
         }
+
+        // Now that all segment clips are in place, it's safe to let empty-track cleanup run.
+        useTimelineStore.getState()._cleanEmptyTracks();
 
         const label = baseClips.length > 1
             ? `${baseClips.length} clips (asset ${targetAssetId})`
