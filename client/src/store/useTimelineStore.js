@@ -610,7 +610,15 @@ const useTimelineStore = create(
                     : [clipId];
 
                 targets.forEach(id => {
-                    timelineManager.dispatch(TimelineActions.removePlacement(id));
+                    // In the legacy API, 'id' is a placement ID.
+                    // Use CLIP_REMOVE which removes both the clip entity and its placement so
+                    // no orphaned clip entities are left behind (which caused console validation warnings).
+                    const placement = timelineManager.getState().entities.placements[id];
+                    if (placement?.clipId) {
+                        timelineManager.dispatch(TimelineActions.removeClip(placement.clipId));
+                    } else {
+                        timelineManager.dispatch(TimelineActions.removePlacement(id));
+                    }
                 });
 
                 get()._cleanEmptyTracks();
