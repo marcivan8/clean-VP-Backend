@@ -733,15 +733,20 @@ export class MediaExecutionEngine {
                 const clipDuration = matchedClip?.duration ?? videoTrack?.clips?.[0]?.duration ?? 0;
                 const coverageOk   = clipDuration <= 0 || lastWordEnd >= clipDuration * 0.30;
 
-                if (coverageOk) {
-                    resolvedPayload.transcript = clipWords.map(c => ({
-                        start: c.start,
-                        end:   c.end,
-                        word:  c.word || c.content || c.text || ''
-                    }));
-                    console.log(`[MediaExecutionEngine] Injected transcript for "${processedBase}" (${resolvedPayload.transcript.length} words, coverage ${lastWordEnd.toFixed(1)}s/${clipDuration.toFixed(1)}s) into ${endpoint}`);
+                // Always inject the transcript even if coverage is below 30%.
+                // The FFmpeg dB-threshold fallback is far too aggressive on quiet
+                // recordings and will wipe the clip. A partial transcript is always
+                // safer — the server will only cut gaps within the covered region.
+                resolvedPayload.transcript = clipWords.map(c => ({
+                    start: c.start,
+                    end:   c.end,
+                    word:  c.word || c.content || c.text || ''
+                }));
+
+                if (!coverageOk) {
+                    console.warn(`[MediaExecutionEngine] Transcript for "${processedBase}" covers only ${((lastWordEnd / clipDuration) * 100).toFixed(0)}% of clip (${lastWordEnd.toFixed(1)}s / ${clipDuration.toFixed(1)}s) — injecting partial transcript anyway (safer than FFmpeg fallback)`);
                 } else {
-                    console.warn(`[MediaExecutionEngine] Transcript for "${processedBase}" covers only ${((lastWordEnd / clipDuration) * 100).toFixed(0)}% — using FFmpeg fallback`);
+                    console.log(`[MediaExecutionEngine] Injected transcript for "${processedBase}" (${resolvedPayload.transcript.length} words, coverage ${lastWordEnd.toFixed(1)}s/${clipDuration.toFixed(1)}s) into ${endpoint}`);
                 }
             } else {
                 // Block silence/filler detection when no transcript is available.
@@ -1076,9 +1081,10 @@ export class MediaExecutionEngine {
             return;
         }
 
-        // Sanity guard: active duration < 10% of the source material → detection failed
+        // Sanity guard: active duration < 10% of the source material → detection failed.
+        // Applied to all clips (not just > 30s) to catch FFmpeg-fallback wipes on short clips.
         const totalActiveTime = validSegs.reduce((t, s) => t + s.duration, 0);
-        if (totalOriginalDuration > 30 && totalActiveTime < totalOriginalDuration * 0.10) {
+        if (totalOriginalDuration > 2 && totalActiveTime < totalOriginalDuration * 0.10) {
             console.error(
                 `[MediaExecutionEngine] _applySegmentsToTimeline: REJECTED — active duration ` +
                 `${totalActiveTime.toFixed(1)}s is less than 10% of original ${totalOriginalDuration.toFixed(1)}s.`

@@ -143,12 +143,13 @@ const useTimelineStore = create(
             uploadedFilePath: _preRestoredProject?.uploadedFilePath || null,
             pacingSegments: [],
             beatMarkers: [],
-            captions: [],
-            captionsFilePath: null,
-            transcriptionAttempted: false,
+            captions: _preRestoredProject?.captions || [],
+            captionsFilePath: _preRestoredProject?.captionsFilePath || null,
+            transcriptionAttempted: _preRestoredProject?.transcriptionAttempted || false,
             // Per-file transcript map: { [basename]: Word[] }
             // Accumulates across all uploaded clips so the AI can understand the full timeline.
-            transcripts: {},
+            // Restored from autosave so silence/filler removal works after a page reload.
+            transcripts: _preRestoredProject?.transcripts || {},
 
             // Long-Form Intelligence Engine — stores ContentAnalyzer result
             contentAnalysis: null,
