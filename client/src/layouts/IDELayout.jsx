@@ -572,9 +572,16 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     } 
                 })
             });
-            const data = await response.json();
-            
-            if (!response.ok) throw new Error(data.error || data.message || 'Export failed');
+            // Parse JSON safely — a 502 from Railway's proxy returns plain text ("upstream error")
+            // which crashes JSON.parse. Fall back to an empty object so the error check below
+            // can still produce a human-readable message.
+            const data = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+                const msg = data.error || data.message
+                    || (response.status === 502 ? 'Render service is temporarily unavailable — please try again in a moment.' : `Export failed (${response.status})`);
+                throw new Error(msg);
+            }
             
             // FFmpeg route is completely synchronous, so we get the final URL immediately
             setExportResult({ success: true, url: data.url });

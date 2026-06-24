@@ -7,7 +7,10 @@ const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 const { authenticateUser, optionalAuth } = require('../middleware/auth');
 const storageConfig = require('../config/storage');
-const gcsBucket = storageConfig.bucket;
+// NOTE: Do NOT capture storageConfig.bucket here at module load time.
+// The GCS client verifies asynchronously on boot; the bucket reference is null
+// until that async check completes and sets storageConfig.bucket. Reading it
+// dynamically inside each request handler ensures we always get the live value.
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -131,6 +134,10 @@ router.post('/', authMiddleware, async (req, res) => {
         const sentAssets = Array.isArray(timeline.assets) ? timeline.assets : [];
         const assetMap = {};
         sentAssets.forEach(a => { if (a.id) assetMap[a.id] = a; });
+
+        // Read GCS bucket reference at request time (not module load time) so we always
+        // get the live value after the async boot-time GCS verification has completed.
+        const gcsBucket = storageConfig.bucket;
 
         // --- resolve platform / resolution settings ---
         const platform = settings.platform && PLATFORM_PRESETS[settings.platform]
