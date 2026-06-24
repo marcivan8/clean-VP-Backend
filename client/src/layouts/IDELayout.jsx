@@ -543,6 +543,29 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         setExportError(null);
         setExportUrl(null);
 
+        // Poll GET /api/render/status/:jobId until the background render finishes.
+        // Network hiccups during polling are swallowed and retried.
+        const pollRenderJob = async (jobId) => {
+            const deadline = Date.now() + 10 * 60 * 1000; // 10-minute hard stop
+            while (Date.now() < deadline) {
+                await new Promise(r => setTimeout(r, 2000));
+                let job = null;
+                try {
+                    const sr = await fetch(`/api/render/status/${jobId}`);
+                    if (sr.ok) job = await sr.json().catch(() => null);
+                } catch (_) { /* network hiccup — keep polling */ }
+                if (!job) continue;
+                if (job.status === 'done') {
+                    setExportResult({ url: job.url, filename: job.filename, metadata: job.metadata });
+                    setExportUrl(job.url);
+                    return;
+                }
+                if (job.status === 'error') throw new Error(job.error || 'Render failed — please try again.');
+                // 'rendering' → keep polling
+            }
+            throw new Error('Render timed out after 10 minutes — try a shorter clip.');
+        };
+
         try {
             // Attach auth token if one exists in localStorage
             const headers = { 'Content-Type': 'application/json' };
@@ -559,7 +582,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 }
             } catch (_) { /* no token — dev mode, route uses optionalAuth */ }
 
-            // POST to /api/render — the pure FFmpeg export engine
             const response = await fetch('/api/render', {
                 method: 'POST',
                 headers,
@@ -569,26 +591,33 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         platform: settings.aspectRatio === '9:16' ? 'tiktok' : 'youtube',
                         quality: 'high',
                         resolution: settings.resolution || '1080p'
-                    } 
+                    }
                 })
             });
-            // Parse JSON safely — a 502 from Railway's proxy returns plain text ("upstream error")
-            // which crashes JSON.parse. Fall back to an empty object so the error check below
-            // can still produce a human-readable message.
+
             const data = await response.json().catch(() => ({}));
 
             if (!response.ok) {
                 const msg = data.error || data.message
-                    || (response.status === 502 ? 'Render service is temporarily unavailable — please try again in a moment.' : `Export failed (${response.status})`);
+                    || (response.status === 502 ? 'Render service temporarily unavailable — please try again.' : `Export failed (${response.status})`);
                 throw new Error(msg);
             }
-            
-            // FFmpeg route is completely synchronous, so we get the final URL immediately
-            setExportResult({ success: true, url: data.url });
+
+            if (response.status === 202 && data.jobId) {
+                // Async job started — poll for completion
+                await pollRenderJob(data.jobId);
+                return;
+            }
+
+            // Synchronous response (legacy fallback)
+            setExportResult({ url: data.url, filename: data.filename, metadata: data.metadata });
             setExportUrl(data.url);
         } catch (err) {
             console.error('Export Failed:', err);
-            setExportError(err.message);
+            const msg = (err.name === 'TypeError' && err.message === 'Failed to fetch')
+                ? 'Connection lost — check your network and try again.'
+                : err.message;
+            setExportError(msg);
         } finally {
             setIsExporting(false);
         }

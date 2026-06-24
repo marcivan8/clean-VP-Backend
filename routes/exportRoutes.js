@@ -115,8 +115,19 @@ function buildScaleFilter(width, height, aspectRatio) {
 }
 
 // ============================================================================
-// POST /render — Full timeline export
+// POST /render — Full timeline export (async job pattern)
+// GET  /status/:jobId — Poll for completion
 // ============================================================================
+
+// In-memory job store. Railway restarts are infrequent; jobs complete in seconds-to-minutes.
+// Entries older than 2 hours are pruned automatically.
+const renderJobs = new Map();
+setInterval(() => {
+    const cutoff = Date.now() - 2 * 60 * 60 * 1000;
+    for (const [id, job] of renderJobs) {
+        if ((job.startTime || 0) < cutoff) renderJobs.delete(id);
+    }
+}, 60_000).unref();
 
 const authMiddleware = process.env.NODE_ENV === 'production' ? authenticateUser : optionalAuth;
 
@@ -203,6 +214,16 @@ router.post('/', authMiddleware, async (req, res) => {
         // Spaces are replaced with underscores; other unsafe characters are stripped.
         const sanitizeFilename = (name) =>
             name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9._-]/g, '');
+
+        // ── Respond 202 immediately ──────────────────────────────────────────
+        // Railway's proxy times out long-running synchronous requests and any
+        // client network change kills the connection. By returning the jobId now
+        // and running FFmpeg in the background, neither of those can abort the job.
+        renderJobs.set(jobId, { status: 'rendering', startTime: Date.now() });
+        res.status(202).json({ jobId, status: 'rendering' });
+
+        // ── Background render ────────────────────────────────────────────────
+        (async () => { try {
 
         // Extract the GCS object path from a storage.googleapis.com URL.
         const gcsPathFromStorageUrl = (url) => {
@@ -468,7 +489,7 @@ router.post('/', authMiddleware, async (req, res) => {
 
         if (segments.length === 0) {
             fs.rmSync(tmpDir, { recursive: true, force: true });
-            return res.status(400).json({ error: 'No valid clips could be processed' });
+            throw new Error('No valid clips could be processed');
         }
 
         // --- STEP 2: Concatenate segments ---
@@ -629,8 +650,8 @@ router.post('/', authMiddleware, async (req, res) => {
         console.log(`🏁 Export complete: ${sizeMB}MB in ${duration}s`);
 
         const filename = path.basename(outputPath);
-        res.json({
-            success: true,
+        renderJobs.set(jobId, {
+            status: 'done',
             url: `/uploads/exports/${filename}`,
             filename,
             metadata: {
@@ -643,11 +664,29 @@ router.post('/', authMiddleware, async (req, res) => {
                 platform: platform?.label || null
             }
         });
+        console.log(`🏁 Job ${jobId} done — /uploads/exports/${filename}`);
+
+        } catch (bgErr) {
+            console.error('❌ Background render failed:', bgErr);
+            renderJobs.set(jobId, { status: 'error', error: bgErr.message });
+            try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+        } })(); // end background render IIFE
 
     } catch (error) {
-        console.error('❌ Render Execution Failed:', error);
-        res.status(500).json({ error: error.message });
+        // Only reached if an error occurs before res.status(202) was sent.
+        console.error('❌ Render setup failed:', error);
+        if (!res.headersSent) res.status(500).json({ error: error.message });
     }
+});
+
+// ============================================================================
+// GET /status/:jobId — Poll for background render completion
+// ============================================================================
+
+router.get('/status/:jobId', (req, res) => {
+    const job = renderJobs.get(req.params.jobId);
+    if (!job) return res.status(404).json({ error: 'Job not found or expired' });
+    res.json(job);
 });
 
 // ============================================================================
