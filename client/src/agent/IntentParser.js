@@ -190,6 +190,13 @@ const NLP_MAP = {
         'what did', 'what does', 'who is', 'who are', 'where is', 'where does',
         'how does', 'why does', 'explain', 'describe',
         'what are the', 'how many', 'show me', 'give me a summary',
+        // Past-tense and other interrogative forms often missed:
+        'what were', 'what was', 'what have', 'what has',
+        'how were', 'how was', 'when were', 'when was',
+        'can you tell', 'could you tell', 'can you describe',
+        'is there', 'are there', 'was there', 'were there',
+        'what happened', 'what changed', 'how did', 'why did',
+        'tell me what',
     ],
     improve: [
         'make it better', 'improve', 'enhance', 'polish', 'fix this',
@@ -334,6 +341,21 @@ export class IntentParser {
         return null; // let the API handle it
     }
 
+    /**
+     * Detect sentences that are almost certainly informational questions, not edit commands.
+     * Used to inject a CHAT hint into the API prompt so GPT doesn't misclassify them
+     * as edit operations (e.g. "what were the big parts" → long_form_edit).
+     */
+    static _isInformationalQuestion(prompt) {
+        const lower = prompt.toLowerCase().trim();
+        // Must start with an interrogative word or phrase
+        const startsWithQuestion = /^(what were|what was|what have|what has|what is|what are|what did|what does|who were|who was|who is|who are|how were|how was|how is|why were|why was|why is|when were|when was|when is|where were|where was|where is|can you tell|could you tell|can you describe|describe|tell me what|tell me about|is there|are there|was there|were there)\b/.test(lower);
+        if (!startsWithQuestion) return false;
+        // Must NOT contain a clear edit-command verb
+        const hasEditVerb = /\b(remove|delete|cut|trim|split|add|apply|export|speed|slow|make|change|convert|adjust|set|edit|reorder|fix|clean|normalize|grade|render|undo|redo)\b/.test(lower);
+        return !hasEditVerb;
+    }
+
     static async parseViaAPI(prompt, context, signal) {
         const controller = new AbortController();
         // Default timeout — must be long enough for Whisper + GPT on a 30-min video.
@@ -342,6 +364,13 @@ export class IntentParser {
         const DEFAULT_TIMEOUT_MS = 180000; // 3 minutes
         const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
         if (signal) signal.addEventListener('abort', () => controller.abort());
+
+        // When the prompt reads as an informational question (not an edit command),
+        // inject a hint so GPT does not misclassify it as an edit operation.
+        // E.g. "what were the big parts on the edited clip" must be CHAT, not long_form_edit.
+        const apiPrompt = this._isInformationalQuestion(prompt)
+            ? `${prompt}\n\n[SYSTEM NOTE: This is an informational question about the video content. Respond with type "CHAT" — do NOT classify as an edit operation.]`
+            : prompt;
 
         // Build conversation history from the AI log so the model understands
         // prior exchanges in the same session. We include the last 10 entries
@@ -368,7 +397,7 @@ export class IntentParser {
             // FIX: was fetch('/api/ai/parse-intent', ...) — no auth → 401 in production
             const response = await authFetch('/api/ai/parse-intent', {
                 method: 'POST',
-                body: JSON.stringify({ prompt, context, conversationHistory }),
+                body: JSON.stringify({ prompt: apiPrompt, context, conversationHistory }),
                 signal: controller.signal
             });
             clearTimeout(timeoutId);

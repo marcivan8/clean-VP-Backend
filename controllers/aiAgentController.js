@@ -211,7 +211,21 @@ When intent is complete and safe:
   "intent": { ...fully structured intent with all fields populated... }
 }
 
-When the user is just chatting, asking a question, requesting advice, or asking about the video's content/context (e.g., "what is this video about?", "what is the context?"):
+When the user is just chatting, asking a question, requesting advice, or asking about the video's content/context, ALWAYS respond with type "CHAT", never an edit operation.
+
+🚨 CRITICAL RULE: Questions about video content are ALWAYS type "CHAT", NEVER an edit command.
+These patterns are ALWAYS CHAT — do NOT classify them as edit or long_form_edit:
+- "what were the big parts / main parts / key parts / main sections"
+- "what was in the clip / what happened in the clip / describe the clip"
+- "what were the topics / what were the subjects"
+- "what is this video about / what is the context / what does it cover"
+- "tell me about the video / describe what was recorded / summarize the content"
+- "what were the main points / what were the highlights" (when phrased as a QUESTION)
+- "what did you edit / what changed / what was done" (session recap questions)
+- ANY sentence starting with: "what were", "what was", "what have", "what has", "can you describe", "tell me about", "describe the"
+
+The ONLY time "highlights" / "best parts" / "main sections" is an EDIT command is when the user is explicitly asking to CREATE or EXTRACT them (e.g. "extract the highlights", "make a highlight reel", "pull out the best parts", "create a clip from the best moments").
+
 {
   "type": "CHAT",
   "message": "Your helpful, conversational, personalized response here. Use the transcriptSummary or MediaMetadata to directly answer questions about the video's content instead of executing an editing task. If hasTranscript is false but transcriptionAttempted is true, politely inform the user that you analyzed the audio but no detectable speech was found (so you can't provide a dialogue summary). If hasTranscript is false AND transcriptionAttempted is false, politely inform them that you need a transcript to understand the video and offer to run the auto-captions tool to generate it."
@@ -253,7 +267,8 @@ These commands mean the user wants a FULL EDIT of their video. Map them to opera
 - "jump cut / YouTube jump cuts / quick cuts / rapid cuts" → silence_removal, style:"jump_cut", threshold:"-25dB"
 - "match cut / smash cut" → add_transition, type:"match_cut"
 - "cutaway / B-roll / insert shot / reaction shot / overlay footage" → add_clip, clipType:"broll"
-- "montage / highlight reel / best moments / compilation / recap" → long_form_edit, editMode:"FULL_BUILD", style:"montage"
+- "make a montage / create a highlight reel / compile the best moments / make a compilation / make a recap" → long_form_edit, editMode:"FULL_BUILD", style:"montage"
+  (NOTE: simply ASKING "what were the best moments?" is CHAT, not this operation — only map to long_form_edit when the user is asking you to CREATE or EXTRACT something)
 - "split / cut / divide / chop" → split_clip
 - "trim / shorten / cut the end / cut the beginning" → trim_clip
 
