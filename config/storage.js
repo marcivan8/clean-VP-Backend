@@ -83,7 +83,10 @@ exports.FOLDERS = {
     TEMP: 'temp/',
 };
 
-const bucketName = process.env.GOOGLE_CLOUD_BUCKET_NAME;
+// Accept either naming convention used across different parts of the codebase.
+// GOOGLE_CLOUD_BUCKET_NAME  — used here and in revideoRenderRoutes
+// GCS_BUCKET_NAME           — used in exportRoutes, silenceRoutes, etc.
+const bucketName = process.env.GOOGLE_CLOUD_BUCKET_NAME || process.env.GCS_BUCKET_NAME;
 const creds = resolveCredentials();
 
 if (!creds || !bucketName || bucketName === 'your-bucket-name') {

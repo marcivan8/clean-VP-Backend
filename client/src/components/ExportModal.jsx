@@ -204,8 +204,13 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
             });
             setNleStatus('success');
         } catch (err) {
-            setNleStatus('error');
-            setNleError(err.message);
+            if (err.isUpgradeRequired) {
+                setNleStatus('upgrade');
+                setNleError(err.upgradeRequired || 'creator');
+            } else {
+                setNleStatus('error');
+                setNleError(err.message);
+            }
         } finally {
             setNleLoadingId(null);
         }
@@ -466,6 +471,29 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                             <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/30">
                                 <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
                                 <span className="text-xs text-red-300">{nleError || 'Failed to generate project file.'}</span>
+                            </div>
+                        )}
+
+                        {nleStatus === 'upgrade' && (
+                            <div className="flex flex-col gap-3 px-4 py-4 rounded-xl bg-gradient-to-br from-amber-500/10 to-yellow-500/5 border border-amber-500/30">
+                                <div className="flex items-start gap-3">
+                                    <div className="p-1.5 rounded-lg bg-amber-500/20 shrink-0">
+                                        <Zap className="w-4 h-4 text-amber-400" />
+                                    </div>
+                                    <div>
+                                        <p className="text-xs font-bold text-amber-300">NLE Export is a Creator feature</p>
+                                        <p className="text-[10px] text-white/40 mt-1 leading-relaxed">
+                                            Export to Premiere Pro, Final Cut Pro, DaVinci Resolve and more.
+                                            Upgrade to unlock full NLE project export.
+                                        </p>
+                                    </div>
+                                </div>
+                                <a
+                                    href="/pricing"
+                                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-black font-bold text-xs text-center flex items-center justify-center gap-1.5 transition-all shadow-lg shadow-amber-500/20"
+                                >
+                                    <Zap className="w-3.5 h-3.5" /> Upgrade to Creator
+                                </a>
                             </div>
                         )}
 

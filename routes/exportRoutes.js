@@ -308,15 +308,21 @@ router.post('/', authMiddleware, async (req, res) => {
             if (clip.assetId && assetMap[clip.assetId] && !(isServerUsableUrl(clip.sourceUrl) || isServerUsableUrl(clip.url) || isServerUsableUrl(clip.proxyUrl))) {
                 const asset = assetMap[clip.assetId];
                 c = { ...clip, sourceUrl: asset.sourceUrl, url: asset.proxyUrl || asset.url, proxyUrl: asset.proxyUrl };
+                console.log(`[export] Recovered URLs for clip "${clip.name}" from asset ${clip.assetId}`);
             }
 
-            // GCS SDK path: authenticated, works for private buckets, no URL issues
+            // GCS SDK path: authenticated, works for private buckets, no URL issues.
+            // Wrapped in try-catch so a transient GCS error falls through gracefully.
             if (gcsBucket) {
                 const gcsPath = await resolveGcsPath(c);
                 if (gcsPath) {
-                    console.log(`[export] Downloading from GCS SDK: ${gcsPath} → ${path.basename(localPath)}`);
-                    await gcsBucket.file(gcsPath).download({ destination: localPath });
-                    return localPath;
+                    try {
+                        console.log(`[export] Downloading from GCS SDK: ${gcsPath} → ${path.basename(localPath)}`);
+                        await gcsBucket.file(gcsPath).download({ destination: localPath });
+                        return localPath;
+                    } catch (sdkErr) {
+                        console.warn(`[export] GCS SDK download failed for "${gcsPath}": ${sdkErr.message} — trying HTTP fallback`);
+                    }
                 }
             }
 
@@ -324,21 +330,46 @@ router.post('/', authMiddleware, async (req, res) => {
             const localSrc = resolveSourcePath(c, uploadsDir);
             if (localSrc) return localSrc;
 
-            // Last resort: HTTP download for any absolute URL that isn't a blob/proxy.
-            // Re-encode the URL so filenames with spaces don't break axios/fetch.
+            // HTTP fallback: for private GCS URLs generate a signed URL so the download
+            // doesn't get a 403. Without a signed URL, unauthenticated requests to a
+            // private bucket always fail. All other HTTPS URLs are downloaded as-is.
             for (const raw of [c.sourceUrl, c.url, c.src, c.videoUrl]) {
-                if (raw && !raw.startsWith('blob:') && !raw.includes('/api/proxy') && raw.startsWith('http')) {
-                    let safeUrl = raw;
+                if (!raw || raw.startsWith('blob:') || raw.includes('/api/proxy') || !raw.startsWith('http')) continue;
+
+                let safeUrl = raw;
+                try {
+                    // Re-encode path segments so filenames with spaces don't break axios.
+                    const parsed = new URL(raw);
+                    parsed.pathname = parsed.pathname.split('/').map(seg => encodeURIComponent(decodeURIComponent(seg))).join('/');
+                    safeUrl = parsed.toString();
+                } catch (_) { /* leave raw as-is */ }
+
+                // For direct storage.googleapis.com URLs, swap in a short-lived signed URL
+                // so the download works even when the bucket is private.
+                if (gcsBucket && safeUrl.includes('storage.googleapis.com')) {
                     try {
-                        // Parse → reconstruct so only the path/query components are encoded,
-                        // leaving the host and existing percent-encoding untouched.
-                        const parsed = new URL(raw);
-                        parsed.pathname = parsed.pathname.split('/').map(seg => encodeURIComponent(decodeURIComponent(seg))).join('/');
-                        safeUrl = parsed.toString();
-                    } catch (_) { /* leave raw as-is */ }
-                    console.log(`[export] HTTP download fallback: ${safeUrl.slice(0, 80)}`);
+                        const signedGcsPath = gcsPathFromStorageUrl(safeUrl);
+                        if (signedGcsPath) {
+                            const [signedUrl] = await gcsBucket.file(signedGcsPath).getSignedUrl({
+                                version: 'v4',
+                                action:  'read',
+                                expires: Date.now() + 3_600_000, // 1 hour
+                            });
+                            safeUrl = signedUrl;
+                            console.log(`[export] Signed GCS URL generated for "${signedGcsPath}"`);
+                        }
+                    } catch (signErr) {
+                        console.warn(`[export] Could not sign GCS URL: ${signErr.message} — downloading unsigned (may 403)`);
+                    }
+                }
+
+                console.log(`[export] HTTP download: ${safeUrl.slice(0, 80)}`);
+                try {
                     await downloadToTemp(safeUrl, localPath);
                     return localPath;
+                } catch (dlErr) {
+                    console.warn(`[export] HTTP download failed for clip "${clip.name}": ${dlErr.message}`);
+                    // Continue to next URL candidate rather than crashing the whole render.
                 }
             }
 
