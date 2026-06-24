@@ -327,6 +327,11 @@ router.post('/', authMiddleware, async (req, res) => {
             return null;
         };
 
+        // Deduplication cache: maps GCS object path → local file already downloaded.
+        // Silence-removal typically creates 30+ segments from the same source video;
+        // with this cache each unique GCS file is fetched from the bucket only once.
+        const _gcsDownloadCache = new Map();
+
         // Download a clip's source to a local temp file.
         // Prefers GCS SDK (authenticated) over HTTPS download.
         // Returns the local file path or null.
@@ -344,9 +349,17 @@ router.post('/', authMiddleware, async (req, res) => {
             if (gcsBucket) {
                 const gcsPath = await resolveGcsPath(c);
                 if (gcsPath) {
+                    // ── Cache hit: reuse already-downloaded file ──────────────────
+                    // Silence-removal clips all reference the same source video; this
+                    // avoids re-downloading it for every segment.
+                    if (_gcsDownloadCache.has(gcsPath)) {
+                        console.log(`[export] Cache hit: "${gcsPath}" — skipping re-download`);
+                        return _gcsDownloadCache.get(gcsPath);
+                    }
                     try {
                         console.log(`[export] Downloading from GCS SDK: ${gcsPath} → ${path.basename(localPath)}`);
                         await gcsBucket.file(gcsPath).download({ destination: localPath });
+                        _gcsDownloadCache.set(gcsPath, localPath);
                         return localPath;
                     } catch (sdkErr) {
                         console.warn(`[export] GCS SDK download failed for "${gcsPath}": ${sdkErr.message} — trying HTTP fallback`);
@@ -408,26 +421,53 @@ router.post('/', authMiddleware, async (req, res) => {
 
         const scaleFilter = buildScaleFilter(targetWidth, targetHeight);
 
-        // --- STEP 1: Trim each clip into a temp segment ---
-        const segments = [];
+        // ─── Worker-pool helper ───────────────────────────────────────────────
+        // Runs taskFns with at most `limit` concurrent workers and returns results
+        // in the same order as taskFns.
+        const runParallel = async (taskFns, limit) => {
+            const results = new Array(taskFns.length);
+            let nextIdx = 0;
+            const worker = async () => {
+                while (nextIdx < taskFns.length) {
+                    const myIdx = nextIdx++;
+                    results[myIdx] = await taskFns[myIdx]();
+                }
+            };
+            await Promise.all(Array.from({ length: Math.min(limit, taskFns.length) }, worker));
+            return results;
+        };
+
+        // --- STEP 1a: Download all clip sources (sequential, with deduplication) ---
+        // Downloads are sequential so we don't hammer GCS with parallel requests;
+        // the cache inside fetchClipSource ensures each unique source file is only
+        // fetched once even when 30+ silence-removal segments share the same origin.
+        const clipDownloads = [];
         for (let i = 0; i < allClips.length; i++) {
             const clip = allClips[i];
             const ext = path.extname(clip.name || '.mp4') || '.mp4';
             const dlPath = path.join(tmpDir, `dl-${i}${ext}`);
             const src = await fetchClipSource(clip, dlPath);
-            if (!src) {
-                console.warn(`⚠️  Could not find source for clip "${clip.name}", skipping`);
-                continue;
-            }
+            if (!src) console.warn(`⚠️  Could not find source for clip "${clip.name}", skipping`);
+            clipDownloads.push({ clip, src, i });
+        }
 
-            const segPath = path.join(tmpDir, `seg-${i}.mp4`);
-            const inPoint = clip.offset || 0;
-            const dur     = clip.duration;
-            const vol     = (clip.volume ?? 1.0) * (clip.trackVolume ?? 1.0);
-            const speed   = clip.speed || 1.0;
-            const isImage = clip.type === 'image';
+        const validClips = clipDownloads.filter(({ src }) => src);
+        console.log(`[export] ${validClips.length}/${allClips.length} clips ready — encoding in parallel (limit=4)`);
 
-            await new Promise((resolve, reject) => {
+        // --- STEP 1b: Encode all segments in parallel (up to 4 at a time) ---
+        // -preset veryfast:  3-5× faster than the default 'medium' preset with
+        //                    only a small file-size increase — acceptable for delivery.
+        // -threads 0:        lets FFmpeg auto-select the optimal thread count per worker.
+        // concurrency=4:     saturates the available vCPUs without over-subscribing.
+        const segResults = await runParallel(
+            validClips.map(({ clip, src, i }) => () => new Promise((resolve) => {
+                const segPath = path.join(tmpDir, `seg-${i}.mp4`);
+                const inPoint = clip.offset || 0;
+                const dur     = clip.duration;
+                const vol     = (clip.volume ?? 1.0) * (clip.trackVolume ?? 1.0);
+                const speed   = clip.speed || 1.0;
+                const isImage = clip.type === 'image';
+
                 let cmd;
                 if (isImage) {
                     // Images need -loop 1 so ffmpeg generates video frames for the full duration
@@ -468,24 +508,32 @@ router.post('/', authMiddleware, async (req, res) => {
                 cmd
                     .fps(targetFps)
                     .videoCodec(codec)
+                    .addOutputOption('-preset', 'veryfast')
+                    .addOutputOption('-threads', '0')
                     .addOutputOption('-profile:v', profile)
                     .addOutputOption('-pix_fmt', 'yuv420p')
                     .addOutputOption('-movflags', '+faststart')
                     .addOutputOption('-shortest')
                     .audioBitrate(audioBitrate)
                     .output(segPath)
-                    .on('start', (cmdLine) => console.log(`  [ffmpeg] ${cmdLine.slice(0, 120)}...`))
-                    .on('stderr', (line) => { if (line.includes('Error') || line.includes('error')) console.warn(`  [ffmpeg stderr] ${line}`); })
-                    .on('end', () => { segments.push(segPath); resolve(); })
+                    .on('start', (cmdLine) => console.log(`  [ffmpeg seg-${i}] ${cmdLine.slice(0, 100)}...`))
+                    .on('stderr', (line) => { if (line.includes('Error') || line.includes('error')) console.warn(`  [ffmpeg stderr seg-${i}] ${line}`); })
+                    .on('end', () => {
+                        console.log(`  ✅ Segment ${i+1}/${allClips.length}: "${clip.name}"`);
+                        resolve(segPath);
+                    })
                     .on('error', (err, stdout, stderr) => {
                         console.error(`  ❌ ffmpeg failed for clip ${i+1}: ${err.message}`);
                         if (stderr) console.error(`  [ffmpeg stderr]\n${stderr.slice(-2000)}`);
-                        reject(err);
+                        resolve(null); // skip bad segment; others continue
                     })
                     .run();
-            });
-            console.log(`  ✅ Segment ${i+1}/${allClips.length}: "${clip.name}"`);
-        }
+            })),
+            4  // max concurrent FFmpeg workers
+        );
+
+        // Collect in timeline order (runParallel preserves index order); drop failures
+        const segments = segResults.filter(Boolean);
 
         if (segments.length === 0) {
             fs.rmSync(tmpDir, { recursive: true, force: true });
