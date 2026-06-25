@@ -792,14 +792,37 @@ export class MediaExecutionEngine {
         job.signal.addEventListener('abort', () => controller.abort());
 
         try {
-            // ── 1. POST to the API endpoint ───────────────────────────────
+            // ── 1. POST to the API endpoint (auto-retry on 429) ──────────
             console.log(`[MediaExecutionEngine] → POST ${endpoint}`, resolvedPayload);
 
-            const response = await authFetch(endpoint, {
-                method,
-                body:   JSON.stringify(resolvedPayload),
-                signal: controller.signal
-            });
+            // Up to 3 attempts; on 429 we read Retry-After and sleep before the
+            // next attempt instead of failing the job immediately.
+            const MAX_429_RETRIES = 3;
+            let response;
+            for (let attempt = 1; attempt <= MAX_429_RETRIES; attempt++) {
+                response = await authFetch(endpoint, {
+                    method,
+                    body:   JSON.stringify(resolvedPayload),
+                    signal: controller.signal
+                });
+
+                if (response.status !== 429) break;
+
+                // Last attempt — give up and let the error block below handle it
+                if (attempt === MAX_429_RETRIES) break;
+
+                // Parse Retry-After (seconds). express-rate-limit sets this header.
+                const retryAfterSec = parseFloat(
+                    response.headers.get('Retry-After') ||
+                    response.headers.get('RateLimit-Reset') || ''
+                );
+                const waitMs = !isNaN(retryAfterSec) && retryAfterSec > 0
+                    ? retryAfterSec * 1000 + 500           // header value + small buffer
+                    : attempt * 15_000;                    // fallback: 15s, 30s
+
+                console.warn(`[MediaExecutionEngine] ⏳ ${endpoint} rate-limited (attempt ${attempt}/${MAX_429_RETRIES}) — retrying in ${(waitMs / 1000).toFixed(1)}s`);
+                await new Promise(resolve => setTimeout(resolve, waitMs));
+            }
 
             clearTimeout(timeoutId);
 

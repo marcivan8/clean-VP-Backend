@@ -137,6 +137,16 @@ const uploadLimiter = rateLimit({
   message: { error: 'Upload rate limit reached. Please wait a moment.' }
 });
 
+// Audio processing (silence/filler detect, transcription): 30 req/min.
+// These are CPU-bound operations, NOT file uploads, so a higher limit is safe.
+// Silence + filler removal in a single workflow = 2 requests; giving them 30
+// slots means a user can run many operations without hitting the ceiling.
+const audioLimiter = rateLimit({
+  windowMs: 60_000, max: 30,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many audio processing requests. Please wait a moment.' }
+});
+
 // Auth routes: 20 attempts per 15 min per IP, counting only failures.
 // Prevents brute-force against profile creation and token-based endpoints.
 const authLimiter = rateLimit({
@@ -226,8 +236,8 @@ app.use('/api/analyze', uploadLimiter, analyzeRoutes);
 app.use('/api/v2/analyze', uploadLimiter, analyzeRoutes);
 app.use('/analyze', uploadLimiter, analyzeRoutes);          // legacy/proxy
 app.use('/api/render', renderLimiter, exportRoutes);        // FFmpeg export
-app.use('/api/audio', uploadLimiter, audioRoutes);          // audio processing
-app.use('/api/filler', uploadLimiter, audioRoutes);         // alias: /api/filler/detect → /api/audio/filler/detect
+app.use('/api/audio', audioLimiter, audioRoutes);           // audio processing (silence/filler/transcribe)
+app.use('/api/filler', audioLimiter, audioRoutes);          // alias: /api/filler/detect → /api/audio/filler/detect
 app.use('/api/silence', require('./routes/silenceRoutes'));
 app.use('/api/ai', aiLimiter, require('./routes/aiRoutes')); // GPT-4o — expensive
 app.use('/api/effects', require('./routes/effectsRoutes'));
