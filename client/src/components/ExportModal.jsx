@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Film, Download, Tv2, Smartphone, Youtube, Clapperboard, CheckCircle2, Loader2, AlertCircle, FileCode2, Scissors, Zap } from 'lucide-react';
 import { exportToNLE } from '../services/nleExportService';
 import useTimelineStore from '../store/useTimelineStore';
+import { Logo } from './Logo.jsx';
 
 // ============================================================================
 // PLATFORM DEFINITIONS (mirrors backend)
@@ -115,19 +116,6 @@ const NLE_TARGETS = [
     },
 ];
 
-// ============================================================================
-// VIBED LOGO (inline SVG — no external dep, always matches brand)
-// ============================================================================
-
-const VibedLogoIcon = ({ size = 18 }) => (
-    <svg width={size} height={size} viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path
-            d="M310 110 L185 265 L250 245 L200 390 L325 230 L258 248 Z"
-            fill="none" stroke="#1a3fa8" strokeWidth="20" strokeLinejoin="round" strokeLinecap="round"
-        />
-        <line x1="248" y1="248" x2="195" y2="268" stroke="#FFB800" strokeWidth="10" strokeLinecap="round" />
-    </svg>
-);
 
 // ============================================================================
 // EXPORT MODAL
@@ -224,7 +212,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                 <div className="relative flex items-center justify-between px-6 py-4 border-b border-white/5 bg-card/80">
                     <div className="flex items-center gap-3">
                         <div className="p-2 rounded-lg bg-white/5 border border-white/10 text-primary">
-                            <VibedLogoIcon size={18} />
+                            <Logo size={18} />
                         </div>
                         <div>
                             <h2 className="text-sm font-extrabold tracking-tight text-foreground">Export Media</h2>

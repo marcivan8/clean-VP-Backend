@@ -2,16 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Scale, Mail, FileText, Database, Settings } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-
-const Logo = ({ size = 24 }) => (
-    <svg width={size} height={size} viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M310 110 L185 265 L250 245 L200 390 L325 230 L258 248 Z"
-            fill="none" stroke="currentColor" strokeWidth="32"
-            strokeLinejoin="round" strokeLinecap="round" />
-        <line x1="248" y1="248" x2="195" y2="268"
-            stroke="currentColor" strokeWidth="16" strokeLinecap="round" />
-    </svg>
-);
+import { Logo } from '../components/Logo.jsx';
 
 const Section = ({ title, icon: Icon, children }) => (
     <div style={{ paddingBottom: 40, borderBottom: '0.5px solid var(--line-soft)' }}>

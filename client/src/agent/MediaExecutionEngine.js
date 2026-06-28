@@ -31,6 +31,7 @@ import { pollJobResult } from '../utils/jobPoller.js';
 import useTimelineStore  from '../store/useTimelineStore.js';
 import { mediaBunnyService } from '../services/MediaBunnyService.js';
 import useAIStore from '../store/useAIStore.js';
+import { assertTimeline } from './TimelineValidator.js';
 
 export const EXECUTION_STATES = {
     QUEUED:    'QUEUED',
@@ -1189,7 +1190,18 @@ export class MediaExecutionEngine {
     }
 
     async verifyExecution(job) {
-        return job.results.every(r => r.success !== false);
+        // ── 1. All commands must have succeeded ───────────────────────────────
+        const commandsOk = job.results.every(r => r.success !== false);
+        if (!commandsOk) return false;
+
+        // ── 2. Timeline invariant check ───────────────────────────────────────
+        // Run after every AI job. Errors are logged (and captured by Sentry in
+        // production) but do not fail the job — the edit already completed and
+        // the user can Cmd+Z to undo. Hard violations surface as red console
+        // errors so they're impossible to miss during development.
+        assertTimeline(useTimelineStore.getState(), `job:${job.id}`);
+
+        return commandsOk;
     }
 
     getStatus() {

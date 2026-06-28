@@ -3,12 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import useSessionStore from '../store/useSessionStore';
 
-const Logo = ({ size = 26 }) => (
-    <svg width={size} height={size} viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M310 110 L185 265 L250 245 L200 390 L325 230 L258 248 Z" fill="none" stroke="currentColor" strokeWidth="32" strokeLinejoin="round" strokeLinecap="round" />
-        <line x1="248" y1="248" x2="195" y2="268" stroke="currentColor" strokeWidth="16" strokeLinecap="round" />
-    </svg>
-);
+import { Logo } from '../components/Logo.jsx';
 
 const Spinner = () => (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ animation: 'spin 0.75s linear infinite' }}>
