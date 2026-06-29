@@ -28,6 +28,7 @@
 
 import { authFetch }  from '../utils/authFetch.js';
 import { pollJobResult } from '../utils/jobPoller.js';
+import { saveJob, clearJob } from '../utils/pendingJobs.js';
 import useTimelineStore  from '../store/useTimelineStore.js';
 import { mediaBunnyService } from '../services/MediaBunnyService.js';
 import useAIStore from '../store/useAIStore.js';
@@ -851,12 +852,23 @@ export class MediaExecutionEngine {
 
             // ── 2. If job was queued, poll until complete ─────────────────
             if (result.jobId) {
-                console.log(`[MediaExecutionEngine] Polling job ${result.jobId}...`);
+                const bullJobId = result.jobId; // capture before result is overwritten
+                console.log(`[MediaExecutionEngine] Polling job ${bullJobId}...`);
+                // Persist the jobId so the user can recover it after a page reload.
+                // clearJob() is called once polling settles (success or hard failure).
+                saveJob(bullJobId, command.action, endpoint);
                 try {
-                    result = await pollJobResult(result.jobId, job.signal);
+                    result = await pollJobResult(bullJobId, job.signal);
                     console.log(`[MediaExecutionEngine] Job ${result === null ? 'null' : 'ok'}:`, result);
+                    // Completed cleanly — no longer needs recovery.
+                    clearJob(bullJobId);
                 } catch (pollErr) {
-                    if (pollErr.message === 'Polling cancelled') throw new Error('API call cancelled');
+                    if (pollErr.message === 'Polling cancelled') {
+                        // User navigated away — keep the entry so the recovery hook finds it.
+                        throw new Error('API call cancelled');
+                    }
+                    // Hard failure (timeout, server error) — clear so we don't show stale recovery.
+                    clearJob(bullJobId);
                     throw pollErr;
                 }
             }

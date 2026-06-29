@@ -698,9 +698,40 @@ router.post('/', authMiddleware, async (req, res) => {
         console.log(`🏁 Export complete: ${sizeMB}MB in ${duration}s`);
 
         const filename = path.basename(outputPath);
+
+        // ── Upload to GCS (permanent storage) ───────────────────────────────
+        // Railway containers use ephemeral local storage — every deploy wipes
+        // /uploads/exports/. Uploading the render to GCS means the download
+        // link survives process restarts and Railway redeploys.
+        // Falls back to the local /uploads/exports/ URL if GCS is unavailable.
+        let downloadUrl = `/uploads/exports/${filename}`;
+        if (gcsBucket) {
+            try {
+                const gcsExportPath = `exports/${userId}/${filename}`;
+                console.log(`[export] Uploading render to GCS: ${gcsExportPath}`);
+                await gcsBucket.file(gcsExportPath).save(fs.readFileSync(outputPath), {
+                    contentType: 'video/mp4',
+                    metadata: { cacheControl: 'no-cache' },
+                });
+                // Signed URL valid for 7 days — enough time for any reasonable download window.
+                const [signedUrl] = await gcsBucket.file(gcsExportPath).getSignedUrl({
+                    version: 'v4',
+                    action:  'read',
+                    expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
+                });
+                downloadUrl = signedUrl;
+                // Local file no longer needed — GCS is the source of truth.
+                try { fs.unlinkSync(outputPath); } catch (_) {}
+                console.log(`[export] GCS upload complete — signed URL generated`);
+            } catch (gcsErr) {
+                console.warn(`[export] GCS upload failed, falling back to local URL: ${gcsErr.message}`);
+                // downloadUrl stays as the local /uploads/exports/ path.
+            }
+        }
+
         renderJobs.set(jobId, {
             status: 'done',
-            url: `/uploads/exports/${filename}`,
+            url: downloadUrl,
             filename,
             metadata: {
                 duration: `${duration}s render time`,
@@ -712,7 +743,7 @@ router.post('/', authMiddleware, async (req, res) => {
                 platform: platform?.label || null
             }
         });
-        console.log(`🏁 Job ${jobId} done — /uploads/exports/${filename}`);
+        console.log(`🏁 Job ${jobId} done — ${downloadUrl.slice(0, 80)}`);
 
         } catch (bgErr) {
             console.error('❌ Background render failed:', bgErr);

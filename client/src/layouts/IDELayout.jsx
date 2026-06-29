@@ -25,8 +25,10 @@ import { ApprovalDialog } from '../components/ApprovalDialog';
 import { probeMedia } from '../utils/mediaProbe';
 import ProxyService from '../services/proxyService';
 import useAIStore from '../store/useAIStore';
+import { useAgentEvents } from '../hooks/useAgentEvents.js';
 import useSessionStore from '../store/useSessionStore';
 import AuthPromptModal from '../components/AuthPromptModal';
+import { useJobRecovery } from '../hooks/useJobRecovery.js';
 
 const VideoTimeDisplay = () => {
     const timeRef = useRef(null);
@@ -229,6 +231,46 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             activationConstraint: { distance: 5 },
         })
     );
+    // ── Job recovery — reconnect to orphaned BullMQ jobs after reload ────────
+    useJobRecovery();
+
+    // Active AI job count — used by the beforeunload guard below
+    const { activeJobsCount } = useAgentEvents();
+
+    // ── beforeunload guard ────────────────────────────────────────────────────
+    // Fires when the user tries to close the tab, press F5, or navigate away
+    // while an AI operation or export is in progress. The browser shows its own
+    // "Leave site?" confirm dialog — we cannot customise the message in modern browsers.
+    useEffect(() => {
+        const isProcessing = activeJobsCount > 0 || isExporting;
+        if (!isProcessing) return;
+
+        const handler = (e) => {
+            e.preventDefault();
+            // Chrome requires returnValue to be set (any non-empty string triggers the dialog)
+            e.returnValue = '';
+        };
+        window.addEventListener('beforeunload', handler);
+        return () => window.removeEventListener('beforeunload', handler);
+    }, [activeJobsCount, isExporting]);
+
+    // Toast state for recovery notifications
+    const [recoveryToasts, setRecoveryToasts] = React.useState([]);
+    useEffect(() => {
+        const handler = (e) => {
+            const { type, label, jobId, action } = e.detail || {};
+            if (type === 'running') return; // silent — already showed spinner
+            const msg = type === 'completed'
+                ? `✅ ${label} completed while you were away`
+                : `⚠️ ${label} did not complete — try again`;
+            setRecoveryToasts(prev => [...prev, { id: jobId || Date.now(), msg, type }]);
+            // Auto-dismiss after 8 s
+            setTimeout(() => setRecoveryToasts(prev => prev.filter(t => t.id !== (jobId || Date.now()))), 8000);
+        };
+        window.addEventListener('vp:recovery:toast', handler);
+        return () => window.removeEventListener('vp:recovery:toast', handler);
+    }, []);
+
     const [showSidebar, setShowSidebar] = React.useState(false);
     const [showAI, setShowAI] = React.useState(false);
     
@@ -544,16 +586,43 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         setExportUrl(null);
 
         // Poll GET /api/render/status/:jobId until the background render finishes.
-        // Network hiccups during polling are swallowed and retried.
+        // Network hiccups are retried; 404 (job not found) means Railway restarted
+        // and the in-memory job record is gone — surface that immediately rather than
+        // silently retrying for 10 minutes.
         const pollRenderJob = async (jobId) => {
-            const deadline = Date.now() + 10 * 60 * 1000; // 10-minute hard stop
+            const deadline        = Date.now() + 10 * 60 * 1000; // 10-minute hard stop
+            let consecutiveErrors = 0;                            // counts non-2xx / network failures
+            const MAX_ERRORS      = 4;                            // ~8s of retries before giving up
+
             while (Date.now() < deadline) {
                 await new Promise(r => setTimeout(r, 2000));
                 let job = null;
+                let status = null;
                 try {
                     const sr = await fetch(`/api/render/status/${jobId}`);
-                    if (sr.ok) job = await sr.json().catch(() => null);
-                } catch (_) { /* network hiccup — keep polling */ }
+                    status = sr.status;
+                    if (sr.ok) {
+                        job = await sr.json().catch(() => null);
+                        consecutiveErrors = 0; // successful fetch — reset counter
+                    } else if (sr.status === 404) {
+                        consecutiveErrors++;
+                    } else {
+                        consecutiveErrors++;
+                    }
+                } catch (_) {
+                    // True network failure (offline, DNS) — count as an error
+                    consecutiveErrors++;
+                }
+
+                // 4 consecutive failures almost always means the render process died
+                // (Railway restart, OOM kill). Stop waiting and tell the user clearly.
+                if (consecutiveErrors >= MAX_ERRORS) {
+                    if (status === 404) {
+                        throw new Error('Render was interrupted — the server restarted mid-export. Please try again.');
+                    }
+                    throw new Error('Lost contact with the render server. Check your connection and try again.');
+                }
+
                 if (!job) continue;
                 if (job.status === 'done') {
                     setExportResult({ url: job.url, filename: job.filename, metadata: job.metadata });
@@ -588,8 +657,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 body: JSON.stringify({
                     timeline: { tracks, duration, assets: assets || [] },
                     settings: {
-                        platform: settings.aspectRatio === '9:16' ? 'tiktok' : 'youtube',
-                        quality: 'high',
+                        // Use the platform the user explicitly picked in ExportModal.
+                        // Fall back to aspect-ratio inference only when no platform is set.
+                        platform: settings.platform || (settings.aspectRatio === '9:16' ? 'tiktok' : 'youtube'),
+                        quality: settings.quality || 'high',
                         resolution: settings.resolution || '1080p'
                     }
                 })
@@ -808,6 +879,28 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             />
             <ClarificationDialog />
             <ApprovalDialog />
+
+            {/* Job recovery toasts — shown when a BullMQ job completed/failed after a reload */}
+            {recoveryToasts.length > 0 && (
+                <div style={{ position: 'fixed', bottom: 80, right: 20, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 320 }}>
+                    {recoveryToasts.map(toast => (
+                        <div key={toast.id} style={{
+                            background: toast.type === 'completed' ? 'var(--glass, rgba(30,32,36,0.95))' : 'rgba(60,30,30,0.95)',
+                            border: `1px solid ${toast.type === 'completed' ? 'var(--accent, #6366f1)' : '#c0392b'}`,
+                            borderRadius: 10, padding: '10px 14px',
+                            fontFamily: 'var(--f-sans)', fontSize: 13, color: 'var(--fg, #f0f0f0)',
+                            boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                        }}>
+                            <span>{toast.msg}</span>
+                            <button
+                                onClick={() => setRecoveryToasts(prev => prev.filter(t => t.id !== toast.id))}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg-2, #aaa)', fontSize: 16, lineHeight: 1, padding: 2 }}
+                            >×</button>
+                        </div>
+                    ))}
+                </div>
+            )}
 
             {/* Progressive auth prompt */}
             {authPrompt && (
