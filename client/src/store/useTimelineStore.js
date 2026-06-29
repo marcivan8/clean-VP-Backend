@@ -27,23 +27,17 @@ const SUPABASE_DEBOUNCE_MS = 3000; // write to Supabase 3 s after last structura
 // ── Supabase autosave helper ──────────────────────────────────────────────────
 // Called by saveProject() after the localStorage write.
 // Silently skipped for unauthenticated (anonymous) users.
-async function _supabaseSave(projectData) {
+// _supabaseSave receives all store values it needs as plain arguments so it
+// never closes over `useTimelineStore` itself — that `const` may not yet be
+// initialised when Rollup evaluates this module depending on chunk ordering.
+async function _supabaseSave(projectData, projectId, projectName, onNewProject) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return; // anonymous — localStorage only
 
-    let projectId = useTimelineStore.getState().projectId;
-
     if (!projectId) {
         // First save for this authenticated user — create the row
-        const name = useTimelineStore.getState().projectName || 'Untitled Project';
-        projectId = await createProject(name, projectData);
-        if (projectId) {
-            useTimelineStore.setState({ projectId });
-            // Persist ID so we reconnect to it on the next page load
-            try {
-                localStorage.setItem('vp_project_id', projectId);
-            } catch (_) {}
-        }
+        const newId = await createProject(projectName || 'Untitled Project', projectData);
+        if (newId) onNewProject(newId);
     } else {
         await updateProject(projectId, projectData);
     }
@@ -125,9 +119,10 @@ const useTimelineStore = create(
                 updates.tracks = timelineManager.toLegacyTracks();
 
                 // Auto-save 1.5 s after structural changes so rapid edits don't spam localStorage
+                // Use get() — never close over `useTimelineStore` const (TDZ risk in some Rollup orderings)
                 clearTimeout(_autosaveTimer);
                 _autosaveTimer = setTimeout(() => {
-                    useTimelineStore.getState().saveProject();
+                    get().saveProject();
                 }, 1500);
             }
 
@@ -419,7 +414,7 @@ const useTimelineStore = create(
                 if (captions?.length > 0) {
                     clearTimeout(_autosaveTimer);
                     _autosaveTimer = setTimeout(() => {
-                        useTimelineStore.getState().saveProject();
+                        get().saveProject();
                     }, 500);
                 }
             },
@@ -900,7 +895,7 @@ const useTimelineStore = create(
                     );
                 } else {
                     // Fallback: update via legacy updateClip which patches placement metadata
-                    useTimelineStore.getState().updateClip(track.id, clipId, {
+                    get().updateClip(track.id, clipId, {
                         keyframes: { ...existingKf, [property]: propKf }
                     });
                 }
@@ -928,7 +923,7 @@ const useTimelineStore = create(
                         })
                     );
                 } else {
-                    useTimelineStore.getState().updateClip(track.id, clipId, {
+                    get().updateClip(track.id, clipId, {
                         keyframes: { ...existingKf, [property]: propKf }
                     });
                 }
@@ -1215,9 +1210,15 @@ const useTimelineStore = create(
 
                 // ── Supabase persistence (authenticated users only) ──────────────
                 // Debounced separately so rapid edits don't spam the DB.
+                // Pass state values as args — _supabaseSave must not close over
+                // `useTimelineStore` to avoid TDZ in some Rollup chunk orderings.
+                const { projectId: _pid, projectName: _pname } = state;
                 clearTimeout(_supabaseTimer);
                 _supabaseTimer = setTimeout(() => {
-                    _supabaseSave(projectData).catch(e =>
+                    _supabaseSave(projectData, _pid, _pname, (newId) => {
+                        set({ projectId: newId });
+                        try { localStorage.setItem('vp_project_id', newId); } catch (_) {}
+                    }).catch(e =>
                         console.warn('[useTimelineStore] Supabase autosave failed:', e.message)
                     );
                 }, SUPABASE_DEBOUNCE_MS);
