@@ -29,6 +29,7 @@ import { useAgentEvents } from '../hooks/useAgentEvents.js';
 import useSessionStore from '../store/useSessionStore';
 import AuthPromptModal from '../components/AuthPromptModal';
 import { useJobRecovery } from '../hooks/useJobRecovery.js';
+import { useSupabasePersistence } from '../hooks/useSupabasePersistence.js';
 
 const VideoTimeDisplay = () => {
     const timeRef = useRef(null);
@@ -233,6 +234,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     );
     // ── Job recovery — reconnect to orphaned BullMQ jobs after reload ────────
     useJobRecovery();
+
+    // ── Supabase persistence — debounced cloud save on structural changes ─────
+    // Imported separately from the store to avoid shifting Rollup chunk ordering
+    // (which caused TDZ on `useTimelineStore` in Railway's production bundle).
+    useSupabasePersistence();
 
     // Active AI job count — used by the beforeunload guard below
     const { activeJobsCount } = useAgentEvents();

@@ -16,32 +16,9 @@ import {
     LAYER_TYPES,
     ENTITY_TYPES
 } from '../timeline/index.js';
-import { supabase } from '../lib/supabaseClient.js';
-import { createProject, updateProject } from '../lib/projectsApi.js';
 
-// Module-level debounce timers — live outside React so they survive re-renders
-let _autosaveTimer    = null;
-let _supabaseTimer    = null;
-const SUPABASE_DEBOUNCE_MS = 3000; // write to Supabase 3 s after last structural change
-
-// ── Supabase autosave helper ──────────────────────────────────────────────────
-// Called by saveProject() after the localStorage write.
-// Silently skipped for unauthenticated (anonymous) users.
-// _supabaseSave receives all store values it needs as plain arguments so it
-// never closes over `useTimelineStore` itself — that `const` may not yet be
-// initialised when Rollup evaluates this module depending on chunk ordering.
-async function _supabaseSave(projectData, projectId, projectName, onNewProject) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return; // anonymous — localStorage only
-
-    if (!projectId) {
-        // First save for this authenticated user — create the row
-        const newId = await createProject(projectName || 'Untitled Project', projectData);
-        if (newId) onNewProject(newId);
-    } else {
-        await updateProject(projectId, projectData);
-    }
-}
+// Module-level debounce timer — lives outside React so it survives re-renders
+let _autosaveTimer = null;
 
 // ── Synchronous pre-restore ────────────────────────────────────────────────
 // Populate timelineManager BEFORE React renders so the Revideo scene
@@ -1207,21 +1184,6 @@ const useTimelineStore = create(
                 } catch (_) {
                     // localStorage full — silently skip
                 }
-
-                // ── Supabase persistence (authenticated users only) ──────────────
-                // Debounced separately so rapid edits don't spam the DB.
-                // Pass state values as args — _supabaseSave must not close over
-                // `useTimelineStore` to avoid TDZ in some Rollup chunk orderings.
-                const { projectId: _pid, projectName: _pname } = state;
-                clearTimeout(_supabaseTimer);
-                _supabaseTimer = setTimeout(() => {
-                    _supabaseSave(projectData, _pid, _pname, (newId) => {
-                        set({ projectId: newId });
-                        try { localStorage.setItem('vp_project_id', newId); } catch (_) {}
-                    }).catch(e =>
-                        console.warn('[useTimelineStore] Supabase autosave failed:', e.message)
-                    );
-                }, SUPABASE_DEBOUNCE_MS);
 
                 return projectData;
             },
