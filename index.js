@@ -62,6 +62,7 @@ app.use(helmet({
       fontSrc:                 ["'self'", "https://fonts.gstatic.com"],
       imgSrc:                  ["'self'", "data:", "blob:", "https://storage.googleapis.com", "https://*.iubenda.com"],
       mediaSrc:                ["'self'", "blob:", "https://storage.googleapis.com"],
+      workerSrc:               ["'self'", "blob:"],
       connectSrc: [
         "'self'",
         "https://*.supabase.co",
