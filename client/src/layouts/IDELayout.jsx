@@ -243,6 +243,16 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     // Active AI job count — used by the beforeunload guard below
     const { activeJobsCount } = useAgentEvents();
 
+    // ── Export state — declared here so isExporting is in scope for the ──────
+    // beforeunload useEffect below. Declaring it after the effect causes TDZ in
+    // Railway's production bundle (minifier keeps `const` TDZ within the
+    // component function body when the reference appears before the declaration).
+    const [isExporting, setIsExporting] = React.useState(false);
+    const [exportUrl, setExportUrl] = React.useState(null);
+    const [exportResult, setExportResult] = React.useState(null);
+    const [exportError, setExportError] = React.useState(null);
+    const [showExportModal, setShowExportModal] = React.useState(false);
+
     // ── beforeunload guard ────────────────────────────────────────────────────
     // Fires when the user tries to close the tab, press F5, or navigate away
     // while an AI operation or export is in progress. The browser shows its own
@@ -284,12 +294,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const [mobileTab, setMobileTab] = React.useState('ai'); // Default to AI on mobile as per user preference
 
     const fileInputRef = useRef(null);
-
-    const [isExporting, setIsExporting] = React.useState(false);
-    const [exportUrl, setExportUrl] = React.useState(null);
-    const [exportResult, setExportResult] = React.useState(null);
-    const [exportError, setExportError] = React.useState(null);
-    const [showExportModal, setShowExportModal] = React.useState(false);
 
     // ── Progressive auth ──────────────────────────────────────────────────
     const { isAnonymous, hoursLeft, getOrCreate, sessionId } = useSessionStore();
