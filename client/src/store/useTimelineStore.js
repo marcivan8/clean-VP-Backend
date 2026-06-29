@@ -16,9 +16,38 @@ import {
     LAYER_TYPES,
     ENTITY_TYPES
 } from '../timeline/index.js';
+import { supabase } from '../lib/supabaseClient.js';
+import { createProject, updateProject } from '../lib/projectsApi.js';
 
-// Module-level debounce timer — lives outside React so it survives re-renders
-let _autosaveTimer = null;
+// Module-level debounce timers — live outside React so they survive re-renders
+let _autosaveTimer    = null;
+let _supabaseTimer    = null;
+const SUPABASE_DEBOUNCE_MS = 3000; // write to Supabase 3 s after last structural change
+
+// ── Supabase autosave helper ──────────────────────────────────────────────────
+// Called by saveProject() after the localStorage write.
+// Silently skipped for unauthenticated (anonymous) users.
+async function _supabaseSave(projectData) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return; // anonymous — localStorage only
+
+    let projectId = useTimelineStore.getState().projectId;
+
+    if (!projectId) {
+        // First save for this authenticated user — create the row
+        const name = useTimelineStore.getState().projectName || 'Untitled Project';
+        projectId = await createProject(name, projectData);
+        if (projectId) {
+            useTimelineStore.setState({ projectId });
+            // Persist ID so we reconnect to it on the next page load
+            try {
+                localStorage.setItem('vp_project_id', projectId);
+            } catch (_) {}
+        }
+    } else {
+        await updateProject(projectId, projectData);
+    }
+}
 
 // ── Synchronous pre-restore ────────────────────────────────────────────────
 // Populate timelineManager BEFORE React renders so the Revideo scene
@@ -31,7 +60,7 @@ try {
     if (_raw) {
         const _saved = JSON.parse(_raw);
         const _age = Date.now() - (_saved.timestamp || 0);
-        if (_saved.version === '1.2' && _age < 24 * 60 * 60 * 1000 && _saved.tracks?.some(t => t.clips?.length > 0)) {
+        if (_saved.version === '1.2' && _age < 30 * 24 * 60 * 60 * 1000 && _saved.tracks?.some(t => t.clips?.length > 0)) {
             // ── FIX: Deduplicate empty tracks from corrupted autosaves ─────────────
             // Separate tracks into two buckets. Keep all tracks that have clips.
             // Only keep an empty track if no clip-bearing track of that type exists.
@@ -170,6 +199,19 @@ const useTimelineStore = create(
 
             playerRef: null,
             setPlayerRef: (ref) => set({ playerRef: ref }),
+
+            // ── Project identity (set when loaded from / saved to Supabase) ──
+            projectId:   localStorage.getItem('vp_project_id') || null,
+            projectName: 'Untitled Project',
+            setProjectName: (name) => set({ projectName: name }),
+            setProjectId:   (id)   => {
+                set({ projectId: id });
+                if (id) {
+                    try { localStorage.setItem('vp_project_id', id); } catch (_) {}
+                } else {
+                    try { localStorage.removeItem('vp_project_id'); } catch (_) {}
+                }
+            },
 
             // ==============================================================
             // PLAYBACK ACTIONS
@@ -1170,6 +1212,16 @@ const useTimelineStore = create(
                 } catch (_) {
                     // localStorage full — silently skip
                 }
+
+                // ── Supabase persistence (authenticated users only) ──────────────
+                // Debounced separately so rapid edits don't spam the DB.
+                clearTimeout(_supabaseTimer);
+                _supabaseTimer = setTimeout(() => {
+                    _supabaseSave(projectData).catch(e =>
+                        console.warn('[useTimelineStore] Supabase autosave failed:', e.message)
+                    );
+                }, SUPABASE_DEBOUNCE_MS);
+
                 return projectData;
             },
 

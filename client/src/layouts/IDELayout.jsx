@@ -1,6 +1,8 @@
 import { useShallow } from 'zustand/react/shallow';
 import React, { useRef, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Menu, Upload, Palette, Move } from 'lucide-react';
+import { Logo } from '../components/Logo.jsx';
 import classNames from 'classnames';
 import { Player } from '@revideo/player-react';
 import project from '../revideo/project';
@@ -59,7 +61,9 @@ const getPlayerDimensions = (ratio) => {
     }
 };
 
-const IDELayout = ({ children, mode = 'editor' }) => {
+const IDELayout = ({ children, mode = 'editor', projectId = null }) => {
+    const navigate = useNavigate();
+
     useEffect(() => {
         const handleKeyDown = (e) => {
             const tag = document.activeElement?.tagName;
@@ -105,7 +109,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
-    const { isPlaying, setUploadedFile, updateClip, uploadedFile, aspectRatio, assets, addAssets, addClip, zoomLevel, tracks, activeClipId, setActiveClip, past, future, duration } = useTimelineStore(useShallow(state => ({
+    const { isPlaying, setUploadedFile, updateClip, uploadedFile, aspectRatio, assets, addAssets, addClip, zoomLevel, tracks, activeClipId, setActiveClip, past, future, duration, projectName } = useTimelineStore(useShallow(state => ({
     isPlaying: state.isPlaying,
     setUploadedFile: state.setUploadedFile,
     updateClip: state.updateClip,
@@ -120,7 +124,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     setActiveClip: state.setActiveClip,
     past: state.past,
     future: state.future,
-    duration: state.duration
+    duration: state.duration,
+    projectName: state.projectName,
 })));
 
     const { activeClip, activeTrackId } = React.useMemo(() => {
@@ -942,16 +947,53 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 {/* Top Bar */}
                 <header className="h-11 border-b flex items-center justify-start gap-6 px-4 z-40 shrink-0" style={{ background: "var(--glass)", borderColor: "var(--line-soft)", backdropFilter: "blur(20px) saturate(160%)" }}>
                     <div className="flex items-center gap-3">
-
+                        {/* Mobile sidebar toggle */}
                         <button className="md:hidden p-2 -ml-2 text-muted-foreground hover:text-foreground" onClick={() => setShowSidebar(!showSidebar)}>
                             <Menu className="w-5 h-5" />
                         </button>
-                        <span className="studio-mono-label hidden md:inline">vibed/studio</span>
+
+                        {/* Logo mark */}
+                        <Logo size={20} variant="gradient" />
+
+                        {/* Back to dashboard (only when opened via /editor/:id) */}
+                        {projectId && (
+                            <button
+                                onClick={() => navigate('/dashboard')}
+                                title="Back to projects"
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    color: 'var(--fg-3)',
+                                    fontFamily: 'var(--f-mono)',
+                                    fontSize: 11,
+                                    letterSpacing: '0.06em',
+                                    padding: '4px 8px',
+                                    borderRadius: 'var(--r-xs)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    transition: 'background 0.12s, color 0.12s',
+                                }}
+                                onMouseEnter={e => {
+                                    e.currentTarget.style.background = 'var(--glass-2)';
+                                    e.currentTarget.style.color = 'var(--fg-2)';
+                                }}
+                                onMouseLeave={e => {
+                                    e.currentTarget.style.background = 'none';
+                                    e.currentTarget.style.color = 'var(--fg-3)';
+                                }}
+                            >
+                                ← Projects
+                            </button>
+                        )}
+
+                        <span className="studio-mono-label hidden md:inline" style={{ opacity: projectId ? 0.4 : 1 }}>vibed/studio</span>
                     </div>
 
                     {/* Centered project name */}
                     <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-2" style={{ fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--fg-3)" }}>
-                        <span style={{ color: "var(--fg-2)" }}>Untitled Project</span>
+                        <span style={{ color: "var(--fg-2)" }}>{projectName || 'Untitled Project'}</span>
                         <span style={{ color: "var(--fg-4)" }}>·</span>
                         <VideoTimeDisplay />
                     </div>

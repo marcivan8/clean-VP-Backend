@@ -55,7 +55,7 @@ export default function AuthPage() {
             });
             if (signInErr) throw signInErr;
             await migrateSession(data.user.id);
-            navigate('/editor');
+            navigate('/dashboard');
         } catch (err) {
             // Return a generic message for invalid credentials to avoid user enumeration
             if (err.message?.toLowerCase().includes('invalid login credentials')) {
@@ -105,7 +105,7 @@ export default function AuthPage() {
                     body: JSON.stringify({ email: cleanEmail }),
                 });
                 await migrateSession(data.user.id);
-                navigate('/editor');
+                navigate('/dashboard');
             } else {
                 setSuccess('Compte créé ! Vérifie ta boîte mail pour confirmer ton adresse.');
             }
@@ -170,9 +170,9 @@ export default function AuthPage() {
                             <button
                                 className="btn btn-primary"
                                 style={{ width: '100%', justifyContent: 'center', borderRadius: 12 }}
-                                onClick={() => navigate('/editor')}
+                                onClick={() => navigate('/dashboard')}
                             >
-                                Ouvrir l'éditeur
+                                Mes projets
                             </button>
                             <button
                                 className="btn btn-ghost"
