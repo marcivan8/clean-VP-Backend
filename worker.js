@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { Worker } = require('bullmq');
-const { connection } = require('./queue/connection');
+const { makeRedisConnection } = require('./queue/connection');
 
 // Import job handlers
 const processVideoJob    = require('./jobs/videoProcessor');
@@ -9,9 +9,13 @@ const processAnalysisJob = require('./jobs/analysisProcessor');
 
 console.log('👷 Worker service starting...');
 
+// Each Worker gets its own Redis connection — sharing one socket across all
+// workers causes ECONNRESET cascades when the single idle connection is
+// dropped by Railway's network between job bursts.
+
 // 1. Video Processing Worker (HLS proxy, waveform)
 const videoWorker = new Worker('video-processing', processVideoJob, {
-    connection,
+    connection: makeRedisConnection(),
     concurrency: 2, // limit concurrency for heavy FFmpeg tasks
     limiter: { max: 10, duration: 60000 }
 });
@@ -25,7 +29,7 @@ videoWorker.on('failed', (job, err) => {
 
 // 2. Audio Processing Worker (transcribe, denoise, normalize, beat-detect, silence-detect)
 const audioWorker = new Worker('audio-processing', processAudioJob, {
-    connection,
+    connection: makeRedisConnection(),
     concurrency: 2,
 });
 
@@ -38,7 +42,7 @@ audioWorker.on('failed', (job, err) => {
 
 // 3. Analysis Processing Worker (Virality)
 const analysisWorker = new Worker('analysis-processing', processAnalysisJob, {
-    connection,
+    connection: makeRedisConnection(),
     concurrency: 2,
 });
 
@@ -54,7 +58,7 @@ analysisWorker.on('failed', (job, err) => {
 // OOM-crashing the container. Serialising here prevents concurrent HTTP
 // requests to the Python service and the resulting 502s.
 const diarizeWorker = new Worker('diarize-processing', processAudioJob, {
-    connection,
+    connection: makeRedisConnection(),
     concurrency: 1,
 });
 
