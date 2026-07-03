@@ -669,6 +669,42 @@ function compileMoveClipToTrack(step, ctx) {
     ]);
 }
 
+// ── Split speakers — "separate the two people" ────────────────────────────────
+// Delegates to the split_speakers case in MediaExecutionEngine which:
+//   1. Queues a diarize job (Node → Python diarize-service via multipart upload)
+//   2. Polls until done → {words, speakers}
+//   3. Calls /api/interview/build-tracks → {tracks: [{speaker, clips}]}
+//   4. Creates one video track per speaker and fills it with their clips
+function compileSplitSpeakers(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'split_speakers', { language: step.language || null },
+            { source_step_id: step.step_id, description: 'Split video into per-speaker tracks (WhisperX + pyannote)' }),
+    ]);
+}
+
+// ── Zoom rhythm — "make it feel multi-camera" ─────────────────────────────────
+// Delegates to the rhythm_zoom case in MediaExecutionEngine.executeStoreAction,
+// which calls /api/interview/rhythm-zoom and applies scale keyframes directly.
+function compileRhythmZoom(step, ctx) {
+    const VALID_STYLES = ['subtle', 'dynamic', 'cinematic'];
+    const style = VALID_STYLES.includes(step.style) ? step.style : 'dynamic';
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'rhythm_zoom', { style },
+            { source_step_id: step.step_id, description: `Zoom rhythm — ${style} style` }),
+    ]);
+}
+
+// ── Semantic clip organizer — "organize my clips / auto-arrange" ───────────────
+// Delegates to the organize_clips case in MediaExecutionEngine.executeStoreAction.
+// Extracts one frame per asset via server-side ffmpeg, classifies with GPT-4o-mini
+// Vision, then reorders clips on the timeline to match the recommended narrative order.
+function compileOrganizeClips(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'organize_clips', {},
+            { source_step_id: step.step_id, description: 'Analyze and auto-organize clips by semantic content' }),
+    ]);
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // §7  COMMAND REGISTRY
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -705,6 +741,11 @@ const COMMAND_REGISTRY = new Map([
     // NEW long-form audio/analysis steps
     ['remove_repeated_takes', { compiler: compileRemoveRepeatedTakes }],
     ['identify_quotable_moments', { compiler: compileIdentifyQuotableMoments }],
+
+    // Interview / talking-head / clip organization
+    ['rhythm_zoom',    { compiler: compileRhythmZoom }],
+    ['split_speakers', { compiler: compileSplitSpeakers }],
+    ['organize_clips', { compiler: compileOrganizeClips }],
 
     // Effect commands
     ['add_transition', { compiler: compileAddTransition }],

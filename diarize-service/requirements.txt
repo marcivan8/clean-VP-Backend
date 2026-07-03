@@ -12,3 +12,26 @@ git+https://github.com/m-bain/whisperX.git
 
 # torch/torchaudio are installed separately in the Dockerfile (pinned to CPU-only
 # wheels for cache efficiency). No need to repeat them here.
+
+# ── Semantic clip analysis (POST /classify-clips) ──────────────────────────────
+# CLIP (openai/clip-vit-base-patch32) for zero-shot visual classification.
+# HuggingFace transformers is already a transitive dep of whisperX; pin loosely.
+transformers>=4.40.0,<5.0
+
+# Pillow — PIL image loading/conversion for CLIP input pre-processing.
+Pillow>=10.0.0
+
+# MediaPipe — face detection + face-size estimation to distinguish
+# close-up / medium / wide shots and confirm talking-head content.
+mediapipe>=0.10.14
+
+# sentence-transformers — embeds per-clip transcript text with
+# all-MiniLM-L6-v2 for semantic similarity and topic clustering.
+sentence-transformers>=3.0.0
+
+# scikit-learn — cosine_similarity + greedy threshold clustering
+# over transcript embeddings to identify topic groups across clips.
+scikit-learn>=1.4.0
+
+# numpy — array ops used by CLIP, MediaPipe, and the clustering step.
+numpy>=1.26.0
