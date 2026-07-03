@@ -77,7 +77,7 @@ function ContextMenu({ projectId, projectName, onRename, onDuplicate, onDelete, 
     const item = (label, action, danger = false) => (
         <button
             key={label}
-            onClick={() => { action(); onClose(); }}
+            onClick={e => { e.stopPropagation(); action(); onClose(); }}
             style={{
                 display: 'block',
                 width: '100%',
