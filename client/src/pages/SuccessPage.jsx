@@ -9,10 +9,10 @@ export default function SuccessPage() {
     const [countdown, setCountdown] = useState(5);
 
     useEffect(() => {
-        if (!checkoutId) { navigate('/editor'); return; }
+        if (!checkoutId) { navigate('/dashboard'); return; }
         const t = setInterval(() => {
             setCountdown(n => {
-                if (n <= 1) { clearInterval(t); navigate('/editor?upgraded=true'); }
+                if (n <= 1) { clearInterval(t); navigate('/dashboard'); }
                 return n - 1;
             });
         }, 1000);
@@ -37,7 +37,7 @@ export default function SuccessPage() {
             <button
                 className="btn btn-primary"
                 style={{ padding: '0 32px', height: 48, fontSize: 16 }}
-                onClick={() => navigate('/editor?upgraded=true')}
+                onClick={() => navigate('/dashboard')}
             >
                 Go to editor now
             </button>
