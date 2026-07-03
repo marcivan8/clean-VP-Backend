@@ -11,6 +11,19 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Logo } from '../components/Logo.jsx';
 import { supabase } from '../lib/supabaseClient.js';
+
+async function createCheckout(plan) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { window.location.href = '/auth'; return; }
+    const res = await fetch('/api/checkout/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ plan }),
+    });
+    if (!res.ok) { console.error('[checkout] failed', await res.text()); return; }
+    const { url } = await res.json();
+    window.location.href = url;
+}
 import {
     listProjects,
     createProject,
@@ -487,7 +500,20 @@ function DeleteConfirm({ projectId, projectName, onClose, onConfirm }) {
 
 // ── Plan limit modal ──────────────────────────────────────────────────────────
 
-function PlanLimitModal({ plan, limit, onClose, onUpgrade }) {
+function PlanLimitModal({ plan, onClose }) {
+    const [loading, setLoading] = useState(null);
+
+    async function handleUpgrade(targetPlan) {
+        setLoading(targetPlan);
+        await createCheckout(targetPlan);
+        setLoading(null);
+    }
+
+    const tiers = [
+        { key: 'creator', name: 'Creator', projects: '10 projects', highlight: false },
+        { key: 'pro',     name: 'Pro',     projects: 'Unlimited projects', highlight: true },
+    ];
+
     return (
         <div style={{
             position: 'fixed', inset: 0, zIndex: 200,
@@ -501,11 +527,11 @@ function PlanLimitModal({ plan, limit, onClose, onUpgrade }) {
                     border: '0.5px solid var(--glass-stroke)',
                     borderRadius: 'var(--r-xl)',
                     padding: '36px 32px',
-                    maxWidth: 460, width: '100%',
+                    maxWidth: 480, width: '100%',
                     boxShadow: '0 32px 80px rgba(0,0,0,0.5)',
                 }}
             >
-                <div style={{ marginBottom: 20 }}>
+                <div style={{ marginBottom: 8 }}>
                     <p style={{ margin: '0 0 4px', fontFamily: 'var(--f-mono)', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--accent)' }}>
                         Plan limit reached
                     </p>
@@ -517,35 +543,36 @@ function PlanLimitModal({ plan, limit, onClose, onUpgrade }) {
                 <p style={{ margin: '0 0 24px', fontSize: 14, color: 'var(--fg-3)', lineHeight: 1.6 }}>
                     Your <strong style={{ color: 'var(--fg-2)', textTransform: 'capitalize' }}>{plan}</strong> plan includes{' '}
                     <strong style={{ color: 'var(--fg-2)' }}>{planLimitLabel(plan)}</strong>.
-                    Upgrade to Creator for 10 projects, or Pro for unlimited.
                 </p>
 
-                <div style={{ display: 'flex', gap: 12 }}>
-                    <button className="btn btn-primary" style={{ flex: 1, height: 42 }} onClick={onUpgrade}>
-                        Upgrade plan
-                    </button>
-                    <button className="btn" style={{ height: 42, padding: '0 20px' }} onClick={onClose}>
-                        Cancel
-                    </button>
-                </div>
-
-                {/* Plan comparison */}
-                <div style={{ marginTop: 24, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                    {[
-                        { name: 'Creator', projects: '10 projects', price: 'Upgrade' },
-                        { name: 'Pro', projects: 'Unlimited projects', price: 'Upgrade' },
-                    ].map(tier => (
-                        <div key={tier.name} style={{
-                            border: '0.5px solid var(--glass-stroke)',
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+                    {tiers.map(tier => (
+                        <div key={tier.key} style={{
+                            border: tier.highlight ? '1px solid var(--accent)' : '0.5px solid var(--glass-stroke)',
                             borderRadius: 'var(--r-md)',
-                            padding: '14px 16px',
-                            background: 'var(--glass)',
+                            padding: '18px 16px',
+                            background: tier.highlight ? 'var(--accent-soft)' : 'var(--glass)',
+                            display: 'flex', flexDirection: 'column', gap: 12,
                         }}>
-                            <p style={{ margin: '0 0 4px', fontWeight: 600, fontSize: 13, color: 'var(--fg)' }}>{tier.name}</p>
-                            <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-3)' }}>{tier.projects}</p>
+                            <div>
+                                <p style={{ margin: '0 0 2px', fontWeight: 600, fontSize: 14, color: 'var(--fg)' }}>{tier.name}</p>
+                                <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-3)' }}>{tier.projects}</p>
+                            </div>
+                            <button
+                                className={tier.highlight ? 'btn btn-primary' : 'btn'}
+                                style={{ height: 36, fontSize: 13, opacity: loading === tier.key ? 0.6 : 1 }}
+                                onClick={() => handleUpgrade(tier.key)}
+                                disabled={!!loading}
+                            >
+                                {loading === tier.key ? 'Redirecting…' : `Get ${tier.name}`}
+                            </button>
                         </div>
                     ))}
                 </div>
+
+                <button className="btn btn-ghost" style={{ width: '100%', height: 38, fontSize: 13 }} onClick={onClose}>
+                    Maybe later
+                </button>
             </div>
         </div>
     );
@@ -878,9 +905,7 @@ export default function DashboardPage() {
             {showLimitModal && (
                 <PlanLimitModal
                     plan={plan}
-                    limit={getProjectLimit(plan)}
                     onClose={() => setShowLimitModal(false)}
-                    onUpgrade={() => { setShowLimitModal(false); navigate('/success'); }}
                 />
             )}
             {showNew && (
