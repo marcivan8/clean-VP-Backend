@@ -58,6 +58,45 @@ const getPlayerDimensions = (ratio) => {
 };
 
 const IDELayout = ({ children, mode = 'editor' }) => {
+    // ── beforeunload guard ────────────────────────────────────────────────────
+    // Warn the user before closing/refreshing the tab while AI is processing
+    // or a video proxy is still uploading. Uses a ref so the handler always
+    // reads the latest value without needing to be re-registered.
+    useEffect(() => {
+        const isBusyRef = { current: false };
+
+        const checkBusy = () => {
+            const aiAnalyzing = useAIStore.getState().isAnalyzing;
+            const anyProxying = useTimelineStore.getState().assets?.some(
+                a => a.isProxying || (a.uploadPhase && a.uploadPhase !== 'ready')
+            ) ?? false;
+            isBusyRef.current = aiAnalyzing || anyProxying;
+        };
+
+        const handleBeforeUnload = (e) => {
+            checkBusy();
+            if (!isBusyRef.current) return;
+            e.preventDefault();
+            e.returnValue = ''; // required for Chrome to show the dialog
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+
+        // Keep isBusyRef in sync by subscribing to both stores
+        const unsubAI       = useAIStore.subscribe(checkBusy);
+        const unsubTimeline = useTimelineStore.subscribe(
+            s => s.assets,
+            checkBusy,
+        );
+
+        return () => {
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+            unsubAI();
+            unsubTimeline();
+        };
+    }, []);
+
+    // ── keyboard shortcuts ────────────────────────────────────────────────────
     useEffect(() => {
         const handleKeyDown = (e) => {
             // Don't intercept shortcuts while typing in an input or textarea
