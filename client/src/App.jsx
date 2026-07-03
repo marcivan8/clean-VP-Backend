@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import HomePage from './pages/HomePage';
 import EditorPage from './pages/EditorPage';
+import DashboardPage from './pages/DashboardPage';
 import AnalyzerPage from './pages/AnalyzerPage';
 import DataPage from './pages/DataPage';
 import GdprPage from './pages/GdprPage';
@@ -19,8 +20,6 @@ function App() {
     useEffect(() => {
         // When Supabase completes a sign-in (magic link, OAuth, email+password),
         // migrate any pending anonymous session to the authenticated user.
-        // Read isAnonymous from the store directly (not the closure) to avoid
-        // stale-closure bugs when the effect re-subscribes after migration.
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             async (event, session) => {
                 if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
@@ -37,7 +36,14 @@ function App() {
             <Routes>
                 <Route path="/"        element={<HomePage />} />
                 <Route path="/auth"    element={<AuthPage />} />
-                <Route path="/editor"  element={<EditorPage />} />
+
+                {/* Dashboard — authenticated users only */}
+                <Route path="/dashboard" element={<DashboardPage />} />
+
+                {/* Editor — /editor for new/anonymous, /editor/:projectId to open saved project */}
+                <Route path="/editor"            element={<EditorPage />} />
+                <Route path="/editor/:projectId" element={<EditorPage />} />
+
                 <Route path="/analyzer" element={<AnalyzerPage />} />
                 <Route path="/data"     element={<DataPage />} />
                 <Route path="/gdpr"     element={<GdprPage />} />

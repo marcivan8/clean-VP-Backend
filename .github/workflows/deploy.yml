@@ -66,6 +66,26 @@ jobs:
           SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
+      # ── Apply Supabase migrations ─────────────────────────────────────────
+      # Runs every migration file in migrations/ in filename order against
+      # the target Supabase Postgres DB. All migrations are idempotent
+      # (IF NOT EXISTS / CREATE OR REPLACE), so re-running is safe.
+      #
+      # Required GitHub secrets (set per environment in repo Settings):
+      #   SUPABASE_DB_URL  — Postgres connection string, e.g.:
+      #     postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres
+      - name: Install psql
+        run: sudo apt-get install -y postgresql-client
+
+      - name: Apply migrations
+        run: |
+          for f in $(ls migrations/*.sql | sort); do
+            echo "Applying $f …"
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "$f"
+          done
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
       # ── Deploy to Railway ─────────────────────────────────────────────────
       # Railway deploys are environment-scoped by the token you pass.
       # Create two tokens in Railway: one scoped to the staging environment,

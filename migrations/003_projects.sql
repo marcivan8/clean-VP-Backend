@@ -1,60 +1,53 @@
--- ─────────────────────────────────────────────────────────────────────────────
--- 003_projects.sql
--- Persistent project storage for Vibed.
---
--- Each row = one user project. The timeline_state column stores the full
--- serialised timeline (tracks, clips, captions, etc.) as JSONB.
--- Transcripts are intentionally excluded — they are large and can be
--- re-generated on demand. Only include what makes a project loadable.
---
--- Usage:
---   Run once in the Supabase SQL editor (Project → SQL Editor → New query).
---   Safe to run again (CREATE TABLE IF NOT EXISTS).
--- ─────────────────────────────────────────────────────────────────────────────
+-- Migration 003: projects table + profiles plan column RLS
+-- Idempotent — safe to re-run.
 
--- ── Table ─────────────────────────────────────────────────────────────────────
+-- ── profiles: plan column ─────────────────────────────────────────────────
+alter table public.profiles
+    add column if not exists plan text not null default 'free'
+        check (plan in ('free', 'creator', 'pro')),
+    add column if not exists plan_expires_at timestamptz;
 
-CREATE TABLE IF NOT EXISTS public.projects (
-  id            uuid          PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id       uuid          NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  name          text          NOT NULL DEFAULT 'Untitled Project',
-  thumbnail_url text,                       -- GCS signed URL or data: URI for the cover frame
-  aspect_ratio  text          NOT NULL DEFAULT '16:9',
-  duration      numeric(10,3) NOT NULL DEFAULT 0,
-  timeline_state jsonb        NOT NULL DEFAULT '{}'::jsonb,
-  created_at    timestamptz   NOT NULL DEFAULT now(),
-  updated_at    timestamptz   NOT NULL DEFAULT now()
+-- RLS: allow users to read their own plan
+do $$ begin
+    if not exists (
+        select 1 from pg_policies
+        where tablename = 'profiles' and policyname = 'profiles: own row select'
+    ) then
+        create policy "profiles: own row select"
+            on public.profiles for select using (auth.uid() = id);
+    end if;
+end $$;
+
+-- ── projects table ────────────────────────────────────────────────────────
+create table if not exists public.projects (
+    id             uuid          primary key default gen_random_uuid(),
+    user_id        uuid          not null references auth.users(id) on delete cascade,
+    name           text          not null default 'Untitled Project',
+    thumbnail_url  text,
+    aspect_ratio   text          not null default '16:9',
+    duration       numeric(10,3) not null default 0,
+    timeline_state jsonb         not null default '{}'::jsonb,
+    created_at     timestamptz   not null default now(),
+    updated_at     timestamptz   not null default now()
 );
 
--- Fast descending list by user
-CREATE INDEX IF NOT EXISTS projects_user_updated_idx
-  ON public.projects (user_id, updated_at DESC);
+create index if not exists projects_user_updated_idx
+    on public.projects (user_id, updated_at desc);
 
--- ── Row-level security ────────────────────────────────────────────────────────
+alter table public.projects enable row level security;
 
-ALTER TABLE public.projects ENABLE ROW LEVEL SECURITY;
+drop policy if exists "users_own_projects" on public.projects;
+create policy "users_own_projects"
+    on public.projects for all
+    using  (auth.uid() = user_id)
+    with check (auth.uid() = user_id);
 
--- Drop policy first so this script is re-runnable
-DROP POLICY IF EXISTS "users_own_projects" ON public.projects;
+-- ── updated_at trigger ────────────────────────────────────────────────────
+create or replace function public.set_updated_at()
+returns trigger language plpgsql as $$
+begin new.updated_at = now(); return new; end; $$;
 
-CREATE POLICY "users_own_projects"
-  ON public.projects
-  FOR ALL
-  USING  (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
-
--- ── updated_at trigger ────────────────────────────────────────────────────────
-
-CREATE OR REPLACE FUNCTION public.set_updated_at()
-RETURNS TRIGGER LANGUAGE plpgsql AS $$
-BEGIN
-  NEW.updated_at = now();
-  RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS projects_set_updated_at ON public.projects;
-
-CREATE TRIGGER projects_set_updated_at
-  BEFORE UPDATE ON public.projects
-  FOR EACH ROW EXECUTE PROCEDURE public.set_updated_at();
+drop trigger if exists projects_set_updated_at on public.projects;
+create trigger projects_set_updated_at
+    before update on public.projects
+    for each row execute procedure public.set_updated_at();

@@ -19,6 +19,8 @@ import {
     duplicateProject,
 } from '../lib/projectsApi.js';
 import useTimelineStore from '../store/useTimelineStore.js';
+import { useUserPlan } from '../hooks/useUserPlan.js';
+import { atLimit, getProjectLimit, planLimitLabel } from '../lib/planLimits.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -482,18 +484,88 @@ function DeleteConfirm({ projectId, projectName, onClose, onConfirm }) {
 
 // ── main page ─────────────────────────────────────────────────────────────────
 
+// ── Plan limit modal ──────────────────────────────────────────────────────────
+
+function PlanLimitModal({ plan, limit, onClose, onUpgrade }) {
+    return (
+        <div style={{
+            position: 'fixed', inset: 0, zIndex: 200,
+            background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(6px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+        }} onClick={onClose}>
+            <div
+                onClick={e => e.stopPropagation()}
+                style={{
+                    background: 'var(--bg-2)',
+                    border: '0.5px solid var(--glass-stroke)',
+                    borderRadius: 'var(--r-xl)',
+                    padding: '36px 32px',
+                    maxWidth: 460, width: '100%',
+                    boxShadow: '0 32px 80px rgba(0,0,0,0.5)',
+                }}
+            >
+                <div style={{ marginBottom: 20 }}>
+                    <p style={{ margin: '0 0 4px', fontFamily: 'var(--f-mono)', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--accent)' }}>
+                        Plan limit reached
+                    </p>
+                    <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--fg)' }}>
+                        Upgrade to create more projects
+                    </h2>
+                </div>
+
+                <p style={{ margin: '0 0 24px', fontSize: 14, color: 'var(--fg-3)', lineHeight: 1.6 }}>
+                    Your <strong style={{ color: 'var(--fg-2)', textTransform: 'capitalize' }}>{plan}</strong> plan includes{' '}
+                    <strong style={{ color: 'var(--fg-2)' }}>{planLimitLabel(plan)}</strong>.
+                    Upgrade to Creator for 10 projects, or Pro for unlimited.
+                </p>
+
+                <div style={{ display: 'flex', gap: 12 }}>
+                    <button className="btn btn-primary" style={{ flex: 1, height: 42 }} onClick={onUpgrade}>
+                        Upgrade plan
+                    </button>
+                    <button className="btn" style={{ height: 42, padding: '0 20px' }} onClick={onClose}>
+                        Cancel
+                    </button>
+                </div>
+
+                {/* Plan comparison */}
+                <div style={{ marginTop: 24, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    {[
+                        { name: 'Creator', projects: '10 projects', price: 'Upgrade' },
+                        { name: 'Pro', projects: 'Unlimited projects', price: 'Upgrade' },
+                    ].map(tier => (
+                        <div key={tier.name} style={{
+                            border: '0.5px solid var(--glass-stroke)',
+                            borderRadius: 'var(--r-md)',
+                            padding: '14px 16px',
+                            background: 'var(--glass)',
+                        }}>
+                            <p style={{ margin: '0 0 4px', fontWeight: 600, fontSize: 13, color: 'var(--fg)' }}>{tier.name}</p>
+                            <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-3)' }}>{tier.projects}</p>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ── main page ─────────────────────────────────────────────────────────────────
+
 export default function DashboardPage() {
     const navigate  = useNavigate();
     const { setProjectId, setProjectName, loadProject } = useTimelineStore();
+    const { plan } = useUserPlan();
 
     const [projects,    setProjects]  = useState([]);
     const [loading,     setLoading]   = useState(true);
     const [user,        setUser]      = useState(null);
 
-    const [showNew,     setShowNew]   = useState(false);
-    const [renameModal, setRenameModal] = useState(null); // { id, name }
-    const [deleteModal, setDeleteModal] = useState(null); // { id, name }
-    const [search,      setSearch]    = useState('');
+    const [showNew,       setShowNew]       = useState(false);
+    const [showLimitModal, setShowLimitModal] = useState(false);
+    const [renameModal,   setRenameModal]   = useState(null); // { id, name }
+    const [deleteModal,   setDeleteModal]   = useState(null); // { id, name }
+    const [search,        setSearch]        = useState('');
 
     // ── auth guard ────────────────────────────────────────────────────────────
     useEffect(() => {
@@ -514,6 +586,15 @@ export default function DashboardPage() {
     useEffect(() => {
         if (user) load();
     }, [user, load]);
+
+    // ── plan limit guard ──────────────────────────────────────────────────────
+    function requestNewProject() {
+        if (atLimit(plan, projects.length)) {
+            setShowLimitModal(true);
+        } else {
+            setShowNew(true);
+        }
+    }
 
     // ── actions ───────────────────────────────────────────────────────────────
     async function handleCreate(name, aspectRatio) {
@@ -638,8 +719,26 @@ export default function DashboardPage() {
                     />
                 </div>
 
+                {/* Plan usage pill */}
+                {!loading && (
+                    <span style={{
+                        fontFamily: 'var(--f-mono)',
+                        fontSize: 10,
+                        letterSpacing: '0.10em',
+                        textTransform: 'uppercase',
+                        padding: '4px 10px',
+                        borderRadius: 999,
+                        border: '0.5px solid var(--glass-stroke)',
+                        background: 'var(--glass)',
+                        color: atLimit(plan, projects.length) ? 'var(--accent-2)' : 'var(--fg-3)',
+                        whiteSpace: 'nowrap',
+                    }}>
+                        {projects.length} / {getProjectLimit(plan) === Infinity ? '∞' : getProjectLimit(plan)} · {plan}
+                    </span>
+                )}
+
                 {/* New project */}
-                <button className="btn btn-primary" style={{ height: 36, padding: '0 16px', fontSize: 13 }} onClick={() => setShowNew(true)}>
+                <button className="btn btn-primary" style={{ height: 36, padding: '0 16px', fontSize: 13 }} onClick={() => requestNewProject()}>
                     + New project
                 </button>
 
@@ -712,7 +811,7 @@ export default function DashboardPage() {
                             </p>
                         </div>
                         {!search && (
-                            <button className="btn btn-primary" style={{ height: 42, padding: '0 22px' }} onClick={() => setShowNew(true)}>
+                            <button className="btn btn-primary" style={{ height: 42, padding: '0 22px' }} onClick={() => requestNewProject()}>
                                 Create project
                             </button>
                         )}
@@ -728,7 +827,7 @@ export default function DashboardPage() {
                     }}>
                         {/* "New project" quick-add card */}
                         <button
-                            onClick={() => setShowNew(true)}
+                            onClick={() => requestNewProject()}
                             style={{
                                 background: 'var(--glass)',
                                 border: '0.5px dashed var(--glass-stroke)',
@@ -775,6 +874,14 @@ export default function DashboardPage() {
             </main>
 
             {/* ── Modals ── */}
+            {showLimitModal && (
+                <PlanLimitModal
+                    plan={plan}
+                    limit={getProjectLimit(plan)}
+                    onClose={() => setShowLimitModal(false)}
+                    onUpgrade={() => { setShowLimitModal(false); navigate('/success'); }}
+                />
+            )}
             {showNew && (
                 <NewProjectModal
                     onClose={() => setShowNew(false)}
