@@ -8,7 +8,7 @@
  */
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Logo } from '../components/Logo.jsx';
 import { supabase } from '../lib/supabaseClient.js';
 
@@ -582,6 +582,7 @@ function PlanLimitModal({ plan, onClose }) {
 
 export default function DashboardPage() {
     const navigate  = useNavigate();
+    const location  = useLocation();
     const { setProjectId, setProjectName, loadProject } = useTimelineStore();
     const { plan } = useUserPlan();
 
@@ -611,9 +612,11 @@ export default function DashboardPage() {
         setLoading(false);
     }, []);
 
+    // Re-fetch on mount and whenever we navigate back to this page (e.g. from editor)
+    // so newly captured thumbnails and other changes are reflected.
     useEffect(() => {
         if (user) load();
-    }, [user, load]);
+    }, [user, load, location.key]);
 
     // ── plan limit guard ──────────────────────────────────────────────────────
     function requestNewProject() {

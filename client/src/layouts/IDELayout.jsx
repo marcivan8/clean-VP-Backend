@@ -60,7 +60,14 @@ const getPlayerDimensions = (ratio) => {
 const IDELayout = ({ children, mode = 'editor' }) => {
     useEffect(() => {
         const handleKeyDown = (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+            // Don't intercept shortcuts while typing in an input or textarea
+            const tag = document.activeElement?.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+            if (e.code === 'Space') {
+                e.preventDefault();
+                useTimelineStore.getState().togglePlay();
+            } else if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
                 e.preventDefault();
                 if (e.shiftKey) {
                     useTimelineStore.getState().redo();
