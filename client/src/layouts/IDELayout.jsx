@@ -476,6 +476,28 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     ? 'Clean up the audio and trim the intro'
                                     : 'Add captions and export for social';
                             useAIStore.getState().setContextualSuggestion(suggestion);
+
+                            // ── Thumbnail capture ─────────────────────────────────
+                            // Trigger right after the first proxy completes — the file
+                            // is guaranteed to exist at this moment (local or GCS).
+                            // Only capture if the project has no thumbnail yet.
+                            setTimeout(async () => {
+                                try {
+                                    const { projectId: pid, tracks: t, assets: a } =
+                                        useTimelineStore.getState();
+                                    if (!pid) return;
+                                    // Quick check: does the project already have a thumbnail?
+                                    const { getProject } = await import('../lib/projectsApi.js');
+                                    const proj = await getProject(pid);
+                                    if (proj?.thumbnail_url) return; // already done
+                                    const { captureProjectThumbnail } = await import(
+                                        '../utils/captureProjectThumbnail.js'
+                                    );
+                                    await captureProjectThumbnail(pid, t, a);
+                                } catch (err) {
+                                    console.warn('[IDELayout] Thumbnail capture after proxy failed:', err.message);
+                                }
+                            }, 1500); // short delay so the player has loaded the new proxyUrl
                         })
                         .catch(err => {
                             clearTimeout(processingTimer);
