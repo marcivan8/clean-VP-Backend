@@ -135,7 +135,7 @@ function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete }) {
             style={{
                 display: 'flex',
                 flexDirection: 'column',
-                overflow: 'hidden',
+                overflow: 'visible',
                 cursor: 'pointer',
                 transition: 'transform 0.18s ease, box-shadow 0.18s ease',
                 boxShadow: 'var(--shadow-card)',
@@ -159,6 +159,7 @@ function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete }) {
                 position: 'relative',
                 maxHeight: isLandscape ? 'none' : 180,
                 overflow: 'hidden',
+                borderRadius: 'var(--r-lg) var(--r-lg) 0 0',
             }}>
                 {project.thumbnail_url ? (
                     <img
