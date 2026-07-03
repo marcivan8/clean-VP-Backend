@@ -731,7 +731,18 @@ export class MediaExecutionEngine {
                 }
 
                 const rzPayload = {
-                    clips: rzClips.map(c => ({ id: c.id, offset: c.offset ?? 0, duration: c.duration ?? 0 })),
+                    clips: rzClips.map(c => {
+                        // Pass assetName so the server can resolve the file path for
+                        // ML frame extraction (CLIP + MediaPipe).  Falls back gracefully
+                        // to transcript-only GPT scoring if assetName is unavailable.
+                        const asset = rzStore.assets?.find(a => a.id === c.assetId);
+                        return {
+                            id:        c.id,
+                            offset:    c.offset   ?? 0,
+                            duration:  c.duration ?? 0,
+                            assetName: asset?.name || null,
+                        };
+                    }),
                     words: rzWords,
                     style: rzStyle,
                 };

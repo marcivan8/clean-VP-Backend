@@ -61,6 +61,40 @@ function resolveUploadPath(filename, filePath) {
     return { error: null, inputPath, uploadsDir, normalized };
 }
 
+// ── Shared: ffmpeg JPEG frame extractor ───────────────────────────────────────
+// Pipes one frame to stdout at the given seek position — no temp files.
+// Returns base64-encoded JPEG string, or null on any error / timeout.
+function _extractFrame(filePath, seekSeconds) {
+    const { spawn } = require('child_process');
+    return new Promise((resolve) => {
+        if (!filePath || !fs.existsSync(filePath)) { resolve(null); return; }
+        const chunks = [];
+        const ff = spawn('ffmpeg', [
+            '-ss', String(Math.max(0, seekSeconds)),
+            '-i', filePath,
+            '-frames:v', '1',
+            '-q:v', '3',
+            '-vf', 'scale=640:-2',
+            '-f', 'image2pipe',
+            '-vcodec', 'mjpeg',
+            'pipe:1',
+        ], { stdio: ['ignore', 'pipe', 'ignore'] });
+        ff.stdout.on('data', c => chunks.push(c));
+        ff.on('close', code => resolve(
+            (code === 0 && chunks.length) ? Buffer.concat(chunks).toString('base64') : null
+        ));
+        ff.on('error', () => resolve(null));
+        setTimeout(() => { ff.kill('SIGKILL'); resolve(null); }, 12_000);
+    });
+}
+
+// Extract 3 frames at 15 %, 45 %, 75 % of the clip's source range.
+// All 3 fire concurrently; null frames are filtered out.
+async function _extractClipFrames(filePath, offset, duration) {
+    const ts = [0.15, 0.45, 0.75].map(p => (offset ?? 0) + (duration ?? 0) * p);
+    return (await Promise.all(ts.map(t => _extractFrame(filePath, t)))).filter(Boolean);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/interview/rhythm-zoom   (SYNCHRONOUS — no file, no queue)
 //
@@ -97,7 +131,6 @@ router.post('/rhythm-zoom', authenticateUser, aiGate, async (req, res) => {
         }
 
         // ── Style config ────────────────────────────────────────────────────────
-        // min = wide shot scale, max = close-up scale, mid = medium shot
         const STYLES = {
             subtle:    { wide: 1.00, mid: 1.06, close: 1.12 },
             dynamic:   { wide: 1.00, mid: 1.10, close: 1.20 },
@@ -106,50 +139,138 @@ router.post('/rhythm-zoom', authenticateUser, aiGate, async (req, res) => {
         const cfg = STYLES[style] || STYLES.dynamic;
 
         // ── Per-clip word extraction ────────────────────────────────────────────
-        // Match words to clips by source-video offset overlap.
-        // A word belongs to a clip if it falls within [clip.offset, clip.offset + clip.duration].
         const clipTexts = clips.map(clip => {
             const ofs = clip.offset ?? 0;
             const end = ofs + (clip.duration ?? 0);
-            const clipWords = words
+            return words
                 .filter(w => w.start >= ofs - 0.05 && w.end <= end + 0.05)
-                .map(w => w.word)
-                .join(' ')
-                .trim();
-            return clipWords || '[silence]';
+                .map(w => w.word).join(' ').trim() || '[silence]';
         });
 
-        // ── GPT-4o-mini batch scoring ───────────────────────────────────────────
-        // Send all clip texts at once. Assign 'wide' | 'medium' | 'close' and
-        // an intensity score (0-1) to each.
+        // ── ML frame classification (CLIP + MediaPipe) ────────────────────────
+        // Optional — fires only when:
+        //   a) DIARIZE_SERVICE_URL is configured (ClipAnalysisService.isAvailable)
+        //   b) At least one clip carries an assetName the server can resolve
+        //
+        // Gives GPT-4o-mini ground-truth visual data (face size, shot type, energy)
+        // so it makes narrative rhythm decisions from fact rather than guessing
+        // from transcript words alone.  Falls back to transcript-only on any error.
+        let mlMeta = {}; // index → ClipMeta | undefined
+
+        const hasAssetNames = clips.some(c => c.assetName);
+        const mlAvailable   = hasAssetNames && (() => {
+            try { return require('../services/ClipAnalysisService').isAvailable; }
+            catch { return false; }
+        })();
+
+        if (mlAvailable) {
+            try {
+                const uploadsDir = path.resolve(__dirname, '../uploads');
+
+                // Resolve server paths (de-duped by assetName)
+                const assetPaths = {};
+                for (const clip of clips) {
+                    const key = clip.assetName || String(clip.id);
+                    if (assetPaths[key] !== undefined) continue;
+                    if (!clip.assetName) { assetPaths[key] = null; continue; }
+                    const { error, inputPath } = resolveUploadPath(clip.assetName, null);
+                    assetPaths[key] = (!error && inputPath && fs.existsSync(inputPath)) ? inputPath : null;
+                }
+
+                // Extract 3 frames per clip concurrently
+                const clipFrameMap = {};
+                await Promise.all(clips.map(async (clip, i) => {
+                    const key = clip.assetName || String(clip.id);
+                    clipFrameMap[i] = await _extractClipFrames(assetPaths[key], clip.offset ?? 0, clip.duration ?? 0);
+                }));
+
+                const totalFrames = Object.values(clipFrameMap).reduce((s, f) => s + f.length, 0);
+                if (totalFrames > 0) {
+                    const ClipAnalysisService = require('../services/ClipAnalysisService');
+                    const mlResult = await ClipAnalysisService.classifyClips(
+                        clips.map((clip, i) => ({
+                            id:         String(i),
+                            frames:     clipFrameMap[i] || [],
+                            transcript: (clipTexts[i] || '').slice(0, 300),
+                            duration:   clip.duration ?? 0,
+                        }))
+                    );
+                    (mlResult.clips || []).forEach(m => {
+                        const idx = parseInt(m.id, 10);
+                        if (!isNaN(idx)) mlMeta[idx] = m;
+                    });
+                    console.log(
+                        `[interviewRoutes] rhythm-zoom: ML metadata loaded for ` +
+                        `${Object.keys(mlMeta).length}/${clips.length} clips, ` +
+                        `${totalFrames} frames`
+                    );
+                }
+            } catch (mlErr) {
+                console.warn(
+                    `[interviewRoutes] rhythm-zoom: ML step failed — falling back to ` +
+                    `transcript-only (${mlErr.message})`
+                );
+            }
+        }
+
+        const hasMl = Object.keys(mlMeta).length > 0;
+
+        // ── GPT-4o-mini shot assignment ────────────────────────────────────────
         const OpenAI = require('openai');
         if (!process.env.OPENAI_API_KEY) {
             return res.status(503).json({ error: 'OPENAI_API_KEY not configured on server.' });
         }
         const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 30_000 });
 
-        const compact = clipTexts.map((t, i) => ({
-            i,
-            dur: parseFloat((clips[i].duration || 0).toFixed(1)),
-            t: t.slice(0, 120),   // cap length to keep the prompt small
-        }));
+        // Build compact per-clip objects for the prompt.
+        // When ML data is available, include visual ground truth so GPT makes
+        // informed narrative decisions rather than guessing from words alone.
+        const compact = clipTexts.map((t, i) => {
+            const ml  = mlMeta[i];
+            const obj = {
+                i,
+                dur: parseFloat((clips[i].duration || 0).toFixed(1)),
+                t:   t.slice(0, 120),
+            };
+            if (ml) {
+                obj.face   = ml.face_size  || 'none';   // "large"|"medium"|"small"|"none"
+                obj.vtype  = ml.clip_type  || 'unknown';
+                obj.energy = ml.energy     || 'neutral';
+            }
+            return obj;
+        });
+
+        const mlInstructions = hasMl ? `
+Each clip also has ML-detected visual fields:
+  face   — actual face size in frame: "large" (face fills frame), "medium", "small", "none" (b-roll/no face)
+  vtype  — CLIP visual classifier output (e.g. "talking_head_close", "broll_outdoor", "emotional_moment")
+  energy — detected energy level: "high" | "medium" | "low" | "neutral"
+
+Extra rules when ML data is present:
+  • face=large: do NOT assign "close" unless this is a peak emotional moment — the face is already big
+  • face=none / vtype contains "broll" or "establishing": assign "wide" — never zoom cutaways aggressively
+  • vtype=emotional_moment: prefer "close"
+  • energy=high: lean toward "close" or "medium"
+  • energy=low: lean toward "wide" or "medium"
+` : '';
 
         const completion = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
             messages: [{
                 role: 'user',
                 content:
-`You are a professional video editor choosing camera shots for a talking-head interview.
-Each entry is one edited clip from the timeline (already cut/cleaned). Assign it a shot type:
-  "wide"   – neutral, transition, hesitation, low energy, breather
-  "medium" – normal conversational tone, background explanation
+`You are a professional video editor assigning shot types to create a multi-camera zoom rhythm for a talking-head video.
+Each clip is already edited and cut. Assign each a shot type:
+  "wide"   – neutral, low energy, transition, breather
+  "medium" – conversational tone, background explanation
   "close"  – key statement, emotion, emphasis, surprise, strong assertion
+${mlInstructions}
+Rhythm rules (always apply):
+- Vary shots — no more than 3 in a row of the same type
+- Never jump directly wide → close (bridge with medium)
+- Clips with dur < 0.8 s must match the previous clip's type
 
-Rules:
-- Vary shots — avoid the same type more than 3 clips in a row
-- Never jump directly wide → close (use medium as bridge)
-- Very short clips (dur < 0.8 s) must match the shot type of the clip before them
-- Return ONLY valid JSON: {"c":[{"i":N,"type":"wide"|"medium"|"close"}]}
+Return ONLY valid JSON: {"c":[{"i":N,"type":"wide"|"medium"|"close"}]}
 
 Clips: ${JSON.stringify(compact)}`,
             }],
@@ -160,44 +281,66 @@ Clips: ${JSON.stringify(compact)}`,
 
         let gptAssignments = [];
         try {
-            const parsed = JSON.parse(completion.choices[0].message.content);
-            gptAssignments = parsed.c || [];
-        } catch (_) {
-            // Malformed — fall back to pure rhythm (wide/mid/close cycle)
-        }
+            gptAssignments = JSON.parse(completion.choices[0].message.content).c || [];
+        } catch (_) { /* fallback to cycle below */ }
 
-        // ── Build assignment map ────────────────────────────────────────────────
         const gptMap = {};
         gptAssignments.forEach(a => { gptMap[a.i] = a.type; });
 
-        // ── Fallback rhythm for any unscored clips ──────────────────────────────
-        // Simple cycling pattern: wide → medium → close → medium → wide …
+        // ── ML-aware scale resolver ────────────────────────────────────────────
+        // Maps (narrative_type, face_size, clip_type) → actual zoom scale.
+        //
+        // Core insight: the zoom should COMPLEMENT the real frame composition.
+        //   • face=large  → face already fills the frame; aggressive zoom crops it badly
+        //   • face=none   → wide/empty frame; bigger zoom headroom
+        //   • broll       → no zoom ever — it breaks the illusion
+        //   • emotional   → always push close regardless of face size (within limits)
+        const lerp = (a, b, t) => a + (b - a) * t;
+
+        function getScale(type, ml) {
+            if (!ml) return cfg[type] ?? cfg.mid;  // no ML → original logic
+
+            const faceSize  = ml.face_size  || 'none';
+            const clipType  = ml.clip_type  || '';
+            const isBroll   = /broll|establishing_shot|screen_recording/.test(clipType);
+            const isEmotional = clipType === 'emotional_moment';
+
+            if (isBroll)       return cfg.wide;  // cutaways stay wide
+            if (isEmotional)   return type === 'wide' ? cfg.mid : cfg.close; // push emotional harder
+
+            if (type === 'wide') return cfg.wide;
+
+            if (type === 'medium') {
+                if (faceSize === 'large') return lerp(cfg.wide, cfg.mid, 0.5); // subtle — face already close
+                return cfg.mid;
+            }
+
+            if (type === 'close') {
+                if (faceSize === 'large')  return lerp(cfg.mid, cfg.close, 0.45); // capped — avoid over-crop
+                if (faceSize === 'medium') return cfg.close;
+                return Math.min(cfg.close + 0.04, 1.30);                          // wide/no face → push harder
+            }
+
+            return cfg.mid;
+        }
+
+        // ── Build final clipZooms list ──────────────────────────────────────────
         const FALLBACK_CYCLE = ['wide', 'medium', 'close', 'medium'];
-        let prevType = 'wide';
+        let prevType  = 'wide';
         let sameCount = 0;
 
         const clipZooms = clips.map((clip, i) => {
             let type = gptMap[i] || null;
 
-            // Short clip: inherit previous shot
-            if (!type && (clip.duration ?? 0) < 0.8) {
-                type = prevType;
-            }
+            if (!type && (clip.duration ?? 0) < 0.8) type = prevType;
+            if (!type) type = FALLBACK_CYCLE[i % FALLBACK_CYCLE.length];
 
-            // Pure fallback: cycle
-            if (!type) {
-                type = FALLBACK_CYCLE[i % FALLBACK_CYCLE.length];
-            }
-
-            // Enforce no wide→close jump
+            // Enforce rhythm constraints
             if (type === 'close' && prevType === 'wide')  type = 'medium';
             if (type === 'wide'  && prevType === 'close') type = 'medium';
-
-            // Enforce max 3 in a row
             if (type === prevType) {
-                sameCount++;
-                if (sameCount >= 3) {
-                    type = type === 'wide' ? 'medium' : (type === 'close' ? 'medium' : 'wide');
+                if (++sameCount >= 3) {
+                    type      = type === 'wide' ? 'medium' : (type === 'close' ? 'medium' : 'wide');
                     sameCount = 0;
                 }
             } else {
@@ -205,8 +348,7 @@ Clips: ${JSON.stringify(compact)}`,
             }
 
             prevType = type;
-
-            const scale = cfg[type] ?? 1.0;
+            const scale = getScale(type, mlMeta[i]);
             return { clipId: clip.id, scale, type };
         });
 
