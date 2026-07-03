@@ -3,7 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import useSessionStore from '../store/useSessionStore';
 
-import { Logo } from '../components/Logo.jsx';
+const Logo = ({ size = 26 }) => (
+    <svg width={size} height={size} viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M310 110 L185 265 L250 245 L200 390 L325 230 L258 248 Z" fill="none" stroke="currentColor" strokeWidth="32" strokeLinejoin="round" strokeLinecap="round" />
+        <line x1="248" y1="248" x2="195" y2="268" stroke="currentColor" strokeWidth="16" strokeLinecap="round" />
+    </svg>
+);
 
 const Spinner = () => (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ animation: 'spin 0.75s linear infinite' }}>
@@ -55,7 +60,7 @@ export default function AuthPage() {
             });
             if (signInErr) throw signInErr;
             await migrateSession(data.user.id);
-            navigate('/editor');
+            navigate('/dashboard');
         } catch (err) {
             // Return a generic message for invalid credentials to avoid user enumeration
             if (err.message?.toLowerCase().includes('invalid login credentials')) {
@@ -105,7 +110,7 @@ export default function AuthPage() {
                     body: JSON.stringify({ email: cleanEmail }),
                 });
                 await migrateSession(data.user.id);
-                navigate('/editor');
+                navigate('/dashboard');
             } else {
                 setSuccess('Compte créé ! Vérifie ta boîte mail pour confirmer ton adresse.');
             }
@@ -170,9 +175,9 @@ export default function AuthPage() {
                             <button
                                 className="btn btn-primary"
                                 style={{ width: '100%', justifyContent: 'center', borderRadius: 12 }}
-                                onClick={() => navigate('/editor')}
+                                onClick={() => navigate('/dashboard')}
                             >
-                                Ouvrir l'éditeur
+                                Mes projets
                             </button>
                             <button
                                 className="btn btn-ghost"
