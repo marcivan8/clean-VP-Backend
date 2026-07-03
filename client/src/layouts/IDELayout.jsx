@@ -1,5 +1,5 @@
 import { useShallow } from 'zustand/react/shallow';
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Menu, Upload, Palette, Move } from 'lucide-react';
 import classNames from 'classnames';
 import { Player } from '@revideo/player-react';
@@ -25,11 +25,8 @@ import { ApprovalDialog } from '../components/ApprovalDialog';
 import { probeMedia } from '../utils/mediaProbe';
 import ProxyService from '../services/proxyService';
 import useAIStore from '../store/useAIStore';
-import { useAgentEvents } from '../hooks/useAgentEvents.js';
 import useSessionStore from '../store/useSessionStore';
 import AuthPromptModal from '../components/AuthPromptModal';
-import { useJobRecovery } from '../hooks/useJobRecovery.js';
-import { useSupabasePersistence } from '../hooks/useSupabasePersistence.js';
 
 const VideoTimeDisplay = () => {
     const timeRef = useRef(null);
@@ -63,39 +60,12 @@ const getPlayerDimensions = (ratio) => {
 const IDELayout = ({ children, mode = 'editor' }) => {
     useEffect(() => {
         const handleKeyDown = (e) => {
-            const tag = document.activeElement?.tagName;
-            const inText = tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable;
-
-            // ── Spacebar: play / pause (Premiere Pro behaviour) ──────────────
-            // Fires when focus is anywhere except a text field so the user can
-            // hit space while hovering the timeline or the monitor.
-            if (e.key === ' ' && !inText && !e.ctrlKey && !e.metaKey) {
-                e.preventDefault();
-                useTimelineStore.getState().togglePlay();
-                return;
-            }
-
-            // ── Undo / Redo ───────────────────────────────────────────────────
             if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
                 e.preventDefault();
                 if (e.shiftKey) {
                     useTimelineStore.getState().redo();
                 } else {
-                    // Smart undo: if CMD+Z is pressed immediately after an AI job
-                    // completed (past.length === lastAIJob.after), undo the entire
-                    // AI batch atomically instead of one micro-step at a time.
-                    const { lastAIJob, clearLastAIJob } = useAIStore.getState();
-                    const currentLen = useTimelineStore.getState().past.length;
-
-                    if (lastAIJob && currentLen === lastAIJob.after && lastAIJob.after > lastAIJob.before) {
-                        while (useTimelineStore.getState().past.length > lastAIJob.before) {
-                            useTimelineStore.getState().undo();
-                        }
-                        clearLastAIJob();
-                    } else {
-                        if (lastAIJob && currentLen <= lastAIJob.before) clearLastAIJob();
-                        useTimelineStore.getState().undo();
-                    }
+                    useTimelineStore.getState().undo();
                 }
             } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
                 e.preventDefault();
@@ -106,7 +76,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
-    const { isPlaying, setUploadedFile, updateClip, uploadedFile, aspectRatio, assets, addAssets, addClip, zoomLevel, tracks, activeClipId, setActiveClip, past, future, duration } = useTimelineStore(useShallow(state => ({
+    const { isPlaying, setUploadedFile, updateClip, uploadedFile, aspectRatio, assets, addAssets, addClip, zoomLevel, tracks, activeClipId, setActiveClip, past, future, duration, projectName, projectId, setProjectName } = useTimelineStore(useShallow(state => ({
     isPlaying: state.isPlaying,
     setUploadedFile: state.setUploadedFile,
     updateClip: state.updateClip,
@@ -121,8 +91,33 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     setActiveClip: state.setActiveClip,
     past: state.past,
     future: state.future,
-    duration: state.duration
+    duration: state.duration,
+    projectName: state.projectName,
+    projectId: state.projectId,
+    setProjectName: state.setProjectName,
 })));
+
+    // ── Inline project rename ──────────────────────────────────────────────────
+    const [editingName, setEditingName] = useState(false);
+    const [nameInput, setNameInput] = useState('');
+    const nameInputRef = useRef(null);
+
+    const startRename = useCallback(() => {
+        setNameInput(projectName || 'Untitled Project');
+        setEditingName(true);
+        setTimeout(() => nameInputRef.current?.select(), 0);
+    }, [projectName]);
+
+    const commitRename = useCallback(async () => {
+        const trimmed = nameInput.trim() || 'Untitled Project';
+        setEditingName(false);
+        if (trimmed === projectName) return;
+        setProjectName(trimmed);
+        if (projectId) {
+            const { renameProject } = await import('../lib/projectsApi.js');
+            await renameProject(projectId, trimmed);
+        }
+    }, [nameInput, projectName, projectId, setProjectName]);
 
     const { activeClip, activeTrackId } = React.useMemo(() => {
         if (!activeClipId) return { activeClip: null, activeTrackId: null };
@@ -179,24 +174,16 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     clips: t.clips.map(c => {
                         const sourceAsset = assets.find(a => a.id === c.assetId);
                         // Resolution order:
-                        // 1. proxyUrl (server-relative) — preferred, always accessible
-                        // 2. stored fileUrl / clip url field (GCS or server paths)
-                        // NOTE: blob: URLs are intentionally excluded. Revideo renders
-                        // in an OffscreenCanvas Web Worker; blob URLs created in the
-                        // main thread are NOT accessible from worker contexts and cause
-                        // ERR_FILE_NOT_FOUND. If only a blob URL is available (video
-                        // still uploading), the clip URL is "" and the Video node is
-                        // skipped (project.tsx: `if (!resolvedUrl) return`) — the clip
-                        // renders as invisible until the proxy job completes.
+                        // 1. proxyUrl (server-relative or blob) — already correct format
+                        // 2. asset blob URL (in-memory, valid while tab is open)
+                        // 3. stored fileUrl / clip url field
                         // All GCS https:// URLs are rewritten to go through /api/proxy/gcs-media
-                        const nb = (u) => (u && !u.startsWith('blob:') ? u : null); // no-blob helper
-                        const rawUrl = nb(sourceAsset?.proxyUrl)
-                            || nb(c.proxyUrl)
-                            || nb(sourceAsset?.fileUrl)
-                            || nb(c.url)
-                            || nb(c.fileUrl)
-                            || nb(sourceAsset?.sourceUrl)
-                            || nb(c.sourceUrl);
+                        const rawUrl = sourceAsset?.proxyUrl
+                            || c.proxyUrl
+                            || sourceAsset?.url
+                            || sourceAsset?.fileUrl
+                            || c.url
+                            || c.fileUrl;
                         return {
                             ...c,
                             type: t.type || c.type,
@@ -232,61 +219,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             activationConstraint: { distance: 5 },
         })
     );
-    // ── Job recovery — reconnect to orphaned BullMQ jobs after reload ────────
-    useJobRecovery();
-
-    // ── Supabase persistence — debounced cloud save on structural changes ─────
-    // Imported separately from the store to avoid shifting Rollup chunk ordering
-    // (which caused TDZ on `useTimelineStore` in Railway's production bundle).
-    useSupabasePersistence();
-
-    // Active AI job count — used by the beforeunload guard below
-    const { activeJobsCount } = useAgentEvents();
-
-    // ── Export state — declared here so isExporting is in scope for the ──────
-    // beforeunload useEffect below. Declaring it after the effect causes TDZ in
-    // Railway's production bundle (minifier keeps `const` TDZ within the
-    // component function body when the reference appears before the declaration).
-    const [isExporting, setIsExporting] = React.useState(false);
-    const [exportUrl, setExportUrl] = React.useState(null);
-    const [exportResult, setExportResult] = React.useState(null);
-    const [exportError, setExportError] = React.useState(null);
-    const [showExportModal, setShowExportModal] = React.useState(false);
-
-    // ── beforeunload guard ────────────────────────────────────────────────────
-    // Fires when the user tries to close the tab, press F5, or navigate away
-    // while an AI operation or export is in progress. The browser shows its own
-    // "Leave site?" confirm dialog — we cannot customise the message in modern browsers.
-    useEffect(() => {
-        const isProcessing = activeJobsCount > 0 || isExporting;
-        if (!isProcessing) return;
-
-        const handler = (e) => {
-            e.preventDefault();
-            // Chrome requires returnValue to be set (any non-empty string triggers the dialog)
-            e.returnValue = '';
-        };
-        window.addEventListener('beforeunload', handler);
-        return () => window.removeEventListener('beforeunload', handler);
-    }, [activeJobsCount, isExporting]);
-
-    // Toast state for recovery notifications
-    const [recoveryToasts, setRecoveryToasts] = React.useState([]);
-    useEffect(() => {
-        const handler = (e) => {
-            const { type, label, jobId, action } = e.detail || {};
-            if (type === 'running') return; // silent — already showed spinner
-            const msg = type === 'completed'
-                ? `✅ ${label} completed while you were away`
-                : `⚠️ ${label} did not complete — try again`;
-            setRecoveryToasts(prev => [...prev, { id: jobId || Date.now(), msg, type }]);
-            // Auto-dismiss after 8 s
-            setTimeout(() => setRecoveryToasts(prev => prev.filter(t => t.id !== (jobId || Date.now()))), 8000);
-        };
-        window.addEventListener('vp:recovery:toast', handler);
-        return () => window.removeEventListener('vp:recovery:toast', handler);
-    }, []);
-
     const [showSidebar, setShowSidebar] = React.useState(false);
     const [showAI, setShowAI] = React.useState(false);
     
@@ -294,6 +226,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const [mobileTab, setMobileTab] = React.useState('ai'); // Default to AI on mobile as per user preference
 
     const fileInputRef = useRef(null);
+
+    const [isExporting, setIsExporting] = React.useState(false);
+    const [exportUrl, setExportUrl] = React.useState(null);
+    const [exportResult, setExportResult] = React.useState(null);
+    const [exportError, setExportError] = React.useState(null);
+    const [showExportModal, setShowExportModal] = React.useState(false);
 
     // ── Progressive auth ──────────────────────────────────────────────────
     const { isAnonymous, hoursLeft, getOrCreate, sessionId } = useSessionStore();
@@ -342,15 +280,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const projectLoaderRef = useRef(null);
     const playerRef = useRef(null);
 
-    const handlePlayerReady = useCallback((revideoPlayer) => {
+    const handlePlayerReady = (revideoPlayer) => {
         playerRef.current = revideoPlayer;
         useTimelineStore.getState().setPlayerRef(revideoPlayer);
         console.log("[IDELayout] Revideo Player Ready", revideoPlayer);
-    }, []);
-
-    const handleTimeUpdate = useCallback((time) => {
-        useTimelineStore.setState({ currentTime: time });
-    }, []);
+    };
 
     const handleSelectiveGradingChange = (range, key, value) => {
         if (!activeClip || !activeTrackId) return;
@@ -480,7 +414,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                             useTimelineStore.getState().updateAsset(assetId, {
                                 proxyUrl: data.proxyUrl,
-                                waveformUrl: data.waveformUrl || null,
                                 sourceUrl: rawGcsUrl || undefined,
                                 isProxying: false,
                                 uploadPhase: 'ready'
@@ -595,56 +528,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         setExportError(null);
         setExportUrl(null);
 
-        // Poll GET /api/render/status/:jobId until the background render finishes.
-        // Network hiccups are retried; 404 (job not found) means Railway restarted
-        // and the in-memory job record is gone — surface that immediately rather than
-        // silently retrying for 10 minutes.
-        const pollRenderJob = async (jobId) => {
-            const deadline        = Date.now() + 10 * 60 * 1000; // 10-minute hard stop
-            let consecutiveErrors = 0;                            // counts non-2xx / network failures
-            const MAX_ERRORS      = 4;                            // ~8s of retries before giving up
-
-            while (Date.now() < deadline) {
-                await new Promise(r => setTimeout(r, 2000));
-                let job = null;
-                let status = null;
-                try {
-                    const sr = await fetch(`/api/render/status/${jobId}`);
-                    status = sr.status;
-                    if (sr.ok) {
-                        job = await sr.json().catch(() => null);
-                        consecutiveErrors = 0; // successful fetch — reset counter
-                    } else if (sr.status === 404) {
-                        consecutiveErrors++;
-                    } else {
-                        consecutiveErrors++;
-                    }
-                } catch (_) {
-                    // True network failure (offline, DNS) — count as an error
-                    consecutiveErrors++;
-                }
-
-                // 4 consecutive failures almost always means the render process died
-                // (Railway restart, OOM kill). Stop waiting and tell the user clearly.
-                if (consecutiveErrors >= MAX_ERRORS) {
-                    if (status === 404) {
-                        throw new Error('Render was interrupted — the server restarted mid-export. Please try again.');
-                    }
-                    throw new Error('Lost contact with the render server. Check your connection and try again.');
-                }
-
-                if (!job) continue;
-                if (job.status === 'done') {
-                    setExportResult({ url: job.url, filename: job.filename, metadata: job.metadata });
-                    setExportUrl(job.url);
-                    return;
-                }
-                if (job.status === 'error') throw new Error(job.error || 'Render failed — please try again.');
-                // 'rendering' → keep polling
-            }
-            throw new Error('Render timed out after 10 minutes — try a shorter clip.');
-        };
-
         try {
             // Attach auth token if one exists in localStorage
             const headers = { 'Content-Type': 'application/json' };
@@ -661,44 +544,29 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 }
             } catch (_) { /* no token — dev mode, route uses optionalAuth */ }
 
+            // POST to /api/render — the pure FFmpeg export engine
             const response = await fetch('/api/render', {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({
                     timeline: { tracks, duration, assets: assets || [] },
                     settings: {
-                        // Use the platform the user explicitly picked in ExportModal.
-                        // Fall back to aspect-ratio inference only when no platform is set.
-                        platform: settings.platform || (settings.aspectRatio === '9:16' ? 'tiktok' : 'youtube'),
-                        quality: settings.quality || 'high',
+                        platform: settings.aspectRatio === '9:16' ? 'tiktok' : 'youtube',
+                        quality: 'high',
                         resolution: settings.resolution || '1080p'
-                    }
+                    } 
                 })
             });
-
-            const data = await response.json().catch(() => ({}));
-
-            if (!response.ok) {
-                const msg = data.error || data.message
-                    || (response.status === 502 ? 'Render service temporarily unavailable — please try again.' : `Export failed (${response.status})`);
-                throw new Error(msg);
-            }
-
-            if (response.status === 202 && data.jobId) {
-                // Async job started — poll for completion
-                await pollRenderJob(data.jobId);
-                return;
-            }
-
-            // Synchronous response (legacy fallback)
-            setExportResult({ url: data.url, filename: data.filename, metadata: data.metadata });
+            const data = await response.json();
+            
+            if (!response.ok) throw new Error(data.error || data.message || 'Export failed');
+            
+            // FFmpeg route is completely synchronous, so we get the final URL immediately
+            setExportResult({ success: true, url: data.url });
             setExportUrl(data.url);
         } catch (err) {
             console.error('Export Failed:', err);
-            const msg = (err.name === 'TypeError' && err.message === 'Failed to fetch')
-                ? 'Connection lost — check your network and try again.'
-                : err.message;
-            setExportError(msg);
+            setExportError(err.message);
         } finally {
             setIsExporting(false);
         }
@@ -762,21 +630,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             });
         }
 
-        // Drop clip onto the "new track" zone (user dragged clip above all tracks)
-        if (activeData?.clip && over?.id === 'new-track-drop-zone') {
-            const activeClipId = active.id;
-            const currentClip = activeData.clip;
-            const deltaSeconds = delta.x / state.zoomLevel;
-            const newStart = Math.max(0, currentClip.start + deltaSeconds);
-            const newTrackId = state.addTrack(currentClip.type === 'audio' ? 'audio' : 'video');
-            state.updateClip(activeData.trackId, activeClipId, {
-                start: newStart,
-                layerId: newTrackId,
-            });
-            return;
-        }
-
-        // Move existing CLIP (single or multi-selection)
+        // Move existing CLIP
         if (activeData?.clip && targetData?.trackId) {
             const activeClipId = active.id;
             let targetTrackId = targetData.trackId;
@@ -785,7 +639,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             const deltaSeconds = delta.x / state.zoomLevel;
             let newStart = Math.max(0, currentClip.start + deltaSeconds);
 
-            // Snapping (against the primary dragged clip)
+            // Snapping
             const SNAP_THRESHOLD_PX = 10;
             const snapThresholdTime = SNAP_THRESHOLD_PX / state.zoomLevel;
             let closestSnap = null;
@@ -816,56 +670,14 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
             if (closestSnap !== null) newStart = closestSnap;
 
-            // Recalculate actual delta after snapping so companions move by the same amount
-            const snappedDeltaSeconds = newStart - currentClip.start;
-
-            const selectedIds = state.selectedClipIds ?? [];
-            const isMultiDrag = selectedIds.length > 1 && selectedIds.includes(activeClipId);
-
-            if (isMultiDrag) {
-                // Move all selected clips by the same snapped delta.
-                // Each companion stays on its own track unless its new position
-                // would overlap a non-selected clip — in that case a new track is
-                // created for it.  The primary (dragged) clip also inherits the
-                // track-switch that happened above via targetTrackId.
-                const trackChanged = targetTrackId !== activeData.trackId;
-
-                selectedIds.forEach(clipId => {
-                    let clipTrackId = null;
-                    let clip = null;
-                    for (const t of state.tracks) {
-                        const found = t.clips.find(c => c.id === clipId);
-                        if (found) { clipTrackId = t.id; clip = found; break; }
-                    }
-                    if (!clipTrackId || !clip) return;
-
-                    const companionStart = Math.max(0, clip.start + snappedDeltaSeconds);
-
-                    // For the primary clip honour an explicit track switch; companions stay put.
-                    let destTrackId = clipTrackId;
-                    if (clipId === activeClipId && trackChanged) destTrackId = targetTrackId;
-
-                    // Push to a new track rather than overlapping a non-selected clip
-                    if (checkOverlap(destTrackId, companionStart, clip.duration, clipId)) {
-                        destTrackId = state.addTrack(clip.type === 'audio' ? 'audio' : 'video');
-                    }
-
-                    state.updateClip(clipTrackId, clipId, {
-                        start: companionStart,
-                        ...(destTrackId !== clipTrackId ? { layerId: destTrackId } : {}),
-                    });
-                });
-            } else {
-                // Single clip drag — original behaviour
-                if (checkOverlap(targetTrackId, newStart, currentClip.duration, activeClipId)) {
-                    targetTrackId = state.addTrack(currentClip.type === 'audio' ? 'audio' : 'video');
-                }
-
-                state.updateClip(activeData.trackId, activeClipId, {
-                    start: newStart,
-                    layerId: targetTrackId !== activeData.trackId ? targetTrackId : undefined,
-                });
+            if (checkOverlap(targetTrackId, newStart, currentClip.duration, activeClipId)) {
+                targetTrackId = state.addTrack(currentClip.type === 'audio' ? 'audio' : 'video');
             }
+
+            state.updateClip(activeData.trackId, activeClipId, { 
+                start: newStart,
+                layerId: targetTrackId !== activeData.trackId ? targetTrackId : undefined
+            });
         }
 
         // Drop EFFECT onto CLIP
@@ -889,28 +701,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             />
             <ClarificationDialog />
             <ApprovalDialog />
-
-            {/* Job recovery toasts — shown when a BullMQ job completed/failed after a reload */}
-            {recoveryToasts.length > 0 && (
-                <div style={{ position: 'fixed', bottom: 80, right: 20, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 320 }}>
-                    {recoveryToasts.map(toast => (
-                        <div key={toast.id} style={{
-                            background: toast.type === 'completed' ? 'var(--glass, rgba(30,32,36,0.95))' : 'rgba(60,30,30,0.95)',
-                            border: `1px solid ${toast.type === 'completed' ? 'var(--accent, #6366f1)' : '#c0392b'}`,
-                            borderRadius: 10, padding: '10px 14px',
-                            fontFamily: 'var(--f-sans)', fontSize: 13, color: 'var(--fg, #f0f0f0)',
-                            boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-                        }}>
-                            <span>{toast.msg}</span>
-                            <button
-                                onClick={() => setRecoveryToasts(prev => prev.filter(t => t.id !== toast.id))}
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg-2, #aaa)', fontSize: 16, lineHeight: 1, padding: 2 }}
-                            >×</button>
-                        </div>
-                    ))}
-                </div>
-            )}
 
             {/* Progressive auth prompt */}
             {authPrompt && (
@@ -959,9 +749,45 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         <span className="studio-mono-label hidden md:inline">vibed/studio</span>
                     </div>
 
-                    {/* Centered project name */}
+                    {/* Centered project name — click to rename */}
                     <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-2" style={{ fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--fg-3)" }}>
-                        <span style={{ color: "var(--fg-2)" }}>Untitled Project</span>
+                        {editingName ? (
+                            <input
+                                ref={nameInputRef}
+                                value={nameInput}
+                                onChange={e => setNameInput(e.target.value)}
+                                onBlur={commitRename}
+                                onKeyDown={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setEditingName(false); }}
+                                style={{
+                                    background: 'var(--bg-3)',
+                                    border: '0.5px solid var(--accent)',
+                                    borderRadius: 4,
+                                    padding: '2px 8px',
+                                    color: 'var(--fg)',
+                                    fontFamily: 'var(--f-mono)',
+                                    fontSize: 11,
+                                    outline: 'none',
+                                    minWidth: 120,
+                                    maxWidth: 280,
+                                }}
+                            />
+                        ) : (
+                            <span
+                                title="Click to rename"
+                                onClick={startRename}
+                                style={{
+                                    color: 'var(--fg-2)',
+                                    cursor: 'text',
+                                    padding: '2px 6px',
+                                    borderRadius: 4,
+                                    transition: 'background 0.15s',
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.background = 'var(--glass-2)'}
+                                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                            >
+                                {projectName || 'Untitled Project'}
+                            </span>
+                        )}
                         <span style={{ color: "var(--fg-4)" }}>·</span>
                         <VideoTimeDisplay />
                     </div>
@@ -1255,6 +1081,13 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 <ErrorBoundary>
                                     {(() => {
                                         const dims = getPlayerDimensions(aspectRatio);
+                                        // Sync project canvas size to current aspect ratio
+                                        if (project && project.settings && project.settings.shared) {
+                                            const v = project.settings.shared.size;
+                                            if (v) { v.x = dims.width; v.y = dims.height; }
+                                            else { project.settings.shared.size = { x: dims.width, y: dims.height }; }
+                                        }
+
                                         return (
                                             <Player
                                                 key={`player-${aspectRatio}-${hasClips ? 'media' : 'empty'}`}
@@ -1262,7 +1095,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                                 playing={isPlaying}
                                                 controls={false}
                                                 currentTime={useTimelineStore.getState().currentTime}
-                                                onTimeUpdate={handleTimeUpdate}
+                                                onTimeUpdate={(time) => {
+                                                    useTimelineStore.setState({ currentTime: time });
+                                                }}
                                                 project={project}
                                                 variables={playerVariables}
                                                 width={dims.width}

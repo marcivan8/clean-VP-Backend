@@ -31,16 +31,16 @@ try {
     if (_raw) {
         const _saved = JSON.parse(_raw);
         const _age = Date.now() - (_saved.timestamp || 0);
-        if (_saved.version === '1.2' && _age < 30 * 24 * 60 * 60 * 1000 && _saved.tracks?.some(t => t.clips?.length > 0)) {
+        if (_saved.version === '1.2' && _age < 24 * 60 * 60 * 1000 && _saved.tracks?.some(t => t.clips?.length > 0)) {
             // ── FIX: Deduplicate empty tracks from corrupted autosaves ─────────────
             // Separate tracks into two buckets. Keep all tracks that have clips.
             // Only keep an empty track if no clip-bearing track of that type exists.
             const tracksWithClips = (_saved.tracks || []).filter(t => t.clips?.length > 0);
             const typesWithClips = new Set(tracksWithClips.map(t => t.type));
-
+            
             const emptyTracksToKeep = [];
             const seenEmptyTypes = new Set();
-
+            
             for (const track of (_saved.tracks || [])) {
                 if (!track.clips?.length) {
                     if (!typesWithClips.has(track.type) && !seenEmptyTypes.has(track.type)) {
@@ -49,7 +49,7 @@ try {
                     }
                 }
             }
-
+            
             _saved.tracks = [...tracksWithClips, ...emptyTracksToKeep];
 
             timelineManager.fromLegacyTracks(_saved.tracks);
@@ -96,10 +96,9 @@ const useTimelineStore = create(
                 updates.tracks = timelineManager.toLegacyTracks();
 
                 // Auto-save 1.5 s after structural changes so rapid edits don't spam localStorage
-                // Use get() — never close over `useTimelineStore` const (TDZ risk in some Rollup orderings)
                 clearTimeout(_autosaveTimer);
                 _autosaveTimer = setTimeout(() => {
-                    get().saveProject();
+                    useTimelineStore.getState().saveProject();
                 }, 1500);
             }
 
@@ -131,6 +130,12 @@ const useTimelineStore = create(
             activeClipId: null,
             selectedClipIds: [],
 
+            // Cloud project identity (set by EditorPage on load, or by autosave hook on first save)
+            projectId:   localStorage.getItem('vp_project_id') || null,
+            projectName: localStorage.getItem('vp_project_name') || 'Untitled Project',
+            setProjectId:   (id)   => { set({ projectId: id });     try { localStorage.setItem('vp_project_id', id); }   catch (_) {} },
+            setProjectName: (name) => { set({ projectName: name }); try { localStorage.setItem('vp_project_name', name); } catch (_) {} },
+
             // History
             past: [],
             future: [],
@@ -144,13 +149,12 @@ const useTimelineStore = create(
             uploadedFilePath: _preRestoredProject?.uploadedFilePath || null,
             pacingSegments: [],
             beatMarkers: [],
-            captions: _preRestoredProject?.captions || [],
-            captionsFilePath: _preRestoredProject?.captionsFilePath || null,
-            transcriptionAttempted: _preRestoredProject?.transcriptionAttempted || false,
+            captions: [],
+            captionsFilePath: null,
+            transcriptionAttempted: false,
             // Per-file transcript map: { [basename]: Word[] }
             // Accumulates across all uploaded clips so the AI can understand the full timeline.
-            // Restored from autosave so silence/filler removal works after a page reload.
-            transcripts: _preRestoredProject?.transcripts || {},
+            transcripts: {},
 
             // Long-Form Intelligence Engine — stores ContentAnalyzer result
             contentAnalysis: null,
@@ -166,24 +170,15 @@ const useTimelineStore = create(
             audioLevels: {},
             waveforms: {},
 
+            // History (expose for UI disabled-state)
+            past: [],
+            future: [],
+
             // Manager access
             manager: timelineManager,
 
             playerRef: null,
             setPlayerRef: (ref) => set({ playerRef: ref }),
-
-            // ── Project identity (set when loaded from / saved to Supabase) ──
-            projectId:   localStorage.getItem('vp_project_id') || null,
-            projectName: 'Untitled Project',
-            setProjectName: (name) => set({ projectName: name }),
-            setProjectId:   (id)   => {
-                set({ projectId: id });
-                if (id) {
-                    try { localStorage.setItem('vp_project_id', id); } catch (_) {}
-                } else {
-                    try { localStorage.removeItem('vp_project_id'); } catch (_) {}
-                }
-            },
 
             // ==============================================================
             // PLAYBACK ACTIONS
@@ -306,10 +301,7 @@ const useTimelineStore = create(
                     });
                 });
 
-                // 2. Clean up any tracks that became empty after the removal
-                get()._cleanEmptyTracks();
-
-                // 3. Remove from the asset list and sync updated track state
+                // 2. Remove from the asset list and sync updated track state
                 set((state) => ({
                     assets: state.assets.filter(a => a.id !== assetId),
                     tracks: timelineManager.toLegacyTracks(),
@@ -317,7 +309,7 @@ const useTimelineStore = create(
                     selectedClipIds: [],
                 }));
 
-                // 4. Persist immediately so the deletion survives a refresh
+                // 3. Persist immediately so the deletion survives a refresh
                 get().saveProject();
             },
             updateAsset: (assetId, updates) => set((state) => ({
@@ -325,27 +317,27 @@ const useTimelineStore = create(
             })),
             setUploadedFile: (file) => set({ uploadedFile: file }),
             setUploadedFilePath: (path) => set({ uploadedFilePath: path }),
-
+            
             // Add asset to timeline (used primarily by mobile tap-to-add interface)
             addAssetToTimeline: (asset) => {
                 const state = get();
                 const tracks = timelineManager.toLegacyTracks();
-
+                
                 // Find target track (first video track for video/image, first audio for audio)
                 let targetTrack = tracks.find(t => t.type === asset.type);
-
+                
                 // Or fallback to first track if type matches roughly
                 if (!targetTrack && (asset.type === 'video' || asset.type === 'image')) {
                     targetTrack = tracks.find(t => t.type === 'video');
                 }
-
+                
                 // If no track exists, create one
                 let trackId = targetTrack?.id;
                 if (!trackId) {
                     const newType = asset.type === 'audio' ? 'audio' : 'video';
                     trackId = get().addTrack(newType);
                 }
-
+                
                 // Find end of current clips on this track.
                 // Ignore ghost clips (empty URLs from a stale autosave) — they have
                 // no playable content, so a freshly uploaded video should start at 0
@@ -356,7 +348,7 @@ const useTimelineStore = create(
                     if (!hasValidUrl) return max;
                     return Math.max(max, clip.start + clip.duration);
                 }, 0) || 0;
-
+                
                 // Add the clip at the end
                 get().addClip(trackId, {
                     assetId: asset.id,
@@ -368,7 +360,7 @@ const useTimelineStore = create(
                     sourceUrl: asset.sourceUrl || asset.url,
                     type: asset.type
                 });
-
+                
                 // Seek to the new clip
                 get().seek(currentEnd);
             },
@@ -385,15 +377,6 @@ const useTimelineStore = create(
                 const newTranscripts = { ...get().transcripts };
                 if (basename && captions?.length > 0) newTranscripts[basename] = captions;
                 set({ captions, captionsFilePath: filePath ?? null, transcriptionAttempted: true, transcripts: newTranscripts });
-                // Transcription finishes async — persist immediately so captions survive
-                // a page reload. The autosave timer only fires on structural timeline events
-                // and would otherwise miss this update.
-                if (captions?.length > 0) {
-                    clearTimeout(_autosaveTimer);
-                    _autosaveTimer = setTimeout(() => {
-                        get().saveProject();
-                    }, 500);
-                }
             },
             // Store timeline-derived words without touching the per-file transcripts index.
             // Use this after segment operations so store.transcripts[file] keeps original
@@ -440,6 +423,16 @@ const useTimelineStore = create(
             // ==============================================================
             // CLIP MANAGEMENT (legacy-compatible API)
             // ==============================================================
+
+            toggleTrackMute: (trackId) => {
+                timelineManager.dispatch({ type: ACTION_TYPES.LAYER_MUTE, payload: { layerId: trackId } });
+                set({ tracks: timelineManager.toLegacyTracks() });
+            },
+
+            toggleTrackSolo: (trackId) => {
+                timelineManager.dispatch({ type: ACTION_TYPES.LAYER_SOLO, payload: { layerId: trackId } });
+                set({ tracks: timelineManager.toLegacyTracks() });
+            },
 
             setTrackVolume: (trackId, volume) => {
                 timelineManager.dispatch({ type: ACTION_TYPES.LAYER_UPDATE, payload: { layerId: trackId, updates: { volume } } });
@@ -533,7 +526,6 @@ const useTimelineStore = create(
                 if (updates.textShadow !== undefined) clipUpdates.textShadow = updates.textShadow;
                 if (updates.stroke !== undefined) clipUpdates.stroke = updates.stroke;
                 if (updates.color !== undefined) clipUpdates.color = updates.color;
-                if (updates.bgColor !== undefined) clipUpdates.bgColor = updates.bgColor;
                 if (updates.textAlign !== undefined) clipUpdates.textAlign = updates.textAlign;
                 if (updates.position !== undefined) clipUpdates.position = updates.position;
                 if (updates.style !== undefined) clipUpdates.style = updates.style;
@@ -583,39 +575,7 @@ const useTimelineStore = create(
                 set({ tracks: timelineManager.toLegacyTracks() });
             },
 
-            // Ripple delete: removes the clip and shifts all subsequent clips left
-            // to close the gap, preserving relative spacing.
-            rippleDeleteClip: (trackId, clipId) => {
-                get()._saveHistory();
-
-                const placement = timelineManager.getState().entities.placements[clipId];
-                if (!placement) return;
-
-                const { startTime, duration } = placement;
-                const gapEnd = startTime + duration;
-
-                // Remove the clip
-                timelineManager.dispatch(TimelineActions.removePlacement(clipId));
-
-                // Shift every placement that starts at or after the gap end
-                const allPlacements = Object.values(timelineManager.getState().entities.placements);
-                allPlacements.forEach(p => {
-                    if (p.startTime >= gapEnd) {
-                        timelineManager.dispatch(
-                            TimelineActions.updatePlacement(p.id, { startTime: p.startTime - duration })
-                        );
-                    }
-                });
-
-                get()._cleanEmptyTracks();
-                set({
-                    tracks: timelineManager.toLegacyTracks(),
-                    activeClipId: null,
-                    selectedClipIds: [],
-                });
-            },
-
-            removeClip: (trackId, clipId, options = {}) => {
+            removeClip: (trackId, clipId) => {
                 get()._saveHistory();
 
                 const state = get();
@@ -624,25 +584,21 @@ const useTimelineStore = create(
                     : [clipId];
 
                 targets.forEach(id => {
-                    // In the legacy API, 'id' is a placement ID.
-                    // Use CLIP_REMOVE which removes both the clip entity and its placement so
-                    // no orphaned clip entities are left behind (which caused console validation warnings).
-                    const placement = timelineManager.getState().entities.placements[id];
-                    if (placement?.clipId) {
-                        timelineManager.dispatch(TimelineActions.removeClip(placement.clipId));
-                    } else {
-                        timelineManager.dispatch(TimelineActions.removePlacement(id));
+                    timelineManager.dispatch(TimelineActions.removePlacement(id));
+                });
+
+                // Clean up empty tracks (except defaults)
+                const currentPlacements = Object.values(timelineManager.getState().entities.placements);
+                const currentLayers = Object.values(timelineManager.getState().entities.layers);
+                
+                currentLayers.forEach(layer => {
+                    if (layer.id === 'track-default-video' || layer.id === 'track-default-audio') return;
+                    const hasClips = currentPlacements.some(p => p.layerId === layer.id);
+                    if (!hasClips) {
+                        timelineManager.dispatch(TimelineActions.removeLayer(layer.id));
                     }
                 });
 
-                // skipCleanup: true when called from bulk operations (e.g. silence removal)
-                // that remove clips and immediately re-add segments to the same layer.
-                // Without this guard, _cleanEmptyTracks() deletes the now-empty video layer,
-                // and the subsequent addClip() calls silently orphan their placements (they
-                // reference a layer that no longer exists) → timeline appears empty.
-                if (!options.skipCleanup) {
-                    get()._cleanEmptyTracks();
-                }
                 set({
                     tracks: timelineManager.toLegacyTracks(),
                     activeClipId: null,
@@ -872,7 +828,7 @@ const useTimelineStore = create(
                     );
                 } else {
                     // Fallback: update via legacy updateClip which patches placement metadata
-                    get().updateClip(track.id, clipId, {
+                    useTimelineStore.getState().updateClip(track.id, clipId, {
                         keyframes: { ...existingKf, [property]: propKf }
                     });
                 }
@@ -900,7 +856,7 @@ const useTimelineStore = create(
                         })
                     );
                 } else {
-                    get().updateClip(track.id, clipId, {
+                    useTimelineStore.getState().updateClip(track.id, clipId, {
                         keyframes: { ...existingKf, [property]: propKf }
                     });
                 }
@@ -1065,19 +1021,6 @@ const useTimelineStore = create(
                 set({ past: newPast, future: [] });
             },
 
-            // Remove every layer that has no placements. Called after any clip
-            // removal so empty tracks disappear immediately, including the two
-            // default tracks (track-default-video / track-default-audio).
-            _cleanEmptyTracks: () => {
-                const placements = Object.values(timelineManager.getState().entities.placements);
-                const layers = Object.values(timelineManager.getState().entities.layers);
-                layers.forEach(layer => {
-                    if (!placements.some(p => p.layerId === layer.id)) {
-                        timelineManager.dispatch(TimelineActions.removeLayer(layer.id));
-                    }
-                });
-            },
-
             // Public alias used by TextOverlay and other UI components
             saveToHistory: () => get()._saveHistory(),
 
@@ -1169,12 +1112,6 @@ const useTimelineStore = create(
                     pacingSegments: state.pacingSegments,
                     beatMarkers: state.beatMarkers,
                     captions: state.captions,
-                    // Persist per-file transcript map so AI operations (silence detection,
-                    // filler removal) survive page reloads without re-running transcription.
-                    // Without this, MediaExecutionEngine falls back to destructive FFmpeg
-                    // silence detection which can wipe the entire clip.
-                    transcripts: state.transcripts || {},
-                    captionsFilePath: state.captionsFilePath || null,
                     transcriptionAttempted: state.transcriptionAttempted,
                     assets: sanitizedAssets,
                     uploadedFilePath: state.uploadedFilePath || null,
@@ -1184,7 +1121,6 @@ const useTimelineStore = create(
                 } catch (_) {
                     // localStorage full — silently skip
                 }
-
                 return projectData;
             },
 
@@ -1201,10 +1137,6 @@ const useTimelineStore = create(
                     pacingSegments: projectData.pacingSegments || [],
                     beatMarkers: projectData.beatMarkers || [],
                     captions: projectData.captions || [],
-                    // Restore per-file transcript map so AI silence/filler detection
-                    // can use transcript-based timing instead of FFmpeg fallback.
-                    transcripts: projectData.transcripts || {},
-                    captionsFilePath: projectData.captionsFilePath || null,
                     transcriptionAttempted: projectData.transcriptionAttempted || false,
                     activeClipId: null,
                     currentTime: 0,
@@ -1332,7 +1264,7 @@ const useTimelineStore = create(
                 const newClips = [];
                 for (const clip of videoTrack.clips) {
                     const cSrcStart = clip.offset ?? 0;
-                    const cSrcEnd = cSrcStart + (clip.duration ?? 0);
+                    const cSrcEnd   = cSrcStart + (clip.duration ?? 0);
 
                     // No overlap → keep as-is
                     if (srcEnd <= cSrcStart || srcStart >= cSrcEnd) {
@@ -1350,8 +1282,8 @@ const useTimelineStore = create(
                     if (srcEnd < cSrcEnd) {
                         newClips.push({
                             ...clip,
-                            id: `${clip.id}-R`,
-                            offset: srcEnd,
+                            id:       `${clip.id}-R`,
+                            offset:   srcEnd,
                             duration: cSrcEnd - srcEnd,
                         });
                     }
