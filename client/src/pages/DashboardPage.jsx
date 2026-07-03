@@ -616,8 +616,7 @@ export default function DashboardPage() {
             uploadedFilePath: null,
         };
 
-        const { createProject: create } = await import('../lib/projectsApi.js');
-        const id = await create(name, skeleton);
+        const id = await createProject(name, skeleton);
         if (!id) { alert('Failed to create project — please try again.'); return; }
 
         // Clear old editor state, set new project context, navigate to editor
@@ -640,6 +639,7 @@ export default function DashboardPage() {
     }
 
     async function handleDuplicate(projectId, projectName) {
+        if (atLimit(plan, projects.length)) { setShowLimitModal(true); return; }
         await duplicateProject(projectId, `${projectName} (Copy)`);
         await load();
     }

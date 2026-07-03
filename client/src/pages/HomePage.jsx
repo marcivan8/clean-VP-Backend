@@ -159,7 +159,6 @@ const Hero = () => {
                     </p>
                     <div className="fade-up fade-up-d3" style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", marginTop: 12 }}>
                         <button onClick={() => window.location.href='#pricing'} className="btn btn-primary">See plans <ArrowRight className="w-4 h-4 ml-1" /></button>
-                        <button onClick={() => { throw new Error('This is your first error!'); }} className="btn" style={{ background: '#ff4d4f', color: '#fff', border: 'none' }}>Break the world</button>
                     </div>
                     <div className="fade-up fade-up-d4 caption" style={{ marginTop: 8 }}>
                         No credit card required. Bring your own clips.
