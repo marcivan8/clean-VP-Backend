@@ -202,6 +202,9 @@ export class EditPlanner {
             case 'reorder_segment': return this.planReorderSegment(planId, constraints);
             case 'reorder_clips': return this.planReorderClips(planId, constraints);
             case 'organize_clips': return this.planOrganizeClips(planId, state, constraints);
+            case 'rhythm_zoom': return this.planRhythmZoom(planId, constraints);
+            case 'split_speakers': return this.planSplitSpeakers(planId);
+            case 'compound_clean_dynamic': return this.planCompoundCleanDynamic(planId, constraints);
             default:
                 console.warn(`[EditPlanner] Unhandled operation: ${operation}`);
                 return null;
@@ -605,6 +608,53 @@ export class EditPlanner {
             plan_id: planId, operation: 'reorder_segment', step_count: 1, requiresApproval: true,
             steps: [{ step_id: 'step_1', action: 'reorder_segment', clip_id: constraints.clipId, track_id: constraints.trackId, target_position: constraints.targetPosition ?? 0, reason: constraints.reason || 'Reorder segment for narrative structure' }]
         };
+    }
+
+    static planRhythmZoom(planId, constraints) {
+        const style = constraints?.style || 'dynamic';
+        return this.buildPlan(planId, 'rhythm_zoom', [
+            {
+                step_id: 'step_1',
+                action: 'rhythm_zoom',
+                style,
+                reason: `Add dynamic zoom rhythm — ${style} style`,
+            }
+        ]);
+    }
+
+    static planSplitSpeakers(planId) {
+        return this.buildPlan(planId, 'split_speakers', [
+            {
+                step_id: 'step_1',
+                action: 'split_speakers',
+                language: null,
+                reason: 'Separate speaker tracks using diarization',
+            }
+        ]);
+    }
+
+    /**
+     * Compound: clean up silences + filler words, then add zoom rhythm.
+     * Runs as a two-step plan so both execute sequentially.
+     */
+    static planCompoundCleanDynamic(planId, constraints) {
+        const style = constraints?.style || 'dynamic';
+        return this.buildPlan(planId, 'compound_clean_dynamic', [
+            {
+                step_id: 'step_1',
+                action: 'silence_removal',
+                threshold: '-30dB',
+                min_duration: 0.5,
+                padding: 0.1,
+                reason: 'Remove silences',
+            },
+            {
+                step_id: 'step_2',
+                action: 'rhythm_zoom',
+                style,
+                reason: `Add dynamic zoom rhythm — ${style} style`,
+            },
+        ]);
     }
 
     static planOrganizeClips(planId, state, constraints) {

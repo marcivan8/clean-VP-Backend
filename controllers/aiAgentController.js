@@ -411,6 +411,9 @@ USER REQUEST:
                                             // Long-form intelligence engine
                                             "long_form_edit", "analyze_structure", "find_hook",
                                             "remove_repetition", "build_from_rushes", "reorder_segment",
+                                            // Talking-head / interview / clip intelligence
+                                            "rhythm_zoom", "split_speakers", "organize_clips",
+                                            "compound_clean_dynamic",
                                             // Conversational
                                             "chat"
                                         ]
