@@ -705,6 +705,17 @@ function compileOrganizeClips(step, ctx) {
     ]);
 }
 
+// ── Virtual multicam — "interview close shots / cut between speakers" ──────────
+// Uses diarization data already in the store (from split-speakers or AssemblyAI)
+// to assign camera angle metadata (wide / close_host / close_guest) to each
+// timeline clip. PlaybackEngine applies the crop region at render time.
+function compileVirtualMulticam(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'virtual_multicam', {},
+            { source_step_id: step.step_id, description: 'Create virtual multicam angles from diarized interview footage' }),
+    ]);
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // §7  COMMAND REGISTRY
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -743,9 +754,10 @@ const COMMAND_REGISTRY = new Map([
     ['identify_quotable_moments', { compiler: compileIdentifyQuotableMoments }],
 
     // Interview / talking-head / clip organization
-    ['rhythm_zoom',    { compiler: compileRhythmZoom }],
-    ['split_speakers', { compiler: compileSplitSpeakers }],
-    ['organize_clips', { compiler: compileOrganizeClips }],
+    ['rhythm_zoom',      { compiler: compileRhythmZoom }],
+    ['split_speakers',   { compiler: compileSplitSpeakers }],
+    ['organize_clips',   { compiler: compileOrganizeClips }],
+    ['virtual_multicam', { compiler: compileVirtualMulticam }],
 
     // Effect commands
     ['add_transition', { compiler: compileAddTransition }],

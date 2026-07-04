@@ -178,6 +178,25 @@ const NLP_MAP = {
         'remove duplicate parts', 'cut repeated content', 'remove repeats',
         'no repetition', 'clean up repetition', 'deduplicate',
     ],
+    virtualMulticam: [
+        // Direct feature names
+        'virtual multicam', 'virtual multi camera', 'virtual multi-camera',
+        // Interview angle vocabulary
+        'interview angles', 'interview style edit', 'multicam interview',
+        'close shot editing', 'close shot interview', 'close shots interview',
+        'speaker close up', 'speaker close shots', 'cut to speaker',
+        'zoom to speaker', 'zoom in on speaker', 'zoom to the speaker',
+        // Single camera → multicam feel
+        'single camera multicam', 'fake multicam interview',
+        'simulate interview angles', 'simulate multicam interview',
+        'create interview angles', 'create close shots',
+        // Feature description phrasing
+        'two person interview edit', '2 person interview angles',
+        'host and guest angles', 'podcast video angles', 'podcast style angles',
+        // Action verbs that clearly imply this feature (not generic dynamic)
+        'cut between speakers', 'cut between host and guest',
+        'switch between speakers', 'alternate speakers',
+    ],
     organizeClips: [
         // ML-based semantic clip organizer (organize_clips operation)
         'organize', 'organize clips', 'organize my clips', 'organize the clips',
@@ -415,6 +434,17 @@ export class IntentParser {
             };
         }
 
+        // ── Virtual multicam — interview close-shot angles ───────────────────
+        if (matches('virtualMulticam')) {
+            return {
+                intent: 'edit',
+                operation: 'virtual_multicam',
+                parameters: {},
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+
         // ── Organize / arrange clips onto the timeline ────────────────────────
         if (matches('organizeClips')) {
             return {
@@ -559,6 +589,20 @@ export class IntentParser {
             return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.LONG_FORM_EDIT, {
                 constraints: { editMode: 'CLEAN_EDIT', platform: this.inferPlatform(lower) || 'podcast' }
             });
+        }
+
+        // ── Virtual multicam — interview close-shot angles ────────────────────
+        if (matches('virtualMulticam')) {
+            return {
+                intent: 'edit',
+                operation: 'virtual_multicam',
+                parameters: {},
+                targets: [],
+                constraints: {},
+                confidence: 'HIGH',
+                missingParameters: [],
+                needs_clarification: false,
+            };
         }
 
         // ── Organize / arrange clips (add to timeline + ML semantic reorder) ─────

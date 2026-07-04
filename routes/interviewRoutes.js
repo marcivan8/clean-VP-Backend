@@ -841,4 +841,210 @@ Ordering: hook first, demos in middle, outro last, B-roll around spoken content 
     }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/interview/virtual-multicam
+//
+// Creates virtual multi-camera angles from a single-camera interview video.
+// Transforms diarization data (who's talking when) into a sequence of camera
+// "shots": wide, close_host, close_guest — each with crop region metadata.
+//
+// The client stores the returned segments as clip.virtualCam on each timeline
+// clip, and PlaybackEngine applies the crop region at render time via WebGL
+// UV sub-region sampling.
+//
+// Body: {
+//   words:    Array<{ word, start, end, speaker }>  — from diarization
+//   speakers: string[]                              — e.g. ["SPEAKER_00","SPEAKER_01"]
+//   frames?:  string[]                              — base64 JPEG sample frames for face detection
+//   hostSide?: "left" | "right"                     — override if known (default: auto-detect)
+// }
+//
+// Returns: {
+//   segments: [{
+//     start:   number,     — timeline seconds
+//     end:     number,
+//     angle:   "wide" | "close_host" | "close_guest",
+//     speaker: string | null,
+//     cropX:   number,     — UV left edge [0,1]
+//     cropY:   number,     — UV top edge  [0,1]
+//     cropW:   number,     — UV width     [0,1]
+//     cropH:   number,     — UV height    [0,1]
+//   }],
+//   hostSide:   "left" | "right",
+//   faceDetected: boolean,
+// }
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
+    try {
+        const { words = [], speakers = [], frames = [], hostSide: forcedHostSide } = req.body;
+
+        if (!words.length) {
+            return res.status(400).json({ error: 'words array is required. Run speaker diarization first.' });
+        }
+        if (!speakers.length) {
+            return res.status(400).json({ error: 'speakers array is required.' });
+        }
+
+        // ── 1. Determine host side via face detection (best-effort) ─────────
+        // Host (SPEAKER_00) is the one who stays on a consistent side.
+        // We sample 3 frames from the beginning of the video where the host
+        // is most likely to be speaking alone.
+        let hostSide   = forcedHostSide || null;
+        let faceDetected = false;
+
+        const diarizeServiceUrl = process.env.DIARIZE_SERVICE_URL;
+
+        if (!hostSide && diarizeServiceUrl && frames.length > 0) {
+            try {
+                const fdRes = await fetch(`${diarizeServiceUrl}/detect-faces`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ frames: frames.slice(0, 3) }),
+                    signal: AbortSignal.timeout(8000),
+                });
+                if (fdRes.ok) {
+                    const fdData = await fdRes.json();
+                    if (fdData.faces && fdData.faces.length > 0) {
+                        // With 2 faces: leftmost is SPEAKER_00 (host) if cx < 0.5
+                        // With 1 face: assume it's the host → take that side
+                        const sortedByCx = [...fdData.faces].sort((a, b) => a.cx - b.cx);
+                        hostSide = sortedByCx[0].side; // leftmost face is host by default
+                        faceDetected = true;
+                        console.log(`[virtual-multicam] Face detection: host on ${hostSide} side`);
+                    }
+                }
+            } catch (fdErr) {
+                console.warn(`[virtual-multicam] Face detection failed (${fdErr.message}) — using default`);
+            }
+        }
+
+        // Default: host on the left (most common interview setup)
+        if (!hostSide) hostSide = 'left';
+
+        // ── 2. Build crop regions for each angle ────────────────────────────
+        // We crop to 60% of the frame width to get a ~1.67x zoom.
+        // For a 16:9 frame, 60% width gives natural "close shot" framing.
+        const CROP_W = 0.60;
+        const CROP_H = 1.00;
+
+        const CROP = {
+            wide: { cropX: 0, cropY: 0, cropW: 1.0, cropH: 1.0 },
+            // Close host — host on left: crop left 60%, host on right: crop right 60%
+            close_host:  hostSide === 'left'
+                ? { cropX: 0,           cropY: 0, cropW: CROP_W, cropH: CROP_H }
+                : { cropX: 1 - CROP_W,  cropY: 0, cropW: CROP_W, cropH: CROP_H },
+            // Close guest — opposite side of host
+            close_guest: hostSide === 'left'
+                ? { cropX: 1 - CROP_W,  cropY: 0, cropW: CROP_W, cropH: CROP_H }
+                : { cropX: 0,           cropY: 0, cropW: CROP_W, cropH: CROP_H },
+        };
+
+        // ── 3. Group words into diarization segments ─────────────────────────
+        // Merge consecutive words from the same speaker (gap ≤ 0.5s = same segment)
+        const MERGE_GAP = 0.5;
+        const rawSegments = []; // { start, end, speaker }
+
+        let cur = null;
+        for (const w of words) {
+            if (!w.speaker) continue;
+            if (!cur || w.speaker !== cur.speaker || (w.start - cur.end) > MERGE_GAP) {
+                if (cur) rawSegments.push(cur);
+                cur = { start: w.start, end: w.end, speaker: w.speaker };
+            } else {
+                cur.end = w.end;
+            }
+        }
+        if (cur) rawSegments.push(cur);
+
+        if (!rawSegments.length) {
+            return res.status(400).json({ error: 'No diarized segments found in words array.' });
+        }
+
+        // ── 4. Apply editorial rules to assign angles ────────────────────────
+        //
+        // Rules:
+        //  • Open with wide (first segment or first N seconds)
+        //  • Single speaker > 2s → close shot of that speaker
+        //  • Segment < 0.6s → inherit previous angle (avoid jarring micro-cuts)
+        //  • Speaker change → hard cut to close of new speaker
+        //  • After 3 consecutive close shots of same speaker → insert wide as breather
+        //  • Last segment → wide
+
+        const host  = speakers[0] || 'SPEAKER_00';
+        const guest = speakers[1] || 'SPEAKER_01';
+
+        const segments = [];
+        let prevAngle      = 'wide';
+        let sameCloseCnt   = 0;
+        const MIN_CLOSE_DUR = 1.5; // seconds — shorter segs stay wide
+
+        for (let i = 0; i < rawSegments.length; i++) {
+            const seg = rawSegments[i];
+            const dur  = seg.end - seg.start;
+            const isFirst = i === 0;
+            const isLast  = i === rawSegments.length - 1;
+
+            let angle;
+
+            if (isFirst || isLast) {
+                angle = 'wide';
+            } else if (dur < 0.6) {
+                // Very short — inherit
+                angle = prevAngle;
+            } else if (dur < MIN_CLOSE_DUR) {
+                // Short segment — stay wide to avoid nervous cuts
+                angle = 'wide';
+            } else {
+                // Assign close shot to the speaking person
+                const isHost  = seg.speaker === host;
+                const isGuest = seg.speaker === guest;
+                if (isHost)       angle = 'close_host';
+                else if (isGuest) angle = 'close_guest';
+                else              angle = 'wide'; // unknown speaker → wide
+
+                // Breather: after 3 consecutive close shots on same speaker → wide
+                if (angle === prevAngle && angle !== 'wide') {
+                    sameCloseCnt++;
+                    if (sameCloseCnt >= 3) {
+                        angle = 'wide';
+                        sameCloseCnt = 0;
+                    }
+                } else {
+                    sameCloseCnt = angle !== 'wide' ? 1 : 0;
+                }
+            }
+
+            prevAngle = angle;
+
+            const crop = CROP[angle];
+            segments.push({
+                start:   parseFloat(seg.start.toFixed(3)),
+                end:     parseFloat(seg.end.toFixed(3)),
+                angle,
+                speaker: seg.speaker || null,
+                cropX:   crop.cropX,
+                cropY:   crop.cropY,
+                cropW:   crop.cropW,
+                cropH:   crop.cropH,
+            });
+        }
+
+        // ── 5. Summary ───────────────────────────────────────────────────────
+        const counts = { wide: 0, close_host: 0, close_guest: 0 };
+        segments.forEach(s => { if (counts[s.angle] !== undefined) counts[s.angle]++; });
+
+        console.log(
+            `[virtual-multicam] ${segments.length} segments: ` +
+            `${counts.wide}W / ${counts.close_host}H / ${counts.close_guest}G | ` +
+            `host=${host} on ${hostSide} | face=${faceDetected}`
+        );
+
+        res.json({ segments, hostSide, faceDetected, host, guest });
+
+    } catch (err) {
+        console.error('[interviewRoutes] /virtual-multicam error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;
