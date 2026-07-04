@@ -450,6 +450,89 @@ def classify_clips():
     return jsonify({"clips": results, "num_topic_clusters": num_clusters})
 
 
+# ── /detect-faces ─────────────────────────────────────────────────────────────
+# Used by the virtual-multicam pipeline to determine where each speaker sits in
+# the frame (left half vs right half), enabling correct crop regions.
+#
+# POST /detect-faces
+# Body (JSON): {
+#   "frames": ["<base64-jpeg>", ...]   — 1–5 frames from the video
+# }
+# Returns: {
+#   "faces": [
+#     {
+#       "cx": 0.28,           — horizontal center of face in [0,1] (0=left, 1=right)
+#       "cy": 0.42,           — vertical center
+#       "w":  0.18,           — width of bounding box [0,1]
+#       "h":  0.24,           — height
+#       "side": "left"|"right"  — which half of the frame this face is in
+#     }
+#   ],
+#   "frame_used": 0           — which frame index was used (middle of input list)
+# }
+#
+# If MediaPipe or the frame decode fails, returns {"faces": [], "frame_used": null}.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route("/detect-faces", methods=["POST"])
+def detect_faces():
+    import base64
+    import numpy as np
+    from io import BytesIO
+    from PIL import Image
+
+    data   = request.get_json(force=True, silent=True) or {}
+    frames = data.get("frames") or []
+
+    if not frames:
+        return jsonify({"faces": [], "frame_used": None})
+
+    # Use the middle frame for the best representative pose
+    frame_idx  = len(frames) // 2
+    frame_b64  = frames[frame_idx]
+    pil_image  = None
+
+    try:
+        img_bytes = base64.b64decode(frame_b64)
+        pil_image = Image.open(BytesIO(img_bytes)).convert("RGB")
+    except Exception as e:
+        log.warning(f"[detect-faces] Frame decode failed: {e}")
+        return jsonify({"faces": [], "frame_used": None})
+
+    faces = []
+    try:
+        import mediapipe as mp
+        mp_face = mp.solutions.face_detection
+
+        img_np = np.array(pil_image)
+        with mp_face.FaceDetection(model_selection=1, min_detection_confidence=0.35) as face_det:
+            mp_result = face_det.process(img_np)
+
+        if mp_result.detections:
+            for det in mp_result.detections:
+                bbox = det.location_data.relative_bounding_box
+                # Clamp to [0,1] — MediaPipe can return slightly out-of-bounds values
+                x = max(0.0, float(bbox.xmin))
+                y = max(0.0, float(bbox.ymin))
+                w = min(float(bbox.width),  1.0 - x)
+                h = min(float(bbox.height), 1.0 - y)
+                cx = x + w / 2.0
+                cy = y + h / 2.0
+                faces.append({
+                    "cx":   round(cx, 4),
+                    "cy":   round(cy, 4),
+                    "w":    round(w,  4),
+                    "h":    round(h,  4),
+                    "side": "left" if cx < 0.5 else "right",
+                })
+    except Exception as e:
+        log.warning(f"[detect-faces] MediaPipe failed: {e}")
+        return jsonify({"faces": [], "frame_used": None})
+
+    log.info(f"[detect-faces] Found {len(faces)} face(s) in frame {frame_idx}")
+    return jsonify({"faces": faces, "frame_used": frame_idx})
+
+
 # ── /diarize ──────────────────────────────────────────────────────────────────
 
 @app.route("/diarize", methods=["POST"])

@@ -135,6 +135,27 @@ export class EditJobManager {
                 return this.runPipeline(jobId, { ...intentResult, _syntheticPlan: syntheticPlan }, abortController, actor);
             }
 
+            // ── virtual_multicam — bypass EditPlanner ──────────────────────────
+            // Like organize_clips, this is a deterministic operation. EditPlanner
+            // would see the timeline and produce a generic step — bypass it with a
+            // pre-built synthetic plan so it routes directly to MediaExecutionEngine.
+            if (intentResult.operation === 'virtual_multicam') {
+                actor.send({ type: 'INTENT_PARSED', intent: intentResult });
+                const syntheticPlan = {
+                    plan_id:   jobId,
+                    operation: 'virtual_multicam',
+                    steps: [{
+                        step_id:    `step_vm_${Date.now()}`,
+                        action:     'virtual_multicam',
+                        reason:     'Create virtual multicam angles from diarized interview footage.',
+                        targets:    [],
+                        parameters: {},
+                    }],
+                };
+                actor.send({ type: 'PLAN_GENERATED', plan: syntheticPlan });
+                return this.runPipeline(jobId, { ...intentResult, _syntheticPlan: syntheticPlan }, abortController, actor);
+            }
+
             actor.send({ type: 'INTENT_PARSED', intent: intentResult });
             return this.runPipeline(jobId, intentResult, abortController, actor);
 

@@ -938,6 +938,137 @@ export class MediaExecutionEngine {
                 };
             }
 
+            // ── Virtual multicam — "interview close shots / cut between speakers" ─
+            // Uses diarization data already stored in the timeline (captions/words
+            // with speaker labels) to assign crop regions to each existing clip.
+            // No new clips are created — each clip gets a `virtualCam` metadata field:
+            //   { angle, cropX, cropY, cropW, cropH }
+            // PlaybackEngine reads virtualCam at render time and applies UV crop.
+            //
+            // Requirements:
+            //   • At least 1 clip on the video track
+            //   • store.captions must contain words with .speaker fields (from diarize)
+            case 'virtual_multicam': {
+                const vmStore      = useTimelineStore.getState();
+                const vmVideoTrack = vmStore.tracks?.find(t => t.type === 'video');
+                const vmClips      = vmVideoTrack?.clips ?? [];
+                const vmWords      = (vmStore.captions ?? []).filter(w => w.speaker);
+
+                if (vmClips.length === 0) {
+                    throw new Error('No clips on the timeline. Add your interview video first.');
+                }
+
+                if (vmWords.length === 0) {
+                    return {
+                        action,
+                        success: false,
+                        message:
+                            'Virtual multicam needs speaker diarization data to know who is talking when.\n\n' +
+                            'Run "split speakers" first (or "add captions" which includes speaker detection), ' +
+                            'then try "interview angles" again.',
+                    };
+                }
+
+                // Collect unique speakers from the words
+                const vmSpeakers = [...new Set(vmWords.map(w => w.speaker).filter(Boolean))].sort();
+
+                if (vmSpeakers.length < 2) {
+                    return {
+                        action,
+                        success: false,
+                        message:
+                            'Virtual multicam works best with at least 2 speakers detected. ' +
+                            'Only one speaker found in the diarization data.',
+                    };
+                }
+
+                // ── 1. Optional: extract sample frames for face detection ──────
+                // We grab up to 5 frames at the start of the video where the host
+                // is most likely alone. Falls back gracefully if not available.
+                // For now we pass an empty array — the backend heuristic (host=left)
+                // works well for standard interview setups and face detection is bonus.
+                const vmFrames = [];
+
+                // ── 2. Call backend to get segments with angle + crop region ───
+                console.log(
+                    `[virtual_multicam] ${vmWords.length} words, ${vmSpeakers.length} speakers, ` +
+                    `${vmClips.length} clips → POST /api/interview/virtual-multicam`
+                );
+
+                const vmRes  = await authFetch('/api/interview/virtual-multicam', {
+                    method: 'POST',
+                    body:   JSON.stringify({
+                        words:    vmWords,
+                        speakers: vmSpeakers,
+                        frames:   vmFrames,
+                    }),
+                });
+                const vmData = await vmRes.json();
+                if (!vmRes.ok) throw new Error(vmData.error || `virtual-multicam returned ${vmRes.status}`);
+
+                const { segments = [], hostSide, host, guest } = vmData;
+
+                if (!segments.length) {
+                    return { action, success: false, message: 'No segments returned from virtual-multicam analysis.' };
+                }
+
+                // ── 3. Assign virtualCam metadata to each clip ─────────────────
+                // For each clip, find the diarization segment whose time range
+                // overlaps the most with the clip's timeline span.
+                const freshStore = useTimelineStore.getState();
+                let wideCount = 0, hostCount = 0, guestCount = 0;
+
+                for (const clip of vmClips) {
+                    const clipStart = clip.start ?? 0;
+                    const clipEnd   = clipStart + (clip.duration ?? 0);
+
+                    // Find the segment with most overlap
+                    let bestSeg = null;
+                    let bestOverlap = 0;
+                    for (const seg of segments) {
+                        const overlapStart = Math.max(seg.start, clipStart);
+                        const overlapEnd   = Math.min(seg.end,   clipEnd);
+                        const overlap      = Math.max(0, overlapEnd - overlapStart);
+                        if (overlap > bestOverlap) {
+                            bestOverlap = overlap;
+                            bestSeg = seg;
+                        }
+                    }
+
+                    if (!bestSeg) continue; // No overlap → leave clip unchanged
+
+                    const virtualCam = {
+                        angle:   bestSeg.angle,
+                        cropX:   bestSeg.cropX,
+                        cropY:   bestSeg.cropY,
+                        cropW:   bestSeg.cropW,
+                        cropH:   bestSeg.cropH,
+                        speaker: bestSeg.speaker || null,
+                    };
+
+                    freshStore.updateClip(vmVideoTrack.id, clip.id, { virtualCam });
+
+                    if (bestSeg.angle === 'wide')        wideCount++;
+                    else if (bestSeg.angle === 'close_host')  hostCount++;
+                    else if (bestSeg.angle === 'close_guest') guestCount++;
+                }
+
+                console.log(
+                    `[virtual_multicam] Applied: ${wideCount}W / ${hostCount}H / ${guestCount}G | ` +
+                    `host=${host} on ${hostSide}`
+                );
+
+                return {
+                    action,
+                    success: true,
+                    message:
+                        `Virtual multicam angles applied to ${vmClips.length} clips — ` +
+                        `${wideCount} wide, ${hostCount} close host, ${guestCount} close guest.\n\n` +
+                        `Host (${host}) is on the ${hostSide} side. ` +
+                        `Angles update in real-time as you scrub through the timeline.`,
+                };
+            }
+
             default: throw new Error(`Unknown store action: ${action}`);
         }
 

@@ -162,14 +162,21 @@ class PlaybackEngine {
     initGL() {
         const gl = this.gl;
 
-        // Vertex Shader (Simple Pass-through)
+        // Vertex Shader — supports UV sub-region sampling for virtual multicam crop.
+        // u_cropOffset and u_cropSize define the sub-region of the video texture to show:
+        //   full frame:     offset=(0,0)  size=(1,1)
+        //   left 60%:       offset=(0,0)  size=(0.6,1)
+        //   right 60%:      offset=(0.4,0) size=(0.6,1)
+        // The final v_texCoord is clamped to [0,1] by CLAMP_TO_EDGE texture params.
         const vsSource = `#version 300 es
         in vec2 a_position;
         in vec2 a_texCoord;
         out vec2 v_texCoord;
+        uniform vec2 u_cropOffset; // (x, y) UV start of crop region
+        uniform vec2 u_cropSize;   // (w, h) UV size of crop region
         void main() {
             gl_Position = vec4(a_position, 0.0, 1.0);
-            v_texCoord = a_texCoord;
+            v_texCoord = u_cropOffset + a_texCoord * u_cropSize;
         }`;
 
         // Fragment Shader (Color Grading)
@@ -277,16 +284,22 @@ class PlaybackEngine {
 
         // Look up locations
         this.loc = {
-            position: gl.getAttribLocation(this.program, "a_position"),
-            texCoord: gl.getAttribLocation(this.program, "a_texCoord"),
+            position:   gl.getAttribLocation(this.program,  "a_position"),
+            texCoord:   gl.getAttribLocation(this.program,  "a_texCoord"),
             brightness: gl.getUniformLocation(this.program, "u_brightness"),
-            contrast: gl.getUniformLocation(this.program, "u_contrast"),
+            contrast:   gl.getUniformLocation(this.program, "u_contrast"),
             saturation: gl.getUniformLocation(this.program, "u_saturation"),
-            hueRotate: gl.getUniformLocation(this.program, "u_hueRotate"),
-            selHue: gl.getUniformLocation(this.program, "u_selHue"),
-            selSat: gl.getUniformLocation(this.program, "u_selSat"),
-            selLum: gl.getUniformLocation(this.program, "u_selLum"),
+            hueRotate:  gl.getUniformLocation(this.program, "u_hueRotate"),
+            selHue:     gl.getUniformLocation(this.program, "u_selHue"),
+            selSat:     gl.getUniformLocation(this.program, "u_selSat"),
+            selLum:     gl.getUniformLocation(this.program, "u_selLum"),
+            // Virtual-multicam crop uniforms
+            cropOffset: gl.getUniformLocation(this.program, "u_cropOffset"),
+            cropSize:   gl.getUniformLocation(this.program, "u_cropSize"),
         };
+
+        // Default crop = full frame
+        this.cropParams = { x: 0, y: 0, w: 1, h: 1 };
 
         // Setup Buffers (Quad)
         this.positionBuffer = gl.createBuffer();
@@ -583,6 +596,24 @@ class PlaybackEngine {
         }
     }
 
+    /**
+     * Set the UV crop region for the current frame.
+     * Used by the virtual-multicam feature to simulate close shots by cropping
+     * to the left or right half of the video texture.
+     *
+     * @param {number} x - Left edge of crop region in UV space [0,1]
+     * @param {number} y - Top edge of crop region in UV space  [0,1]
+     * @param {number} w - Width of crop region in UV space     [0,1]
+     * @param {number} h - Height of crop region in UV space    [0,1]
+     *
+     * Full frame: setCrop(0, 0, 1, 1)  (default)
+     * Left 60%:   setCrop(0, 0, 0.6, 1)
+     * Right 60%:  setCrop(0.4, 0, 0.6, 1)
+     */
+    setCrop(x = 0, y = 0, w = 1, h = 1) {
+        this.cropParams = { x, y, w, h };
+    }
+
     // === EFFECTS API ===
 
     /**
@@ -655,10 +686,9 @@ class PlaybackEngine {
             }
             this.pushFrame(payload.data, payload.timestamp);
         } else if (type === 'AUDIO_DATA') {
-            // Forward Waveform Data if present — keyed as 'video_main' so
-            // audio track clips can look it up via waveforms['video_main'].
+            // Forward Waveform Data if present
             if (payload.peaks && this.onWaveformUpdate) {
-                this.onWaveformUpdate(payload.peaks, payload.timestamp, payload.duration, 'video_main');
+                // this.onWaveformUpdate(payload.peaks, payload.timestamp, payload.duration);
             }
 
             // QUEUE AUDIO FOR STREAMING (Flow Control)
@@ -1125,6 +1155,10 @@ class PlaybackEngine {
         gl.uniform1fv(this.loc.selHue, this.gradingParams.selectiveHue);
         gl.uniform1fv(this.loc.selSat, this.gradingParams.selectiveSat);
         gl.uniform1fv(this.loc.selLum, this.gradingParams.selectiveLum);
+
+        // Virtual-multicam crop (full frame when cropW=1 cropH=1)
+        gl.uniform2f(this.loc.cropOffset, this.cropParams.x, this.cropParams.y);
+        gl.uniform2f(this.loc.cropSize,   this.cropParams.w, this.cropParams.h);
 
         // DRAW
         gl.drawArrays(gl.TRIANGLES, 0, 6);

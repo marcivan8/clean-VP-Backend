@@ -115,6 +115,13 @@ const VideoPlayer = () => {
                 }
                 // Set Volume
                 engineRef.current.setMasterVolume(activeClip.volume !== undefined ? activeClip.volume : 1.0);
+                // Virtual multicam crop — apply the stored crop region if present
+                if (activeClip.virtualCam) {
+                    const { cropX = 0, cropY = 0, cropW = 1, cropH = 1 } = activeClip.virtualCam;
+                    engineRef.current.setCrop(cropX, cropY, cropW, cropH);
+                } else {
+                    engineRef.current.setCrop(0, 0, 1, 1); // full frame
+                }
             } else {
                 console.warn('[VideoPlayer] Playing without Active Clip URL');
                 engineRef.current.resumeAudio();
@@ -141,6 +148,13 @@ const VideoPlayer = () => {
             // Update Volume Real-time
             if (activeClip) {
                 engineRef.current.setMasterVolume(activeClip.volume !== undefined ? activeClip.volume : 1.0);
+            }
+            // Sync virtual multicam crop in real-time (handles clip changes while paused)
+            if (activeClip?.virtualCam) {
+                const { cropX = 0, cropY = 0, cropW = 1, cropH = 1 } = activeClip.virtualCam;
+                engineRef.current.setCrop(cropX, cropY, cropW, cropH);
+            } else if (engineRef.current.setCrop) {
+                engineRef.current.setCrop(0, 0, 1, 1);
             }
         }
 
