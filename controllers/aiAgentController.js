@@ -647,6 +647,10 @@ function localParseIntent(prompt, context) {
             'like a movie', 'movie edit', 'cinematic video',
             'make it like mrbeast', 'mrbeast style', 'like casey neistat',
             'neistat style', 'vlog edit', 'documentary style',
+            // Talking head / selfie / presenter content
+            'edit this talking head', 'edit my talking head', 'talking head edit',
+            'edit this selfie', 'edit my selfie', 'edit this presenter',
+            'edit this face cam', 'edit my face cam', 'edit this on-camera',
         ];
         if (has(...highLevelEditPhrases)) {
             return {

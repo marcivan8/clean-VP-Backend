@@ -724,10 +724,16 @@ export class MediaExecutionEngine {
                 const rzStyle      = args.style || 'dynamic';
 
                 if (rzClips.length < 2) {
-                    return { action, success: false, message: 'Need ≥ 2 clips on the timeline. Run Silence Removal first.' };
+                    return {
+                        action, success: false,
+                        message: `Zoom rhythm needs at least 2 clips to create camera movement between shots — your timeline currently has ${rzClips.length} clip.\n\nTry "remove silence" first: it automatically splits your clip into multiple segments. Then run "make it more dynamic" again.`,
+                    };
                 }
                 if (rzWords.length === 0) {
-                    return { action, success: false, message: 'No transcript found. Run Auto-Captions first.' };
+                    return {
+                        action, success: false,
+                        message: `Zoom rhythm syncs with your speech to decide when to zoom in or out, so it needs a transcript.\n\nRun "add captions" to generate one, then try "make it more dynamic" again.`,
+                    };
                 }
 
                 const rzPayload = {

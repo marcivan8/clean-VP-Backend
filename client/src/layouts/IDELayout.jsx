@@ -18,6 +18,7 @@ import TextOverlay from '../components/Player/TextOverlay';
 import MobileBottomNav from '../components/MobileBottomNav';
 import useDeviceType from '../hooks/useDeviceType';
 import MixerPanel from '../components/Sidebar/MixerPanel';
+import InterviewEditPanel from '../components/InterviewEditPanel';
 import ExportModal from '../components/ExportModal';
 import { Type } from 'lucide-react';
 import { ClarificationDialog } from '../components/ClarificationDialog';
@@ -507,14 +508,62 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 console.warn('[IDELayout] Proxy job result missing proxyPath and originalPath — AI API calls will not work');
                             }
 
-                            // Set contextual AI suggestion based on video duration
                             const dur = assetEntry.sourceDuration || assetEntry.duration || 0;
-                            const suggestion = dur > 600
-                                ? 'Remove all silences and filler words'
-                                : dur > 60
-                                    ? 'Clean up the audio and trim the intro'
-                                    : 'Add captions and export for social';
-                            useAIStore.getState().setContextualSuggestion(suggestion);
+
+                            // ── Immediate contextual greeting ─────────────────────
+                            // Fires ~800ms after proxy so the timeline has rendered.
+                            // Tells the user what we understand about their clip and
+                            // what we can do — no analysis needed, just context-aware
+                            // suggestions based on duration / content type.
+                            if (processedAssets.length === 1) {
+                                setTimeout(() => {
+                                    const aiStore = useAIStore.getState();
+                                    const fmtShort = (s) => {
+                                        const m = Math.floor(s / 60);
+                                        const sec = Math.floor(s % 60);
+                                        return m > 0
+                                            ? `${m}:${sec.toString().padStart(2, '0')}`
+                                            : `${Math.round(s)}s`;
+                                    };
+
+                                    let msg;
+                                    if (dur > 600) {
+                                        msg =
+                                            `Your ${fmtShort(dur)} video is ready — looks like a longer session.\n\n` +
+                                            `Here's what I can do with it:\n` +
+                                            `• "clean this clip" — remove silences and filler words across the whole recording\n` +
+                                            `• "split speakers" — separate each person onto their own track\n` +
+                                            `• "add captions" — auto-generate subtitles\n` +
+                                            `• "extract highlights" — pull the best moments for social clips\n\n` +
+                                            `I'm scanning the content in the background and will share specific findings shortly.`;
+                                    } else if (dur > 20) {
+                                        msg =
+                                            `Your ${fmtShort(dur)} clip is ready! Here's what I can do with it:\n\n` +
+                                            `• "make it more dynamic" — zoom rhythm for a multi-camera feel\n` +
+                                            `• "clean this clip" — remove silences and filler words\n` +
+                                            `• "add captions" — auto-generate subtitles\n` +
+                                            `• "make it vertical" — convert to 9:16 for TikTok/Reels\n\n` +
+                                            `What would you like to focus on?`;
+                                    } else {
+                                        msg =
+                                            `Clip ready! Here's what I can do:\n\n` +
+                                            `• "make it more dynamic" — zoom rhythm to boost engagement\n` +
+                                            `• "add captions" — auto-generate subtitles\n` +
+                                            `• "make it vertical" — convert to 9:16 for TikTok/Reels`;
+                                    }
+
+                                    aiStore.addLog({
+                                        id:        `proxy-ready-${Date.now()}`,
+                                        type:      'assistant',
+                                        message:   msg,
+                                        timestamp: new Date().toLocaleTimeString(),
+                                    });
+
+                                    aiStore.setContextualSuggestion(
+                                        dur > 30 ? 'make it more dynamic' : 'add captions'
+                                    );
+                                }, 800);
+                            }
 
                             // ── Thumbnail capture ─────────────────────────────────
                             // Trigger right after the first proxy completes — the file
@@ -537,6 +586,81 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     console.warn('[IDELayout] Thumbnail capture after proxy failed:', err.message);
                                 }
                             }, 1500); // short delay so the player has loaded the new proxyUrl
+
+                            // ── Proactive talking-head / on-camera video detection ────
+                            // Any single-camera recording longer than 90 s — talking
+                            // head, vlog, selfie, tutorial, whatever — gets a background
+                            // analysis that surfaces what's hurting engagement and what
+                            // we can do about it. Fires 3 s after proxy so thumbnail
+                            // capture goes first.
+                            if (dur > 90 && processedAssets.length === 1 && rawFilePath) {
+                                setTimeout(async () => {
+                                    const aiStore = useAIStore.getState();
+                                    const fmtDur = (s) => {
+                                        const m = Math.floor(s / 60);
+                                        const sec = Math.floor(s % 60);
+                                        return `${m}:${sec.toString().padStart(2, '0')}`;
+                                    };
+                                    try {
+                                        // Lazy-import so the initial bundle stays light.
+                                        const { authFetch }     = await import('../utils/authFetch.js');
+                                        const { pollJobResult } = await import('../utils/jobPoller.js');
+
+                                        const res = await authFetch('/api/interview/analyze', {
+                                            method: 'POST',
+                                            body:   JSON.stringify({ filename: rawFilePath }),
+                                        });
+
+                                        // Silently bail on auth / plan-gate errors — no scary UI.
+                                        if (!res.ok) {
+                                            console.warn('[IDELayout] Background video analysis non-ok:', res.status);
+                                            return;
+                                        }
+
+                                        const { jobId } = await res.json();
+                                        if (!jobId) return;
+
+                                        const result = await pollJobResult(jobId);
+                                        if (!result?.summary) return;
+
+                                        const {
+                                            fillerCount,
+                                            deadAirCount,
+                                            deadAirSaved,
+                                            thinkingCount,
+                                        } = result.summary;
+
+                                        // Only surface findings if there's something meaningful to report.
+                                        const killers = [];
+                                        if (deadAirCount > 0) killers.push(`${deadAirCount} silent gaps (${deadAirSaved}s of dead air)`);
+                                        if (fillerCount  > 0) killers.push(`${fillerCount} filler words`);
+                                        if (thinkingCount > 0) killers.push(`${thinkingCount} thinking pauses`);
+
+                                        if (killers.length > 0) {
+                                            const topAction = (fillerCount > 0 || deadAirCount > 0)
+                                                ? '"make it more dynamic"'
+                                                : '"make it feel multi-camera"';
+                                            aiStore.addLog({
+                                                id:        `camvid-result-${Date.now()}`,
+                                                type:      'assistant',
+                                                message:   `Scan complete — I found: ${killers.join(', ')}.\n\nMost impactful next step: ${topAction}`,
+                                                timestamp: new Date().toLocaleTimeString(),
+                                            });
+                                            aiStore.setContextualSuggestion(
+                                                (fillerCount > 0 || deadAirCount > 0)
+                                                    ? 'make it more dynamic'
+                                                    : 'make it feel multi-camera'
+                                            );
+                                        }
+                                        // If nothing found: stay quiet — the initial suggestion message is enough.
+
+                                    } catch (err) {
+                                        // Best-effort: if this fails the user just misses
+                                        // the proactive message — no error shown in the UI.
+                                        console.warn('[IDELayout] Background video analysis failed:', err.message);
+                                    }
+                                }, 3000);
+                            }
                         })
                         .catch(err => {
                             clearTimeout(processingTimer);
@@ -974,7 +1098,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         <input type="file" ref={fileInputRef} onChange={handleFileImport} className="hidden" accept="video/*,audio/*,image/*" multiple />
 
                         <div className="p-2 border-b flex gap-1 overflow-x-auto no-scrollbar" style={{ borderColor: "var(--line-soft)" }}>
-                            {['media', 'transcript', 'color', 'text', 'audio', 'transform', 'settings'].map(tab => (
+                            {['media', 'transcript', 'interview', 'color', 'text', 'audio', 'transform', 'settings'].map(tab => (
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab)}
@@ -982,6 +1106,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 >
                                     {tab === 'media'      && <Layers   className="w-2.5 h-2.5" />}
                                     {tab === 'transcript' && <span style={{ fontSize: 9 }}>📝</span>}
+                                    {tab === 'interview'  && <span style={{ fontSize: 9 }}>🎙️</span>}
                                     {tab === 'color'      && <Palette  className="w-2.5 h-2.5" />}
                                     {tab === 'text'       && <Type     className="w-2.5 h-2.5" />}
                                     {tab === 'audio'      && <span style={{ fontSize: 9 }}>🎤</span>}
@@ -1064,6 +1189,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 </section>
                             )}
 
+                            {activeTab === 'interview' && <section className="border-b border-border/50"><InterviewEditPanel /></section>}
                             {activeTab === 'text' && <section className="p-4 border-b border-border/50"><TextPanel /></section>}
                             {activeTab === 'audio' && <section className="p-4 border-b border-border/50"><MixerPanel /></section>}
 
