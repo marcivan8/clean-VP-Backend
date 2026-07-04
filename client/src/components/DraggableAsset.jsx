@@ -146,7 +146,7 @@ const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","
 
             {/* Thumbnail Image or Placeholder */}
             {asset.thumbnail ? (
-                <img src={asset.thumbnail} alt={asset.name} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" />
+                <img src={asset.thumbnail} alt={asset.name} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
             ) : (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/10">
                     <Icon className="w-8 h-8 text-primary opacity-50" />
@@ -156,19 +156,19 @@ const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","
             {/* Badges (Duration, Resolution) */}
             <div className="absolute top-1 left-1 flex flex-col gap-1 pointer-events-none">
                 {asset.duration > 0 && (
-                    <span className="bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded backdrop-blur-sm w-fit font-mono">
+                    <span className="bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded backdrop-blur-sm w-fit font-mono font-medium">
                         {formatTime(asset.duration)}
                     </span>
                 )}
                 {asset.resolution && (
-                    <span className="bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded backdrop-blur-sm w-fit font-mono">
+                    <span className="bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded backdrop-blur-sm w-fit font-mono font-medium">
                         {asset.resolution.w}p
                     </span>
                 )}
             </div>
 
-            <div className="absolute bottom-0 inset-x-0 bg-black/60 p-2">
-                <p className="text-[10px] text-white truncate" title={asset.name}>{asset.name}</p>
+            <div className="absolute bottom-0 inset-x-0 bg-black/70 px-2 py-1.5">
+                <p className="text-xs font-medium text-white truncate leading-tight" title={asset.name}>{asset.name}</p>
             </div>
 
             {/* Proxying Overlay */}
