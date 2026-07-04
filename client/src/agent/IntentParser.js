@@ -18,6 +18,7 @@ import { IntentValidator } from './IntentValidator.js';
 import { INTENT_TYPES, OPERATIONS } from './CommandConstants.js';
 import { extractEditIntent } from '../utils/nlpFallback.js';
 import useAIStore from '../store/useAIStore.js';
+import useTimelineStore from '../store/useTimelineStore.js';
 
 export { INTENT_TYPES, OPERATIONS };
 
@@ -366,9 +367,16 @@ export class IntentParser {
 
         // ── Rhythm zoom / multi-camera feel (unambiguous dynamic commands) ────
         if (matches('rhythmZoom')) {
+            // If the timeline has only 1 clip, rhythm_zoom would fail immediately
+            // because it needs segments to create camera switches between.
+            // Auto-upgrade to compound_clean_dynamic (silence_removal → rhythm_zoom)
+            // so "make it more dynamic" works in one shot without a two-step process.
+            const { tracks } = useTimelineStore.getState();
+            const clipCount = (tracks ?? []).flatMap(t => t.clips ?? []).length;
+            const operation = clipCount < 2 ? 'compound_clean_dynamic' : 'rhythm_zoom';
             return {
                 intent: 'edit',
-                operation: 'rhythm_zoom',
+                operation,
                 parameters: { style: 'dynamic' },
                 confidence: 'HIGH',
                 missingParameters: []
@@ -527,9 +535,12 @@ export class IntentParser {
 
         // ── Rhythm zoom / dynamic multi-camera feel ────────────────────────────
         if (matches('rhythmZoom')) {
+            const { tracks: _rzTracks } = useTimelineStore.getState();
+            const _rzClipCount = (_rzTracks ?? []).flatMap(t => t.clips ?? []).length;
+            const _rzOp = _rzClipCount < 2 ? 'compound_clean_dynamic' : 'rhythm_zoom';
             return {
                 intent: 'edit',
-                operation: 'rhythm_zoom',
+                operation: _rzOp,
                 parameters: { style: 'dynamic' },
                 targets: [],
                 constraints: { style: 'dynamic' },
