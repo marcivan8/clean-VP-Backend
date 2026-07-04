@@ -449,40 +449,64 @@ module.exports = async function processAudioJob(job) {
         }
 
         case 'diarize': {
-            console.log(`[Job ${job.id}] 🎙️ Speaker diarization via WhisperX: ${inputPath}`);
-            const DiarizeService = require('../services/DiarizeService');
+            const AssemblyAIService = require('../services/AssemblyAIService');
+            const DiarizeService    = require('../services/DiarizeService');
 
-            if (!DiarizeService.isAvailable) {
-                throw new Error('DIARIZE_SERVICE_URL is not configured — cannot run speaker diarization');
+            if (!AssemblyAIService.isAvailable && !DiarizeService.isAvailable) {
+                throw new Error(
+                    'No diarization service configured — set ASSEMBLYAI_API_KEY (recommended) or DIARIZE_SERVICE_URL'
+                );
             }
 
             await job.updateProgress(5);
 
-            // Extract a mono 16 kHz WAV for WhisperX — reduces file size and ensures
-            // compatibility across all audio codecs (AAC/MP4, MOV, etc.)
-            const wavPath = path.join(tempDir, `diarize-${job.id}.wav`);
-            await new Promise((resolve, reject) => {
-                ffmpeg(inputPath)
-                    .audioChannels(1)
-                    .audioFrequency(16000)
-                    .format('wav')
-                    .output(wavPath)
-                    .on('end', resolve)
-                    .on('error', reject)
-                    .run();
-            });
+            let result = null;
 
-            await job.updateProgress(15);
+            // ── PRIMARY: AssemblyAI ──────────────────────────────────────────────
+            if (AssemblyAIService.isAvailable) {
+                console.log(`[Job ${job.id}] 🎙️ Diarization via AssemblyAI: ${inputPath}`);
+                try {
+                    result = await AssemblyAIService.diarize(inputPath, language || null);
+                    console.log(`[Job ${job.id}] ✅ AssemblyAI: ${result.words.length} words, ${result.speakers.length} speakers`);
+                } catch (aaiErr) {
+                    console.error(`[Job ${job.id}] ⚠️ AssemblyAI failed (${aaiErr.message}) — trying pyannote fallback`);
+                    result = null;
+                }
+            }
 
-            let result;
-            try {
-                result = await DiarizeService.diarize(wavPath, language || null);
-            } finally {
-                if (fs.existsSync(wavPath)) fs.unlinkSync(wavPath);
+            // ── FALLBACK: pyannote / WhisperX self-hosted ────────────────────────
+            if (!result) {
+                if (!DiarizeService.isAvailable) {
+                    throw new Error(
+                        'AssemblyAI diarization failed and DIARIZE_SERVICE_URL is not configured — no fallback available'
+                    );
+                }
+                console.log(`[Job ${job.id}] 🎙️ Diarization via pyannote (fallback): ${inputPath}`);
+
+                // Extract a mono 16 kHz WAV for WhisperX
+                const wavPath = path.join(tempDir, `diarize-${job.id}.wav`);
+                await new Promise((resolve, reject) => {
+                    ffmpeg(inputPath)
+                        .audioChannels(1)
+                        .audioFrequency(16000)
+                        .format('wav')
+                        .output(wavPath)
+                        .on('end', resolve)
+                        .on('error', reject)
+                        .run();
+                });
+
+                await job.updateProgress(15);
+
+                try {
+                    result = await DiarizeService.diarize(wavPath, language || null);
+                    console.log(`[Job ${job.id}] ✅ pyannote: ${result.words.length} words, ${result.speakers.length} speakers`);
+                } finally {
+                    if (fs.existsSync(wavPath)) fs.unlinkSync(wavPath);
+                }
             }
 
             await job.updateProgress(100);
-            console.log(`[Job ${job.id}] ✅ Diarization complete: ${result.words.length} words, ${result.speakers.length} speakers`);
             return result;
         }
 
