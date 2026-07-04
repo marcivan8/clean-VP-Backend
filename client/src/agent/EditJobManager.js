@@ -113,6 +113,28 @@ export class EditJobManager {
                 return this.runNLEExport(jobId, intentResult, actor);
             }
 
+            // ── organize_clips — bypass EditPlanner ─────────────────────────────
+            // EditPlanner sees "0 clips on timeline" and generates a chat step
+            // ("The timeline has no clips") instead of the STORE command.
+            // organize_clips is deterministic — no planning needed. Skip the LLM
+            // and directly inject a synthetic one-step plan.
+            if (intentResult.operation === 'organize_clips') {
+                actor.send({ type: 'INTENT_PARSED', intent: intentResult });
+                const syntheticPlan = {
+                    plan_id: jobId,
+                    operation: 'organize_clips',
+                    steps: [{
+                        step_id:  `step_organize_${Date.now()}`,
+                        action:   'organize_clips',
+                        reason:   'Place bin assets onto the timeline and semantically order them.',
+                        targets:  [],
+                        parameters: {},
+                    }],
+                };
+                actor.send({ type: 'PLAN_GENERATED', plan: syntheticPlan });
+                return this.runPipeline(jobId, { ...intentResult, _syntheticPlan: syntheticPlan }, abortController, actor);
+            }
+
             actor.send({ type: 'INTENT_PARSED', intent: intentResult });
             return this.runPipeline(jobId, intentResult, abortController, actor);
 
@@ -208,8 +230,16 @@ export class EditJobManager {
 
         // ── Generate Plan ─────────────────────────────────────────────────────
         logStep('Planning edits…');
-        console.log('[EditJobManager] Generating plan...');
-        const planResult = await EditPlanner.generatePlan(intentResult, abortController.signal);
+        let planResult;
+
+        if (intentResult._syntheticPlan) {
+            // Bypass EditPlanner — caller already injected a pre-built plan
+            console.log('[EditJobManager] Using synthetic plan (bypassing EditPlanner)');
+            planResult = { success: true, plan: intentResult._syntheticPlan };
+        } else {
+            console.log('[EditJobManager] Generating plan...');
+            planResult = await EditPlanner.generatePlan(intentResult, abortController.signal);
+        }
 
         if (abortController.signal.aborted) throw new Error('Cancelled by user');
 
