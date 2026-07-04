@@ -74,7 +74,9 @@ async function extractAudioForWhisper(inputPath, tempDir) {
     await new Promise((resolve, reject) => {
         ffmpeg(inputPath)
             .noVideo()
-            .audioFilters('loudnorm=I=-16:TP=-1.5:LRA=11') // Normalize audio to ensure Whisper hears faint speech
+            // dynaudnorm: single-pass streaming normalizer — no full-file buffering unlike loudnorm.
+            // Saves 3-5s on short clips (loudnorm is an offline integrated-loudness algorithm).
+            .audioFilters('dynaudnorm=f=150:g=15')
             .audioCodec('libmp3lame')
             .audioChannels(1)
             .audioFrequency(16000)
@@ -472,39 +474,439 @@ module.exports = async function processAudioJob(job) {
 
             await job.updateProgress(15);
 
-            // minSpeakers=2 is a critical default for interview/podcast content:
-            // pyannote will NOT collapse two distinct voices into one speaker when
-            // it knows there are at least 2. Without this, single-speaker detection
-            // is often returned for content with obvious speaker changes.
-            // Override via job.data.minSpeakers if the caller knows the speaker count.
-            const minSpeakers = job.data.minSpeakers ?? 2;
-            const maxSpeakers = job.data.maxSpeakers ?? 10;
-
             let result;
             try {
-                result = await DiarizeService.diarize(wavPath, language || null, { minSpeakers, maxSpeakers });
+                result = await DiarizeService.diarize(wavPath, language || null);
             } finally {
                 if (fs.existsSync(wavPath)) fs.unlinkSync(wavPath);
             }
 
             await job.updateProgress(100);
+            console.log(`[Job ${job.id}] ✅ Diarization complete: ${result.words.length} words, ${result.speakers.length} speakers`);
+            return result;
+        }
 
-            if (!result.diarizationRan) {
-                // Diarization pipeline didn't load on the Python side — most likely
-                // HF_TOKEN is missing. Surface this as a job warning in the result
-                // so the client can inform the user.
-                console.warn(`[Job ${job.id}] ⚠️  Diarization skipped — no speaker labels. Check HF_TOKEN on diarize-service.`);
+        // ── interview-analyze ─────────────────────────────────────────────────
+        case 'interview-analyze': {
+            console.log(`[Job ${job.id}] 🎙️ Interview analysis: ${inputPath}`);
+
+            // ── 1. Extract audio ──────────────────────────────────────────────
+            await job.updateProgress(5);
+            let iaTempAudio = null;
+            let words = [];
+
+            try {
+                iaTempAudio = await extractAudioForWhisper(inputPath, tempDir);
+                await job.updateProgress(20);
+
+                // ── 2. Transcribe with Whisper (word-level) ───────────────────
+                const openai = getOpenAI();
+                let whisperPath = iaTempAudio;
+
+                // Split if over 25 MB (same approach as transcribe case)
+                const fileSize = fs.statSync(whisperPath).size;
+                if (fileSize > WHISPER_LIMIT) {
+                    console.log(`[Job ${job.id}] Audio is ${(fileSize/1024/1024).toFixed(1)} MB — over 25 MB limit, chunking...`);
+                    // Extract first 10 minutes as a single chunk for now
+                    // (full chunking is in the transcribe case; interview videos are typically shorter)
+                    const chunkPath = path.join(tempDir, `ia_chunk_${job.id}.mp3`);
+                    await new Promise((resolve, reject) => {
+                        ffmpeg(whisperPath)
+                            .setDuration(600)
+                            .output(chunkPath)
+                            .on('end', resolve)
+                            .on('error', reject)
+                            .run();
+                    });
+                    if (iaTempAudio) { try { fs.unlinkSync(iaTempAudio); } catch(_) {} }
+                    iaTempAudio = chunkPath;
+                    whisperPath = chunkPath;
+                }
+
+                await job.updateProgress(25);
+
+                const transcription = await openai.audio.transcriptions.create({
+                    file:             fs.createReadStream(whisperPath),
+                    model:            'whisper-1',
+                    language:         language || undefined,
+                    response_format:  'verbose_json',
+                    timestamp_granularities: ['word'],
+                });
+
+                await job.updateProgress(65);
+
+                // Normalise word list — some Whisper versions nest under segments
+                if (transcription.words?.length) {
+                    words = transcription.words;
+                } else if (transcription.segments?.length) {
+                    for (const seg of transcription.segments) {
+                        if (seg.words?.length) words.push(...seg.words);
+                    }
+                }
+                console.log(`[Job ${job.id}] Whisper returned ${words.length} words`);
+
+            } finally {
+                if (iaTempAudio) { try { fs.unlinkSync(iaTempAudio); } catch(_) {} }
+            }
+
+            if (!words.length) {
                 return {
-                    words:           result.words,
-                    speakers:        [],
-                    language:        result.language,
-                    diarizationRan:  false,
-                    warning:         'Speaker separation did not run. Set HF_TOKEN in the diarize-service Railway Variables and accept the pyannote model terms at https://huggingface.co/pyannote/speaker-diarization-3.1',
+                    words: [],
+                    fillers: [],
+                    pauses: [],
+                    segments: { no_fillers: [], no_dead_air: [], clean: [] },
+                    summary: { totalDuration: 0, fillerCount: 0, deadAirCount: 0, deadAirSaved: 0, thinkingCount: 0 },
                 };
             }
 
-            console.log(`[Job ${job.id}] ✅ Diarization complete: ${result.words.length} words, ${result.speakers.length} speakers: ${result.speakers.join(', ')}`);
-            return result;
+            // ── 3. Pause classification ───────────────────────────────────────
+            // Classify gaps between consecutive words.
+            // < 0.3 s  → micro-pause  (skip — too short to notice)
+            // 0.3–1.2 s → thinking    (flag for user review)
+            // > 1.2 s  → dead_air     (suggest removal)
+
+            const MICRO  = 0.3;
+            const THINK  = 1.2;
+            const pauses = [];
+
+            for (let i = 1; i < words.length; i++) {
+                const gap = words[i].start - words[i - 1].end;
+                if (gap < MICRO) continue;
+                pauses.push({
+                    start:    words[i - 1].end,
+                    end:      words[i].start,
+                    duration: gap,
+                    type:     gap > THINK ? 'dead_air' : 'thinking',
+                });
+            }
+
+            // ── 4. Filler-word detection (keyword) ────────────────────────────
+            const FILLER_SET = new Set([
+                'um', 'uh', 'ah', 'er', 'eh', 'hmm', 'hm',
+                'like', 'basically', 'literally',
+                'euh', 'ben', 'genre', 'voilà', 'bah',
+            ]);
+            const FILLER_PHRASES = ['you know', 'i mean', 'kind of', 'sort of', 'you see'];
+
+            const fillers = [];
+            const fillerIndices = new Set();
+
+            // Single-word fillers
+            for (let i = 0; i < words.length; i++) {
+                const token = words[i].word.toLowerCase().replace(/[^a-zàâéèêëîïôùûüç]/g, '').trim();
+                if (FILLER_SET.has(token)) {
+                    fillers.push({ start: words[i].start, end: words[i].end, word: words[i].word.trim() });
+                    fillerIndices.add(i);
+                }
+            }
+
+            // Multi-word filler phrases
+            for (let i = 0; i < words.length - 1; i++) {
+                const bigram = (words[i].word + ' ' + words[i+1].word).toLowerCase().replace(/[^a-z ]/g, '').trim();
+                if (FILLER_PHRASES.includes(bigram)) {
+                    // Remove single-word entries we already added for these indices
+                    fillerIndices.add(i); fillerIndices.add(i + 1);
+                    fillers.push({ start: words[i].start, end: words[i+1].end, word: bigram });
+                }
+            }
+
+            await job.updateProgress(80);
+
+            // ── 5. Build activeSegment sets ───────────────────────────────────
+            // Given a list of { start, end } "cut" ranges, build the inverse
+            // (keep ranges) from words[0].start to words[last].end.
+
+            const PADDING    = 0.08; // 80 ms breathing room on each side of a cut
+            const totalStart = words[0].start;
+            const totalEnd   = words[words.length - 1].end;
+
+            function buildKeepSegments(cutRanges) {
+                // Merge overlapping cuts, then invert
+                const sorted = [...cutRanges].sort((a, b) => a.start - b.start);
+                const merged = [];
+                for (const c of sorted) {
+                    if (merged.length && c.start <= merged[merged.length - 1].end) {
+                        merged[merged.length - 1].end = Math.max(merged[merged.length - 1].end, c.end);
+                    } else {
+                        merged.push({ ...c });
+                    }
+                }
+
+                const keep = [];
+                let cursor = totalStart;
+                for (const cut of merged) {
+                    const s = Math.max(cursor, cut.start - PADDING);
+                    const e = Math.min(totalEnd, cut.end + PADDING);
+                    if (s > cursor + 0.05) {
+                        keep.push({ start: cursor, end: s, duration: s - cursor });
+                    }
+                    cursor = e;
+                }
+                if (cursor < totalEnd - 0.05) {
+                    keep.push({ start: cursor, end: totalEnd, duration: totalEnd - cursor });
+                }
+                return keep;
+            }
+
+            const fillerCuts   = fillers.map(f => ({ start: f.start, end: f.end }));
+            const deadAirCuts  = pauses.filter(p => p.type === 'dead_air').map(p => ({ start: p.start, end: p.end }));
+
+            const segsNoFillers  = buildKeepSegments(fillerCuts);
+            const segsNoDeadAir  = buildKeepSegments(deadAirCuts);
+            const segsClean      = buildKeepSegments([...fillerCuts, ...deadAirCuts]);
+
+            await job.updateProgress(100);
+
+            const deadAirSaved = pauses
+                .filter(p => p.type === 'dead_air')
+                .reduce((sum, p) => sum + p.duration, 0);
+
+            console.log(
+                `[Job ${job.id}] ✅ Interview analysis done — ` +
+                `${words.length} words, ${fillers.length} fillers, ` +
+                `${pauses.filter(p => p.type === 'dead_air').length} dead-air gaps ` +
+                `(${deadAirSaved.toFixed(1)}s), ` +
+                `${pauses.filter(p => p.type === 'thinking').length} thinking pauses`
+            );
+
+            return {
+                words,
+                fillers,
+                pauses,
+                segments: {
+                    no_fillers:  segsNoFillers,
+                    no_dead_air: segsNoDeadAir,
+                    clean:       segsClean,
+                },
+                summary: {
+                    totalDuration:   totalEnd - totalStart,
+                    fillerCount:     fillers.length,
+                    deadAirCount:    pauses.filter(p => p.type === 'dead_air').length,
+                    deadAirSaved:    parseFloat(deadAirSaved.toFixed(1)),
+                    thinkingCount:   pauses.filter(p => p.type === 'thinking').length,
+                },
+            };
+        }
+
+        // ── rhythm-zoom ───────────────────────────────────────────────────────
+        // Generates a scale-keyframe zoom rhythm for single-camera talking-head
+        // videos, simulating a multi-camera feel.
+        //
+        // Algorithm:
+        //  1. Extract per-second audio loudness (EBU R128) via FFmpeg
+        //  2. Group the transcript into phrases (gaps > 0.35 s)
+        //  3. Ask GPT-4o to score each phrase for emotional intensity
+        //  4. Combine loudness + semantic score → target zoom scale per phrase
+        //  5. Enforce rhythm constraints (min shot duration, max step size)
+        //  6. Return zoom events ready for addTransformKeyframe()
+        case 'rhythm-zoom': {
+            const { words: providedWords = [], style = 'dynamic' } = job.data;
+
+            console.log(`[Job ${job.id}] 🎥 Rhythm-zoom analysis: ${inputPath} style=${style}`);
+            await job.updateProgress(5);
+
+            // ── 1. Audio energy via FFmpeg EBU R128 ──────────────────────────
+            // Output: [{ time, loudness }] in LUFS (momentary, every ~400ms)
+            const audioEnergy = await new Promise(resolve => {
+                const samples = [];
+                ffmpeg(inputPath)
+                    .audioFilters('ebur128=framelog=verbose')
+                    .format('null')
+                    .output('-')
+                    .on('stderr', line => {
+                        // Lines: "t: 2.4000 M: -21.3 S: ..."
+                        const m = line.match(/t:\s*([\d.]+)\s+M:\s*(-?[\d.]+)/);
+                        if (m) samples.push({ time: parseFloat(m[1]), lufs: parseFloat(m[2]) });
+                    })
+                    .on('end', () => resolve(samples))
+                    .on('error', () => resolve([]))
+                    .run();
+            });
+
+            await job.updateProgress(30);
+
+            // Normalise LUFS to [0,1]. Typical speech: -30 (quiet) to -9 (loud).
+            const LUFS_MIN = -35, LUFS_MAX = -9;
+            function energyAt(t) {
+                if (!audioEnergy.length) return 0.5;
+                // Average loudness over a 1-second window
+                const window = audioEnergy.filter(s => Math.abs(s.time - t) < 0.5);
+                if (!window.length) return 0.5;
+                const avg = window.reduce((s, e) => s + e.lufs, 0) / window.length;
+                return Math.min(1, Math.max(0, (avg - LUFS_MIN) / (LUFS_MAX - LUFS_MIN)));
+            }
+
+            // ── 2. Phrase grouping ────────────────────────────────────────────
+            let words = providedWords;
+
+            // If no transcript passed in, transcribe now
+            if (!words.length) {
+                await job.updateProgress(35);
+                let rzTempAudio = null;
+                try {
+                    rzTempAudio = await extractAudioForWhisper(inputPath, tempDir);
+                    const openai = getOpenAI();
+                    const tx = await openai.audio.transcriptions.create({
+                        file: fs.createReadStream(rzTempAudio),
+                        model: 'whisper-1',
+                        response_format: 'verbose_json',
+                        timestamp_granularities: ['word'],
+                    });
+                    words = tx.words || [];
+                    if (!words.length && tx.segments?.length) {
+                        for (const seg of tx.segments) if (seg.words?.length) words.push(...seg.words);
+                    }
+                } finally {
+                    if (rzTempAudio) { try { fs.unlinkSync(rzTempAudio); } catch (_) {} }
+                }
+            }
+
+            if (!words.length) {
+                return { zoomEvents: [], summary: { phraseCount: 0, style } };
+            }
+
+            await job.updateProgress(50);
+
+            // Group words into phrases by pause gaps > 0.35 s
+            const GAP = 0.35;
+            const phrases = [];
+            let current = { words: [words[0]], start: words[0].start, end: words[0].end };
+
+            for (let i = 1; i < words.length; i++) {
+                const w = words[i];
+                if (w.start - current.end > GAP) {
+                    phrases.push({ ...current, text: current.words.map(w => w.word).join(' ').trim() });
+                    current = { words: [w], start: w.start, end: w.end };
+                } else {
+                    current.words.push(w);
+                    current.end = w.end;
+                }
+            }
+            phrases.push({ ...current, text: current.words.map(w => w.word).join(' ').trim() });
+
+            // ── 3. GPT-4o phrase scoring ──────────────────────────────────────
+            // Limit to 60 phrases to keep the API call cheap (compact JSON)
+            const SAMPLE_STEP = phrases.length > 60 ? Math.ceil(phrases.length / 60) : 1;
+            const sampledPhrases = phrases.filter((_, i) => i % SAMPLE_STEP === 0);
+
+            let gptScores = null;
+            const openai = getOpenAI();
+            try {
+                const compact = sampledPhrases.map((p, i) => ({ i, s: p.start.toFixed(2), t: p.text.slice(0, 80) }));
+                const completion = await openai.chat.completions.create({
+                    model: 'gpt-4o-mini',   // fast + cheap for this classification task
+                    messages: [{
+                        role: 'user',
+                        content: `You are a video editor analyzing a talking-head/interview video for camera zoom rhythm.
+
+Rate each phrase for emotional intensity:
+- 0.0 = pause, transition, quiet, hesitation, low energy sentence
+- 0.5 = normal conversational tone
+- 1.0 = key statement, emotional peak, emphasis, strong assertion, surprising fact
+
+Also assign: "wide" (pull back), "medium" (standard), or "close" (push in)
+
+Transcript phrases (i=index, s=start_time, t=text):
+${JSON.stringify(compact)}
+
+Return ONLY valid JSON: {"p":[{"i":N,"v":0.0-1.0,"z":"wide"|"medium"|"close"}]}`
+                    }],
+                    response_format: { type: 'json_object' },
+                    temperature: 0.2,
+                    max_tokens: 2048,
+                });
+
+                const parsed = JSON.parse(completion.choices[0].message.content);
+                gptScores = {};
+                (parsed.p || []).forEach(s => { gptScores[s.i] = { intensity: s.v ?? 0.5, zoom: s.z || 'medium' }; });
+                console.log(`[Job ${job.id}] GPT scored ${Object.keys(gptScores).length} phrases`);
+            } catch (err) {
+                if (isQuotaExhausted(err)) {
+                    console.warn(`[Job ${job.id}] GPT quota exhausted — falling back to audio-only scoring`);
+                } else {
+                    console.warn(`[Job ${job.id}] GPT scoring failed, audio-only fallback:`, err.message);
+                }
+            }
+
+            await job.updateProgress(80);
+
+            // ── 4. Style config ────────────────────────────────────────────────
+            // min/max/step: scale range and max step between consecutive shots
+            const STYLES = {
+                subtle:    { min: 1.0, max: 1.10, step: 0.06, minShot: 2.5 },
+                dynamic:   { min: 1.0, max: 1.20, step: 0.10, minShot: 2.0 },
+                cinematic: { min: 1.0, max: 1.28, step: 0.14, minShot: 1.8 },
+            };
+            const cfg = STYLES[style] || STYLES.dynamic;
+
+            // ── 5. Generate zoom events ────────────────────────────────────────
+            const zoomEvents = [];
+            let lastEventTime  = -cfg.minShot;
+            let lastScale      = 1.0;
+
+            // Always start wide
+            zoomEvents.push({ videoTime: words[0].start, scale: 1.0, easing: 'linear' });
+
+            for (let pi = 0; pi < phrases.length; pi++) {
+                const phrase = phrases[pi];
+
+                // Enforce minimum shot duration
+                if (phrase.start - lastEventTime < cfg.minShot) continue;
+
+                // Combine GPT score (60%) + audio energy (40%)
+                const gpt     = gptScores?.[pi] ?? null;
+                const audioPct = energyAt(phrase.start + (phrase.end - phrase.start) / 2);
+                const gptPct   = gpt ? gpt.intensity : audioPct;
+                const combined = gpt ? (gptPct * 0.6 + audioPct * 0.4) : audioPct;
+
+                // Determine target scale
+                let targetScale;
+                const gptZoom = gpt?.zoom || (combined > 0.65 ? 'close' : combined > 0.35 ? 'medium' : 'wide');
+                switch (gptZoom) {
+                    case 'close':  targetScale = cfg.max; break;
+                    case 'medium': targetScale = cfg.min + (cfg.max - cfg.min) * 0.5; break;
+                    default:       targetScale = cfg.min; break;
+                }
+
+                // Don't jump more than one step at a time (no wide → close)
+                if (targetScale > lastScale + cfg.step) targetScale = lastScale + cfg.step;
+                if (targetScale < lastScale - cfg.step) targetScale = lastScale - cfg.step;
+
+                // Round to avoid floating-point noise
+                targetScale = Math.round(targetScale * 1000) / 1000;
+
+                if (targetScale !== lastScale) {
+                    zoomEvents.push({
+                        videoTime: phrase.start,
+                        scale:     targetScale,
+                        easing:    targetScale > lastScale ? 'easeOutCubic' : 'linear',
+                        // Debug metadata (stripped on the final return)
+                        _reason: gptZoom,
+                        _audio:  audioPct.toFixed(2),
+                    });
+                    lastEventTime = phrase.start;
+                    lastScale     = targetScale;
+                }
+            }
+
+            // Return to wide at the end for a clean finish
+            const lastWord = words[words.length - 1];
+            if (lastScale !== 1.0) {
+                zoomEvents.push({ videoTime: lastWord.end, scale: 1.0, easing: 'linear' });
+            }
+
+            await job.updateProgress(100);
+            console.log(`[Job ${job.id}] ✅ Rhythm-zoom: ${zoomEvents.length} events over ${phrases.length} phrases`);
+
+            return {
+                zoomEvents: zoomEvents.map(({ videoTime, scale, easing }) => ({ videoTime, scale, easing })),
+                summary: {
+                    phraseCount:   phrases.length,
+                    eventCount:    zoomEvents.length,
+                    style,
+                    maxScale:      Math.max(...zoomEvents.map(e => e.scale)),
+                },
+            };
         }
 
         default:

@@ -54,8 +54,12 @@ class ProxyService {
 
     /**
      * Upload directly to GCS via Resumable Session URL, then process.
+     *
+     * @param {Function} [onUploadComplete] - Called with (destPath) the instant the file
+     *   lands on GCS — before proxy encoding starts. Use this to kick off parallel work
+     *   like transcription so it runs concurrently with proxy generation.
      */
-    static async uploadDirectToGCS(file, onProgress) {
+    static async uploadDirectToGCS(file, onProgress, onUploadComplete) {
         // 1. Get Resumable URL
         const headers = await buildHeaders({ 'Content-Type': 'application/json' });
         const initResponse = await fetch(`${API_URL}/api/proxy/upload-url`, {
@@ -96,6 +100,10 @@ class ProxyService {
             xhr.send(file);
         });
 
+        // File is now on GCS — fire callback so callers can start parallel work
+        // (e.g. transcription) without waiting for proxy encoding to finish.
+        try { onUploadComplete?.(destPath); } catch (_) {}
+
         // 3. Notify backend to process the file
         const processResponse = await fetch(`${API_URL}/api/proxy/process-direct`, {
             method: 'POST',
@@ -129,22 +137,18 @@ class ProxyService {
      * @param {Function} onProgress - Callback for upload progress (0-100).
      * @returns {Promise<{ proxyPath: string, proxyUrl: string }>}
      */
-    static async uploadAndGenerateProxy(file, userId, onProgress) {
+    static async uploadAndGenerateProxy(file, userId, onProgress, onUploadComplete) {
         try {
             // Attempt Direct to GCS first
             try {
-                return await this.uploadDirectToGCS(file, onProgress);
+                return await this.uploadDirectToGCS(file, onProgress, onUploadComplete);
             } catch (err) {
-                // Fall back to legacy server upload for any GCS failure:
-                //  - 'GCS not configured'  → upload-url endpoint disabled
-                //  - job failure errors    → worker can't reach GCS (missing credentials
-                //                           on the Railway worker service), but the legacy
-                //                           path uploads the file directly to the server so
-                //                           the worker can find it on the local filesystem
-                //  - XHR network errors   → transient GCS connectivity issue
-                // Only hard auth rejections (401/403) from our own API would also fail
-                // on the legacy path, so there's no harm in always trying it.
-                console.warn('[ProxyService] Direct GCS upload failed, falling back to legacy upload:', err.message);
+                // If it fails because GCS is not configured, fallback to legacy upload
+                if (err.message === 'GCS not configured') {
+                    console.log('[ProxyService] GCS not configured, falling back to legacy upload...');
+                } else {
+                    throw err; // Rethrow actual upload errors
+                }
             }
 
             // Legacy Fallback
@@ -154,8 +158,6 @@ class ProxyService {
 
             const headers = await buildHeaders();
 
-            // Use XMLHttpRequest here too if we want fallback progress, 
-            // but standard fetch is fine for the fallback since it's mostly local.
             const response = await fetch(`${API_URL}/api/proxy/upload`, {
                 method: 'POST',
                 headers,
@@ -168,6 +170,9 @@ class ProxyService {
             }
 
             const data = await response.json();
+
+            // File is on the server — fire callback for parallel work before proxy polling
+            try { onUploadComplete?.(data.originalPath || data.videoPath || null); } catch (_) {}
 
             // If the backend queued a job, poll until it completes.
             if (data.jobId) {

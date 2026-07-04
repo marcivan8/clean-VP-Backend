@@ -440,9 +440,30 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     }, 5000);
 
                     const userId = sessionId || 'anon';
-                    ProxyService.uploadAndGenerateProxy(file, userId, (progress) => {
-                        useTimelineStore.getState().updateAsset(assetId, { uploadProgress: progress });
-                    })
+                    // Track whether early transcription already started (via onUploadComplete).
+                    // This prevents a duplicate job when the proxy .then() resolves.
+                    let earlyTranscriptionPath = null;
+
+                    ProxyService.uploadAndGenerateProxy(
+                        file,
+                        userId,
+                        (progress) => {
+                            useTimelineStore.getState().updateAsset(assetId, { uploadProgress: progress });
+                        },
+                        (gcsPath) => {
+                            // ⚡ File landed on GCS — start transcription NOW, in parallel
+                            // with proxy encoding. Whisper and FFmpeg proxy run simultaneously.
+                            if (gcsPath) {
+                                earlyTranscriptionPath = gcsPath;
+                                useTimelineStore.getState().setUploadedFilePath(gcsPath);
+                                transcriptionManager.startBackgroundTranscription(gcsPath, {
+                                    platform: null,
+                                    targetDuration: null,
+                                });
+                                console.log(`[IDELayout] ⚡ Early transcription started: ${gcsPath}`);
+                            }
+                        },
+                    )
                         .then(data => {
                             clearTimeout(processingTimer);
                             if (!data) {
@@ -489,11 +510,15 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                             if (data.originalPath) {
                                 useTimelineStore.getState().setUploadedFilePath(data.originalPath);
-                                // Start background transcription so all AI operations share one transcript
-                                transcriptionManager.startBackgroundTranscription(data.originalPath, {
-                                    platform: null,
-                                    targetDuration: null,
-                                });
+                                // Only start transcription here if the early parallel start
+                                // (onUploadComplete callback above) didn't fire — e.g. local
+                                // dev with no GCS where the path came back as null.
+                                if (!earlyTranscriptionPath) {
+                                    transcriptionManager.startBackgroundTranscription(data.originalPath, {
+                                        platform: null,
+                                        targetDuration: null,
+                                    });
+                                }
                             }
                             // Store the GCS raw path so AI API calls (silence, filler, denoise)
                             // can locate the file via the worker's GCS fallback.
