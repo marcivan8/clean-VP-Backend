@@ -1257,7 +1257,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             {activeTab === 'media' && (
                                 <section className="p-4 border-b" style={{ borderColor: "var(--line-soft)" }}>
                                     <div className="flex items-center justify-between mb-4">
-                                        <div className="studio-mono-label">BIN · {assets.length} CLIPS</div>
+                                        <div className="studio-mono-label" style={{ color: 'var(--fg-2)' }}>BIN · {assets.length} CLIPS</div>
                                         <button onClick={triggerImport} className="text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-colors flex items-center gap-1" style={{ fontFamily: "var(--f-mono)" }}>
                                             <Upload className="w-3 h-3" /> Import
                                         </button>
