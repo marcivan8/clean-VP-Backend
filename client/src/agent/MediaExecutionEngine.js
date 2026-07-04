@@ -795,15 +795,38 @@ export class MediaExecutionEngine {
                 const ocAssets = ocStore.assets || [];
 
                 // Gather all clips across all video tracks, sorted by current timeline position
-                const allClips = ocTracks.flatMap(t =>
+                let allClips = ocTracks.flatMap(t =>
                     (t.clips || []).map(c => ({ ...c, _trackId: t.id }))
                 ).sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
 
+                // If fewer clips on the timeline than there are ready assets in the bin,
+                // auto-add the missing assets first so "arrange them on the timeline"
+                // works even when the user hasn't dragged anything yet.
+                const readyAssets = ocAssets.filter(a => !a.isProxying && a.type === 'video');
+                const timelineAssetIds = new Set(allClips.map(c => c.assetId));
+                const unplacedAssets = readyAssets.filter(a => !timelineAssetIds.has(a.id));
+
+                if (unplacedAssets.length > 0) {
+                    console.log(`[MediaExecutionEngine] organize_clips: auto-adding ${unplacedAssets.length} unplaced asset(s) to timeline`);
+                    for (const asset of unplacedAssets) {
+                        useTimelineStore.getState().addAssetToTimeline(asset);
+                    }
+                    // Re-read after adding
+                    const freshTracks = useTimelineStore.getState().tracks.filter(t => t.type === 'video');
+                    allClips = freshTracks.flatMap(t =>
+                        (t.clips || []).map(c => ({ ...c, _trackId: t.id }))
+                    ).sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
+                }
+
                 if (allClips.length < 2) {
+                    // Only 1 asset total — nothing to organise, but we may have just added it
+                    if (allClips.length === 1) {
+                        return { action, success: true, message: 'Added your clip to the timeline.' };
+                    }
                     return {
                         action,
                         success: false,
-                        message: 'Need at least 2 clips on the timeline to organize. Import more footage first.',
+                        message: 'Need at least 2 clips to organize. Import more footage first.',
                     };
                 }
 

@@ -178,6 +178,23 @@ const NLP_MAP = {
         'remove duplicate parts', 'cut repeated content', 'remove repeats',
         'no repetition', 'clean up repetition', 'deduplicate',
     ],
+    organizeClips: [
+        // ML-based semantic clip organizer (organize_clips operation)
+        'organize', 'organize clips', 'organize my clips', 'organize the clips',
+        'organize those clips', 'organize all clips', 'organize the footage',
+        'arrange', 'arrange clips', 'arrange them', 'arrange those clips',
+        'arrange on the timeline', 'arrange them on the timeline',
+        'arrange the clips on the timeline', 'put them on the timeline',
+        'add to timeline', 'add all to timeline', 'add clips to timeline',
+        'put clips on timeline', 'put on timeline', 'place on timeline',
+        'add all clips', 'add all videos', 'add them to the timeline',
+        'lay out', 'lay them out', 'lay the clips out',
+        'sequence', 'sequence clips', 'sequence the clips', 'sequence the footage',
+        'order my clips', 'order the clips', 'order the footage',
+        'sort the clips', 'sort clips', 'sort my footage',
+        'find the best order', 'best order', 'optimal order',
+        'yes arrange', 'yes add', 'yes organize', 'yes put them',
+    ],
     reorderClips: [
         'reorder clips', 'reorder the clips', 'rearrange clips', 'rearrange the clips',
         'put the best', 'put the hook', 'put the most important',
@@ -533,6 +550,20 @@ export class IntentParser {
             });
         }
 
+        // ── Organize / arrange clips (add to timeline + ML semantic reorder) ─────
+        if (matches('organizeClips')) {
+            return {
+                intent: 'edit',
+                operation: 'organize_clips',
+                parameters: {},
+                targets: [],
+                constraints: {},
+                confidence: 'HIGH',
+                missingParameters: [],
+                needs_clarification: false,
+            };
+        }
+
         // ── Rhythm zoom / dynamic multi-camera feel ────────────────────────────
         if (matches('rhythmZoom')) {
             const { tracks: _rzTracks } = useTimelineStore.getState();
@@ -581,6 +612,16 @@ export class IntentParser {
 
         if (matches('removeRepetition')) {
             return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.LONG_FORM_EDIT, { constraints: { editMode: 'SMART_CLEANUP' } });
+        }
+
+        if (matches('organizeClips')) {
+            return {
+                intent: 'edit',
+                operation: 'organize_clips',
+                parameters: {},
+                confidence: 'HIGH',
+                missingParameters: [],
+            };
         }
 
         if (matches('reorderClips') || matches('reorganize') || matches('reorderSegments')) {
