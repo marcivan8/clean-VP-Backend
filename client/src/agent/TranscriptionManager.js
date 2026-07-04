@@ -210,8 +210,31 @@ class TranscriptionManagerClass {
                 // Poll for completion — more reliable than SSE on Railway/reverse-proxies
                 // which buffer or kill long-lived EventSource connections.
                 this._setStatus(TRANSCRIPTION_STATUS.TRANSCRIBING, 10);
-                const result = await pollJobResult(data.jobId, signal);
-                words = result?.words || [];
+                try {
+                    const result = await pollJobResult(data.jobId, signal);
+                    words = result?.words || [];
+                } catch (jobErr) {
+                    // Job failed asynchronously (e.g. DIARIZE_SERVICE_URL set in web
+                    // container but missing in the worker container). Fall back to the
+                    // standard Whisper transcription endpoint.
+                    console.log(`[TranscriptionManager] Diarize job failed (${jobErr.message}) — falling back to standard transcribe`);
+                    const fallbackResp = await authFetch('/api/audio/transcribe', {
+                        method: 'POST',
+                        body: JSON.stringify({ filename }),
+                        signal: controller.signal,
+                    });
+                    if (!fallbackResp.ok) {
+                        const text = await fallbackResp.text().catch(() => fallbackResp.statusText);
+                        throw new Error(`Transcription API error ${fallbackResp.status}: ${text}`);
+                    }
+                    const fallbackData = await fallbackResp.json();
+                    if (fallbackData.jobId) {
+                        const fallbackResult = await pollJobResult(fallbackData.jobId, signal);
+                        words = fallbackResult?.words || [];
+                    } else {
+                        words = fallbackData.words || [];
+                    }
+                }
             } else {
                 words = data.words || [];
             }
