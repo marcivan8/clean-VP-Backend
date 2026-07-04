@@ -633,14 +633,22 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                             if (data.originalPath) {
                                 useTimelineStore.getState().setUploadedFilePath(data.originalPath);
-                                // Only start transcription here if the early parallel start
-                                // (onUploadComplete callback above) didn't fire — e.g. local
-                                // dev with no GCS where the path came back as null.
-                                if (!earlyTranscriptionPath) {
-                                    transcriptionManager.startBackgroundTranscription(data.originalPath, {
-                                        platform: null,
-                                        targetDuration: null,
-                                    });
+                            }
+                            // Start (or retry) transcription — the early parallel attempt
+                            // may have failed (e.g. 401 before auth was established, or
+                            // GCS path was null on the legacy upload path).
+                            // Only skip if transcription is already running or complete.
+                            {
+                                const tmStatus = transcriptionManager.getStatus().status;
+                                const alreadyRunning = tmStatus === 'transcribing' || tmStatus === 'analyzing' || tmStatus === 'ready';
+                                if (!alreadyRunning) {
+                                    const transcriptPath = data.rawGcsPath || data.originalPath;
+                                    if (transcriptPath) {
+                                        transcriptionManager.startBackgroundTranscription(transcriptPath, {
+                                            platform: null,
+                                            targetDuration: null,
+                                        });
+                                    }
                                 }
                             }
                             // Store the GCS raw path so AI API calls (silence, filler, denoise)
