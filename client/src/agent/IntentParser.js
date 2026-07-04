@@ -415,6 +415,17 @@ export class IntentParser {
             };
         }
 
+        // ── Organize / arrange clips onto the timeline ────────────────────────
+        if (matches('organizeClips')) {
+            return {
+                intent: 'edit',
+                operation: 'organize_clips',
+                parameters: {},
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+
         return null; // let the API handle it
     }
 
