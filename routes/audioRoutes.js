@@ -399,10 +399,11 @@ router.post('/diarize', ...authAndGate, async (req, res) => {
             return res.status(400).json({ error: 'filename or filePath is required' });
         }
 
-        const DiarizeService = require('../services/DiarizeService');
-        if (!DiarizeService.isAvailable) {
+        const AssemblyAIService = require('../services/AssemblyAIService');
+        const DiarizeService    = require('../services/DiarizeService');
+        if (!AssemblyAIService.isAvailable && !DiarizeService.isAvailable) {
             return res.status(503).json({
-                error: 'Speaker diarization is not available — DIARIZE_SERVICE_URL is not configured.',
+                error: 'Speaker diarization is not available — set ASSEMBLYAI_API_KEY or DIARIZE_SERVICE_URL.',
                 code: 'DIARIZE_NOT_CONFIGURED',
             });
         }
