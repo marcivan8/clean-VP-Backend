@@ -26,10 +26,15 @@ const express        = require('express');
 const router         = express.Router();
 const path           = require('path');
 const fs             = require('fs');
-const { authenticateUser } = require('../middleware/auth');
+const { authenticateUser, optionalAuth } = require('../middleware/auth');
 const { aiGate }     = require('../middleware/usageGate');
 const { audioQueue } = require('../queue/queues');
 const storageConfig  = require('../config/storage');
+
+// Non-production: skip hard auth so staging/local works without valid Supabase JWTs.
+// Route handlers already fall back to 'dev-user' when req.user is absent.
+const isProd = process.env.NODE_ENV === 'production';
+const authAndGate = isProd ? [authenticateUser, aiGate] : [optionalAuth];
 
 // ── Shared path-resolution helper ─────────────────────────────────────────────
 // Mirrors the same guard used in silenceRoutes and audioRoutes so every route
@@ -114,7 +119,7 @@ async function _extractClipFrames(filePath, offset, duration) {
 // Returns synchronously (typically < 5 s — one GPT-4o-mini call):
 //   { clipZooms: [{ clipId, scale, type }], summary }
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/rhythm-zoom', authenticateUser, aiGate, async (req, res) => {
+router.post('/rhythm-zoom', ...authAndGate, async (req, res) => {
     try {
         const { clips = [], words = [], style = 'dynamic' } = req.body;
 
@@ -385,7 +390,7 @@ Clips: ${JSON.stringify(compact)}`,
 //   3. Keyword-matches filler words
 //   4. Returns pre-built activeSegment sets for the editor
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/analyze', authenticateUser, aiGate, async (req, res) => {
+router.post('/analyze', ...authAndGate, async (req, res) => {
     try {
         const { filename, filePath, language = 'en' } = req.body;
 
@@ -434,7 +439,7 @@ router.post('/analyze', authenticateUser, aiGate, async (req, res) => {
 // posts back as { words, speakers, videoDuration, projectId } to
 // /api/interview/build-tracks to get the multi-track timeline_state patch.
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/split-speakers', authenticateUser, aiGate, async (req, res) => {
+router.post('/split-speakers', ...authAndGate, async (req, res) => {
     try {
         const DiarizeService = require('../services/DiarizeService');
         if (!DiarizeService.isAvailable) {
@@ -488,7 +493,7 @@ router.post('/split-speakers', authenticateUser, aiGate, async (req, res) => {
 // Returns:
 //   { tracks: [{ speaker, clips: [{ start, end, duration }] }] }
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/build-tracks', authenticateUser, (req, res) => {
+router.post('/build-tracks', ...authAndGate, async (req, res) => {
     try {
         const { words, speakers, videoDuration, assetId } = req.body;
 
@@ -582,7 +587,7 @@ router.post('/build-tracks', authenticateUser, (req, res) => {
 //     pipeline:   string      — "ml" | "vision_fallback"
 //   }
 // ─────────────────────────────────────────────────────────────────────────────
-router.post('/organize-clips', authenticateUser, aiGate, async (req, res) => {
+router.post('/organize-clips', ...authAndGate, async (req, res) => {
     const { spawn } = require('child_process');
 
     try {

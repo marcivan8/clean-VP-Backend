@@ -241,7 +241,8 @@ app.use('/api/captions', require('./routes/captionRoutes')); // Caption generati
 app.use('/api/admin',   require('./routes/adminRoutes'));   // Temp admin ops (remove after use)
 app.use('/api/polar',    require('./routes/polarWebhook'));   // Polar subscription webhooks
 app.use('/api/checkout', require('./routes/polarWebhook'));  // alias: /api/checkout/create
-app.use('/api/projects', require('./routes/projectRoutes')); // Project thumbnail upload
+app.use('/api/projects',   require('./routes/projectRoutes'));   // Project thumbnail upload
+app.use('/api/interview', require('./routes/interviewRoutes')); // Interview/podcast smart editing
 
 
 

@@ -4,12 +4,17 @@ WhisperX transcription + pyannote speaker diarization microservice.
 Also hosts the semantic clip-analysis endpoint used by the organize-clips pipeline.
 
 POST /diarize
-Body: { "filePath": "/abs/path/to/audio.wav", "language": "en" }  (language optional)
+Body: multipart/form-data with field "audio" (file) and optional "language"
+      OR application/json: { "filePath": "/abs/path/to/audio.wav", "language": "en" }
 Returns: {
   "words": [{ "word": "anyway", "start": 4.2, "end": 4.6, "speaker": "SPEAKER_01" }],
   "speakers": ["SPEAKER_00", "SPEAKER_01"],
-  "language": "en"
+  "language": "en",
+  "diarization_enabled": true
 }
+
+GET /status
+Returns model loading status — useful for diagnosing HF_TOKEN / pyannote issues.
 
 POST /classify-clips
 Body: {
@@ -22,25 +27,12 @@ Body: {
     }
   ]
 }
-Returns: {
-  "clips": [
-    {
-      "id": "clip1",
-      "clip_type": "talking_head_medium",
-      "clip_type_confidence": 0.87,
-      "has_face": true,
-      "face_count": 1,
-      "face_size": "medium",
-      "energy": "medium",
-      "topic_cluster": 0,
-      "top_types": { "talking_head_medium": 0.87, "talking_head_close": 0.08 }
-    }
-  ],
-  "num_topic_clusters": 2
-}
 
 Environment variables required:
-  HF_TOKEN — HuggingFace access token (for pyannote gated model)
+  HF_TOKEN — HuggingFace access token (for pyannote gated model).
+             The account that created this token MUST have accepted the terms at:
+               https://huggingface.co/pyannote/segmentation-3.0
+               https://huggingface.co/pyannote/speaker-diarization-3.1
 
 Optional:
   WHISPERX_DEVICE    — "cpu" or "cuda" (default: cpu)
@@ -54,6 +46,7 @@ import os
 import sys
 import logging
 import traceback
+import threading
 
 from flask import Flask, request, jsonify
 
@@ -62,63 +55,128 @@ log = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# ── Lazy model loading ────────────────────────────────────────────────────────
-# Models are loaded once on first request so the container starts fast and
-# Railway's health check can pass before the 3–5 GB model download completes.
+# ── Config ────────────────────────────────────────────────────────────────────
+
+DEVICE       = os.environ.get("WHISPERX_DEVICE",  "cpu")
+MODEL_ID     = os.environ.get("WHISPERX_MODEL",   "base")
+COMPUTE      = os.environ.get("WHISPERX_COMPUTE", "int8" if DEVICE == "cpu" else "float16")
+HF_TOKEN     = os.environ.get("HF_TOKEN", "").strip()
+MAX_SPEAKERS = int(os.environ.get("MAX_SPEAKERS", "5"))
+
+# ── Model state ───────────────────────────────────────────────────────────────
 
 _whisperx_model   = None
 _align_model      = None
 _align_meta       = None
 _diarize_pipeline = None
+_models_loading   = False
+_models_loaded    = False
+_whisperx_error   = None   # set if WhisperX failed to load
+_diarize_error    = None   # set if pyannote failed to load (non-fatal)
 
-DEVICE       = os.environ.get("WHISPERX_DEVICE",  "cpu")
-MODEL_ID     = os.environ.get("WHISPERX_MODEL",   "base")
-COMPUTE      = os.environ.get("WHISPERX_COMPUTE", "int8" if DEVICE == "cpu" else "float16")
-HF_TOKEN     = os.environ.get("HF_TOKEN", "")
-MAX_SPEAKERS = int(os.environ.get("MAX_SPEAKERS", "5"))
+_load_lock = threading.Lock()
 
 
 def _load_models():
-    global _whisperx_model, _align_model, _align_meta, _diarize_pipeline
-    if _whisperx_model is not None:
-        return
+    """
+    Load WhisperX and (optionally) the pyannote diarization pipeline.
 
-    import whisperx
+    pyannote failures are NON-FATAL — the service continues in
+    transcription-only mode and returns words without speaker labels.
+    This handles gated model errors, missing HF_TOKEN, network issues, etc.
+    """
+    global _whisperx_model, _diarize_pipeline
+    global _models_loading, _models_loaded
+    global _whisperx_error, _diarize_error
 
-    log.info(f"Loading WhisperX model={MODEL_ID} device={DEVICE} compute={COMPUTE}")
-    _whisperx_model = whisperx.load_model(
-        MODEL_ID,
-        DEVICE,
-        compute_type=COMPUTE,
-        language=None,  # auto-detect
-    )
-    log.info("WhisperX model loaded.")
+    with _load_lock:
+        if _models_loaded:
+            return
+        _models_loading = True
 
-    if HF_TOKEN:
-        log.info("Loading pyannote diarization pipeline…")
-        _diarize_pipeline = whisperx.DiarizationPipeline(
-            use_auth_token=HF_TOKEN,
-            device=DEVICE,
+    # ── 1. WhisperX (required) ────────────────────────────────────────────────
+    try:
+        import whisperx
+        log.info(f"Loading WhisperX model={MODEL_ID} device={DEVICE} compute={COMPUTE}")
+        _whisperx_model = whisperx.load_model(
+            MODEL_ID, DEVICE, compute_type=COMPUTE, language=None,
         )
-        log.info("Diarization pipeline loaded.")
+        log.info("✅ WhisperX model loaded.")
+    except Exception as e:
+        _whisperx_error = str(e)
+        log.error(f"❌ WhisperX failed to load: {e}\n{traceback.format_exc()}")
+        _models_loading = False
+        return  # can't do anything without WhisperX
+
+    # ── 2. pyannote diarization pipeline (optional) ───────────────────────────
+    if not HF_TOKEN:
+        _diarize_error = "HF_TOKEN env var not set — speaker diarization disabled."
+        log.warning(f"⚠️  {_diarize_error}")
+        log.warning("    Set HF_TOKEN and redeploy to enable speaker labels.")
     else:
-        log.warning("HF_TOKEN not set — diarization disabled, speaker labels will be null.")
+        try:
+            import whisperx
+            log.info("Loading pyannote/speaker-diarization-3.1 …")
+            _diarize_pipeline = whisperx.DiarizationPipeline(
+                use_auth_token=HF_TOKEN,
+                device=DEVICE,
+            )
+            log.info("✅ pyannote diarization pipeline loaded.")
+        except Exception as e:
+            _diarize_error = str(e)
+            _diarize_pipeline = None
+
+            # Produce a helpful diagnostic based on the error type
+            err_lower = str(e).lower()
+            if "gated" in err_lower or "403" in err_lower or "access" in err_lower:
+                log.error(
+                    "❌ pyannote: model is gated — you must accept the HuggingFace terms.\n"
+                    "   1. Log into https://huggingface.co with the account that owns HF_TOKEN\n"
+                    "   2. Accept terms at https://huggingface.co/pyannote/segmentation-3.0\n"
+                    "   3. Accept terms at https://huggingface.co/pyannote/speaker-diarization-3.1\n"
+                    "   4. Redeploy this service so it re-downloads the models.\n"
+                    "   → Running in transcription-only mode (no speaker labels)."
+                )
+            elif "401" in err_lower or "unauthorized" in err_lower or "invalid" in err_lower:
+                log.error(
+                    "❌ pyannote: HF_TOKEN is invalid or expired.\n"
+                    "   Generate a new token at https://huggingface.co/settings/tokens\n"
+                    "   and update the HF_TOKEN Railway environment variable.\n"
+                    "   → Running in transcription-only mode (no speaker labels)."
+                )
+            else:
+                log.error(
+                    f"❌ pyannote failed to load: {e}\n{traceback.format_exc()}\n"
+                    "   → Running in transcription-only mode (no speaker labels)."
+                )
+
+    _models_loaded = True
+    _models_loading = False
+
+
+# ── Eager model load on startup (background thread) ───────────────────────────
+# Start loading immediately so the first /diarize request doesn't have to wait.
+# The health check passes instantly; we just log warnings if models fail.
+
+def _startup_load():
+    try:
+        _load_models()
+    except Exception as e:
+        log.error(f"Startup model load error: {e}")
+
+threading.Thread(target=_startup_load, daemon=True).start()
 
 
 # ── CLIP + MediaPipe + sentence-transformers (lazy) ───────────────────────────
-# These models are independent of WhisperX and are only loaded when the
-# /classify-clips endpoint is first called.  Cold-start adds ~30 s on CPU.
 
 _clip_model      = None
 _clip_processor  = None
-_st_model        = None   # sentence-transformers
-_mp_face_det     = None   # MediaPipe FaceDetection
+_st_model        = None
+_mp_face_det     = None
 
 CLIP_MODEL_ID = "openai/clip-vit-base-patch32"
 ST_MODEL_ID   = "all-MiniLM-L6-v2"
 
-# CLIP text labels — order must match LABEL_TYPES below.
-# Rich, specific descriptions outperform short category words for CLIP.
 CLIP_LABELS = [
     "a person talking directly to camera in close-up, face fills most of the frame",
     "a person talking to camera in medium shot, upper body and shoulders visible",
@@ -151,7 +209,6 @@ LABEL_TYPES = [
     "presentation",
 ]
 
-# Map clip_type → default energy level (overridden by face-size signal)
 _TYPE_ENERGY = {
     "talking_head_close":  "high",
     "emotional_moment":    "high",
@@ -170,7 +227,6 @@ _TYPE_ENERGY = {
 
 
 def _load_clip_models():
-    """Load CLIP + sentence-transformers on first /classify-clips call."""
     global _clip_model, _clip_processor, _st_model
     import torch
     from transformers import CLIPModel, CLIPProcessor
@@ -189,17 +245,44 @@ def _load_clip_models():
         log.info("Sentence-transformer loaded.")
 
 
-# ── /classify-clips endpoint ──────────────────────────────────────────────────
+# ── /status ───────────────────────────────────────────────────────────────────
+
+@app.route("/status")
+def status():
+    """Returns the model loading state — useful for diagnosing issues."""
+    return jsonify({
+        "whisperx": {
+            "loaded": _whisperx_model is not None,
+            "model":  MODEL_ID,
+            "device": DEVICE,
+            "error":  _whisperx_error,
+        },
+        "diarization": {
+            "enabled":    _diarize_pipeline is not None,
+            "hf_token":   bool(HF_TOKEN),
+            "error":      _diarize_error,
+        },
+        "models_loading": _models_loading,
+        "models_loaded":  _models_loaded,
+    })
+
+
+# ── /health ───────────────────────────────────────────────────────────────────
+
+@app.route("/health")
+def health():
+    return jsonify({
+        "ok":     True,
+        "model":  MODEL_ID,
+        "device": DEVICE,
+        "diarization": _diarize_pipeline is not None,
+    })
+
+
+# ── /classify-clips ───────────────────────────────────────────────────────────
 
 @app.route("/classify-clips", methods=["POST"])
 def classify_clips():
-    """
-    Receives base64-encoded JPEG frames + optional transcript per clip.
-    Runs CLIP (visual classification), MediaPipe (face detection), and
-    sentence-transformers (semantic transcript clustering) on the batch.
-    Returns rich per-clip metadata used by Node to build a GPT-4o-mini
-    text prompt for final narrative ordering.
-    """
     import base64
     import numpy as np
     from io import BytesIO
@@ -212,15 +295,14 @@ def classify_clips():
     if not clips:
         return jsonify({"error": "No clips provided"}), 400
 
-    # ── Load models (first call only) ──────────────────────────────────────────
     try:
         _load_clip_models()
     except Exception as e:
         log.error(f"/classify-clips model load failed: {e}\n{traceback.format_exc()}")
         return jsonify({"error": f"Model loading failed: {e}"}), 500
 
-    results         = []
-    embed_texts     = []   # one string per clip for sentence-transformers
+    results     = []
+    embed_texts = []
 
     for clip in clips:
         clip_id    = clip.get("id", "unknown")
@@ -228,7 +310,6 @@ def classify_clips():
         transcript = (clip.get("transcript") or "").strip()
         duration   = float(clip.get("duration") or 0)
 
-        # ── Decode frames ─────────────────────────────────────────────────────
         pil_images = []
         for fb64 in frames_b64:
             try:
@@ -236,9 +317,8 @@ def classify_clips():
                 img = Image.open(BytesIO(raw)).convert("RGB")
                 pil_images.append(img)
             except Exception:
-                pass   # skip corrupt frames silently
+                pass
 
-        # ── CLIP zero-shot visual classification ──────────────────────────────
         clip_type            = "unknown"
         clip_type_confidence = 0.0
         top_types            = {}
@@ -254,43 +334,34 @@ def classify_clips():
                 )
                 with torch.no_grad():
                     outputs = _clip_model(**inputs)
-                    # logits_per_image: [num_images, num_labels]
-                    # Average softmax across all frames → one distribution per clip
                     probs = outputs.logits_per_image.softmax(dim=1).mean(dim=0)
 
                 best_idx             = int(probs.argmax())
                 clip_type            = LABEL_TYPES[best_idx]
                 clip_type_confidence = float(probs[best_idx])
-                # Return top-3 labels for transparency
                 top3_idx = probs.topk(min(3, len(LABEL_TYPES))).indices.tolist()
                 top_types = {LABEL_TYPES[i]: round(float(probs[i]), 4) for i in top3_idx}
             except Exception as e:
                 log.warning(f"CLIP failed for clip {clip_id}: {e}")
 
-        # ── MediaPipe face detection ──────────────────────────────────────────
         has_face  = False
         face_count = 0
-        face_size  = "none"   # none | small | medium | large
+        face_size  = "none"
 
         if pil_images:
             try:
                 import mediapipe as mp
                 mp_face = mp.solutions.face_detection
 
-                # Use the middle frame as the reference for face analysis
                 ref_img = pil_images[len(pil_images) // 2]
                 img_np  = np.array(ref_img)
 
-                with mp_face.FaceDetection(
-                    model_selection=1,          # 1 = full-range (up to 5 m)
-                    min_detection_confidence=0.4,
-                ) as face_det:
+                with mp_face.FaceDetection(model_selection=1, min_detection_confidence=0.4) as face_det:
                     mp_result = face_det.process(img_np)
 
                 if mp_result.detections:
                     has_face   = True
                     face_count = len(mp_result.detections)
-                    # Use the largest detected face for shot-size estimation
                     largest = max(
                         mp_result.detections,
                         key=lambda d: (
@@ -299,11 +370,7 @@ def classify_clips():
                         ),
                     )
                     bbox      = largest.location_data.relative_bounding_box
-                    face_area = bbox.width * bbox.height  # 0.0 – 1.0
-                    # Thresholds calibrated on typical camera distances:
-                    #   > 0.12  → close-up (face fills frame)
-                    #   0.04–0.12 → medium shot
-                    #   < 0.04  → wide shot / small face in background
+                    face_area = bbox.width * bbox.height
                     if face_area > 0.12:
                         face_size = "large"
                     elif face_area > 0.04:
@@ -313,9 +380,6 @@ def classify_clips():
             except Exception as e:
                 log.warning(f"MediaPipe failed for clip {clip_id}: {e}")
 
-        # ── Refine clip_type with face-detection signal ───────────────────────
-        # CLIP sometimes confuses wide talking-head with establishing shot;
-        # MediaPipe ground-truth overrides when a face is clearly detected.
         if has_face and clip_type in ("establishing_shot", "broll_outdoor", "broll_indoor"):
             if face_size == "large":
                 clip_type = "talking_head_close"
@@ -324,17 +388,12 @@ def classify_clips():
             else:
                 clip_type = "talking_head_wide"
 
-        # ── Energy heuristic ──────────────────────────────────────────────────
         energy = _TYPE_ENERGY.get(clip_type, "neutral")
-        # Promote energy when face is very close (engaged / emphatic delivery)
         if face_size == "large" and energy not in ("high",):
             energy = "high"
-        # Short clips with a face are usually key moments
         if duration < 4.0 and has_face:
             energy = "high"
 
-        # ── Prepare text for semantic embedding ───────────────────────────────
-        # Combine transcript + inferred visual context for richer embedding.
         visual_ctx = f"[{clip_type.replace('_', ' ')}]"
         embed_text = f"{visual_ctx} {transcript}".strip() if transcript else visual_ctx
         embed_texts.append(embed_text)
@@ -349,12 +408,9 @@ def classify_clips():
             "energy":               energy,
             "duration":             duration,
             "top_types":            top_types,
-            "topic_cluster":        0,   # filled below
+            "topic_cluster":        0,
         })
 
-    # ── Semantic transcript clustering (sentence-transformers) ─────────────────
-    # Embeds the combined visual+transcript text for each clip, then performs
-    # greedy cosine-similarity clustering so GPT can reason about topic groups.
     topic_clusters = [0] * len(results)
 
     if _st_model is not None and len(results) >= 2:
@@ -364,10 +420,9 @@ def classify_clips():
             embeddings  = _st_model.encode(embed_texts, show_progress_bar=False)
             sim_matrix  = cos_sim(embeddings)
 
-            # Greedy threshold clustering: similarity > 0.55 → same topic group
-            THRESHOLD   = 0.55
-            cluster_id  = 0
-            assigned    = {}
+            THRESHOLD  = 0.55
+            cluster_id = 0
+            assigned   = {}
 
             for i in range(len(results)):
                 if i in assigned:
@@ -382,13 +437,12 @@ def classify_clips():
         except Exception as e:
             log.warning(f"Semantic clustering failed: {e}")
 
-    # Inject clusters
     for i, r in enumerate(results):
         r["topic_cluster"] = topic_clusters[i]
 
     num_clusters = len(set(topic_clusters))
     log.info(
-        f"[classify-clips] {len(results)} clips processed | "
+        f"[classify-clips] {len(results)} clips | "
         f"{sum(1 for r in results if r['has_face'])} with face | "
         f"{num_clusters} topic cluster(s)"
     )
@@ -396,14 +450,7 @@ def classify_clips():
     return jsonify({"clips": results, "num_topic_clusters": num_clusters})
 
 
-# ── Health check ─────────────────────────────────────────────────────────────
-
-@app.route("/health")
-def health():
-    return jsonify({"ok": True, "model": MODEL_ID, "device": DEVICE})
-
-
-# ── Main endpoint ─────────────────────────────────────────────────────────────
+# ── /diarize ──────────────────────────────────────────────────────────────────
 
 @app.route("/diarize", methods=["POST"])
 def diarize():
@@ -419,26 +466,22 @@ def diarize():
     """
     import tempfile
 
-    temp_path = None   # set when we receive an upload so we can clean up
+    temp_path = None
 
     content_type = request.content_type or ""
     if "multipart/form-data" in content_type:
-        # ── Streaming upload ──────────────────────────────────────────────────
         if "audio" not in request.files:
             return jsonify({"error": "multipart request must include an 'audio' field"}), 400
 
-        upload  = request.files["audio"]
+        upload   = request.files["audio"]
         language = request.form.get("language") or None
-
-        suffix  = os.path.splitext(upload.filename or "audio.wav")[1] or ".wav"
+        suffix   = os.path.splitext(upload.filename or "audio.wav")[1] or ".wav"
         fd, temp_path = tempfile.mkstemp(suffix=suffix)
         os.close(fd)
         upload.save(temp_path)
         file_path = temp_path
-        log.info(f"Received uploaded file → {temp_path} ({os.path.getsize(temp_path)} bytes)")
-
+        log.info(f"Received upload → {temp_path} ({os.path.getsize(temp_path)} bytes)")
     else:
-        # ── JSON body with local path (local dev / same-machine deployment) ──
         body      = request.get_json(force=True, silent=True) or {}
         file_path = body.get("filePath") or body.get("file_path")
         language  = body.get("language") or None
@@ -451,31 +494,35 @@ def diarize():
     try:
         import whisperx
 
-        _load_models()
+        # Block until models are ready (they load in background on startup).
+        # In practice the first request arrives well after startup on Railway.
+        if not _models_loaded:
+            _load_models()
+
+        if _whisperx_model is None:
+            return jsonify({
+                "error": f"WhisperX failed to load: {_whisperx_error}",
+                "code":  "WHISPERX_NOT_LOADED",
+            }), 503
 
         # ── 1. Transcribe ─────────────────────────────────────────────────────
         log.info(f"Transcribing: {file_path}")
-        audio = whisperx.load_audio(file_path)
+        audio  = whisperx.load_audio(file_path)
         result = _whisperx_model.transcribe(audio, batch_size=4, language=language)
         detected_lang = result.get("language", "en")
-        log.info(f"Transcription done. Language={detected_lang}, segments={len(result['segments'])}")
+        log.info(f"Transcription done. lang={detected_lang}, segments={len(result['segments'])}")
 
         # ── 2. Word-level alignment ──────────────────────────────────────────
         global _align_model, _align_meta
         if _align_model is None or (_align_meta and _align_meta.get("language") != detected_lang):
-            log.info(f"Loading alignment model for language={detected_lang}")
+            log.info(f"Loading alignment model for lang={detected_lang}")
             _align_model, _align_meta = whisperx.load_align_model(
-                language_code=detected_lang,
-                device=DEVICE,
+                language_code=detected_lang, device=DEVICE,
             )
             _align_meta["language"] = detected_lang
 
         result = whisperx.align(
-            result["segments"],
-            _align_model,
-            _align_meta,
-            audio,
-            DEVICE,
+            result["segments"], _align_model, _align_meta, audio, DEVICE,
             return_char_alignments=False,
         )
         log.info("Alignment done.")
@@ -508,7 +555,8 @@ def diarize():
             speakers = sorted(seen_speakers)
             log.info(f"Diarization done. {len(speakers)} speakers, {len(words_out)} words.")
         else:
-            # No diarization — return words without speaker labels
+            # No diarization — return words without speaker labels.
+            # The client can still use timestamps for silence removal etc.
             for seg in result["segments"]:
                 for w in seg.get("words", []):
                     words_out.append({
@@ -517,12 +565,15 @@ def diarize():
                         "end":     round(w.get("end",   0), 3),
                         "speaker": None,
                     })
-            log.info(f"No diarization (HF_TOKEN absent). {len(words_out)} words returned.")
+            log.info(f"Transcription-only (no diarization). {len(words_out)} words.")
 
         return jsonify({
-            "words":    words_out,
-            "speakers": speakers,
-            "language": detected_lang,
+            "words":                words_out,
+            "speakers":             speakers,
+            "language":             detected_lang,
+            "diarization_enabled":  _diarize_pipeline is not None,
+            # Surface the reason diarization is off so the client can inform the user
+            "diarization_error":    _diarize_error if _diarize_pipeline is None else None,
         })
 
     except Exception as e:
@@ -530,7 +581,6 @@ def diarize():
         return jsonify({"error": str(e)}), 500
 
     finally:
-        # Remove the temp file we created from the upload (not the caller's file)
         if temp_path and os.path.exists(temp_path):
             try:
                 os.unlink(temp_path)
@@ -542,5 +592,4 @@ def diarize():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5001"))
-    # Use threaded=False — model inference is not thread-safe without locks
     app.run(host="0.0.0.0", port=port, threaded=False)
