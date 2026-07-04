@@ -1228,7 +1228,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         <input type="file" ref={fileInputRef} onChange={handleFileImport} className="hidden" accept="video/*,audio/*,image/*" multiple />
 
                         <div className="p-2 border-b flex gap-1 overflow-x-auto no-scrollbar" style={{ borderColor: "var(--line-soft)" }}>
-                            {['media', 'transcript', 'interview', 'color', 'text', 'audio', 'transform', 'settings'].map(tab => (
+                            {['media', 'transcript', 'color', 'text', 'audio', 'transform', 'settings'].map(tab => (
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab)}
@@ -1236,7 +1236,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 >
                                     {tab === 'media'      && <Layers   className="w-2.5 h-2.5" />}
                                     {tab === 'transcript' && <span style={{ fontSize: 9 }}>📝</span>}
-                                    {tab === 'interview'  && <span style={{ fontSize: 9 }}>🎙️</span>}
                                     {tab === 'color'      && <Palette  className="w-2.5 h-2.5" />}
                                     {tab === 'text'       && <Type     className="w-2.5 h-2.5" />}
                                     {tab === 'audio'      && <span style={{ fontSize: 9 }}>🎤</span>}

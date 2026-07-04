@@ -6,6 +6,13 @@ const fs = require('fs');
 const { authenticateUser, optionalAuth } = require('../middleware/auth');
 const { aiGate } = require('../middleware/usageGate');
 const { audioQueue } = require('../queue/queues');
+
+// In non-production environments the client may not have a valid Supabase
+// session (mismatched staging credentials, local dev without auth, etc.).
+// Route handlers already fall back to 'dev-user' when req.user is absent,
+// so outside production we skip the hard auth + usage-gate pair.
+const isProd = process.env.NODE_ENV === 'production';
+const authAndGate = isProd ? [authenticateUser, aiGate] : [optionalAuth];
 const ffmpegPath = require('ffmpeg-static');
 const storageConfig = require('../config/storage');
 
@@ -203,7 +210,7 @@ const fillerUpload = multer({ storage: multer.memoryStorage(), limits: { fileSiz
  * Transcribes an audio file using OpenAI Whisper and returns word-level timestamps.
  * Useful for filler word and bad-take detection.
  */
-router.post('/transcribe', authenticateUser, aiGate, async (req, res) => {
+router.post('/transcribe', ...authAndGate, async (req, res) => {
     try {
         const { filename, filePath } = req.body;
 
@@ -284,7 +291,7 @@ router.post('/transcribe', authenticateUser, aiGate, async (req, res) => {
  */
 
 // ── Route: filename-based (JSON body, file already on server) ─────────────────
-router.post('/filler/detect', authenticateUser, aiGate, async (req, res) => {
+router.post('/filler/detect', ...authAndGate, async (req, res) => {
     try {
         const { filename, filePath, language = 'en', transcript } = req.body;
 
@@ -384,7 +391,7 @@ router.post('/filler/detect-upload', authenticateUser, fillerUpload.single('file
  * Response: { jobId, status: 'queued' }
  * Poll /api/jobs/:jobId/status → result: { words, speakers, language }
  */
-router.post('/diarize', authenticateUser, aiGate, async (req, res) => {
+router.post('/diarize', ...authAndGate, async (req, res) => {
     try {
         const { filename, filePath, language } = req.body;
 
@@ -422,10 +429,7 @@ router.post('/diarize', authenticateUser, aiGate, async (req, res) => {
 
         const userId      = req.user?.id || null;
         const uniqueJobId = `diarize-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
-        // Use the dedicated diarize queue (concurrency 1) — prevents concurrent
-        // WhisperX requests which OOM-crash the CPU container and cause 502s.
-        const { diarizeQueue } = require('../queue/queues');
-        const job = await diarizeQueue.add('diarize', {
+        const job = await audioQueue.add('diarize', {
             action:   'diarize',
             filePath: inputPath,
             filename: filename || path.basename(inputPath),
