@@ -58,6 +58,129 @@ const getPlayerDimensions = (ratio) => {
     }
 };
 
+// ── Video type detection + contextual welcome message ─────────────────────────
+// Uses resolution, fps, file extension, duration, and filename — in that order
+// of reliability. Filename keywords are the weakest signal because most real
+// uploads have generic names like IMG_0029.MOV or clip001.mp4.
+//
+// Returns one of: 'screen_recording' | 'interview_or_call' | 'vertical_social' |
+//                 'short_clip' | 'talking_head'
+function detectVideoType(filename, resolution, duration, fps) {
+    const lower    = (filename || '').toLowerCase();
+    const ext      = lower.match(/\.(\w+)$/)?.[1] || '';
+    const w        = resolution?.w || 0;
+    const h        = resolution?.h || 0;
+    const ratio    = h > 0 ? w / h : 16 / 9;
+    const isPortrait = ratio < 0.75;           // 9:16 (0.56), 4:5 (0.80) → portrait
+    const isSquare   = ratio >= 0.9 && ratio <= 1.15; // ~1:1
+
+    // ── 1. File extension (very reliable) ────────────────────────────────────
+    // .webm = browser-captured (screen share, video call, Loom)
+    // .mkv  = OBS default output
+    if (ext === 'webm' || ext === 'mkv') return 'screen_recording';
+
+    // ── 2. Aspect ratio (reliable — camera orientation is intentional) ────────
+    if (isPortrait || isSquare) return 'vertical_social';
+
+    // ── 3. Resolution × framerate (reliable for screen recordings) ───────────
+    // Monitors ship in a fixed set of widths; phones do too but in portrait.
+    // 60 fps at a standard monitor width = almost certainly a screen capture.
+    const monitorWidths = new Set([1280, 1366, 1440, 1600, 1920, 2560, 3440, 3840]);
+    if (fps >= 50 && monitorWidths.has(w)) return 'screen_recording';
+
+    // ── 4. Filename keywords (weakest — many uploads have generic names) ──────
+    if (/\b(screen|screencast|capture|loom|obs|desktop|walkthrough|tutorial|demo|howto|how[-_]?to)\b/.test(lower)) {
+        return 'screen_recording';
+    }
+    if (/\b(zoom|meet(?:ing)?|teams|webex|podcast|interview|conversation|call|webinar|session)\b/.test(lower)) {
+        return 'interview_or_call';
+    }
+    if (/\b(reel|tiktok|short|vertical|portrait|story|ig|instagram)\b/.test(lower)) {
+        return 'vertical_social';
+    }
+
+    // ── 5. Duration ───────────────────────────────────────────────────────────
+    // NOTE: duration alone cannot distinguish a long YouTube talking head from
+    // a podcast — both can be 20+ minutes of 16:9 footage. Only use it to
+    // catch very short clips; everything else defaults to talking_head.
+    if (duration < 30) return 'short_clip';
+
+    return 'talking_head'; // safe default: single-person on-camera
+}
+
+function buildProxyReadyMessage(type, duration) {
+    const m = Math.floor(duration / 60);
+    const s = Math.floor(duration % 60);
+    const durLabel = m > 0
+        ? `${m}:${s.toString().padStart(2, '0')}`
+        : `${Math.round(duration)}s`;
+
+    switch (type) {
+        case 'screen_recording':
+            return (
+                `Looks like a screen recording or tutorial.\n\n` +
+                `Here's what I can do with it:\n` +
+                `• "add captions" — subtitles make tutorials accessible and searchable\n` +
+                `• "clean this clip" — cut silences and thinking pauses between steps\n` +
+                `• "make it vertical" — reframe to 9:16 for TikTok or YouTube Shorts\n\n` +
+                `What are you creating this for?`
+            );
+        case 'interview_or_call':
+            return (
+                `Your ${durLabel} recording is ready — looks like a call or multi-person session.\n\n` +
+                `Here's what I can do:\n` +
+                `• "split speakers" — separate each person onto their own track\n` +
+                `• "clean this clip" — remove silences, crosstalk gaps, and filler words\n` +
+                `• "add captions" — auto-generate subtitles for all speakers\n` +
+                `• "extract highlights" — pull the best moments for short-form content`
+            );
+        case 'vertical_social':
+            return (
+                `Already in portrait mode — perfect for Reels, TikTok, and YouTube Shorts.\n\n` +
+                `Here's what I can do:\n` +
+                `• "make it more dynamic" — add zoom rhythm for a polished, multi-camera feel\n` +
+                `• "clean this clip" — remove silences and hesitations\n` +
+                `• "add captions" — subtitles dramatically boost mobile watch time`
+            );
+        case 'short_clip':
+            return (
+                `Short clip ready! Here's what I can do:\n` +
+                `• "make it more dynamic" — zoom rhythm to boost engagement\n` +
+                `• "add captions" — subtitles improve watch-through rate\n` +
+                `• "make it vertical" — convert to 9:16 for Reels / TikTok`
+            );
+        case 'talking_head':
+        default:
+            if (duration > 300) {
+                // Long talking head — YouTube, course, vlog episode, etc.
+                return (
+                    `Your ${durLabel} recording is ready. Looks like a longer talking head — YouTube, course content, or a vlog episode.\n\n` +
+                    `Here's what I can do:\n` +
+                    `• "clean this clip" — remove silences and filler words across the whole recording\n` +
+                    `• "add captions" — auto-generate subtitles\n` +
+                    `• "extract highlights" — pull the best moments for Reels or Shorts\n` +
+                    `• "make it more dynamic" — zoom rhythm to keep viewers watching`
+                );
+            }
+            return (
+                `Your ${durLabel} clip is ready. Looks like a talking head or vlog-style recording.\n\n` +
+                `Here's what I can do:\n` +
+                `• "make it more dynamic" — simulate multi-camera with zoom rhythm\n` +
+                `• "clean this clip" — remove silences and filler words\n` +
+                `• "add captions" — auto-generate subtitles\n` +
+                `• "make it vertical" — reformat for TikTok / Reels`
+            );
+    }
+}
+
+const CONTEXTUAL_SUGGESTION = {
+    screen_recording:  'add captions',
+    interview_or_call: 'split speakers',
+    vertical_social:   'make it more dynamic',
+    short_clip:        'make it more dynamic',
+    talking_head:      'make it more dynamic',
+};
+
 const IDELayout = ({ children, mode = 'editor' }) => {
     // ── beforeunload guard ────────────────────────────────────────────────────
     // Warn the user before closing/refreshing the tab while AI is processing
@@ -543,39 +666,13 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             if (processedAssets.length === 1) {
                                 setTimeout(() => {
                                     const aiStore = useAIStore.getState();
-                                    const fmtShort = (s) => {
-                                        const m = Math.floor(s / 60);
-                                        const sec = Math.floor(s % 60);
-                                        return m > 0
-                                            ? `${m}:${sec.toString().padStart(2, '0')}`
-                                            : `${Math.round(s)}s`;
-                                    };
-
-                                    let msg;
-                                    if (dur > 600) {
-                                        msg =
-                                            `Your ${fmtShort(dur)} video is ready — looks like a longer session.\n\n` +
-                                            `Here's what I can do with it:\n` +
-                                            `• "clean this clip" — remove silences and filler words across the whole recording\n` +
-                                            `• "split speakers" — separate each person onto their own track\n` +
-                                            `• "add captions" — auto-generate subtitles\n` +
-                                            `• "extract highlights" — pull the best moments for social clips\n\n` +
-                                            `I'm scanning the content in the background and will share specific findings shortly.`;
-                                    } else if (dur > 20) {
-                                        msg =
-                                            `Your ${fmtShort(dur)} clip is ready! Here's what I can do with it:\n\n` +
-                                            `• "make it more dynamic" — zoom rhythm for a multi-camera feel\n` +
-                                            `• "clean this clip" — remove silences and filler words\n` +
-                                            `• "add captions" — auto-generate subtitles\n` +
-                                            `• "make it vertical" — convert to 9:16 for TikTok/Reels\n\n` +
-                                            `What would you like to focus on?`;
-                                    } else {
-                                        msg =
-                                            `Clip ready! Here's what I can do:\n\n` +
-                                            `• "make it more dynamic" — zoom rhythm to boost engagement\n` +
-                                            `• "add captions" — auto-generate subtitles\n` +
-                                            `• "make it vertical" — convert to 9:16 for TikTok/Reels`;
-                                    }
+                                    const videoType = detectVideoType(
+                                        file.name,
+                                        assetEntry.resolution,
+                                        dur,
+                                        assetEntry.fps,
+                                    );
+                                    const msg = buildProxyReadyMessage(videoType, dur);
 
                                     aiStore.addLog({
                                         id:        `proxy-ready-${Date.now()}`,
@@ -585,7 +682,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     });
 
                                     aiStore.setContextualSuggestion(
-                                        dur > 30 ? 'make it more dynamic' : 'add captions'
+                                        CONTEXTUAL_SUGGESTION[videoType] ?? 'make it more dynamic'
                                     );
                                 }, 800);
                             }
