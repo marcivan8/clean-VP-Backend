@@ -949,12 +949,20 @@ export class MediaExecutionEngine {
             //   • At least 1 clip on the video track
             //   • store.captions must contain words with .speaker fields (from diarize)
             case 'virtual_multicam': {
-                const vmStore      = useTimelineStore.getState();
-                const vmVideoTrack = vmStore.tracks?.find(t => t.type === 'video');
-                const vmClips      = vmVideoTrack?.clips ?? [];
-                const vmWords      = (vmStore.captions ?? []).filter(w => w.speaker);
+                const vmStore = useTimelineStore.getState();
 
-                if (vmClips.length === 0) {
+                // ── Collect clips from ALL video tracks ───────────────────────
+                // After split-speakers there are 2 video tracks (one per speaker).
+                // We tag clips from every video track so none are missed.
+                const vmVideoTracks = (vmStore.tracks ?? []).filter(t => t.type === 'video');
+                // Flatten, keeping track id per clip so updateClip targets the right track
+                const vmAllClips = vmVideoTracks.flatMap(t =>
+                    (t.clips ?? []).map(c => ({ ...c, _trackId: t.id }))
+                );
+
+                const vmWords = (vmStore.captions ?? []).filter(w => w.speaker);
+
+                if (vmAllClips.length === 0) {
                     throw new Error('No clips on the timeline. Add your interview video first.');
                 }
 
@@ -982,17 +990,10 @@ export class MediaExecutionEngine {
                     };
                 }
 
-                // ── 1. Optional: extract sample frames for face detection ──────
-                // We grab up to 5 frames at the start of the video where the host
-                // is most likely alone. Falls back gracefully if not available.
-                // For now we pass an empty array — the backend heuristic (host=left)
-                // works well for standard interview setups and face detection is bonus.
-                const vmFrames = [];
-
-                // ── 2. Call backend to get segments with angle + crop region ───
+                // ── Call backend to get segments with angle + crop region ─────
                 console.log(
                     `[virtual_multicam] ${vmWords.length} words, ${vmSpeakers.length} speakers, ` +
-                    `${vmClips.length} clips → POST /api/interview/virtual-multicam`
+                    `${vmAllClips.length} clips across ${vmVideoTracks.length} track(s) → POST /api/interview/virtual-multicam`
                 );
 
                 const vmRes  = await authFetch('/api/interview/virtual-multicam', {
@@ -1000,7 +1001,7 @@ export class MediaExecutionEngine {
                     body:   JSON.stringify({
                         words:    vmWords,
                         speakers: vmSpeakers,
-                        frames:   vmFrames,
+                        frames:   [],
                     }),
                 });
                 const vmData = await vmRes.json();
@@ -1012,30 +1013,48 @@ export class MediaExecutionEngine {
                     return { action, success: false, message: 'No segments returned from virtual-multicam analysis.' };
                 }
 
-                // ── 3. Assign virtualCam metadata to each clip ─────────────────
-                // For each clip, find the diarization segment whose time range
-                // overlaps the most with the clip's timeline span.
+                // ── Assign virtualCam metadata to each clip ────────────────────
+                //
+                // CRITICAL: diarization timestamps are SOURCE VIDEO time (original file).
+                // After silence removal, clip.start = TIMELINE position (gaps removed),
+                // clip.offset = SOURCE position (where in original video this starts).
+                // We MUST compare against clip.offset, not clip.start.
+                //
+                // For each clip: find the diarization segment with the most overlap
+                // against the clip's source-time window [offset, offset + duration].
                 const freshStore = useTimelineStore.getState();
-                let wideCount = 0, hostCount = 0, guestCount = 0;
+                let wideCount = 0, hostCount = 0, guestCount = 0, skipped = 0;
 
-                for (const clip of vmClips) {
-                    const clipStart = clip.start ?? 0;
-                    const clipEnd   = clipStart + (clip.duration ?? 0);
+                for (const clip of vmAllClips) {
+                    // Use source-video position (offset) — this matches diarization timestamps
+                    const srcStart = clip.offset ?? clip.sourceStart ?? clip.start ?? 0;
+                    const srcEnd   = srcStart + (clip.duration ?? 0);
 
-                    // Find the segment with most overlap
-                    let bestSeg = null;
+                    // Find the diarization segment with the greatest overlap
+                    let bestSeg     = null;
                     let bestOverlap = 0;
                     for (const seg of segments) {
-                        const overlapStart = Math.max(seg.start, clipStart);
-                        const overlapEnd   = Math.min(seg.end,   clipEnd);
-                        const overlap      = Math.max(0, overlapEnd - overlapStart);
+                        const oStart  = Math.max(seg.start, srcStart);
+                        const oEnd    = Math.min(seg.end,   srcEnd);
+                        const overlap = Math.max(0, oEnd - oStart);
                         if (overlap > bestOverlap) {
                             bestOverlap = overlap;
                             bestSeg = seg;
                         }
                     }
 
-                    if (!bestSeg) continue; // No overlap → leave clip unchanged
+                    if (!bestSeg) {
+                        // Fallback: assign the segment whose midpoint is closest to clip midpoint
+                        const clipMid = srcStart + (clip.duration ?? 0) / 2;
+                        let minDist = Infinity;
+                        for (const seg of segments) {
+                            const segMid = (seg.start + seg.end) / 2;
+                            const dist   = Math.abs(segMid - clipMid);
+                            if (dist < minDist) { minDist = dist; bestSeg = seg; }
+                        }
+                    }
+
+                    if (!bestSeg) { skipped++; continue; }
 
                     const virtualCam = {
                         angle:   bestSeg.angle,
@@ -1046,26 +1065,28 @@ export class MediaExecutionEngine {
                         speaker: bestSeg.speaker || null,
                     };
 
-                    freshStore.updateClip(vmVideoTrack.id, clip.id, { virtualCam });
+                    freshStore.updateClip(clip._trackId, clip.id, { virtualCam });
 
-                    if (bestSeg.angle === 'wide')        wideCount++;
+                    if (bestSeg.angle === 'wide')             wideCount++;
                     else if (bestSeg.angle === 'close_host')  hostCount++;
                     else if (bestSeg.angle === 'close_guest') guestCount++;
                 }
 
+                const totalTagged = wideCount + hostCount + guestCount;
                 console.log(
-                    `[virtual_multicam] Applied: ${wideCount}W / ${hostCount}H / ${guestCount}G | ` +
-                    `host=${host} on ${hostSide}`
+                    `[virtual_multicam] Applied to ${totalTagged}/${vmAllClips.length} clips: ` +
+                    `${wideCount}W / ${hostCount}H / ${guestCount}G | ` +
+                    `host=${host} on ${hostSide} | skipped=${skipped}`
                 );
 
                 return {
                     action,
                     success: true,
                     message:
-                        `Virtual multicam angles applied to ${vmClips.length} clips — ` +
+                        `Virtual multicam applied to ${totalTagged} clips — ` +
                         `${wideCount} wide, ${hostCount} close host, ${guestCount} close guest.\n\n` +
                         `Host (${host}) is on the ${hostSide} side. ` +
-                        `Angles update in real-time as you scrub through the timeline.`,
+                        `Angles switch in real-time as you scrub through the timeline.`,
                 };
             }
 
