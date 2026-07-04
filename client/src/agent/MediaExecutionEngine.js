@@ -724,9 +724,12 @@ export class MediaExecutionEngine {
                 const rzStyle      = args.style || 'dynamic';
 
                 if (rzClips.length < 2) {
+                    // This should not normally be reached — IntentParser auto-upgrades
+                    // "make it more dynamic" to compound_clean_dynamic when clips < 2.
+                    // This is a safety net for the GPT-routed path.
                     return {
                         action, success: false,
-                        message: `Zoom rhythm needs at least 2 clips to create camera movement between shots — your timeline currently has ${rzClips.length} clip.\n\nTry "remove silence" first: it automatically splits your clip into multiple segments. Then run "make it more dynamic" again.`,
+                        message: `I need to split your clip into segments first before applying zoom rhythm. Try: "clean this clip then make it dynamic" — that removes silences to create segments, then applies the zoom effect in one go.`,
                     };
                 }
                 if (rzWords.length === 0) {
