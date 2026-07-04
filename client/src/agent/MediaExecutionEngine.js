@@ -794,62 +794,75 @@ export class MediaExecutionEngine {
                 const ocTracks = (ocStore.tracks || []).filter(t => t.type === 'video');
                 const ocAssets = ocStore.assets || [];
 
+                console.log(`[organize_clips] store has ${ocAssets.length} asset(s), ${ocTracks.length} video track(s)`);
+                if (ocAssets.length > 0) {
+                    console.log(`[organize_clips] asset types:`,
+                        ocAssets.map(a => `${a.name}(type=${a.type},proxying=${a.isProxying})`).join(', '));
+                }
+
                 // Gather all clips across all video tracks, sorted by current timeline position
                 let allClips = ocTracks.flatMap(t =>
                     (t.clips || []).map(c => ({ ...c, _trackId: t.id }))
                 ).sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
 
-                // If fewer clips on the timeline than there are ready assets in the bin,
-                // auto-add the missing assets first so "arrange them on the timeline"
-                // works even when the user hasn't dragged anything yet.
-                const readyAssets = ocAssets.filter(a => !a.isProxying && a.type === 'video');
+                // ── Step 1: place any unplaced bin assets on the timeline ────────
+                // Broad type match: accept 'video', 'Video', or anything that includes 'video'
+                const readyAssets = ocAssets.filter(
+                    a => !a.isProxying && typeof a.type === 'string' && a.type.toLowerCase().includes('video')
+                );
                 const timelineAssetIds = new Set(allClips.map(c => c.assetId));
-                const unplacedAssets = readyAssets.filter(a => !timelineAssetIds.has(a.id));
+                const unplacedAssets   = readyAssets.filter(a => !timelineAssetIds.has(a.id));
 
+                console.log(`[organize_clips] ready=${readyAssets.length}, unplaced=${unplacedAssets.length}, on-timeline=${allClips.length}`);
+
+                let justPlaced = 0;
                 if (unplacedAssets.length > 0) {
-                    console.log(`[MediaExecutionEngine] organize_clips: auto-adding ${unplacedAssets.length} unplaced asset(s) to timeline`);
+                    console.log(`[organize_clips] adding ${unplacedAssets.length} unplaced asset(s) to timeline`);
                     for (const asset of unplacedAssets) {
                         useTimelineStore.getState().addAssetToTimeline(asset);
+                        justPlaced++;
                     }
-                    // Re-read after adding
+                    // Re-read after adding — Zustand set() is synchronous so this is fresh
                     const freshTracks = useTimelineStore.getState().tracks.filter(t => t.type === 'video');
                     allClips = freshTracks.flatMap(t =>
                         (t.clips || []).map(c => ({ ...c, _trackId: t.id }))
                     ).sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
+                    console.log(`[organize_clips] after placement: ${allClips.length} clip(s) on timeline`);
                 }
 
-                if (allClips.length < 2) {
-                    // Only 1 asset total — nothing to organise, but we may have just added it
-                    if (allClips.length === 1) {
-                        return { action, success: true, message: 'Added your clip to the timeline.' };
-                    }
+                // If still no clips after placement attempt, throw so the upstream
+                // reports a real error (not "complete"). Returning {success:false}
+                // without throwing is swallowed by execute() as a success.
+                if (allClips.length === 0) {
+                    throw new Error('No clips found. Import some video clips first.');
+                }
+
+                if (allClips.length === 1) {
                     return {
                         action,
-                        success: false,
-                        message: 'Need at least 2 clips to organize. Import more footage first.',
+                        success: true,
+                        message: justPlaced > 0
+                            ? 'Added your clip to the timeline.'
+                            : 'Only one clip on the timeline — import more to organize.',
                     };
                 }
 
-                // Build the payload for the server.
-                // For the file path we use the asset name (server resolves via uploads/).
-                // Include a transcript excerpt per clip if captions are available.
+                // ── Step 2: semantic ML ordering (best-effort; placement already done) ─
+                const placedMsg = justPlaced > 0
+                    ? `Added ${justPlaced} clip(s) to the timeline.`
+                    : '';
+
                 const captions   = ocStore.captions ?? [];
                 const uploadedFP = ocStore.uploadedFilePath || null;
 
                 const clipPayload = allClips.map(clip => {
-                    const asset = ocAssets.find(a => a.id === clip.assetId);
-                    // assetName: prefer name that matches uploads/ structure
-                    const assetName = asset?.name || clip.name || null;
-
-                    // Harvest transcript words that fall inside this clip's source range
+                    const asset      = ocAssets.find(a => a.id === clip.assetId);
+                    const assetName  = asset?.name || clip.name || null;
                     const clipOffset = clip.offset ?? 0;
                     const clipEnd    = clipOffset + (clip.duration ?? 0);
                     const transcript = captions
                         .filter(w => w.start >= clipOffset - 0.1 && w.end <= clipEnd + 0.1)
-                        .map(w => w.word)
-                        .join(' ')
-                        .trim()
-                        .slice(0, 300);
+                        .map(w => w.word).join(' ').trim().slice(0, 300);
 
                     return {
                         id:         clip.id,
@@ -861,65 +874,67 @@ export class MediaExecutionEngine {
                     };
                 });
 
-                console.log(`[MediaExecutionEngine] organize_clips: ${clipPayload.length} clips → POST /api/interview/organize-clips`);
+                console.log(`[organize_clips] ${clipPayload.length} clips → POST /api/interview/organize-clips`);
 
-                const ocRes  = await authFetch('/api/interview/organize-clips', {
-                    method: 'POST',
-                    body:   JSON.stringify({ clips: clipPayload }),
-                });
-                const ocData = await ocRes.json();
-                if (!ocRes.ok) throw new Error(ocData.error || `organize-clips returned ${ocRes.status}`);
+                let orderMsg = '';
+                try {
+                    const ocRes  = await authFetch('/api/interview/organize-clips', {
+                        method: 'POST',
+                        body:   JSON.stringify({ clips: clipPayload }),
+                    });
+                    const ocData = await ocRes.json();
 
-                const { orderedIds = [], clipMeta = [], rationale = '' } = ocData;
+                    if (!ocRes.ok) {
+                        throw new Error(ocData.error || `organize-clips returned ${ocRes.status}`);
+                    }
 
-                if (orderedIds.length === 0) {
-                    return { action, success: false, message: 'Could not determine clip order. Try again.' };
+                    const { orderedIds = [], clipMeta = [], rationale = '' } = ocData;
+
+                    if (orderedIds.length > 0) {
+                        const currentIds   = allClips.map(c => c.id);
+                        const alreadySorted = orderedIds.every((id, i) => id === currentIds[i]);
+
+                        if (alreadySorted) {
+                            orderMsg = `Clips are already in the recommended order. ${rationale}`;
+                        } else {
+                            // Reorder: place each clip consecutively with no gaps
+                            const clipById  = {};
+                            allClips.forEach(c => { clipById[c.id] = c; });
+                            const freshStore = useTimelineStore.getState();
+                            let cursor = 0;
+
+                            for (const clipId of orderedIds) {
+                                const clip = clipById[clipId];
+                                if (!clip) continue;
+                                freshStore.updateClip(clip._trackId, clipId, { start: cursor });
+                                cursor += clip.duration ?? 0;
+                            }
+
+                            const metaById = {};
+                            clipMeta.forEach(m => { metaById[m.id] = m; });
+                            const orderDesc = orderedIds
+                                .map((id, i) => {
+                                    const m = metaById[id];
+                                    return m ? `${i + 1}. ${m.type || 'clip'} (${m.energy || ''})` : `${i + 1}. clip`;
+                                })
+                                .join(' → ');
+
+                            console.log(`[organize_clips] reordered ${orderedIds.length} clips — ${orderDesc}`);
+                            orderMsg = `Semantically organized ${orderedIds.length} clips.\n\n${rationale}\n\nOrder: ${orderDesc}`;
+                        }
+                    }
+                } catch (apiErr) {
+                    // ML ordering failed — clips are still placed, just not reordered.
+                    // Don't throw: the placement in Step 1 already succeeded.
+                    console.warn(`[organize_clips] ML ordering skipped (${apiErr.message}) — clips placed in upload order`);
+                    orderMsg = justPlaced > 0 ? '' : 'Could not determine optimal order — clips kept in current order.';
                 }
-
-                // Check if GPT actually suggested a different order
-                const currentIds = allClips.map(c => c.id);
-                const alreadySorted = orderedIds.every((id, i) => id === currentIds[i]);
-                if (alreadySorted) {
-                    return {
-                        action,
-                        success: true,
-                        message: `Your clips are already in the best order. ${rationale}`,
-                    };
-                }
-
-                // Rebuild timeline positions: place each clip consecutively with no gaps.
-                // We build a map of clipId → new startTime based on sorted durations.
-                const clipById = {};
-                allClips.forEach(c => { clipById[c.id] = c; });
-
-                let cursor = 0;
-                const freshStore = useTimelineStore.getState();
-
-                for (const clipId of orderedIds) {
-                    const clip = clipById[clipId];
-                    if (!clip) continue;
-                    const dur = clip.duration ?? 0;
-                    freshStore.updateClip(clip._trackId, clipId, { start: cursor });
-                    cursor += dur;
-                }
-
-                // Build a human summary of the new order
-                const metaById = {};
-                clipMeta.forEach(m => { metaById[m.id] = m; });
-
-                const orderDesc = orderedIds
-                    .map((id, i) => {
-                        const m = metaById[id];
-                        return m ? `${i + 1}. ${m.type || 'clip'} (${m.energy || ''})` : `${i + 1}. clip`;
-                    })
-                    .join(' → ');
-
-                console.log(`[MediaExecutionEngine] organize_clips: reordered ${orderedIds.length} clips — ${orderDesc}`);
 
                 return {
                     action,
                     success: true,
-                    message: `Organized ${orderedIds.length} clips by content.\n\n${rationale}\n\nNew order: ${orderDesc}`,
+                    message: [placedMsg, orderMsg].filter(Boolean).join('\n\n') ||
+                             `${allClips.length} clips are on the timeline.`,
                 };
             }
 
