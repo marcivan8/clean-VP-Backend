@@ -924,19 +924,23 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
         // ── 2. Build crop regions for each angle ────────────────────────────
         // We crop to 60% of the frame width to get a ~1.67x zoom.
         // For a 16:9 frame, 60% width gives natural "close shot" framing.
-        const CROP_W = 0.60;
+        // Crop to 42% of frame width → ~2.4x zoom.
+        // Standard two-person interview: subjects sit on opposite halves of the frame.
+        //   Host (left side):  face at ~25% from left → crop window starts at INSET
+        //   Guest (right side): face at ~75% from left → crop window ends at 1-INSET
+        // INSET prevents cropping flush to the edge (looks jarring on tight shots).
+        const CROP_W = 0.42;
         const CROP_H = 1.00;
+        const INSET  = 0.02;
 
         const CROP = {
             wide: { cropX: 0, cropY: 0, cropW: 1.0, cropH: 1.0 },
-            // Close host — host on left: crop left 60%, host on right: crop right 60%
-            close_host:  hostSide === 'left'
-                ? { cropX: 0,           cropY: 0, cropW: CROP_W, cropH: CROP_H }
-                : { cropX: 1 - CROP_W,  cropY: 0, cropW: CROP_W, cropH: CROP_H },
-            // Close guest — opposite side of host
+            close_host: hostSide === 'left'
+                ? { cropX: INSET,               cropY: 0, cropW: CROP_W, cropH: CROP_H }
+                : { cropX: 1 - CROP_W - INSET,  cropY: 0, cropW: CROP_W, cropH: CROP_H },
             close_guest: hostSide === 'left'
-                ? { cropX: 1 - CROP_W,  cropY: 0, cropW: CROP_W, cropH: CROP_H }
-                : { cropX: 0,           cropY: 0, cropW: CROP_W, cropH: CROP_H },
+                ? { cropX: 1 - CROP_W - INSET,  cropY: 0, cropW: CROP_W, cropH: CROP_H }
+                : { cropX: INSET,               cropY: 0, cropW: CROP_W, cropH: CROP_H },
         };
 
         // ── 3. Group words into diarization segments ─────────────────────────
