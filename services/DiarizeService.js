@@ -1,18 +1,35 @@
 // services/DiarizeService.js
 // Node.js client for the WhisperX diarization microservice.
 //
-// Set DIARIZE_SERVICE_URL in Railway's Variables dashboard to the URL of the
-// deployed diarize-service container (e.g. https://diarize.up.railway.app).
-// Leave it unset to disable speaker diarization gracefully — the transcription
-// pipeline still runs via OpenAI Whisper, just without speaker labels.
+// IMPORTANT — filesystem isolation:
+// In Railway production the Node server and the Python diarize container run
+// in SEPARATE containers with NO shared filesystem. We therefore always stream
+// the audio file as multipart/form-data rather than sending a local path.
+// The Python service saves it to a temp file, processes it, and deletes it.
+//
+// Backward compat: if DIARIZE_SERVICE_URL is unset the class is a no-op and
+// isAvailable returns false — the transcription pipeline still runs via Whisper.
 
-const axios    = require('axios');
-const fs       = require('fs');
-const path     = require('path');
-const FormData = require('form-data');
+const axios      = require('axios');
+const fs         = require('fs');
+const path       = require('path');
+const FormData   = require('form-data');
 
-const BASE_URL   = process.env.DIARIZE_SERVICE_URL || null;
-const TIMEOUT_MS = parseInt(process.env.DIARIZE_TIMEOUT_MS || '600000', 10); // 10 min default
+const TIMEOUT_MS = parseInt(process.env.DIARIZE_TIMEOUT_MS || '600000', 10); // 10 min
+
+// Normalize the service URL — Railway internal hostnames are often set without
+// a scheme (e.g. "my-service.railway.internal:5000"). Prepend http:// when
+// missing so axios doesn't throw "Invalid URL" before the request is made.
+function normalizeServiceUrl(raw) {
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    if (/^https?:\/\//i.test(trimmed)) return trimmed.replace(/\/$/, '');
+    console.warn(`[DiarizeService] DIARIZE_SERVICE_URL has no scheme — prepending http:// to "${trimmed}"`);
+    return `http://${trimmed}`.replace(/\/$/, '');
+}
+
+const BASE_URL = normalizeServiceUrl(process.env.DIARIZE_SERVICE_URL);
 
 class DiarizeServiceClass {
     constructor() {
@@ -26,82 +43,56 @@ class DiarizeServiceClass {
     }
 
     /**
-     * Run WhisperX transcription + pyannote diarization on a local audio file.
+     * Run WhisperX transcription + pyannote diarization on an audio file.
      *
-     * @param {string} filePath      - Absolute path to the audio/video file on the
-     *                                 server filesystem (already downloaded from GCS).
-     * @param {string} [language]    - ISO-639-1 language code, e.g. "en". Omit for auto-detect.
-     * @param {object} [opts]
-     * @param {number} [opts.minSpeakers=2] - Minimum number of speakers to detect.
-     *   Setting this to 2 dramatically improves accuracy for interview/podcast content
-     *   because pyannote won't collapse two distinct speakers into one.
-     * @param {number} [opts.maxSpeakers=10] - Maximum number of speakers to detect.
+     * The file is STREAMED to the Python service via multipart/form-data so
+     * this works even when the two services run in separate Railway containers.
+     *
+     * @param {string} filePath   — Absolute path to the WAV/MP4 on THIS server.
+     * @param {string} [language] — ISO-639-1 code, e.g. "en". Omit for auto-detect.
      * @returns {Promise<{
-     *   words:           Array<{ word: string, start: number, end: number, speaker: string|null }>,
-     *   speakers:        string[],
-     *   language:        string,
-     *   diarizationRan:  boolean,   // false when HF_TOKEN not set on the Python service
+     *   words:    Array<{ word, start, end, speaker }>,
+     *   speakers: string[],
+     *   language: string,
      * }>}
      */
-    async diarize(filePath, language = null, { minSpeakers = 2, maxSpeakers = 10 } = {}) {
+    async diarize(filePath, language = null) {
         if (!this.isAvailable) {
             throw new Error('Diarization service is not configured (DIARIZE_SERVICE_URL not set)');
         }
 
-        console.log(`[DiarizeService] POST /diarize  filePath=${filePath}  minSpeakers=${minSpeakers}  maxSpeakers=${maxSpeakers}`);
+        if (!fs.existsSync(filePath)) {
+            throw new Error(`[DiarizeService] File not found: ${filePath}`);
+        }
 
-        // Upload the WAV file as multipart so the diarize container doesn't
-        // need access to this container's filesystem (required on Railway).
         const form = new FormData();
-        form.append('file', fs.createReadStream(filePath), {
-            filename: path.basename(filePath),
+        form.append('audio', fs.createReadStream(filePath), {
+            filename:    path.basename(filePath),
             contentType: 'audio/wav',
         });
         if (language) form.append('language', language);
-        form.append('min_speakers', String(minSpeakers));
-        form.append('max_speakers', String(maxSpeakers));
 
-        // Retry up to 3 times on 502/503 — the Python container may be
-        // momentarily restarting after an OOM kill.
-        let response;
-        const MAX_RETRIES = 3;
-        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            try {
-                response = await axios.post(`${BASE_URL}/diarize`, form, {
-                    timeout: TIMEOUT_MS,
-                    headers: form.getHeaders(),
-                });
-                break; // success
-            } catch (err) {
-                const status = err.response?.status;
-                if ((status === 502 || status === 503) && attempt < MAX_RETRIES) {
-                    const delayMs = attempt * 15_000; // 15s, 30s
-                    console.warn(`[DiarizeService] ${status} on attempt ${attempt}/${MAX_RETRIES} — retrying in ${delayMs / 1000}s`);
-                    await new Promise(r => setTimeout(r, delayMs));
-                    continue;
-                }
-                throw err; // non-retryable or exhausted retries
-            }
-        }
+        const fileSize = fs.statSync(filePath).size;
+        console.log(
+            `[DiarizeService] POST /diarize (multipart) ` +
+            `file=${path.basename(filePath)} size=${(fileSize / 1024 / 1024).toFixed(1)} MB` +
+            (language ? ` lang=${language}` : '')
+        );
 
-        const { words, speakers, language: detectedLang, diarization_ran: diarizationRan } = response.data;
+        const response = await axios.post(`${BASE_URL}/diarize`, form, {
+            timeout:          TIMEOUT_MS,
+            headers:          form.getHeaders(),
+            maxContentLength: Infinity,
+            maxBodyLength:    Infinity,
+        });
 
-        if (!diarizationRan) {
-            console.warn(
-                `[DiarizeService] ⚠️  Diarization did NOT run on the Python service — all speaker fields will be null. ` +
-                `This usually means HF_TOKEN is not set in the diarize-service container. ` +
-                `Set HF_TOKEN in Railway Variables and redeploy diarize-service. ` +
-                `Also ensure you have accepted the pyannote model terms at ` +
-                `https://huggingface.co/pyannote/speaker-diarization-3.1`
-            );
-        } else {
-            console.log(
-                `[DiarizeService] Done — ${words.length} words, ` +
-                `${speakers.length} speaker(s): ${speakers.join(', ')}, lang=${detectedLang}`
-            );
-        }
+        const { words, speakers, language: detectedLang } = response.data;
+        console.log(
+            `[DiarizeService] Done — ${words.length} words, ` +
+            `${speakers.length} speaker(s): ${speakers.join(', ')}, lang=${detectedLang}`
+        );
 
-        return { words, speakers, language: detectedLang, diarizationRan: Boolean(diarizationRan) };
+        return { words, speakers, language: detectedLang };
     }
 
     /**
