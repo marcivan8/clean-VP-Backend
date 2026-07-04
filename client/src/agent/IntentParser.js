@@ -710,9 +710,97 @@ export class IntentParser {
             });
         }
 
+        // ── Smart contextual fallback — understand what the user is hinting at ──
+        const smart = this._buildContextualSuggestion(lower, context);
+        if (smart) return smart;
+
         return this.needsClarification(
-            `I didn't quite understand that. Try something like:\n• "make it more dynamic"\n• "clean this clip"\n• "remove silence"\n• "split the clip in half"\n• "speed up 2x"\n• "make it vertical (9:16)"\n• "trim to 30 seconds"\n• "export the video"\n• "what did you change?"`
+            `Not sure I understood that. Here are some things you can try:\n• "make it more dynamic" — zoom rhythm for engagement\n• "clean this clip" — remove silences and filler words\n• "add captions" — auto-generate subtitles\n• "make it vertical" — convert to 9:16\n• "trim to 60 seconds" — shorten the clip\n• "export the video" — render the final cut`
         );
+    }
+
+    /**
+     * Returns a conversational chat response when the prompt is a high-level or
+     * ambiguous intent that we understood contextually but can't execute blindly.
+     * The response tells the user what we detected and asks what they want to do.
+     */
+    static _buildContextualSuggestion(lower, context) {
+        const hasTalkingHead  = /\b(talking[\s-]?head|selfie|on[\s-]?camera|to[\s-]?camera|face[\s-]?cam|presenter|solo|speaker)\b/.test(lower);
+        const hasPodcast      = /\b(podcast|interview|conversation|discussion|guest|host)\b/.test(lower);
+        const hasVlog         = /\b(vlog|vlogger|daily|lifestyle|travel|diary)\b/.test(lower);
+        const hasTutorial     = /\b(tutorial|how[\s-]?to|explainer|lesson|training|course)\b/.test(lower);
+        const hasGenericVideo = /\b(clip|video|footage|recording|take)\b/.test(lower);
+        const hasEditIntent   = /\b(edit|improve|fix|make|help|work\s+on|do\s+(something|anything)|what\s+can|what\s+should|give\s+me|show\s+me|produce|process)\b/.test(lower);
+
+        const chat = (message) => ({
+            intent: INTENT_TYPES.CHAT,
+            operation: OPERATIONS.CHAT,
+            targets: [],
+            constraints: {},
+            confidence: 'HIGH',
+            missingParameters: [],
+            needs_clarification: false,
+            message,
+        });
+
+        if (hasTalkingHead && hasEditIntent) {
+            return chat(
+                `I can see this is a talking head clip. Here's what I can do with it:\n\n` +
+                `• "make it more dynamic" — adds zoom rhythm for a multi-camera feel\n` +
+                `• "clean this clip" — removes silences and filler words\n` +
+                `• "add captions" — auto-generates subtitles\n` +
+                `• "make it vertical" — converts to 9:16 for TikTok/Reels\n\n` +
+                `What would you like to focus on?`
+            );
+        }
+
+        if (hasPodcast && hasEditIntent) {
+            return chat(
+                `Got it — a podcast or interview clip. Here's what works best:\n\n` +
+                `• "clean this clip" — removes silences and filler words\n` +
+                `• "split speakers" — separates host and guest onto different tracks\n` +
+                `• "add captions" — auto-generates subtitles\n` +
+                `• "make it more dynamic" — adds zoom rhythm between shots\n\n` +
+                `Where do you want to start?`
+            );
+        }
+
+        if (hasVlog && hasEditIntent) {
+            return chat(
+                `A vlog — nice! Here's what I can do:\n\n` +
+                `• "make it more dynamic" — zoom rhythm for energy\n` +
+                `• "clean this clip" — silences and filler words removed\n` +
+                `• "add captions" — auto-generates subtitles\n` +
+                `• "make it vertical" — converts to 9:16 for Reels/TikTok\n\n` +
+                `What's the goal?`
+            );
+        }
+
+        if (hasTutorial && hasEditIntent) {
+            return chat(
+                `Tutorial content — I can help polish it:\n\n` +
+                `• "clean this clip" — removes silences and filler words\n` +
+                `• "add captions" — auto-generates subtitles for accessibility\n` +
+                `• "make it more dynamic" — zoom rhythm to keep attention\n` +
+                `• "trim to 10 minutes" — shorten to a target length\n\n` +
+                `What do you want to do?`
+            );
+        }
+
+        // Generic "edit this video/clip" with no content-type context
+        if (hasEditIntent && hasGenericVideo) {
+            return chat(
+                `Ready to edit! What would you like to focus on?\n\n` +
+                `• "make it more dynamic" — zoom rhythm for engagement\n` +
+                `• "clean this clip" — silence + filler word removal\n` +
+                `• "add captions" — auto-subtitles\n` +
+                `• "make it vertical" — convert to 9:16\n` +
+                `• "trim to 60 seconds" — shorten the clip\n` +
+                `• "export" — render the final video`
+            );
+        }
+
+        return null; // no context detected — use the generic fallback message
     }
 
     static parseTrimIntent(prompt, clip, context) {
