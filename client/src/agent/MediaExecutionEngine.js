@@ -28,11 +28,9 @@
 
 import { authFetch }  from '../utils/authFetch.js';
 import { pollJobResult } from '../utils/jobPoller.js';
-import { saveJob, clearJob } from '../utils/pendingJobs.js';
 import useTimelineStore  from '../store/useTimelineStore.js';
 import { mediaBunnyService } from '../services/MediaBunnyService.js';
 import useAIStore from '../store/useAIStore.js';
-import { assertTimeline } from './TimelineValidator.js';
 
 export const EXECUTION_STATES = {
     QUEUED:    'QUEUED',
@@ -590,6 +588,309 @@ export class MediaExecutionEngine {
                 return { action, success: result.success !== false, message: result.message || action, result };
             }
 
+            // ── Split speakers — "separate the two people" ───────────────────
+            // Full pipeline:
+            //   1. Queue diarize job  → Node server streams WAV to Python service
+            //   2. Poll until complete → { words, speakers, language }
+            //   3. Call build-tracks  → { tracks: [{ speaker, clips }] }
+            //   4. Create one video track per speaker, fill it with their clips
+            case 'split_speakers': {
+                const spStore      = useTimelineStore.getState();
+                const uploadedPath = spStore.uploadedFilePath;
+                const videoAsset   = (spStore.assets || []).find(a => a.type === 'video');
+
+                if (!uploadedPath) {
+                    return { action, success: false, message: 'No uploaded file path found. Re-upload the video and try again.' };
+                }
+                if (!videoAsset) {
+                    return { action, success: false, message: 'No video asset in timeline.' };
+                }
+
+                const spLanguage = args.language || null;
+
+                // ── 1. Queue the diarize job ──────────────────────────────────
+                console.log('[MediaExecutionEngine] split_speakers: queuing diarize job…');
+                const diarizeRes = await authFetch('/api/interview/split-speakers', {
+                    method: 'POST',
+                    body:   JSON.stringify({
+                        filename: uploadedPath,
+                        ...(spLanguage ? { language: spLanguage } : {}),
+                    }),
+                });
+                if (!diarizeRes.ok) {
+                    const errBody = await diarizeRes.json().catch(() => ({}));
+                    throw new Error(errBody.error || `split-speakers returned ${diarizeRes.status}`);
+                }
+                const { jobId: diarizeJobId } = await diarizeRes.json();
+                if (!diarizeJobId) throw new Error('split-speakers did not return a jobId');
+
+                // ── 2. Poll — this can take 1–5 minutes ───────────────────────
+                console.log(`[MediaExecutionEngine] split_speakers: polling job ${diarizeJobId}…`);
+                const diarizeResult = await pollJobResult(diarizeJobId, job.signal);
+                if (!diarizeResult?.words?.length) {
+                    return { action, success: false, message: 'Diarization returned no words — check that DIARIZE_SERVICE_URL is configured and the Python service is running.' };
+                }
+
+                const { words, speakers } = diarizeResult;
+                console.log(`[MediaExecutionEngine] split_speakers: ${words.length} words, ${speakers.length} speaker(s): ${speakers.join(', ')}`);
+
+                if (speakers.length < 2) {
+                    return {
+                        action,
+                        success: true,
+                        message: `Only one speaker detected in this video (${words.length} words). Nothing to split — try "make it more dynamic" instead.`,
+                    };
+                }
+
+                // ── 3. Build per-speaker clip ranges ─────────────────────────
+                const videoDuration = videoAsset.duration || videoAsset.sourceDuration || 0;
+                const buildRes = await authFetch('/api/interview/build-tracks', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        words,
+                        speakers,
+                        videoDuration,
+                        assetId: videoAsset.id,
+                    }),
+                });
+                if (!buildRes.ok) throw new Error(`build-tracks returned ${buildRes.status}`);
+                const { tracks: speakerTracks } = await buildRes.json();
+                if (!speakerTracks?.length) {
+                    return { action, success: false, message: 'build-tracks returned no tracks.' };
+                }
+
+                // ── 4. Populate the timeline ──────────────────────────────────
+                // Re-read store so we have the freshest track list.
+                const freshStore     = useTimelineStore.getState();
+                const proxyUrl       = videoAsset.proxyUrl || videoAsset.url || '';
+                const existingVTrack = freshStore.tracks?.find(t => t.type === 'video');
+
+                speakerTracks.forEach(({ speaker, clips: spClips }, idx) => {
+                    const label = `Speaker ${String(idx + 1).padStart(2, '0')}`;
+                    let trackId;
+
+                    if (idx === 0 && existingVTrack) {
+                        // Reuse the first video track — remove its existing clips
+                        trackId = existingVTrack.id;
+                        (existingVTrack.clips || []).forEach(c => {
+                            useTimelineStore.getState().removeClip(trackId, c.id);
+                        });
+                        useTimelineStore.getState().renameTrack(trackId, label);
+                    } else {
+                        // Track IDs before the new addTrack call
+                        const beforeIds = new Set(useTimelineStore.getState().tracks.map(t => t.id));
+                        trackId = useTimelineStore.getState().addTrack('video');
+                        // addTrack returns the id directly
+                        useTimelineStore.getState().renameTrack(trackId, label);
+                    }
+
+                    // Place each speaker clip at its natural source-video position
+                    spClips.forEach((clip, clipIdx) => {
+                        useTimelineStore.getState().addClip(trackId, {
+                            id:           `sp${idx}-clip${clipIdx}-${Date.now()}`,
+                            assetId:      videoAsset.id,
+                            name:         `${label} · clip ${clipIdx + 1}`,
+                            type:         'video',
+                            url:          proxyUrl,
+                            sourceUrl:    videoAsset.sourceUrl || proxyUrl,
+                            offset:       clip.start,     // source video position
+                            start:        clip.start,     // timeline position = source position
+                            duration:     clip.duration,
+                            sourceDuration: clip.duration,
+                        });
+                    });
+                });
+
+                const summary = speakerTracks
+                    .map((t, i) => `Speaker ${i + 1}: ${t.clips.length} clip${t.clips.length !== 1 ? 's' : ''}`)
+                    .join(' · ');
+
+                return {
+                    action,
+                    success: true,
+                    message: `Split into ${speakerTracks.length} speaker tracks — ${summary}. You can now edit each track independently.`,
+                };
+            }
+
+            // ── Zoom rhythm — "make it feel multi-camera" ─────────────────────
+            // Calls the synchronous /api/interview/rhythm-zoom endpoint, then
+            // applies one static scale keyframe at t=0 per clip.
+            // Requires: ≥2 clips on the video track + captions in the store.
+            case 'rhythm_zoom': {
+                const rzStore      = useTimelineStore.getState();
+                const rzVideoTrack = rzStore.tracks?.find(t => t.type === 'video');
+                const rzClips      = rzVideoTrack?.clips ?? [];
+                const rzWords      = rzStore.captions ?? [];
+                const rzStyle      = args.style || 'dynamic';
+
+                if (rzClips.length < 2) {
+                    return { action, success: false, message: 'Need ≥ 2 clips on the timeline. Run Silence Removal first.' };
+                }
+                if (rzWords.length === 0) {
+                    return { action, success: false, message: 'No transcript found. Run Auto-Captions first.' };
+                }
+
+                const rzPayload = {
+                    clips: rzClips.map(c => {
+                        // Pass assetName so the server can resolve the file path for
+                        // ML frame extraction (CLIP + MediaPipe).  Falls back gracefully
+                        // to transcript-only GPT scoring if assetName is unavailable.
+                        const asset = rzStore.assets?.find(a => a.id === c.assetId);
+                        return {
+                            id:        c.id,
+                            offset:    c.offset   ?? 0,
+                            duration:  c.duration ?? 0,
+                            assetName: asset?.name || null,
+                        };
+                    }),
+                    words: rzWords,
+                    style: rzStyle,
+                };
+                console.log(`[MediaExecutionEngine] rhythm_zoom: ${rzClips.length} clips, ${rzWords.length} words, style=${rzStyle}`);
+
+                const rzRes  = await authFetch('/api/interview/rhythm-zoom', { method: 'POST', body: JSON.stringify(rzPayload) });
+                const rzData = await rzRes.json();
+                if (!rzRes.ok) throw new Error(rzData.error || `rhythm-zoom error ${rzRes.status}`);
+
+                const { clipZooms, summary } = rzData;
+
+                // Clear existing scale keyframes, then apply one per clip at t=0
+                rzClips.forEach(clip => {
+                    if (clip.keyframes?.scale?.length) {
+                        rzStore.updateClip(rzVideoTrack.id, clip.id, {
+                            keyframes: { ...(clip.keyframes || {}), scale: [] },
+                        });
+                    }
+                });
+                clipZooms.forEach(({ clipId, scale }) => {
+                    rzStore.addTransformKeyframe(clipId, 'scale', 0, scale, 'linear');
+                });
+
+                const { counts = {} } = summary || {};
+                return {
+                    action,
+                    success: true,
+                    message: `Zoom rhythm applied — ${counts.wide ?? 0}W / ${counts.medium ?? 0}M / ${counts.close ?? 0}C across ${rzClips.length} shots`,
+                };
+            }
+
+            // ── Semantic clip organizer — "organize my clips" ─────────────────
+            // 1. Collect all clips from all video tracks (sorted by current start time)
+            // 2. POST to /api/interview/organize-clips with frame extraction server-side
+            // 3. Get back orderedIds + per-clip metadata + rationale
+            // 4. Rebuild clip start positions on the timeline in the new order
+            //    (each clip placed immediately after the previous one, no gaps)
+            case 'organize_clips': {
+                const ocStore  = useTimelineStore.getState();
+                const ocTracks = (ocStore.tracks || []).filter(t => t.type === 'video');
+                const ocAssets = ocStore.assets || [];
+
+                // Gather all clips across all video tracks, sorted by current timeline position
+                const allClips = ocTracks.flatMap(t =>
+                    (t.clips || []).map(c => ({ ...c, _trackId: t.id }))
+                ).sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
+
+                if (allClips.length < 2) {
+                    return {
+                        action,
+                        success: false,
+                        message: 'Need at least 2 clips on the timeline to organize. Import more footage first.',
+                    };
+                }
+
+                // Build the payload for the server.
+                // For the file path we use the asset name (server resolves via uploads/).
+                // Include a transcript excerpt per clip if captions are available.
+                const captions   = ocStore.captions ?? [];
+                const uploadedFP = ocStore.uploadedFilePath || null;
+
+                const clipPayload = allClips.map(clip => {
+                    const asset = ocAssets.find(a => a.id === clip.assetId);
+                    // assetName: prefer name that matches uploads/ structure
+                    const assetName = asset?.name || clip.name || null;
+
+                    // Harvest transcript words that fall inside this clip's source range
+                    const clipOffset = clip.offset ?? 0;
+                    const clipEnd    = clipOffset + (clip.duration ?? 0);
+                    const transcript = captions
+                        .filter(w => w.start >= clipOffset - 0.1 && w.end <= clipEnd + 0.1)
+                        .map(w => w.word)
+                        .join(' ')
+                        .trim()
+                        .slice(0, 300);
+
+                    return {
+                        id:         clip.id,
+                        assetName,
+                        filePath:   uploadedFP || null,
+                        offset:     clipOffset,
+                        duration:   clip.duration ?? 0,
+                        transcript: transcript || undefined,
+                    };
+                });
+
+                console.log(`[MediaExecutionEngine] organize_clips: ${clipPayload.length} clips → POST /api/interview/organize-clips`);
+
+                const ocRes  = await authFetch('/api/interview/organize-clips', {
+                    method: 'POST',
+                    body:   JSON.stringify({ clips: clipPayload }),
+                });
+                const ocData = await ocRes.json();
+                if (!ocRes.ok) throw new Error(ocData.error || `organize-clips returned ${ocRes.status}`);
+
+                const { orderedIds = [], clipMeta = [], rationale = '' } = ocData;
+
+                if (orderedIds.length === 0) {
+                    return { action, success: false, message: 'Could not determine clip order. Try again.' };
+                }
+
+                // Check if GPT actually suggested a different order
+                const currentIds = allClips.map(c => c.id);
+                const alreadySorted = orderedIds.every((id, i) => id === currentIds[i]);
+                if (alreadySorted) {
+                    return {
+                        action,
+                        success: true,
+                        message: `Your clips are already in the best order. ${rationale}`,
+                    };
+                }
+
+                // Rebuild timeline positions: place each clip consecutively with no gaps.
+                // We build a map of clipId → new startTime based on sorted durations.
+                const clipById = {};
+                allClips.forEach(c => { clipById[c.id] = c; });
+
+                let cursor = 0;
+                const freshStore = useTimelineStore.getState();
+
+                for (const clipId of orderedIds) {
+                    const clip = clipById[clipId];
+                    if (!clip) continue;
+                    const dur = clip.duration ?? 0;
+                    freshStore.updateClip(clip._trackId, clipId, { start: cursor });
+                    cursor += dur;
+                }
+
+                // Build a human summary of the new order
+                const metaById = {};
+                clipMeta.forEach(m => { metaById[m.id] = m; });
+
+                const orderDesc = orderedIds
+                    .map((id, i) => {
+                        const m = metaById[id];
+                        return m ? `${i + 1}. ${m.type || 'clip'} (${m.energy || ''})` : `${i + 1}. clip`;
+                    })
+                    .join(' → ');
+
+                console.log(`[MediaExecutionEngine] organize_clips: reordered ${orderedIds.length} clips — ${orderDesc}`);
+
+                return {
+                    action,
+                    success: true,
+                    message: `Organized ${orderedIds.length} clips by content.\n\n${rationale}\n\nNew order: ${orderDesc}`,
+                };
+            }
+
             default: throw new Error(`Unknown store action: ${action}`);
         }
 
@@ -735,31 +1036,18 @@ export class MediaExecutionEngine {
                 const clipDuration = matchedClip?.duration ?? videoTrack?.clips?.[0]?.duration ?? 0;
                 const coverageOk   = clipDuration <= 0 || lastWordEnd >= clipDuration * 0.30;
 
-                // Always inject the transcript even if coverage is below 30%.
-                // The FFmpeg dB-threshold fallback is far too aggressive on quiet
-                // recordings and will wipe the clip. A partial transcript is always
-                // safer — the server will only cut gaps within the covered region.
-                resolvedPayload.transcript = clipWords.map(c => ({
-                    start: c.start,
-                    end:   c.end,
-                    word:  c.word || c.content || c.text || ''
-                }));
-
-                if (!coverageOk) {
-                    console.warn(`[MediaExecutionEngine] Transcript for "${processedBase}" covers only ${((lastWordEnd / clipDuration) * 100).toFixed(0)}% of clip (${lastWordEnd.toFixed(1)}s / ${clipDuration.toFixed(1)}s) — injecting partial transcript anyway (safer than FFmpeg fallback)`);
-                } else {
+                if (coverageOk) {
+                    resolvedPayload.transcript = clipWords.map(c => ({
+                        start: c.start,
+                        end:   c.end,
+                        word:  c.word || c.content || c.text || ''
+                    }));
                     console.log(`[MediaExecutionEngine] Injected transcript for "${processedBase}" (${resolvedPayload.transcript.length} words, coverage ${lastWordEnd.toFixed(1)}s/${clipDuration.toFixed(1)}s) into ${endpoint}`);
+                } else {
+                    console.warn(`[MediaExecutionEngine] Transcript for "${processedBase}" covers only ${((lastWordEnd / clipDuration) * 100).toFixed(0)}% — using FFmpeg fallback`);
                 }
             } else {
-                // Block silence/filler detection when no transcript is available.
-                // The FFmpeg audio-level fallback uses a fixed dB threshold that is
-                // far too aggressive on talking-head footage and will wipe the entire
-                // clip if the recorded levels are low. Abort here and ask the user to
-                // transcribe first — the transcript-based path is much safer.
-                throw new Error(
-                    `No transcript found for "${processedBase}". ` +
-                    `Please wait for transcription to finish (or ask the AI to transcribe the clip) before running silence or filler removal.`
-                );
+                console.warn(`[MediaExecutionEngine] No transcript found for "${processedBase}" — using FFmpeg fallback`);
             }
 
             // Pass micro-padding config through to the worker
@@ -794,37 +1082,14 @@ export class MediaExecutionEngine {
         job.signal.addEventListener('abort', () => controller.abort());
 
         try {
-            // ── 1. POST to the API endpoint (auto-retry on 429) ──────────
+            // ── 1. POST to the API endpoint ───────────────────────────────
             console.log(`[MediaExecutionEngine] → POST ${endpoint}`, resolvedPayload);
 
-            // Up to 3 attempts; on 429 we read Retry-After and sleep before the
-            // next attempt instead of failing the job immediately.
-            const MAX_429_RETRIES = 3;
-            let response;
-            for (let attempt = 1; attempt <= MAX_429_RETRIES; attempt++) {
-                response = await authFetch(endpoint, {
-                    method,
-                    body:   JSON.stringify(resolvedPayload),
-                    signal: controller.signal
-                });
-
-                if (response.status !== 429) break;
-
-                // Last attempt — give up and let the error block below handle it
-                if (attempt === MAX_429_RETRIES) break;
-
-                // Parse Retry-After (seconds). express-rate-limit sets this header.
-                const retryAfterSec = parseFloat(
-                    response.headers.get('Retry-After') ||
-                    response.headers.get('RateLimit-Reset') || ''
-                );
-                const waitMs = !isNaN(retryAfterSec) && retryAfterSec > 0
-                    ? retryAfterSec * 1000 + 500           // header value + small buffer
-                    : attempt * 15_000;                    // fallback: 15s, 30s
-
-                console.warn(`[MediaExecutionEngine] ⏳ ${endpoint} rate-limited (attempt ${attempt}/${MAX_429_RETRIES}) — retrying in ${(waitMs / 1000).toFixed(1)}s`);
-                await new Promise(resolve => setTimeout(resolve, waitMs));
-            }
+            const response = await authFetch(endpoint, {
+                method,
+                body:   JSON.stringify(resolvedPayload),
+                signal: controller.signal
+            });
 
             clearTimeout(timeoutId);
 
@@ -852,23 +1117,12 @@ export class MediaExecutionEngine {
 
             // ── 2. If job was queued, poll until complete ─────────────────
             if (result.jobId) {
-                const bullJobId = result.jobId; // capture before result is overwritten
-                console.log(`[MediaExecutionEngine] Polling job ${bullJobId}...`);
-                // Persist the jobId so the user can recover it after a page reload.
-                // clearJob() is called once polling settles (success or hard failure).
-                saveJob(bullJobId, command.action, endpoint);
+                console.log(`[MediaExecutionEngine] Polling job ${result.jobId}...`);
                 try {
-                    result = await pollJobResult(bullJobId, job.signal);
+                    result = await pollJobResult(result.jobId, job.signal);
                     console.log(`[MediaExecutionEngine] Job ${result === null ? 'null' : 'ok'}:`, result);
-                    // Completed cleanly — no longer needs recovery.
-                    clearJob(bullJobId);
                 } catch (pollErr) {
-                    if (pollErr.message === 'Polling cancelled') {
-                        // User navigated away — keep the entry so the recovery hook finds it.
-                        throw new Error('API call cancelled');
-                    }
-                    // Hard failure (timeout, server error) — clear so we don't show stale recovery.
-                    clearJob(bullJobId);
+                    if (pollErr.message === 'Polling cancelled') throw new Error('API call cancelled');
                     throw pollErr;
                 }
             }
@@ -1017,12 +1271,7 @@ export class MediaExecutionEngine {
      */
     _applySegmentsToTimeline(segments, prefix = 'seg', targetClipId = null, targetAssetId = null) {
         const timelineStore = useTimelineStore.getState();
-        // Prefer the video track that actually has clips — an empty "extra" track
-        // added via "+ Track" sorts before the main track and would otherwise be
-        // picked first, causing the "video track has no clips" bail-out.
-        const videoTrack =
-            timelineStore.tracks?.find(t => t.type === 'video' && t.clips.length > 0) ??
-            timelineStore.tracks?.find(t => t.type === 'video');
+        const videoTrack    = timelineStore.tracks?.find(t => t.type === 'video');
 
         if (!videoTrack) {
             console.warn(`[MediaExecutionEngine] _applySegmentsToTimeline: no video track found`);
@@ -1117,10 +1366,9 @@ export class MediaExecutionEngine {
             return;
         }
 
-        // Sanity guard: active duration < 10% of the source material → detection failed.
-        // Applied to all clips (not just > 30s) to catch FFmpeg-fallback wipes on short clips.
+        // Sanity guard: active duration < 10% of the source material → detection failed
         const totalActiveTime = validSegs.reduce((t, s) => t + s.duration, 0);
-        if (totalOriginalDuration > 2 && totalActiveTime < totalOriginalDuration * 0.10) {
+        if (totalOriginalDuration > 30 && totalActiveTime < totalOriginalDuration * 0.10) {
             console.error(
                 `[MediaExecutionEngine] _applySegmentsToTimeline: REJECTED — active duration ` +
                 `${totalActiveTime.toFixed(1)}s is less than 10% of original ${totalOriginalDuration.toFixed(1)}s.`
@@ -1143,12 +1391,9 @@ export class MediaExecutionEngine {
             timestamp: new Date().toLocaleTimeString()
         });
 
-        // Remove all clips in the range.
-        // skipCleanup: true prevents _cleanEmptyTracks() from deleting the video layer
-        // while it is temporarily empty. If the layer is deleted here, the addClip()
-        // calls below silently orphan their placements and the timeline appears empty.
+        // Remove all clips in the range
         for (const clip of baseClips) {
-            timelineStore.removeClip(videoTrack.id, clip.id, { skipCleanup: true });
+            timelineStore.removeClip(videoTrack.id, clip.id);
         }
 
         // Insert replacement clips starting at rangeStart
@@ -1184,9 +1429,6 @@ export class MediaExecutionEngine {
                 });
         }
 
-        // Now that all segment clips are in place, it's safe to let empty-track cleanup run.
-        useTimelineStore.getState()._cleanEmptyTracks();
-
         const label = baseClips.length > 1
             ? `${baseClips.length} clips (asset ${targetAssetId})`
             : `"${baseClip.name}"`;
@@ -1202,18 +1444,7 @@ export class MediaExecutionEngine {
     }
 
     async verifyExecution(job) {
-        // ── 1. All commands must have succeeded ───────────────────────────────
-        const commandsOk = job.results.every(r => r.success !== false);
-        if (!commandsOk) return false;
-
-        // ── 2. Timeline invariant check ───────────────────────────────────────
-        // Run after every AI job. Errors are logged (and captured by Sentry in
-        // production) but do not fail the job — the edit already completed and
-        // the user can Cmd+Z to undo. Hard violations surface as red console
-        // errors so they're impossible to miss during development.
-        assertTimeline(useTimelineStore.getState(), `job:${job.id}`);
-
-        return commandsOk;
+        return job.results.every(r => r.success !== false);
     }
 
     getStatus() {

@@ -142,10 +142,29 @@ const NLP_MAP = {
         'create from raw', 'edit the raw footage',
     ],
     cleanEdit: [
+        // Generic clip cleaning (most common user phrasing)
+        'clean this clip', 'clean the clip', 'clean this video', 'clean the video',
+        'clean it up', 'clean it', 'clean up this clip', 'clean up the clip',
+        'make it clean', 'clean up my clip', 'clean up the video',
+        // Podcast / interview context
         'clean this podcast', 'clean the podcast', 'edit the podcast',
         'clean up the interview', 'edit this interview', 'clean up the recording',
         'tighten up the interview', 'tighten the podcast', 'clean up this recording',
         'clean the recording', 'edit my podcast',
+    ],
+    rhythmZoom: [
+        // Direct phrasing users actually say
+        'make it more dynamic', 'more dynamic', 'make it dynamic',
+        'make this clip more dynamic', 'make this more dynamic', 'make the clip more dynamic',
+        // Multi-camera / zoom rhythm vocabulary
+        'zoom rhythm', 'rhythm zoom', 'add zoom rhythm', 'camera rhythm', 'add rhythm',
+        'multi camera', 'multi-camera', 'multicam', 'multi-cam',
+        'make it feel multi', 'simulate multi', 'fake multi',
+        'make it feel like multi-camera', 'make it feel like multi camera',
+        // Engagement / style
+        'vlog style', 'dynamic style', 'talking head style',
+        'make it more engaging', 'more engaging', 'keep viewers', 'hold attention',
+        'boost engagement',
     ],
     youtubeOptimize: [
         'optimize for youtube', 'make a youtube video', 'edit for youtube',
@@ -190,13 +209,6 @@ const NLP_MAP = {
         'what did', 'what does', 'who is', 'who are', 'where is', 'where does',
         'how does', 'why does', 'explain', 'describe',
         'what are the', 'how many', 'show me', 'give me a summary',
-        // Past-tense and other interrogative forms often missed:
-        'what were', 'what was', 'what have', 'what has',
-        'how were', 'how was', 'when were', 'when was',
-        'can you tell', 'could you tell', 'can you describe',
-        'is there', 'are there', 'was there', 'were there',
-        'what happened', 'what changed', 'how did', 'why did',
-        'tell me what',
     ],
     improve: [
         'make it better', 'improve', 'enhance', 'polish', 'fix this',
@@ -338,22 +350,47 @@ export class IntentParser {
             return { intent: 'edit', operation: 'remove_filler_words', parameters: {}, confidence: 'HIGH', missingParameters: [] };
         }
 
-        return null; // let the API handle it
-    }
+        // ── Compound: "clean AND dynamic" — run both ops in one plan ──────────
+        // Detect presence of both a cleaning intent and a dynamic/zoom-rhythm intent.
+        const hasCleanToken  = /\b(clean|remove\s+silence|filler)\b/.test(lower);
+        const hasDynamicToken = /\b(dynamic|zoom\s*rhythm|multi[\s-]?cam(era)?|multicam|make\s+it\s+(more\s+)?engaging)\b/.test(lower);
+        if (hasCleanToken && hasDynamicToken) {
+            return {
+                intent: 'edit',
+                operation: 'compound_clean_dynamic',
+                parameters: { style: 'dynamic' },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
 
-    /**
-     * Detect sentences that are almost certainly informational questions, not edit commands.
-     * Used to inject a CHAT hint into the API prompt so GPT doesn't misclassify them
-     * as edit operations (e.g. "what were the big parts" → long_form_edit).
-     */
-    static _isInformationalQuestion(prompt) {
-        const lower = prompt.toLowerCase().trim();
-        // Must start with an interrogative word or phrase
-        const startsWithQuestion = /^(what were|what was|what have|what has|what is|what are|what did|what does|who were|who was|who is|who are|how were|how was|how is|why were|why was|why is|when were|when was|when is|where were|where was|where is|can you tell|could you tell|can you describe|describe|tell me what|tell me about|is there|are there|was there|were there)\b/.test(lower);
-        if (!startsWithQuestion) return false;
-        // Must NOT contain a clear edit-command verb
-        const hasEditVerb = /\b(remove|delete|cut|trim|split|add|apply|export|speed|slow|make|change|convert|adjust|set|edit|reorder|fix|clean|normalize|grade|render|undo|redo)\b/.test(lower);
-        return !hasEditVerb;
+        // ── Rhythm zoom / multi-camera feel (unambiguous dynamic commands) ────
+        if (matches('rhythmZoom')) {
+            return {
+                intent: 'edit',
+                operation: 'rhythm_zoom',
+                parameters: { style: 'dynamic' },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+
+        // ── Generic clip cleaning (clean it up / clean this clip / etc.) ──────
+        if (matches('cleanEdit')) {
+            return {
+                intent: 'long_form_build',
+                operation: 'long_form_edit',
+                parameters: {
+                    editMode: 'CLEAN_EDIT',
+                    actions: ['silence_removal', 'remove_filler_words'],
+                    reason: 'Generic "clean" command — removing silences and filler words',
+                },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+
+        return null; // let the API handle it
     }
 
     static async parseViaAPI(prompt, context, signal) {
@@ -364,13 +401,6 @@ export class IntentParser {
         const DEFAULT_TIMEOUT_MS = 180000; // 3 minutes
         const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
         if (signal) signal.addEventListener('abort', () => controller.abort());
-
-        // When the prompt reads as an informational question (not an edit command),
-        // inject a hint so GPT does not misclassify it as an edit operation.
-        // E.g. "what were the big parts on the edited clip" must be CHAT, not long_form_edit.
-        const apiPrompt = this._isInformationalQuestion(prompt)
-            ? `${prompt}\n\n[SYSTEM NOTE: This is an informational question about the video content. Respond with type "CHAT" — do NOT classify as an edit operation.]`
-            : prompt;
 
         // Build conversation history from the AI log so the model understands
         // prior exchanges in the same session. We include the last 10 entries
@@ -397,7 +427,7 @@ export class IntentParser {
             // FIX: was fetch('/api/ai/parse-intent', ...) — no auth → 401 in production
             const response = await authFetch('/api/ai/parse-intent', {
                 method: 'POST',
-                body: JSON.stringify({ prompt: apiPrompt, context, conversationHistory }),
+                body: JSON.stringify({ prompt, context, conversationHistory }),
                 signal: controller.signal
             });
             clearTimeout(timeoutId);
@@ -493,6 +523,39 @@ export class IntentParser {
             return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.LONG_FORM_EDIT, {
                 constraints: { editMode: 'CLEAN_EDIT', platform: this.inferPlatform(lower) || 'podcast' }
             });
+        }
+
+        // ── Rhythm zoom / dynamic multi-camera feel ────────────────────────────
+        if (matches('rhythmZoom')) {
+            return {
+                intent: 'edit',
+                operation: 'rhythm_zoom',
+                parameters: { style: 'dynamic' },
+                targets: [],
+                constraints: { style: 'dynamic' },
+                confidence: 'HIGH',
+                missingParameters: [],
+                needs_clarification: false,
+            };
+        }
+
+        // ── Compound clean + dynamic ───────────────────────────────────────────
+        {
+            const hasClean   = lower.includes('clean') || lower.includes('remove silence');
+            const hasDynamic = lower.includes('dynamic') || lower.includes('zoom rhythm')
+                            || lower.includes('multi-camera') || lower.includes('multicam');
+            if (hasClean && hasDynamic) {
+                return {
+                    intent: 'edit',
+                    operation: 'compound_clean_dynamic',
+                    parameters: { style: 'dynamic' },
+                    targets: [],
+                    constraints: { style: 'dynamic' },
+                    confidence: 'HIGH',
+                    missingParameters: [],
+                    needs_clarification: false,
+                };
+            }
         }
 
         if (matches('youtubeOptimize')) {
@@ -648,7 +711,7 @@ export class IntentParser {
         }
 
         return this.needsClarification(
-            `I didn't quite understand that. Try something like:\n• "split the clip in half"\n• "remove silence"\n• "speed up 2x"\n• "make it vertical (9:16)"\n• "trim to 30 seconds"\n• "export the video"\n• "what did you change?"`
+            `I didn't quite understand that. Try something like:\n• "make it more dynamic"\n• "clean this clip"\n• "remove silence"\n• "split the clip in half"\n• "speed up 2x"\n• "make it vertical (9:16)"\n• "trim to 30 seconds"\n• "export the video"\n• "what did you change?"`
         );
     }
 

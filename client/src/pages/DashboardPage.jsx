@@ -8,7 +8,7 @@
  */
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Logo } from '../components/Logo.jsx';
 import { supabase } from '../lib/supabaseClient.js';
 
@@ -54,24 +54,6 @@ function formatDuration(secs) {
     const m = Math.floor(secs / 60);
     const s = Math.floor(secs % 60);
     return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-function AspectBadge({ ratio }) {
-    return (
-        <span style={{
-            fontFamily: 'var(--f-mono)',
-            fontSize: 10,
-            letterSpacing: '0.10em',
-            textTransform: 'uppercase',
-            padding: '3px 8px',
-            borderRadius: 999,
-            border: '0.5px solid var(--glass-stroke)',
-            background: 'var(--glass)',
-            color: 'var(--fg-3)',
-        }}>
-            {ratio ?? '16:9'}
-        </span>
-    );
 }
 
 // ── 3-dot menu ────────────────────────────────────────────────────────────────
@@ -241,7 +223,6 @@ function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete }) {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <AspectBadge ratio={project.aspect_ratio} />
                     <span className="caption" style={{ fontSize: 12 }}>
                         {formatDuration(project.duration)}
                     </span>
@@ -257,13 +238,12 @@ function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete }) {
 // ── new project modal ─────────────────────────────────────────────────────────
 
 function NewProjectModal({ onClose, onCreate }) {
-    const [name, setName]         = useState('');
-    const [ratio, setRatio]       = useState('16:9');
-    const [loading, setLoading]   = useState(false);
+    const [name, setName]       = useState('');
+    const [loading, setLoading] = useState(false);
 
     async function handleCreate() {
         setLoading(true);
-        await onCreate(name.trim() || 'Untitled Project', ratio);
+        await onCreate(name.trim() || 'Untitled Project');
         setLoading(false);
     }
 
@@ -318,46 +298,6 @@ function NewProjectModal({ onClose, onCreate }) {
                         onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'}
                         onBlur={e  => e.currentTarget.style.borderColor = 'var(--glass-stroke)'}
                     />
-                </div>
-
-                {/* Aspect ratio */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <label className="caption" style={{ fontSize: 12, color: 'var(--fg-3)', letterSpacing: '0.04em', textTransform: 'uppercase', fontFamily: 'var(--f-mono)' }}>
-                        Format
-                    </label>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                        {[
-                            { value: '16:9',  label: '16:9', desc: 'Landscape' },
-                            { value: '9:16',  label: '9:16', desc: 'Portrait' },
-                            { value: '1:1',   label: '1:1',  desc: 'Square' },
-                        ].map(opt => (
-                            <button
-                                key={opt.value}
-                                onClick={() => setRatio(opt.value)}
-                                style={{
-                                    flex: 1,
-                                    padding: '10px 0',
-                                    borderRadius: 'var(--r-sm)',
-                                    border: ratio === opt.value
-                                        ? '0.5px solid var(--accent)'
-                                        : '0.5px solid var(--glass-stroke)',
-                                    background: ratio === opt.value
-                                        ? 'var(--accent-soft)'
-                                        : 'var(--bg-3)',
-                                    color: ratio === opt.value ? 'var(--fg)' : 'var(--fg-3)',
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    alignItems: 'center',
-                                    gap: 2,
-                                    transition: 'all 0.15s',
-                                }}
-                            >
-                                <span style={{ fontWeight: 600, fontSize: 14, fontFamily: 'var(--f-mono)' }}>{opt.label}</span>
-                                <span style={{ fontSize: 11, color: 'var(--fg-3)', fontFamily: 'var(--f-sans)' }}>{opt.desc}</span>
-                            </button>
-                        ))}
-                    </div>
                 </div>
 
                 {/* Actions */}
@@ -582,6 +522,7 @@ function PlanLimitModal({ plan, onClose }) {
 
 export default function DashboardPage() {
     const navigate  = useNavigate();
+    const location  = useLocation();
     const { setProjectId, setProjectName, loadProject } = useTimelineStore();
     const { plan } = useUserPlan();
 
@@ -611,9 +552,11 @@ export default function DashboardPage() {
         setLoading(false);
     }, []);
 
+    // Re-fetch on mount and whenever we navigate back to this page (e.g. from editor)
+    // so newly captured thumbnails and other changes are reflected.
     useEffect(() => {
         if (user) load();
-    }, [user, load]);
+    }, [user, load, location.key]);
 
     // ── plan limit guard ──────────────────────────────────────────────────────
     function requestNewProject() {
@@ -625,14 +568,14 @@ export default function DashboardPage() {
     }
 
     // ── actions ───────────────────────────────────────────────────────────────
-    async function handleCreate(name, aspectRatio) {
-        // Spin up a blank project skeleton
+    async function handleCreate(name) {
+        // Spin up a blank project skeleton — aspect ratio is set inside the editor
         const skeleton = {
             version: '1.2',
             timestamp: Date.now(),
             tracks: [],
             duration: 60,
-            aspectRatio,
+            aspectRatio: '16:9',
             zoomLevel: 10,
             pacingSegments: [],
             beatMarkers: [],

@@ -58,9 +58,55 @@ const getPlayerDimensions = (ratio) => {
 };
 
 const IDELayout = ({ children, mode = 'editor' }) => {
+    // ── beforeunload guard ────────────────────────────────────────────────────
+    // Warn the user before closing/refreshing the tab while AI is processing
+    // or a video proxy is still uploading. Uses a ref so the handler always
+    // reads the latest value without needing to be re-registered.
+    useEffect(() => {
+        const isBusyRef = { current: false };
+
+        const checkBusy = () => {
+            const aiAnalyzing = useAIStore.getState().isAnalyzing;
+            const anyProxying = useTimelineStore.getState().assets?.some(
+                a => a.isProxying || (a.uploadPhase && a.uploadPhase !== 'ready')
+            ) ?? false;
+            isBusyRef.current = aiAnalyzing || anyProxying;
+        };
+
+        const handleBeforeUnload = (e) => {
+            checkBusy();
+            if (!isBusyRef.current) return;
+            e.preventDefault();
+            e.returnValue = ''; // required for Chrome to show the dialog
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+
+        // Keep isBusyRef in sync by subscribing to both stores
+        const unsubAI       = useAIStore.subscribe(checkBusy);
+        const unsubTimeline = useTimelineStore.subscribe(
+            s => s.assets,
+            checkBusy,
+        );
+
+        return () => {
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+            unsubAI();
+            unsubTimeline();
+        };
+    }, []);
+
+    // ── keyboard shortcuts ────────────────────────────────────────────────────
     useEffect(() => {
         const handleKeyDown = (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+            // Don't intercept shortcuts while typing in an input or textarea
+            const tag = document.activeElement?.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+            if (e.code === 'Space') {
+                e.preventDefault();
+                useTimelineStore.getState().togglePlay();
+            } else if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
                 e.preventDefault();
                 if (e.shiftKey) {
                     useTimelineStore.getState().redo();
@@ -469,6 +515,28 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     ? 'Clean up the audio and trim the intro'
                                     : 'Add captions and export for social';
                             useAIStore.getState().setContextualSuggestion(suggestion);
+
+                            // ── Thumbnail capture ─────────────────────────────────
+                            // Trigger right after the first proxy completes — the file
+                            // is guaranteed to exist at this moment (local or GCS).
+                            // Only capture if the project has no thumbnail yet.
+                            setTimeout(async () => {
+                                try {
+                                    const { projectId: pid, tracks: t, assets: a } =
+                                        useTimelineStore.getState();
+                                    if (!pid) return;
+                                    // Quick check: does the project already have a thumbnail?
+                                    const { getProject } = await import('../lib/projectsApi.js');
+                                    const proj = await getProject(pid);
+                                    if (proj?.thumbnail_url) return; // already done
+                                    const { captureProjectThumbnail } = await import(
+                                        '../utils/captureProjectThumbnail.js'
+                                    );
+                                    await captureProjectThumbnail(pid, t, a);
+                                } catch (err) {
+                                    console.warn('[IDELayout] Thumbnail capture after proxy failed:', err.message);
+                                }
+                            }, 1500); // short delay so the player has loaded the new proxyUrl
                         })
                         .catch(err => {
                             clearTimeout(processingTimer);
