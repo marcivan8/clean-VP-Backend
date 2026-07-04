@@ -47,20 +47,18 @@ router.post('/:id/thumbnail', authMiddleware, upload.single('thumbnail'), async 
         const gcsObjectPath = `thumbnails/${userId}/${projectId}.jpg`;
 
         if (storageConfig.bucket && !storageConfig.useLocalStorage) {
-            // ── GCS: save with public-read ACL so we can use the plain URL ─
+            // ── GCS: save without legacy ACL (uniform bucket-level access) ──
+            // predefinedAcl: 'publicRead' fails on buckets with uniform access
+            // enabled. Instead, serve through the server proxy so we never need
+            // the object to be directly public.
             const file = storageConfig.bucket.file(gcsObjectPath);
             await file.save(req.file.buffer, {
-                contentType:   'image/jpeg',
-                predefinedAcl: 'publicRead',
+                contentType: 'image/jpeg',
             });
 
-            const bucketName =
-                process.env.GOOGLE_CLOUD_BUCKET_NAME ||
-                process.env.GCS_BUCKET_NAME          ||
-                'viral-pilot_bucket';
-
-            thumbnailUrl = `https://storage.googleapis.com/${bucketName}/${gcsObjectPath}`;
-            console.log(`[projectRoutes] Thumbnail uploaded to GCS: ${thumbnailUrl}`);
+            // Serve through the existing GCS proxy — no direct bucket URL needed
+            thumbnailUrl = `/api/proxy/gcs-media/${gcsObjectPath}`;
+            console.log(`[projectRoutes] Thumbnail uploaded to GCS: ${gcsObjectPath}`);
         } else {
             // ── Local storage fallback (dev / staging without GCS) ──────────
             const uploadsDir = path.join(__dirname, '..', 'uploads');
