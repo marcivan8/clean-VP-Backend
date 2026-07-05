@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sparkles, ArrowRight, Play, CheckCircle2, MousePointerClick, Layers, LayoutGrid, Link as LinkIcon, MessageSquare, Mic, Scissors, UserCheck, Zap } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
+import Logo from '../components/Logo';
 
 async function createCheckout(plan) {
     const { data: { session } } = await supabase.auth.getSession();
@@ -15,13 +16,6 @@ async function createCheckout(plan) {
     const { url } = await res.json();
     window.location.href = url;
 }
-
-const Logo = ({ size = 28 }) => (
-    <svg width={size} height={size} viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M310 110 L185 265 L250 245 L200 390 L325 230 L258 248 Z" fill="none" stroke="currentColor" strokeWidth="32" strokeLinejoin="round" strokeLinecap="round" />
-        <line x1="248" y1="248" x2="195" y2="268" stroke="currentColor" strokeWidth="16" strokeLinecap="round" className="text-accent" />
-    </svg>
-);
 
 const Nav = () => {
     const [scrolled, setScrolled] = useState(false);
