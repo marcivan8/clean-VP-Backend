@@ -21,13 +21,55 @@ const SPEAKER_PALETTE = [
 ];
 
 const TranscriptPanel = () => {
-    const { captions, currentTime, seek, cutSourceRange } =
+    const { captions, tracks, assets, transcripts, currentTime, seek, cutSourceRange } =
         useTimelineStore(useShallow(s => ({
             captions:       s.captions,
+            tracks:         s.tracks,
+            assets:         s.assets,
+            transcripts:    s.transcripts,
             currentTime:    s.currentTime,
             seek:           s.seek,
             cutSourceRange: s.cutSourceRange,
         })));
+
+    // Re-derive timeline-mapped words from raw per-file transcripts + current
+    // track layout. This keeps the transcript panel in sync even when clips are
+    // manually deleted and re-added without running silence removal (which is
+    // the only other path that calls setTimelineTranscript).
+    const displayWords = useMemo(() => {
+        const hasRawTranscripts = transcripts && Object.keys(transcripts).length > 0;
+        if (!hasRawTranscripts) return captions;
+
+        const videoTracks = (tracks || []).filter(t => t.type === 'video');
+        const derived = [];
+
+        for (const track of videoTracks) {
+            for (const clip of (track.clips || [])) {
+                const asset = (assets || []).find(a => a.id === clip.assetId);
+                if (!asset) continue;
+                const rawWords = transcripts[asset.name];
+                if (!rawWords?.length) continue;
+
+                const clipDuration = clip.end - clip.start;
+                const srcStart = clip.offset ?? 0;
+                const srcEnd   = srcStart + clipDuration;
+
+                for (const w of rawWords) {
+                    if (w.start >= srcStart && w.start < srcEnd) {
+                        const tlStart = clip.start + (w.start - srcStart);
+                        const tlEnd   = Math.min(clip.end, clip.start + (w.end - srcStart));
+                        // Preserve source timestamps so cutSourceRange (which
+                        // filters by clip.offset, a source-time property) works
+                        // correctly when the user cuts from the transcript panel.
+                        derived.push({ ...w, start: tlStart, end: tlEnd, srcStart: w.start, srcEnd: w.end });
+                    }
+                }
+            }
+        }
+
+        derived.sort((a, b) => a.start - b.start);
+        return derived.length > 0 ? derived : captions;
+    }, [transcripts, tracks, assets, captions]);
 
     const [selection, setSelection] = useState(null);
     const isSelecting = useRef(false);
@@ -39,14 +81,14 @@ const TranscriptPanel = () => {
 
     // ── Speaker colour map ────────────────────────────────────────────────────
     const speakerColors = useMemo(() => {
-        const speakers = [...new Set(captions.map(w => w.speaker).filter(Boolean))].sort();
+        const speakers = [...new Set(displayWords.map(w => w.speaker).filter(Boolean))].sort();
         return Object.fromEntries(speakers.map((s, i) => [s, SPEAKER_PALETTE[i % SPEAKER_PALETTE.length]]));
-    }, [captions]);
+    }, [displayWords]);
 
     const hasSpeakers = Object.keys(speakerColors).length > 0;
 
     // ── Playhead tracking ─────────────────────────────────────────────────────
-    const activeIdx = captions.findLastIndex(w => w.start <= currentTime);
+    const activeIdx = displayWords.findLastIndex(w => w.start <= currentTime);
     const activeRef = useRef(null);
     useEffect(() => {
         if (activeRef.current && activeIdx >= 0) {
@@ -70,10 +112,10 @@ const TranscriptPanel = () => {
         if (!isSelecting.current) return;
         isSelecting.current = false;
         if (selection?.anchorIdx === idx && selection?.focusIdx === idx) {
-            seek(captions[idx]?.start ?? 0);
+            seek(displayWords[idx]?.start ?? 0);
             setSelection(null);
         }
-    }, [selection, seek, captions]);
+    }, [selection, seek, displayWords]);
 
     useEffect(() => {
         const clear = () => { isSelecting.current = false; };
@@ -82,16 +124,22 @@ const TranscriptPanel = () => {
     }, []);
 
     // ── Cut selected words ────────────────────────────────────────────────────
+    // cutSourceRange expects SOURCE timestamps (it filters by clip.offset).
+    // Derived displayWords carry both timeline time (.start/.end) and the
+    // original Whisper source time (.srcStart/.srcEnd). Fall back to .start
+    // when srcStart is absent (captions are source-time already).
     const cutRange = useCallback(() => {
-        if (!selRange || !captions.length) return;
-        const srcStart = captions[selRange[0]].start;
-        const srcEnd   = captions[selRange[1]].end;
+        if (!selRange || !displayWords.length) return;
+        const w0 = displayWords[selRange[0]];
+        const w1 = displayWords[selRange[1]];
+        const srcStart = w0.srcStart ?? w0.start;
+        const srcEnd   = w1.srcEnd   ?? w1.end;
         cutSourceRange(srcStart, srcEnd);
         setSelection(null);
-    }, [selRange, captions, cutSourceRange]);
+    }, [selRange, displayWords, cutSourceRange]);
 
     // ── Empty state ───────────────────────────────────────────────────────────
-    if (!captions || captions.length === 0) {
+    if (!displayWords || displayWords.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center h-full gap-2 p-6 text-center">
                 <p className="text-xs text-muted-foreground">No transcript yet.</p>
@@ -110,7 +158,7 @@ const TranscriptPanel = () => {
                  style={{ borderColor: 'var(--line-soft)' }}>
                 <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground"
                       style={{ fontFamily: 'var(--f-mono)' }}>
-                    TRANSCRIPT · {captions.length} words
+                    TRANSCRIPT · {displayWords.length} words
                 </span>
                 {selRange && (
                     <button
@@ -139,13 +187,13 @@ const TranscriptPanel = () => {
 
             {/* Word cloud — scrollable */}
             <div className="flex-1 overflow-y-auto px-3 py-3 leading-relaxed" style={{ minHeight: 0 }}>
-                {captions.map((word, i) => {
+                {displayWords.map((word, i) => {
                     const isActive   = i === activeIdx;
                     const isSelected = selRange && i >= selRange[0] && i <= selRange[1];
                     const color      = word.speaker ? speakerColors[word.speaker] : null;
 
                     // Show speaker label when speaker changes
-                    const prevSpeaker = i > 0 ? captions[i - 1].speaker : null;
+                    const prevSpeaker = i > 0 ? displayWords[i - 1].speaker : null;
                     const showLabel   = hasSpeakers && word.speaker && word.speaker !== prevSpeaker;
 
                     return (
@@ -187,9 +235,9 @@ const TranscriptPanel = () => {
             {selRange && (
                 <div className="px-3 py-1.5 border-t text-[10px] text-muted-foreground font-mono shrink-0"
                      style={{ borderColor: 'var(--line-soft)' }}>
-                    {fmtTime(captions[selRange[0]].start)} → {fmtTime(captions[selRange[1]].end)}
+                    {fmtTime(displayWords[selRange[0]].start)} → {fmtTime(displayWords[selRange[1]].end)}
                     &nbsp;·&nbsp;
-                    {(captions[selRange[1]].end - captions[selRange[0]].start).toFixed(1)}s
+                    {(displayWords[selRange[1]].end - displayWords[selRange[0]].start).toFixed(1)}s
                 </div>
             )}
         </div>
