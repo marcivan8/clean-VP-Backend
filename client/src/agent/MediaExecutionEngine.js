@@ -29,6 +29,7 @@
 import { authFetch }  from '../utils/authFetch.js';
 import { pollJobResult } from '../utils/jobPoller.js';
 import useTimelineStore  from '../store/useTimelineStore.js';
+import { TimelineActions } from '../timeline/index.js';
 import { mediaBunnyService } from '../services/MediaBunnyService.js';
 import useAIStore from '../store/useAIStore.js';
 
@@ -1025,10 +1026,19 @@ export class MediaExecutionEngine {
                 // clip.offset = SOURCE position (where in original video this starts).
                 // We MUST compare against clip.offset, not clip.start.
                 //
-                // For each clip: find the diarization segment with the most overlap
-                // against the clip's source-time window [offset, offset + duration].
+                // PERFORMANCE: Do NOT use updateClip() in a loop — it calls _saveHistory()
+                // and schedules a seek(currentTime) via setTimeout for EVERY clip.
+                // For 100+ clips that means 100+ full-state snapshots + 100+ concurrent
+                // seek calls at ~10ms, which freezes the player and races React renders.
+                //
+                // Instead: dispatch directly to timelineManager (in-memory, no React),
+                // then do ONE history save + ONE setState after the full loop.
                 const freshStore = useTimelineStore.getState();
+                const tm         = freshStore.manager; // timelineManager singleton
                 let wideCount = 0, hostCount = 0, guestCount = 0, skipped = 0;
+
+                // Save one history snapshot before the batch (allows a single Undo)
+                freshStore._saveHistory?.();
 
                 for (const clip of vmAllClips) {
                     // Use source-video position (offset) — this matches diarization timestamps
@@ -1070,12 +1080,23 @@ export class MediaExecutionEngine {
                         speaker: bestSeg.speaker || null,
                     };
 
-                    freshStore.updateClip(clip._trackId, clip.id, { virtualCam });
+                    // Resolve placement → underlying clip entity ID, then patch directly.
+                    // clip.id from toLegacyTracks() == placement.id in the entity store.
+                    const placement = tm.getState().entities.placements[clip.id];
+                    if (!placement) {
+                        console.warn(`[virtual_multicam] Placement not found for clip ${clip.id} — skipping`);
+                        skipped++;
+                        continue;
+                    }
+                    tm.dispatch(TimelineActions.updateClip(placement.clipId, { virtualCam }));
 
                     if (bestSeg.angle === 'wide')             wideCount++;
                     else if (bestSeg.angle === 'close_host')  hostCount++;
                     else if (bestSeg.angle === 'close_guest') guestCount++;
                 }
+
+                // ONE React state sync after all entity updates — no per-clip re-renders
+                useTimelineStore.setState({ tracks: tm.toLegacyTracks() });
 
                 const totalTagged = wideCount + hostCount + guestCount;
                 console.log(
