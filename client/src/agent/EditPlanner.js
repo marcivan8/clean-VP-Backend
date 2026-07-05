@@ -205,6 +205,7 @@ export class EditPlanner {
             case 'rhythm_zoom': return this.planRhythmZoom(planId, constraints);
             case 'split_speakers': return this.planSplitSpeakers(planId);
             case 'compound_clean_dynamic': return this.planCompoundCleanDynamic(planId, constraints);
+            case 'compound_clean_virtual_multicam': return this.planCompoundCleanVirtualMulticam(planId);
             default:
                 console.warn(`[EditPlanner] Unhandled operation: ${operation}`);
                 return null;
@@ -653,6 +654,27 @@ export class EditPlanner {
                 action: 'rhythm_zoom',
                 style,
                 reason: `Add dynamic zoom rhythm — ${style} style`,
+            },
+        ]);
+    }
+
+    /**
+     * Compound: remove silences first, then apply virtual multicam close-up angles.
+     */
+    static planCompoundCleanVirtualMulticam(planId) {
+        return this.buildPlan(planId, 'compound_clean_virtual_multicam', [
+            {
+                step_id: 'step_1',
+                action: 'silence_removal',
+                threshold: '-30dB',
+                min_duration: 0.5,
+                padding: 0.1,
+                reason: 'Remove silences to create clean clip segments',
+            },
+            {
+                step_id: 'step_2',
+                action: 'virtual_multicam',
+                reason: 'Apply virtual multicam close-up angles using diarization',
             },
         ]);
     }
