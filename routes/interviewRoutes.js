@@ -1084,25 +1084,35 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
         if (!hostSide) hostSide = 'left';
 
         // ── 2. Build crop regions for each angle ────────────────────────────
-        // We crop to 60% of the frame width to get a ~1.67x zoom.
-        // For a 16:9 frame, 60% width gives natural "close shot" framing.
-        // Crop to 42% of frame width → ~2.4x zoom.
-        // Standard two-person interview: subjects sit on opposite halves of the frame.
-        //   Host (left side):  face at ~25% from left → crop window starts at INSET
-        //   Guest (right side): face at ~75% from left → crop window ends at 1-INSET
-        // INSET prevents cropping flush to the edge (looks jarring on tight shots).
-        const CROP_W = 0.42;
-        const CROP_H = 1.00;
-        const INSET  = 0.02;
+        // For a 16:9 source displayed on a 16:9 canvas, cropW MUST equal cropH
+        // to avoid distortion (the sub-region pixel AR must match the canvas AR,
+        // and since both are 16:9: cropW / cropH × (sourceH / sourceW) = 1 → cropW = cropH).
+        //
+        // Target: ~3× zoom (user requests ≈200% scale increase).
+        //   CROP_W = CROP_H = 1/3 ≈ 0.33 → exact 3× uniform zoom, no distortion.
+        //
+        // Horizontal position: each speaker occupies roughly one half of the frame.
+        //   INSET_X pushes the crop window slightly inward so the subject is centred.
+        //   Left speaker:  cropX = INSET_X          (0 → CROP_W)
+        //   Right speaker: cropX = 1 - CROP_W - INSET_X
+        //
+        // Vertical position: faces sit in the upper ~50% of a seated interview frame.
+        //   cropY = INSET_Y gives a small top-of-frame buffer (headroom).
+        //   With cropH = 0.33 starting at cropY = 0.05 we capture y=5%→38%,
+        //   which frames head + shoulders for a typical seated interview.
+        const CROP_W   = 0.33;  // 3× zoom — must equal CROP_H for no distortion
+        const CROP_H   = 0.33;
+        const INSET_X  = 0.04;  // horizontal inset from the edge toward centre
+        const INSET_Y  = 0.05;  // start slightly below the very top for natural headroom
 
         const CROP = {
             wide: { cropX: 0, cropY: 0, cropW: 1.0, cropH: 1.0 },
             close_host: hostSide === 'left'
-                ? { cropX: INSET,               cropY: 0, cropW: CROP_W, cropH: CROP_H }
-                : { cropX: 1 - CROP_W - INSET,  cropY: 0, cropW: CROP_W, cropH: CROP_H },
+                ? { cropX: INSET_X,                  cropY: INSET_Y, cropW: CROP_W, cropH: CROP_H }
+                : { cropX: 1 - CROP_W - INSET_X,     cropY: INSET_Y, cropW: CROP_W, cropH: CROP_H },
             close_guest: hostSide === 'left'
-                ? { cropX: 1 - CROP_W - INSET,  cropY: 0, cropW: CROP_W, cropH: CROP_H }
-                : { cropX: INSET,               cropY: 0, cropW: CROP_W, cropH: CROP_H },
+                ? { cropX: 1 - CROP_W - INSET_X,     cropY: INSET_Y, cropW: CROP_W, cropH: CROP_H }
+                : { cropX: INSET_X,                  cropY: INSET_Y, cropW: CROP_W, cropH: CROP_H },
         };
 
         // ── 3. Group words into diarization segments ─────────────────────────
