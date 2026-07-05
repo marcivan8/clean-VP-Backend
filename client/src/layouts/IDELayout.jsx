@@ -240,6 +240,15 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
                 e.preventDefault();
                 useTimelineStore.getState().redo();
+            } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'c') {
+                const { activeClipId } = useTimelineStore.getState();
+                if (activeClipId) {
+                    e.preventDefault();
+                    useTimelineStore.getState().copyClip(activeClipId);
+                }
+            } else if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+                e.preventDefault();
+                useTimelineStore.getState().pasteClip(useTimelineStore.getState().currentTime);
             }
         };
         window.addEventListener('keydown', handleKeyDown);

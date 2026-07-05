@@ -67,6 +67,7 @@ const SpeedRow = ({ clip, trackId, onClose }) => {
 const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
     const menuRef = React.useRef(null);
     const [pos, setPos] = React.useState(position);
+    const copiedAttributes = useTimelineStore(s => s.copiedAttributes);
 
     // Adjust position to keep menu inside viewport
     React.useLayoutEffect(() => {
@@ -139,6 +140,18 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
                 hint="⌘D"
                 onClick={() => run(() => store().duplicateClip(trackId, clip.id))}
             />
+            <Item
+                icon={Copy}
+                label="Copy Attributes"
+                onClick={() => run(() => store().copyAttributes(clip.id))}
+            />
+            {copiedAttributes && (
+                <Item
+                    icon={Copy}
+                    label="Paste Attributes"
+                    onClick={() => run(() => store().pasteAttributes(trackId, clip.id))}
+                />
+            )}
 
             <Separator />
 
