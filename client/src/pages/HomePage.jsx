@@ -1,7 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sparkles, ArrowRight, Play, CheckCircle2, MousePointerClick, Layers, LayoutGrid, Link as LinkIcon, MessageSquare, Mic, Scissors, UserCheck, Zap } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
+import { useTranslation } from 'react-i18next';
+import { LanguageSwitcher } from '../components/LanguageSwitcher';
+import Logo from '../components/Logo';
+
+const renderHighlightedText = (text, accent, bold, mint, boldFg) => {
+    if (!text) return null;
+    let parts = [text];
+    if (accent) parts = parts.flatMap((p, idx) => typeof p === 'string' ? p.split(accent).reduce((acc, val, i, arr) => i < arr.length - 1 ? acc.concat(val, <A key={`a-${idx}-${i}`}>{accent}</A>) : acc.concat(val), []) : [p]);
+    if (bold) parts = parts.flatMap((p, idx) => typeof p === 'string' ? p.split(bold).reduce((acc, val, i, arr) => i < arr.length - 1 ? acc.concat(val, <W key={`w-${idx}-${i}`}>{bold}</W>) : acc.concat(val), []) : [p]);
+    if (mint) parts = parts.flatMap((p, idx) => typeof p === 'string' ? p.split(mint).reduce((acc, val, i, arr) => i < arr.length - 1 ? acc.concat(val, <G key={`g-${idx}-${i}`}>{mint}</G>) : acc.concat(val), []) : [p]);
+    if (boldFg) parts = parts.flatMap((p, idx) => typeof p === 'string' ? p.split(boldFg).reduce((acc, val, i, arr) => i < arr.length - 1 ? acc.concat(val, <span key={`bf-${idx}-${i}`} style={{ color: "var(--fg)", fontWeight: 600 }}>{boldFg}</span>) : acc.concat(val), []) : [p]);
+    return parts;
+};
 
 async function createCheckout(plan) {
     const { data: { session } } = await supabase.auth.getSession();
@@ -16,17 +29,29 @@ async function createCheckout(plan) {
     window.location.href = url;
 }
 
-const Logo = ({ size = 28 }) => (
-    <svg width={size} height={size} viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M310 110 L185 265 L250 245 L200 390 L325 230 L258 248 Z" fill="none" stroke="currentColor" strokeWidth="32" strokeLinejoin="round" strokeLinecap="round" />
-        <line x1="248" y1="248" x2="195" y2="268" stroke="currentColor" strokeWidth="16" strokeLinecap="round" className="text-accent" />
-    </svg>
-);
+// ── Scroll-triggered reveal hook ──────────────────────────────────────────────
+const useReveal = (threshold = 0.15) => {
+    const ref = useRef(null);
+    const [visible, setVisible] = useState(false);
+    useEffect(() => {
+        const el = ref.current;
+        if (!el) return;
+        const obs = new IntersectionObserver(
+            ([entry]) => { if (entry.isIntersecting) { setVisible(true); obs.disconnect(); } },
+            { threshold }
+        );
+        obs.observe(el);
+        return () => obs.disconnect();
+    }, [threshold]);
+    return [ref, visible];
+};
+
 
 const Nav = () => {
     const [scrolled, setScrolled] = useState(false);
     const [user, setUser] = useState(null);
     const navigate = useNavigate();
+    const { t } = useTranslation('common');
 
     useEffect(() => {
         const handleScroll = () => setScrolled(window.scrollY > 24);
@@ -59,11 +84,12 @@ const Nav = () => {
             }}>
                 <Logo />
                 <div style={{ display: "flex", gap: 22, fontSize: 13.5, color: "var(--fg-2)" }} className="hidden sm:flex font-medium">
-                    <a href="#product" className="hover:text-foreground transition-colors">Product</a>
-                    <a href="#exports" className="hover:text-foreground transition-colors">Exports</a>
-                    <a href="/about" className="hover:text-foreground transition-colors">About</a>
+                    <a href="#product" className="hover:text-foreground transition-colors">{t('nav.product')}</a>
+                    <a href="#exports" className="hover:text-foreground transition-colors">{t('nav.exports')}</a>
+                    <a href="/about" className="hover:text-foreground transition-colors">{t('nav.about')}</a>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <LanguageSwitcher />
                     {user ? (
                         <>
                             <span style={{
@@ -73,12 +99,12 @@ const Nav = () => {
                                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--mint)", display: "inline-block" }} />
                                 {user.email}
                             </span>
-                            <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/auth')}>Account</button>
+                            <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/dashboard')}>{t('nav.account')}</button>
                         </>
                     ) : (
                         <>
-                            <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/auth')}>Log in</button>
-                            <button className="btn btn-primary" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => window.location.href='/auth'}>Start free</button>
+                            <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/auth')}>{t('nav.logIn')}</button>
+                            <button className="btn btn-primary" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => window.location.href='/auth'}>{t('nav.startFree')}</button>
                         </>
                     )}
                 </div>
@@ -86,7 +112,6 @@ const Nav = () => {
         </nav>
     );
 };
-
 
 const HeroFrame = () => {
     const images = [
@@ -137,6 +162,7 @@ const HeroFrame = () => {
 };
 
 const Hero = () => {
+    const { t } = useTranslation('landing');
     return (
         <section style={{ paddingTop: 140, paddingBottom: 40, position: "relative", overflow: "hidden" }}>
             <div className="aurora" />
@@ -144,24 +170,26 @@ const Hero = () => {
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 28 }}>
                     <div className="tag fade-up">
                         <span className="dot" />
-                        <span>Vibed Studio</span>
+                        <span>{t('hero.badge')}</span>
                         <span style={{ color: "var(--fg-4)" }}>—</span>
-                        <span>v0.6 "Cinema"</span>
+                        <span>{t('hero.version')}</span>
                     </div>
-                    <h1 className="display fade-up fade-up-d1">
-                        Create at the<br />
-                        <em>speed of thought.</em>
+                    <h1 className="display fade-up fade-up-d1" style={{ whiteSpace: "pre-line" }}>
+                        {t('hero.headline').split('\n').map((line, i, arr) => (
+                            <React.Fragment key={i}>
+                                {i === arr.length - 1 ? <em>{line}</em> : line}
+                                {i < arr.length - 1 && <br />}
+                            </React.Fragment>
+                        ))}
                     </h1>
                     <p className="body-lg fade-up fade-up-d2" style={{ maxWidth: 620, margin: 0, fontSize: 19 }}>
-                        Vibed is the creative operating system for storytellers and editors.
-                        Edit, organize and refine your footage in conversation with an assistant that
-                        respects your taste. Every edit lands as a named, reversible action.
+                        {t('hero.body')}
                     </p>
                     <div className="fade-up fade-up-d3" style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", marginTop: 12 }}>
-                        <button onClick={() => window.location.href='#pricing'} className="btn btn-primary">See plans <ArrowRight className="w-4 h-4 ml-1" /></button>
+                        <button onClick={() => window.location.href='#pricing'} className="btn btn-primary">{t('hero.cta')} <ArrowRight className="w-4 h-4 ml-1" /></button>
                     </div>
                     <div className="fade-up fade-up-d4 caption" style={{ marginTop: 8 }}>
-                        No credit card required. Bring your own clips.
+                        {t('hero.caption')}
                     </div>
                 </div>
                 <div className="fade-up fade-up-d4" style={{ marginTop: 72 }}>
@@ -172,29 +200,124 @@ const Hero = () => {
     );
 };
 
+// ── Inline emphasis helpers (module-level to avoid "component created during render") ──
+const A = ({ children }) => <span style={{ color: "var(--accent)", fontWeight: 600 }}>{children}</span>;
+const G = ({ children }) => <span style={{ color: "var(--mint)", fontWeight: 600 }}>{children}</span>;
+const W = ({ children }) => <span style={{ color: "var(--fg)", fontWeight: 600 }}>{children}</span>;
+
+// ── Problem Section ───────────────────────────────────────────────────────────
+const ProblemSection = () => {
+    const { t } = useTranslation('landing');
+    const [ref, visible] = useReveal();
+
+    const pains = t('problem.pains', { returnObjects: true });
+
+    return (
+        <section style={{
+            padding: "100px 0",
+            background: "var(--bg-2)",
+            borderTop: "0.5px solid var(--line)",
+            borderBottom: "0.5px solid var(--line)",
+        }}>
+            <div className="wrap">
+                <div style={{ textAlign: "center", marginBottom: 72 }}>
+                    <span className="eyebrow">{t('problem.eyebrow')}</span>
+                    <h2 className="h-section" style={{ marginTop: 16, maxWidth: 600, marginInline: "auto" }}>
+                        {t('problem.headline')}
+                    </h2>
+                </div>
+
+                <div ref={ref} style={{ display: "flex", flexDirection: "column" }}>
+                    {pains.map((p, i) => (
+                        <div key={i} style={{
+                            display: "grid",
+                            gridTemplateColumns: "72px 1fr",
+                            gap: 36,
+                            padding: "40px 0",
+                            borderTop: "0.5px solid var(--line)",
+                            opacity: visible ? 1 : 0,
+                            transform: visible ? "translateY(0)" : "translateY(20px)",
+                            transition: `opacity 0.65s ease ${i * 0.13}s, transform 0.65s ease ${i * 0.13}s`,
+                        }}>
+                            <div className="mono" style={{
+                                fontSize: 12, fontWeight: 600, letterSpacing: "0.12em",
+                                color: "var(--fg-4)", paddingTop: 5,
+                            }}>
+                                {p.num}
+                            </div>
+                            <div>
+                                <h3 style={{
+                                    fontSize: "clamp(19px, 2vw, 22px)", fontWeight: 600,
+                                    letterSpacing: "-0.01em", marginBottom: 10, lineHeight: 1.3,
+                                }}>
+                                    {p.headline}
+                                </h3>
+                                <p style={{
+                                    fontSize: 15.5, color: "var(--fg-2)", lineHeight: 1.7,
+                                    margin: 0, maxWidth: 680,
+                                }}>
+                                    {renderHighlightedText(p.body, p.bodyAccent, p.bodyBold)}
+                                </p>
+                            </div>
+                        </div>
+                    ))}
+
+                    {/* Kicker */}
+                    <div style={{
+                        borderTop: "0.5px solid var(--line)",
+                        paddingTop: 52,
+                        textAlign: "center",
+                        opacity: visible ? 1 : 0,
+                        transform: visible ? "translateY(0)" : "translateY(16px)",
+                        transition: "opacity 0.65s ease 0.42s, transform 0.65s ease 0.42s",
+                    }}>
+                        <p style={{
+                            fontSize: "clamp(18px, 2.2vw, 25px)",
+                            fontWeight: 500,
+                            fontStyle: "italic",
+                            color: "var(--fg-2)",
+                            maxWidth: 700,
+                            margin: "0 auto",
+                            lineHeight: 1.55,
+                            letterSpacing: "-0.01em",
+                        }}>
+                            {renderHighlightedText(t('problem.kicker'), t('problem.kickerAccent'), null, null, t('problem.kickerBoldFg'))}
+                            {t('problem.kickerBoldFg2') && <span style={{ color: "var(--fg)", fontWeight: 600 }}> {t('problem.kickerBoldFg2')}</span>}
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    );
+};
+
+// ── Feature Moments ───────────────────────────────────────────────────────────
 const FeatureMoments = () => {
+    const { t } = useTranslation('landing');
+    const translatedMoments = t('workflow.moments', { returnObjects: true });
+
     const moments = [
         {
-            title: "Conversational Editing",
-            copy: "Tell the AI what to do, and watch the timeline update.",
+            title: translatedMoments[0]?.title || "Conversational Editing",
+            copy: translatedMoments[0]?.copy || "Tell the AI what to do, and watch the timeline update.",
             img: "/AI commands.png",
             icon: MessageSquare
         },
         {
-            title: "Your transcript is your timeline",
-            copy: "Click a sentence, the playhead is already there.",
+            title: translatedMoments[1]?.title || "Your transcript is your timeline",
+            copy: translatedMoments[1]?.copy || "Click a sentence, the playhead is already there.",
             img: "/Transcript editing.png",
             icon: Layers
         },
         {
-            title: "Type what you want to cut",
-            copy: "Show 'cut from so anyway to let's move on' → the cut appears.",
+            title: translatedMoments[2]?.title || "Type what you want to cut",
+            copy: translatedMoments[2]?.copy || "Show 'cut from so anyway to let's move on' → the cut appears.",
             img: "/AI edit timeline.png",
             icon: Scissors
         },
         {
-            title: "Speaker-scoped commands",
-            copy: "Cut all of Marc's stumbles — VIBED highlights segments and removes them.",
+            title: translatedMoments[3]?.title || "Speaker-scoped commands",
+            copy: translatedMoments[3]?.copy || "Cut all of Marc's stumbles — VIBED highlights segments and removes them.",
             img: "/AI acceptreject.png",
             icon: UserCheck
         }
@@ -204,8 +327,15 @@ const FeatureMoments = () => {
         <section id="product" style={{ paddingTop: 80, paddingBottom: 80 }}>
             <div className="wrap">
                 <div className="section-head text-center" style={{ marginBottom: 60, alignItems: "center" }}>
-                    <span className="eyebrow">The workflow</span>
-                    <h2 className="h-section">AI that works <em>with</em> your creativity.</h2>
+                    <span className="eyebrow">{t('workflow.eyebrow')}</span>
+                    <h2 className="h-section">
+                        {t('workflow.headline').split('with').map((part, i, arr) => (
+                            <React.Fragment key={i}>
+                                {part}
+                                {i < arr.length - 1 && <em>with</em>}
+                            </React.Fragment>
+                        ))}
+                    </h2>
                 </div>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 64 }}>
@@ -255,168 +385,361 @@ const FeatureMoments = () => {
     );
 };
 
-const AntiDescript = () => (
-    <section style={{ padding: "80px 0", background: "var(--bg-2)", borderTop: "0.5px solid var(--line)", borderBottom: "0.5px solid var(--line)" }}>
-        <div className="wrap">
-            <div style={{ maxWidth: 800, margin: "0 auto", textAlign: "center" }}>
-                <p style={{ fontSize: "clamp(24px, 3vw, 32px)", lineHeight: 1.4, fontWeight: 500, margin: 0, letterSpacing: "-0.01em" }}>
-                    Descript invented transcript editing. It's genuinely great — until you need to finish in Premiere or Final Cut, at which point you're stuck. <span style={{ color: "var(--accent)" }}>VIBED does the same thing and hands you a real FCPXML or Premiere XML at the end.</span> That combination doesn't exist anywhere else.
-                </p>
-            </div>
-        </div>
-    </section>
-);
-  
-const ExportIcon = {
-    premiere: () => (
-      <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="6" width="26" height="20" rx="2" />
-        <path d="M3 11h26M3 21h26" />
-        <path d="M7 6v-2M11 6v-2M15 6v-2M19 6v-2M23 6v-2M27 6v-2" />
-        <path d="M7 28v-2M11 28v-2M15 28v-2M19 28v-2M23 28v-2M27 28v-2" />
-        <path d="M13 14l6 2-6 2v-4z" fill="currentColor" stroke="none" />
-      </svg>
-    ),
-    resolve: () => (
-      <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4">
-        <circle cx="16" cy="16" r="10" />
-        <circle cx="16" cy="16" r="3" />
-        <path d="M16 6v4M16 22v4M6 16h4M22 16h4M9 9l2.8 2.8M20.2 20.2L23 23M9 23l2.8-2.8M20.2 11.8L23 9" strokeLinecap="round" />
-      </svg>
-    ),
-    finalcut: () => (
-      <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round">
-        <rect x="4" y="4" width="24" height="24" rx="5" />
-        <path d="M12 11v10l9-5-9-5z" fill="currentColor" stroke="none" />
-      </svg>
-    ),
-    otio: () => (
-      <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4">
-        <circle cx="7" cy="9" r="2.5" />
-        <circle cx="25" cy="9" r="2.5" />
-        <circle cx="16" cy="23" r="2.5" />
-        <path d="M9 10.5l5.5 10M23 10.5l-5.5 10M9.5 9h13" strokeLinecap="round" />
-      </svg>
-    ),
-};
-  
-const Exports = () => {
-    const tools = [
-      { key: "premiere", name: "Premiere Pro",     fmt: "XML · MOGRT" },
-      { key: "resolve",  name: "DaVinci Resolve",  fmt: "DRP · OFX" },
-      { key: "finalcut", name: "Final Cut Pro",    fmt: "FCPXML · iCloud" },
-      { key: "otio",     name: "OpenTimelineIO",   fmt: "Open standard" },
-    ];
+// ── Before / After Section ────────────────────────────────────────────────────
+const BeforeAfterSection = () => {
+    const { t } = useTranslation('landing');
+    const [ref, visible] = useReveal(0.1);
+
+    const rows = t('beforeAfter.rows', { returnObjects: true }) || [];
+
     return (
-      <section id="exports" style={{ padding: "100px 0" }}>
-        <div className="wrap">
-          <div style={{ display: "grid", gap: 80, alignItems: "center" }} className="grid-cols-1 md:grid-cols-2">
-            <div className="section-head" style={{ marginBottom: 0 }}>
-              <span className="eyebrow">Roundtrip-ready</span>
-              <h2 className="h-section">Works with the suite you <em>already</em> finish in.</h2>
-              <p className="body-lg">Vibed isn’t the last app you’ll ever open — it’s the first.
-                Hand off cleanly to professional editing tools the moment you’re ready to polish.</p>
-              <p className="body-lg" style={{ marginTop: 16, fontWeight: 500 }}>
-                The transcript edit happens in VIBED. The finishing happens where you've always finished.
-              </p>
-              <div style={{ display: "flex", gap: 12, marginTop: 24, flexWrap: "wrap" }}>
-                <span className="tag"><span className="dot" />XML · FCPXML · EDL · OTIO</span>
-                <span className="tag">Bin metadata preserved</span>
-              </div>
-            </div>
-  
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
-              {tools.map((t) => {
-                const Icon = ExportIcon[t.key];
-                return (
-                  <div key={t.key} className="card" style={{ padding: 20, display: "flex", alignItems: "center", gap: 14 }}>
+        <section style={{ padding: "100px 0" }}>
+            <div className="wrap">
+                <div style={{ textAlign: "center", marginBottom: 64 }}>
+                    <span className="eyebrow">{t('beforeAfter.eyebrow')}</span>
+                    <h2 className="h-section" style={{ marginTop: 16 }}>
+                        {t('beforeAfter.headline').split('\n').map((line, i, arr) => (
+                            <React.Fragment key={i}>
+                                {i === arr.length - 1 ? <em>{line}</em> : line}
+                                {i < arr.length - 1 && <br />}
+                            </React.Fragment>
+                        ))}
+                    </h2>
+                    <p className="body-lg" style={{ color: "var(--fg-2)", maxWidth: 480, margin: "20px auto 0" }}>
+                        {t('beforeAfter.subtitle')}
+                    </p>
+                </div>
+
+                <div ref={ref} style={{ borderRadius: 16, overflow: "hidden", border: "0.5px solid var(--line)" }}>
+                    {/* Header row */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", background: "var(--bg-2)" }}>
+                        <div style={{ padding: "18px 28px", borderRight: "0.5px solid var(--line)", display: "flex", alignItems: "center", gap: 10 }}>
+                            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#EF4444", flexShrink: 0 }} />
+                            <span className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", color: "var(--fg-3)" }}>{t('beforeAfter.withoutHeader')}</span>
+                        </div>
+                        <div style={{ padding: "18px 28px", display: "flex", alignItems: "center", gap: 10 }}>
+                            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--mint)", flexShrink: 0 }} />
+                            <span className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", color: "var(--accent)" }}>{t('beforeAfter.withHeader')}</span>
+                        </div>
+                    </div>
+
+                    {/* Data rows */}
+                    {rows.map((row, i) => (
+                        <div key={i} style={{
+                            display: "grid",
+                            gridTemplateColumns: "1fr 1fr",
+                            borderTop: "0.5px solid var(--line)",
+                            opacity: visible ? 1 : 0,
+                            transform: visible ? "translateX(0)" : "translateX(-12px)",
+                            transition: `opacity 0.55s ease ${i * 0.07}s, transform 0.55s ease ${i * 0.07}s`,
+                        }}>
+                            <div style={{
+                                padding: "20px 28px", borderRight: "0.5px solid var(--line)",
+                                display: "flex", justifyContent: "space-between", alignItems: "center",
+                                background: "rgba(239, 68, 68, 0.025)",
+                            }}>
+                                <span style={{ fontSize: 14, color: "var(--fg-2)", lineHeight: 1.4 }}>{row.without}</span>
+                                <span style={{ fontSize: 14, fontWeight: 700, color: "#EF4444", flexShrink: 0, marginLeft: 20 }}>{row.withoutTime}</span>
+                            </div>
+                            <div style={{
+                                padding: "20px 28px",
+                                display: "flex", justifyContent: "space-between", alignItems: "center",
+                                background: "rgba(16, 185, 129, 0.025)",
+                            }}>
+                                <span style={{ fontSize: 14, color: "var(--fg-2)", lineHeight: 1.4 }}>{row.with}</span>
+                                <span style={{ fontSize: 14, fontWeight: 700, color: "var(--mint)", flexShrink: 0, marginLeft: 20 }}>{row.withTime}</span>
+                            </div>
+                        </div>
+                    ))}
+
+                    {/* Total row */}
                     <div style={{
-                      width: 48, height: 48, borderRadius: 12, background: "var(--bg-3)",
-                      border: "0.5px solid var(--line)", color: "var(--fg)",
-                      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        borderTop: "0.5px solid var(--line)",
+                        background: "var(--bg-2)",
                     }}>
-                      <Icon />
+                        <div style={{
+                            padding: "28px 28px", borderRight: "0.5px solid var(--line)",
+                            display: "flex", justifyContent: "space-between", alignItems: "center",
+                        }}>
+                            <span style={{ fontSize: 15, fontWeight: 600, color: "var(--fg)" }}>{t('beforeAfter.totalLabel')}</span>
+                            <span style={{ fontSize: 22, fontWeight: 700, color: "#EF4444", letterSpacing: "-0.02em" }}>{t('beforeAfter.totalWithout')}</span>
+                        </div>
+                        <div style={{
+                            padding: "28px 28px",
+                            display: "flex", justifyContent: "space-between", alignItems: "center",
+                        }}>
+                            <span style={{ fontSize: 15, fontWeight: 600, color: "var(--fg)" }}>{t('beforeAfter.totalLabel')}</span>
+                            <span style={{ fontSize: 22, fontWeight: 700, color: "var(--mint)", letterSpacing: "-0.02em" }}>{t('beforeAfter.totalWith')}</span>
+                        </div>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 500 }}>{t.name}</div>
-                      <div className="mono" style={{ color: "var(--fg-3)", fontSize: 10.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.fmt}</div>
-                    </div>
-                    <div style={{ marginLeft: "auto", color: "var(--fg-4)" }}><ArrowRight className="w-4 h-4" /></div>
-                  </div>
-                );
-              })}
+                </div>
             </div>
-          </div>
-        </div>
-      </section>
+        </section>
     );
 };
-  
-const PLANS = [
-    {
-        key:     'free',
-        name:    'Free',
-        price:   '€0',
-        period:  '',
-        tagline: 'Edit your first project. Feel what conversational editing is.',
-        cta:     'Start free',
-        ctaStyle: 'btn-ghost',
-        features: [
-            '2 active projects',
-            'Videos up to 20 minutes',
-            '7-day storage',
-            '10 AI operations / month',
-            'Silence removal & trim — unlimited',
-            'MP4 export — no watermark',
-        ],
-        locked: ['NLE export', 'Transcript intelligence'],
-    },
-    {
-        key:     'creator',
-        name:    'Creator',
-        price:   '€15',
-        period:  '/ month',
-        tagline: 'Edit every week. Export to any tool you already use.',
-        cta:     'Get Creator',
-        ctaStyle: 'btn-primary',
-        highlight: true,
-        features: [
-            'Unlimited projects',
-            'Videos up to 90 minutes',
-            '30-day storage',
-            '100 AI operations / month',
-            'All AI commands — filler, captions, best moments',
-            'Full transcript + content intelligence',
-            'MP4 export',
-            'NLE export — Premiere, Final Cut, DaVinci, OTIO',
-        ],
-        locked: [],
-    },
-    {
-        key:     'pro',
-        name:    'Pro',
-        price:   '€35',
-        period:  '/ month',
-        tagline: 'Edit without limits. Bring your team.',
-        cta:     'Get Pro',
-        ctaStyle: 'btn-ghost',
-        features: [
-            'Everything in Creator',
-            'Videos up to 4 hours',
-            '90-day storage',
-            'Unlimited AI operations',
-            'Priority processing queue',
-            '2 team seats',
-            'Virality scoring + performance analysis',
-            'Early access to new features',
-        ],
-        locked: [],
-    },
-];
+
+// ── Who It's For ──────────────────────────────────────────────────────────────
+const PersonasSection = () => {
+    const { t } = useTranslation('landing');
+    const [ref, visible] = useReveal(0.1);
+
+    const translatedPersonas = t('personas.list', { returnObjects: true }) || [];
+
+    const personas = [
+        { Icon: Mic, ...translatedPersonas[0] },
+        { Icon: Layers, ...translatedPersonas[1] },
+        { Icon: UserCheck, ...translatedPersonas[2] },
+    ];
+
+    return (
+        <section style={{
+            padding: "100px 0",
+            background: "var(--bg-2)",
+            borderTop: "0.5px solid var(--line)",
+            borderBottom: "0.5px solid var(--line)",
+        }}>
+            <div className="wrap">
+                <div style={{ textAlign: "center", marginBottom: 64 }}>
+                    <span className="eyebrow">{t('personas.eyebrow')}</span>
+                    <h2 className="h-section" style={{ marginTop: 16, maxWidth: 560, marginInline: "auto" }}>
+                        {t('personas.headline').split('\n').map((line, i, arr) => (
+                            <React.Fragment key={i}>
+                                {line}
+                                {i < arr.length - 1 && <br />}
+                            </React.Fragment>
+                        ))}
+                    </h2>
+                </div>
+
+                <div ref={ref} style={{ display: "grid", gap: 20 }} className="grid-cols-1 md:grid-cols-3">
+                    {personas.map((p, i) => (
+                        <div key={i} className="card" style={{
+                            padding: "32px 28px",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 24,
+                            opacity: visible ? 1 : 0,
+                            transform: visible ? "translateY(0)" : "translateY(28px)",
+                            transition: `opacity 0.65s ease ${i * 0.14}s, transform 0.65s ease ${i * 0.14}s`,
+                        }}>
+                            <div style={{
+                                width: 48, height: 48, borderRadius: 12,
+                                background: "var(--bg-3)", border: "0.5px solid var(--line)",
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                color: "var(--accent)",
+                            }}>
+                                {p.Icon && <p.Icon size={20} strokeWidth={1.6} />}
+                            </div>
+
+                            <div>
+                                <div className="mono" style={{ fontSize: 10.5, letterSpacing: "0.1em", color: "var(--fg-4)", marginBottom: 8 }}>
+                                    {t('personas.personaLabel')}
+                                </div>
+                                <h3 style={{ fontSize: 19, fontWeight: 600, letterSpacing: "-0.01em", marginBottom: 8, lineHeight: 1.3 }}>
+                                    {p.role}
+                                </h3>
+                                <p style={{ fontSize: 13.5, color: "var(--fg-3)", lineHeight: 1.6, margin: 0 }}>
+                                    {p.description}
+                                </p>
+                            </div>
+
+                            <div style={{ borderTop: "0.5px solid var(--line)", paddingTop: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+                                <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                                    <div style={{
+                                        width: 20, height: 20, borderRadius: "50%", flexShrink: 0, marginTop: 1,
+                                        background: "rgba(239,68,68,0.1)", border: "0.5px solid rgba(239,68,68,0.25)",
+                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                    }}>
+                                        <div style={{ width: 7, height: 1.5, background: "#EF4444", borderRadius: 1 }} />
+                                    </div>
+                                    <p style={{ fontSize: 13.5, color: "var(--fg-3)", lineHeight: 1.55, margin: 0 }}>
+                                        {renderHighlightedText(p.before, p.beforeAccent)}
+                                    </p>
+                                </div>
+                                <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                                    <div style={{
+                                        width: 20, height: 20, borderRadius: "50%", flexShrink: 0, marginTop: 1,
+                                        background: "rgba(16,185,129,0.1)", border: "0.5px solid rgba(16,185,129,0.25)",
+                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                    }}>
+                                        <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
+                                            <path d="M1 3.5l2.3 2.3 4.4-4.6" stroke="#10B981" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                                        </svg>
+                                    </div>
+                                    <p style={{ fontSize: 13.5, color: "var(--fg)", lineHeight: 1.55, margin: 0 }}>
+                                        {renderHighlightedText(p.after, null, p.afterBold, p.afterMint)}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </section>
+    );
+};
+
+// ── ROI Statement ─────────────────────────────────────────────────────────────
+const AntiDescript = () => {
+    const { t } = useTranslation('landing');
+    return (
+        <section style={{ padding: "80px 0", background: "var(--bg-2)", borderTop: "0.5px solid var(--line)", borderBottom: "0.5px solid var(--line)" }}>
+            <div className="wrap">
+                <div style={{ maxWidth: 800, margin: "0 auto", textAlign: "center" }}>
+                    <p style={{ fontSize: "clamp(24px, 3vw, 32px)", lineHeight: 1.4, fontWeight: 500, margin: 0, letterSpacing: "-0.01em" }}>
+                        {renderHighlightedText(t('roi.body'), t('roi.accentPart'), null, null, t('roi.boldPart'))}
+                    </p>
+                </div>
+            </div>
+        </section>
+    );
+};
+
+const ExportIcon = {
+    premiere: () => (
+        <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="6" width="26" height="20" rx="2" />
+            <path d="M3 11h26M3 21h26" />
+            <path d="M7 6v-2M11 6v-2M15 6v-2M19 6v-2M23 6v-2M27 6v-2" />
+            <path d="M7 28v-2M11 28v-2M15 28v-2M19 28v-2M23 28v-2M27 28v-2" />
+            <path d="M13 14l6 2-6 2v-4z" fill="currentColor" stroke="none" />
+        </svg>
+    ),
+    resolve: () => (
+        <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4">
+            <circle cx="16" cy="16" r="10" />
+            <circle cx="16" cy="16" r="3" />
+            <path d="M16 6v4M16 22v4M6 16h4M22 16h4M9 9l2.8 2.8M20.2 20.2L23 23M9 23l2.8-2.8M20.2 11.8L23 9" strokeLinecap="round" />
+        </svg>
+    ),
+    finalcut: () => (
+        <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round">
+            <rect x="4" y="4" width="24" height="24" rx="5" />
+            <path d="M12 11v10l9-5-9-5z" fill="currentColor" stroke="none" />
+        </svg>
+    ),
+    otio: () => (
+        <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4">
+            <circle cx="7" cy="9" r="2.5" />
+            <circle cx="25" cy="9" r="2.5" />
+            <circle cx="16" cy="23" r="2.5" />
+            <path d="M9 10.5l5.5 10M23 10.5l-5.5 10M9.5 9h13" strokeLinecap="round" />
+        </svg>
+    ),
+};
+
+const Exports = () => {
+    const { t } = useTranslation('landing');
+    const translatedTools = t('exports.tools', { returnObjects: true }) || {};
+
+    const tools = [
+        { key: "premiere", name: translatedTools.premiere?.name || "Premiere Pro",    fmt: translatedTools.premiere?.fmt || "XML · MOGRT" },
+        { key: "resolve",  name: translatedTools.resolve?.name  || "DaVinci Resolve", fmt: translatedTools.resolve?.fmt  || "DRP · OFX" },
+        { key: "finalcut", name: translatedTools.finalcut?.name || "Final Cut Pro",   fmt: translatedTools.finalcut?.fmt || "FCPXML · iCloud" },
+        { key: "otio",     name: translatedTools.otio?.name     || "OpenTimelineIO",  fmt: translatedTools.otio?.fmt     || "Open standard" },
+    ];
+    return (
+        <section id="exports" style={{ padding: "100px 0" }}>
+            <div className="wrap">
+                <div style={{ display: "grid", gap: 80, alignItems: "center" }} className="grid-cols-1 md:grid-cols-2">
+                    <div className="section-head" style={{ marginBottom: 0 }}>
+                        <span className="eyebrow">{t('exports.eyebrow')}</span>
+                        <h2 className="h-section">
+                            {t('exports.headline').split('already').map((part, i, arr) => (
+                                <React.Fragment key={`en-${i}`}>
+                                    {part.split('déjà').map((subPart, j, subArr) => (
+                                        <React.Fragment key={`fr-${j}`}>
+                                            {subPart}
+                                            {j < subArr.length - 1 && <em>déjà</em>}
+                                        </React.Fragment>
+                                    ))}
+                                    {i < arr.length - 1 && <em>already</em>}
+                                </React.Fragment>
+                            ))}
+                        </h2>
+                        <p className="body-lg">{t('exports.body1')}</p>
+                        <p className="body-lg" style={{ marginTop: 16, fontWeight: 500 }}>
+                            {t('exports.body2')}
+                        </p>
+                        <div style={{ display: "flex", gap: 12, marginTop: 24, flexWrap: "wrap" }}>
+                            <span className="tag"><span className="dot" />{t('exports.formatTag')}</span>
+                            <span className="tag">{t('exports.metadataTag')}</span>
+                        </div>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+                        {tools.map((tool) => {
+                            const Icon = ExportIcon[tool.key];
+                            return (
+                                <div key={tool.key} className="card" style={{ padding: 20, display: "flex", alignItems: "center", gap: 14 }}>
+                                    <div style={{
+                                        width: 48, height: 48, borderRadius: 12, background: "var(--bg-3)",
+                                        border: "0.5px solid var(--line)", color: "var(--fg)",
+                                        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                                    }}>
+                                        <Icon />
+                                    </div>
+                                    <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                                        <div style={{ fontSize: 14, fontWeight: 500 }}>{tool.name}</div>
+                                        <div className="mono" style={{ color: "var(--fg-3)", fontSize: 10.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tool.fmt}</div>
+                                    </div>
+                                    <div style={{ marginLeft: "auto", color: "var(--fg-4)" }}><ArrowRight className="w-4 h-4" /></div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+        </section>
+    );
+};
+
 
 const Pricing = () => {
+    const { t } = useTranslation('landing');
     const navigate = useNavigate();
     const [loading, setLoading] = useState(null);
+
+    const translatedPlans = t('pricing.plans', { returnObjects: true }) || {};
+
+    const PLANS = [
+        {
+            key:     'free',
+            name:    'Free',
+            price:   '€0',
+            period:  '',
+            tagline: translatedPlans.free?.tagline,
+            cta:     translatedPlans.free?.cta,
+            ctaStyle: 'btn-ghost',
+            features: translatedPlans.free?.features || [],
+            locked: translatedPlans.free?.locked || [],
+        },
+        {
+            key:     'creator',
+            name:    'Creator',
+            price:   '€15',
+            period:  '/ month',
+            tagline: translatedPlans.creator?.tagline,
+            cta:     translatedPlans.creator?.cta,
+            ctaStyle: 'btn-primary',
+            highlight: true,
+            features: translatedPlans.creator?.features || [],
+            locked: translatedPlans.creator?.locked || [],
+        },
+        {
+            key:     'pro',
+            name:    'Pro',
+            price:   '€35',
+            period:  '/ month',
+            tagline: translatedPlans.pro?.tagline,
+            cta:     translatedPlans.pro?.cta,
+            ctaStyle: 'btn-ghost',
+            features: translatedPlans.pro?.features || [],
+            locked: translatedPlans.pro?.locked || [],
+        },
+    ];
 
     const handleUpgrade = async (plan) => {
         if (plan === 'free') { navigate('/dashboard'); return; }
@@ -431,13 +754,13 @@ const Pricing = () => {
                 <div style={{ textAlign: 'center', marginBottom: 64 }}>
                     <div className="tag" style={{ display: 'inline-flex', marginBottom: 20 }}>
                         <Zap className="w-3 h-3" style={{ color: 'var(--accent)' }} />
-                        <span>Simple pricing</span>
+                        <span>{t('pricing.eyebrow')}</span>
                     </div>
                     <h2 className="display" style={{ fontSize: 'clamp(36px, 5vw, 64px)', margin: '0 0 16px' }}>
-                        One tool. Three speeds.
+                        {t('pricing.headline')}
                     </h2>
                     <p className="body-lg" style={{ margin: 0, color: 'var(--fg-2)', maxWidth: 520, marginInline: 'auto' }}>
-                        Start free. Upgrade when the product earns it.
+                        {t('pricing.subtitle')}
                     </p>
                 </div>
 
@@ -509,124 +832,132 @@ const Pricing = () => {
 };
 
 const SocialProof = () => {
+    const { t } = useTranslation('landing');
+    const quotes = t('socialProof.quotes', { returnObjects: true }) || [];
+
     return (
         <section style={{ padding: "80px 0", background: "var(--bg-2)" }}>
             <div className="wrap">
                 <div style={{ display: "grid", gap: 32 }} className="grid-cols-1 md:grid-cols-2">
-                    <div className="card" style={{ padding: 40, border: "0.5px solid var(--line)" }}>
-                        <div style={{ color: "var(--accent)", marginBottom: 20 }}>
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/>
-                            </svg>
-                        </div>
-                        <p style={{ fontSize: 20, fontStyle: "italic", lineHeight: 1.5, marginBottom: 24 }}>
-                            "Finally, an AI editor that knows when to get out of the way. It lets me work at the speed of thought without messing up my timeline."
-                        </p>
-                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                            <div style={{ width: 40, height: 40, borderRadius: "50%", background: "var(--line)", flexShrink: 0 }} />
-                            <div>
-                                <div style={{ fontWeight: 600, fontSize: 15 }}>Alex</div>
-                                <div style={{ color: "var(--fg-3)", fontSize: 14 }}>Senior Video Editor</div>
+                    {quotes.map((q, i) => (
+                        <div key={i} className="card" style={{ padding: 40, border: "0.5px solid var(--line)" }}>
+                            <div style={{ color: "var(--accent)", marginBottom: 20 }}>
+                                <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/>
+                                </svg>
+                            </div>
+                            <p style={{ fontSize: 20, fontStyle: "italic", lineHeight: 1.5, marginBottom: 24 }}>
+                                "{q.text}"
+                            </p>
+                            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                                <div style={{ width: 40, height: 40, borderRadius: "50%", background: "var(--line)", flexShrink: 0 }} />
+                                <div>
+                                    <div style={{ fontWeight: 600, fontSize: 15 }}>{q.author}</div>
+                                    <div style={{ color: "var(--fg-3)", fontSize: 14 }}>{q.role}</div>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <div className="card" style={{ padding: 40, border: "0.5px solid var(--line)" }}>
-                        <div style={{ color: "var(--accent)", marginBottom: 20 }}>
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/>
-                            </svg>
-                        </div>
-                        <p style={{ fontSize: 20, fontStyle: "italic", lineHeight: 1.5, marginBottom: 24 }}>
-                            "The fact that I can dump it straight into Resolve when the rough cut is done is a complete game-changer for my agency workflow."
-                        </p>
-                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                            <div style={{ width: 40, height: 40, borderRadius: "50%", background: "var(--line)", flexShrink: 0 }} />
-                            <div>
-                                <div style={{ fontWeight: 600, fontSize: 15 }}>Sarah</div>
-                                <div style={{ color: "var(--fg-3)", fontSize: 14 }}>Creative Director</div>
-                            </div>
-                        </div>
-                    </div>
+                    ))}
                 </div>
             </div>
         </section>
     );
 };
 
-const FinalCTA = () => (
-    <section style={{ position: "relative", overflow: "hidden", paddingTop: 140, paddingBottom: 140 }}>
-      <div className="aurora" />
-      <div className="wrap" style={{ position: "relative", zIndex: 2, textAlign: "center", display: "flex", flexDirection: "column", gap: 28, alignItems: "center" }}>
-        <h2 className="display" style={{ fontSize: "clamp(48px, 6.4vw, 96px)" }}>
-          The future of editing<br /><em>is collaborative.</em>
-        </h2>
-        <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap", justifyContent: "center" }}>
-          <button onClick={() => window.location.href='#pricing'} className="btn btn-primary" style={{ padding: "0 32px", height: 48, fontSize: 16 }}>
-            See plans <ArrowRight className="w-5 h-5 ml-1" />
-          </button>
-        </div>
-        <div className="caption" style={{ marginTop: 8 }}>
-          Start free. No credit card. Bring your own clips.
-        </div>
-      </div>
-    </section>
-);
-  
-const Footer = () => {
-    const cols = {
-      "Company": ["About"],
-      "Legal": ["Privacy Policy", "Cookie Policy", "Your data"],
-    };
+const FinalCTA = () => {
+    const { t } = useTranslation('landing');
     return (
-      <footer style={{ borderTop: "0.5px solid var(--line)", padding: "64px 0 32px", background: "var(--bg)" }}>
-        <div className="wrap grid-cols-2 md:grid-cols-[1.4fr_1fr_1fr_1fr]" style={{ display: "grid", gap: 56 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <Logo size={32} />
-            <p className="body" style={{ fontSize: 13.5, margin: 0, maxWidth: 280 }}>
-              The creative operating system for modern storytellers, editors and studios.
-            </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
-              <div style={{ display: "flex" }}>
-                <a href="/gdpr" style={{ textDecoration: 'none' }}>
-                  <span className="tag" style={{ border: "0.5px solid var(--line-strong)", background: "var(--bg-2)", cursor: "pointer" }}>GDPR Compliant · GCS Data Processor · 30-Day Retention</span>
-                </a>
-              </div>
+        <section style={{ position: "relative", overflow: "hidden", paddingTop: 140, paddingBottom: 140 }}>
+            <div className="aurora" />
+            <div className="wrap" style={{ position: "relative", zIndex: 2, textAlign: "center", display: "flex", flexDirection: "column", gap: 28, alignItems: "center" }}>
+                <h2 className="display" style={{ fontSize: "clamp(48px, 6.4vw, 96px)" }}>
+                    {t('finalCta.headline').split('\n').map((line, i, arr) => (
+                        <React.Fragment key={i}>
+                            {i === arr.length - 1 ? <em>{line}</em> : line}
+                            {i < arr.length - 1 && <br />}
+                        </React.Fragment>
+                    ))}
+                </h2>
+                <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                    <button onClick={() => window.location.href='#pricing'} className="btn btn-primary" style={{ padding: "0 32px", height: 48, fontSize: 16 }}>
+                        {t('finalCta.cta')} <ArrowRight className="w-5 h-5 ml-1" />
+                    </button>
+                </div>
+                <div className="caption" style={{ marginTop: 8 }}>
+                    {t('finalCta.caption')}
+                </div>
             </div>
-          </div>
-          {Object.entries(cols).map(([k, items]) => (
-            <div key={k} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div className="mono" style={{ color: "var(--fg-4)" }}>{k.toUpperCase()}</div>
-              {items.map(it => {
-                  let href = '#';
-                  if (it === 'Your data') href = '/data';
-                  if (it === 'Privacy Policy') href = '/privacy';
-                  if (it === 'Cookie Policy') href = '/cookie-policy';
-                  if (it === 'About') href = '/about';
-                  return (
-                    <a key={it} href={href} style={{ fontSize: 13.5, color: "var(--fg-2)" }} className="hover:text-foreground transition-colors">{it}</a>
-                  )
-              })}
-            </div>
-          ))}
-        </div>
-        <div className="wrap" style={{ marginTop: 56, paddingTop: 24, borderTop: "0.5px solid var(--line-soft)",
-          display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-          <span className="caption">© 2026 Vibed Studios</span>
-          <span className="caption">Made with care, for makers.</span>
-        </div>
-      </footer>
+        </section>
     );
 };
 
+const Footer = () => {
+    const { t } = useTranslation('common');
+
+    const cols = [
+        {
+            key: 'company',
+            label: t('footer.company'),
+            items: [{ label: t('footer.links.about'), href: '/about' }],
+        },
+        {
+            key: 'legal',
+            label: t('footer.legal'),
+            items: [
+                { label: t('footer.links.privacyPolicy'), href: '/privacy' },
+                { label: t('footer.links.cookiePolicy'), href: '/cookie-policy' },
+                { label: t('footer.links.yourData'), href: '/data' },
+            ],
+        },
+    ];
+
+    return (
+        <footer style={{ borderTop: "0.5px solid var(--line)", padding: "64px 0 32px", background: "var(--bg)" }}>
+            <div className="wrap grid-cols-2 md:grid-cols-[1.4fr_1fr_1fr_1fr]" style={{ display: "grid", gap: 56 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    <Logo size={32} />
+                    <p className="body" style={{ fontSize: 13.5, margin: 0, maxWidth: 280 }}>
+                        {t('footer.tagline')}
+                    </p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
+                        <div style={{ display: "flex" }}>
+                            <a href="/gdpr" style={{ textDecoration: 'none' }}>
+                                <span className="tag" style={{ border: "0.5px solid var(--line-strong)", background: "var(--bg-2)", cursor: "pointer" }}>{t('footer.gdpr')}</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                {cols.map(col => (
+                    <div key={col.key} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        <div className="mono" style={{ color: "var(--fg-4)" }}>{col.label.toUpperCase()}</div>
+                        {col.items.map(item => (
+                            <a key={item.href} href={item.href} style={{ fontSize: 13.5, color: "var(--fg-2)" }} className="hover:text-foreground transition-colors">{item.label}</a>
+                        ))}
+                    </div>
+                ))}
+            </div>
+            <div className="wrap" style={{ marginTop: 56, paddingTop: 24, borderTop: "0.5px solid var(--line-soft)",
+                display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+                <span className="caption">{t('footer.copyright')}</span>
+                <span className="caption">{t('footer.madeWith')}</span>
+            </div>
+        </footer>
+    );
+};
+
+// ── Page composition ──────────────────────────────────────────────────────────
 const HomePage = () => {
     return (
         <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)] font-sans selection:bg-accent selection:text-white">
             <Nav />
             <main>
                 <Hero />
+                <ProblemSection />
                 <FeatureMoments />
-                <AntiDescript />
+                <BeforeAfterSection />
+                <PersonasSection />
                 <Exports />
+                <AntiDescript />
                 <Pricing />
                 <SocialProof />
                 <FinalCTA />
