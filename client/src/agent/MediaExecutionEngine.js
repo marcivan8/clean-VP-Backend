@@ -351,8 +351,19 @@ export class MediaExecutionEngine {
             if (val === '$playhead') {
                 args[key] = store.currentTime || 0;
             } else if (val === '$first_clip') {
-                const videoTrack = store.tracks?.find(t => t.type === 'video') || store.tracks?.[0];
-                args[key] = videoTrack?.clips?.[0]?.id || null;
+                // If a clip is actively selected, target that specific clip.
+                // Otherwise fan out to ALL clips on all video tracks so operations
+                // like volume, mute, color grade apply everywhere — not just clip[0].
+                if (store.activeClipId) {
+                    args[key] = store.activeClipId;
+                } else {
+                    const allVideoClips = (store.tracks || [])
+                        .filter(t => t.type === 'video')
+                        .flatMap(t => t.clips || []);
+                    args[key] = allVideoClips.length === 1
+                        ? allVideoClips[0].id   // single clip — keep original behavior
+                        : '$ALL_CLIPS';          // multiple clips — fan out in executeStoreAction
+                }
             } else if (val === '$uploaded_file') {
                 // Prefer the server-side path stored after proxy upload
                 let serverPath = store.uploadedFilePath;
@@ -475,14 +486,65 @@ export class MediaExecutionEngine {
             case 'removeClip':     this._callStore(store, 'removeClip', args.trackId, args.clipId); return { action, success: true, message: `Removed clip ${args.clipId}` };
             case 'setClipSpeed':   this._callStore(store, 'setClipSpeed', args.trackId, args.clipId, args.speed); return { action, success: true };
             case 'setAspectRatio': this._callStore(store, 'setAspectRatio', args.ratio); return { action, success: true };
-            case 'updateClip':     this._callStore(store, 'updateClip', args.trackId, args.clipId, args.updates); return { action, success: true };
+            case 'updateClip': {
+                if (args.clipId === '$ALL_CLIPS') {
+                    // Fan out to every clip on every video track — one history snapshot total
+                    store._saveHistory?.();
+                    const videoTracks = (store.tracks || []).filter(t => t.type === 'video');
+                    for (const track of videoTracks) {
+                        for (const clip of (track.clips || [])) {
+                            store.updateClip(track.id, clip.id, args.updates, { skipHistory: true });
+                        }
+                    }
+                } else {
+                    this._callStore(store, 'updateClip', args.trackId, args.clipId, args.updates);
+                }
+                return { action, success: true };
+            }
             case 'duplicateClip':  this._callStore(store, 'duplicateClip', args.trackId, args.clipId); return { action, success: true };
             case 'trimClip':       this._callStore(store, 'trimClip', args.trackId, args.clipId, args.trimFrom, args.amount); return { action, success: true };
             case 'rippleDelete':   this._callStore(store, 'rippleDelete', args.atTime); return { action, success: true };
-            case 'addTransition':  this._callStore(store, 'addTransition', args.clipId, args.type, args.duration); return { action, success: true };
-            case 'addFilter':      this._callStore(store, 'addFilter', args.clipId, args.filterType, args.intensity); return { action, success: true };
+            case 'addTransition': {
+                if (args.clipId === '$ALL_CLIPS') {
+                    const videoTracks = (store.tracks || []).filter(t => t.type === 'video');
+                    for (const track of videoTracks) {
+                        for (const clip of (track.clips || [])) {
+                            this._callStore(store, 'addTransition', clip.id, args.type, args.duration);
+                        }
+                    }
+                } else {
+                    this._callStore(store, 'addTransition', args.clipId, args.type, args.duration);
+                }
+                return { action, success: true };
+            }
+            case 'addFilter': {
+                if (args.clipId === '$ALL_CLIPS') {
+                    const videoTracks = (store.tracks || []).filter(t => t.type === 'video');
+                    for (const track of videoTracks) {
+                        for (const clip of (track.clips || [])) {
+                            this._callStore(store, 'addFilter', clip.id, args.filterType, args.intensity);
+                        }
+                    }
+                } else {
+                    this._callStore(store, 'addFilter', args.clipId, args.filterType, args.intensity);
+                }
+                return { action, success: true };
+            }
             case 'addTextOverlay': this._callStore(store, 'addTextOverlay', args.text, args.position, args.duration, args.style); return { action, success: true };
-            case 'applyColorGrade':this._callStore(store, 'applyColorGrade', args.clipId, args.adjustments); return { action, success: true };
+            case 'applyColorGrade': {
+                if (args.clipId === '$ALL_CLIPS') {
+                    store._saveHistory?.();
+                    const videoTracks = (store.tracks || []).filter(t => t.type === 'video');
+                    for (const track of videoTracks) {
+                        for (const clip of (track.clips || [])) {
+                            this._callStore(store, 'applyColorGrade', clip.id, args.adjustments);
+                        }
+                    }
+                } else {
+                    this._callStore(store, 'applyColorGrade', args.clipId, args.adjustments);
+                }
+                return { action, success: true };
+            }
             case 'undo':           this._callStore(store, 'undo'); return { action, success: true };
             case 'redo':           this._callStore(store, 'redo'); return { action, success: true };
             case 'chat':           return { action, success: true, message: args.message, isChat: true };
@@ -1559,21 +1621,30 @@ export class MediaExecutionEngine {
                 });
             }
             if (!baseClip) {
-                console.error(
-                    `[MediaExecutionEngine] _applySegmentsToTimeline: ${videoTrack.clips.length} clips on track ` +
-                    `but cannot match processed file "${processedBase}" (stripped: "${strippedBase}") to any clip. ` +
-                    `Clip names: ${videoTrack.clips.map(c => basename(c.name || c.id)).join(', ')}. Skipping to prevent data loss.`
-                );
-                useAIStore.getState().addLog({
-                    id: `step-multiclip-${Date.now()}`,
-                    type: 'warning',
-                    message: `Could not identify which clip to edit (${videoTrack.clips.length} clips on track). ` +
-                        `Please select the clip you want to process and run the operation again.`,
-                    timestamp: new Date().toLocaleTimeString()
-                });
-                return;
+                // No filename match — fall back to applying to ALL clips from the
+                // most-represented assetId (i.e. the primary uploaded file).
+                // This handles the common case where silence_removal is run on a
+                // track that already has N clips from one asset.
+                const assetCounts = {};
+                for (const c of videoTrack.clips) {
+                    if (c.assetId) assetCounts[c.assetId] = (assetCounts[c.assetId] || 0) + 1;
+                }
+                const primaryAssetId = Object.entries(assetCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
+                if (primaryAssetId) {
+                    console.log(`[MediaExecutionEngine] _applySegmentsToTimeline: no filename match — applying to all clips for asset "${primaryAssetId}"`);
+                    baseClips = videoTrack.clips
+                        .filter(c => c.assetId === primaryAssetId)
+                        .sort((a, b) => a.start - b.start);
+                    baseClip = baseClips[0];
+                } else {
+                    // Ultimate fallback: all clips sorted by start time
+                    console.log(`[MediaExecutionEngine] _applySegmentsToTimeline: no assetId found — applying to all ${videoTrack.clips.length} clips`);
+                    baseClips = [...videoTrack.clips].sort((a, b) => a.start - b.start);
+                    baseClip  = baseClips[0];
+                }
+            } else {
+                baseClips = [baseClip];
             }
-            baseClips = [baseClip];
         }
 
         // ── Compute replacement range ─────────────────────────────────────────
