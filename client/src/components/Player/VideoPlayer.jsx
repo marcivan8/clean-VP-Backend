@@ -346,9 +346,19 @@ const VideoPlayer = () => {
         const scale = interpolate(kf.scale, 1.0);
         const x = interpolate(kf.x, 0);
         const y = interpolate(kf.y, 0);
+        const rotation = interpolate(kf.rotation, 0);
 
-        if (scale !== 1.0 || x !== 0 || y !== 0) {
-            transformStyle = `translate(${x}px, ${y}px) scale(${scale})`;
+        if (scale !== 1.0 || x !== 0 || y !== 0 || rotation !== 0) {
+            transformStyle = `translate(${x}px, ${y}px) scale(${scale}) rotate(${rotation}deg)`;
+        }
+    } else if (activeClip) {
+        // No keyframes — read direct clip properties set by the Transform tab
+        const scale = activeClip.scale ?? 1.0;
+        const x = activeClip.x ?? 0;
+        const y = activeClip.y ?? 0;
+        const rotation = activeClip.rotation ?? 0;
+        if (scale !== 1.0 || x !== 0 || y !== 0 || rotation !== 0) {
+            transformStyle = `translate(${x}px, ${y}px) scale(${scale}) rotate(${rotation}deg)`;
         }
     }
 

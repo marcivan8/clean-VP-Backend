@@ -142,6 +142,7 @@ const useTimelineStore = create(
 
             // Clipboard
             clipboard: null,
+            copiedAttributes: null,
 
             // Assets & uploads — pre-filled from autosave so proxyUrls are available immediately
             assets: _preRestoredProject?.assets || [],
@@ -1005,6 +1006,29 @@ const useTimelineStore = create(
                     id: `clip-paste-${Date.now()}`,
                     start: currentTime
                 });
+            },
+
+            copyAttributes: (clipId) => {
+                const tracks = timelineManager.toLegacyTracks();
+                for (const track of tracks) {
+                    const clip = track.clips.find(c => c.id === clipId);
+                    if (clip) {
+                        const ATTR_KEYS = ['scale', 'x', 'y', 'rotation', 'opacity', 'grading', 'filter', 'volume', 'speed', 'transition', 'denoise', 'enhance'];
+                        const attrs = {};
+                        for (const k of ATTR_KEYS) {
+                            if (clip[k] !== undefined) attrs[k] = clip[k];
+                        }
+                        set({ copiedAttributes: attrs });
+                        return;
+                    }
+                }
+            },
+
+            pasteAttributes: (trackId, clipId) => {
+                const { copiedAttributes } = get();
+                if (!copiedAttributes) return;
+                get()._saveHistory();
+                get().updateClip(trackId, clipId, { ...copiedAttributes });
             },
 
             // ==============================================================
