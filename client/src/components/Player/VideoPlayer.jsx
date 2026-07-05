@@ -15,10 +15,12 @@ const VideoPlayer = () => {
     const { currentTime, isPlaying, tracks, assets, seek, setIsPlaying } = useTimelineStore();
 
     // Determine Active Clip for Rendering & Logic
-    const videoTrack = tracks.find(t => t.type === 'video');
-    const activeClip = videoTrack?.clips.find(
-        clip => currentTime >= clip.start - 0.001 && currentTime < clip.start + clip.duration + 0.001
-    );
+    // Search ALL video tracks — after split-speakers there are 2 (one per speaker).
+    const videoTracks = tracks.filter(t => t.type === 'video');
+    const videoTrack = videoTracks[0]; // legacy compat for single-track code paths
+    const activeClip = videoTracks
+        .flatMap(t => t.clips)
+        .find(clip => currentTime >= clip.start - 0.001 && currentTime < clip.start + clip.duration + 0.001);
 
     // Initialize Engine
     useEffect(() => {

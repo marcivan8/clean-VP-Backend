@@ -909,7 +909,6 @@ export class TimelineStateManager {
                         textShadow: clip.textShadow,
                         stroke: clip.stroke,
                         color: clip.color,
-                        bgColor: clip.bgColor,
                         textAlign: clip.textAlign,
                         position: clip.position,
                         style: clip.style,
@@ -921,6 +920,8 @@ export class TimelineStateManager {
                         scaleY: clip.scaleY,
                         rotation: clip.rotation,
                         opacity: clip.opacity,
+                        // Virtual multicam crop metadata
+                        virtualCam: clip.virtualCam,
                     };
                 })
             };
@@ -972,6 +973,7 @@ export class TimelineStateManager {
                                 thumbnail: legacyClip.thumbnail,
                                 // Text / overlay
                                 content: legacyClip.content,
+                                color: legacyClip.color,
                                 fontSize: legacyClip.fontSize,
                                 fontFamily: legacyClip.fontFamily,
                                 fontWeight: legacyClip.fontWeight,
@@ -979,8 +981,6 @@ export class TimelineStateManager {
                                 textDecoration: legacyClip.textDecoration,
                                 textShadow: legacyClip.textShadow,
                                 stroke: legacyClip.stroke,
-                                color: legacyClip.color,
-                                bgColor: legacyClip.bgColor,
                                 textAlign: legacyClip.textAlign,
                                 position: legacyClip.position,
                                 style: legacyClip.style,
@@ -998,6 +998,8 @@ export class TimelineStateManager {
                                 filter: legacyClip.filter,
                                 filterIntensity: legacyClip.filterIntensity,
                                 transition: legacyClip.transition,
+                                // Virtual multicam crop metadata
+                                virtualCam: legacyClip.virtualCam,
                             }
                         }
                     });
