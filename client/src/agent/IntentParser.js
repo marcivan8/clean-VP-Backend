@@ -387,10 +387,40 @@ export class IntentParser {
             return { intent: 'edit', operation: 'remove_filler_words', parameters: {}, confidence: 'HIGH', missingParameters: [] };
         }
 
-        // ── Compound: "clean AND dynamic" — run both ops in one plan ──────────
-        // Detect presence of both a cleaning intent and a dynamic/zoom-rhythm intent.
-        const hasCleanToken  = /\b(clean|remove\s+silence|filler)\b/.test(lower);
-        const hasDynamicToken = /\b(dynamic|zoom\s*rhythm|multi[\s-]?cam(era)?|multicam|make\s+it\s+(more\s+)?engaging)\b/.test(lower);
+        // ── Virtual multicam — MUST be checked before the compound clean+dynamic
+        // block below, because "multicam" appears in the hasDynamicToken regex
+        // and would otherwise hijack "clean + virtual multicam" → compound_clean_dynamic.
+        // ─────────────────────────────────────────────────────────────────────────
+        const hasVirtualMulticamToken = matches('virtualMulticam');
+        const hasCleanToken = /\b(clean|remove\s+silence|filler)\b/.test(lower);
+
+        // "clean the clips and add a virtual multicam feel" → silence_removal → virtual_multicam
+        if (hasCleanToken && hasVirtualMulticamToken) {
+            return {
+                intent: 'edit',
+                operation: 'compound_clean_virtual_multicam',
+                parameters: {},
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+
+        // Pure virtual multicam (no clean prefix)
+        if (hasVirtualMulticamToken) {
+            return {
+                intent: 'edit',
+                operation: 'virtual_multicam',
+                parameters: {},
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+
+        // ── Compound: "clean AND dynamic" (rhythm zoom) ───────────────────────
+        // Virtual multicam already handled above — this only fires for generic
+        // "multicam feel" / "dynamic" phrases, not interview close-up angles.
+        const hasDynamicToken = /\b(dynamic|zoom\s*rhythm|make\s+it\s+(more\s+)?engaging)\b/.test(lower) ||
+            (!hasVirtualMulticamToken && /\b(multi[\s-]?cam(era)?|multicam)\b/.test(lower));
         if (hasCleanToken && hasDynamicToken) {
             return {
                 intent: 'edit',
@@ -403,10 +433,6 @@ export class IntentParser {
 
         // ── Rhythm zoom / multi-camera feel (unambiguous dynamic commands) ────
         if (matches('rhythmZoom')) {
-            // If the timeline has only 1 clip, rhythm_zoom would fail immediately
-            // because it needs segments to create camera switches between.
-            // Auto-upgrade to compound_clean_dynamic (silence_removal → rhythm_zoom)
-            // so "make it more dynamic" works in one shot without a two-step process.
             const { tracks } = useTimelineStore.getState();
             const clipCount = (tracks ?? []).flatMap(t => t.clips ?? []).length;
             const operation = clipCount < 2 ? 'compound_clean_dynamic' : 'rhythm_zoom';
@@ -429,17 +455,6 @@ export class IntentParser {
                     actions: ['silence_removal', 'remove_filler_words'],
                     reason: 'Generic "clean" command — removing silences and filler words',
                 },
-                confidence: 'HIGH',
-                missingParameters: []
-            };
-        }
-
-        // ── Virtual multicam — interview close-shot angles ───────────────────
-        if (matches('virtualMulticam')) {
-            return {
-                intent: 'edit',
-                operation: 'virtual_multicam',
-                parameters: {},
                 confidence: 'HIGH',
                 missingParameters: []
             };
@@ -591,18 +606,37 @@ export class IntentParser {
             });
         }
 
-        // ── Virtual multicam — interview close-shot angles ────────────────────
-        if (matches('virtualMulticam')) {
-            return {
-                intent: 'edit',
-                operation: 'virtual_multicam',
-                parameters: {},
-                targets: [],
-                constraints: {},
-                confidence: 'HIGH',
-                missingParameters: [],
-                needs_clarification: false,
-            };
+        // ── Virtual multicam — check BEFORE compound_clean_dynamic to avoid
+        // "multicam" token hijacking "clean + virtual multicam" prompts.
+        {
+            const _hasVMToken = matches('virtualMulticam');
+            const _hasClean   = lower.includes('clean') || lower.includes('remove silence');
+
+            if (_hasClean && _hasVMToken) {
+                return {
+                    intent: 'edit',
+                    operation: 'compound_clean_virtual_multicam',
+                    parameters: {},
+                    targets: [],
+                    constraints: {},
+                    confidence: 'HIGH',
+                    missingParameters: [],
+                    needs_clarification: false,
+                };
+            }
+
+            if (_hasVMToken) {
+                return {
+                    intent: 'edit',
+                    operation: 'virtual_multicam',
+                    parameters: {},
+                    targets: [],
+                    constraints: {},
+                    confidence: 'HIGH',
+                    missingParameters: [],
+                    needs_clarification: false,
+                };
+            }
         }
 
         // ── Organize / arrange clips (add to timeline + ML semantic reorder) ─────
@@ -636,11 +670,13 @@ export class IntentParser {
             };
         }
 
-        // ── Compound clean + dynamic ───────────────────────────────────────────
+        // ── Compound clean + dynamic (rhythm zoom) ────────────────────────────
+        // Virtual multicam already handled above — exclude its tokens here.
         {
             const hasClean   = lower.includes('clean') || lower.includes('remove silence');
             const hasDynamic = lower.includes('dynamic') || lower.includes('zoom rhythm')
-                            || lower.includes('multi-camera') || lower.includes('multicam');
+                            || (lower.includes('multi-camera') && !matches('virtualMulticam'))
+                            || (lower.includes('multicam') && !matches('virtualMulticam'));
             if (hasClean && hasDynamic) {
                 return {
                     intent: 'edit',
