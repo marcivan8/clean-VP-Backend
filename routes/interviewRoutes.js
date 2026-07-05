@@ -26,10 +26,148 @@ const express        = require('express');
 const router         = express.Router();
 const path           = require('path');
 const fs             = require('fs');
+const { execSync }   = require('child_process');
 const { authenticateUser, optionalAuth } = require('../middleware/auth');
 const { aiGate }     = require('../middleware/usageGate');
 const { audioQueue } = require('../queue/queues');
 const storageConfig  = require('../config/storage');
+
+// ── Host-side detection helpers ───────────────────────────────────────────────
+
+/**
+ * Find the longest consecutive speaking turn for a given speaker.
+ * A turn ends when another speaker's word appears within 1s.
+ */
+function findLongestTurn(words, targetSpeaker) {
+    const sorted = [...words].sort((a, b) => a.start - b.start);
+    let best = null;
+    let runStart = null;
+    let runEnd   = null;
+
+    for (const w of sorted) {
+        if (w.speaker === targetSpeaker) {
+            if (runStart === null) runStart = w.start;
+            runEnd = w.end;
+        } else if (w.speaker && runStart !== null) {
+            // Another speaker intervened — close this run
+            const dur = runEnd - runStart;
+            if (!best || dur > (best.end - best.start)) {
+                best = { start: runStart, end: runEnd, speaker: targetSpeaker };
+            }
+            runStart = null;
+            runEnd   = null;
+        }
+    }
+    if (runStart !== null) {
+        const dur = runEnd - runStart;
+        if (!best || dur > (best.end - best.start)) {
+            best = { start: runStart, end: runEnd, speaker: targetSpeaker };
+        }
+    }
+    return best; // { start, end, speaker } or null
+}
+
+/**
+ * Extract one video frame at `timestampSec` from a GCS file or local file.
+ * Returns a base64 JPEG string, or null on failure.
+ */
+async function extractVideoFrame(gcsPath, timestampSec) {
+    try {
+        let inputArg;
+
+        if (storageConfig.bucket && !storageConfig.useLocalStorage) {
+            // GCS: generate a short-lived signed URL
+            const [signedUrl] = await storageConfig.bucket.file(gcsPath).getSignedUrl({
+                version: 'v4',
+                action:  'read',
+                expires: Date.now() + 5 * 60 * 1000,
+            });
+            inputArg = signedUrl;
+        } else {
+            // Local fallback
+            const uploadsDir = path.resolve(__dirname, '../uploads');
+            const localPath  = path.resolve(uploadsDir, gcsPath.replace(/^raw\//, ''));
+            if (!fs.existsSync(localPath)) return null;
+            inputArg = localPath;
+        }
+
+        // -ss before -i = fast seek; -vframes 1 = single frame; pipe: = stdout
+        const cmd = `ffmpeg -ss ${timestampSec.toFixed(2)} -i "${inputArg}" -vframes 1 -f image2pipe -vcodec mjpeg -q:v 5 pipe:1`;
+        const buf = execSync(cmd, {
+            maxBuffer: 8 * 1024 * 1024,
+            timeout:   20000,
+            stdio:     ['pipe', 'pipe', 'ignore'],
+        });
+        return buf.toString('base64');
+    } catch (err) {
+        console.warn(`[virtual-multicam] extractVideoFrame @${timestampSec.toFixed(1)}s failed:`, err.message);
+        return null;
+    }
+}
+
+/**
+ * Call diarize-service /detect-faces and return face array.
+ */
+async function detectFacesInFrame(base64Frame, diarizeServiceUrl) {
+    const res = await fetch(`${diarizeServiceUrl}/detect-faces`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ frames: [base64Frame] }),
+        signal:  AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.faces || [];
+}
+
+/**
+ * Determine which side (left/right) each speaker is on using:
+ *  1. Find each speaker's longest solo turn from diarization
+ *  2. Extract a frame at the midpoint of that turn
+ *  3. Run face detection — the LARGER face (by area w×h) is more frontal
+ *     (speaking person faces the camera more directly)
+ *  4. The largest face's side = that speaker's side
+ *
+ * Returns { [speaker]: 'left'|'right' } or null on failure.
+ */
+async function detectSpeakerSides(words, speakers, filename, diarizeServiceUrl) {
+    if (!diarizeServiceUrl || !filename) return null;
+    if (speakers.length < 2) return null;
+
+    try {
+        const results = {};
+
+        for (const speaker of speakers) {
+            const turn = findLongestTurn(words, speaker);
+            if (!turn || (turn.end - turn.start) < 1.5) {
+                console.warn(`[virtual-multicam] No long turn found for ${speaker}`);
+                continue;
+            }
+
+            const midpoint   = (turn.start + turn.end) / 2;
+            const frameB64   = await extractVideoFrame(filename, midpoint);
+            if (!frameB64) continue;
+
+            const faces = await detectFacesInFrame(frameB64, diarizeServiceUrl);
+            if (!faces.length) continue;
+
+            // Largest face by bounding-box area = more frontal = active speaker
+            const largestFace = faces.sort((a, b) => (b.w * b.h) - (a.w * a.h))[0];
+            results[speaker]  = largestFace.side; // 'left' or 'right'
+
+            console.log(
+                `[virtual-multicam] ${speaker}: longest turn ${turn.start.toFixed(1)}s–${turn.end.toFixed(1)}s, ` +
+                `frame at ${midpoint.toFixed(1)}s, ${faces.length} face(s), ` +
+                `largest face → ${largestFace.side} (area=${(largestFace.w * largestFace.h).toFixed(4)})`
+            );
+        }
+
+        return Object.keys(results).length === speakers.length ? results : null;
+    } catch (err) {
+        console.warn('[virtual-multicam] detectSpeakerSides failed:', err.message);
+        return null;
+    }
+}
 
 // Non-production: skip hard auth so staging/local works without valid Supabase JWTs.
 // Route handlers already fall back to 'dev-user' when req.user is absent.
@@ -876,7 +1014,13 @@ Ordering: hook first, demos in middle, outro last, B-roll around spoken content 
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
     try {
-        const { words = [], speakers = [], frames = [], hostSide: forcedHostSide } = req.body;
+        const {
+            words    = [],
+            speakers = [],
+            frames   = [],          // legacy: client-sent base64 frames (kept for compat)
+            filename = null,        // GCS path (e.g. "raw/1234-video.mp4") for server-side frame extraction
+            hostSide: forcedHostSide,
+        } = req.body;
 
         if (!words.length) {
             return res.status(400).json({ error: 'words array is required. Run speaker diarization first.' });
@@ -885,40 +1029,58 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
             return res.status(400).json({ error: 'speakers array is required.' });
         }
 
-        // ── 1. Determine host side via face detection (best-effort) ─────────
-        // Host (SPEAKER_00) is the one who stays on a consistent side.
-        // We sample 3 frames from the beginning of the video where the host
-        // is most likely to be speaking alone.
-        let hostSide   = forcedHostSide || null;
+        // ── 1. Determine host side ───────────────────────────────────────────
+        // Priority:
+        //  a. forcedHostSide from caller (explicit override)
+        //  b. detectSpeakerSides(): uses diarization longest turns + server-side
+        //     frame extraction + MediaPipe face detection to map each speaker to
+        //     the side where their face appears largest (most frontal = speaking)
+        //  c. Legacy: client-sent frames[] + simple leftmost-face heuristic
+        //  d. Default: 'left'
+
+        let hostSide     = forcedHostSide || null;
         let faceDetected = false;
 
         const diarizeServiceUrl = process.env.DIARIZE_SERVICE_URL;
 
+        if (!hostSide && filename && diarizeServiceUrl) {
+            // ── Path b: smart detection from diarization + server-side frames ──
+            const speakerSides = await detectSpeakerSides(words, speakers, filename, diarizeServiceUrl);
+            if (speakerSides) {
+                // SPEAKER_00 is the host by convention (first speaker assigned by AssemblyAI)
+                const host = speakers[0]; // SPEAKER_00
+                if (speakerSides[host]) {
+                    hostSide     = speakerSides[host];
+                    faceDetected = true;
+                    console.log(`[virtual-multicam] Host (${host}) detected on ${hostSide} side via diarization+frames`);
+                }
+            }
+        }
+
         if (!hostSide && diarizeServiceUrl && frames.length > 0) {
+            // ── Path c: legacy client-sent frames ──────────────────────────────
             try {
                 const fdRes = await fetch(`${diarizeServiceUrl}/detect-faces`, {
-                    method: 'POST',
+                    method:  'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ frames: frames.slice(0, 3) }),
-                    signal: AbortSignal.timeout(8000),
+                    body:    JSON.stringify({ frames: frames.slice(0, 3) }),
+                    signal:  AbortSignal.timeout(8000),
                 });
                 if (fdRes.ok) {
                     const fdData = await fdRes.json();
                     if (fdData.faces && fdData.faces.length > 0) {
-                        // With 2 faces: leftmost is SPEAKER_00 (host) if cx < 0.5
-                        // With 1 face: assume it's the host → take that side
                         const sortedByCx = [...fdData.faces].sort((a, b) => a.cx - b.cx);
-                        hostSide = sortedByCx[0].side; // leftmost face is host by default
+                        hostSide     = sortedByCx[0].side;
                         faceDetected = true;
-                        console.log(`[virtual-multicam] Face detection: host on ${hostSide} side`);
+                        console.log(`[virtual-multicam] Face detection (legacy frames): host on ${hostSide} side`);
                     }
                 }
             } catch (fdErr) {
-                console.warn(`[virtual-multicam] Face detection failed (${fdErr.message}) — using default`);
+                console.warn(`[virtual-multicam] Legacy face detection failed (${fdErr.message})`);
             }
         }
 
-        // Default: host on the left (most common interview setup)
+        // ── Path d: default ────────────────────────────────────────────────────
         if (!hostSide) hostSide = 'left';
 
         // ── 2. Build crop regions for each angle ────────────────────────────

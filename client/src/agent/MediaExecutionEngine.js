@@ -996,12 +996,17 @@ export class MediaExecutionEngine {
                     `${vmAllClips.length} clips across ${vmVideoTracks.length} track(s) → POST /api/interview/virtual-multicam`
                 );
 
+                // Send the GCS server-side path so the backend can extract frames
+                // for host-side detection via diarization + MediaPipe face analysis.
+                const vmUploadedPath = vmStore.uploadedFilePath || null;
+
                 const vmRes  = await authFetch('/api/interview/virtual-multicam', {
                     method: 'POST',
                     body:   JSON.stringify({
                         words:    vmWords,
                         speakers: vmSpeakers,
                         frames:   [],
+                        filename: vmUploadedPath,   // GCS path for server-side frame extraction
                     }),
                 });
                 const vmData = await vmRes.json();
