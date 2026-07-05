@@ -1081,98 +1081,125 @@ export class MediaExecutionEngine {
                     return { action, success: false, message: 'No segments returned from virtual-multicam analysis.' };
                 }
 
-                // ── Assign virtualCam metadata to each clip ────────────────────
+                // ── Build new track structure: split long clips + tag each piece ─────
                 //
-                // CRITICAL: diarization timestamps are SOURCE VIDEO time (original file).
-                // After silence removal, clip.start = TIMELINE position (gaps removed),
-                // clip.offset = SOURCE position (where in original video this starts).
-                // We MUST compare against clip.offset, not clip.start.
+                // Problem with "greatest overlap" approach on raw (un-split) files:
+                //   A whole 5-min clip overlaps with ALL ~200 segments; the one with
+                //   the biggest single duration "wins" → all clips get the same angle.
                 //
-                // PERFORMANCE: Do NOT use updateClip() in a loop — it calls _saveHistory()
-                // and schedules a seek(currentTime) via setTimeout for EVERY clip.
-                // For 100+ clips that means 100+ full-state snapshots + 100+ concurrent
-                // seek calls at ~10ms, which freezes the player and races React renders.
+                // Fix: when a clip spans multiple diarization segments, SPLIT it at
+                // segment boundaries and tag each piece individually. This produces
+                // the same 100–200 short tagged clips that we get after silence
+                // removal, but works even when the files haven't been pre-chopped.
                 //
-                // Instead: dispatch directly to timelineManager (in-memory, no React),
-                // then do ONE history save + ONE setState after the full loop.
+                // This path also handles the pre-chopped case (1 segment per clip)
+                // transparently — the split branch is never entered.
                 const freshStore = useTimelineStore.getState();
-                const tm         = freshStore.manager; // timelineManager singleton
-                let wideCount = 0, hostCount = 0, guestCount = 0, skipped = 0;
+                const tm         = freshStore.manager;
+                let wideCount = 0, hostCount = 0, guestCount = 0;
 
-                // Save one history snapshot before the batch (allows a single Undo)
                 freshStore._saveHistory?.();
 
-                for (const clip of vmAllClips) {
-                    // Use source-video position (offset) — this matches diarization timestamps
-                    const srcStart = clip.offset ?? clip.sourceStart ?? clip.start ?? 0;
-                    const srcEnd   = srcStart + (clip.duration ?? 0);
+                const sortedSegs = [...segments].sort((a, b) => a.start - b.start);
 
-                    // Find the diarization segment with the greatest overlap
-                    let bestSeg     = null;
-                    let bestOverlap = 0;
-                    for (const seg of segments) {
-                        const oStart  = Math.max(seg.start, srcStart);
-                        const oEnd    = Math.min(seg.end,   srcEnd);
-                        const overlap = Math.max(0, oEnd - oStart);
-                        if (overlap > bestOverlap) {
-                            bestOverlap = overlap;
-                            bestSeg = seg;
+                const newTracks = freshStore.tracks.map(track => {
+                    if (track.type !== 'video') return track;
+
+                    const expandedClips = [];
+
+                    for (const clip of (track.clips ?? [])) {
+                        const srcStart = clip.offset ?? 0;
+                        const srcEnd   = srcStart + (clip.duration ?? 0);
+
+                        // Segments that overlap this clip's source range
+                        const overlapping = sortedSegs.filter(s => s.end > srcStart && s.start < srcEnd);
+
+                        if (overlapping.length === 0) {
+                            // No segment covers this clip — keep as-is
+                            expandedClips.push(clip);
+                            continue;
+                        }
+
+                        if (overlapping.length === 1) {
+                            // Single segment — tag in-place, no split needed
+                            const seg = overlapping[0];
+                            if (seg.angle === 'wide')             wideCount++;
+                            else if (seg.angle === 'close_host')  hostCount++;
+                            else if (seg.angle === 'close_guest') guestCount++;
+                            expandedClips.push({
+                                ...clip,
+                                virtualCam: {
+                                    angle:   seg.angle,
+                                    cropX:   seg.cropX,
+                                    cropY:   seg.cropY,
+                                    cropW:   seg.cropW,
+                                    cropH:   seg.cropH,
+                                    speaker: seg.speaker || null,
+                                },
+                            });
+                            continue;
+                        }
+
+                        // Multiple segments — split the clip at diarization boundaries
+                        for (const seg of overlapping) {
+                            const pSrcStart = Math.max(seg.start, srcStart);
+                            const pSrcEnd   = Math.min(seg.end,   srcEnd);
+                            const pDur      = pSrcEnd - pSrcStart;
+                            if (pDur < 0.05) continue; // skip hairline slivers
+
+                            if (seg.angle === 'wide')             wideCount++;
+                            else if (seg.angle === 'close_host')  hostCount++;
+                            else if (seg.angle === 'close_guest') guestCount++;
+
+                            expandedClips.push({
+                                ...clip,
+                                id:       `${clip.id}_vm${Math.round(pSrcStart * 10)}`,
+                                offset:   pSrcStart,
+                                duration: pDur,
+                                virtualCam: {
+                                    angle:   seg.angle,
+                                    cropX:   seg.cropX,
+                                    cropY:   seg.cropY,
+                                    cropW:   seg.cropW,
+                                    cropH:   seg.cropH,
+                                    speaker: seg.speaker || null,
+                                },
+                            });
                         }
                     }
 
-                    if (!bestSeg) {
-                        // Fallback: assign the segment whose midpoint is closest to clip midpoint
-                        const clipMid = srcStart + (clip.duration ?? 0) / 2;
-                        let minDist = Infinity;
-                        for (const seg of segments) {
-                            const segMid = (seg.start + seg.end) / 2;
-                            const dist   = Math.abs(segMid - clipMid);
-                            if (dist < minDist) { minDist = dist; bestSeg = seg; }
-                        }
-                    }
-
-                    if (!bestSeg) { skipped++; continue; }
-
-                    const virtualCam = {
-                        angle:   bestSeg.angle,
-                        cropX:   bestSeg.cropX,
-                        cropY:   bestSeg.cropY,
-                        cropW:   bestSeg.cropW,
-                        cropH:   bestSeg.cropH,
-                        speaker: bestSeg.speaker || null,
+                    // Re-layout: pack all pieces at consecutive timeline positions
+                    let cursor = 0;
+                    return {
+                        ...track,
+                        clips: expandedClips.map(c => {
+                            const laid = { ...c, start: cursor, end: cursor + c.duration };
+                            cursor += c.duration;
+                            return laid;
+                        }),
                     };
+                });
 
-                    // Resolve placement → underlying clip entity ID, then patch directly.
-                    // clip.id from toLegacyTracks() == placement.id in the entity store.
-                    const placement = tm.getState().entities.placements[clip.id];
-                    if (!placement) {
-                        console.warn(`[virtual_multicam] Placement not found for clip ${clip.id} — skipping`);
-                        skipped++;
-                        continue;
-                    }
-                    tm.dispatch(TimelineActions.updateClip(placement.clipId, { virtualCam }));
-
-                    if (bestSeg.angle === 'wide')             wideCount++;
-                    else if (bestSeg.angle === 'close_host')  hostCount++;
-                    else if (bestSeg.angle === 'close_guest') guestCount++;
-                }
-
-                // ONE React state sync after all entity updates — no per-clip re-renders
+                // Rebuild timeline entity graph from new track structure and sync to React
+                tm.fromLegacyTracks(newTracks);
                 useTimelineStore.setState({ tracks: tm.toLegacyTracks() });
 
+                const totalClipsAfter = (freshStore.tracks ?? [])
+                    .filter(t => t.type === 'video')
+                    .reduce((n, t) => n + (t.clips?.length ?? 0), 0);
                 const totalTagged = wideCount + hostCount + guestCount;
                 console.log(
-                    `[virtual_multicam] Applied to ${totalTagged}/${vmAllClips.length} clips: ` +
+                    `[virtual_multicam] Applied to ${totalTagged} clips (split from ${vmAllClips.length}): ` +
                     `${wideCount}W / ${hostCount}H / ${guestCount}G | ` +
-                    `host=${host} on ${hostSide} | skipped=${skipped}`
+                    `host=${host} on ${hostSide}`
                 );
 
                 return {
                     action,
                     success: true,
                     message:
-                        `Virtual multicam applied to ${totalTagged} clips — ` +
-                        `${wideCount} wide, ${hostCount} close host, ${guestCount} close guest.\n\n` +
+                        `Virtual multicam applied — ${totalTagged} angle-tagged segments ` +
+                        `(${wideCount} wide, ${hostCount} close host, ${guestCount} close guest).\n\n` +
                         `Host (${host}) is on the ${hostSide} side. ` +
                         `Angles switch in real-time as you scrub through the timeline.`,
                 };
