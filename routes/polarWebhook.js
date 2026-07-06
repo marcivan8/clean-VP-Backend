@@ -32,12 +32,28 @@ const PRODUCT_TO_PLAN = Object.fromEntries([
 
 async function setPlan(customerEmail, plan) {
     if (!customerEmail) return;
+
+    // profiles is keyed by UUID (id), not email.
+    // Resolve the user's UUID via the helper function in migrations/004_billing_helper.sql.
+    const { data: userId, error: lookupErr } = await supabaseAdmin
+        .rpc('get_user_id_by_email', { email_param: customerEmail });
+
+    if (lookupErr) {
+        console.error(`[PolarWebhook] Could not look up user for ${customerEmail}:`, lookupErr.message);
+        return;
+    }
+    if (!userId) {
+        console.warn(`[PolarWebhook] No Supabase user found for email=${customerEmail} — skipping plan update`);
+        return;
+    }
+
     const { error } = await supabaseAdmin
         .from('profiles')
         .update({ plan })
-        .eq('email', customerEmail);
+        .eq('id', userId);
+
     if (error) console.error(`[PolarWebhook] Failed to set plan=${plan} for ${customerEmail}:`, error.message);
-    else console.log(`[PolarWebhook] ${customerEmail} → plan=${plan}`);
+    else console.log(`[PolarWebhook] ${customerEmail} (id=${userId}) → plan=${plan}`);
 }
 
 router.post(
