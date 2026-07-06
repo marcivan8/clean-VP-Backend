@@ -7,7 +7,7 @@
  */
 
 export const PLAN_LIMITS = {
-    free:    1,
+    free:    2,
     creator: 10,
     pro:     Infinity,
 };
