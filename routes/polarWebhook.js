@@ -19,6 +19,27 @@ const { authenticateUser } = require('../middleware/auth');
 
 const polar = new Polar({ accessToken: process.env.POLAR_ACCESS_TOKEN });
 
+const SUPABASE_URL  = process.env.SUPABASE_URL;
+const SUPABASE_ANON = process.env.SUPABASE_ANON_KEY;
+const PUBLIC_URL    = process.env.PUBLIC_URL || 'https://www.viralpilot.fr';
+
+// Fire-and-forget call to the send-email edge function.
+async function sendEmail(type, to, data) {
+    if (!SUPABASE_URL || !SUPABASE_ANON) return;
+    try {
+        await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+            method:  'POST',
+            headers: {
+                'Content-Type':  'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON}`,
+            },
+            body: JSON.stringify({ type, to, data }),
+        });
+    } catch (err) {
+        console.warn('[PolarWebhook] sendEmail failed (non-blocking):', err.message);
+    }
+}
+
 const PLAN_TO_PRODUCT = {
     creator: process.env.POLAR_PRODUCT_CREATOR,
     pro:     process.env.POLAR_PRODUCT_PRO,
@@ -52,8 +73,34 @@ async function setPlan(customerEmail, plan) {
         .update({ plan })
         .eq('id', userId);
 
-    if (error) console.error(`[PolarWebhook] Failed to set plan=${plan} for ${customerEmail}:`, error.message);
-    else console.log(`[PolarWebhook] ${customerEmail} (id=${userId}) → plan=${plan}`);
+    if (error) {
+        console.error(`[PolarWebhook] Failed to set plan=${plan} for ${customerEmail}:`, error.message);
+        return;
+    }
+
+    console.log(`[PolarWebhook] ${customerEmail} (id=${userId}) → plan=${plan}`);
+
+    // Send plan confirmation email (non-blocking)
+    if (plan !== 'free') {
+        const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+        const firstName = (authUser?.user?.user_metadata?.full_name ?? customerEmail).split(' ')[0];
+
+        const renewalDate = new Date();
+        renewalDate.setMonth(renewalDate.getMonth() + 1);
+        const renewalStr = renewalDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
+        const planPriceMap = { creator: '€15', pro: '€35' };
+
+        await sendEmail('plan', customerEmail, {
+            first_name:      firstName,
+            plan_name:       plan.charAt(0).toUpperCase() + plan.slice(1),
+            renewal_date:    renewalStr,
+            plan_price:      planPriceMap[plan] ?? '€15',
+            cta_url:         `${PUBLIC_URL}/dashboard`,
+            account_url:     `${PUBLIC_URL}/account`,
+            unsubscribe_url: `${PUBLIC_URL}/unsubscribe?uid=${userId}`,
+        });
+    }
 }
 
 router.post(
