@@ -1,5 +1,6 @@
 import React from 'react';
 import { useDroppable } from '@dnd-kit/core';
+import { useShallow } from 'zustand/react/shallow';
 import Clip from './Clip';
 import { Video, Music, Type, Volume2, VolumeX, Headphones } from 'lucide-react';
 import classNames from 'classnames';
@@ -14,8 +15,11 @@ const TrackIcon = ({ type }) => {
     }
 };
 
-const Track = ({ track }) => {
-    const { zoomLevel, duration } = useTimelineStore();
+const Track = React.memo(({ track }) => {
+    // Selector — only re-render when zoomLevel or duration change, not on every clip update
+    const { zoomLevel, duration } = useTimelineStore(
+        useShallow(state => ({ zoomLevel: state.zoomLevel, duration: state.duration }))
+    );
     const { setNodeRef, isOver } = useDroppable({
         id: track.id,
         data: { trackId: track.id }
@@ -77,7 +81,7 @@ const Track = ({ track }) => {
             <div
                 ref={setNodeRef}
                 className={classNames(
-                    "flex-1 relative h-20 border-b border-white/5 transition-colors",
+                    "flex-1 relative h-10 border-b border-white/5 transition-colors",
                     isOver ? "bg-white/5" : "bg-black/20 group-hover:bg-black/30"
                 )}
                 style={{ width: `${duration * zoomLevel}px`, minWidth: '100%' }}
@@ -91,6 +95,7 @@ const Track = ({ track }) => {
             </div>
         </div>
     );
-};
+});
 
+Track.displayName = 'Track';
 export default Track;
