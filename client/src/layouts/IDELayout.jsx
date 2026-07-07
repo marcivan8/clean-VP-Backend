@@ -23,6 +23,7 @@ import ExportModal from '../components/ExportModal';
 import { Type } from 'lucide-react';
 import { ClarificationDialog } from '../components/ClarificationDialog';
 import { ApprovalDialog } from '../components/ApprovalDialog';
+import { trackEvent } from '../utils/trackEvent';
 import { probeMedia } from '../utils/mediaProbe';
 import ProxyService from '../services/proxyService';
 import useAIStore from '../store/useAIStore';
@@ -674,6 +675,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 useTimelineStore.getState().setUploadedFile({ name: rawFilePath });
                                 useTimelineStore.getState().setUploadedFilePath(rawFilePath);
                                 console.log(`[IDELayout] uploadedFile path set: ${rawFilePath}`);
+                                trackEvent('video_uploaded');
                             } else {
                                 console.warn('[IDELayout] Proxy job result missing proxyPath and originalPath — AI API calls will not work');
                             }
@@ -859,6 +861,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
     const handleExportConfirm = async (settings) => {
         const { tracks, duration, assets } = useTimelineStore.getState();
+        trackEvent('video_exported');
         setIsExporting(true);
         setExportResult(null);
         setExportError(null);
