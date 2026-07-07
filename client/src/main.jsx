@@ -2,6 +2,10 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import * as Sentry from '@sentry/react'
 import './index.css'
+// Must be imported before App so i18next is initialised before any
+// component calls useTranslation(). Without this the landing page renders
+// blank because t() returns undefined for every key.
+import './i18n.js'
 import App from './App.jsx'
 
 // DSN is public by design — safe to hardcode as fallback.
