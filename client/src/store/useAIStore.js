@@ -5,18 +5,16 @@ const useAIStore = create((set) => ({
     logs: [],
     suggestions: [],
     contextualSuggestion: null,
-    quickChips: ['Remove silences', 'Clean up speech', 'Trim the intro', 'Export for YouTube'],
-
-    // Tracks the last AI job's history boundaries so CMD+Z can undo the
-    // entire batch atomically: { before: N, after: M }
-    lastAIJob: null,
+    quickChips: ['Make it more dynamic', 'Clean it up', 'Add captions', 'Export for YouTube'],
 
     // Actions
-    setIsAnalyzing: (status) => set({ isAnalyzing: status }),
+    setIsAnalyzing: (status) => set((state) => ({
+        isAnalyzing: status,
+        // Step logs are transient progress indicators — clear them when the job
+        // finishes so the "Verifying edits…" spinner doesn't stay on screen forever.
+        logs: status ? state.logs : state.logs.filter(l => l.type !== 'step'),
+    })),
     setContextualSuggestion: (suggestion) => set({ contextualSuggestion: suggestion }),
-
-    setLastAIJob: (before, after) => set({ lastAIJob: { before, after } }),
-    clearLastAIJob: () => set({ lastAIJob: null }),
 
     addLog: (log) => set((state) => ({
         logs: [...state.logs, log]
@@ -26,7 +24,7 @@ const useAIStore = create((set) => ({
         suggestions: [...state.suggestions, suggestion]
     })),
 
-    clearSession: () => set({ logs: [], suggestions: [], isAnalyzing: false, contextualSuggestion: null, lastAIJob: null }),
+    clearSession: () => set({ logs: [], suggestions: [], isAnalyzing: false, contextualSuggestion: null }),
 
     removeSuggestion: (id) => set((state) => ({
         suggestions: state.suggestions.filter(s => s.id !== id)
