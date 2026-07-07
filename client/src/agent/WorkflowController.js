@@ -4,6 +4,7 @@ import useAIStore from '../store/useAIStore.js';
 import useJobStore, { JOB_STATES, TERMINAL_STATES } from '../store/useJobStore.js';
 import { EventBus, EVENT_TYPES } from './EventBus.js';
 import useTimelineStore from '../store/useTimelineStore.js';
+import { trackEvent } from '../utils/trackEvent.js';
 
 /**
  * WorkflowController V2
@@ -102,6 +103,11 @@ const workflowMachine = createMachine({
                             const result = event.output;
 
                             if (result.success) {
+                                // Track every successful AI edit (not chat replies)
+                                if (result.operation && result.operation !== 'chat') {
+                                    trackEvent(`ai_edit:${result.operation}`);
+                                }
+
                                 if (result.operation === 'chat') {
                                     useAIStore.getState().addLog({
                                         id: 'chat-' + Date.now(),
@@ -110,13 +116,7 @@ const workflowMachine = createMachine({
                                         timestamp: new Date().toLocaleTimeString()
                                     });
                                 } else {
-                                    const afterLen = useTimelineStore.getState().past.length;
-                                    const stepsApplied = afterLen - context.initialHistoryLen;
-                                    if (stepsApplied > 0) {
-                                        // Expose history boundaries so CMD+Z can undo the
-                                        // entire AI batch atomically (not one step at a time).
-                                        useAIStore.getState().setLastAIJob(context.initialHistoryLen, afterLen);
-                                    }
+                                    const stepsApplied = useTimelineStore.getState().past.length - context.initialHistoryLen;
                                     useAIStore.getState().addLog({
                                         id: 'task-complete-' + Date.now(),
                                         type: 'task_complete',
@@ -260,11 +260,7 @@ const workflowMachine = createMachine({
                             useAIStore.getState().setIsAnalyzing(false);
 
                             if (event.output.success) {
-                                const afterLen = useTimelineStore.getState().past.length;
-                                const stepsApplied = afterLen - context.initialHistoryLen;
-                                if (stepsApplied > 0) {
-                                    useAIStore.getState().setLastAIJob(context.initialHistoryLen, afterLen);
-                                }
+                                const stepsApplied = useTimelineStore.getState().past.length - context.initialHistoryLen;
                                 useAIStore.getState().addLog({
                                     id: 'task-complete-' + Date.now(),
                                     type: 'task_complete',
