@@ -1,8 +1,12 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../store/useTimelineStore';
 
 const SettingsPanel = () => {
-    const { aspectRatio, setAspectRatio } = useTimelineStore();
+    const { aspectRatio, setAspectRatio } = useTimelineStore(useShallow(state => ({
+        aspectRatio:    state.aspectRatio,
+        setAspectRatio: state.setAspectRatio,
+    })));
 
     return (
         <div className="space-y-6">

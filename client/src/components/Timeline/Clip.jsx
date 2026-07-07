@@ -1,13 +1,24 @@
 import React from 'react';
 import { useDraggable, useDroppable, useDndContext } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
+import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../../store/useTimelineStore';
 import classNames from 'classnames';
 import Waveform from './Waveform';
 import ClipContextMenu from './ClipContextMenu';
 
 const Clip = ({ clip, trackId }) => {
-    const { zoomLevel, removeClip, activeClipId, selectedClipIds, setActiveClip, toggleClipSelection, waveforms, assets, addWaveform } = useTimelineStore();
+    const { zoomLevel, removeClip, activeClipId, selectedClipIds, setActiveClip, toggleClipSelection, waveforms, assets, addWaveform } = useTimelineStore(useShallow(state => ({
+        zoomLevel:            state.zoomLevel,
+        removeClip:           state.removeClip,
+        activeClipId:         state.activeClipId,
+        selectedClipIds:      state.selectedClipIds,
+        setActiveClip:        state.setActiveClip,
+        toggleClipSelection:  state.toggleClipSelection,
+        waveforms:            state.waveforms,
+        assets:               state.assets,
+        addWaveform:          state.addWaveform,
+    })));
     const isActive = activeClipId === clip.id;
     const isSelected = selectedClipIds && selectedClipIds.includes(clip.id);
     const [ctxMenu, setCtxMenu] = React.useState(null); // null | { x, y }
@@ -102,43 +113,53 @@ const Clip = ({ clip, trackId }) => {
         const startStart = clip.start;
         const startOffset = clip.offset || 0;
 
+        let rafId = null;
+        let lastUpdates = null;
+
         const onMove = (moveEvent) => {
-            const currentX = moveEvent.type.startsWith('touch') ? moveEvent.touches[0].clientX : moveEvent.clientX;
-            const deltaX = currentX - startX;
-            const deltaSeconds = deltaX / zoomLevel;
+            // Capture clientX immediately — touch arrays may be recycled before RAF fires
+            const clientX = moveEvent.type.startsWith('touch') ? moveEvent.touches[0].clientX : moveEvent.clientX;
+            if (rafId !== null) return; // already a frame queued — skip this event
+            rafId = requestAnimationFrame(() => {
+                rafId = null;
+                const deltaSeconds = (clientX - startX) / zoomLevel;
 
-            // Neighbour clips on this track — used to clamp so we never overlap
-            const trackState = useTimelineStore.getState().tracks.find(t => t.id === trackId);
-            const others = (trackState?.clips || []).filter(c => c.id !== clip.id);
+                // Neighbour clips on this track — used to clamp so we never overlap
+                const trackState = useTimelineStore.getState().tracks.find(t => t.id === trackId);
+                const others = (trackState?.clips || []).filter(c => c.id !== clip.id);
 
-            let updates = {};
+                let updates = {};
 
-            if (direction === 'right') {
-                // Clamp new end to the start of the next clip on this track
-                const nextClip = others
-                    .filter(c => c.start >= startStart)
-                    .sort((a, b) => a.start - b.start)[0];
-                const maxEnd = nextClip ? nextClip.start : Infinity;
-                const newDuration = Math.max(0.1, Math.min(startDuration + deltaSeconds, maxEnd - startStart));
-                updates = { duration: newDuration };
-            } else if (direction === 'left') {
-                // Clamp new start to the end of the previous clip on this track
-                const prevClip = others
-                    .filter(c => c.start + c.duration <= startStart + startDuration)
-                    .sort((a, b) => (b.start + b.duration) - (a.start + a.duration))[0];
-                const minStart = prevClip ? prevClip.start + prevClip.duration : 0;
-                const maxDelta = startDuration - 0.1;
-                const safeDelta = Math.max(Math.min(deltaSeconds, maxDelta), minStart - startStart);
-                updates = {
-                    start: startStart + safeDelta,
-                    duration: startDuration - safeDelta,
-                    offset: startOffset + safeDelta
-                };
-            }
-            useTimelineStore.getState().updateClip(trackId, clip.id, updates);
+                if (direction === 'right') {
+                    const nextClip = others
+                        .filter(c => c.start >= startStart)
+                        .sort((a, b) => a.start - b.start)[0];
+                    const maxEnd = nextClip ? nextClip.start : Infinity;
+                    const newDuration = Math.max(0.1, Math.min(startDuration + deltaSeconds, maxEnd - startStart));
+                    updates = { duration: newDuration };
+                } else if (direction === 'left') {
+                    const prevClip = others
+                        .filter(c => c.start + c.duration <= startStart + startDuration)
+                        .sort((a, b) => (b.start + b.duration) - (a.start + a.duration))[0];
+                    const minStart = prevClip ? prevClip.start + prevClip.duration : 0;
+                    const maxDelta = startDuration - 0.1;
+                    const safeDelta = Math.max(Math.min(deltaSeconds, maxDelta), minStart - startStart);
+                    updates = {
+                        start: startStart + safeDelta,
+                        duration: startDuration - safeDelta,
+                        offset: startOffset + safeDelta
+                    };
+                }
+                lastUpdates = updates;
+                // skipHistory: true — avoids deep-cloning the full timeline state on every frame
+                useTimelineStore.getState().updateClip(trackId, clip.id, updates, { skipHistory: true });
+            });
         };
 
         const onUp = () => {
+            if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+            // Commit final position to undo history exactly once
+            if (lastUpdates) useTimelineStore.getState().updateClip(trackId, clip.id, lastUpdates);
             if (isTouch) {
                 document.removeEventListener('touchmove', onMove);
                 document.removeEventListener('touchend', onUp);
@@ -162,19 +183,24 @@ const Clip = ({ clip, trackId }) => {
         const startX = e.clientX;
         const startDuration = clip.transition?.duration || 1.0;
 
+        let rafId = null;
+        let lastUpdates = null;
+
         const onMove = (moveEvent) => {
-            const deltaX = startX - moveEvent.clientX; // dragging left increases duration
-            const deltaSeconds = deltaX / zoomLevel;
-            
-            // clamped between 0.1s and clip.duration
-            const newDuration = Math.min(Math.max(0.1, startDuration + deltaSeconds), clip.duration);
-            
-            useTimelineStore.getState().updateClip(trackId, clip.id, {
-                transition: { ...clip.transition, duration: newDuration }
+            const clientX = moveEvent.clientX;
+            if (rafId !== null) return;
+            rafId = requestAnimationFrame(() => {
+                rafId = null;
+                const deltaSeconds = (startX - clientX) / zoomLevel;
+                const newDuration = Math.min(Math.max(0.1, startDuration + deltaSeconds), clip.duration);
+                lastUpdates = { transition: { ...clip.transition, duration: newDuration } };
+                useTimelineStore.getState().updateClip(trackId, clip.id, lastUpdates, { skipHistory: true });
             });
         };
 
         const onUp = () => {
+            if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+            if (lastUpdates) useTimelineStore.getState().updateClip(trackId, clip.id, lastUpdates);
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
         };
@@ -218,12 +244,6 @@ const Clip = ({ clip, trackId }) => {
                 setCtxMenu({ x: e.clientX, y: e.clientY });
             }}
         >
-            {/* Left Handle */}
-            <div
-                className="absolute left-0 top-0 bottom-0 w-2 cursor-w-resize hover:bg-white/20 z-20"
-                onPointerDown={(e) => handleResize(e, 'left')}
-            ></div>
-
             <div className="px-2 py-0.5 text-[10px] font-medium text-white truncate drop-shadow-md flex justify-between items-center bg-black/10 pointer-events-none sticky top-0 z-10">
                 <span className="pointer-events-auto">{clip.name}</span>
                 <button

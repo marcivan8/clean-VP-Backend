@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Sparkles, Brain, Check, X, ArrowRight, Activity, MessageSquare, Loader2, XCircle, Shield } from 'lucide-react';
 import useAIStore from '../../store/useAIStore';
+import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../../store/useTimelineStore';
 import useJobStore, { JOB_STATES, TERMINAL_STATES } from '../../store/useJobStore';
 import { analyzeFile } from '../../services/aiService';
@@ -12,13 +13,10 @@ import { workflowController } from '../../agent/WorkflowController.js';
 
 // --- Sub-components ---
 
-const StepLogItem = ({ log, isDone }) => (
+const StepLogItem = ({ log }) => (
     <div className="flex items-center gap-2 py-1.5 animate-in fade-in slide-in-from-bottom-1 duration-200">
-        {isDone
-            ? <Check className="w-3 h-3 shrink-0" style={{ color: 'var(--mint, #34d399)' }} />
-            : <Loader2 className="w-3 h-3 shrink-0 animate-spin" style={{ color: 'var(--accent)' }} />
-        }
-        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: isDone ? 'var(--fg-4)' : 'var(--fg-3)', letterSpacing: '0.04em' }}>
+        <Loader2 className="w-3 h-3 shrink-0 animate-spin" style={{ color: 'var(--accent)' }} />
+        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)', letterSpacing: '0.04em' }}>
             {log.message}
         </span>
     </div>
@@ -48,12 +46,8 @@ const TaskCompletionCard = ({ log }) => {
 
     const handleReject = () => {
         setRejecting(true);
-        // Re-read the store on every iteration — the initial snapshot goes stale
-        // after the first undo() call, so checking store.past.length from the
-        // closure freezes the loop at the pre-undo depth forever.
-        // Cap at 200 iterations as a safety guard against any edge-case cycle.
-        let safety = 200;
-        while (useTimelineStore.getState().past.length > preTaskHistoryLen && safety-- > 0) {
+        const store = useTimelineStore.getState();
+        while (store.past.length > preTaskHistoryLen) {
             useTimelineStore.getState().undo();
         }
         setDismissed(true);
@@ -129,8 +123,8 @@ const TaskCompletionCard = ({ log }) => {
     );
 };
 
-const LogItem = ({ log, isDone }) => {
-    if (log.type === 'step')          return <StepLogItem log={log} isDone={isDone} />;
+const LogItem = ({ log }) => {
+    if (log.type === 'step')          return <StepLogItem log={log} />;
     if (log.type === 'assistant')     return <AssistantLogItem log={log} />;
     if (log.type === 'task_complete') return <TaskCompletionCard log={log} />;
 
@@ -340,7 +334,11 @@ const UploadStatusCard = ({ asset }) => {
 
 const ReasoningPanel = () => {
     const { logs, suggestions, isAnalyzing, setIsAnalyzing, addLog, removeSuggestion, contextualSuggestion, quickChips } = useAIStore();
-    const { uploadedFile, performAction, assets } = useTimelineStore();
+    const { uploadedFile, performAction, assets } = useTimelineStore(useShallow(state => ({
+        uploadedFile:  state.uploadedFile,
+        performAction: state.performAction,
+        assets:        state.assets,
+    })));
     const { recordDecision } = useUserPreferences();
     const scrollRef = useRef(null);
 
@@ -536,18 +534,9 @@ const ReasoningPanel = () => {
                 )}
 
                 {/* Logs Stream */}
-                {(() => {
-                    // Find the index of the last 'step' log so we can show a spinner
-                    // only on the active step and a ✓ on all completed ones.
-                    const lastStepIdx = logs.reduce((acc, l, i) => l.type === 'step' ? i : acc, -1);
-                    return logs.map((log, i) => (
-                        <LogItem
-                            key={log.id}
-                            log={log}
-                            isDone={log.type === 'step' && (!isAnalyzing || i < lastStepIdx)}
-                        />
-                    ));
-                })()}
+                {logs.map(log => (
+                    <LogItem key={log.id} log={log} />
+                ))}
 
                 {/* Active Suggestions */}
                 {suggestions.map(suggestion => (
