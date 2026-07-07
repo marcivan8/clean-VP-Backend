@@ -81,7 +81,7 @@ const Track = React.memo(({ track }) => {
             <div
                 ref={setNodeRef}
                 className={classNames(
-                    "flex-1 relative h-10 border-b border-white/5 transition-colors",
+                    "flex-1 relative h-20 border-b border-white/5 transition-colors",
                     isOver ? "bg-white/5" : "bg-black/20 group-hover:bg-black/30"
                 )}
                 style={{ width: `${duration * zoomLevel}px`, minWidth: '100%' }}
