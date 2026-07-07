@@ -1083,37 +1083,65 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
         // ── Path d: default ────────────────────────────────────────────────────
         if (!hostSide) hostSide = 'left';
 
-        // ── 2. Build crop regions for each angle ────────────────────────────
-        // For a 16:9 source displayed on a 16:9 canvas, cropW MUST equal cropH
-        // to avoid distortion (the sub-region pixel AR must match the canvas AR,
-        // and since both are 16:9: cropW / cropH × (sourceH / sourceW) = 1 → cropW = cropH).
+        // ── 2. Virtual camera definitions ────────────────────────────────────
         //
-        // Target: ~3× zoom (user requests ≈200% scale increase).
-        //   CROP_W = CROP_H = 1/3 ≈ 0.33 → exact 3× uniform zoom, no distortion.
+        // Each camera is defined by scale (zoom factor) and x/y offset (relative
+        // to frame centre, in texture-space units [0,1]).
+        //   x < 0 → pan left   x > 0 → pan right
+        //   y < 0 → pan up     y > 0 → pan down
         //
-        // Horizontal position: each speaker occupies roughly one half of the frame.
-        //   INSET_X pushes the crop window slightly inward so the subject is centred.
-        //   Left speaker:  cropX = INSET_X          (0 → CROP_W)
-        //   Right speaker: cropX = 1 - CROP_W - INSET_X
+        // Names are POSITIONAL (A = left side, B = right side of the frame),
+        // not tied to host/guest labels.  The host↔side mapping below determines
+        // which camera label maps to which physical speaker.
         //
-        // Vertical position: faces sit in the upper ~50% of a seated interview frame.
-        //   cropY = INSET_Y gives a small top-of-frame buffer (headroom).
-        //   With cropH = 0.33 starting at cropY = 0.05 we capture y=5%→38%,
-        //   which frames head + shoulders for a typical seated interview.
-        const CROP_W   = 0.33;  // 3× zoom — must equal CROP_H for no distortion
-        const CROP_H   = 0.33;
-        const INSET_X  = 0.04;  // horizontal inset from the edge toward centre
-        const INSET_Y  = 0.05;  // start slightly below the very top for natural headroom
-
-        const CROP = {
-            wide: { cropX: 0, cropY: 0, cropW: 1.0, cropH: 1.0 },
-            close_host: hostSide === 'left'
-                ? { cropX: INSET_X,                  cropY: INSET_Y, cropW: CROP_W, cropH: CROP_H }
-                : { cropX: 1 - CROP_W - INSET_X,     cropY: INSET_Y, cropW: CROP_W, cropH: CROP_H },
-            close_guest: hostSide === 'left'
-                ? { cropX: 1 - CROP_W - INSET_X,     cropY: INSET_Y, cropW: CROP_W, cropH: CROP_H }
-                : { cropX: INSET_X,                  cropY: INSET_Y, cropW: CROP_W, cropH: CROP_H },
+        // Crop math:  cropW = cropH = 1/scale  (equal to preserve 16:9 AR)
+        //             centerX = 0.5 + x
+        //             centerY = 0.5 + y
+        //             cropX = clamp(centerX - cropW/2, 0, 1-cropW)
+        //             cropY = clamp(centerY - cropH/2, 0, 1-cropH)
+        //
+        // Scale reference at 1080p output from 4K source:
+        //   1.00 → full frame  |  1.60 → loose single  |  2.50 → standard single
+        //
+        // Y offset -0.10 for close-ups: shifts crop window up so faces sit in
+        // the upper third rather than dead-centre (better for seated interviews).
+        const VIRTUAL_CAMERAS = {
+            wide:      { scale: 1.00, x:  0.00, y:  0.00 },
+            speakerA:  { scale: 2.50, x: -0.28, y: -0.10 },  // left speaker, standard single
+            speakerB:  { scale: 2.50, x: +0.28, y: -0.10 },  // right speaker, standard single
+            reactionA: { scale: 1.60, x: -0.15, y: -0.05 },  // left speaker listening (OTS)
+            reactionB: { scale: 1.60, x: +0.15, y: -0.05 },  // right speaker listening (OTS)
         };
+
+        function scaleToCrop({ scale, x, y }) {
+            const w  = 1.0 / scale;
+            const h  = 1.0 / scale;
+            const cx = 0.5 + x;
+            const cy = 0.5 + y;
+            return {
+                cropX: Math.max(0, Math.min(1 - w, cx - w / 2)),
+                cropY: Math.max(0, Math.min(1 - h, cy - h / 2)),
+                cropW: w,
+                cropH: h,
+            };
+        }
+
+        // Map speaker IDs to camera labels based on detected host side.
+        //   hostSide='left' → host is speaker A (left), guest is speaker B (right)
+        //   hostSide='right' → host is speaker B (right), guest is speaker A (left)
+        const host  = speakers[0] || 'SPEAKER_00';
+        const guest = speakers[1] || 'SPEAKER_01';
+
+        const speakerCam   = {};  // speaker → close-up camera name
+        const reactionCam  = {};  // speaker → reaction camera (other side listening)
+
+        if (hostSide === 'left') {
+            speakerCam[host]   = 'speakerA';   reactionCam[host]   = 'reactionB';
+            speakerCam[guest]  = 'speakerB';   reactionCam[guest]  = 'reactionA';
+        } else {
+            speakerCam[host]   = 'speakerB';   reactionCam[host]   = 'reactionA';
+            speakerCam[guest]  = 'speakerA';   reactionCam[guest]  = 'reactionB';
+        }
 
         // ── 3. Group words into diarization segments ─────────────────────────
         // Merge consecutive words from the same speaker (gap ≤ 0.5s = same segment)
@@ -1136,27 +1164,26 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
             return res.status(400).json({ error: 'No diarized segments found in words array.' });
         }
 
-        // ── 4. Apply editorial rules to assign angles ────────────────────────
+        // ── 4. Apply editorial rules to assign camera angles ────────────────
         //
-        // Rules:
-        //  • Open with wide (first segment or first N seconds)
-        //  • Single speaker > 2s → close shot of that speaker
-        //  • Segment < 0.6s → inherit previous angle (avoid jarring micro-cuts)
-        //  • Speaker change → hard cut to close of new speaker
-        //  • After 3 consecutive close shots of same speaker → insert wide as breather
-        //  • Last segment → wide
-
-        const host  = speakers[0] || 'SPEAKER_00';
-        const guest = speakers[1] || 'SPEAKER_01';
+        // Rules (in priority order):
+        //  • First and last segment → wide (establish / close the scene)
+        //  • Duration < 0.6 s → inherit previous angle (avoid micro-cut flicker)
+        //  • Duration < MIN_CLOSE_DUR → wide (short segments look nervous as close-ups)
+        //  • Otherwise → close-up of the speaking person (speakerA or speakerB)
+        //  • Breather: after 3 consecutive close shots on the SAME camera → swap to
+        //    the other speaker's REACTION shot (not a wide — more cinematic than a
+        //    plain wide cut, and gives the listening speaker screen time)
+        //  • If the reaction cam is already what we'd use → fall back to wide
 
         const segments = [];
         let prevAngle      = 'wide';
         let sameCloseCnt   = 0;
-        const MIN_CLOSE_DUR = 1.5; // seconds — shorter segs stay wide
+        const MIN_CLOSE_DUR = 1.5; // seconds
 
         for (let i = 0; i < rawSegments.length; i++) {
-            const seg = rawSegments[i];
-            const dur  = seg.end - seg.start;
+            const seg     = rawSegments[i];
+            const dur     = seg.end - seg.start;
             const isFirst = i === 0;
             const isLast  = i === rawSegments.length - 1;
 
@@ -1165,39 +1192,41 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
             if (isFirst || isLast) {
                 angle = 'wide';
             } else if (dur < 0.6) {
-                // Very short — inherit
-                angle = prevAngle;
+                angle = prevAngle; // inherit — too short to cut cleanly
             } else if (dur < MIN_CLOSE_DUR) {
-                // Short segment — stay wide to avoid nervous cuts
                 angle = 'wide';
             } else {
-                // Assign close shot to the speaking person
-                const isHost  = seg.speaker === host;
-                const isGuest = seg.speaker === guest;
-                if (isHost)       angle = 'close_host';
-                else if (isGuest) angle = 'close_guest';
-                else              angle = 'wide'; // unknown speaker → wide
+                // Assign close-up for the speaking person
+                const closeCam    = speakerCam[seg.speaker]  || 'wide';
+                const rxCam       = reactionCam[seg.speaker] || 'wide';
 
-                // Breather: after 3 consecutive close shots on same speaker → wide
-                if (angle === prevAngle && angle !== 'wide') {
+                if (closeCam === prevAngle) {
                     sameCloseCnt++;
                     if (sameCloseCnt >= 3) {
-                        angle = 'wide';
+                        // Breather: cut to the listening speaker's reaction shot
+                        angle = (rxCam !== prevAngle) ? rxCam : 'wide';
                         sameCloseCnt = 0;
+                    } else {
+                        angle = closeCam;
                     }
                 } else {
+                    angle        = closeCam;
                     sameCloseCnt = angle !== 'wide' ? 1 : 0;
                 }
             }
 
             prevAngle = angle;
 
-            const crop = CROP[angle];
+            const cam  = VIRTUAL_CAMERAS[angle] || VIRTUAL_CAMERAS.wide;
+            const crop = scaleToCrop(cam);
             segments.push({
                 start:   parseFloat(seg.start.toFixed(3)),
                 end:     parseFloat(seg.end.toFixed(3)),
                 angle,
                 speaker: seg.speaker || null,
+                scale:   cam.scale,
+                x:       cam.x,
+                y:       cam.y,
                 cropX:   crop.cropX,
                 cropY:   crop.cropY,
                 cropW:   crop.cropW,
@@ -1206,12 +1235,13 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
         }
 
         // ── 5. Summary ───────────────────────────────────────────────────────
-        const counts = { wide: 0, close_host: 0, close_guest: 0 };
+        const counts = { wide: 0, speakerA: 0, speakerB: 0, reactionA: 0, reactionB: 0 };
         segments.forEach(s => { if (counts[s.angle] !== undefined) counts[s.angle]++; });
 
         console.log(
             `[virtual-multicam] ${segments.length} segments: ` +
-            `${counts.wide}W / ${counts.close_host}H / ${counts.close_guest}G | ` +
+            `${counts.wide}W / ${counts.speakerA}A / ${counts.speakerB}B / ` +
+            `${counts.reactionA}rA / ${counts.reactionB}rB | ` +
             `host=${host} on ${hostSide} | face=${faceDetected}`
         );
 

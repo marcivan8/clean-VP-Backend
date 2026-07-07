@@ -1112,7 +1112,10 @@ export class MediaExecutionEngine {
                 // transparently — the split branch is never entered.
                 const freshStore = useTimelineStore.getState();
                 const tm         = freshStore.manager;
-                let wideCount = 0, hostCount = 0, guestCount = 0;
+
+                // Angle counters (new names: speakerA/speakerB/wide/reactionA/reactionB)
+                const angleCounts = { wide: 0, speakerA: 0, speakerB: 0, reactionA: 0, reactionB: 0 };
+                const countAngle  = (a) => { if (angleCounts[a] !== undefined) angleCounts[a]++; };
 
                 freshStore._saveHistory?.();
 
@@ -1131,7 +1134,6 @@ export class MediaExecutionEngine {
                         const overlapping = sortedSegs.filter(s => s.end > srcStart && s.start < srcEnd);
 
                         if (overlapping.length === 0) {
-                            // No segment covers this clip — keep as-is
                             expandedClips.push(clip);
                             continue;
                         }
@@ -1139,13 +1141,14 @@ export class MediaExecutionEngine {
                         if (overlapping.length === 1) {
                             // Single segment — tag in-place, no split needed
                             const seg = overlapping[0];
-                            if (seg.angle === 'wide')             wideCount++;
-                            else if (seg.angle === 'close_host')  hostCount++;
-                            else if (seg.angle === 'close_guest') guestCount++;
+                            countAngle(seg.angle);
                             expandedClips.push({
                                 ...clip,
                                 virtualCam: {
                                     angle:   seg.angle,
+                                    scale:   seg.scale  ?? 1,
+                                    x:       seg.x      ?? 0,
+                                    y:       seg.y      ?? 0,
                                     cropX:   seg.cropX,
                                     cropY:   seg.cropY,
                                     cropW:   seg.cropW,
@@ -1163,10 +1166,7 @@ export class MediaExecutionEngine {
                             const pDur      = pSrcEnd - pSrcStart;
                             if (pDur < 0.05) continue; // skip hairline slivers
 
-                            if (seg.angle === 'wide')             wideCount++;
-                            else if (seg.angle === 'close_host')  hostCount++;
-                            else if (seg.angle === 'close_guest') guestCount++;
-
+                            countAngle(seg.angle);
                             expandedClips.push({
                                 ...clip,
                                 id:       `${clip.id}_vm${Math.round(pSrcStart * 10)}`,
@@ -1174,6 +1174,9 @@ export class MediaExecutionEngine {
                                 duration: pDur,
                                 virtualCam: {
                                     angle:   seg.angle,
+                                    scale:   seg.scale  ?? 1,
+                                    x:       seg.x      ?? 0,
+                                    y:       seg.y      ?? 0,
                                     cropX:   seg.cropX,
                                     cropY:   seg.cropY,
                                     cropW:   seg.cropW,
@@ -1200,10 +1203,11 @@ export class MediaExecutionEngine {
                 tm.fromLegacyTracks(newTracks);
                 useTimelineStore.setState({ tracks: tm.toLegacyTracks() });
 
-                const totalTagged = wideCount + hostCount + guestCount;
+                const totalTagged = Object.values(angleCounts).reduce((s, n) => s + n, 0);
                 console.log(
                     `[virtual_multicam] Applied to ${totalTagged} clips (split from ${vmAllClips.length}): ` +
-                    `${wideCount}W / ${hostCount}H / ${guestCount}G | ` +
+                    `${angleCounts.wide}W / ${angleCounts.speakerA}A / ${angleCounts.speakerB}B / ` +
+                    `${angleCounts.reactionA}rA / ${angleCounts.reactionB}rB | ` +
                     `host=${host} on ${hostSide}`
                 );
 
@@ -1214,14 +1218,17 @@ export class MediaExecutionEngine {
                 // (Calling renderOnce + seek here, BEFORE React fires setCrop, caused
                 //  a race where the frame rendered with stale full-frame cropParams.)
 
+                const rxTotal = angleCounts.reactionA + angleCounts.reactionB;
                 return {
                     action,
                     success: true,
                     message:
-                        `Virtual multicam applied — ${totalTagged} angle-tagged segments ` +
-                        `(${wideCount} wide, ${hostCount} close host, ${guestCount} close guest).\n\n` +
-                        `Host (${host}) is on the ${hostSide} side. ` +
-                        `Angles switch in real-time as you scrub through the timeline.`,
+                        `Virtual multicam applied — ${totalTagged} angle-tagged segments.\n\n` +
+                        `${angleCounts.wide} wide  ·  ` +
+                        `${angleCounts.speakerA + angleCounts.speakerB} close-ups  ·  ` +
+                        `${rxTotal} reaction shots\n\n` +
+                        `Host (${host}) detected on the ${hostSide}. ` +
+                        `Camera angles switch as speakers take turns — scrub the timeline to see them.`,
                 };
             }
 
