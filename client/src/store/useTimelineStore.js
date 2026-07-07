@@ -31,7 +31,7 @@ try {
     if (_raw) {
         const _saved = JSON.parse(_raw);
         const _age = Date.now() - (_saved.timestamp || 0);
-        if (_saved.version === '1.2' && _age < 24 * 60 * 60 * 1000 && _saved.tracks?.some(t => t.clips?.length > 0)) {
+        if (_saved.version === '1.2' && _age < 7 * 24 * 60 * 60 * 1000 && _saved.tracks?.some(t => t.clips?.length > 0)) {
             // ── FIX: Deduplicate empty tracks from corrupted autosaves ─────────────
             // Separate tracks into two buckets. Keep all tracks that have clips.
             // Only keep an empty track if no clip-bearing track of that type exists.
@@ -63,8 +63,12 @@ try {
                 _preRestoredProject = { ..._preRestoredProject, aspectRatio: '16:9' };
             }
         } else {
-            // Wipe corrupted or old session (forces a completely clean state)
+            // Wipe corrupted or expired autosave.
+            // Also clear the project ID so EditorPage doesn't take the early-return branch
+            // and instead reloads fresh data from Supabase.
             localStorage.removeItem('vp_autosave');
+            localStorage.removeItem('vp_project_id');
+            localStorage.removeItem('vp_project_name');
         }
     }
 } catch (_) { /* corrupted autosave — ignore */ }

@@ -28,6 +28,7 @@ import ProxyService from '../services/proxyService';
 import useAIStore from '../store/useAIStore';
 import useSessionStore from '../store/useSessionStore';
 import AuthPromptModal from '../components/AuthPromptModal';
+import { useSupabasePersistence } from '../hooks/useSupabasePersistence';
 
 const VideoTimeDisplay = () => {
     const timeRef = useRef(null);
@@ -182,6 +183,10 @@ const CONTEXTUAL_SUGGESTION = {
 };
 
 const IDELayout = ({ children, mode = 'editor' }) => {
+    // Keeps Supabase in sync with localStorage autosaves (debounced 3 s after each change).
+    // Without this call the hook was defined but never mounted — Supabase never updated.
+    useSupabasePersistence();
+
     // ── beforeunload guard ────────────────────────────────────────────────────
     // Warn the user before closing/refreshing the tab while AI is processing
     // or a video proxy is still uploading. Uses a ref so the handler always
