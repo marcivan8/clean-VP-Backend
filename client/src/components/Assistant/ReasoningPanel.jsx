@@ -15,8 +15,11 @@ import { workflowController } from '../../agent/WorkflowController.js';
 
 const StepLogItem = ({ log }) => (
     <div className="flex items-center gap-2 py-1.5 animate-in fade-in slide-in-from-bottom-1 duration-200">
-        <Loader2 className="w-3 h-3 shrink-0 animate-spin" style={{ color: 'var(--accent)' }} />
-        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)', letterSpacing: '0.04em' }}>
+        {log.done
+            ? <Check className="w-3 h-3 shrink-0" style={{ color: 'var(--mint, #34d399)' }} />
+            : <Loader2 className="w-3 h-3 shrink-0 animate-spin" style={{ color: 'var(--accent)' }} />
+        }
+        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: log.done ? 'var(--fg-4)' : 'var(--fg-3)', letterSpacing: '0.04em' }}>
             {log.message}
         </span>
     </div>

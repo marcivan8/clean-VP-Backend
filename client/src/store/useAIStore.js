@@ -10,9 +10,12 @@ const useAIStore = create((set) => ({
     // Actions
     setIsAnalyzing: (status) => set((state) => ({
         isAnalyzing: status,
-        // Step logs are transient progress indicators — clear them when the job
-        // finishes so the "Verifying edits…" spinner doesn't stay on screen forever.
-        logs: status ? state.logs : state.logs.filter(l => l.type !== 'step'),
+        // When a job finishes, mark pending step logs as done so they switch from
+        // a spinner to a checkmark and stay visible as an execution trail.
+        // When a new job starts (status=true) leave existing logs untouched.
+        logs: status
+            ? state.logs
+            : state.logs.map(l => l.type === 'step' ? { ...l, done: true } : l),
     })),
     setContextualSuggestion: (suggestion) => set({ contextualSuggestion: suggestion }),
 
