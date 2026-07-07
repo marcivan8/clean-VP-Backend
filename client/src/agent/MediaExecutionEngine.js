@@ -1184,15 +1184,28 @@ export class MediaExecutionEngine {
                 tm.fromLegacyTracks(newTracks);
                 useTimelineStore.setState({ tracks: tm.toLegacyTracks() });
 
-                const totalClipsAfter = (freshStore.tracks ?? [])
-                    .filter(t => t.type === 'video')
-                    .reduce((n, t) => n + (t.clips?.length ?? 0), 0);
                 const totalTagged = wideCount + hostCount + guestCount;
                 console.log(
                     `[virtual_multicam] Applied to ${totalTagged} clips (split from ${vmAllClips.length}): ` +
                     `${wideCount}W / ${hostCount}H / ${guestCount}G | ` +
                     `host=${host} on ${hostSide}`
                 );
+
+                // Force the PlaybackEngine to redraw the current frame so the crop
+                // effect is immediately visible in the paused preview (the RAF loop
+                // skips rendering when clock.isPlaying = false, so setCrop alone
+                // won't update the canvas). renderOnce() + seek() together: seek
+                // flushes the old buffer and asks the worker for fresh frames at
+                // the current time; renderOnce() flags that the very next arriving
+                // frame should be rendered immediately even while paused.
+                try {
+                    const engine = useTimelineStore.getState().playbackEngine;
+                    const ct     = useTimelineStore.getState().currentTime;
+                    if (engine) {
+                        if (typeof engine.renderOnce === 'function') engine.renderOnce();
+                        if (typeof engine.seek      === 'function') engine.seek(ct);
+                    }
+                } catch (_) { /* best-effort */ }
 
                 return {
                     action,
@@ -1714,6 +1727,20 @@ export class MediaExecutionEngine {
             timestamp: new Date().toLocaleTimeString()
         });
 
+        // Collect virtual-multicam data from existing clips BEFORE removing them.
+        // When virtual_multicam ran before this cleanup pass, each clip has its own
+        // angle (close_host / close_guest / wide). Blindly spreading ...baseClip would
+        // copy the FIRST clip's angle to every new clip, wiping out the per-shot angles.
+        // Instead we build a source-time-range → virtualCam lookup so each new clip
+        // inherits the angle from whichever old clip has the most source-time overlap.
+        const srcVirtualCamRanges = baseClips
+            .filter(c => c.virtualCam)
+            .map(c => ({
+                start:     c.offset ?? 0,
+                end:       (c.offset ?? 0) + (c.duration ?? 0),
+                virtualCam: c.virtualCam,
+            }));
+
         // Remove all clips in the range
         for (const clip of baseClips) {
             timelineStore.removeClip(videoTrack.id, clip.id);
@@ -1724,6 +1751,22 @@ export class MediaExecutionEngine {
         const persistentUrl  = baseClip.sourceUrl || baseClip.url || '';
 
         validSegs.forEach((seg, i) => {
+            // Inherit the correct virtualCam angle from the pre-cleanup clips by
+            // matching on source-time overlap. Falls back to baseClip.virtualCam
+            // (or null) when no per-clip data exists (i.e. VM hasn't run yet).
+            let inheritedVirtualCam = baseClip.virtualCam ?? null;
+            if (srcVirtualCamRanges.length > 0) {
+                const segEnd = seg.start + (seg.duration ?? 0);
+                let bestOverlap = 0;
+                for (const vc of srcVirtualCamRanges) {
+                    const overlap = Math.max(0, Math.min(vc.end, segEnd) - Math.max(vc.start, seg.start));
+                    if (overlap > bestOverlap) {
+                        bestOverlap   = overlap;
+                        inheritedVirtualCam = vc.virtualCam;
+                    }
+                }
+            }
+
             const newClip = {
                 ...baseClip,
                 id:           `clip_${prefix}_${ts}_${i}`,
@@ -1734,10 +1777,11 @@ export class MediaExecutionEngine {
                 originalName: baseClip.originalName || baseClip.name,
                 url:          persistentUrl,
                 sourceUrl:    baseClip.sourceUrl || persistentUrl,
+                virtualCam:   inheritedVirtualCam,
             };
             timelineStore.addClip(videoTrack.id, newClip);
             currentStartTime += seg.duration;
-            console.log(`[MediaExecutionEngine]   clip_${prefix}_${i}: timeline ${newClip.start.toFixed(2)}s–${currentStartTime.toFixed(2)}s  source ${seg.start.toFixed(2)}s–${seg.end.toFixed(2)}s`);
+            console.log(`[MediaExecutionEngine]   clip_${prefix}_${i}: timeline ${newClip.start.toFixed(2)}s–${currentStartTime.toFixed(2)}s  source ${seg.start.toFixed(2)}s–${seg.end.toFixed(2)}s  angle=${inheritedVirtualCam?.angle ?? 'none'}`);
         });
 
         // Shift clips that came AFTER the replaced range
