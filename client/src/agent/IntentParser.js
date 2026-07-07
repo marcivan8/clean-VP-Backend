@@ -154,14 +154,11 @@ const NLP_MAP = {
         'clean the recording', 'edit my podcast',
     ],
     rhythmZoom: [
-        // Direct phrasing users actually say
+        // Direct phrasing users actually say (talking-head zoom rhythm only)
         'make it more dynamic', 'more dynamic', 'make it dynamic',
         'make this clip more dynamic', 'make this more dynamic', 'make the clip more dynamic',
-        // Multi-camera / zoom rhythm vocabulary
+        // Zoom rhythm vocabulary (no multicam/multi-camera — those route to virtualMulticam)
         'zoom rhythm', 'rhythm zoom', 'add zoom rhythm', 'camera rhythm', 'add rhythm',
-        'multi camera', 'multi-camera', 'multicam', 'multi-cam',
-        'make it feel multi', 'simulate multi', 'fake multi',
-        'make it feel like multi-camera', 'make it feel like multi camera',
         // Engagement / style
         'vlog style', 'dynamic style', 'talking head style',
         'make it more engaging', 'more engaging', 'keep viewers', 'hold attention',
@@ -177,6 +174,12 @@ const NLP_MAP = {
         'remove repetition', 'remove repetitions', 'cut out repetitions',
         'remove duplicate parts', 'cut repeated content', 'remove repeats',
         'no repetition', 'clean up repetition', 'deduplicate',
+    ],
+    splitSpeakers: [
+        'split speakers', 'split speaker', 'separate speakers', 'separate speaker',
+        'diarize', 'speaker diarization', 'speaker separation',
+        'split by speaker', 'separate by speaker', 'identify speakers',
+        'split the speakers', 'separate the speakers',
     ],
     virtualMulticam: [
         // Direct feature names
@@ -196,6 +199,12 @@ const NLP_MAP = {
         // Action verbs that clearly imply this feature (not generic dynamic)
         'cut between speakers', 'cut between host and guest',
         'switch between speakers', 'alternate speakers',
+        // "add multicam" without the "virtual" prefix — must live here so it
+        // isn't hijacked by the rhythmZoom "multicam" token in compound commands
+        // like "split speakers and add multicam".
+        'add multicam', 'add multi cam', 'add multi-cam',
+        'add multicam angles', 'add interview angles', 'add speaker angles',
+        'add virtual multicam', 'add multicam edit',
     ],
     organizeClips: [
         // ML-based semantic clip organizer (organize_clips operation)
@@ -387,6 +396,33 @@ export class IntentParser {
             return { intent: 'edit', operation: 'remove_filler_words', parameters: {}, confidence: 'HIGH', missingParameters: [] };
         }
 
+        // ── Split-speakers compound: "split speakers and add multicam" ──────────
+        // Must run before the virtualMulticam / rhythmZoom blocks so "multicam" in
+        // "split speakers and add multicam" doesn't get swallowed by rhythmZoom.
+        // ─────────────────────────────────────────────────────────────────────────
+        const hasSplitSpeakersToken = matches('splitSpeakers') || /\b(split\s+speakers?|separate\s+speakers?|diarize)\b/.test(lower);
+        const hasMulticamSignal = matches('virtualMulticam') || /\b(add\s+(virtual\s+)?multi[\s-]?cam(era)?|add\s+multicam)\b/.test(lower);
+
+        if (hasSplitSpeakersToken && hasMulticamSignal) {
+            return {
+                intent: 'edit',
+                operation: 'compound_split_speakers_virtual_multicam',
+                parameters: {},
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+
+        if (hasSplitSpeakersToken) {
+            return {
+                intent: 'edit',
+                operation: 'split_speakers',
+                parameters: {},
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+
         // ── Virtual multicam — MUST be checked before the compound clean+dynamic
         // block below, because "multicam" appears in the hasDynamicToken regex
         // and would otherwise hijack "clean + virtual multicam" → compound_clean_dynamic.
@@ -417,10 +453,8 @@ export class IntentParser {
         }
 
         // ── Compound: "clean AND dynamic" (rhythm zoom) ───────────────────────
-        // Virtual multicam already handled above — this only fires for generic
-        // "multicam feel" / "dynamic" phrases, not interview close-up angles.
-        const hasDynamicToken = /\b(dynamic|zoom\s*rhythm|make\s+it\s+(more\s+)?engaging)\b/.test(lower) ||
-            (!hasVirtualMulticamToken && /\b(multi[\s-]?cam(era)?|multicam)\b/.test(lower));
+        // Multicam vocabulary is intentionally excluded — it routes to virtualMulticam.
+        const hasDynamicToken = /\b(dynamic|zoom\s*rhythm|make\s+it\s+(more\s+)?engaging)\b/.test(lower);
         if (hasCleanToken && hasDynamicToken) {
             return {
                 intent: 'edit',
@@ -606,6 +640,38 @@ export class IntentParser {
             });
         }
 
+        // ── Split-speakers compound (localParse) ──────────────────────────────
+        {
+            const _hasSplitSp = matches('splitSpeakers') || /\b(split\s+speakers?|separate\s+speakers?|diarize)\b/.test(lower);
+            const _hasVMSignal = matches('virtualMulticam') || /\b(add\s+(virtual\s+)?multi[\s-]?cam(era)?|add\s+multicam)\b/.test(lower);
+
+            if (_hasSplitSp && _hasVMSignal) {
+                return {
+                    intent: 'edit',
+                    operation: 'compound_split_speakers_virtual_multicam',
+                    parameters: {},
+                    targets: [],
+                    constraints: {},
+                    confidence: 'HIGH',
+                    missingParameters: [],
+                    needs_clarification: false,
+                };
+            }
+
+            if (_hasSplitSp) {
+                return {
+                    intent: 'edit',
+                    operation: 'split_speakers',
+                    parameters: {},
+                    targets: [],
+                    constraints: {},
+                    confidence: 'HIGH',
+                    missingParameters: [],
+                    needs_clarification: false,
+                };
+            }
+        }
+
         // ── Virtual multicam — check BEFORE compound_clean_dynamic to avoid
         // "multicam" token hijacking "clean + virtual multicam" prompts.
         {
@@ -671,12 +737,10 @@ export class IntentParser {
         }
 
         // ── Compound clean + dynamic (rhythm zoom) ────────────────────────────
-        // Virtual multicam already handled above — exclude its tokens here.
+        // Multicam vocabulary is excluded — it routes to virtualMulticam, not rhythmZoom.
         {
             const hasClean   = lower.includes('clean') || lower.includes('remove silence');
-            const hasDynamic = lower.includes('dynamic') || lower.includes('zoom rhythm')
-                            || (lower.includes('multi-camera') && !matches('virtualMulticam'))
-                            || (lower.includes('multicam') && !matches('virtualMulticam'));
+            const hasDynamic = lower.includes('dynamic') || lower.includes('zoom rhythm');
             if (hasClean && hasDynamic) {
                 return {
                     intent: 'edit',

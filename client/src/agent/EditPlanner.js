@@ -206,6 +206,7 @@ export class EditPlanner {
             case 'split_speakers': return this.planSplitSpeakers(planId);
             case 'compound_clean_dynamic': return this.planCompoundCleanDynamic(planId, constraints);
             case 'compound_clean_virtual_multicam': return this.planCompoundCleanVirtualMulticam(planId);
+            case 'compound_split_speakers_virtual_multicam': return this.planSplitSpeakersVirtualMulticam(planId);
             default:
                 console.warn(`[EditPlanner] Unhandled operation: ${operation}`);
                 return null;
@@ -675,6 +676,27 @@ export class EditPlanner {
                 step_id: 'step_2',
                 action: 'virtual_multicam',
                 reason: 'Apply virtual multicam close-up angles using diarization',
+            },
+        ]);
+    }
+
+    /**
+     * Compound: diarize + split speakers onto separate tracks, then apply
+     * virtual multicam close-up angles driven by speaker turns.
+     * "split speakers and add multicam" → this plan.
+     */
+    static planSplitSpeakersVirtualMulticam(planId) {
+        return this.buildPlan(planId, 'compound_split_speakers_virtual_multicam', [
+            {
+                step_id: 'step_1',
+                action: 'split_speakers',
+                language: null,
+                reason: 'Separate speakers onto individual tracks using diarization',
+            },
+            {
+                step_id: 'step_2',
+                action: 'virtual_multicam',
+                reason: 'Apply virtual multicam close-up angles — zooming in on whichever speaker is active',
             },
         ]);
     }
