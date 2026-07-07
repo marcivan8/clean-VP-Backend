@@ -166,6 +166,20 @@ const VideoPlayer = () => {
             } else if (engineRef.current.setCrop) {
                 engineRef.current.setCrop(0, 0, 1, 1);
             }
+
+            // When paused the RAF loop stops, so setCrop() above updates cropParams but
+            // nothing re-renders the canvas.  Trigger a one-shot frame render here —
+            // AFTER setCrop — so the crop uniforms are already correct when the frame
+            // arrives from the worker and is drawn.
+            if (!isPlaying && typeof engineRef.current.renderOnce === 'function') {
+                engineRef.current.renderOnce();
+                // seek() flushes stale buffered frames and asks the worker for a fresh
+                // one.  Without this the buffer may be empty (e.g. after tracks change
+                // due to virtual_multicam) and renderOnce's flag is never consumed.
+                if (typeof engineRef.current.seek === 'function') {
+                    engineRef.current.seek(currentTime);
+                }
+            }
         }
 
     }, [isPlaying, currentTime, tracks, assets, activeClip]);

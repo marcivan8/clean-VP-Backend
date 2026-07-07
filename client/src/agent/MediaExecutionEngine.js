@@ -1023,7 +1023,23 @@ export class MediaExecutionEngine {
                     (t.clips ?? []).map(c => ({ ...c, _trackId: t.id }))
                 );
 
-                const vmWords = (vmStore.captions ?? []).filter(w => w.speaker);
+                // store.captions may have been overwritten by setTimelineTranscript() after
+                // silence removal — that call strips the .speaker field (timeline-space words
+                // only carry word/start/end, not speaker).  If so, fall back to the per-file
+                // transcript index (store.transcripts) which always preserves the original
+                // Whisper/diarization data including speaker labels and source-space timestamps.
+                let vmWords = (vmStore.captions ?? []).filter(w => w.speaker);
+                if (vmWords.length === 0 && vmStore.transcripts) {
+                    const allSrcWords = Object.values(vmStore.transcripts).flat();
+                    const speakerSrcWords = allSrcWords.filter(w => w.speaker);
+                    if (speakerSrcWords.length > 0) {
+                        vmWords = speakerSrcWords;
+                        console.log(
+                            `[virtual_multicam] store.captions had no speaker data; ` +
+                            `using ${vmWords.length} words from transcript index instead`
+                        );
+                    }
+                }
 
                 if (vmAllClips.length === 0) {
                     throw new Error('No clips on the timeline. Add your interview video first.');
@@ -1191,21 +1207,12 @@ export class MediaExecutionEngine {
                     `host=${host} on ${hostSide}`
                 );
 
-                // Force the PlaybackEngine to redraw the current frame so the crop
-                // effect is immediately visible in the paused preview (the RAF loop
-                // skips rendering when clock.isPlaying = false, so setCrop alone
-                // won't update the canvas). renderOnce() + seek() together: seek
-                // flushes the old buffer and asks the worker for fresh frames at
-                // the current time; renderOnce() flags that the very next arriving
-                // frame should be rendered immediately even while paused.
-                try {
-                    const engine = useTimelineStore.getState().playbackEngine;
-                    const ct     = useTimelineStore.getState().currentTime;
-                    if (engine) {
-                        if (typeof engine.renderOnce === 'function') engine.renderOnce();
-                        if (typeof engine.seek      === 'function') engine.seek(ct);
-                    }
-                } catch (_) { /* best-effort */ }
+                // NOTE: The paused-preview redraw (renderOnce + seek) is triggered by
+                // VideoPlayer's main effect, which fires when `tracks` changes here.
+                // That effect calls setCrop() first — then renderOnce + seek — so the
+                // crop uniforms are always set before the new frame is rendered.
+                // (Calling renderOnce + seek here, BEFORE React fires setCrop, caused
+                //  a race where the frame rendered with stale full-frame cropParams.)
 
                 return {
                     action,
