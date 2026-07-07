@@ -73,6 +73,10 @@ app.use(helmet({
         "https://*.ingest.de.sentry.io",
         ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
       ],
+      // blob: is required for Web Workers created by Vite/Revideo at runtime.
+      // Without worker-src the browser falls back to script-src, which doesn't
+      // include blob:, and blocks every worker with a CSP violation.
+      workerSrc:               ["'self'", "blob:"],
       objectSrc:               ["'none'"],
       frameSrc:                ["'self'", "https://*.iubenda.com"],
       baseUri:                 ["'self'"],
@@ -270,11 +274,19 @@ app.use(express.static(clientBuildPath));
 // Catch-all route for React client-side routing.
 // Must be placed AFTER all API routes but BEFORE the 404 handler.
 app.get('*', (req, res, next) => {
-  // If the request was for the API and wasn't caught by a route, pass it to the 404 handler
+  // API and upload paths that missed their route → real 404, not the SPA shell.
   if (req.path.startsWith('/api/') || req.path.startsWith('/uploads/')) {
     return next();
   }
-  
+
+  // Static asset requests (JS, CSS, images, fonts, source maps…) that weren't
+  // found by express.static() must NOT fall through to index.html — doing so
+  // would serve HTML with content-type text/html, causing browsers to reject the
+  // file with a MIME-type error (e.g. "Refused to apply style … not text/css").
+  if (/\.(js|css|map|png|jpg|jpeg|gif|ico|svg|woff2?|ttf|eot|webp|webm|mp4)$/.test(req.path)) {
+    return next();
+  }
+
   const indexPath = path.join(clientBuildPath, 'index.html');
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
