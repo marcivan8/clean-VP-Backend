@@ -106,7 +106,106 @@ async function extractVideoFrame(gcsPath, timestampSec) {
 }
 
 /**
+ * detectHostSideViaVision
+ *
+ * Uses GPT-4o-mini Vision to determine which side of the frame the host
+ * (SPEAKER_00) is sitting on.  No extra microservice required — just OpenAI.
+ *
+ * Strategy: during a speaker's longest solo turn they face the camera more
+ * directly than the listening person.  We extract one frame per speaker at
+ * the midpoint of their longest turn and send both images in a single
+ * GPT-4o-mini call, asking which half of the frame each active speaker
+ * occupies.  We use the host's answer as hostSide.
+ *
+ * Returns 'left' | 'right' | null on failure.
+ */
+async function detectHostSideViaVision(words, speakers, filename) {
+    if (!process.env.OPENAI_API_KEY) return null;
+    if (!filename || speakers.length < 2) return null;
+
+    try {
+        const OpenAI = require('openai');
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 20_000 });
+
+        // Extract one frame per speaker at the midpoint of their longest solo turn.
+        // Both images go in a single API call to keep latency and cost low.
+        const frames = [];
+        for (const speaker of speakers.slice(0, 2)) {
+            const turn = findLongestTurn(words, speaker);
+            if (!turn || (turn.end - turn.start) < 1.0) {
+                console.warn(`[virtual-multicam] Vision: no usable turn for ${speaker}`);
+                return null;
+            }
+            const mid   = (turn.start + turn.end) / 2;
+            const frame = await extractVideoFrame(filename, mid);
+            if (!frame) return null;
+            frames.push({ speaker, mid, frame });
+        }
+
+        // Both frames in one call: image 1 = host turn, image 2 = guest turn.
+        // We ask GPT to identify which side of the frame each active speaker is on,
+        // then parse the JSON answer.
+        const content = [
+            {
+                type: 'text',
+                text:
+                    'These are two frames from the same two-person interview video.\n' +
+                    'In each frame one person is actively speaking (more frontal, facing camera).\n' +
+                    'For each frame state whether the active speaker is on the LEFT or RIGHT half.\n' +
+                    'Reply with ONLY valid JSON: {"frame1":"left"|"right","frame2":"left"|"right"}',
+            },
+            {
+                type: 'image_url',
+                image_url: { url: `data:image/jpeg;base64,${frames[0].frame}`, detail: 'low' },
+            },
+            {
+                type: 'image_url',
+                image_url: { url: `data:image/jpeg;base64,${frames[1].frame}`, detail: 'low' },
+            },
+        ];
+
+        const resp = await openai.chat.completions.create({
+            model:       'gpt-4o-mini',
+            messages:    [{ role: 'user', content }],
+            max_tokens:  30,
+            temperature: 0,
+        });
+
+        const raw  = resp.choices[0]?.message?.content?.trim() || '';
+        // Strip any markdown fences GPT sometimes wraps around JSON
+        const json = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+        const ans  = JSON.parse(json);
+
+        const hostSide  = (ans.frame1 || '').toLowerCase();
+        const guestSide = (ans.frame2 || '').toLowerCase();
+
+        if (!['left', 'right'].includes(hostSide) || !['left', 'right'].includes(guestSide)) {
+            console.warn('[virtual-multicam] Vision: unexpected GPT answer:', ans);
+            return null;
+        }
+
+        // Sanity check: two speakers should be on opposite sides
+        if (hostSide === guestSide) {
+            console.warn(`[virtual-multicam] Vision: both speakers reported on ${hostSide} — ignoring`);
+            return null;
+        }
+
+        console.log(
+            `[virtual-multicam] GPT-4o-mini Vision: host=${frames[0].speaker} on ${hostSide} ` +
+            `(frame @${frames[0].mid.toFixed(1)}s), guest=${frames[1].speaker} on ${guestSide} ` +
+            `(frame @${frames[1].mid.toFixed(1)}s)`
+        );
+
+        return hostSide; // side of SPEAKER_00 (the host)
+    } catch (err) {
+        console.warn('[virtual-multicam] Vision hostSide detection failed:', err.message);
+        return null;
+    }
+}
+
+/**
  * Call diarize-service /detect-faces and return face array.
+ * Only used when DIARIZE_SERVICE_URL is configured (pyannote microservice).
  */
 async function detectFacesInFrame(base64Frame, diarizeServiceUrl) {
     const res = await fetch(`${diarizeServiceUrl}/detect-faces`, {
@@ -121,14 +220,12 @@ async function detectFacesInFrame(base64Frame, diarizeServiceUrl) {
 }
 
 /**
- * Determine which side (left/right) each speaker is on using:
- *  1. Find each speaker's longest solo turn from diarization
- *  2. Extract a frame at the midpoint of that turn
- *  3. Run face detection — the LARGER face (by area w×h) is more frontal
- *     (speaking person faces the camera more directly)
- *  4. The largest face's side = that speaker's side
+ * detectSpeakerSides (pyannote path)
  *
- * Returns { [speaker]: 'left'|'right' } or null on failure.
+ * Kept as a secondary option when DIARIZE_SERVICE_URL is available.
+ * Finds each speaker's longest solo turn, extracts a frame, runs pyannote
+ * MediaPipe face detection, and returns { [speaker]: 'left'|'right' }.
+ * Returns null on any failure.
  */
 async function detectSpeakerSides(words, speakers, filename, diarizeServiceUrl) {
     if (!diarizeServiceUrl || !filename) return null;
@@ -140,31 +237,30 @@ async function detectSpeakerSides(words, speakers, filename, diarizeServiceUrl) 
         for (const speaker of speakers) {
             const turn = findLongestTurn(words, speaker);
             if (!turn || (turn.end - turn.start) < 1.5) {
-                console.warn(`[virtual-multicam] No long turn found for ${speaker}`);
+                console.warn(`[virtual-multicam] pyannote: no long turn for ${speaker}`);
                 continue;
             }
 
-            const midpoint   = (turn.start + turn.end) / 2;
-            const frameB64   = await extractVideoFrame(filename, midpoint);
+            const midpoint = (turn.start + turn.end) / 2;
+            const frameB64 = await extractVideoFrame(filename, midpoint);
             if (!frameB64) continue;
 
             const faces = await detectFacesInFrame(frameB64, diarizeServiceUrl);
             if (!faces.length) continue;
 
-            // Largest face by bounding-box area = more frontal = active speaker
+            // Largest face by bounding-box area = most frontal = active speaker
             const largestFace = faces.sort((a, b) => (b.w * b.h) - (a.w * a.h))[0];
-            results[speaker]  = largestFace.side; // 'left' or 'right'
+            results[speaker]  = largestFace.side;
 
             console.log(
-                `[virtual-multicam] ${speaker}: longest turn ${turn.start.toFixed(1)}s–${turn.end.toFixed(1)}s, ` +
-                `frame at ${midpoint.toFixed(1)}s, ${faces.length} face(s), ` +
-                `largest face → ${largestFace.side} (area=${(largestFace.w * largestFace.h).toFixed(4)})`
+                `[virtual-multicam] pyannote ${speaker}: @${midpoint.toFixed(1)}s, ` +
+                `${faces.length} face(s), largest → ${largestFace.side}`
             );
         }
 
         return Object.keys(results).length === speakers.length ? results : null;
     } catch (err) {
-        console.warn('[virtual-multicam] detectSpeakerSides failed:', err.message);
+        console.warn('[virtual-multicam] pyannote detectSpeakerSides failed:', err.message);
         return null;
     }
 }
@@ -1051,45 +1147,36 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
 
         const diarizeServiceUrl = process.env.DIARIZE_SERVICE_URL;
 
+        // ── Path b: GPT-4o-mini Vision (primary — no extra service needed) ──────
+        // Extracts one frame per speaker at their longest solo turn, sends both
+        // to GPT-4o-mini in a single call, and asks which side each active speaker
+        // is on. Requires OPENAI_API_KEY and a resolvable filename (GCS or local).
+        if (!hostSide && filename) {
+            const visionSide = await detectHostSideViaVision(words, speakers, filename);
+            if (visionSide) {
+                hostSide     = visionSide;
+                faceDetected = true;
+                console.log(`[virtual-multicam] hostSide="${hostSide}" via GPT-4o-mini Vision`);
+            }
+        }
+
+        // ── Path c: pyannote MediaPipe (secondary — if DIARIZE_SERVICE_URL set) ─
+        // Cross-checks the Vision result. If both agree, confidence is high.
+        // If only pyannote is available (no OpenAI key), it acts as primary.
         if (!hostSide && filename && diarizeServiceUrl) {
-            // ── Path b: smart detection from diarization + server-side frames ──
             const speakerSides = await detectSpeakerSides(words, speakers, filename, diarizeServiceUrl);
-            if (speakerSides) {
-                // SPEAKER_00 is the host by convention (first speaker assigned by AssemblyAI)
-                const host = speakers[0]; // SPEAKER_00
-                if (speakerSides[host]) {
-                    hostSide     = speakerSides[host];
-                    faceDetected = true;
-                    console.log(`[virtual-multicam] Host (${host}) detected on ${hostSide} side via diarization+frames`);
-                }
+            if (speakerSides?.[speakers[0]]) {
+                hostSide     = speakerSides[speakers[0]];
+                faceDetected = true;
+                console.log(`[virtual-multicam] hostSide="${hostSide}" via pyannote MediaPipe`);
             }
         }
 
-        if (!hostSide && diarizeServiceUrl && frames.length > 0) {
-            // ── Path c: legacy client-sent frames ──────────────────────────────
-            try {
-                const fdRes = await fetch(`${diarizeServiceUrl}/detect-faces`, {
-                    method:  'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body:    JSON.stringify({ frames: frames.slice(0, 3) }),
-                    signal:  AbortSignal.timeout(8000),
-                });
-                if (fdRes.ok) {
-                    const fdData = await fdRes.json();
-                    if (fdData.faces && fdData.faces.length > 0) {
-                        const sortedByCx = [...fdData.faces].sort((a, b) => a.cx - b.cx);
-                        hostSide     = sortedByCx[0].side;
-                        faceDetected = true;
-                        console.log(`[virtual-multicam] Face detection (legacy frames): host on ${hostSide} side`);
-                    }
-                }
-            } catch (fdErr) {
-                console.warn(`[virtual-multicam] Legacy face detection failed (${fdErr.message})`);
-            }
+        // ── Path d: default ───────────────────────────────────────────────────
+        if (!hostSide) {
+            hostSide = 'left';
+            console.log('[virtual-multicam] hostSide defaulting to "left" (no face detection available)');
         }
-
-        // ── Path d: default ────────────────────────────────────────────────────
-        if (!hostSide) hostSide = 'left';
 
         // ── 2. Virtual camera definitions ────────────────────────────────────
         //
