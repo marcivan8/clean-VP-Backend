@@ -579,10 +579,18 @@ router.post('/analyze', ...authAndGate, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/split-speakers', ...authAndGate, async (req, res) => {
     try {
-        const DiarizeService = require('../services/DiarizeService');
-        if (!DiarizeService.isAvailable) {
+        const AssemblyAIService = require('../services/AssemblyAIService');
+        const DiarizeService    = require('../services/DiarizeService');
+
+        // Allow the request through if EITHER provider is configured.
+        // The job processor uses AssemblyAI as primary and pyannote as fallback;
+        // the route guard must mirror that — checking only DiarizeService here
+        // causes a false 503 when ASSEMBLYAI_API_KEY is set but DIARIZE_SERVICE_URL is not.
+        if (!AssemblyAIService.isAvailable && !DiarizeService.isAvailable) {
             return res.status(503).json({
-                error: 'Speaker diarization is not configured on this server. Set DIARIZE_SERVICE_URL.',
+                error:
+                    'Speaker diarization is not configured. ' +
+                    'Set ASSEMBLYAI_API_KEY (recommended) or DIARIZE_SERVICE_URL.',
             });
         }
 
