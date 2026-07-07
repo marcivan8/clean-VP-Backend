@@ -48,7 +48,11 @@ const timelineScene = makeScene2D('timeline', function* (view) {
     const totalDuration: number = (durationSignal ? typeof durationSignal === 'function' ? durationSignal() : durationSignal : 10) as number;
 
     const tracksSignal = vars.get('tracks', []);
-    const tracks: any[] = (tracksSignal ? typeof tracksSignal === 'function' ? tracksSignal() : tracksSignal : []) as any[];
+    const _rawTracks = (tracksSignal ? typeof tracksSignal === 'function' ? tracksSignal() : tracksSignal : []);
+    // Defensive: vars.get can return a signal object, null, or a non-array on corrupted data.
+    // If it's not an array, default to [] so the scene falls through to the "NO MEDIA" branch
+    // instead of crashing the generator and triggering cascading r.map errors in Revideo internals.
+    const tracks: any[] = Array.isArray(_rawTracks) ? _rawTracks : [];
 
     const backendUrlSignal = vars.get('backendUrl', '');
     const backendUrl: string = (typeof backendUrlSignal === 'function' ? backendUrlSignal() : backendUrlSignal) as string;
@@ -128,7 +132,10 @@ const timelineScene = makeScene2D('timeline', function* (view) {
     // Play all clips at their respective start times
     const runningClips: any[] = [];
     sortedTracks.forEach((track: any) => {
-        track.clips.forEach((clip: any) => {
+        // Defensive: clips should always be an array (built via .map() in IDELayout),
+        // but guard against null/undefined from corrupted localStorage or serialization edge-cases.
+        const trackClips: any[] = Array.isArray(track.clips) ? track.clips : [];
+        trackClips.forEach((clip: any) => {
             runningClips.push(function* () {
                 // Wait for clip's start time on the timeline
                 yield* waitFor(clip.start);
@@ -297,9 +304,12 @@ const timelineScene = makeScene2D('timeline', function* (view) {
         });
     });
 
+    // Guard: calling all() with no arguments causes join() to receive undefined as its
+    // first arg, pushing it into tasks, and then Math.max(...[]) = -Infinity which
+    // corrupts playback time. Fall back to waitFor if somehow runningClips is empty.
     yield* any(
         waitFor(totalDuration),
-        all(...runningClips)
+        runningClips.length > 0 ? all(...runningClips) : waitFor(totalDuration)
     );
 });
 
