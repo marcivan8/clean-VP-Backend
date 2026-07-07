@@ -676,6 +676,16 @@ class PlaybackEngine {
 
     // --- Frame Ingestion (Producer Interface) ---
 
+    /**
+     * Request that the very next incoming frame is rendered immediately,
+     * even while the clock is paused. Useful after crop or grading changes
+     * so the paused preview reflects the new visual parameters right away.
+     * Pair with engine.seek(time) to request a fresh frame from the worker.
+     */
+    renderOnce() {
+        this._wantOneRender = true;
+    }
+
     handleWorkerMessage(e) {
         const { type, payload } = e.data;
         if (type === 'NEW_FRAME') {
@@ -685,6 +695,17 @@ class PlaybackEngine {
                 this.onMetadata(payload.width, payload.height);
             }
             this.pushFrame(payload.data, payload.timestamp);
+            // If a one-shot render was requested (e.g. after crop change while paused),
+            // render the frame immediately without waiting for the RAF loop.
+            if (this._wantOneRender) {
+                this._wantOneRender = false;
+                const candidate = this.buffer.peek();
+                if (candidate) {
+                    this.render(candidate);
+                    const consumed = this.buffer.pop();
+                    if (consumed?.data?.close) consumed.data.close();
+                }
+            }
         } else if (type === 'AUDIO_DATA') {
             // Forward Waveform Data if present
             if (payload.peaks && this.onWaveformUpdate) {
