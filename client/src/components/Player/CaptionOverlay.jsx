@@ -1,4 +1,5 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../../store/useTimelineStore';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -8,7 +9,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 // I'll stick to CSS for safety and speed.
 
 const CaptionOverlay = () => {
-    const { currentTime, captions } = useTimelineStore();
+    const { currentTime, captions } = useTimelineStore(useShallow(state => ({
+        currentTime: state.currentTime,
+        captions:    state.captions,
+    })));
 
     if (!captions || captions.length === 0) return null;
 

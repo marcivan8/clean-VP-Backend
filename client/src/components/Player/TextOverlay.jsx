@@ -1,4 +1,5 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../../store/useTimelineStore';
 
 // Map preset names to actual font families
@@ -15,7 +16,14 @@ const FONT_MAP = {
 
 const TextOverlay = () => {
     const containerRef = React.useRef(null);
-    const { currentTime, tracks, activeClipId, updateClip, setActiveClip, saveToHistory } = useTimelineStore();
+    const { currentTime, tracks, activeClipId, updateClip, setActiveClip, saveToHistory } = useTimelineStore(useShallow(state => ({
+        currentTime:   state.currentTime,
+        tracks:        state.tracks,
+        activeClipId:  state.activeClipId,
+        updateClip:    state.updateClip,
+        setActiveClip: state.setActiveClip,
+        saveToHistory: state.saveToHistory,
+    })));
 
     // 1. Filter for 'text' tracks
     const textTracks = tracks.filter(t => t.type === 'text');
@@ -143,6 +151,7 @@ const TextOverlay = () => {
                         style={{
                             left,
                             top,
+                            // Transform: Center (-50%) + Scale
                             transform: `translate(-50%, -50%) scale(${clip.scale || 1})`,
                             width: '80%',
                             fontFamily: FONT_MAP[clip.fontFamily] || 'Inter, sans-serif',
@@ -154,11 +163,8 @@ const TextOverlay = () => {
                             textAlign: clip.textAlign || 'center',
                             textShadow: clip.textShadow || 'none',
                             WebkitTextStroke: clip.stroke ? `${clip.stroke.width}px ${clip.stroke.color}` : 'none',
-                            backgroundColor: clip.bgColor || 'transparent',
                             opacity: clip.opacity ?? 1,
-                            pointerEvents: 'auto',
-                            padding: clip.bgColor ? '4px 8px' : undefined,
-                            borderRadius: clip.bgColor ? '4px' : undefined,
+                            pointerEvents: 'auto'
                         }}
                     >
                         {clip.content || 'New Text'}

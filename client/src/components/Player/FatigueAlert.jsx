@@ -1,9 +1,14 @@
 import React, { useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../../store/useTimelineStore';
 import { AlertTriangle } from 'lucide-react';
 
 const FatigueAlert = () => {
-    const { currentTime, pacingSegments, isPlaying } = useTimelineStore();
+    const { currentTime, pacingSegments, isPlaying } = useTimelineStore(useShallow(state => ({
+        currentTime:     state.currentTime,
+        pacingSegments:  state.pacingSegments,
+        isPlaying:       state.isPlaying,
+    })));
 
     // Memoize the segment mapping to avoid calculation on every frame
     const segmentsWithTime = useMemo(() => {

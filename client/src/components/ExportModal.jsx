@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { X, Film, Download, Tv2, Smartphone, Youtube, Clapperboard, CheckCircle2, Loader2, AlertCircle, FileCode2, Scissors, Zap } from 'lucide-react';
 import { exportToNLE } from '../services/nleExportService';
+import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../store/useTimelineStore';
-import { Logo } from './Logo.jsx';
 
 // ============================================================================
 // PLATFORM DEFINITIONS (mirrors backend)
@@ -116,6 +116,19 @@ const NLE_TARGETS = [
     },
 ];
 
+// ============================================================================
+// VIBED LOGO (inline SVG — no external dep, always matches brand)
+// ============================================================================
+
+const VibedLogoIcon = ({ size = 18 }) => (
+    <svg width={size} height={size} viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path
+            d="M310 110 L185 265 L250 245 L200 390 L325 230 L258 248 Z"
+            fill="none" stroke="#1a3fa8" strokeWidth="20" strokeLinejoin="round" strokeLinecap="round"
+        />
+        <line x1="248" y1="248" x2="195" y2="268" stroke="#FFB800" strokeWidth="10" strokeLinecap="round" />
+    </svg>
+);
 
 // ============================================================================
 // EXPORT MODAL
@@ -136,7 +149,10 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
     const [nleError,       setNleError]       = useState(null);
     const [nleLoadingId,   setNleLoadingId]   = useState(null); // id of card currently exporting
 
-    const { tracks, aspectRatio } = useTimelineStore();
+    const { tracks, aspectRatio } = useTimelineStore(useShallow(state => ({
+        tracks:      state.tracks,
+        aspectRatio: state.aspectRatio,
+    })));
 
     useEffect(() => {
         if (isExporting) {
@@ -192,13 +208,8 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
             });
             setNleStatus('success');
         } catch (err) {
-            if (err.isUpgradeRequired) {
-                setNleStatus('upgrade');
-                setNleError(err.upgradeRequired || 'creator');
-            } else {
-                setNleStatus('error');
-                setNleError(err.message);
-            }
+            setNleStatus('error');
+            setNleError(err.message);
         } finally {
             setNleLoadingId(null);
         }
@@ -212,7 +223,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                 <div className="relative flex items-center justify-between px-6 py-4 border-b border-white/5 bg-card/80">
                     <div className="flex items-center gap-3">
                         <div className="p-2 rounded-lg bg-white/5 border border-white/10 text-primary">
-                            <Logo size={18} />
+                            <VibedLogoIcon size={18} />
                         </div>
                         <div>
                             <h2 className="text-sm font-extrabold tracking-tight text-foreground">Export Media</h2>
@@ -459,29 +470,6 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                             <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/30">
                                 <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
                                 <span className="text-xs text-red-300">{nleError || 'Failed to generate project file.'}</span>
-                            </div>
-                        )}
-
-                        {nleStatus === 'upgrade' && (
-                            <div className="flex flex-col gap-3 px-4 py-4 rounded-xl bg-gradient-to-br from-amber-500/10 to-yellow-500/5 border border-amber-500/30">
-                                <div className="flex items-start gap-3">
-                                    <div className="p-1.5 rounded-lg bg-amber-500/20 shrink-0">
-                                        <Zap className="w-4 h-4 text-amber-400" />
-                                    </div>
-                                    <div>
-                                        <p className="text-xs font-bold text-amber-300">NLE Export is a Creator feature</p>
-                                        <p className="text-[10px] text-white/40 mt-1 leading-relaxed">
-                                            Export to Premiere Pro, Final Cut Pro, DaVinci Resolve and more.
-                                            Upgrade to unlock full NLE project export.
-                                        </p>
-                                    </div>
-                                </div>
-                                <a
-                                    href="/pricing"
-                                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-black font-bold text-xs text-center flex items-center justify-center gap-1.5 transition-all shadow-lg shadow-amber-500/20"
-                                >
-                                    <Zap className="w-3.5 h-3.5" /> Upgrade to Creator
-                                </a>
                             </div>
                         )}
 

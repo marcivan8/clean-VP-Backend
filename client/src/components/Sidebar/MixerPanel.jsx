@@ -1,4 +1,5 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../../store/useTimelineStore';
 import { authFetch } from '../../utils/authFetch';
 import { pollJobResult } from '../../utils/jobPoller';
@@ -13,7 +14,15 @@ const MixerPanel = () => {
         toggleTrackMute,
         toggleTrackSolo,
         audioLevels
-    } = useTimelineStore();
+    } = useTimelineStore(useShallow(state => ({
+        tracks:            state.tracks,
+        activeClipId:      state.activeClipId,
+        updateClip:        state.updateClip,
+        updateTrackVolume: state.updateTrackVolume,
+        toggleTrackMute:   state.toggleTrackMute,
+        toggleTrackSolo:   state.toggleTrackSolo,
+        audioLevels:       state.audioLevels,
+    })));
 
     const [processing, setProcessing] = React.useState({});
 

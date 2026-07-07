@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../../store/useTimelineStore';
 import CaptionOverlay from './CaptionOverlay';
 import TextOverlay from './TextOverlay';
@@ -12,7 +13,14 @@ const VideoPlayer = () => {
     const engineRef = useRef(null); // Persist engine instance
 
     // Connect to store
-    const { currentTime, isPlaying, tracks, assets, seek, setIsPlaying } = useTimelineStore();
+    const { currentTime, isPlaying, tracks, assets, seek, setIsPlaying } = useTimelineStore(useShallow(state => ({
+        currentTime:  state.currentTime,
+        isPlaying:    state.isPlaying,
+        tracks:       state.tracks,
+        assets:       state.assets,
+        seek:         state.seek,
+        setIsPlaying: state.setIsPlaying,
+    })));
 
     // Determine Active Clip for Rendering & Logic
     // Search ALL video tracks — after split-speakers there are 2 (one per speaker).
