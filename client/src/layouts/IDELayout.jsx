@@ -458,7 +458,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         });
     }, [isAnonymous, showAuthPrompt]);
 
-    const [activeTab, setActiveTab] = React.useState('media');
+    const activeTab    = useAIStore(s => s.activeTab);
+    const setActiveTab = useAIStore(s => s.setActiveTab);
     const [activeColorRange, setActiveColorRange] = React.useState('reds');
     const [openMenu, setOpenMenu] = React.useState(null);
 
@@ -1245,16 +1246,16 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         <input type="file" ref={fileInputRef} onChange={handleFileImport} className="hidden" accept="video/*,audio/*,image/*" multiple />
 
                         <div className="p-2 border-b flex gap-1 overflow-x-auto no-scrollbar" style={{ borderColor: "var(--line-soft)" }}>
-                            {['media', 'transcript', 'color', 'text', 'audio', 'transform', 'settings'].map(tab => (
+                            {['media', 'captions', 'transcript', 'color', 'audio', 'transform', 'settings'].map(tab => (
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab)}
                                     className={classNames("studio-tab-btn", activeTab === tab && "active")}
                                 >
                                     {tab === 'media'      && <Layers   className="w-2.5 h-2.5" />}
+                                    {tab === 'captions'   && <Type     className="w-2.5 h-2.5" />}
                                     {tab === 'transcript' && <span style={{ fontSize: 9 }}>📝</span>}
                                     {tab === 'color'      && <Palette  className="w-2.5 h-2.5" />}
-                                    {tab === 'text'       && <Type     className="w-2.5 h-2.5" />}
                                     {tab === 'audio'      && <span style={{ fontSize: 9 }}>🎤</span>}
                                     {tab === 'transform'  && <Move     className="w-2.5 h-2.5" />}
                                     {tab === 'settings'   && <Settings className="w-2.5 h-2.5" />}
@@ -1336,7 +1337,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             )}
 
                             {activeTab === 'interview' && <section className="border-b border-border/50"><InterviewEditPanel /></section>}
-                            {activeTab === 'text' && <section className="p-4 border-b border-border/50"><TextPanel /></section>}
+                            {activeTab === 'captions' && <section className="p-4 border-b border-border/50"><TextPanel /></section>}
                             {activeTab === 'audio' && <section className="p-4 border-b border-border/50"><MixerPanel /></section>}
 
                             {activeTab === 'transform' && (
@@ -1355,13 +1356,35 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                                     { key: 'x', label: 'Position X', min: -1920, max: 1920, toDisplay: v => v || 0, unit: 'px', fromDisplay: v => v },
                                                     { key: 'y', label: 'Position Y', min: -1080, max: 1080, toDisplay: v => v || 0, unit: 'px', fromDisplay: v => v },
                                                     { key: 'rotation', label: 'Rotation', min: -180, max: 180, toDisplay: v => v || 0, unit: '°', fromDisplay: v => v },
-                                                ].map(({ key, label, min, max, toDisplay, unit, fromDisplay }) => (
+                                                ].map(({ key, label, min, max, toDisplay, unit, fromDisplay }) => {
+                                                    const displayVal = toDisplay(activeClip[key]);
+                                                    const scaleQuality = key === 'scale'
+                                                        ? (displayVal <= 100 ? { color: '#34d399', label: 'Sharp' }
+                                                        : displayVal <= 130 ? { color: '#fbbf24', label: 'Slight upscale' }
+                                                        : { color: '#f87171', label: 'Upscaled' })
+                                                        : null;
+                                                    return (
                                                     <div key={key} className="space-y-2">
-                                                        <div className="flex justify-between text-xs"><span>{label}</span><span className="text-muted-foreground">{toDisplay(activeClip[key])}{unit}</span></div>
-                                                        <input type="range" min={min} max={max} value={toDisplay(activeClip[key])} onChange={(e) => updateClip(activeTrackId, activeClip.id, { [key]: fromDisplay(parseInt(e.target.value)) })} className="w-full accent-primary h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer" />
+                                                        <div className="flex justify-between text-xs items-center">
+                                                            <span>{label}</span>
+                                                            <div className="flex items-center gap-1.5">
+                                                                {scaleQuality && (
+                                                                    <span className="flex items-center gap-1">
+                                                                        <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: scaleQuality.color, boxShadow: `0 0 4px ${scaleQuality.color}` }} />
+                                                                        <span className="text-[10px]" style={{ color: scaleQuality.color }}>{scaleQuality.label}</span>
+                                                                    </span>
+                                                                )}
+                                                                <span className="text-muted-foreground">{displayVal}{unit}</span>
+                                                            </div>
+                                                        </div>
+                                                        <input type="range" min={min} max={max} value={displayVal} onChange={(e) => updateClip(activeTrackId, activeClip.id, { [key]: fromDisplay(parseInt(e.target.value)) })} className="w-full accent-primary h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer" />
                                                     </div>
-                                                ))}
-                                                <div className="pt-4 border-t border-border">
+                                                    );
+                                                })}
+                                                <p className="text-[10px] leading-relaxed pt-1" style={{ color: 'var(--fg-4)', fontFamily: 'var(--f-sans)' }}>
+                                                    Export always uses your original source file from GCS for maximum quality.
+                                                </p>
+                                                <div className="pt-3 border-t border-border">
                                                     <button onClick={() => updateClip(activeTrackId, activeClip.id, { scale: 1, x: 0, y: 0, rotation: 0 })} className="w-full py-1.5 text-xs bg-secondary hover:bg-white/10 rounded text-muted-foreground transition-colors">Reset Transform</button>
                                                 </div>
                                             </>

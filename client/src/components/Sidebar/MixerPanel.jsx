@@ -25,6 +25,17 @@ const MixerPanel = () => {
     })));
 
     const [processing, setProcessing] = React.useState({});
+    const volumeRef = React.useRef(null);
+
+    // TASK 8: Scroll to volume/fade controls when an audio clip is selected
+    React.useEffect(() => {
+        if (!activeClipId) return;
+        // Small delay to let the tab switch + render complete first
+        const t = setTimeout(() => {
+            volumeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
+        return () => clearTimeout(t);
+    }, [activeClipId]);
 
     let activeClip = null;
     let activeTrackId = null;
@@ -97,7 +108,7 @@ const MixerPanel = () => {
                             <h4 className="text-xs font-bold text-white/70 mb-3 truncate">{activeClip.name}</h4>
 
                             {/* Volume */}
-                            <div className="mb-4">
+                            <div ref={volumeRef} className="mb-4">
                                 <div className="flex justify-between text-xs mb-1">
                                     <span className="text-white/50">Gain</span>
                                     <span className="text-primary font-mono">{((activeClip.volume ?? 1.0) * 100).toFixed(0)}%</span>

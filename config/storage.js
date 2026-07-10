@@ -83,10 +83,7 @@ exports.FOLDERS = {
     TEMP: 'temp/',
 };
 
-// Accept either naming convention used across different parts of the codebase.
-// GOOGLE_CLOUD_BUCKET_NAME  — used here and in revideoRenderRoutes
-// GCS_BUCKET_NAME           — used in exportRoutes, silenceRoutes, etc.
-const bucketName = process.env.GOOGLE_CLOUD_BUCKET_NAME || process.env.GCS_BUCKET_NAME;
+const bucketName = process.env.GOOGLE_CLOUD_BUCKET_NAME;
 const creds = resolveCredentials();
 
 if (!creds || !bucketName || bucketName === 'your-bucket-name') {
@@ -108,47 +105,23 @@ if (!creds || !bucketName || bucketName === 'your-bucket-name') {
         const gcsStorage = new Storage(storageOpts);
         const gcsBucket = gcsStorage.bucket(bucketName);
 
-        // Do NOT export the bucket until verification succeeds.
-        // Exporting it before the async check resolves creates a race where jobs
-        // start with a non-null bucket reference, the auth call inside fails, the
-        // catch handler nulls it out, and all retries see null.
-        //
-        // Railway containers sometimes lack full outbound connectivity for the first
-        // few seconds after boot. A single cold-start attempt to oauth2.googleapis.com
-        // can time out or drop with an empty 'reason', permanently flipping the service
-        // to local storage for the entire container lifetime. Retry with backoff to
-        // absorb transient startup network hiccups.
-        const verifyWithRetry = async (attempt = 1) => {
-            const MAX_ATTEMPTS = 5;
-            const DELAYS_MS = [2000, 5000, 10000, 20000]; // 2s, 5s, 10s, 20s
+        exports.storage = gcsStorage;
+        exports.bucket = gcsBucket;
 
-            try {
-                const [exists] = await gcsBucket.exists();
+        // Async verification — updates exports in-place if the bucket turns out to be bad
+        gcsBucket.exists()
+            .then(([exists]) => {
                 if (exists) {
-                    exports.storage = gcsStorage;
-                    exports.bucket = gcsBucket;
-                    console.log(`✅ Google Cloud Storage ready — bucket: ${bucketName}` +
-                        (attempt > 1 ? ` (succeeded on attempt ${attempt})` : ''));
+                    console.log(`✅ Google Cloud Storage ready — bucket: ${bucketName}`);
                 } else {
                     console.warn(`⚠️ GCS bucket "${bucketName}" does not exist — falling back to local storage`);
                     setupLocalStorage();
                 }
-            } catch (err) {
-                if (attempt < MAX_ATTEMPTS) {
-                    const delay = DELAYS_MS[attempt - 1] ?? 20000;
-                    console.warn(
-                        `⚠️ GCS verification attempt ${attempt}/${MAX_ATTEMPTS} failed: ${err.message}` +
-                        ` — retrying in ${delay / 1000}s`
-                    );
-                    setTimeout(() => verifyWithRetry(attempt + 1), delay);
-                } else {
-                    console.warn(`⚠️ GCS bucket verification failed after ${MAX_ATTEMPTS} attempts: ${err.message} — falling back to local storage`);
-                    setupLocalStorage();
-                }
-            }
-        };
-
-        verifyWithRetry();
+            })
+            .catch(err => {
+                console.warn('⚠️ GCS bucket verification failed:', err.message, '— falling back to local storage');
+                setupLocalStorage();
+            });
     } catch (err) {
         console.error('⚠️ Failed to initialize GCS client:', err.message, '— using local storage');
         setupLocalStorage();

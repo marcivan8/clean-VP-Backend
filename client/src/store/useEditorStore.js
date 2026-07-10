@@ -36,6 +36,7 @@ const useEditorStore = create((set, get) => ({
     activeClipId: null, // Primary active clip (for inspector)
     selectedClipIds: [], // Multi-selection array
     clipboard: null, // Clip ID or data to copy
+    clipboard: null, // Clip ID or data to copy
     uploadedFile: null, // The real file object for backend analysis
     pacingSegments: [], // Array of fast/slow segments for HUD
     beatMarkers: [], // Array of timestamps for music beats
@@ -221,6 +222,9 @@ const useEditorStore = create((set, get) => ({
             pacingSegments: state.pacingSegments,
             beatMarkers: state.beatMarkers,
             captions: state.captions,
+            pacingSegments: state.pacingSegments,
+            beatMarkers: state.beatMarkers,
+            captions: state.captions,
             activeClipId: state.activeClipId,
             selectedClipIds: state.selectedClipIds
         };
@@ -242,6 +246,8 @@ const useEditorStore = create((set, get) => ({
             aspectRatio: state.aspectRatio,
             zoomLevel: state.zoomLevel,
             pacingSegments: state.pacingSegments,
+            beatMarkers: state.beatMarkers,
+            captions: state.captions,
             beatMarkers: state.beatMarkers,
             captions: state.captions,
             activeClipId: state.activeClipId,
@@ -268,6 +274,8 @@ const useEditorStore = create((set, get) => ({
             aspectRatio: state.aspectRatio,
             zoomLevel: state.zoomLevel,
             pacingSegments: state.pacingSegments,
+            beatMarkers: state.beatMarkers,
+            captions: state.captions,
             beatMarkers: state.beatMarkers,
             captions: state.captions,
             activeClipId: state.activeClipId,

@@ -182,8 +182,14 @@ const NLP_MAP = {
         'split the speakers', 'separate the speakers',
     ],
     virtualMulticam: [
-        // Direct feature names
+        // Direct feature names — with and without "virtual" prefix.
+        // "multi camera" / "multicam" alone must live HERE (not in rhythmZoom) so
+        // that any prompt containing these words (including French "effet de multi
+        // camera") is caught by tryLocalFirst before the API sees it and mis-routes
+        // it based on conversation-history bias.
         'virtual multicam', 'virtual multi camera', 'virtual multi-camera',
+        'multicam', 'multi cam', 'multi camera', 'multi-camera', 'multi-cam',
+        'effet de multi camera', 'effet multicam', 'effet multi camera',
         // Interview angle vocabulary
         'interview angles', 'interview style edit', 'multicam interview',
         'close shot editing', 'close shot interview', 'close shots interview',
@@ -199,9 +205,7 @@ const NLP_MAP = {
         // Action verbs that clearly imply this feature (not generic dynamic)
         'cut between speakers', 'cut between host and guest',
         'switch between speakers', 'alternate speakers',
-        // "add multicam" without the "virtual" prefix — must live here so it
-        // isn't hijacked by the rhythmZoom "multicam" token in compound commands
-        // like "split speakers and add multicam".
+        // "add multicam" variants
         'add multicam', 'add multi cam', 'add multi-cam',
         'add multicam angles', 'add interview angles', 'add speaker angles',
         'add virtual multicam', 'add multicam edit',

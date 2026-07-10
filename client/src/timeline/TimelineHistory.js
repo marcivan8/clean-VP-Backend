@@ -486,52 +486,20 @@ export class TimelineHistory {
 
     /**
      * Persist history to storage
-     *
-     * `captions`, `transcripts`, and `waveformData` are excluded from every
-     * persisted snapshot.  They are the biggest contributors to localStorage
-     * size (easily 100 KB+ each × 20 history entries = quota overflow), and
-     * they are stored separately in the main timeline store / re-fetched on
-     * demand — they don't need to ride along with undo snapshots.
      */
     persist() {
-        // Strip large, reconstructable fields from a state snapshot.
-        const _slim = (state) => {
-            if (!state) return state;
-            // eslint-disable-next-line no-unused-vars
-            const { captions, transcripts, waveformData, ...slim } = state;
-            return slim;
-        };
-
-        const slimPast = this.past.slice(-20).map(e => ({ ...e, state: _slim(e.state) }));
-        const slimVersions = Array.from(this.versions.entries())
-            .map(([k, v]) => [k, { ...v, state: _slim(v.state) }]);
-        const slimCurrent = _slim(this.currentState);
-
-        const tryWrite = (past, versions) => {
-            const data = { past, versions, currentState: slimCurrent, timestamp: Date.now() };
-            localStorage.setItem(this.options.persistenceKey, JSON.stringify(data));
-        };
-
         try {
-            tryWrite(slimPast, slimVersions);
+            const data = {
+                past: this.past.slice(-20), // Only persist last 20 entries
+                versions: Array.from(this.versions.entries()),
+                currentState: this.currentState,
+                timestamp: Date.now()
+            };
+
+            localStorage.setItem(this.options.persistenceKey, JSON.stringify(data));
             console.log('[TimelineHistory] Persisted to storage');
         } catch (err) {
-            if (err.name !== 'QuotaExceededError') {
-                console.error('[TimelineHistory] Failed to persist:', err);
-                return;
-            }
-            // Quota exceeded — progressively reduce what we store
-            try {
-                tryWrite(slimPast.slice(-5), []);
-                console.warn('[TimelineHistory] Quota tight — persisted with reduced history (5 entries, no versions)');
-            } catch (_) {
-                try {
-                    tryWrite([], []);
-                    console.warn('[TimelineHistory] Quota exceeded — persisted current state only (no history)');
-                } catch (last) {
-                    console.error('[TimelineHistory] Cannot persist — localStorage full:', last.message);
-                }
-            }
+            console.error('[TimelineHistory] Failed to persist:', err);
         }
     }
 

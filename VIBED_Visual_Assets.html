@@ -1,0 +1,1236 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VIBED — Visual Assets Kit</title>
+<style>
+  /* VIBED DESIGN SYSTEM */
+  :root {
+    --accent: #6366F1;
+    --mint:   #10B981;
+    --fg:     #0F0F0F;
+    --bg:     #09090B;
+    --line:   rgba(255,255,255,0.08);
+    --glass:  rgba(255,255,255,0.04);
+    --glass-border: rgba(255,255,255,0.12);
+    --purple: #8B5CF6;
+    --ig:     #E1306C;
+    --tk:     #000000;
+    --li:     #0A66C2;
+    --yt:     #FF0000;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, 'Inter', 'Segoe UI', sans-serif;
+    background: #111;
+    color: #eee;
+    padding: 40px 20px;
+  }
+
+  h1.page-title {
+    text-align: center;
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--accent);
+    margin-bottom: 8px;
+    letter-spacing: -0.5px;
+  }
+  .page-subtitle {
+    text-align: center;
+    font-size: 13px;
+    color: #666;
+    margin-bottom: 40px;
+  }
+
+  .section-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #555;
+    text-transform: uppercase;
+    margin: 48px 0 16px;
+    padding-left: 4px;
+  }
+
+  .assets-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  /* ─── CARD WRAPPER ─────────────────────────────────── */
+  .asset-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .asset-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 2px;
+  }
+  .asset-name { font-size: 12px; font-weight: 600; color: #aaa; }
+  .asset-size { font-size: 11px; color: #555; }
+
+  /* ─── SHARED ASSET STYLES ────────────────────────────── */
+  .asset {
+    border-radius: 16px;
+    overflow: hidden;
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  /* ══════════════════════════════════════════════════════
+     ASSET 1 — Instagram Reel Cover (9:16 thumbnail)
+  ══════════════════════════════════════════════════════ */
+  .reel-cover {
+    width: 202px;
+    height: 360px;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 24px 20px;
+    position: relative;
+  }
+  .reel-cover .bg-glow {
+    position: absolute;
+    top: -60px; right: -60px;
+    width: 250px; height: 250px;
+    background: radial-gradient(circle, rgba(99,102,241,0.35) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .reel-cover .bg-glow2 {
+    position: absolute;
+    bottom: -40px; left: -40px;
+    width: 200px; height: 200px;
+    background: radial-gradient(circle, rgba(16,185,129,0.2) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .reel-cover .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(99,102,241,0.15);
+    border: 1px solid rgba(99,102,241,0.4);
+    border-radius: 20px;
+    padding: 4px 10px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 12px;
+    width: fit-content;
+  }
+  .reel-cover .chip-dot {
+    width: 6px; height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+  }
+  .reel-cover .headline {
+    font-size: 18px;
+    font-weight: 800;
+    line-height: 1.2;
+    color: #fff;
+    margin-bottom: 8px;
+    letter-spacing: -0.3px;
+  }
+  .reel-cover .headline span { color: var(--accent); }
+  .reel-cover .sub {
+    font-size: 11px;
+    color: rgba(255,255,255,0.5);
+    line-height: 1.4;
+    margin-bottom: 16px;
+  }
+  .reel-cover .logo-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .reel-cover .logo-text {
+    font-size: 13px;
+    font-weight: 900;
+    color: var(--accent);
+    letter-spacing: -0.5px;
+  }
+  .reel-cover .logo-dot { width: 5px; height: 5px; background: var(--mint); border-radius: 50%; }
+  .reel-cover .time-badge {
+    position: absolute;
+    top: 16px; right: 16px;
+    background: rgba(0,0,0,0.7);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    padding: 4px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  /* ══════════════════════════════════════════════════════
+     ASSET 2 — Instagram Square Post (1:1)
+  ══════════════════════════════════════════════════════ */
+  .ig-square {
+    width: 360px;
+    height: 360px;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 32px;
+    position: relative;
+    text-align: center;
+  }
+  .ig-square .corner-accent {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--purple), var(--mint));
+  }
+  .ig-square .number {
+    font-size: 72px;
+    font-weight: 900;
+    line-height: 1;
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 4px;
+  }
+  .ig-square .number-unit {
+    font-size: 18px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.4);
+    margin-bottom: 20px;
+  }
+  .ig-square .statement {
+    font-size: 22px;
+    font-weight: 800;
+    color: #fff;
+    line-height: 1.25;
+    margin-bottom: 12px;
+    letter-spacing: -0.3px;
+  }
+  .ig-square .statement em {
+    font-style: normal;
+    color: var(--mint);
+  }
+  .ig-square .sub {
+    font-size: 12px;
+    color: rgba(255,255,255,0.4);
+    margin-bottom: 24px;
+  }
+  .ig-square .badge {
+    background: rgba(99,102,241,0.12);
+    border: 1px solid rgba(99,102,241,0.35);
+    border-radius: 100px;
+    padding: 6px 16px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  /* ══════════════════════════════════════════════════════
+     ASSET 3 — Carousel Slide (1:1, slide 1)
+  ══════════════════════════════════════════════════════ */
+  .carousel-cover {
+    width: 360px;
+    height: 360px;
+    background: linear-gradient(135deg, #0D0D1A 0%, #0F0F0F 100%);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 28px;
+    position: relative;
+    overflow: hidden;
+  }
+  .carousel-cover .grid-lines {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(99,102,241,0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(99,102,241,0.06) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  .carousel-cover .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(16,185,129,0.12);
+    border: 1px solid rgba(16,185,129,0.3);
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--mint);
+    width: fit-content;
+    position: relative;
+  }
+  .carousel-cover .title {
+    font-size: 26px;
+    font-weight: 900;
+    color: #fff;
+    line-height: 1.2;
+    letter-spacing: -0.5px;
+    position: relative;
+  }
+  .carousel-cover .title .accent { color: var(--accent); }
+  .carousel-cover .slide-num {
+    position: absolute;
+    top: 28px; right: 28px;
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.25);
+  }
+  .carousel-cover .swipe-hint {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+  }
+  .carousel-cover .swipe-text {
+    font-size: 11px;
+    color: rgba(255,255,255,0.4);
+  }
+  .carousel-cover .dots {
+    display: flex;
+    gap: 4px;
+  }
+  .carousel-cover .dot {
+    width: 16px; height: 4px;
+    border-radius: 2px;
+    background: var(--accent);
+  }
+  .carousel-cover .dot.inactive {
+    width: 4px;
+    background: rgba(255,255,255,0.2);
+  }
+
+  /* ══════════════════════════════════════════════════════
+     ASSET 4 — TikTok / Reel Vertical Hook Card
+  ══════════════════════════════════════════════════════ */
+  .tiktok-hook {
+    width: 202px;
+    height: 360px;
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 24px 20px;
+    position: relative;
+    text-align: center;
+  }
+  .tiktok-hook .pulse-ring {
+    position: absolute;
+    width: 160px; height: 160px;
+    border-radius: 50%;
+    border: 1px solid rgba(99,102,241,0.2);
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+  }
+  .tiktok-hook .pulse-ring2 {
+    position: absolute;
+    width: 220px; height: 220px;
+    border-radius: 50%;
+    border: 1px solid rgba(99,102,241,0.08);
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+  }
+  .tiktok-hook .center-icon {
+    width: 60px; height: 60px;
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    margin-bottom: 16px;
+    position: relative;
+    box-shadow: 0 0 40px rgba(99,102,241,0.5);
+  }
+  .tiktok-hook .hook-text {
+    font-size: 17px;
+    font-weight: 900;
+    color: #fff;
+    line-height: 1.25;
+    margin-bottom: 12px;
+    position: relative;
+  }
+  .tiktok-hook .hook-text span { color: var(--accent); }
+  .tiktok-hook .sub-text {
+    font-size: 10px;
+    color: rgba(255,255,255,0.4);
+    position: relative;
+  }
+  .tiktok-hook .bottom-bar {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--mint));
+  }
+  .tiktok-hook .top-tag {
+    position: absolute;
+    top: 14px; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255,255,255,0.08);
+    border-radius: 20px;
+    padding: 3px 10px;
+    font-size: 9px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.5);
+    white-space: nowrap;
+  }
+
+  /* ══════════════════════════════════════════════════════
+     ASSET 5 — LinkedIn Header / Banner (5.6:1)
+  ══════════════════════════════════════════════════════ */
+  .li-banner {
+    width: 360px;
+    height: 96px;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    gap: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+  .li-banner .bg-line {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--purple), var(--mint), transparent);
+  }
+  .li-banner .logo-big {
+    font-size: 28px;
+    font-weight: 900;
+    color: var(--accent);
+    letter-spacing: -1px;
+    flex-shrink: 0;
+  }
+  .li-banner .divider {
+    width: 1px;
+    height: 40px;
+    background: rgba(255,255,255,0.1);
+    flex-shrink: 0;
+  }
+  .li-banner .tagline-col {
+    flex: 1;
+  }
+  .li-banner .tagline-main {
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1.3;
+    margin-bottom: 3px;
+  }
+  .li-banner .tagline-sub {
+    font-size: 10px;
+    color: rgba(255,255,255,0.4);
+  }
+  .li-banner .pills {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: flex-end;
+  }
+  .li-banner .pill {
+    background: rgba(99,102,241,0.12);
+    border: 1px solid rgba(99,102,241,0.25);
+    border-radius: 100px;
+    padding: 2px 8px;
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  .li-banner .glow-orb {
+    position: absolute;
+    right: -30px; top: -30px;
+    width: 120px; height: 120px;
+    background: radial-gradient(circle, rgba(99,102,241,0.25) 0%, transparent 70%);
+  }
+
+  /* ══════════════════════════════════════════════════════
+     ASSET 6 — YouTube Thumbnail
+  ══════════════════════════════════════════════════════ */
+  .yt-thumb {
+    width: 360px;
+    height: 202px;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    padding: 24px;
+    gap: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+  .yt-thumb .bg-gradient {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(99,102,241,0.15) 0%, transparent 60%);
+  }
+  .yt-thumb .left-col {
+    position: relative;
+    flex-shrink: 0;
+  }
+  .yt-thumb .face-placeholder {
+    width: 100px; height: 100px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    border: 3px solid rgba(255,255,255,0.15);
+    box-shadow: 0 0 30px rgba(99,102,241,0.4);
+  }
+  .yt-thumb .reaction-badge {
+    position: absolute;
+    bottom: -4px; right: -4px;
+    background: #FF0000;
+    border-radius: 8px;
+    padding: 3px 7px;
+    font-size: 10px;
+    font-weight: 800;
+    color: #fff;
+    border: 2px solid var(--bg);
+  }
+  .yt-thumb .right-col {
+    flex: 1;
+    position: relative;
+  }
+  .yt-thumb .label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--mint);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .yt-thumb .title {
+    font-size: 19px;
+    font-weight: 900;
+    color: #fff;
+    line-height: 1.2;
+    margin-bottom: 10px;
+    letter-spacing: -0.3px;
+  }
+  .yt-thumb .title .highlight {
+    background: linear-gradient(90deg, var(--accent), var(--purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .yt-thumb .stat-row {
+    display: flex;
+    gap: 10px;
+  }
+  .yt-thumb .stat {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.5);
+  }
+  .yt-thumb .stat-icon { font-size: 10px; }
+  .yt-thumb .corner-logo {
+    position: absolute;
+    bottom: 14px; right: 16px;
+    font-size: 11px;
+    font-weight: 900;
+    color: rgba(99,102,241,0.6);
+    letter-spacing: -0.5px;
+  }
+
+  /* ══════════════════════════════════════════════════════
+     ASSET 7 — Story CTA (9:16)
+  ══════════════════════════════════════════════════════ */
+  .story-cta {
+    width: 202px;
+    height: 360px;
+    background: linear-gradient(160deg, #0D0D1A 0%, #0A0A0F 100%);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 28px 20px;
+    position: relative;
+    text-align: center;
+    overflow: hidden;
+  }
+  .story-cta .glow-top {
+    position: absolute;
+    top: -80px; left: 50%;
+    transform: translateX(-50%);
+    width: 280px; height: 200px;
+    background: radial-gradient(ellipse at center, rgba(99,102,241,0.3) 0%, transparent 70%);
+  }
+  .story-cta .glow-bot {
+    position: absolute;
+    bottom: -60px; left: 50%;
+    transform: translateX(-50%);
+    width: 200px; height: 150px;
+    background: radial-gradient(ellipse at center, rgba(16,185,129,0.2) 0%, transparent 70%);
+  }
+  .story-cta .vibed-logo {
+    font-size: 22px;
+    font-weight: 900;
+    color: var(--accent);
+    letter-spacing: -0.5px;
+    margin-bottom: 32px;
+    position: relative;
+  }
+  .story-cta .main-text {
+    font-size: 20px;
+    font-weight: 900;
+    color: #fff;
+    line-height: 1.25;
+    margin-bottom: 8px;
+    position: relative;
+  }
+  .story-cta .main-text span { color: var(--accent); }
+  .story-cta .sub-text {
+    font-size: 11px;
+    color: rgba(255,255,255,0.4);
+    margin-bottom: 28px;
+    position: relative;
+    line-height: 1.5;
+  }
+  .story-cta .cta-btn {
+    background: var(--accent);
+    border-radius: 100px;
+    padding: 10px 22px;
+    font-size: 12px;
+    font-weight: 800;
+    color: #fff;
+    position: relative;
+    margin-bottom: 12px;
+    letter-spacing: 0.3px;
+  }
+  .story-cta .cta-sub {
+    font-size: 9px;
+    color: rgba(255,255,255,0.3);
+    position: relative;
+  }
+  .story-cta .swipe-up {
+    position: absolute;
+    bottom: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .story-cta .swipe-arrow { font-size: 14px; color: rgba(255,255,255,0.5); }
+  .story-cta .swipe-label { font-size: 9px; color: rgba(255,255,255,0.3); }
+
+  /* ══════════════════════════════════════════════════════
+     ASSET 8 — Feature Spotlight Card
+  ══════════════════════════════════════════════════════ */
+  .feature-card {
+    width: 360px;
+    background: var(--bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 20px;
+    padding: 28px;
+    position: relative;
+    overflow: hidden;
+  }
+  .feature-card .glow {
+    position: absolute;
+    top: -60px; right: -60px;
+    width: 200px; height: 200px;
+    background: radial-gradient(circle, rgba(99,102,241,0.2) 0%, transparent 70%);
+  }
+  .feature-card .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(16,185,129,0.1);
+    border: 1px solid rgba(16,185,129,0.25);
+    border-radius: 20px;
+    padding: 4px 10px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--mint);
+    margin-bottom: 16px;
+    position: relative;
+  }
+  .feature-card .tag-dot { width: 5px; height: 5px; background: var(--mint); border-radius: 50%; }
+  .feature-card .feat-title {
+    font-size: 22px;
+    font-weight: 900;
+    color: #fff;
+    line-height: 1.2;
+    margin-bottom: 8px;
+    position: relative;
+    letter-spacing: -0.3px;
+  }
+  .feature-card .feat-title em {
+    font-style: normal;
+    color: var(--accent);
+  }
+  .feature-card .feat-desc {
+    font-size: 12px;
+    color: rgba(255,255,255,0.45);
+    line-height: 1.6;
+    margin-bottom: 20px;
+    position: relative;
+  }
+  .feature-card .feat-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    position: relative;
+  }
+  .feature-card .stat-box {
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    padding: 14px;
+  }
+  .feature-card .stat-val {
+    font-size: 24px;
+    font-weight: 900;
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 3px;
+  }
+  .feature-card .stat-val.mint { color: var(--mint); }
+  .feature-card .stat-label {
+    font-size: 10px;
+    color: rgba(255,255,255,0.4);
+  }
+  .feature-card .footer-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--glass-border);
+    position: relative;
+  }
+  .feature-card .logo { font-size: 13px; font-weight: 900; color: var(--accent); letter-spacing: -0.5px; }
+  .feature-card .url { font-size: 10px; color: rgba(255,255,255,0.25); }
+
+  /* ══════════════════════════════════════════════════════
+     ASSET 9 — Pricing Card (BOFU)
+  ══════════════════════════════════════════════════════ */
+  .pricing-card {
+    width: 360px;
+    background: var(--bg);
+    border-radius: 20px;
+    overflow: hidden;
+    position: relative;
+  }
+  .pricing-card .pricing-header {
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    padding: 24px;
+    position: relative;
+  }
+  .pricing-card .pricing-header .glow {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at top left, rgba(255,255,255,0.1) 0%, transparent 60%);
+  }
+  .pricing-card .plan-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.8);
+    margin-bottom: 4px;
+    position: relative;
+  }
+  .pricing-card .price-big {
+    font-size: 48px;
+    font-weight: 900;
+    color: #fff;
+    line-height: 1;
+    position: relative;
+    letter-spacing: -1px;
+  }
+  .pricing-card .price-period {
+    font-size: 14px;
+    font-weight: 400;
+    color: rgba(255,255,255,0.6);
+  }
+  .pricing-card .pricing-body {
+    padding: 20px 24px 24px;
+  }
+  .pricing-card .feat-list {
+    list-style: none;
+    margin-bottom: 20px;
+  }
+  .pricing-card .feat-list li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 0;
+    font-size: 12px;
+    color: rgba(255,255,255,0.75);
+    border-bottom: 1px solid var(--glass-border);
+  }
+  .pricing-card .feat-list li:last-child { border-bottom: none; }
+  .pricing-card .check {
+    width: 18px; height: 18px;
+    background: rgba(16,185,129,0.15);
+    border: 1px solid rgba(16,185,129,0.3);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    flex-shrink: 0;
+    color: var(--mint);
+  }
+  .pricing-card .cta-pricing {
+    display: block;
+    background: linear-gradient(90deg, var(--accent), var(--purple));
+    border-radius: 12px;
+    padding: 12px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: 0.3px;
+  }
+
+  /* ══════════════════════════════════════════════════════
+     ASSET 10 — Platform Overview 4-grid
+  ══════════════════════════════════════════════════════ */
+  .platform-grid {
+    width: 360px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px;
+    background: #222;
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .plat-cell {
+    padding: 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .plat-icon { font-size: 22px; }
+  .plat-name { font-size: 13px; font-weight: 800; color: #fff; }
+  .plat-detail { font-size: 10px; color: rgba(255,255,255,0.45); line-height: 1.4; }
+  .plat-cadence {
+    display: inline-flex;
+    background: rgba(255,255,255,0.08);
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-size: 10px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.6);
+    width: fit-content;
+  }
+
+  /* ── Navigation bar ─────────────────────────────────── */
+  .nav {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 32px;
+  }
+  .nav-btn {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 100px;
+    padding: 6px 16px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #aaa;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .nav-btn:hover, .nav-btn.active {
+    background: rgba(99,102,241,0.15);
+    border-color: rgba(99,102,241,0.4);
+    color: var(--accent);
+  }
+</style>
+</head>
+<body>
+
+<h1 class="page-title">VIBED — Visual Assets Kit</h1>
+<p class="page-subtitle">Branded graphics using VIBED design system · Screenshot each card for social media</p>
+
+<!-- NAVIGATION -->
+<div class="nav">
+  <div class="nav-btn">Instagram Reels (9:16)</div>
+  <div class="nav-btn">Instagram Square (1:1)</div>
+  <div class="nav-btn">TikTok Hook (9:16)</div>
+  <div class="nav-btn">LinkedIn Banner</div>
+  <div class="nav-btn">YouTube Thumbnail</div>
+  <div class="nav-btn">Stories CTA</div>
+  <div class="nav-btn">Feature Cards</div>
+</div>
+
+<!-- ─── SECTION 1 — REELS & STORIES ─────────────────────────────── -->
+<p class="section-label">Instagram Reels · TikTok · Stories (9:16 format)</p>
+<div class="assets-grid">
+
+  <!-- Reel Cover 1 — Transformation -->
+  <div class="asset-wrap">
+    <div class="asset-meta">
+      <span class="asset-name">Reel Cover — Transformation</span>
+      <span class="asset-size">1080×1920 (9:16)</span>
+    </div>
+    <div class="asset reel-cover">
+      <div class="bg-glow"></div>
+      <div class="bg-glow2"></div>
+      <div class="time-badge">⏱ 12 MIN</div>
+      <div class="chip"><div class="chip-dot"></div>RÉSULTAT RÉEL</div>
+      <div class="headline">J'ai édité <span>1h de podcast</span> en 12 minutes.</div>
+      <div class="sub">Sans raccourcis. Sans perte de qualité. Avec l'IA.</div>
+      <div class="logo-row">
+        <div class="logo-text">VIBED</div>
+        <div class="logo-dot"></div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.3)">vibed.io</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reel Cover 2 — Multicam -->
+  <div class="asset-wrap">
+    <div class="asset-meta">
+      <span class="asset-name">Reel Cover — Multicam</span>
+      <span class="asset-size">1080×1920 (9:16)</span>
+    </div>
+    <div class="asset reel-cover">
+      <div class="bg-glow" style="background:radial-gradient(circle, rgba(16,185,129,0.3) 0%, transparent 70%)"></div>
+      <div class="bg-glow2" style="background:radial-gradient(circle, rgba(99,102,241,0.2) 0%, transparent 70%)"></div>
+      <div class="time-badge">✦ NEW</div>
+      <div class="chip" style="background:rgba(16,185,129,0.12);border-color:rgba(16,185,129,0.4);color:var(--mint)"><div class="chip-dot" style="background:var(--mint)"></div>MULTICAM VIRTUEL</div>
+      <div class="headline">1 seule <span style="color:var(--mint)">caméra.</span><br>Effet multicam.</div>
+      <div class="sub">L'IA génère plusieurs angles depuis un seul fichier.</div>
+      <div class="logo-row">
+        <div class="logo-text">VIBED</div>
+        <div class="logo-dot"></div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.3)">vibed.io</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TikTok Hook Card -->
+  <div class="asset-wrap">
+    <div class="asset-meta">
+      <span class="asset-name">TikTok Hook — Silence</span>
+      <span class="asset-size">1080×1920 (9:16)</span>
+    </div>
+    <div class="asset tiktok-hook">
+      <div class="top-tag">@[ton_compte] · VIBED</div>
+      <div class="pulse-ring"></div>
+      <div class="pulse-ring2"></div>
+      <div class="center-icon">⚡</div>
+      <div class="hook-text"><span>40 minutes</span> de silence<br>supprimées en<br>8 secondes.</div>
+      <div class="sub-text">regarde jusqu'au bout 👀</div>
+      <div class="bottom-bar"></div>
+    </div>
+  </div>
+
+  <!-- Story CTA -->
+  <div class="asset-wrap">
+    <div class="asset-meta">
+      <span class="asset-name">Story — CTA Free Trial</span>
+      <span class="asset-size">1080×1920 (9:16)</span>
+    </div>
+    <div class="asset story-cta">
+      <div class="glow-top"></div>
+      <div class="glow-bot"></div>
+      <div class="vibed-logo">VIBED</div>
+      <div class="main-text">Essaie<br><span>gratuitement.</span><br>Sans CB.</div>
+      <div class="sub-text">L'éditeur vidéo IA<br>pour les créateurs sérieux</div>
+      <div class="cta-btn">→ vibed.io/free</div>
+      <div class="cta-sub">Plan Free · Aucune carte requise</div>
+      <div class="swipe-up">
+        <div class="swipe-arrow">↑</div>
+        <div class="swipe-label">SWIPE UP</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ─── SECTION 2 — SQUARE POSTS ─────────────────────────────────── -->
+<p class="section-label">Instagram Square · LinkedIn Post (1:1 format)</p>
+<div class="assets-grid">
+
+  <!-- Square — Stat -->
+  <div class="asset-wrap">
+    <div class="asset-meta">
+      <span class="asset-name">Square — Stat Choc</span>
+      <span class="asset-size">1080×1080 (1:1)</span>
+    </div>
+    <div class="asset ig-square">
+      <div class="corner-accent"></div>
+      <div class="number">-90%</div>
+      <div class="number-unit">de temps d'édition</div>
+      <div class="statement">Ce que tu fais en <em>3 heures</em>,<br>l'IA le fait en 12 min.</div>
+      <div class="sub">Silence removal · Transcript editing · Multicam IA</div>
+      <div class="badge">VIBED — vibed.io</div>
+    </div>
+  </div>
+
+  <!-- Square — Quote -->
+  <div class="asset-wrap">
+    <div class="asset-meta">
+      <span class="asset-name">Square — Quote / Social Proof</span>
+      <span class="asset-size">1080×1080 (1:1)</span>
+    </div>
+    <div class="asset ig-square" style="background:linear-gradient(135deg,#0D0D1A,#0F0F0F)">
+      <div class="corner-accent" style="background:linear-gradient(90deg,var(--mint),var(--accent))"></div>
+      <div style="font-size:40px;margin-bottom:16px;position:relative">💬</div>
+      <div class="statement" style="font-size:18px;line-height:1.4">
+        <em style="color:var(--mint)">"VIBED a changé ma façon<br>de créer du contenu.<br>Je gagne 2h par jour."</em>
+      </div>
+      <div class="sub" style="margin-top:12px">— Creator, 280k abonnés YouTube</div>
+      <div class="badge" style="margin-top:16px;background:rgba(16,185,129,0.1);border-color:rgba(16,185,129,0.3);color:var(--mint)">VIBED — vibed.io</div>
+    </div>
+  </div>
+
+  <!-- Carousel Cover -->
+  <div class="asset-wrap">
+    <div class="asset-meta">
+      <span class="asset-name">Carousel — Cover Slide</span>
+      <span class="asset-size">1080×1080 (1:1)</span>
+    </div>
+    <div class="asset carousel-cover">
+      <div class="grid-lines"></div>
+      <div class="slide-num">1 / 6</div>
+      <div class="pill"><div class="tag-dot" style="width:5px;height:5px;background:var(--mint);border-radius:50%"></div>SAVE CE POST</div>
+      <div class="title">5 features <span class="accent">IA</span> que les creators ne connaissent pas encore</div>
+      <div class="swipe-hint">
+        <span class="swipe-text">swipe pour découvrir →</span>
+        <div class="dots">
+          <div class="dot"></div>
+          <div class="dot inactive"></div>
+          <div class="dot inactive"></div>
+          <div class="dot inactive"></div>
+          <div class="dot inactive"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ─── SECTION 3 — WIDE FORMAT ──────────────────────────────────── -->
+<p class="section-label">YouTube Thumbnail (16:9) · LinkedIn Banner</p>
+<div class="assets-grid">
+
+  <!-- YouTube Thumbnail 1 -->
+  <div class="asset-wrap">
+    <div class="asset-meta">
+      <span class="asset-name">YouTube Thumbnail — Tutorial</span>
+      <span class="asset-size">1280×720 (16:9)</span>
+    </div>
+    <div class="asset yt-thumb">
+      <div class="bg-gradient"></div>
+      <div class="left-col">
+        <div class="face-placeholder">🎬</div>
+        <div class="reaction-badge">TUTO</div>
+      </div>
+      <div class="right-col">
+        <div class="label">▶ VIBED TUTORIAL</div>
+        <div class="title">Éditer un podcast en<br><span class="highlight">20 minutes</span><br>avec l'IA</div>
+        <div class="stat-row">
+          <div class="stat"><span class="stat-icon">⏱</span> 20 min</div>
+          <div class="stat"><span class="stat-icon">🆓</span> Plan gratuit</div>
+        </div>
+      </div>
+      <div class="corner-logo">VIBED</div>
+    </div>
+  </div>
+
+  <!-- YouTube Thumbnail 2 -->
+  <div class="asset-wrap">
+    <div class="asset-meta">
+      <span class="asset-name">YouTube Thumbnail — Comparatif</span>
+      <span class="asset-size">1280×720 (16:9)</span>
+    </div>
+    <div class="asset yt-thumb" style="background:linear-gradient(135deg,#0A0A0F,#0F0F1A)">
+      <div class="bg-gradient" style="background:linear-gradient(135deg,rgba(139,92,246,0.15) 0%,transparent 60%)"></div>
+      <div class="left-col">
+        <div class="face-placeholder" style="background:linear-gradient(135deg,var(--purple),var(--accent))">⚡</div>
+        <div class="reaction-badge" style="background:var(--purple)">VS</div>
+      </div>
+      <div class="right-col">
+        <div class="label" style="color:var(--purple)">▶ COMPARATIF 2025</div>
+        <div class="title">VIBED vs Descript<br>vs CapCut —<br><span class="highlight">lequel choisir ?</span></div>
+        <div class="stat-row">
+          <div class="stat"><span class="stat-icon">🏆</span> Test honnête</div>
+          <div class="stat"><span class="stat-icon">💰</span> Prix comparés</div>
+        </div>
+      </div>
+      <div class="corner-logo">VIBED</div>
+    </div>
+  </div>
+
+  <!-- LinkedIn Banner -->
+  <div class="asset-wrap">
+    <div class="asset-meta">
+      <span class="asset-name">LinkedIn Profile Banner</span>
+      <span class="asset-size">1584×396 (4:1)</span>
+    </div>
+    <div class="asset li-banner">
+      <div class="bg-line"></div>
+      <div class="glow-orb"></div>
+      <div class="logo-big">VIBED</div>
+      <div class="divider"></div>
+      <div class="tagline-col">
+        <div class="tagline-main">Edit faster. Create more. Ship daily.</div>
+        <div class="tagline-sub">AI Video Editor · Fondateur @ VIBED · vibed.io</div>
+      </div>
+      <div class="pills">
+        <div class="pill">🤖 IA</div>
+        <div class="pill">🎬 Vidéo</div>
+        <div class="pill">🚀 SaaS</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ─── SECTION 4 — FEATURE & PRICING CARDS ─────────────────────── -->
+<p class="section-label">Feature Cards · Pricing Cards (multi-format)</p>
+<div class="assets-grid">
+
+  <!-- Feature Card — Silence Removal -->
+  <div class="asset-wrap">
+    <div class="asset-meta">
+      <span class="asset-name">Feature Card — Silence Removal</span>
+      <span class="asset-size">Adaptable</span>
+    </div>
+    <div class="asset feature-card">
+      <div class="glow"></div>
+      <div class="tag"><div class="tag-dot"></div>FEATURE SPOTLIGHT</div>
+      <div class="feat-title"><em>Silence Removal</em> IA<br>en 1 clic.</div>
+      <div class="feat-desc">L'IA détecte et retire automatiquement tous les silences de ta vidéo. Règle le seuil, clique une fois. C'est fait.</div>
+      <div class="feat-stats">
+        <div class="stat-box">
+          <div class="stat-val">8s</div>
+          <div class="stat-label">Pour 40 min de silence</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val mint">-90%</div>
+          <div class="stat-label">Temps d'édition gagné</div>
+        </div>
+      </div>
+      <div class="footer-row">
+        <div class="logo">VIBED</div>
+        <div class="url">vibed.io</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Feature Card — Multicam -->
+  <div class="asset-wrap">
+    <div class="asset-meta">
+      <span class="asset-name">Feature Card — Multicam Virtuel</span>
+      <span class="asset-size">Adaptable</span>
+    </div>
+    <div class="asset feature-card" style="border-color:rgba(16,185,129,0.15)">
+      <div class="glow" style="background:radial-gradient(circle, rgba(16,185,129,0.15) 0%, transparent 70%)"></div>
+      <div class="tag" style="background:rgba(139,92,246,0.1);border-color:rgba(139,92,246,0.25);color:var(--purple)"><div class="tag-dot" style="background:var(--purple)"></div>NOUVEAU</div>
+      <div class="feat-title"><em style="color:var(--purple)">Multicam Virtuel</em><br>depuis 1 fichier.</div>
+      <div class="feat-desc">L'IA analyse qui parle et génère automatiquement des angles dynamiques. Résultat professionnel sans caméra supplémentaire.</div>
+      <div class="feat-stats">
+        <div class="stat-box">
+          <div class="stat-val" style="color:var(--purple)">1</div>
+          <div class="stat-label">Seul fichier source</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val mint">∞</div>
+          <div class="stat-label">Angles générés par l'IA</div>
+        </div>
+      </div>
+      <div class="footer-row">
+        <div class="logo">VIBED</div>
+        <div class="url">vibed.io</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pricing Card — Creator -->
+  <div class="asset-wrap">
+    <div class="asset-meta">
+      <span class="asset-name">Pricing Card — Creator</span>
+      <span class="asset-size">BOFU content</span>
+    </div>
+    <div class="asset pricing-card">
+      <div class="pricing-header">
+        <div class="glow"></div>
+        <div class="plan-name">Plan Creator</div>
+        <div class="price-big">€15<span class="price-period">/mois</span></div>
+      </div>
+      <div class="pricing-body">
+        <ul class="feat-list">
+          <li><div class="check">✓</div>Silence removal illimité</li>
+          <li><div class="check">✓</div>Transcript editing complet</li>
+          <li><div class="check">✓</div>Multicam virtuel IA</li>
+          <li><div class="check">✓</div>Export Premiere Pro / DaVinci / Final Cut</li>
+          <li><div class="check">✓</div>20h de footage/mois</li>
+        </ul>
+        <div class="cta-pricing">Commencer avec Creator →</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Platform grid -->
+  <div class="asset-wrap">
+    <div class="asset-meta">
+      <span class="asset-name">Platform Overview Grid</span>
+      <span class="asset-size">Multi-format</span>
+    </div>
+    <div class="asset platform-grid">
+      <div class="plat-cell" style="background:#1A0A10">
+        <div class="plat-icon">📸</div>
+        <div class="plat-name">Instagram</div>
+        <div class="plat-detail">Reels · Carousels · Stories</div>
+        <div class="plat-cadence">5 posts/semaine</div>
+      </div>
+      <div class="plat-cell" style="background:#0A0A0A">
+        <div class="plat-icon">🎵</div>
+        <div class="plat-name">TikTok</div>
+        <div class="plat-detail">Vidéos · Tendances · POV</div>
+        <div class="plat-cadence">7 vidéos/semaine</div>
+      </div>
+      <div class="plat-cell" style="background:#070E1A">
+        <div class="plat-icon">💼</div>
+        <div class="plat-name">LinkedIn</div>
+        <div class="plat-detail">Posts · Carousels · Articles</div>
+        <div class="plat-cadence">4 posts/semaine</div>
+      </div>
+      <div class="plat-cell" style="background:#1A0A0A">
+        <div class="plat-icon">▶️</div>
+        <div class="plat-name">YouTube</div>
+        <div class="plat-detail">Long-form · Shorts · Lives</div>
+        <div class="plat-cadence">2 long + Shorts/sem.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ─── USAGE GUIDE ─────────────────────────────────────────────── -->
+<p class="section-label">Usage guide</p>
+<div style="max-width:900px;margin:0 auto;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:24px;font-size:12px;color:#888;line-height:1.8;">
+  <strong style="color:#ccc;font-size:13px">Comment utiliser ces assets</strong><br><br>
+  <strong style="color:#aaa">Screenshot individuel :</strong> Ouvre ce fichier dans Chrome, fais un clic droit sur chaque card → "Inspecter" → click droit sur l'élément → "Capture node screenshot". Tu obtiens l'image exacte à la bonne résolution.<br><br>
+  <strong style="color:#aaa">Tailles exactes :</strong> Les dimensions affichées (ex: 1080×1920) correspondent aux dimensions de production. Pour l'affichage à l'écran, les cards sont mis à l'échelle — les proportions sont correctes.<br><br>
+  <strong style="color:#aaa">Personnalisation :</strong> Remplace [ton_compte] par ton vrai handle. Remplace l'emoji 🎬 par ta vraie photo de profil dans les thumbnails YouTube.<br><br>
+  <strong style="color:#aaa">Design system :</strong> --accent: #6366F1 · --mint: #10B981 · --bg: #09090B · Glassmorphism · Font: -apple-system / Inter
+</div>
+
+<p style="text-align:center;font-size:11px;color:#444;margin-top:40px;margin-bottom:20px">VIBED Visual Assets Kit · vibed.io · Juillet 2025</p>
+
+</body>
+</html>

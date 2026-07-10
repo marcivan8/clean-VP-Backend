@@ -6,8 +6,10 @@ const useAIStore = create((set) => ({
     suggestions: [],
     contextualSuggestion: null,
     quickChips: ['Make it more dynamic', 'Clean it up', 'Add captions', 'Export for YouTube'],
+    activeTab: 'media',
 
     // Actions
+    setActiveTab: (tab) => set({ activeTab: tab }),
     setIsAnalyzing: (status) => set((state) => ({
         isAnalyzing: status,
         // When a job finishes, mark pending step logs as done so they switch from

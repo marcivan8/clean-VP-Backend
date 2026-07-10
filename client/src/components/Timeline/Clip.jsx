@@ -3,9 +3,30 @@ import { useDraggable, useDroppable, useDndContext } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../../store/useTimelineStore';
+import useAIStore from '../../store/useAIStore';
 import classNames from 'classnames';
 import Waveform from './Waveform';
 import ClipContextMenu from './ClipContextMenu';
+
+const AUDIO_EXTENSIONS = /\.(mp3|wav|m4a|aac|ogg|flac)$/i;
+
+const getTabForClip = (clip, trackId) => {
+    // Determine which left panel tab to activate based on clip/track type
+    if (clip.type === 'text' || clip.type === 'caption') return 'captions';
+    const track = useTimelineStore.getState().tracks.find(t => t.id === trackId);
+    if (track?.type === 'text') return 'captions';
+    if (track?.type === 'audio' || clip.type === 'audio') {
+        // Music files get audio tab (TASK 8)
+        return 'audio';
+    }
+    // Check asset extension for music clips without explicit type
+    if (clip.assetId) {
+        const asset = useTimelineStore.getState().assets?.find(a => a.id === clip.assetId);
+        if (asset?.name && AUDIO_EXTENSIONS.test(asset.name)) return 'audio';
+        if (asset?.url && AUDIO_EXTENSIONS.test(asset.url)) return 'audio';
+    }
+    return null; // no auto-switch for video/other clips
+};
 
 const Clip = ({ clip, trackId }) => {
     const { zoomLevel, removeClip, activeClipId, selectedClipIds, setActiveClip, toggleClipSelection, waveforms, assets, addWaveform } = useTimelineStore(useShallow(state => ({
@@ -235,6 +256,9 @@ const Clip = ({ clip, trackId }) => {
                     toggleClipSelection(clip.id);
                 } else {
                     setActiveClip(clip.id);
+                    // Auto-switch left panel tab based on clip type (Tasks 2 & 8)
+                    const targetTab = getTabForClip(clip, trackId);
+                    if (targetTab) useAIStore.getState().setActiveTab(targetTab);
                 }
             }}
             onContextMenu={(e) => {

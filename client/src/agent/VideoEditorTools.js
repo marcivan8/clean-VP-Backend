@@ -109,14 +109,13 @@ export const TOOL_DEFINITIONS = [
     // --- Visual & Project Tools ---
     {
         name: "set_aspect_ratio",
-        description: "Changes the project aspect ratio. IMPORTANT: before calling this tool you MUST ask the user whether they want to CROP the video (keeps the original framing, cuts the edges to fill the new ratio) or SQUEEZE/stretch it (distorts the image to fit). Never assume — always ask.",
+        description: "Changes the project aspect ratio (e.g., '16:9', '9:16', '1:1').",
         parameters: {
             type: "object",
             properties: {
-                ratio:   { type: "string", enum: ["16:9", "9:16", "1:1"], description: "Target aspect ratio" },
-                fitMode: { type: "string", enum: ["crop", "squeeze"], description: "'crop' = scale-and-crop to fill (no black bars, no distortion); 'squeeze' = stretch to fill (distorts image)" }
+                ratio: { type: "string", enum: ["16:9", "9:16", "1:1"], description: "Target aspect ratio" }
             },
-            required: ["ratio", "fitMode"]
+            required: ["ratio"]
         }
     },
     {
@@ -388,19 +387,9 @@ export class VideoEditorTools {
         return { success: true, message: "Synced clips to extracted beat markers." };
     }
 
-    setAspectRatio({ ratio, fitMode = 'crop' }) {
+    setAspectRatio({ ratio }) {
         this.store.setAspectRatio(ratio);
-        // Persist fitMode on every video clip so the canvas renderer can
-        // apply scale-and-crop ('crop') vs stretch ('squeeze') accordingly.
-        const state = this.store;
-        const tracks = state.tracks || [];
-        tracks.forEach(track => {
-            if (track.type !== 'video') return;
-            (track.clips || []).forEach(clip => {
-                state.updateClip(track.id, clip.id, { fitMode });
-            });
-        });
-        return { success: true, message: `Set aspect ratio to ${ratio} (${fitMode === 'crop' ? 'crop to fill' : 'stretch to fit'})` };
+        return { success: true, message: `Set aspect ratio to ${ratio}` };
     }
 
     colorGradeClip({ clipId, trackId, preset }) {
@@ -706,11 +695,7 @@ export class VideoEditorTools {
         console.log('[VideoEditorTools] Running smart cleanup...');
         const store = useTimelineStore.getState();
 
-        // Prefer video track that has clips — an empty extra track added via
-        // "+ Track" sorts before the main track and would otherwise be selected.
-        const videoTrack =
-            store.tracks?.find(t => t.type === 'video' && t.clips.length > 0) ??
-            store.tracks?.find(t => t.type === 'video');
+        const videoTrack = store.tracks?.find(t => t.type === 'video');
         if (!videoTrack || videoTrack.clips.length === 0) {
             return { success: false, message: 'No video clips on the timeline to analyze.' };
         }

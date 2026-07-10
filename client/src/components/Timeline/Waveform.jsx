@@ -1,167 +1,92 @@
 import React, { useRef, useEffect, useState } from 'react';
 
-/**
- * Waveform — professional filled-polygon waveform renderer.
- *
- * Uses the same technique as Premiere / Descript / Logic:
- *   - One pass traces the top contour (maxAmp) left → right
- *   - A second pass traces the bottom contour (minAmp) right → left
- *   - The closed path is filled in a single draw call — no per-pixel loops
- *
- * Peak formats supported:
- *   New: peaks = [[minAmp, maxAmp], …]   (values in [-1, 1])
- *   Old: peaks = [scalar, …]             (values in [0, 1], rendered symmetric)
- *
- * Props:
- *   peaks        — waveform data (see above)
- *   duration     — total source audio duration in seconds
- *   offset       — trim offset in seconds (clip.offset)
- *   zoomLevel    — px/s timeline zoom
- *   waveColor    — waveform fill colour
- *   bgColor      — canvas background (drawn before the waveform)
- *   centerLine   — whether to draw a subtle centre-line (default true)
- */
-const Waveform = ({
-    peaks,
-    duration,
-    offset = 0,
-    zoomLevel,
-    waveColor  = 'rgba(74, 222, 128, 0.75)',  // emerald-400 — overridden per clip type
-    bgColor    = 'rgba(0, 0, 0, 0.42)',
-    centerLine = true,
-    // Legacy prop name kept for backwards compatibility
-    color,
-}) => {
+const Waveform = ({ peaks, duration, offset, zoomLevel, height = 40, color = '#ffffff' }) => {
     const canvasRef = useRef(null);
-    const [cssSize, setCssSize] = useState({ w: 0, h: 0 });
+    const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
-    // Accept either `waveColor` or the old `color` prop
-    const fillColor = color ?? waveColor;
+    const draw = () => {
+        const canvas = canvasRef.current;
+        if (!canvas || !peaks) return;
 
-    // ── Observe canvas size ───────────────────────────────────────────────────
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+
+        // Dimensions from state 
+        const { width: cssWidth, height: cssHeight } = dimensions;
+        if (cssWidth === 0) return;
+
+        // Ensure canvas buffer matches visual size * DPR
+        canvas.width = cssWidth * dpr;
+        canvas.height = cssHeight * dpr;
+
+        // Logical dimensions for drawing
+        const width = canvas.width / dpr;
+        const h = canvas.height / dpr;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = color;
+        ctx.beginPath();
+
+        // Waveform Logic
+        const peaksPerSec = peaks.length / duration;
+
+        // We draw pixels from x=0 to width.
+        // pixel 0 corresponds to time = offset.
+        // pixel W corresponds to time = offset + (width / zoomLevel).
+
+        const startSec = offset;
+
+        // Optimization: Step > 1 if density is too high?
+        // 1px step is fine.
+
+        for (let x = 0; x < width; x++) {
+            // Map pixel x to Time relative to Offset
+            const time = startSec + (x / zoomLevel);
+
+            // Map Time to Peak Index
+            const peakIndex = Math.floor(time * peaksPerSec);
+
+            if (peakIndex >= 0 && peakIndex < peaks.length) {
+                const val = peaks[peakIndex];
+
+                // Draw 1px bar.
+                // Scale height: 0.9 to leave some margin
+                const barHeight = val * h * 0.9;
+                const y = (h - barHeight) / 2;
+
+                // Draw rect at x*dpr, y*dpr, 1*dpr wide, height*dpr tall
+                ctx.fillRect(x * dpr, y * dpr, 1 * dpr, barHeight * dpr);
+            }
+        }
+    };
+
+    // Draw when dependencies change or dimensions update
+    useEffect(() => {
+        draw();
+    }, [peaks, duration, offset, zoomLevel, height, color, dimensions]);
+
+    // Handle Resize
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-        const ro = new ResizeObserver(entries => {
+
+        const resizeObserver = new ResizeObserver(entries => {
             for (const entry of entries) {
                 const { width, height } = entry.contentRect;
-                setCssSize({ w: width, h: height });
+                setDimensions({ width, height });
             }
         });
-        ro.observe(canvas);
-        return () => ro.disconnect();
+
+        resizeObserver.observe(canvas);
+        return () => resizeObserver.disconnect();
     }, []);
-
-    // ── Draw ─────────────────────────────────────────────────────────────────
-    useEffect(() => {
-        const canvas = canvasRef.current;
-        if (!canvas || !peaks?.length || !duration || !zoomLevel || cssSize.w === 0) return;
-
-        const dpr    = window.devicePixelRatio || 1;
-        const W      = cssSize.w;
-        const H      = cssSize.h;
-
-        canvas.width  = Math.round(W * dpr);
-        canvas.height = Math.round(H * dpr);
-
-        const ctx  = canvas.getContext('2d');
-        const midY = H / 2;
-        const SCALE = 0.90; // leave ~5% margin top and bottom
-
-        const isPairs      = Array.isArray(peaks[0]);
-        const peaksPerSec  = peaks.length / duration;
-
-        // Helper: get [minAmp, maxAmp] for a given pixel column
-        const getAmps = (x) => {
-            const t   = offset + x / zoomLevel;
-            const idx = Math.floor(t * peaksPerSec);
-            if (idx < 0 || idx >= peaks.length) return null;
-            if (isPairs) return peaks[idx];
-            const v = Math.abs(peaks[idx]);
-            return [-v, v];
-        };
-
-        // ── 1. Background ────────────────────────────────────────────────────
-        ctx.fillStyle = bgColor;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        // ── 2. Waveform polygon ──────────────────────────────────────────────
-        // Build a closed path:
-        //   left-edge anchor → top contour L→R → right-edge anchor
-        //   → bottom contour R→L → close
-        ctx.beginPath();
-
-        let pathStarted = false;
-
-        // Top contour: left → right
-        for (let x = 0; x < W; x++) {
-            const amps = getAmps(x);
-            if (!amps) continue;
-            const [, maxAmp] = amps;
-            const y = (midY - maxAmp * midY * SCALE) * dpr;
-            if (!pathStarted) {
-                ctx.moveTo(x * dpr, y);
-                pathStarted = true;
-            } else {
-                ctx.lineTo(x * dpr, y);
-            }
-        }
-
-        if (!pathStarted) return; // no visible peaks in this viewport
-
-        // Bottom contour: right → left
-        for (let x = W - 1; x >= 0; x--) {
-            const amps = getAmps(x);
-            if (!amps) continue;
-            const [minAmp] = amps;
-            const y = (midY - minAmp * midY * SCALE) * dpr;
-            ctx.lineTo(x * dpr, y);
-        }
-
-        ctx.closePath();
-        ctx.fillStyle = fillColor;
-        ctx.fill();
-
-        // ── 3. Subtle inner highlight (lighter edge along the top contour) ───
-        // Draws a 1px line along the top of the waveform so peaks have a crisp edge
-        ctx.beginPath();
-        pathStarted = false;
-        for (let x = 0; x < W; x++) {
-            const amps = getAmps(x);
-            if (!amps) continue;
-            const [, maxAmp] = amps;
-            const y = (midY - maxAmp * midY * SCALE) * dpr;
-            if (!pathStarted) { ctx.moveTo(x * dpr, y); pathStarted = true; }
-            else ctx.lineTo(x * dpr, y);
-        }
-        // Mirror for bottom edge
-        for (let x = W - 1; x >= 0; x--) {
-            const amps = getAmps(x);
-            if (!amps) continue;
-            const [minAmp] = amps;
-            const y = (midY - minAmp * midY * SCALE) * dpr;
-            ctx.lineTo(x * dpr, y);
-        }
-        ctx.strokeStyle = fillColor.replace(/[\d.]+\)$/, '0.4)'); // 40% opacity edge
-        ctx.lineWidth   = dpr;
-        ctx.stroke();
-
-        // ── 4. Centre line ────────────────────────────────────────────────────
-        if (centerLine) {
-            ctx.beginPath();
-            ctx.moveTo(0, midY * dpr);
-            ctx.lineTo(canvas.width, midY * dpr);
-            ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-            ctx.lineWidth   = dpr;
-            ctx.stroke();
-        }
-
-    }, [peaks, duration, offset, zoomLevel, fillColor, bgColor, centerLine, cssSize]);
 
     return (
         <canvas
             ref={canvasRef}
-            className="absolute inset-0 w-full h-full block"
+            className="w-full h-full block opacity-70 canvas-waveform"
+            style={{ width: '100%', height: '100%' }}
         />
     );
 };

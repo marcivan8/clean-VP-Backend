@@ -6,6 +6,29 @@ import { EventBus, EVENT_TYPES } from './EventBus.js';
 import useTimelineStore from '../store/useTimelineStore.js';
 import { trackEvent } from '../utils/trackEvent.js';
 
+// Per-operation editorial descriptions and next-step suggestions
+const OPERATION_META = {
+    auto_captions:     { description: 'Captions generated from your spoken audio — each word is timed to the frame.', suggestion: 'Style your captions', suggestionPrompt: null, suggestionTab: 'captions' },
+    dynamic_rhythm:    { description: 'Dynamic zoom keyframes applied — cuts punch in sync with your speech energy.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
+    silence_removal:   { description: 'Dead air trimmed out. Your video now flows without the awkward pauses.', suggestion: 'Make it more dynamic', suggestionPrompt: 'Make it more dynamic' },
+    music:             { description: 'Background music added and ducked under your voice automatically.', suggestion: 'Export for YouTube', suggestionPrompt: 'Export for YouTube' },
+    virtual_multicam:  { description: 'Virtual camera angles generated — the edit punches in on the active speaker.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
+    split_speakers:    { description: 'Speakers diarized onto separate tracks — each voice lives on its own layer.', suggestion: 'Apply virtual multicam', suggestionPrompt: 'Apply virtual multicam' },
+    compound_split_speakers_virtual_multicam: { description: 'Speakers separated and virtual multicam angles applied. Your edit now feels like a professional two-camera interview.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
+    trim:              { description: 'Timeline trimmed to your specified range.', suggestion: 'Export for YouTube', suggestionPrompt: 'Export for YouTube' },
+    export:            { description: 'Render queued. Your video will be ready to download shortly.', suggestion: null },
+    color_grade:       { description: 'Color grade applied across all clips.', suggestion: 'Export for YouTube', suggestionPrompt: 'Export for YouTube' },
+    remove_filler:     { description: 'Filler words and hesitations removed. Your delivery sounds sharper.', suggestion: 'Make it more dynamic', suggestionPrompt: 'Make it more dynamic' },
+};
+
+function getOperationMeta(operation) {
+    return OPERATION_META[operation] || {
+        description: null,
+        suggestion: 'Export for YouTube',
+        suggestionPrompt: 'Export for YouTube',
+    };
+}
+
 /**
  * WorkflowController V2
  * Rewired to use the new EditJobManager pipeline.
@@ -108,6 +131,17 @@ const workflowMachine = createMachine({
                                     trackEvent(`ai_edit:${result.operation}`);
                                 }
 
+                                // After captions are generated, show font style cards
+                                if (result.operation === 'auto_captions') {
+                                    setTimeout(() => {
+                                        useAIStore.getState().addLog({
+                                            id: 'caption-styles-' + Date.now(),
+                                            type: 'caption_styles',
+                                            timestamp: new Date().toLocaleTimeString(),
+                                        });
+                                    }, 400);
+                                }
+
                                 if (result.operation === 'chat') {
                                     useAIStore.getState().addLog({
                                         id: 'chat-' + Date.now(),
@@ -117,16 +151,22 @@ const workflowMachine = createMachine({
                                     });
                                 } else {
                                     const stepsApplied = useTimelineStore.getState().past.length - context.initialHistoryLen;
+                                    const opMeta = getOperationMeta(result.operation);
                                     useAIStore.getState().addLog({
                                         id: 'task-complete-' + Date.now(),
                                         type: 'task_complete',
                                         message: result.message || 'Edit completed successfully',
                                         data: {
+                                            operation: result.operation,
                                             jobId: result.jobId,
                                             details: result.details,
                                             validation: result.validation,
                                             stepsApplied,
                                             preTaskHistoryLen: context.initialHistoryLen,
+                                            editDescription: opMeta.description,
+                                            nextSuggestion: opMeta.suggestion,
+                                            nextSuggestionPrompt: opMeta.suggestionPrompt,
+                                            nextSuggestionTab: opMeta.suggestionTab,
                                         },
                                         timestamp: new Date().toLocaleTimeString()
                                     });
