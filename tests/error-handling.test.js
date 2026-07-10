@@ -72,7 +72,6 @@ describe('Content-Type enforcement', () => {
             .post('/api/ai/chat')
             .set('Content-Type', 'text/plain')
             .send('remove silences');
-        // AI routes require auth, so no-auth requests return 401
-        expect([200, 400, 401, 415, 500]).toContain(res.status);
+        expect([200, 400, 415, 500]).toContain(res.status);
     });
 });

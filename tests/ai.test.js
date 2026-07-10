@@ -2,31 +2,15 @@
  * AI routes — /api/ai/*
  * Tests all GPT-4o-backed endpoints: chat, plan, parse-intent,
  * smart-cleanup, and reorder-clips. No real OpenAI calls are made
- * (openai is mocked via moduleNameMapper in package.json).
+ * (openai is mocked in setup.js).
  */
 const request = require('supertest');
 const app     = require('../index');
-
-// Access the supabase mock at runtime (after jest.mock hoisting runs)
-function db() { return require('../config/database').supabaseAdmin; }
-
-const VALID_USER    = { id: 'user-ai-123', email: 'ai@example.com' };
-const VALID_PROFILE = { id: 'user-ai-123', email: 'ai@example.com', subscription_tier: 'pro' };
-
-// All AI routes require auth. Queue a valid user response before every test.
-// BYPASS_USAGE_GATE=true (set in tests/setup.js) skips the usage-gate DB calls.
-beforeEach(() => {
-    db().auth.getUser.mockResolvedValueOnce({ data: { user: VALID_USER }, error: null });
-    db()._mockSingle.mockResolvedValueOnce({ data: VALID_PROFILE, error: null });
-});
-
-const AUTH = { Authorization: 'Bearer valid-token' };
 
 describe('POST /api/ai/chat', () => {
     it('200 with actions array when command is provided', async () => {
         const res = await request(app)
             .post('/api/ai/chat')
-            .set(AUTH)
             .send({ command: 'remove silences', context: {} });
         expect(res.status).toBe(200);
         expect(res.body).toHaveProperty('success', true);
@@ -34,9 +18,9 @@ describe('POST /api/ai/chat', () => {
     });
 
     it('200 with mock fallback when OPENAI_API_KEY is absent', async () => {
+        // The mock returns a parseable response regardless
         const res = await request(app)
             .post('/api/ai/chat')
-            .set(AUTH)
             .send({ command: 'cut clip at 5 seconds' });
         expect(res.status).toBe(200);
     });
@@ -44,7 +28,6 @@ describe('POST /api/ai/chat', () => {
     it('200 when command is empty string (AI handles gracefully)', async () => {
         const res = await request(app)
             .post('/api/ai/chat')
-            .set(AUTH)
             .send({ command: '' });
         expect(res.status).toBe(200);
     });
@@ -54,16 +37,12 @@ describe('POST /api/ai/parse-intent', () => {
     it('200 with intent object', async () => {
         const res = await request(app)
             .post('/api/ai/parse-intent')
-            .set(AUTH)
             .send({ command: 'remove filler words', context: {} });
         expect(res.status).toBe(200);
     });
 
     it('400 or 200 when body is empty', async () => {
-        const res = await request(app)
-            .post('/api/ai/parse-intent')
-            .set(AUTH)
-            .send({});
+        const res = await request(app).post('/api/ai/parse-intent').send({});
         expect([200, 400]).toContain(res.status);
     });
 });
@@ -72,7 +51,6 @@ describe('POST /api/ai/generate-plan', () => {
     it('200 with plan', async () => {
         const res = await request(app)
             .post('/api/ai/generate-plan')
-            .set(AUTH)
             .send({ intent: { type: 'edit', operation: 'silence_removal' }, context: {} });
         expect(res.status).toBe(200);
     });
@@ -82,7 +60,6 @@ describe('POST /api/ai/smart-cleanup', () => {
     it('200 when clips array provided', async () => {
         const res = await request(app)
             .post('/api/ai/smart-cleanup')
-            .set(AUTH)
             .send({
                 clips: [
                     { id: 'clip-1', text: 'Hello world this is a test clip', duration: 5 },
@@ -96,7 +73,6 @@ describe('POST /api/ai/smart-cleanup', () => {
     it('400 or 200 when clips array is missing', async () => {
         const res = await request(app)
             .post('/api/ai/smart-cleanup')
-            .set(AUTH)
             .send({ prompt: 'cleanup' });
         expect([200, 400]).toContain(res.status);
     });
@@ -106,7 +82,6 @@ describe('POST /api/ai/reorder-clips', () => {
     it('200 when clips with text are provided', async () => {
         const res = await request(app)
             .post('/api/ai/reorder-clips')
-            .set(AUTH)
             .send({
                 clips: [
                     { id: 'clip-1', text: 'Introduction to the topic', duration: 10 },
@@ -121,7 +96,6 @@ describe('POST /api/ai/reorder-clips', () => {
     it('400 or 200 when clips array is empty', async () => {
         const res = await request(app)
             .post('/api/ai/reorder-clips')
-            .set(AUTH)
             .send({ clips: [], prompt: 'reorder' });
         expect([200, 400]).toContain(res.status);
     });
@@ -131,7 +105,6 @@ describe('POST /api/ai/agent-plan', () => {
     it('200 with plan response', async () => {
         const res = await request(app)
             .post('/api/ai/agent-plan')
-            .set(AUTH)
             .send({ command: 'remove silences and filler words', context: { duration: 120 } });
         expect(res.status).toBe(200);
     });

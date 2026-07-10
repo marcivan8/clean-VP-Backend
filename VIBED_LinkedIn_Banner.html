@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>VIBED LinkedIn Banner</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+body {
+  background: #09090B;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* ── BANNER ── 1584×396 exact ───────────────────────── */
+.banner {
+  width: 1584px;
+  height: 396px;
+  background: #0E0F11;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 0 80px;
+  flex-shrink: 0;
+}
+
+/* Subtle dot grid */
+.banner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255,255,255,0.055) 1px, transparent 1px);
+  background-size: 28px 28px;
+  pointer-events: none;
+}
+
+/* Top gradient bar */
+.top-bar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #00E5FF 0%, #8A2BE2 100%);
+  z-index: 10;
+}
+
+/* Glow orbs */
+.glow {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.glow-left {
+  top: 50%; left: 12%;
+  transform: translate(-50%, -50%);
+  width: 480px; height: 480px;
+  background: radial-gradient(circle, rgba(0,229,255,0.07) 0%, transparent 65%);
+}
+.glow-right {
+  top: 50%; right: 6%;
+  transform: translateY(-50%);
+  width: 380px; height: 380px;
+  background: radial-gradient(circle, rgba(138,43,226,0.08) 0%, transparent 65%);
+}
+
+/* ── LEFT ────────────────────────────────────────────── */
+.left {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  z-index: 2;
+  width: 280px;
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* VIBED wordmark */
+.wordmark {
+  font-size: 52px;
+  font-weight: 900;
+  letter-spacing: -2.5px;
+  line-height: 1;
+  background: linear-gradient(135deg, #00E5FF 0%, #8A2BE2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.tagline {
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(237,234,227,0.5);
+  margin-top: 10px;
+  line-height: 1.6;
+  letter-spacing: 0.1px;
+}
+
+.tagline strong {
+  color: rgba(237,234,227,0.85);
+  font-weight: 700;
+}
+
+.url {
+  margin-top: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(237,234,227,0.38);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+.url-dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: #00E5FF;
+  flex-shrink: 0;
+}
+
+/* ── DIVIDER ─────────────────────────────────────────── */
+.sep {
+  width: 1px;
+  height: 52%;
+  background: rgba(255,255,255,0.08);
+  margin: 0 64px;
+  flex-shrink: 0;
+  z-index: 2;
+}
+
+/* ── CENTER ──────────────────────────────────────────── */
+.center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  z-index: 2;
+}
+
+.section-eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: rgba(237,234,227,0.22);
+  margin-bottom: 2px;
+}
+
+.features-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.feat-row {
+  display: flex;
+  gap: 9px;
+}
+
+.feat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(237,234,227,0.72);
+  white-space: nowrap;
+}
+
+.feat-icon {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.feat.cyan .feat-icon { background: #00E5FF; }
+.feat.violet .feat-icon { background: #8A2BE2; }
+.feat.mid .feat-icon { background: #5B85EF; }
+.feat.white .feat-icon { background: rgba(237,234,227,0.3); }
+
+.export-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.export-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(237,234,227,0.25);
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.export-tag {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 5px;
+  padding: 3px 9px;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(237,234,227,0.38);
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+/* ── RIGHT SEP + RIGHT ───────────────────────────────── */
+.sep2 {
+  width: 1px;
+  height: 52%;
+  background: rgba(255,255,255,0.08);
+  margin: 0 56px;
+  flex-shrink: 0;
+  z-index: 2;
+}
+
+.right {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 2;
+}
+
+.plans-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: rgba(237,234,227,0.22);
+}
+
+.plans {
+  display: flex;
+  gap: 8px;
+}
+
+.plan {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 9px;
+  padding: 10px 16px;
+  min-width: 76px;
+}
+
+.plan.featured {
+  background: rgba(0,229,255,0.06);
+  border-color: rgba(0,229,255,0.18);
+}
+
+.plan-name {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: rgba(237,234,227,0.35);
+}
+
+.plan.featured .plan-name { color: #00E5FF; }
+
+.plan-price {
+  font-size: 20px;
+  font-weight: 900;
+  color: rgba(237,234,227,0.7);
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+
+.plan.featured .plan-price { color: #00E5FF; }
+
+.plan-per {
+  font-size: 9px;
+  color: rgba(237,234,227,0.22);
+  font-weight: 500;
+}
+
+.founder {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.avatar {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #00E5FF 0%, #8A2BE2 100%);
+  border: 1.5px solid rgba(255,255,255,0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 900;
+  color: #0E0F11;
+  flex-shrink: 0;
+  font-family: 'Inter', sans-serif;
+}
+
+.founder-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.founder-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(237,234,227,0.72);
+}
+
+.founder-role {
+  font-size: 10.5px;
+  color: rgba(237,234,227,0.3);
+  font-weight: 500;
+}
+</style>
+</head>
+<body>
+<div class="banner" id="banner">
+  <div class="top-bar"></div>
+  <div class="glow glow-left"></div>
+  <div class="glow glow-right"></div>
+
+  <!-- LEFT: Logo + tagline -->
+  <div class="left">
+    <div class="brand-row">
+      <!-- 9-bar waveform logo -->
+      <svg width="44" height="44" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="2.5"  y="15"   width="7" height="70" rx="3.5" fill="#00E5FF"/>
+        <rect x="13.5" y="25"   width="7" height="50" rx="3.5" fill="#17CDFB"/>
+        <rect x="24.5" y="33"   width="7" height="34" rx="3.5" fill="#2EB5F7"/>
+        <rect x="35.5" y="39.5" width="7" height="21" rx="3.5" fill="#459DF3"/>
+        <rect x="46.5" y="43"   width="7" height="14" rx="3.5" fill="#5B85EF"/>
+        <rect x="57.5" y="39.5" width="7" height="21" rx="3.5" fill="#726DEB"/>
+        <rect x="68.5" y="33"   width="7" height="34" rx="3.5" fill="#8855E7"/>
+        <rect x="79.5" y="25"   width="7" height="50" rx="3.5" fill="#9F3DE3"/>
+        <rect x="90.5" y="15"   width="7" height="70" rx="3.5" fill="#8A2BE2"/>
+      </svg>
+      <div class="wordmark">VIBED</div>
+    </div>
+    <div class="tagline">
+      <strong>Edit faster.</strong> Create more. Ship daily.
+    </div>
+    <div class="url">
+      <div class="url-dot"></div>
+      vibed.io
+    </div>
+  </div>
+
+  <div class="sep"></div>
+
+  <!-- CENTER: Features -->
+  <div class="center">
+    <div class="section-eyebrow">Fonctionnalités</div>
+    <div class="features-grid">
+      <div class="feat-row">
+        <div class="feat cyan"><div class="feat-icon"></div>Silence Removal IA</div>
+        <div class="feat violet"><div class="feat-icon"></div>Multicam Virtuel</div>
+        <div class="feat mid"><div class="feat-icon"></div>Transcript Editing</div>
+      </div>
+      <div class="feat-row">
+        <div class="feat cyan"><div class="feat-icon"></div>Édition Conversationnelle</div>
+        <div class="feat white"><div class="feat-icon"></div>Export Pro en 1 clic</div>
+      </div>
+    </div>
+    <div class="export-row">
+      <span class="export-label">Export vers</span>
+      <div class="export-tag">Premiere Pro</div>
+      <div class="export-tag">DaVinci Resolve</div>
+      <div class="export-tag">Final Cut Pro</div>
+      <div class="export-tag">OpenTimelineIO</div>
+    </div>
+  </div>
+
+  <div class="sep2"></div>
+
+  <!-- RIGHT: Pricing + founder -->
+  <div class="right">
+    <div class="plans-label">Tarifs</div>
+    <div class="plans">
+      <div class="plan">
+        <div class="plan-name">Free</div>
+        <div class="plan-price">€0</div>
+        <div class="plan-per">/mois</div>
+      </div>
+      <div class="plan featured">
+        <div class="plan-name">Creator</div>
+        <div class="plan-price">€15</div>
+        <div class="plan-per">/mois</div>
+      </div>
+      <div class="plan">
+        <div class="plan-name">Pro</div>
+        <div class="plan-price">€35</div>
+        <div class="plan-per">/mois</div>
+      </div>
+    </div>
+    <div class="founder">
+      <div class="avatar">M</div>
+      <div class="founder-text">
+        <div class="founder-name">Marc Ivan Guidjol</div>
+        <div class="founder-role">Fondateur · VIBED</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

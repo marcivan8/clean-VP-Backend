@@ -20,13 +20,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          # No cache key — lock file may be stale after adding packages locally
-          # without committing the updated lock file.
+          cache: npm
+          cache-dependency-path: client/package-lock.json
 
       - name: Install dependencies
-        # Use npm install (not npm ci) so a stale lock file never blocks CI.
-        # Once the lock file is committed in sync, switch back to npm ci.
-        run: npm install
+        run: npm ci
 
       - name: Lint
         run: npm run lint
@@ -34,6 +32,7 @@ jobs:
       - name: Build
         run: npm run build
         env:
+          # DSN is not needed for a build-only check; the plugin is skipped when absent.
           VITE_SENTRY_DSN: ''
 
   # ── Test the server ────────────────────────────────────────────────────────
@@ -57,8 +56,8 @@ jobs:
         run: npm test
         env:
           NODE_ENV: test
+          # Provide stub values so modules that import from .env don't throw.
           SUPABASE_URL: https://stub.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: stub-key
           SUPABASE_ANON_KEY: stub-anon-key
           OPENAI_API_KEY: stub-openai-key
-          BYPASS_USAGE_GATE: 'true'

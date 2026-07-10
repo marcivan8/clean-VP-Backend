@@ -7,10 +7,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 const { authenticateUser, optionalAuth } = require('../middleware/auth');
 const storageConfig = require('../config/storage');
-// NOTE: Do NOT capture storageConfig.bucket here at module load time.
-// The GCS client verifies asynchronously on boot; the bucket reference is null
-// until that async check completes and sets storageConfig.bucket. Reading it
-// dynamically inside each request handler ensures we always get the live value.
+const gcsBucket = storageConfig.bucket;
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -115,19 +112,8 @@ function buildScaleFilter(width, height, aspectRatio) {
 }
 
 // ============================================================================
-// POST /render — Full timeline export (async job pattern)
-// GET  /status/:jobId — Poll for completion
+// POST /render — Full timeline export
 // ============================================================================
-
-// In-memory job store. Railway restarts are infrequent; jobs complete in seconds-to-minutes.
-// Entries older than 2 hours are pruned automatically.
-const renderJobs = new Map();
-setInterval(() => {
-    const cutoff = Date.now() - 2 * 60 * 60 * 1000;
-    for (const [id, job] of renderJobs) {
-        if ((job.startTime || 0) < cutoff) renderJobs.delete(id);
-    }
-}, 60_000).unref();
 
 const authMiddleware = process.env.NODE_ENV === 'production' ? authenticateUser : optionalAuth;
 
@@ -145,10 +131,6 @@ router.post('/', authMiddleware, async (req, res) => {
         const sentAssets = Array.isArray(timeline.assets) ? timeline.assets : [];
         const assetMap = {};
         sentAssets.forEach(a => { if (a.id) assetMap[a.id] = a; });
-
-        // Read GCS bucket reference at request time (not module load time) so we always
-        // get the live value after the async boot-time GCS verification has completed.
-        const gcsBucket = storageConfig.bucket;
 
         // --- resolve platform / resolution settings ---
         const platform = settings.platform && PLATFORM_PRESETS[settings.platform]
@@ -214,16 +196,6 @@ router.post('/', authMiddleware, async (req, res) => {
         // Spaces are replaced with underscores; other unsafe characters are stripped.
         const sanitizeFilename = (name) =>
             name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9._-]/g, '');
-
-        // ── Respond 202 immediately ──────────────────────────────────────────
-        // Railway's proxy times out long-running synchronous requests and any
-        // client network change kills the connection. By returning the jobId now
-        // and running FFmpeg in the background, neither of those can abort the job.
-        renderJobs.set(jobId, { status: 'rendering', startTime: Date.now() });
-        res.status(202).json({ jobId, status: 'rendering' });
-
-        // ── Background render ────────────────────────────────────────────────
-        (async () => { try {
 
         // Extract the GCS object path from a storage.googleapis.com URL.
         const gcsPathFromStorageUrl = (url) => {
@@ -327,11 +299,6 @@ router.post('/', authMiddleware, async (req, res) => {
             return null;
         };
 
-        // Deduplication cache: maps GCS object path → local file already downloaded.
-        // Silence-removal typically creates 30+ segments from the same source video;
-        // with this cache each unique GCS file is fetched from the bucket only once.
-        const _gcsDownloadCache = new Map();
-
         // Download a clip's source to a local temp file.
         // Prefers GCS SDK (authenticated) over HTTPS download.
         // Returns the local file path or null.
@@ -341,29 +308,15 @@ router.post('/', authMiddleware, async (req, res) => {
             if (clip.assetId && assetMap[clip.assetId] && !(isServerUsableUrl(clip.sourceUrl) || isServerUsableUrl(clip.url) || isServerUsableUrl(clip.proxyUrl))) {
                 const asset = assetMap[clip.assetId];
                 c = { ...clip, sourceUrl: asset.sourceUrl, url: asset.proxyUrl || asset.url, proxyUrl: asset.proxyUrl };
-                console.log(`[export] Recovered URLs for clip "${clip.name}" from asset ${clip.assetId}`);
             }
 
-            // GCS SDK path: authenticated, works for private buckets, no URL issues.
-            // Wrapped in try-catch so a transient GCS error falls through gracefully.
+            // GCS SDK path: authenticated, works for private buckets, no URL issues
             if (gcsBucket) {
                 const gcsPath = await resolveGcsPath(c);
                 if (gcsPath) {
-                    // ── Cache hit: reuse already-downloaded file ──────────────────
-                    // Silence-removal clips all reference the same source video; this
-                    // avoids re-downloading it for every segment.
-                    if (_gcsDownloadCache.has(gcsPath)) {
-                        console.log(`[export] Cache hit: "${gcsPath}" — skipping re-download`);
-                        return _gcsDownloadCache.get(gcsPath);
-                    }
-                    try {
-                        console.log(`[export] Downloading from GCS SDK: ${gcsPath} → ${path.basename(localPath)}`);
-                        await gcsBucket.file(gcsPath).download({ destination: localPath });
-                        _gcsDownloadCache.set(gcsPath, localPath);
-                        return localPath;
-                    } catch (sdkErr) {
-                        console.warn(`[export] GCS SDK download failed for "${gcsPath}": ${sdkErr.message} — trying HTTP fallback`);
-                    }
+                    console.log(`[export] Downloading from GCS SDK: ${gcsPath} → ${path.basename(localPath)}`);
+                    await gcsBucket.file(gcsPath).download({ destination: localPath });
+                    return localPath;
                 }
             }
 
@@ -371,46 +324,21 @@ router.post('/', authMiddleware, async (req, res) => {
             const localSrc = resolveSourcePath(c, uploadsDir);
             if (localSrc) return localSrc;
 
-            // HTTP fallback: for private GCS URLs generate a signed URL so the download
-            // doesn't get a 403. Without a signed URL, unauthenticated requests to a
-            // private bucket always fail. All other HTTPS URLs are downloaded as-is.
+            // Last resort: HTTP download for any absolute URL that isn't a blob/proxy.
+            // Re-encode the URL so filenames with spaces don't break axios/fetch.
             for (const raw of [c.sourceUrl, c.url, c.src, c.videoUrl]) {
-                if (!raw || raw.startsWith('blob:') || raw.includes('/api/proxy') || !raw.startsWith('http')) continue;
-
-                let safeUrl = raw;
-                try {
-                    // Re-encode path segments so filenames with spaces don't break axios.
-                    const parsed = new URL(raw);
-                    parsed.pathname = parsed.pathname.split('/').map(seg => encodeURIComponent(decodeURIComponent(seg))).join('/');
-                    safeUrl = parsed.toString();
-                } catch (_) { /* leave raw as-is */ }
-
-                // For direct storage.googleapis.com URLs, swap in a short-lived signed URL
-                // so the download works even when the bucket is private.
-                if (gcsBucket && safeUrl.includes('storage.googleapis.com')) {
+                if (raw && !raw.startsWith('blob:') && !raw.includes('/api/proxy') && raw.startsWith('http')) {
+                    let safeUrl = raw;
                     try {
-                        const signedGcsPath = gcsPathFromStorageUrl(safeUrl);
-                        if (signedGcsPath) {
-                            const [signedUrl] = await gcsBucket.file(signedGcsPath).getSignedUrl({
-                                version: 'v4',
-                                action:  'read',
-                                expires: Date.now() + 3_600_000, // 1 hour
-                            });
-                            safeUrl = signedUrl;
-                            console.log(`[export] Signed GCS URL generated for "${signedGcsPath}"`);
-                        }
-                    } catch (signErr) {
-                        console.warn(`[export] Could not sign GCS URL: ${signErr.message} — downloading unsigned (may 403)`);
-                    }
-                }
-
-                console.log(`[export] HTTP download: ${safeUrl.slice(0, 80)}`);
-                try {
+                        // Parse → reconstruct so only the path/query components are encoded,
+                        // leaving the host and existing percent-encoding untouched.
+                        const parsed = new URL(raw);
+                        parsed.pathname = parsed.pathname.split('/').map(seg => encodeURIComponent(decodeURIComponent(seg))).join('/');
+                        safeUrl = parsed.toString();
+                    } catch (_) { /* leave raw as-is */ }
+                    console.log(`[export] HTTP download fallback: ${safeUrl.slice(0, 80)}`);
                     await downloadToTemp(safeUrl, localPath);
                     return localPath;
-                } catch (dlErr) {
-                    console.warn(`[export] HTTP download failed for clip "${clip.name}": ${dlErr.message}`);
-                    // Continue to next URL candidate rather than crashing the whole render.
                 }
             }
 
@@ -421,53 +349,26 @@ router.post('/', authMiddleware, async (req, res) => {
 
         const scaleFilter = buildScaleFilter(targetWidth, targetHeight);
 
-        // ─── Worker-pool helper ───────────────────────────────────────────────
-        // Runs taskFns with at most `limit` concurrent workers and returns results
-        // in the same order as taskFns.
-        const runParallel = async (taskFns, limit) => {
-            const results = new Array(taskFns.length);
-            let nextIdx = 0;
-            const worker = async () => {
-                while (nextIdx < taskFns.length) {
-                    const myIdx = nextIdx++;
-                    results[myIdx] = await taskFns[myIdx]();
-                }
-            };
-            await Promise.all(Array.from({ length: Math.min(limit, taskFns.length) }, worker));
-            return results;
-        };
-
-        // --- STEP 1a: Download all clip sources (sequential, with deduplication) ---
-        // Downloads are sequential so we don't hammer GCS with parallel requests;
-        // the cache inside fetchClipSource ensures each unique source file is only
-        // fetched once even when 30+ silence-removal segments share the same origin.
-        const clipDownloads = [];
+        // --- STEP 1: Trim each clip into a temp segment ---
+        const segments = [];
         for (let i = 0; i < allClips.length; i++) {
             const clip = allClips[i];
             const ext = path.extname(clip.name || '.mp4') || '.mp4';
             const dlPath = path.join(tmpDir, `dl-${i}${ext}`);
             const src = await fetchClipSource(clip, dlPath);
-            if (!src) console.warn(`⚠️  Could not find source for clip "${clip.name}", skipping`);
-            clipDownloads.push({ clip, src, i });
-        }
+            if (!src) {
+                console.warn(`⚠️  Could not find source for clip "${clip.name}", skipping`);
+                continue;
+            }
 
-        const validClips = clipDownloads.filter(({ src }) => src);
-        console.log(`[export] ${validClips.length}/${allClips.length} clips ready — encoding in parallel (limit=4)`);
+            const segPath = path.join(tmpDir, `seg-${i}.mp4`);
+            const inPoint = clip.offset || 0;
+            const dur     = clip.duration;
+            const vol     = (clip.volume ?? 1.0) * (clip.trackVolume ?? 1.0);
+            const speed   = clip.speed || 1.0;
+            const isImage = clip.type === 'image';
 
-        // --- STEP 1b: Encode all segments in parallel (up to 4 at a time) ---
-        // -preset veryfast:  3-5× faster than the default 'medium' preset with
-        //                    only a small file-size increase — acceptable for delivery.
-        // -threads 0:        lets FFmpeg auto-select the optimal thread count per worker.
-        // concurrency=4:     saturates the available vCPUs without over-subscribing.
-        const segResults = await runParallel(
-            validClips.map(({ clip, src, i }) => () => new Promise((resolve) => {
-                const segPath = path.join(tmpDir, `seg-${i}.mp4`);
-                const inPoint = clip.offset || 0;
-                const dur     = clip.duration;
-                const vol     = (clip.volume ?? 1.0) * (clip.trackVolume ?? 1.0);
-                const speed   = clip.speed || 1.0;
-                const isImage = clip.type === 'image';
-
+            await new Promise((resolve, reject) => {
                 let cmd;
                 if (isImage) {
                     // Images need -loop 1 so ffmpeg generates video frames for the full duration
@@ -508,36 +409,28 @@ router.post('/', authMiddleware, async (req, res) => {
                 cmd
                     .fps(targetFps)
                     .videoCodec(codec)
-                    .addOutputOption('-preset', 'veryfast')
-                    .addOutputOption('-threads', '0')
                     .addOutputOption('-profile:v', profile)
                     .addOutputOption('-pix_fmt', 'yuv420p')
                     .addOutputOption('-movflags', '+faststart')
                     .addOutputOption('-shortest')
                     .audioBitrate(audioBitrate)
                     .output(segPath)
-                    .on('start', (cmdLine) => console.log(`  [ffmpeg seg-${i}] ${cmdLine.slice(0, 100)}...`))
-                    .on('stderr', (line) => { if (line.includes('Error') || line.includes('error')) console.warn(`  [ffmpeg stderr seg-${i}] ${line}`); })
-                    .on('end', () => {
-                        console.log(`  ✅ Segment ${i+1}/${allClips.length}: "${clip.name}"`);
-                        resolve(segPath);
-                    })
+                    .on('start', (cmdLine) => console.log(`  [ffmpeg] ${cmdLine.slice(0, 120)}...`))
+                    .on('stderr', (line) => { if (line.includes('Error') || line.includes('error')) console.warn(`  [ffmpeg stderr] ${line}`); })
+                    .on('end', () => { segments.push(segPath); resolve(); })
                     .on('error', (err, stdout, stderr) => {
                         console.error(`  ❌ ffmpeg failed for clip ${i+1}: ${err.message}`);
                         if (stderr) console.error(`  [ffmpeg stderr]\n${stderr.slice(-2000)}`);
-                        resolve(null); // skip bad segment; others continue
+                        reject(err);
                     })
                     .run();
-            })),
-            4  // max concurrent FFmpeg workers
-        );
-
-        // Collect in timeline order (runParallel preserves index order); drop failures
-        const segments = segResults.filter(Boolean);
+            });
+            console.log(`  ✅ Segment ${i+1}/${allClips.length}: "${clip.name}"`);
+        }
 
         if (segments.length === 0) {
             fs.rmSync(tmpDir, { recursive: true, force: true });
-            throw new Error('No valid clips could be processed');
+            return res.status(400).json({ error: 'No valid clips could be processed' });
         }
 
         // --- STEP 2: Concatenate segments ---
@@ -698,40 +591,9 @@ router.post('/', authMiddleware, async (req, res) => {
         console.log(`🏁 Export complete: ${sizeMB}MB in ${duration}s`);
 
         const filename = path.basename(outputPath);
-
-        // ── Upload to GCS (permanent storage) ───────────────────────────────
-        // Railway containers use ephemeral local storage — every deploy wipes
-        // /uploads/exports/. Uploading the render to GCS means the download
-        // link survives process restarts and Railway redeploys.
-        // Falls back to the local /uploads/exports/ URL if GCS is unavailable.
-        let downloadUrl = `/uploads/exports/${filename}`;
-        if (gcsBucket) {
-            try {
-                const gcsExportPath = `exports/${userId}/${filename}`;
-                console.log(`[export] Uploading render to GCS: ${gcsExportPath}`);
-                await gcsBucket.file(gcsExportPath).save(fs.readFileSync(outputPath), {
-                    contentType: 'video/mp4',
-                    metadata: { cacheControl: 'no-cache' },
-                });
-                // Signed URL valid for 7 days — enough time for any reasonable download window.
-                const [signedUrl] = await gcsBucket.file(gcsExportPath).getSignedUrl({
-                    version: 'v4',
-                    action:  'read',
-                    expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
-                });
-                downloadUrl = signedUrl;
-                // Local file no longer needed — GCS is the source of truth.
-                try { fs.unlinkSync(outputPath); } catch (_) {}
-                console.log(`[export] GCS upload complete — signed URL generated`);
-            } catch (gcsErr) {
-                console.warn(`[export] GCS upload failed, falling back to local URL: ${gcsErr.message}`);
-                // downloadUrl stays as the local /uploads/exports/ path.
-            }
-        }
-
-        renderJobs.set(jobId, {
-            status: 'done',
-            url: downloadUrl,
+        res.json({
+            success: true,
+            url: `/uploads/exports/${filename}`,
             filename,
             metadata: {
                 duration: `${duration}s render time`,
@@ -743,29 +605,11 @@ router.post('/', authMiddleware, async (req, res) => {
                 platform: platform?.label || null
             }
         });
-        console.log(`🏁 Job ${jobId} done — ${downloadUrl.slice(0, 80)}`);
-
-        } catch (bgErr) {
-            console.error('❌ Background render failed:', bgErr);
-            renderJobs.set(jobId, { status: 'error', error: bgErr.message });
-            try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
-        } })(); // end background render IIFE
 
     } catch (error) {
-        // Only reached if an error occurs before res.status(202) was sent.
-        console.error('❌ Render setup failed:', error);
-        if (!res.headersSent) res.status(500).json({ error: error.message });
+        console.error('❌ Render Execution Failed:', error);
+        res.status(500).json({ error: error.message });
     }
-});
-
-// ============================================================================
-// GET /status/:jobId — Poll for background render completion
-// ============================================================================
-
-router.get('/status/:jobId', (req, res) => {
-    const job = renderJobs.get(req.params.jobId);
-    if (!job) return res.status(404).json({ error: 'Job not found or expired' });
-    res.json(job);
 });
 
 // ============================================================================

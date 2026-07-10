@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Sparkles, Brain, Check, X, ArrowRight, Activity, MessageSquare, Loader2, XCircle, Shield } from 'lucide-react';
+import { Sparkles, Brain, Check, X, ArrowRight, Activity, MessageSquare, Loader2, XCircle, Shield, Type } from 'lucide-react';
 import useAIStore from '../../store/useAIStore';
 import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../../store/useTimelineStore';
@@ -40,13 +40,16 @@ const AssistantLogItem = ({ log }) => (
 const TaskCompletionCard = ({ log }) => {
     const [dismissed, setDismissed] = useState(false);
     const [rejecting, setRejecting] = useState(false);
-    const stepsApplied = log.data?.stepsApplied ?? 0;
+    const stepsApplied   = log.data?.stepsApplied   ?? 0;
     const preTaskHistoryLen = log.data?.preTaskHistoryLen ?? 0;
+    const editDescription   = log.data?.editDescription;
+    const nextSuggestion    = log.data?.nextSuggestion;
+    const nextSuggestionPrompt = log.data?.nextSuggestionPrompt;
+    const nextSuggestionTab = log.data?.nextSuggestionTab;
 
     if (dismissed) return null;
 
     const handleAccept = () => setDismissed(true);
-
     const handleReject = () => {
         setRejecting(true);
         const store = useTimelineStore.getState();
@@ -56,80 +59,103 @@ const TaskCompletionCard = ({ log }) => {
         setDismissed(true);
     };
 
+    const handleSuggestion = () => {
+        if (nextSuggestionTab) {
+            useAIStore.getState().setActiveTab(nextSuggestionTab);
+        } else if (nextSuggestionPrompt) {
+            // Find the ReasoningPanel textarea and fill it
+            const textarea = document.querySelector('textarea[placeholder]');
+            if (textarea) { textarea.value = nextSuggestionPrompt; textarea.focus(); }
+        }
+        setDismissed(true);
+    };
+
     return (
-        <div className="rounded-lg p-3 mb-2 animate-in fade-in slide-in-from-bottom-2 duration-300"
+        <div className="rounded-lg mb-2 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300"
              style={{ background: 'rgba(0,0,0,0.25)', border: '0.5px solid var(--line)' }}>
-            <div className="flex items-center gap-1.5 mb-2">
-                <Check className="w-3 h-3" style={{ color: 'var(--mint, #34d399)' }} />
-                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                    Terminé
+            {/* Part 1: Bold confirmation header */}
+            <div className="px-3 py-2.5 flex items-center gap-2" style={{ borderBottom: '0.5px solid var(--line-soft)', background: 'rgba(52,211,153,0.06)' }}>
+                <Check className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--mint, #34d399)' }} />
+                <span className="font-semibold" style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg)' }}>
+                    {log.message}
                 </span>
                 {stepsApplied > 0 && (
-                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', marginLeft: 'auto' }}>
-                        {stepsApplied} modification{stepsApplied !== 1 ? 's' : ''}
+                    <span className="ml-auto shrink-0" style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)' }}>
+                        {stepsApplied} edit{stepsApplied !== 1 ? 's' : ''}
                     </span>
                 )}
             </div>
-            <p className="mb-3 leading-relaxed whitespace-pre-wrap"
-               style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg-2)' }}>
-                {log.message}
-            </p>
-            {log.data?.details && log.data.details.length > 0 && (
-                <ul className="mb-3 space-y-1">
-                    {log.data.details.map((step, i) => (
-                        <li key={i} className="flex items-start gap-2"
-                            style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)' }}>
-                            <span style={{ color: step.status === 'success' ? 'var(--mint, #34d399)' : 'var(--coral, #f87171)' }}>
-                                {step.status === 'success' ? '✓' : '✗'}
-                            </span>
-                            <span>{step.action}{step.result?.message ? ` — ${step.result.message}` : ''}</span>
-                        </li>
-                    ))}
-                </ul>
-            )}
-            {stepsApplied > 0 ? (
-                <div className="flex gap-2">
-                    <button
-                        onClick={handleAccept}
-                        className="flex-1 text-xs py-1.5 rounded-md transition-all font-medium flex items-center justify-center gap-1.5"
-                        style={{
-                            background: 'color-mix(in oklch, var(--accent) 18%, transparent)',
-                            border: '0.5px solid color-mix(in oklch, var(--accent) 35%, transparent)',
-                            color: 'var(--accent)',
-                        }}
-                    >
-                        <Check className="w-3 h-3" /> Accepter
+
+            <div className="p-3">
+                {/* Part 2: Editorial description */}
+                {editDescription && (
+                    <p className="mb-3 leading-relaxed" style={{ fontFamily: 'var(--f-sans)', fontSize: 11, color: 'var(--fg-3)' }}>
+                        {editDescription}
+                    </p>
+                )}
+
+                {/* Details list (compound ops etc) */}
+                {log.data?.details && log.data.details.length > 0 && (
+                    <ul className="mb-3 space-y-1">
+                        {log.data.details.map((step, i) => (
+                            <li key={i} className="flex items-start gap-2"
+                                style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)' }}>
+                                <span style={{ color: step.status === 'success' ? 'var(--mint, #34d399)' : 'var(--coral, #f87171)' }}>
+                                    {step.status === 'success' ? '✓' : '✗'}
+                                </span>
+                                <span>{step.action}{step.result?.message ? ` — ${step.result.message}` : ''}</span>
+                            </li>
+                        ))}
+                    </ul>
+                )}
+
+                {/* Part 3: Proactive suggestion */}
+                {nextSuggestion && (
+                    <div className="mb-3 rounded-md px-2.5 py-2 flex items-center justify-between"
+                         style={{ background: 'rgba(255,255,255,0.04)', border: '0.5px solid var(--line)' }}>
+                        <span style={{ fontFamily: 'var(--f-sans)', fontSize: 11, color: 'var(--fg-3)' }}>
+                            Next: <strong style={{ color: 'var(--fg-2)' }}>{nextSuggestion}</strong>
+                        </span>
+                        <button
+                            onClick={handleSuggestion}
+                            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-colors hover:opacity-80 shrink-0 ml-2"
+                            style={{ background: 'color-mix(in oklch, var(--accent) 18%, transparent)', border: '0.5px solid color-mix(in oklch, var(--accent) 35%, transparent)', color: 'var(--accent)', fontFamily: 'var(--f-mono)' }}
+                        >
+                            <ArrowRight className="w-2.5 h-2.5" /> Go
+                        </button>
+                    </div>
+                )}
+
+                {/* Accept / Reject */}
+                {stepsApplied > 0 ? (
+                    <div className="flex gap-2">
+                        <button onClick={handleAccept}
+                            className="flex-1 text-xs py-1.5 rounded-md transition-all font-medium flex items-center justify-center gap-1.5"
+                            style={{ background: 'color-mix(in oklch, var(--accent) 18%, transparent)', border: '0.5px solid color-mix(in oklch, var(--accent) 35%, transparent)', color: 'var(--accent)' }}>
+                            <Check className="w-3 h-3" /> Keep
+                        </button>
+                        <button onClick={handleReject} disabled={rejecting}
+                            className="flex-1 text-xs py-1.5 rounded-md transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                            style={{ background: 'rgba(255,255,255,0.04)', border: '0.5px solid var(--line)', color: 'var(--fg-3)' }}>
+                            <X className="w-3 h-3" /> {rejecting ? 'Undoing…' : 'Undo'}
+                        </button>
+                    </div>
+                ) : (
+                    <button onClick={handleAccept} className="text-xs px-3 py-1 rounded-md"
+                        style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--fg-3)', border: '0.5px solid var(--line)' }}>
+                        OK
                     </button>
-                    <button
-                        onClick={handleReject}
-                        disabled={rejecting}
-                        className="flex-1 text-xs py-1.5 rounded-md transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
-                        style={{
-                            background: 'rgba(255,255,255,0.04)',
-                            border: '0.5px solid var(--line)',
-                            color: 'var(--fg-3)',
-                        }}
-                    >
-                        <X className="w-3 h-3" /> {rejecting ? 'Annulation…' : 'Rejeter'}
-                    </button>
-                </div>
-            ) : (
-                <button
-                    onClick={handleAccept}
-                    className="text-xs px-3 py-1 rounded-md"
-                    style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--fg-3)', border: '0.5px solid var(--line)' }}
-                >
-                    OK
-                </button>
-            )}
+                )}
+            </div>
         </div>
     );
 };
 
 const LogItem = ({ log }) => {
-    if (log.type === 'step')          return <StepLogItem log={log} />;
-    if (log.type === 'assistant')     return <AssistantLogItem log={log} />;
-    if (log.type === 'task_complete') return <TaskCompletionCard log={log} />;
+    if (log.type === 'step')            return <StepLogItem log={log} />;
+    if (log.type === 'assistant')       return <AssistantLogItem log={log} />;
+    if (log.type === 'task_complete')   return <TaskCompletionCard log={log} />;
+    if (log.type === 'caption_styles')  return <CaptionStylesCard log={log} />;
 
     const isSuccess = log.type === 'success';
     const isWarning = log.type === 'warning';
@@ -335,13 +361,91 @@ const UploadStatusCard = ({ asset }) => {
     );
 };
 
+// Caption style presets for TASK 3
+const CAPTION_STYLES = [
+    { id: 'bold-impact',   name: 'Bold Impact',   font: 'Anton',           weight: 900, color: '#FFFFFF', stroke: { width: 2, color: '#000000' }, emoji: '💥' },
+    { id: 'clean-modern',  name: 'Clean Modern',  font: 'Montserrat',      weight: 600, color: '#FFFFFF', stroke: null,                           emoji: '✨' },
+    { id: 'soft-rounded',  name: 'Soft Rounded',  font: 'Nunito',          weight: 700, color: '#FFFFFF', stroke: null,                           emoji: '🌸' },
+    { id: 'cinematic',     name: 'Cinematic',     font: 'Playfair Display', weight: 400, style: 'italic', color: '#F5E6C8', stroke: null,          emoji: '🎬' },
+    { id: 'handwritten',   name: 'Handwritten',   font: 'Caveat',          weight: 700, color: '#FFFFFF', stroke: null,                           emoji: '✍️' },
+    { id: 'neon-glow',     name: 'Neon Glow',     font: 'Montserrat',      weight: 800, color: '#00FFFF', stroke: null, textShadow: '0 0 12px #00FFFF, 0 0 24px #00FFFF', emoji: '💫' },
+];
+
+const CaptionStylesCard = ({ log }) => {
+    const [applied, setApplied] = useState(null);
+    const applyStyle = (style) => {
+        const { tracks, updateClip } = useTimelineStore.getState();
+        const textTrack = tracks.find(t => t.type === 'text');
+        if (!textTrack) return;
+        const updates = {
+            fontFamily: style.font,
+            fontWeight: style.weight,
+            color: style.color,
+            stroke: style.stroke || null,
+            textShadow: style.textShadow || null,
+            fontStyle: style.style || 'normal',
+        };
+        textTrack.clips.forEach(clip => updateClip(textTrack.id, clip.id, updates));
+        setApplied(style.id);
+        useAIStore.getState().setActiveTab('captions');
+    };
+    return (
+        <div className="rounded-lg p-3 mb-2 animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ background: 'rgba(0,0,0,0.25)', border: '0.5px solid var(--line)' }}>
+            <div className="flex items-center gap-1.5 mb-3">
+                <Type className="w-3 h-3" style={{ color: 'var(--accent)' }} />
+                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                    Choose a caption style
+                </span>
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                {CAPTION_STYLES.map(style => (
+                    <button
+                        key={style.id}
+                        onClick={() => applyStyle(style)}
+                        className="flex-shrink-0 rounded-lg px-3 py-2.5 text-left transition-all hover:scale-105"
+                        style={{
+                            background: applied === style.id ? 'color-mix(in oklch, var(--accent) 20%, transparent)' : 'rgba(255,255,255,0.05)',
+                            border: applied === style.id ? '1px solid var(--accent)' : '1px solid rgba(255,255,255,0.08)',
+                            minWidth: 90,
+                        }}
+                    >
+                        <div className="text-[16px] mb-1">{style.emoji}</div>
+                        <div style={{
+                            fontFamily: `"${style.font}", sans-serif`,
+                            fontWeight: style.weight,
+                            fontStyle: style.style || 'normal',
+                            fontSize: 11,
+                            color: style.color === '#00FFFF' ? '#00FFFF' : 'var(--fg)',
+                            textShadow: style.textShadow || 'none',
+                            WebkitTextStroke: style.stroke ? `${style.stroke.width}px ${style.stroke.color}` : 'none',
+                            lineHeight: 1.2,
+                        }}>
+                            Abc
+                        </div>
+                        <div style={{ fontFamily: 'var(--f-mono)', fontSize: 8, color: 'var(--fg-4)', marginTop: 3 }}>
+                            {style.name}
+                        </div>
+                        {applied === style.id && (
+                            <Check className="w-2.5 h-2.5 mt-1" style={{ color: 'var(--accent)' }} />
+                        )}
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+};
+
 const ReasoningPanel = () => {
-    const { logs, suggestions, isAnalyzing, setIsAnalyzing, addLog, removeSuggestion, contextualSuggestion, quickChips } = useAIStore();
-    const { uploadedFile, performAction, assets } = useTimelineStore(useShallow(state => ({
+    const { logs, suggestions, isAnalyzing, setIsAnalyzing, addLog, removeSuggestion, contextualSuggestion, quickChips, setActiveTab } = useAIStore();
+    const { uploadedFile, performAction, assets, tracks } = useTimelineStore(useShallow(state => ({
         uploadedFile:  state.uploadedFile,
         performAction: state.performAction,
         assets:        state.assets,
+        tracks:        state.tracks,
     })));
+
+    // Detect if any caption/text clips exist on the timeline
+    const hasCaptionClips = tracks?.some(t => t.clips?.some(c => c.type === 'text' || c.type === 'caption'));
     const { recordDecision } = useUserPreferences();
     const scrollRef = useRef(null);
 
@@ -531,6 +635,15 @@ const ReasoningPanel = () => {
                                         {chip}
                                     </button>
                                 ))}
+                                {hasCaptionClips && (
+                                    <button
+                                        onClick={() => setActiveTab('captions')}
+                                        className="px-2.5 py-1 rounded-full text-[10px] transition-colors flex items-center gap-1"
+                                        style={{ background: 'color-mix(in oklch, var(--accent) 12%, transparent)', border: '0.5px solid color-mix(in oklch, var(--accent) 35%, transparent)', color: 'var(--accent)', fontFamily: 'var(--f-sans)' }}
+                                    >
+                                        <Type className="w-2.5 h-2.5" /> Edit captions
+                                    </button>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -594,6 +707,19 @@ const ReasoningPanel = () => {
                     </div>
                 )}
             </div>
+
+            {/* Persistent Edit Captions chip — visible whenever captions exist */}
+            {hasCaptionClips && (
+                <div className="px-4 pt-2 pb-0 flex" style={{ borderTop: '0.5px solid var(--line-soft)' }}>
+                    <button
+                        onClick={() => setActiveTab('captions')}
+                        className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] transition-colors"
+                        style={{ background: 'color-mix(in oklch, var(--accent) 12%, transparent)', border: '0.5px solid color-mix(in oklch, var(--accent) 35%, transparent)', color: 'var(--accent)', fontFamily: 'var(--f-sans)' }}
+                    >
+                        <Type className="w-2.5 h-2.5" /> Edit captions
+                    </button>
+                </div>
+            )}
 
             {/* Input Area */}
             <div className="p-4 border-t" style={{ borderColor: 'var(--line-soft)', background: 'var(--glass)' }}>

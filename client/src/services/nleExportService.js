@@ -85,12 +85,6 @@ export class NLEExportService {
 
         if (!response.ok) {
             const err = await response.json().catch(() => ({ error: 'Unknown server error' }));
-            if (response.status === 402 && err.error === 'NLE_EXPORT_PAID') {
-                const upgradeError = new Error(err.message || 'NLE export requires the Creator plan.');
-                upgradeError.isUpgradeRequired = true;
-                upgradeError.upgradeRequired   = err.upgradeRequired || 'creator';
-                throw upgradeError;
-            }
             throw new Error(err.error || `Server returned ${response.status}`);
         }
 

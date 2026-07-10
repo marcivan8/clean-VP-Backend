@@ -4,14 +4,57 @@ import useTimelineStore from '../../store/useTimelineStore';
 
 // Map preset names to actual font families
 const FONT_MAP = {
-    'Inter': 'Inter, sans-serif',
-    'Roboto': '"Roboto", sans-serif',
-    'Lato': '"Lato", sans-serif',
-    'Montserrat': '"Montserrat", sans-serif',
-    'Oswald': '"Oswald", sans-serif',
-    'Merriweather': '"Merriweather", serif',
-    'Playfair': '"Playfair Display", serif',
-    'Handwriting': '"Dancing Script", cursive',
+    'Inter':            'Inter, sans-serif',
+    'Anton':            '"Anton", sans-serif',
+    'Roboto':           '"Roboto", sans-serif',
+    'Lato':             '"Lato", sans-serif',
+    'Montserrat':       '"Montserrat", sans-serif',
+    'Nunito':           '"Nunito", sans-serif',
+    'Oswald':           '"Oswald", sans-serif',
+    'Merriweather':     '"Merriweather", serif',
+    'Playfair':         '"Playfair Display", serif',
+    'Playfair Display': '"Playfair Display", serif',
+    'Caveat':           '"Caveat", cursive',
+    'Handwriting':      '"Dancing Script", cursive',
+};
+
+// CSS keyframes injected once
+const ANIMATION_CSS = `
+@keyframes vibed-fade-in    { from { opacity:0 }                           to { opacity:1 } }
+@keyframes vibed-slide-up   { from { opacity:0; transform:translate(-50%,calc(-50%+16px)) scale(var(--clip-scale,1)) }   to { opacity:1; transform:translate(-50%,-50%) scale(var(--clip-scale,1)) } }
+@keyframes vibed-pop        { 0% { opacity:0; transform:translate(-50%,-50%) scale(calc(var(--clip-scale,1)*0.75)) } 60% { transform:translate(-50%,-50%) scale(calc(var(--clip-scale,1)*1.08)) } 100% { opacity:1; transform:translate(-50%,-50%) scale(var(--clip-scale,1)) } }
+`;
+if (typeof document !== 'undefined' && !document.getElementById('vibed-overlay-anims')) {
+    const s = document.createElement('style');
+    s.id = 'vibed-overlay-anims';
+    s.textContent = ANIMATION_CSS;
+    document.head.appendChild(s);
+}
+
+const getAnimationStyle = (animation, clipScale) => {
+    if (!animation || animation === 'none') return {};
+    const dur = '0.35s';
+    const ease = 'cubic-bezier(0.22,0.61,0.36,1)';
+    const base = { '--clip-scale': clipScale || 1 };
+    if (animation === 'fade-in')  return { ...base, animation: `vibed-fade-in  ${dur} ${ease} both` };
+    if (animation === 'slide-up') return { ...base, animation: `vibed-slide-up ${dur} ${ease} both` };
+    if (animation === 'pop')      return { ...base, animation: `vibed-pop      0.45s ${ease} both` };
+    return {};
+};
+
+// Word-by-word: reveal words progressively across clip duration
+const WordByWord = ({ content, progress }) => {
+    const words = (content || '').split(' ');
+    const revealCount = Math.ceil(progress * words.length);
+    return (
+        <span>
+            {words.map((word, i) => (
+                <span key={i} style={{ opacity: i < revealCount ? 1 : 0, transition: 'opacity 0.1s', marginRight: '0.25em' }}>
+                    {word}
+                </span>
+            ))}
+        </span>
+    );
 };
 
 const TextOverlay = () => {
@@ -142,6 +185,14 @@ const TextOverlay = () => {
             {activeTextClips.map((clip) => {
                 const isActive = clip.id === activeClipId;
                 const { left, top } = resolvePos(clip);
+                const clipScale = clip.scale || 1;
+                const animStyle = clip.animation !== 'word-by-word'
+                    ? getAnimationStyle(clip.animation, clipScale)
+                    : {};
+                // Word-by-word progress: 0→1 across clip duration
+                const clipProgress = clip.duration > 0
+                    ? Math.min(1, Math.max(0, (currentTime - clip.start) / clip.duration))
+                    : 1;
 
                 return (
                     <div
@@ -151,10 +202,9 @@ const TextOverlay = () => {
                         style={{
                             left,
                             top,
-                            // Transform: Center (-50%) + Scale
-                            transform: `translate(-50%, -50%) scale(${clip.scale || 1})`,
+                            transform: `translate(-50%, -50%) scale(${clipScale})`,
                             width: '80%',
-                            fontFamily: FONT_MAP[clip.fontFamily] || 'Inter, sans-serif',
+                            fontFamily: FONT_MAP[clip.fontFamily] || FONT_MAP[clip.fontFamily?.split(',')[0]?.trim()] || 'Inter, sans-serif',
                             fontSize: `${clip.fontSize || 48}px`,
                             fontWeight: clip.fontWeight || 'normal',
                             fontStyle: clip.fontStyle || 'normal',
@@ -164,10 +214,14 @@ const TextOverlay = () => {
                             textShadow: clip.textShadow || 'none',
                             WebkitTextStroke: clip.stroke ? `${clip.stroke.width}px ${clip.stroke.color}` : 'none',
                             opacity: clip.opacity ?? 1,
-                            pointerEvents: 'auto'
+                            pointerEvents: 'auto',
+                            ...animStyle,
                         }}
                     >
-                        {clip.content || 'New Text'}
+                        {clip.animation === 'word-by-word'
+                            ? <WordByWord content={clip.content || 'New Text'} progress={clipProgress} />
+                            : (clip.content || 'New Text')
+                        }
 
                         {/* Resize Handle (Only if Active) */}
                         {isActive && (

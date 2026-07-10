@@ -1,6 +1,5 @@
 import { useShallow } from 'zustand/react/shallow';
 import React from 'react';
-import { useDroppable, useDndContext } from '@dnd-kit/core';
 import Track from './Track';
 import useTimelineStore from '../../store/useTimelineStore';
 import { Scissors, ZoomIn, ZoomOut, Copy, Type, Palette } from 'lucide-react';
@@ -28,13 +27,6 @@ const Timeline = () => {
     const tracksAreaRef = React.useRef(null);
     const selDragRef = React.useRef(null);
     const [selBox, setSelBox] = React.useState(null);
-
-    // "Create new track" drop zone — shown above the track list while dragging a clip
-    const { active: dndActive } = useDndContext();
-    const isDraggingClip = dndActive?.data?.current?.clip != null;
-    const { setNodeRef: newTrackDropRef, isOver: isOverNewTrack } = useDroppable({
-        id: 'new-track-drop-zone',
-    });
 
     const getContentPos = React.useCallback((clientX, clientY) => {
         const area = tracksAreaRef.current;
@@ -146,9 +138,6 @@ const Timeline = () => {
                     useTimelineStore.getState().clearSelection();
                 }
             } else {
-                // Single click without drag — seek to the clicked position and clear selection
-                const zl = useTimelineStore.getState().zoomLevel;
-                useTimelineStore.getState().seek(Math.max(0, (selDragRef.current.x - LABEL_W) / zl));
                 useTimelineStore.getState().clearSelection();
             }
 
@@ -223,18 +212,6 @@ const Timeline = () => {
         if ((e.metaKey || e.ctrlKey) && e.key === 'v') {
             pasteClip(currentTime);
         }
-
-        // Arrow keys — frame-by-frame scrubbing (no modifier key)
-        // Shift+Arrow = jump 10 frames
-        if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.metaKey && !e.ctrlKey) {
-            e.preventDefault();
-            const { seek, duration, playerRef } = useTimelineStore.getState();
-            // Prefer fps from the live Revideo player; fall back to 30
-            const fps = playerRef?.playback?.fps ?? 30;
-            const frames = e.shiftKey ? 10 : 1;
-            const step = (frames / fps) * (e.key === 'ArrowLeft' ? -1 : 1);
-            seek(Math.max(0, Math.min(duration, currentTime + step)));
-        }
     }, []);
 
     React.useEffect(() => {
@@ -248,8 +225,16 @@ const Timeline = () => {
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
 
+    const handleSeekClick = (e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const clickedTime = x / zoomLevel;
+        seek(clickedTime);
+    };
+
+
     return (
-        <div className="flex-1 bg-transparent flex flex-col relative h-full select-none" onKeyDown={handleKeyDown} onContextMenu={e => e.preventDefault()} tabIndex={0}>
+        <div className="flex-1 bg-transparent flex flex-col relative h-full select-none" onKeyDown={handleKeyDown} tabIndex={0}>
             {/* Toolbar */}
             <div className="h-10 border-b flex items-center px-4 justify-between z-20 shrink-0" style={{ background: "var(--glass)", borderColor: "var(--line-soft)" }}>
                 <div className="flex items-center gap-4">
@@ -401,14 +386,7 @@ const Timeline = () => {
                     <div
                         className="flex-1 relative cursor-pointer"
                         style={{ width: `${duration * zoomLevel}px`, minWidth: '100%' }}
-                        onMouseDown={(e) => {
-                            if (e.button !== 0) return;
-                            // Stop propagation so the tracks-area rubber-band handler
-                            // doesn't also fire and compete with the ruler seek.
-                            e.stopPropagation();
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            seek(Math.max(0, (e.clientX - rect.left) / zoomLevel));
-                        }}
+                        onClick={handleSeekClick}
                     >
                         {/* Ruler ticks */}
                         {Array.from({ length: Math.ceil(duration / 5) }).map((_, i) => (
@@ -446,41 +424,9 @@ const Timeline = () => {
                         <div className="absolute -top-1 -left-1.5 w-3 h-3 bg-red-500 rotate-45 transform shadow-sm"></div>
                     </div>
 
-                    {/* New-track drop zone — appears above all tracks while dragging a clip */}
-                    {isDraggingClip && (
-                        <div
-                            ref={newTrackDropRef}
-                            className={`flex items-center justify-center h-9 mx-1 my-0.5 rounded border-2 border-dashed transition-all text-xs font-medium select-none pointer-events-auto
-                                ${isOverNewTrack
-                                    ? 'border-blue-400 bg-blue-400/15 text-blue-400'
-                                    : 'border-white/20 text-white/30'}`}
-                        >
-                            ↑ Drop here to create a new track
-                        </div>
-                    )}
-
-                    {(() => {
-                        // Identify the baseline video and audio tracks — always kept
-                        // visible as drop targets, even when empty.
-                        //
-                        // Tracks are sorted by order ascending. New video tracks get
-                        // minOrder-1 (float above), so the original main video track
-                        // has the highest order → it is LAST in the video list.
-                        // New audio tracks get maxOrder+1 (sink below), so the main
-                        // audio track has the lowest order → FIRST in the audio list.
-                        const videoTracks = tracks.filter(t => t.type === 'video');
-                        const audioTracks = tracks.filter(t => t.type === 'audio');
-                        const mainVideoId = videoTracks.at(-1)?.id ?? null;
-                        const mainAudioId = audioTracks[0]?.id ?? null;
-
-                        return tracks
-                            .filter(track =>
-                                track.clips.length > 0 ||
-                                track.id === mainVideoId ||
-                                track.id === mainAudioId
-                            )
-                            .map(track => <Track key={track.id} track={track} />);
-                    })()}
+                    {tracks.map(track => (
+                        <Track key={track.id} track={track} />
+                    ))}
 
                     {/* Rubber-band selection box */}
                     {selBox && (
