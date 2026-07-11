@@ -224,16 +224,7 @@ const workflowMachine = createMachine({
                                     }, 300);
                                 }
 
-                                // Add suggestion for next actions
-                                if (result.suggestions && result.suggestions.length > 0) {
-                                    useAIStore.getState().addSuggestion({
-                                        id: 'next-actions-' + Date.now(),
-                                        type: 'next_actions',
-                                        title: 'What would you like to do next?',
-                                        description: result.suggestions.join(' • '),
-                                        data: { suggestions: result.suggestions }
-                                    });
-                                }
+                                // next_actions suggestion removed — TaskCompletionCard already shows the next step
                             } else {
                                 useAIStore.getState().addLog({
                                     id: 'job-error-' + Date.now(),
