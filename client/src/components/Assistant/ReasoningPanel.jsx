@@ -389,47 +389,91 @@ const CaptionStylesCard = ({ log }) => {
         setApplied(style.id);
         useAIStore.getState().setActiveTab('captions');
     };
+
     return (
-        <div className="rounded-lg p-3 mb-2 animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ background: 'rgba(0,0,0,0.25)', border: '0.5px solid var(--line)' }}>
-            <div className="flex items-center gap-1.5 mb-3">
-                <Type className="w-3 h-3" style={{ color: 'var(--accent)' }} />
-                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                    Choose a caption style
+        <div
+            className="rounded-xl p-3 mb-2 animate-in fade-in slide-in-from-bottom-2 duration-300"
+            style={{ background: 'rgba(0,0,0,0.3)', border: '0.5px solid rgba(255,255,255,0.07)' }}
+        >
+            {/* Header */}
+            <div className="flex items-center gap-2 mb-3">
+                <div style={{
+                    width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                    background: 'linear-gradient(135deg, #00E5FF 0%, #8A2BE2 100%)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                    <Type style={{ color: '#fff', width: 9, height: 9 }} />
+                </div>
+                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+                    Caption Style
                 </span>
             </div>
+
+            {/* Style cards */}
             <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-                {CAPTION_STYLES.map(style => (
-                    <button
-                        key={style.id}
-                        onClick={() => applyStyle(style)}
-                        className="flex-shrink-0 rounded-lg px-3 py-2.5 text-left transition-all hover:scale-105"
-                        style={{
-                            background: applied === style.id ? 'color-mix(in oklch, var(--accent) 20%, transparent)' : 'rgba(255,255,255,0.05)',
-                            border: applied === style.id ? '1px solid var(--accent)' : '1px solid rgba(255,255,255,0.08)',
-                            minWidth: 90,
-                        }}
-                    >
-                        <div className="text-[16px] mb-1">{style.emoji}</div>
-                        <div style={{
-                            fontFamily: `"${style.font}", sans-serif`,
-                            fontWeight: style.weight,
-                            fontStyle: style.style || 'normal',
-                            fontSize: 11,
-                            color: style.color === '#00FFFF' ? '#00FFFF' : 'var(--fg)',
-                            textShadow: style.textShadow || 'none',
-                            WebkitTextStroke: style.stroke ? `${style.stroke.width}px ${style.stroke.color}` : 'none',
-                            lineHeight: 1.2,
-                        }}>
-                            Abc
-                        </div>
-                        <div style={{ fontFamily: 'var(--f-mono)', fontSize: 8, color: 'var(--fg-4)', marginTop: 3 }}>
-                            {style.name}
-                        </div>
-                        {applied === style.id && (
-                            <Check className="w-2.5 h-2.5 mt-1" style={{ color: 'var(--accent)' }} />
-                        )}
-                    </button>
-                ))}
+                {CAPTION_STYLES.map(style => {
+                    const isActive = applied === style.id;
+                    return (
+                        <button
+                            key={style.id}
+                            onClick={() => applyStyle(style)}
+                            className="flex-shrink-0 transition-all"
+                            style={{
+                                minWidth: 78,
+                                borderRadius: 10,
+                                padding: 0,
+                                border: 'none',
+                                cursor: 'pointer',
+                                // Gradient border trick when active
+                                background: isActive
+                                    ? 'linear-gradient(135deg, #00E5FF 0%, #8A2BE2 100%)'
+                                    : 'rgba(255,255,255,0.06)',
+                                boxShadow: isActive ? '0 0 12px rgba(0,229,255,0.2)' : 'none',
+                                transform: isActive ? 'scale(1.04)' : 'scale(1)',
+                                transition: 'all 0.2s cubic-bezier(.22,.61,.36,1)',
+                            }}
+                        >
+                            {/* Inner card */}
+                            <div style={{
+                                margin: isActive ? 1.5 : 1,
+                                borderRadius: isActive ? 8.5 : 9,
+                                background: isActive ? '#0d0d0f' : 'rgba(255,255,255,0.03)',
+                                border: isActive ? 'none' : '0.5px solid rgba(255,255,255,0.08)',
+                                padding: '10px 8px 8px',
+                                textAlign: 'center',
+                            }}>
+                                {/* Abc preview */}
+                                <div style={{
+                                    fontFamily: `"${style.font}", ${style.font === 'Caveat' ? 'cursive' : style.font === 'Playfair Display' ? 'serif' : 'sans-serif'}`,
+                                    fontWeight: style.weight,
+                                    fontStyle:  style.style || 'normal',
+                                    fontSize:   17,
+                                    color:      style.color,
+                                    textShadow: style.textShadow || 'none',
+                                    WebkitTextStroke: style.stroke ? `${style.stroke.width}px ${style.stroke.color}` : 'none',
+                                    lineHeight: 1,
+                                    marginBottom: 7,
+                                    letterSpacing: style.id === 'bold-impact' ? '0.04em' : 'normal',
+                                    transition: 'all 0.2s',
+                                }}>
+                                    Abc
+                                </div>
+                                {/* Style name */}
+                                <div style={{
+                                    fontFamily: 'var(--f-mono)',
+                                    fontSize:   7.5,
+                                    color:      isActive ? '#00E5FF' : 'var(--fg-4)',
+                                    letterSpacing: '0.07em',
+                                    textTransform: 'uppercase',
+                                    lineHeight: 1.3,
+                                    transition: 'color 0.2s',
+                                }}>
+                                    {style.name}
+                                </div>
+                            </div>
+                        </button>
+                    );
+                })}
             </div>
         </div>
     );

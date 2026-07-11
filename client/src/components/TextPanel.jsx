@@ -268,8 +268,7 @@ const TextPanel = () => {
         setActiveClip: state.setActiveClip,
     })));
 
-    const [applyToAll, setApplyToAll] = useState(true);
-    const [editMode, setEditMode]     = useState('global');
+    const [editMode, setEditMode] = useState('global');
 
     const activeTrack = tracks.find(t => t.clips.some(c => c.id === activeClipId));
     const activeClip  = activeTrack?.clips.find(c => c.id === activeClipId);
@@ -283,7 +282,7 @@ const TextPanel = () => {
         if (!activeClip && !textTrack) return;
         const opts = skipHistory ? { skipHistory: true } : undefined;
 
-        if (editMode === 'global' || applyToAll) {
+        if (editMode === 'global') {
             const { content, ...styleOnly } = updates;
             if (Object.keys(styleOnly).length > 0 && textTrack) {
                 textTrack.clips.forEach(clip => updateClip(textTrack.id, clip.id, styleOnly, opts));
@@ -361,32 +360,9 @@ const TextPanel = () => {
                     <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em', flexShrink: 0 }}>
                         Text Properties
                     </span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                        {captionClips.length > 1 && (
-                            <ModeToggle mode="global" onChange={setEditMode} />
-                        )}
-                        {/* Apply to all toggle */}
-                        <button
-                            onClick={() => setApplyToAll(v => !v)}
-                            style={{
-                                display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px',
-                                borderRadius: 6, border: '0.5px solid var(--line)', cursor: 'pointer',
-                                background: applyToAll ? 'color-mix(in oklch, var(--accent) 12%, transparent)' : 'rgba(255,255,255,0.04)',
-                                fontFamily: 'var(--f-mono)', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em',
-                                color: applyToAll ? 'var(--accent)' : 'var(--fg-4)',
-                                transition: 'all 0.15s',
-                            }}>
-                            <span style={{
-                                width: 10, height: 10, borderRadius: 3, flexShrink: 0,
-                                background: applyToAll ? 'var(--accent)' : 'transparent',
-                                border: `0.5px solid ${applyToAll ? 'var(--accent)' : 'var(--fg-4)'}`,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            }}>
-                                {applyToAll && <span style={{ color: '#000', fontSize: 7, lineHeight: 1, fontWeight: 'bold' }}>✓</span>}
-                            </span>
-                            All
-                        </button>
-                    </div>
+                    {captionClips.length > 1 && (
+                        <ModeToggle mode="global" onChange={setEditMode} />
+                    )}
                 </div>
                 <StyleEditor clip={activeClip} onUpdate={handleUpdate} onLiveUpdate={handleLiveUpdate} showContent />
             </div>
