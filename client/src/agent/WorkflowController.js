@@ -6,19 +6,47 @@ import { EventBus, EVENT_TYPES } from './EventBus.js';
 import useTimelineStore from '../store/useTimelineStore.js';
 import { trackEvent } from '../utils/trackEvent.js';
 
-// Per-operation editorial descriptions and next-step suggestions
+// Per-operation editorial descriptions and next-step suggestions.
+// Keys must match the `operation` field returned by IntentParser / EditJobManager.
 const OPERATION_META = {
+    // Captions
     auto_captions:     { description: 'Captions generated from your spoken audio — each word is timed to the frame.', suggestion: 'Style your captions', suggestionPrompt: null, suggestionTab: 'captions' },
-    dynamic_rhythm:    { description: 'Dynamic zoom keyframes applied — cuts punch in sync with your speech energy.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
+
+    // Silence / filler / cleanup
     silence_removal:   { description: 'Dead air trimmed out. Your video now flows without the awkward pauses.', suggestion: 'Make it more dynamic', suggestionPrompt: 'Make it more dynamic' },
-    music:             { description: 'Background music added and ducked under your voice automatically.', suggestion: 'Export for YouTube', suggestionPrompt: 'Export for YouTube' },
+    remove_filler_words: { description: 'Filler words, ums, and uhs removed — your delivery sounds cleaner and more confident.', suggestion: 'Make it more dynamic', suggestionPrompt: 'Make it more dynamic' },
+    remove_filler:     { description: 'Filler words and hesitations removed. Your delivery sounds sharper.', suggestion: 'Make it more dynamic', suggestionPrompt: 'Make it more dynamic' },
+
+    // Dynamic / rhythm
+    dynamic_rhythm:    { description: 'Dynamic zoom keyframes applied — cuts punch in sync with your speech energy.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
+    rhythm_zoom:       { description: 'Dynamic zoom rhythm applied — scale keyframes pulse in sync with your speech energy.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
+
+    // Compound clean + dynamic
+    compound_clean_dynamic: { description: 'Silences removed and dynamic zoom applied — your edit flows tighter and punches with energy.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
+    compound_clean_virtual_multicam: { description: 'Silences removed and virtual camera angles generated. Tight, professional multi-shot feel.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
+
+    // Multicam / speakers
     virtual_multicam:  { description: 'Virtual camera angles generated — the edit punches in on the active speaker.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
     split_speakers:    { description: 'Speakers diarized onto separate tracks — each voice lives on its own layer.', suggestion: 'Apply virtual multicam', suggestionPrompt: 'Apply virtual multicam' },
     compound_split_speakers_virtual_multicam: { description: 'Speakers separated and virtual multicam angles applied. Your edit now feels like a professional two-camera interview.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
+
+    // Organize / b-roll
+    organize_clips:    { description: 'Clips analyzed and organized — main footage and B-Roll placed on separate tracks.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
+
+    // Music
+    music:             { description: 'Background music added and ducked under your voice automatically.', suggestion: 'Export for YouTube', suggestionPrompt: 'Export for YouTube' },
+
+    // Color
+    color_grade:       { description: 'Color grade applied across all clips.', suggestion: 'Export for YouTube', suggestionPrompt: 'Export for YouTube' },
+
+    // Trim / export
     trim:              { description: 'Timeline trimmed to your specified range.', suggestion: 'Export for YouTube', suggestionPrompt: 'Export for YouTube' },
     export:            { description: 'Render queued. Your video will be ready to download shortly.', suggestion: null },
-    color_grade:       { description: 'Color grade applied across all clips.', suggestion: 'Export for YouTube', suggestionPrompt: 'Export for YouTube' },
-    remove_filler:     { description: 'Filler words and hesitations removed. Your delivery sounds sharper.', suggestion: 'Make it more dynamic', suggestionPrompt: 'Make it more dynamic' },
+    nle_export:        { description: 'Project exported for your NLE. Open the file in your editing app to continue.', suggestion: null },
+
+    // Long-form
+    long_form_edit:    { description: 'Long-form edit applied — structured cuts made from content analysis of your full video.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
+    remove_repetition: { description: 'Repetitive and low-value segments removed — only your best takes remain.', suggestion: 'Make it more dynamic', suggestionPrompt: 'Make it more dynamic' },
 };
 
 function getOperationMeta(operation) {
@@ -171,16 +199,22 @@ const workflowMachine = createMachine({
                                         timestamp: new Date().toLocaleTimeString()
                                     });
 
-                                    // P5: seek to the first edit point so the user immediately
-                                    // sees the result without having to manually press play.
+                                    // P5: preview the result — play briefly then return to
+                                    // the first clip so the canvas isn't left at a gap/black frame.
                                     setTimeout(() => {
                                         const ts = useTimelineStore.getState();
                                         const firstClipStart = ts.tracks
                                             ?.flatMap(t => t.clips || [])
+                                            .filter(c => c.type !== 'text')
                                             .sort((a, b) => a.start - b.start)[0]?.start ?? 0;
                                         ts.seek(firstClipStart);
                                         ts.setIsPlaying(true);
-                                        setTimeout(() => useTimelineStore.getState().setIsPlaying(false), 4000);
+                                        setTimeout(() => {
+                                            useTimelineStore.getState().setIsPlaying(false);
+                                            // Return to the start so the canvas shows the first frame
+                                            // not a black gap left over from silence-removed segments.
+                                            useTimelineStore.getState().seek(firstClipStart);
+                                        }, 4000);
                                     }, 300);
                                 }
 
