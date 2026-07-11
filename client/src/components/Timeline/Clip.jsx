@@ -245,7 +245,7 @@ const Clip = ({ clip, trackId }) => {
             {...listeners}
             {...attributes}
             className={classNames(
-                "absolute top-0 bottom-0 rounded-md border border-white/10 overflow-hidden group flex flex-col justify-between select-none",
+                "absolute top-0 bottom-0 rounded-md border border-white/10 overflow-hidden group flex flex-col select-none",
                 // Text clips use a CSS color (e.g. '#fff') for their content — use
                 // type-based Tailwind class for the timeline bar instead.
                 clip.type === 'text'
@@ -286,8 +286,8 @@ const Clip = ({ clip, trackId }) => {
                 </button>
             </div>
 
-            {/* Waveform — pinned to the bottom of the clip (h-12 = 48px) */}
-            <div className="w-full h-12 relative overflow-hidden flex-shrink-0">
+            {/* Waveform — fills remaining clip height below the header */}
+            <div className="w-full flex-1 min-h-0 relative overflow-hidden">
                 {waveformData && (
                     <Waveform
                         peaks={waveformData.peaks}
@@ -299,7 +299,7 @@ const Clip = ({ clip, trackId }) => {
                                 ? 'rgba(251, 146, 60, 0.80)'
                                 : 'rgba(74, 222, 128, 0.78)'
                         }
-                        bgColor="rgba(0, 0, 0, 0.50)"
+                        bgColor="rgba(0, 0, 0, 0.35)"
                     />
                 )}
             </div>

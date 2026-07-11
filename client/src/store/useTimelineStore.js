@@ -561,11 +561,14 @@ const useTimelineStore = create(
                 set({ tracks: timelineManager.toLegacyTracks() });
 
                 // Force the player to redraw the current frame if paused so edits
-                // (crop, scale, grading) are visible immediately.
-                // Skip for text/caption tracks — their changes are pure CSS and don't
-                // require a video seek; doing so on every slider pixel causes repeated
-                // re-decodes and visible quality degradation.
-                if (!options.skipHistory && !get().isPlaying) {
+                // (grading, virtualCam crop) are visible immediately.
+                // CSS-transform-only updates (x, y, scale, rotation, opacity) are applied
+                // as canvas element style — the engine never needs to re-decode a frame for
+                // them. Calling seek() for those changes causes quality degradation and the
+                // "cursor jumps to end of clip" bug where onTick fires during renderOnce().
+                const CSS_ONLY_KEYS = new Set(['x', 'y', 'scale', 'scaleX', 'scaleY', 'rotation', 'opacity']);
+                const isCssOnly = Object.keys(updates).every(k => CSS_ONLY_KEYS.has(k));
+                if (!options.skipHistory && !get().isPlaying && !isCssOnly) {
                     const updatedTrack = timelineManager.toLegacyTracks().find(t =>
                         t.id === trackId && t.type !== 'text'
                     );
