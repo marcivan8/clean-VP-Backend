@@ -199,22 +199,28 @@ const workflowMachine = createMachine({
                                         timestamp: new Date().toLocaleTimeString()
                                     });
 
-                                    // P5: preview the result — play briefly then return to
-                                    // the first clip so the canvas isn't left at a gap/black frame.
+                                    // P5: After the edit, ensure the canvas shows a valid frame.
+                                    // If the current time now falls in a gap (e.g. after silence
+                                    // removal), quietly seek to the nearest clip start.
+                                    // We never auto-play — the user controls playback.
                                     setTimeout(() => {
                                         const ts = useTimelineStore.getState();
-                                        const firstClipStart = ts.tracks
+                                        const allMediaClips = ts.tracks
                                             ?.flatMap(t => t.clips || [])
                                             .filter(c => c.type !== 'text')
-                                            .sort((a, b) => a.start - b.start)[0]?.start ?? 0;
-                                        ts.seek(firstClipStart);
-                                        ts.setIsPlaying(true);
-                                        setTimeout(() => {
-                                            useTimelineStore.getState().setIsPlaying(false);
-                                            // Return to the start so the canvas shows the first frame
-                                            // not a black gap left over from silence-removed segments.
-                                            useTimelineStore.getState().seek(firstClipStart);
-                                        }, 4000);
+                                            .sort((a, b) => a.start - b.start) ?? [];
+                                        const t = ts.currentTime;
+                                        const inValidClip = allMediaClips.some(
+                                            c => t >= c.start - 0.001 && t < c.start + c.duration + 0.001
+                                        );
+                                        if (!inValidClip && allMediaClips.length > 0) {
+                                            // Playhead landed in a gap — snap to first clip start
+                                            ts.seek(allMediaClips[0].start);
+                                        } else {
+                                            // Still in a valid clip; just re-render the current frame
+                                            ts.playbackEngine?.renderOnce?.();
+                                            ts.playbackEngine?.seek?.(t);
+                                        }
                                     }, 300);
                                 }
 
