@@ -46,6 +46,30 @@ const VideoPlayer = () => {
         .flatMap(t => t.clips)
         .find(clip => currentTime >= clip.start - 0.001 && currentTime < clip.start + clip.duration + 0.001);
 
+    // activeClipForEngine: stable reference that only changes when properties the
+    // engine actually cares about change. x / y / scale / rotation are pure CSS
+    // transforms applied to the canvas element — they never need a seek() or
+    // renderOnce(). Excluding them prevents quality-degrading re-decodes and the
+    // "cursor jumps to end of clip" bug caused by onTick firing inside renderOnce().
+    const activeClipForEngine = React.useMemo(() => {
+        if (!activeClip) return null;
+        return {
+            id:         activeClip.id,
+            assetId:    activeClip.assetId,
+            url:        activeClip.url,
+            grading:    activeClip.grading,
+            volume:     activeClip.volume,
+            virtualCam: activeClip.virtualCam,
+            start:      activeClip.start,
+            duration:   activeClip.duration,
+        };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+        activeClip?.id, activeClip?.assetId, activeClip?.url,
+        activeClip?.grading, activeClip?.volume, activeClip?.virtualCam,
+        activeClip?.start, activeClip?.duration,
+    ]);
+
     // Initialize Engine
     useEffect(() => {
         if (!canvasRef.current) return;
@@ -204,7 +228,7 @@ const VideoPlayer = () => {
         prevTimeRef.current = currentTime;
         prevIsPlayingRef.current = isPlaying;
 
-    }, [isPlaying, currentTime, avTracks, assets, activeClip]);
+    }, [isPlaying, currentTime, avTracks, assets, activeClipForEngine]);
 
     // --- Audio Track Loader & Sync ---
     useEffect(() => {
@@ -240,19 +264,6 @@ const VideoPlayer = () => {
         engineRef.current.updateTrackMetadata(tracks); // pass full tracks for audio mixing
 
     }, [avTracks, assets]); // avTracks: only re-run when video/audio tracks change
-
-    // Sync Seek (One-way: Store -> Engine)
-    // We need to detect if Seek happened. Compare internal engine time vs store time?
-    // Or assume store update implies seek if |delta| > small?
-    useEffect(() => {
-        if (!engineRef.current) return;
-
-        const engineTime = engineRef.current.lastFrameRendered || engineRef.current.clock.getCurrentTime();
-        // Lower threshold for better scrubbing responsiveness (e.g. 100ms)
-        if (Math.abs(currentTime - engineTime) > 0.1) {
-            engineRef.current.seek(currentTime);
-        }
-    }, [currentTime]);
 
     // --- Resize Observer with Quality Scaling ---
     useEffect(() => {
