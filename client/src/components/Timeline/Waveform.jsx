@@ -1,8 +1,10 @@
 import React, { useRef, useEffect, useState } from 'react';
 
-const Waveform = ({ peaks, duration, offset, zoomLevel, height = 40, color = '#ffffff' }) => {
+// Accepts waveColor (preferred) or color (legacy alias), and optional bgColor.
+const Waveform = ({ peaks, duration, offset, zoomLevel, height = 40, waveColor, color = '#ffffff', bgColor }) => {
     const canvasRef = useRef(null);
     const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+    const resolvedColor = waveColor || color;
 
     const draw = () => {
         const canvas = canvasRef.current;
@@ -11,7 +13,7 @@ const Waveform = ({ peaks, duration, offset, zoomLevel, height = 40, color = '#f
         const ctx = canvas.getContext('2d');
         const dpr = window.devicePixelRatio || 1;
 
-        // Dimensions from state 
+        // Dimensions from state
         const { width: cssWidth, height: cssHeight } = dimensions;
         if (cssWidth === 0) return;
 
@@ -25,7 +27,13 @@ const Waveform = ({ peaks, duration, offset, zoomLevel, height = 40, color = '#f
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        ctx.fillStyle = color;
+        // Background fill
+        if (bgColor) {
+            ctx.fillStyle = bgColor;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        ctx.fillStyle = resolvedColor;
         ctx.beginPath();
 
         // Waveform Logic
@@ -64,7 +72,8 @@ const Waveform = ({ peaks, duration, offset, zoomLevel, height = 40, color = '#f
     // Draw when dependencies change or dimensions update
     useEffect(() => {
         draw();
-    }, [peaks, duration, offset, zoomLevel, height, color, dimensions]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [peaks, duration, offset, zoomLevel, height, resolvedColor, bgColor, dimensions]);
 
     // Handle Resize
     useEffect(() => {
