@@ -542,6 +542,7 @@ const useTimelineStore = create(
                 if (updates.rotation !== undefined) clipUpdates.rotation = updates.rotation;
                 if (updates.opacity !== undefined) clipUpdates.opacity = updates.opacity;
                 if (updates.keyframes !== undefined) clipUpdates.keyframes = updates.keyframes;
+                if (updates.animation !== undefined) clipUpdates.animation = updates.animation;
                 // Virtual multicam crop metadata
                 if (updates.virtualCam !== undefined) clipUpdates.virtualCam = updates.virtualCam;
 
