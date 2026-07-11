@@ -444,8 +444,8 @@ const useTimelineStore = create(
                 set({ tracks: timelineManager.toLegacyTracks() });
             },
 
-            addClip: (trackId, clip) => {
-                get()._saveHistory();
+            addClip: (trackId, clip, options = {}) => {
+                if (!options.skipHistory) get()._saveHistory();
 
                 const clipId = clip.id || `clip-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -592,8 +592,8 @@ const useTimelineStore = create(
                 set({ tracks: timelineManager.toLegacyTracks() });
             },
 
-            removeClip: (trackId, clipId) => {
-                get()._saveHistory();
+            removeClip: (trackId, clipId, options = {}) => {
+                if (!options.skipHistory) get()._saveHistory();
 
                 const state = get();
                 const targets = state.selectedClipIds.includes(clipId)
@@ -609,7 +609,11 @@ const useTimelineStore = create(
                 const currentLayers = Object.values(timelineManager.getState().entities.layers);
                 
                 currentLayers.forEach(layer => {
+                    // Never auto-delete the default tracks (by ID) or any primary
+                    // media container (by type).  Deleting an empty video/audio track
+                    // causes subsequent addClip calls to silently orphan their placements.
                     if (layer.id === 'track-default-video' || layer.id === 'track-default-audio') return;
+                    if (layer.type === 'video' || layer.type === 'audio') return;
                     const hasClips = currentPlacements.some(p => p.layerId === layer.id);
                     if (!hasClips) {
                         timelineManager.dispatch(TimelineActions.removeLayer(layer.id));
