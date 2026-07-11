@@ -25,7 +25,8 @@ const getTabForClip = (clip, trackId) => {
         if (asset?.name && AUDIO_EXTENSIONS.test(asset.name)) return 'audio';
         if (asset?.url && AUDIO_EXTENSIONS.test(asset.url)) return 'audio';
     }
-    return null; // no auto-switch for video/other clips
+    // Video clips → Transform panel (scale, crop, position controls)
+    return 'transform';
 };
 
 const Clip = ({ clip, trackId }) => {

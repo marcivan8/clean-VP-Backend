@@ -950,7 +950,7 @@ const useTimelineStore = create(
                             style: 'subtitle',
                             fontSize: 36,
                             color: '#ffffff',
-                            textShadow: '2px 2px 4px rgba(0,0,0,0.9)',
+                            textShadow: null,
                             sourceUrl: null,
                             sourceDuration: duration,
                             metadata: {},

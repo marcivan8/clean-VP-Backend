@@ -449,6 +449,13 @@ const ReasoningPanel = () => {
     const { recordDecision } = useUserPreferences();
     const scrollRef = useRef(null);
 
+    // Auto-scroll to bottom whenever logs change (so new cards like caption_styles are always visible)
+    useEffect(() => {
+        const el = scrollRef.current;
+        if (!el) return;
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    }, [logs]);
+
     const proxying = assets.filter(a => a.isProxying);
     const isEmpty = logs.length === 0 && suggestions.length === 0 && !isAnalyzing;
 
