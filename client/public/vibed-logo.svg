@@ -1,19 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" fill="none">
-  <!-- Lightning bolt / paper plane outline — royal blue stroke -->
-  <path
-    d="M310 110 L185 265 L250 245 L200 390 L325 230 L258 248 Z"
-    fill="none"
-    stroke="#1a3fa8"
-    stroke-width="18"
-    stroke-linejoin="round"
-    stroke-linecap="round"
-  />
-  <!-- Gold accent diagonal line -->
-  <line
-    x1="248" y1="248"
-    x2="195" y2="268"
-    stroke="#FFB800"
-    stroke-width="8"
-    stroke-linecap="round"
-  />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" fill="none">
+  <defs>
+    <linearGradient id="vbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7B7BFF"/>
+      <stop offset="1" stop-color="#A480FF"/>
+    </linearGradient>
+  </defs>
+  <rect width="300" height="300" rx="80" fill="url(#vbg)"/>
+  <path d="M80 100 l50 130 30 -70 30 70 50 -130" fill="none" stroke="#fff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

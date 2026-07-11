@@ -33,7 +33,7 @@ import {
 } from '../lib/projectsApi.js';
 import useTimelineStore from '../store/useTimelineStore.js';
 import { useUserPlan } from '../hooks/useUserPlan.js';
-import { atLimit, getProjectLimit, planLimitLabel } from '../lib/planLimits.js';
+import { atLimit, planLimitLabel, getProjectLimit } from '../lib/planLimits.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -436,83 +436,93 @@ function DeleteConfirm({ projectId, projectName, onClose, onConfirm }) {
     );
 }
 
-// ── main page ─────────────────────────────────────────────────────────────────
+// ── plan limit modal ──────────────────────────────────────────────────────────
 
-// ── Plan limit modal ──────────────────────────────────────────────────────────
-
-function PlanLimitModal({ plan, onClose }) {
-    const [loading, setLoading] = useState(null);
-
-    async function handleUpgrade(targetPlan) {
-        setLoading(targetPlan);
-        await createCheckout(targetPlan);
-        setLoading(null);
-    }
-
-    const tiers = [
-        { key: 'creator', name: 'Creator', projects: '10 projects', highlight: false },
-        { key: 'pro',     name: 'Pro',     projects: 'Unlimited projects', highlight: true },
-    ];
-
+function PlanLimitModal({ plan, limit, onClose, onUpgrade }) {
+    const nextPlan = plan === 'free' ? 'Creator' : 'Pro';
     return (
-        <div style={{
-            position: 'fixed', inset: 0, zIndex: 200,
-            background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(6px)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
-        }} onClick={onClose}>
+        <div
+            style={{
+                position: 'fixed', inset: 0, zIndex: 200,
+                background: 'rgba(14,15,17,0.85)',
+                backdropFilter: 'blur(12px)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+            onClick={e => e.target === e.currentTarget && onClose()}
+        >
             <div
-                onClick={e => e.stopPropagation()}
-                style={{
-                    background: 'var(--bg-2)',
-                    border: '0.5px solid var(--glass-stroke)',
-                    borderRadius: 'var(--r-xl)',
-                    padding: '36px 32px',
-                    maxWidth: 480, width: '100%',
-                    boxShadow: '0 32px 80px rgba(0,0,0,0.5)',
-                }}
+                className="card"
+                style={{ width: 380, padding: 32, display: 'flex', flexDirection: 'column', gap: 24, textAlign: 'center' }}
             >
-                <div style={{ marginBottom: 8 }}>
-                    <p style={{ margin: '0 0 4px', fontFamily: 'var(--f-mono)', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--accent)' }}>
-                        Plan limit reached
-                    </p>
-                    <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--fg)' }}>
-                        Upgrade to create more projects
-                    </h2>
+                {/* Icon */}
+                <div style={{
+                    width: 48, height: 48, borderRadius: '50%',
+                    background: 'linear-gradient(135deg, rgba(0,229,255,0.15), rgba(138,43,226,0.15))',
+                    border: '0.5px solid rgba(0,229,255,0.25)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    margin: '0 auto',
+                    fontSize: 22,
+                }}>
+                    🔒
                 </div>
 
-                <p style={{ margin: '0 0 24px', fontSize: 14, color: 'var(--fg-3)', lineHeight: 1.6 }}>
-                    Your <strong style={{ color: 'var(--fg-2)', textTransform: 'capitalize' }}>{plan}</strong> plan includes{' '}
-                    <strong style={{ color: 'var(--fg-2)' }}>{planLimitLabel(plan)}</strong>.
-                </p>
+                {/* Copy */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--fg)' }}>
+                        Project limit reached
+                    </h2>
+                    <p style={{ margin: 0, fontSize: 14, color: 'var(--fg-2)', lineHeight: 1.6 }}>
+                        Your <strong style={{ color: 'var(--fg)', textTransform: 'capitalize' }}>{plan}</strong> plan
+                        includes <strong style={{ color: 'var(--fg)' }}>{planLimitLabel(plan)}</strong>.
+                        Upgrade to {nextPlan} to create more.
+                    </p>
+                </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
-                    {tiers.map(tier => (
-                        <div key={tier.key} style={{
-                            border: tier.highlight ? '1px solid var(--accent)' : '0.5px solid var(--glass-stroke)',
-                            borderRadius: 'var(--r-md)',
-                            padding: '18px 16px',
-                            background: tier.highlight ? 'var(--accent-soft)' : 'var(--glass)',
-                            display: 'flex', flexDirection: 'column', gap: 12,
-                        }}>
-                            <div>
-                                <p style={{ margin: '0 0 2px', fontWeight: 600, fontSize: 14, color: 'var(--fg)' }}>{tier.name}</p>
-                                <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-3)' }}>{tier.projects}</p>
-                            </div>
-                            <button
-                                className={tier.highlight ? 'btn btn-primary' : 'btn'}
-                                style={{ height: 36, fontSize: 13, opacity: loading === tier.key ? 0.6 : 1 }}
-                                onClick={() => handleUpgrade(tier.key)}
-                                disabled={!!loading}
-                            >
-                                {loading === tier.key ? 'Redirecting…' : `Get ${tier.name}`}
-                            </button>
+                {/* Plan comparison */}
+                <div style={{
+                    background: 'var(--glass)',
+                    border: '0.5px solid var(--glass-stroke)',
+                    borderRadius: 'var(--r-md)',
+                    padding: '14px 18px',
+                    display: 'flex',
+                    justifyContent: 'space-around',
+                    gap: 16,
+                }}>
+                    {[
+                        { label: 'Creator', projects: '10 projects' },
+                        { label: 'Pro', projects: 'Unlimited' },
+                    ].map(({ label, projects }) => (
+                        <div key={label} style={{ textAlign: 'center' }}>
+                            <div style={{
+                                fontFamily: 'var(--f-mono)', fontSize: 10,
+                                letterSpacing: '0.12em', textTransform: 'uppercase',
+                                color: 'var(--fg-3)', marginBottom: 4,
+                            }}>{label}</div>
+                            <div style={{
+                                fontSize: 14, fontWeight: 600,
+                                color: label === nextPlan ? 'var(--accent)' : 'var(--fg-2)',
+                            }}>{projects}</div>
                         </div>
                     ))}
                 </div>
 
-                <button className="btn btn-ghost" style={{ width: '100%', height: 38, fontSize: 13 }} onClick={onClose}>
-                    Maybe later
-                </button>
+                {/* Actions */}
+                <div style={{ display: 'flex', gap: 10 }}>
+                    <button
+                        className="btn btn-ghost"
+                        style={{ flex: 1, height: 40, fontSize: 14 }}
+                        onClick={onClose}
+                    >
+                        Maybe later
+                    </button>
+                    <button
+                        className="btn btn-primary"
+                        style={{ flex: 2, height: 40, fontSize: 14 }}
+                        onClick={onUpgrade}
+                    >
+                        Upgrade to {nextPlan}
+                    </button>
+                </div>
             </div>
         </div>
     );
@@ -524,7 +534,7 @@ export default function DashboardPage() {
     const navigate  = useNavigate();
     const location  = useLocation();
     const { setProjectId, setProjectName, loadProject } = useTimelineStore();
-    const { plan } = useUserPlan();
+    const { plan }  = useUserPlan();
 
     const [projects,    setProjects]  = useState([]);
     const [loading,     setLoading]   = useState(true);
@@ -558,7 +568,9 @@ export default function DashboardPage() {
         if (user) load();
     }, [user, load, location.key]);
 
-    // ── plan limit guard ──────────────────────────────────────────────────────
+    // ── actions ───────────────────────────────────────────────────────────────
+
+    /** Open the "New project" modal only if the user hasn't hit their plan limit. */
     function requestNewProject() {
         if (atLimit(plan, projects.length)) {
             setShowLimitModal(true);
@@ -567,9 +579,15 @@ export default function DashboardPage() {
         }
     }
 
-    // ── actions ───────────────────────────────────────────────────────────────
-    async function handleCreate(name) {
-        // Spin up a blank project skeleton — aspect ratio is set inside the editor
+    async function handleCreate(name, aspectRatio) {
+        // Double-check limit (guards against race where projects loaded after click)
+        if (atLimit(plan, projects.length)) {
+            setShowNew(false);
+            setShowLimitModal(true);
+            return;
+        }
+
+        // Spin up a blank project skeleton
         const skeleton = {
             version: '1.2',
             timestamp: Date.now(),
@@ -692,24 +710,23 @@ export default function DashboardPage() {
 
                 {/* Plan usage pill */}
                 {!loading && (
-                    <span style={{
-                        fontFamily: 'var(--f-mono)',
-                        fontSize: 10,
-                        letterSpacing: '0.10em',
-                        textTransform: 'uppercase',
+                    <div style={{
+                        fontFamily: 'var(--f-mono)', fontSize: 10,
+                        letterSpacing: '0.10em', textTransform: 'uppercase',
+                        color: atLimit(plan, projects.length) ? 'var(--accent)' : 'var(--fg-3)',
                         padding: '4px 10px',
                         borderRadius: 999,
-                        border: '0.5px solid var(--glass-stroke)',
-                        background: 'var(--glass)',
-                        color: atLimit(plan, projects.length) ? 'var(--accent-2)' : 'var(--fg-3)',
+                        border: `0.5px solid ${atLimit(plan, projects.length) ? 'rgba(0,229,255,0.3)' : 'var(--glass-stroke)'}`,
+                        background: atLimit(plan, projects.length) ? 'rgba(0,229,255,0.06)' : 'transparent',
                         whiteSpace: 'nowrap',
+                        flexShrink: 0,
                     }}>
                         {projects.length} / {getProjectLimit(plan) === Infinity ? '∞' : getProjectLimit(plan)} · {plan}
-                    </span>
+                    </div>
                 )}
 
                 {/* New project */}
-                <button className="btn btn-primary" style={{ height: 36, padding: '0 16px', fontSize: 13 }} onClick={() => requestNewProject()}>
+                <button className="btn btn-primary" style={{ height: 36, padding: '0 16px', fontSize: 13 }} onClick={requestNewProject}>
                     + New project
                 </button>
 
@@ -782,7 +799,7 @@ export default function DashboardPage() {
                             </p>
                         </div>
                         {!search && (
-                            <button className="btn btn-primary" style={{ height: 42, padding: '0 22px' }} onClick={() => requestNewProject()}>
+                            <button className="btn btn-primary" style={{ height: 42, padding: '0 22px' }} onClick={requestNewProject}>
                                 Create project
                             </button>
                         )}
@@ -798,7 +815,7 @@ export default function DashboardPage() {
                     }}>
                         {/* "New project" quick-add card */}
                         <button
-                            onClick={() => requestNewProject()}
+                            onClick={requestNewProject}
                             style={{
                                 background: 'var(--glass)',
                                 border: '0.5px dashed var(--glass-stroke)',
@@ -871,6 +888,17 @@ export default function DashboardPage() {
                     projectName={deleteModal.name}
                     onClose={() => setDeleteModal(null)}
                     onConfirm={handleDelete}
+                />
+            )}
+            {showLimitModal && (
+                <PlanLimitModal
+                    plan={plan}
+                    limit={getProjectLimit(plan)}
+                    onClose={() => setShowLimitModal(false)}
+                    onUpgrade={() => {
+                        setShowLimitModal(false);
+                        navigate('/success'); // or link to pricing — adjust as needed
+                    }}
                 />
             )}
         </div>
