@@ -47,7 +47,11 @@ const Clip = ({ clip, trackId }) => {
     // Waveform Data — PlaybackEngine emits under 'video_main' (the embedded
     // audio stream). Fall back to that key so audio track clips get the waveform
     // even though their trackId doesn't match 'video_main'.
-    const waveformData = waveforms ? (waveforms[trackId] ?? waveforms['video_main'] ?? null) : null;
+    // Text/caption clips never have audio — skip the fallback so they don't
+    // accidentally display the video's waveform on the caption track.
+    const isTextClip = clip.type === 'text' || clip.type === 'caption';
+    const waveformData = isTextClip ? null
+        : waveforms ? (waveforms[trackId] ?? waveforms['video_main'] ?? null) : null;
 
     // Resolve waveform URL — prefer explicit waveformUrl on the asset, fall back
     // to deriving it from proxyUrl for assets uploaded before waveformUrl was stored.
