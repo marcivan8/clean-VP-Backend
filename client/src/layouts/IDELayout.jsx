@@ -1377,7 +1377,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                                                 <span className="text-muted-foreground">{displayVal}{unit}</span>
                                                             </div>
                                                         </div>
-                                                        <input type="range" min={min} max={max} value={displayVal} onChange={(e) => updateClip(activeTrackId, activeClip.id, { [key]: fromDisplay(parseInt(e.target.value)) })} className="w-full accent-primary h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer" />
+                                                        <input type="range" min={min} max={max} value={displayVal}
+                                                            onChange={(e) => updateClip(activeTrackId, activeClip.id, { [key]: fromDisplay(parseInt(e.target.value)) }, { skipHistory: true })}
+                                                            onPointerUp={(e) => updateClip(activeTrackId, activeClip.id, { [key]: fromDisplay(parseInt(e.target.value)) })}
+                                                            className="w-full accent-primary h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer" />
                                                     </div>
                                                     );
                                                 })}

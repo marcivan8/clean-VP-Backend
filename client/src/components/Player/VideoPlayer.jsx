@@ -11,6 +11,11 @@ const VideoPlayer = () => {
     const canvasRef = useRef(null);
     const containerRef = useRef(null); // Added containerRef
     const engineRef = useRef(null); // Persist engine instance
+    // Track previous time/playState to detect whether seek() is actually needed.
+    // Property-only changes (x, y, scale, rotation, grading) update avTracks/activeClip
+    // but don't need a new video decode — renderOnce() is enough.
+    const prevTimeRef = useRef(null);
+    const prevIsPlayingRef = useRef(null);
 
     // Connect to store
     // NOTE: we subscribe to the full `tracks` array for clip lookups, but use
@@ -185,13 +190,19 @@ const VideoPlayer = () => {
             if (!isPlaying && typeof engineRef.current.renderOnce === 'function') {
                 engineRef.current.renderOnce();
                 // seek() flushes stale buffered frames and asks the worker for a fresh
-                // one.  Without this the buffer may be empty (e.g. after tracks change
-                // due to virtual_multicam) and renderOnce's flag is never consumed.
-                if (typeof engineRef.current.seek === 'function') {
+                // one — but it also forces expensive video frame decoding.  Only call it
+                // when the current time or play state actually changed.  Property-only
+                // updates (x, y, scale, rotation, grading) change avTracks/activeClip
+                // references but don't need a new frame decode; renderOnce() is enough.
+                const timeChanged = prevTimeRef.current !== currentTime;
+                const playChanged = prevIsPlayingRef.current !== isPlaying;
+                if ((timeChanged || playChanged) && typeof engineRef.current.seek === 'function') {
                     engineRef.current.seek(currentTime);
                 }
             }
         }
+        prevTimeRef.current = currentTime;
+        prevIsPlayingRef.current = isPlaying;
 
     }, [isPlaying, currentTime, avTracks, assets, activeClip]);
 
