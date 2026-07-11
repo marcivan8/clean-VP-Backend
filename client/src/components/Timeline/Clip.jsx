@@ -7,6 +7,8 @@ import useAIStore from '../../store/useAIStore';
 import classNames from 'classnames';
 import Waveform from './Waveform';
 import ClipContextMenu from './ClipContextMenu';
+import ClipWaveform from '../ClipWaveform';
+import { usePeaks } from '../../hooks/usePeaks';
 
 const AUDIO_EXTENSIONS = /\.(mp3|wav|m4a|aac|ogg|flac)$/i;
 
@@ -86,6 +88,16 @@ const Clip = ({ clip, trackId }) => {
         return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [resolvedWaveformUrl, !!waveformData]);
+
+    // WaveSurfer peaks — fetched from server (independent of canvas waveform above)
+    const { peaks: wsPeaks, duration: wsDuration, loading: wsLoading } = usePeaks(
+        isTextClip ? null : clip.assetId,
+        asset?.gcsPath,
+    );
+    const wsColor = clip.type === 'audio'
+        ? 'rgba(251,146,60,0.6)'
+        : 'rgba(52,211,153,0.6)';
+    const wsAudioUrl = asset?.proxyUrl || clip.url || clip.sourceUrl || null;
 
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: clip.id,
@@ -305,6 +317,23 @@ const Clip = ({ clip, trackId }) => {
             </div>
 
 
+
+            {/* ClipWaveform — WaveSurfer overlay, bottom 40%, pointer-events:none */}
+            {!isTextClip && wsAudioUrl && (
+                <div style={{
+                    position: 'absolute', left: 0, right: 0, bottom: 0,
+                    height: '40%', pointerEvents: 'none', overflow: 'hidden',
+                }}>
+                    <ClipWaveform
+                        audioUrl={wsAudioUrl}
+                        peaks={wsPeaks}
+                        duration={wsDuration}
+                        height={32}
+                        color={wsColor}
+                        loading={wsLoading}
+                    />
+                </div>
+            )}
 
             {/* Transition Handle / Visualizer */}
             {clip.transition && (

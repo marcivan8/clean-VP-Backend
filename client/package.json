@@ -37,7 +37,7 @@
     "react-player": "^3.4.0",
     "react-router-dom": "^7.11.0",
     "three": "^0.184.0",
-    "wavesurfer.js": "^7.12.1",
+    "wavesurfer.js": "^7.12.10",
     "xstate": "^5.25.0",
     "zustand": "^5.0.9"
   },
