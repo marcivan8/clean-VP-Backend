@@ -196,7 +196,7 @@ const TextOverlay = () => {
 
                 return (
                     <div
-                        key={clip.id}
+                        key={`${clip.id}-${clip.animation || 'none'}`}
                         onPointerDown={(e) => handleDragStart(e, clip)}
                         className={`absolute whitespace-pre-wrap select-none origin-center cursor-move transition-opacity hover:opacity-100 ${isActive ? 'ring-1 ring-primary ring-offset-1 ring-offset-transparent' : 'opacity-90'}`}
                         style={{
