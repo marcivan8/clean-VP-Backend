@@ -2,7 +2,6 @@ import React from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { useShallow } from 'zustand/react/shallow';
 import Clip from './Clip';
-import Waveform from './Waveform';
 import { Video, Music, Type, Volume2, VolumeX, Headphones } from 'lucide-react';
 import classNames from 'classnames';
 import useTimelineStore from '../../store/useTimelineStore';
@@ -16,23 +15,15 @@ const TrackIcon = ({ type }) => {
     }
 };
 
-const CLIP_ZONE_HEIGHT = 30; // px — compact clip strip for video/audio tracks
-
 const Track = ({ track }) => {
-    const { zoomLevel, duration, waveforms } = useTimelineStore(useShallow(state => ({
+    const { zoomLevel, duration } = useTimelineStore(useShallow(state => ({
         zoomLevel: state.zoomLevel,
         duration:  state.duration,
-        waveforms: state.waveforms,
     })));
     const { setNodeRef, isOver } = useDroppable({
         id: track.id,
         data: { trackId: track.id }
     });
-
-    const isTextTrack = track.type === 'text';
-    const waveformData = !isTextTrack
-        ? (waveforms?.[track.id] ?? waveforms?.['video_main'] ?? null)
-        : null;
 
     return (
         <div className="flex w-full mb-1 group">
@@ -90,52 +81,17 @@ const Track = ({ track }) => {
             <div
                 ref={setNodeRef}
                 className={classNames(
-                    "flex-1 relative h-20 border-b border-white/5 transition-colors flex flex-col",
+                    "flex-1 relative h-20 border-b border-white/5 transition-colors",
                     isOver ? "bg-white/5" : "bg-black/20 group-hover:bg-black/30"
                 )}
                 style={{ width: `${duration * zoomLevel}px`, minWidth: '100%' }}
             >
-                {/* Grid Lines */}
-                <div className="absolute inset-0 pointer-events-none opacity-10 z-0 bg-[linear-gradient(90deg,transparent_99%,#fff_100%)] bg-[length:100px_100%]" />
+                {/* Grid Lines (Optional) */}
+                <div className="absolute inset-0 pointer-events-none opacity-10 bg-[linear-gradient(90deg,transparent_99%,#fff_100%)] bg-[length:100px_100%]"></div>
 
-                {isTextTrack ? (
-                    /* Text tracks: clips fill the full height */
-                    <div className="relative flex-1 z-10">
-                        {track.clips.map(clip => (
-                            <Clip key={clip.id} clip={clip} trackId={track.id} />
-                        ))}
-                    </div>
-                ) : (
-                    <>
-                        {/* Compact clip strip */}
-                        <div className="relative z-10 shrink-0" style={{ height: CLIP_ZONE_HEIGHT }}>
-                            {track.clips.map(clip => (
-                                <Clip key={clip.id} clip={clip} trackId={track.id} />
-                            ))}
-                        </div>
-
-                        {/* Continuous waveform strip */}
-                        <div
-                            className="flex-1 relative overflow-hidden"
-                            style={{ background: 'rgb(8, 10, 20)' }}
-                        >
-                            {waveformData && (
-                                <Waveform
-                                    peaks={waveformData.peaks}
-                                    duration={waveformData.duration}
-                                    offset={0}
-                                    zoomLevel={zoomLevel}
-                                    waveColor={
-                                        track.type === 'audio'
-                                            ? 'rgba(251, 146, 60, 0.85)'
-                                            : 'rgba(52, 211, 153, 0.85)'
-                                    }
-                                    bgColor="rgb(8, 10, 20)"
-                                />
-                            )}
-                        </div>
-                    </>
-                )}
+                {track.clips.map(clip => (
+                    <Clip key={clip.id} clip={clip} trackId={track.id} />
+                ))}
             </div>
         </div>
     );
