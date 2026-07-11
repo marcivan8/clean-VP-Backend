@@ -1,0 +1,49 @@
+<!-- @dsCard group="Components" viewport="700x180" name="Badges & Tags" subtitle="Glowing-dot status badges + technical tags" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<style>
+  html,body { margin:0; background:var(--ink-950); }
+  #root { padding:26px 32px; }
+  .row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .cap { font-family:var(--f-mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--text-faint); width:64px; }
+</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+  <script src="../../_ds_bundle.js"></script>
+  <script type="text/babel">
+    const { Badge, Tag, Icon } = window.VibedDesignSystem_013733;
+    function Demo() {
+      return (
+        <div>
+          <div className="row">
+            <span className="cap">Badge</span>
+            <Badge tone="cyan">Live</Badge>
+            <Badge tone="violet">Rendering</Badge>
+            <Badge tone="success">Synced</Badge>
+            <Badge tone="warning">Drift</Badge>
+            <Badge tone="rec">Rec</Badge>
+            <Badge tone="neutral" dot={false}>Draft</Badge>
+          </div>
+          <div className="row">
+            <span className="cap">Tag</span>
+            <Tag>4K · ProRes</Tag>
+            <Tag>00:42:18</Tag>
+            <Tag active icon={<Icon name="captions" size={13} />}>Captions</Tag>
+            <Tag icon={<Icon name="palette" size={13} />}>Grade</Tag>
+            <Tag onRemove={() => {}}>b-roll</Tag>
+          </div>
+        </div>
+      );
+    }
+    ReactDOM.createRoot(document.getElementById("root")).render(<Demo />);
+  </script>
+</body>
+</html>

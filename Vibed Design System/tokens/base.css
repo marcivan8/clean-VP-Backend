@@ -1,0 +1,123 @@
+/* ============================================================
+   Vibed — Base resets + signature utility classes
+   .glass-panel · .glass-button-pro · .aurora · .film-grain ·
+   .eyebrow · .traffic-dot
+   ============================================================ */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--f-sans);
+  font-feature-settings: var(--f-sans-features);
+  font-size: var(--fs-body);
+  line-height: var(--lh-normal);
+  color: var(--text-body);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ---- Editorial display ------------------------------------- */
+.display {
+  font-family: var(--f-display);
+  font-weight: var(--fw-regular);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--ls-display);
+  color: var(--text-strong);
+}
+.display em, .display .it { font-style: italic; }
+
+/* ---- Mono eyebrow ------------------------------------------ */
+.eyebrow {
+  font-family: var(--f-mono);
+  font-size: var(--fs-eyebrow);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ---- Aurora glow ground ------------------------------------ */
+.aurora {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+.aurora::before, .aurora::after {
+  content: "";
+  position: absolute;
+  width: 46vmax;
+  height: 46vmax;
+  border-radius: 50%;
+  filter: var(--blur-aurora);
+  opacity: 0.55;
+}
+.aurora::before {
+  background: var(--cyan-500);
+  top: -16vmax; left: -8vmax;
+}
+.aurora::after {
+  background: var(--violet-500);
+  bottom: -18vmax; right: -10vmax;
+  opacity: 0.45;
+}
+
+/* ---- Glass panel ------------------------------------------- */
+.glass-panel {
+  position: relative;
+  background: var(--surface-card);
+  backdrop-filter: var(--blur-glass);
+  -webkit-backdrop-filter: var(--blur-glass);
+  border: var(--stroke-hair) solid var(--border-hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md), var(--shadow-glass-top);
+}
+
+/* ---- Pro glass button -------------------------------------- */
+.glass-button-pro {
+  font-family: var(--f-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-mono-ui);
+  text-transform: uppercase;
+  color: var(--text-strong);
+  background: var(--surface-card-strong);
+  border: var(--stroke-hair) solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-4);
+  box-shadow: var(--shadow-glass-top);
+  cursor: pointer;
+  transition: transform var(--dur-base) var(--ease-out),
+              box-shadow var(--dur-base) var(--ease-out),
+              border-color var(--dur-base) var(--ease-out);
+}
+.glass-button-pro:hover {
+  transform: translateY(-1px);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-lg), var(--glow-cyan-soft), var(--shadow-glass-top);
+}
+.glass-button-pro:active { transform: translateY(0) scale(0.99); }
+
+/* ---- Traffic dot (glowing indicator) ----------------------- */
+.traffic-dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--cyan-500);
+  box-shadow: var(--glow-dot);
+}
+.traffic-dot.violet { background: var(--violet-500); box-shadow: 0 0 8px rgba(138,43,226,0.9); }
+.traffic-dot.rec { background: var(--rec); box-shadow: 0 0 8px rgba(255,59,92,0.9); }
+
+/* ---- Film grain overlay ------------------------------------ */
+.film-grain {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: var(--grain-opacity);
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}

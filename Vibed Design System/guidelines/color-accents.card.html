@@ -1,0 +1,24 @@
+<!-- @dsCard group="Colors" viewport="700x170" name="Brand Accents" subtitle="Neon cyan + violet, the signature pair" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  html,body { margin:0; background:var(--ink-950); }
+  .wrap { padding:24px 32px; display:flex; gap:16px; flex-wrap:wrap; }
+  .sw { width:150px; height:96px; border-radius:12px; position:relative; border:1px solid var(--border-hairline);
+        display:flex; flex-direction:column; justify-content:flex-end; padding:12px; }
+  .n { font-family:var(--f-mono); font-size:11px; color:#fff; text-transform:uppercase; letter-spacing:.04em; }
+  .h { font-family:var(--f-mono); font-size:11px; color:rgba(255,255,255,.7); }
+  .grad { width:220px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="sw" style="background:#00E5FF; box-shadow:0 0 24px rgba(0,229,255,.4);"><span class="n" style="color:#04161A;">Cyan</span><span class="h" style="color:rgba(4,22,26,.7);">#00E5FF</span></div>
+    <div class="sw" style="background:#8A2BE2; box-shadow:0 0 24px rgba(138,43,226,.4);"><span class="n">Violet</span><span class="h">#8A2BE2</span></div>
+    <div class="sw grad" style="background:linear-gradient(120deg,#00E5FF,#8A2BE2);"><span class="n">Accent gradient</span><span class="h">--grad-accent</span></div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<!-- @dsCard group="Components" viewport="700x230" name="Buttons" subtitle="Primary, glass, ghost, danger + icon buttons" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<style>
+  html,body { margin:0; background:var(--ink-950); }
+  #root { padding:28px 32px; }
+  .row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+  .cap { font-family:var(--f-mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--text-faint); width:64px; }
+</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+  <script src="../../_ds_bundle.js"></script>
+  <script type="text/babel">
+    const { Button, IconButton, Icon } = window.VibedDesignSystem_013733;
+    function Demo() {
+      return (
+        <div>
+          <div className="row">
+            <span className="cap">Solid</span>
+            <Button variant="primary" iconLeft={<Icon name="sparkles" size={15} />}>Generate cut</Button>
+            <Button variant="glass" iconLeft={<Icon name="download" size={15} />}>Export</Button>
+            <Button variant="ghost">Cancel</Button>
+            <Button variant="danger">Delete</Button>
+          </div>
+          <div className="row">
+            <span className="cap">Sizes</span>
+            <Button size="sm" variant="glass">Small</Button>
+            <Button size="md" variant="glass">Medium</Button>
+            <Button size="lg" variant="glass">Large</Button>
+            <Button variant="primary" disabled>Disabled</Button>
+          </div>
+          <div className="row">
+            <span className="cap">Icon</span>
+            <IconButton variant="solid" icon={<Icon name="play" size={18} />} label="Play" />
+            <IconButton icon={<Icon name="scissors" size={18} />} label="Cut" active />
+            <IconButton icon={<Icon name="wand-2" size={18} />} label="Auto edit" />
+            <IconButton icon={<Icon name="captions" size={18} />} label="Captions" />
+            <IconButton icon={<Icon name="palette" size={18} />} label="Color" />
+          </div>
+        </div>
+      );
+    }
+    ReactDOM.createRoot(document.getElementById("root")).render(<Demo />);
+  </script>
+</body>
+</html>

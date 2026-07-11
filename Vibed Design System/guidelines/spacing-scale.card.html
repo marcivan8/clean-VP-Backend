@@ -1,0 +1,26 @@
+<!-- @dsCard group="Spacing" viewport="700x160" name="Spacing Scale" subtitle="8px base grid" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  html,body { margin:0; background:var(--ink-950); }
+  .wrap { padding:24px 32px; display:flex; gap:14px; align-items:flex-end; }
+  .item { display:flex; flex-direction:column; align-items:center; gap:8px; }
+  .bar { width:var(--w); background:linear-gradient(180deg,#00E5FF,#8A2BE2); border-radius:3px; }
+  .lbl { font-family:var(--f-mono); font-size:10px; color:var(--text-faint); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="item"><div class="bar" style="--w:4px; height:16px;"></div><span class="lbl">1·4</span></div>
+    <div class="item"><div class="bar" style="--w:8px; height:24px;"></div><span class="lbl">2·8</span></div>
+    <div class="item"><div class="bar" style="--w:12px; height:36px;"></div><span class="lbl">3·12</span></div>
+    <div class="item"><div class="bar" style="--w:16px; height:48px;"></div><span class="lbl">4·16</span></div>
+    <div class="item"><div class="bar" style="--w:24px; height:64px;"></div><span class="lbl">6·24</span></div>
+    <div class="item"><div class="bar" style="--w:32px; height:80px;"></div><span class="lbl">8·32</span></div>
+    <div class="item"><div class="bar" style="--w:48px; height:96px;"></div><span class="lbl">12·48</span></div>
+  </div>
+</body>
+</html>

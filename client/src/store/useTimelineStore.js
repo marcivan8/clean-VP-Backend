@@ -955,6 +955,9 @@ const useTimelineStore = create(
                         const duration = Math.max(0.3, (cap.end || 0) - (cap.start || 0));
 
                         // Add the clip entity (metadata / visual properties)
+                        // Preserve any existing global style from the text track (so style
+                        // card picks survive re-captioning), otherwise use Vibed defaults.
+                        const existingTextClip = textTrack?.clips?.[0];
                         timelineManager.dispatch(TimelineActions.addClip({
                             id: clipId,
                             name: cap.text,
@@ -962,9 +965,20 @@ const useTimelineStore = create(
                             type: 'text',
                             position: 'bottom',
                             style: 'subtitle',
-                            fontSize: 36,
-                            color: '#ffffff',
-                            textShadow: null,
+                            // Vibed caption defaults — inherit existing style if already set
+                            fontFamily:    existingTextClip?.fontFamily  || 'Anton',
+                            fontWeight:    existingTextClip?.fontWeight  || 900,
+                            fontSize:      existingTextClip?.fontSize    || 48,
+                            fontStyle:     existingTextClip?.fontStyle   || 'normal',
+                            color:         existingTextClip?.color       || '#FACC15',
+                            textShadow:    existingTextClip?.textShadow  !== undefined
+                                               ? existingTextClip.textShadow
+                                               : '2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 3px 6px rgba(0,0,0,0.6)',
+                            stroke:        existingTextClip?.stroke      !== undefined
+                                               ? existingTextClip.stroke
+                                               : { width: 2, color: '#000000' },
+                            textAlign:     existingTextClip?.textAlign   || 'center',
+                            animation:     existingTextClip?.animation   || 'none',
                             sourceUrl: null,
                             sourceDuration: duration,
                             metadata: {},

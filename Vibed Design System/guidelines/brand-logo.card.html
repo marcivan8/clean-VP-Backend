@@ -1,0 +1,41 @@
+<!-- @dsCard group="Brand" viewport="700x160" name="Logo" subtitle="Vibed Waveform V mark — gradient · white · ink" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  html,body { margin:0; background:var(--ink-950); }
+  .wrap { padding:0 28px; height:160px; display:flex; align-items:center; gap:20px; }
+  .swatch { display:flex; align-items:center; gap:12px; border-radius:12px; padding:14px 20px; flex-shrink:0; }
+  .dark  { background:#0D0D11; border:1px solid rgba(250,250,250,.07); }
+  .warm  { background:#F4F1EC; }
+  .blk   { background:#0D0D11; border:1px solid rgba(250,250,250,.07); }
+  .word  { font-family:var(--f-display); font-size:34px; letter-spacing:-.01em; color:#FAFAFA; line-height:1; }
+  .word-ink { font-family:var(--f-display); font-size:34px; letter-spacing:-.01em; color:#101114; line-height:1; }
+  .glow  { filter: drop-shadow(0 0 8px rgba(0,229,255,.5)) drop-shadow(0 0 20px rgba(0,229,255,.26)); }
+  .div   { width:1px; height:80px; background:rgba(250,250,250,.08); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- Gradient on dark + wordmark -->
+    <div class="swatch dark">
+      <img src="../assets/logo-mark.svg" width="44" height="44" class="glow" alt="Vibed mark">
+      <span class="word">Vibed</span>
+    </div>
+    <div class="div"></div>
+    <!-- White mark on dark (no wordmark — mark only) -->
+    <div class="swatch dark">
+      <img src="../assets/logo-mark-white.svg" width="44" height="44" alt="Vibed mark white">
+      <span class="word" style="font-size:22px;color:rgba(250,250,250,.35);font-family:var(--f-mono);letter-spacing:.1em;">Mark only</span>
+    </div>
+    <div class="div"></div>
+    <!-- Ink on warm -->
+    <div class="swatch warm">
+      <img src="../assets/logo-mark-black.svg" width="38" height="38" alt="Vibed mark ink">
+      <span class="word-ink">Vibed</span>
+    </div>
+  </div>
+</body>
+</html>

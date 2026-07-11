@@ -3,15 +3,14 @@ import React, { useState } from 'react';
 import useTimelineStore from '../store/useTimelineStore';
 import { AlignLeft, AlignCenter, AlignRight, Plus, Bold, Italic, Underline, RotateCcw, Type } from 'lucide-react';
 
-const FONTS = [
-    { name: 'Inter',            value: 'Inter, sans-serif' },
-    { name: 'Anton',            value: '"Anton", sans-serif' },
-    { name: 'Montserrat',       value: '"Montserrat", sans-serif' },
-    { name: 'Nunito',           value: '"Nunito", sans-serif' },
-    { name: 'Playfair Display', value: '"Playfair Display", serif' },
-    { name: 'Caveat',           value: '"Caveat", cursive' },
-    { name: 'Oswald',           value: '"Oswald", sans-serif' },
-    { name: 'Roboto',           value: '"Roboto", sans-serif' },
+const FONT_GROUPS = [
+    { group: 'Talking Head',       fonts: ['Anton', 'Bebas Neue', 'Montserrat', 'Inter', 'Barlow Condensed'] },
+    { group: 'Podcast / Doc',      fonts: ['Playfair Display', 'Lora', 'Merriweather', 'DM Serif Display', 'Cormorant Garamond'] },
+    { group: 'Lifestyle / Vlog',   fonts: ['Nunito', 'Poppins', 'Quicksand', 'Josefin Sans', 'Raleway'] },
+    { group: 'Gaming / Tech',      fonts: ['Rajdhani', 'Exo 2', 'Orbitron', 'Oxanium', 'Roboto Condensed'] },
+    { group: 'Motivational',       fonts: ['Oswald', 'Teko', 'Black Han Sans', 'Saira Condensed', 'Cabin'] },
+    { group: 'Handwritten',        fonts: ['Caveat', 'Pacifico', 'Kalam', 'Satisfy', 'Dancing Script'] },
+    { group: 'Neon / Glow',        fonts: ['Boogaloo', 'Righteous', 'Press Start 2P', 'Audiowide'] },
 ];
 
 const ANIMATION_PRESETS = [
@@ -89,7 +88,11 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, showContent = true, showRes
                 <select value={clip.fontFamily || 'Inter'}
                     onChange={(e) => onUpdate({ fontFamily: e.target.value })}
                     style={S.select}>
-                    {FONTS.map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
+                    {FONT_GROUPS.map(g => (
+                        <optgroup key={g.group} label={g.group}>
+                            {g.fonts.map(f => <option key={f} value={f}>{f}</option>)}
+                        </optgroup>
+                    ))}
                 </select>
             </div>
 
@@ -197,11 +200,14 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, showContent = true, showRes
 
 // ── Per-segment row ────────────────────────────────────────────────────────────
 const SegmentRow = ({ clip, trackId, globalStyle, onActivate, isActive }) => {
-    const { updateClip } = useTimelineStore.getState();
     const [expanded, setExpanded] = useState(false);
 
     const handleToggle = () => { onActivate(clip.id); setExpanded(p => !p); };
-    const handleUpdate = (updates) => updateClip(trackId, clip.id, updates);
+    const handleUpdate = (updates) => {
+        const store = useTimelineStore.getState();
+        store.saveToHistory?.();
+        store.updateClip(trackId, clip.id, updates, { skipHistory: true });
+    };
 
     const hasOverrides = Object.keys(globalStyle).some(k => {
         if (k === 'content') return false;
@@ -210,7 +216,9 @@ const SegmentRow = ({ clip, trackId, globalStyle, onActivate, isActive }) => {
 
     const handleReset = () => {
         const { content, ...styleOnly } = globalStyle;
-        updateClip(trackId, clip.id, styleOnly);
+        const store = useTimelineStore.getState();
+        store.saveToHistory?.();
+        store.updateClip(trackId, clip.id, styleOnly, { skipHistory: true });
     };
 
     const fmt = (s) => { const m = Math.floor(s / 60); return `${m}:${(s % 60).toFixed(1).padStart(4, '0')}`; };
@@ -259,12 +267,10 @@ const ModeToggle = ({ mode, onChange }) => (
 
 // ── Main TextPanel ─────────────────────────────────────────────────────────────
 const TextPanel = () => {
-    const { activeClipId, tracks, updateClip, addClip, addTextTrack, setActiveClip } = useTimelineStore(useShallow(state => ({
+    const { activeClipId, tracks, addClip, setActiveClip } = useTimelineStore(useShallow(state => ({
         activeClipId:  state.activeClipId,
         tracks:        state.tracks,
-        updateClip:    state.updateClip,
         addClip:       state.addClip,
-        addTextTrack:  state.addTextTrack,
         setActiveClip: state.setActiveClip,
     })));
 
@@ -276,22 +282,41 @@ const TextPanel = () => {
 
     const textTrack    = tracks.find(t => t.type === 'text');
     const captionClips = textTrack?.clips || [];
+    // Representative clip for global mode display: prefer the active text clip,
+    // fall back to the first caption clip so the editor is always populated.
     const globalStyle  = captionClips[0] || {};
+    const displayClip  = (activeClip && isTextClip) ? activeClip : globalStyle;
 
     const handleUpdate = (updates, skipHistory = false) => {
-        if (!activeClip && !textTrack) return;
-        const opts = skipHistory ? { skipHistory: true } : undefined;
+        // Always read fresh from the store — avoids stale-closure issues when
+        // multiple clips are updated in the same event (N _saveHistory calls
+        // would create N intermediate undo entries and risk partial fan-out).
+        const store       = useTimelineStore.getState();
+        const freshTracks = store.tracks;
+        const freshText   = freshTracks.find(t => t.type === 'text');
+        const freshActTrk = freshTracks.find(t => t.clips.some(c => c.id === activeClipId));
+        const freshActClp = freshActTrk?.clips.find(c => c.id === activeClipId);
+        const freshIsText = freshActTrk?.type === 'text';
+
+        if (!freshText && !freshActTrk) return;
 
         if (editMode === 'global') {
             const { content, ...styleOnly } = updates;
-            if (Object.keys(styleOnly).length > 0 && textTrack) {
-                textTrack.clips.forEach(clip => updateClip(textTrack.id, clip.id, styleOnly, opts));
+            if (Object.keys(styleOnly).length > 0 && freshText) {
+                // ONE history entry for the entire batch
+                if (!skipHistory) store.saveToHistory?.();
+                freshText.clips.forEach(clip =>
+                    store.updateClip(freshText.id, clip.id, styleOnly, { skipHistory: true })
+                );
             }
-            if (content !== undefined && activeTrack && activeClip) {
-                updateClip(activeTrack.id, activeClip.id, { content }, opts);
+            // Content is per-segment — update only the active caption clip
+            if (content !== undefined && freshIsText && freshActTrk && freshActClp) {
+                store.updateClip(freshActTrk.id, freshActClp.id, { content }, { skipHistory: true });
             }
-        } else if (activeTrack && activeClip) {
-            updateClip(activeTrack.id, activeClip.id, updates, opts);
+        } else {
+            if (!freshActTrk || !freshActClp) return;
+            if (!skipHistory) store.saveToHistory?.();
+            store.updateClip(freshActTrk.id, freshActClp.id, updates, { skipHistory: true });
         }
     };
 
@@ -316,94 +341,94 @@ const TextPanel = () => {
         setActiveClip(id);
     };
 
+    // ── No captions yet → Add presets ─────────────────────────────────────────
+    if (captionClips.length === 0) {
+        return (
+            <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16 }}>
+                    <Type size={13} style={{ color: 'var(--fg-4)' }} />
+                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Add Text</span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+                    {[
+                        { name: 'Heading',    content: 'Big Headline',                fontSize: 72, fontWeight: 'bold',   preview: { fontSize: 20, fontWeight: 700 }, sub: 'Large, bold title text.' },
+                        { name: 'Subheading', content: 'Subtitle Text',                fontSize: 48, fontWeight: 'medium', preview: { fontSize: 14, fontWeight: 500 }, sub: 'Secondary text for context.' },
+                        { name: 'Body Text',  content: 'Body text content goes here.', fontSize: 24,                      preview: { fontSize: 11, fontWeight: 400 }, sub: 'Small text for descriptions.' },
+                    ].map(preset => (
+                        <button key={preset.name} onClick={() => handleAddText(preset)}
+                            style={{ padding: 14, background: 'rgba(255,255,255,0.03)', border: '0.5px solid var(--line)', borderRadius: 8, textAlign: 'left', cursor: 'pointer', transition: 'background 0.15s' }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.06)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}>
+                            <div style={{ ...preset.preview, fontFamily: 'var(--f-sans)', color: 'var(--fg)', marginBottom: 3 }}>{preset.name}</div>
+                            <div style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)' }}>{preset.sub}</div>
+                        </button>
+                    ))}
+                </div>
+
+                <div style={{ borderTop: '0.5px solid var(--line)', paddingTop: 12 }}>
+                    <button onClick={() => handleAddText({ name: 'Text', content: 'Enter text here', fontSize: 48 })}
+                        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                            padding: '8px 0', borderRadius: 7, cursor: 'pointer',
+                            background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
+                            border: '0.5px solid color-mix(in oklch, var(--accent) 30%, transparent)',
+                            color: 'var(--accent)', fontFamily: 'var(--f-mono)', fontSize: 10,
+                            textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                        <Plus size={12} /> Add Text Layer
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    // ── Shared header (always shown when captions exist) ───────────────────────
+    const Header = () => (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, gap: 8 }}>
+            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em', flexShrink: 0 }}>
+                {editMode === 'global' ? 'Caption Style' : 'Segments'}
+            </span>
+            <ModeToggle mode={editMode} onChange={setEditMode} />
+        </div>
+    );
+
     // ── Individual mode ────────────────────────────────────────────────────────
     if (editMode === 'individual') {
         return (
             <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Captions</span>
-                    <ModeToggle mode="individual" onChange={setEditMode} />
+                <Header />
+                <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+                    {captionClips
+                        .slice()
+                        .sort((a, b) => a.start - b.start)
+                        .map(clip => (
+                            <SegmentRow
+                                key={clip.id}
+                                clip={clip}
+                                trackId={textTrack.id}
+                                globalStyle={globalStyle}
+                                isActive={activeClipId === clip.id}
+                                onActivate={setActiveClip}
+                            />
+                        ))
+                    }
                 </div>
-
-                {captionClips.length === 0 ? (
-                    <div style={{ padding: 20, borderRadius: 8, border: '0.5px dashed var(--line)', textAlign: 'center' }}>
-                        <p style={{ fontFamily: 'var(--f-sans)', fontSize: 11, color: 'var(--fg-4)' }}>No captions yet. Ask the AI to add captions first.</p>
-                    </div>
-                ) : (
-                    <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
-                        {captionClips
-                            .slice()
-                            .sort((a, b) => a.start - b.start)
-                            .map(clip => (
-                                <SegmentRow
-                                    key={clip.id}
-                                    clip={clip}
-                                    trackId={textTrack.id}
-                                    globalStyle={globalStyle}
-                                    isActive={activeClipId === clip.id}
-                                    onActivate={setActiveClip}
-                                />
-                            ))
-                        }
-                    </div>
-                )}
             </div>
         );
     }
 
-    // ── Global mode (clip selected) ────────────────────────────────────────────
-    if (activeClip && isTextClip) {
-        return (
-            <div>
-                {/* Header row */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, gap: 8 }}>
-                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em', flexShrink: 0 }}>
-                        Text Properties
-                    </span>
-                    {captionClips.length > 1 && (
-                        <ModeToggle mode="global" onChange={setEditMode} />
-                    )}
-                </div>
-                <StyleEditor clip={activeClip} onUpdate={handleUpdate} onLiveUpdate={handleLiveUpdate} showContent />
-            </div>
-        );
-    }
-
-    // ── Default: Add presets ───────────────────────────────────────────────────
+    // ── Global mode — always accessible when captions exist ───────────────────
+    // displayClip is the active text clip if selected, otherwise the first caption.
+    // All style changes fan out to every caption clip via handleUpdate.
+    // Content is per-segment: only shown when a specific clip is active.
     return (
         <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16 }}>
-                <Type size={13} style={{ color: 'var(--fg-4)' }} />
-                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Add Text</span>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-                {[
-                    { name: 'Heading',    content: 'Big Headline', fontSize: 72, fontWeight: 'bold',   preview: { fontSize: 20, fontWeight: 700 }, sub: 'Large, bold title text.' },
-                    { name: 'Subheading', content: 'Subtitle Text', fontSize: 48, fontWeight: 'medium', preview: { fontSize: 14, fontWeight: 500 }, sub: 'Secondary text for context.' },
-                    { name: 'Body Text',  content: 'Body text content goes here.', fontSize: 24,       preview: { fontSize: 11, fontWeight: 400 }, sub: 'Small text for descriptions.' },
-                ].map(preset => (
-                    <button key={preset.name} onClick={() => handleAddText(preset)}
-                        style={{ padding: 14, background: 'rgba(255,255,255,0.03)', border: '0.5px solid var(--line)', borderRadius: 8, textAlign: 'left', cursor: 'pointer', transition: 'background 0.15s' }}
-                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.06)'}
-                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}>
-                        <div style={{ ...preset.preview, fontFamily: 'var(--f-sans)', color: 'var(--fg)', marginBottom: 3 }}>{preset.name}</div>
-                        <div style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)' }}>{preset.sub}</div>
-                    </button>
-                ))}
-            </div>
-
-            <div style={{ borderTop: '0.5px solid var(--line)', paddingTop: 12 }}>
-                <button onClick={() => handleAddText({ name: 'Text', content: 'Enter text here', fontSize: 48 })}
-                    style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                        padding: '8px 0', borderRadius: 7, cursor: 'pointer',
-                        background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
-                        border: '0.5px solid color-mix(in oklch, var(--accent) 30%, transparent)',
-                        color: 'var(--accent)', fontFamily: 'var(--f-mono)', fontSize: 10,
-                        textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                    <Plus size={12} /> Add Text Layer
-                </button>
-            </div>
+            <Header />
+            <StyleEditor
+                clip={displayClip}
+                onUpdate={handleUpdate}
+                onLiveUpdate={handleLiveUpdate}
+                showContent={activeClip && isTextClip}
+            />
         </div>
     );
 };

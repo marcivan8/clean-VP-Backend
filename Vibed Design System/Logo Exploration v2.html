@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="design_doc_mode" content="canvas">
+<title>Vibed — V-mark Directions</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  body { margin:0; font-family:var(--f-sans); background:#070708; }
+  .lbl { font-family:var(--f-mono); font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--text-muted); display:flex; align-items:center; gap:8px; }
+  .lbl .n { color:var(--accent); }
+  .colhead { font-family:var(--f-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--text-faint); }
+  .card { position:relative; border-radius:18px; overflow:hidden; display:flex; align-items:center; justify-content:center;
+          border:1px solid var(--border-hairline); }
+  .dark { background:radial-gradient(120% 100% at 30% 15%, #15171c, #0a0a0b 72%); box-shadow:var(--shadow-md), var(--shadow-glass-top); }
+  .blk  { background:#0E0E10; }
+  .wht  { background:#FFFFFF; border-color:rgba(0,0,0,.10); }
+  .glow-cy { filter: drop-shadow(0 0 12px rgba(0,229,255,.5)) drop-shadow(0 0 26px rgba(0,229,255,.28)); }
+  .meaning { font-family:var(--f-mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); margin-top:3px; }
+  .rowcap { font-family:var(--f-sans); font-size:12.5px; color:var(--text-muted); line-height:1.45; margin-top:8px; max-width:180px; }
+  h1.title { font-family:var(--f-display); font-size:44px; color:var(--text-strong); margin:0 0 6px; letter-spacing:-.02em; }
+  h1.title em { font-style:italic; }
+  .sub { font-size:15px; color:var(--text-muted); max-width:660px; margin:0; }
+  .word { font-family:var(--f-display); letter-spacing:-.01em; }
+  .wmono { font-family:var(--f-mono); font-weight:500; letter-spacing:.04em; }
+</style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute"><defs>
+    <linearGradient id="gv" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#00E5FF"/><stop offset="1" stop-color="#8A2BE2"/></linearGradient>
+  </defs></svg>
+
+  <div style="position:absolute; left:48px; top:40px; width:900px;">
+    <div class="lbl" style="margin-bottom:12px;"><span class="traffic-dot"></span>Vibed · A distinct V-mark</div>
+    <h1 class="title">Off the bolt — a <em>V</em> that means something.</h1>
+    <p class="sub">Four marks all built from the letter V, each carrying a different idea: saving time, momentum, the craft, creativity. Shown in the treatments you liked — gradient, app-icon, and clean black / white.</p>
+  </div>
+
+  <div id="grid"></div>
+
+  <script>
+    const G = 'url(#gv)';
+
+    // ---- V glyph generators (viewBox 0 0 100 100) -------------------
+    function ffV(c, sw){ sw = sw||12; return `
+      <path d="M24 20 L50 50 L76 20" fill="none" stroke="${c}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M24 44 L50 74 L76 44" fill="none" stroke="${c}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>`; }
+
+    function sparkV(c){ return `
+      <path d="M16 28 L50 84 L84 28 L67 28 L50 56 L33 28 Z" fill="${c}"/>
+      <path d="M83 6 C84.4 14 87 16.6 95 18 C87 19.4 84.4 22 83 30 C81.6 22 79 19.4 71 18 C79 16.6 81.6 14 83 6 Z" fill="${c}"/>`; }
+
+    function waveV(c){
+      const xs=[16,33,50,67,84], hs=[60,40,22,40,60]; let s='';
+      xs.forEach((x,i)=>{ const h=hs[i], y=(100-h)/2; s+=`<rect x="${x-4.5}" y="${y}" width="9" height="${h}" rx="4.5" fill="${c}"/>`; });
+      return s;
+    }
+
+    function velV(c){ return `
+      <line x1="4"  y1="30" x2="24" y2="30" stroke="${c}" stroke-width="5" stroke-linecap="round" opacity="0.45"/>
+      <line x1="0"  y1="41" x2="20" y2="41" stroke="${c}" stroke-width="5" stroke-linecap="round" opacity="0.30"/>
+      <line x1="6"  y1="52" x2="22" y2="52" stroke="${c}" stroke-width="5" stroke-linecap="round" opacity="0.45"/>
+      <path d="M34 28 L64 84 L96 28 L80 28 L64 54 L48 28 Z" fill="${c}"/>`; }
+
+    function svg(size, inner, glow){
+      return `<svg width="${size}" height="${size}" viewBox="0 0 100 100" ${glow?'class="glow-cy"':''}>${inner}</svg>`;
+    }
+
+    const concepts = [
+      { id:'A', name:'Fast-forward V', meaning:'saves time', glyph:ffV,
+        cap:'Two nested chevrons read as a fast-forward and as the letter V. Speed = time saved.' },
+      { id:'B', name:'Velocity V', meaning:'momentum', glyph:velV,
+        cap:'A bold V wedge with motion lines — forward, fast, decisive.' },
+      { id:'C', name:'Waveform V', meaning:'the craft', glyph:waveV,
+        cap:'Five bars dip into a V valley — the DAW / editing heritage, fully ownable.' },
+      { id:'D', name:'Spark V', meaning:'creativity', glyph:sparkV,
+        cap:'A clean V wedge lit by a generate-spark — the conversational, creative core.' },
+    ];
+
+    const cols = ['Gradient','App icon','On black','On white'];
+    const colX = [300, 524, 748, 972];
+    const cardW = 200, cardH = 200, rowTop = 210, rowGap = 250;
+
+    let html = '';
+
+    // column headers
+    cols.forEach((c,i)=>{ html += `<div style="position:absolute; left:${colX[i]}px; top:178px;"><span class="colhead">${c}</span></div>`; });
+
+    concepts.forEach((cn, r)=>{
+      const y = rowTop + r*rowGap;
+      // row label
+      html += `<div style="position:absolute; left:48px; top:${y+18}px; width:200px;">
+        <div class="lbl"><span class="n">${cn.id}</span> ${cn.name}</div>
+        <div class="meaning">${cn.meaning}</div>
+        <div class="rowcap">${cn.cap}</div></div>`;
+
+      // gradient on dark
+      html += `<div class="card dark" style="position:absolute; left:${colX[0]}px; top:${y}px; width:${cardW}px; height:${cardH}px;">${svg(108, cn.glyph(G), true)}</div>`;
+
+      // app-icon tile
+      html += `<div class="card dark" style="position:absolute; left:${colX[1]}px; top:${y}px; width:${cardW}px; height:${cardH}px;">
+        <div style="width:120px;height:120px;border-radius:28px;position:relative;overflow:hidden;
+             background:radial-gradient(120% 120% at 30% 20%,#1a1c22,#0a0a0b 75%);border:1px solid var(--border-strong);
+             box-shadow:0 16px 40px rgba(0,0,0,.6), inset 0 1px 0 rgba(250,250,250,.08);display:flex;align-items:center;justify-content:center;">
+          <div style="position:absolute;inset:0;background:radial-gradient(60% 70% at 65% 60%,rgba(0,229,255,.22),transparent 60%),radial-gradient(55% 60% at 30% 80%,rgba(138,43,226,.20),transparent 65%);"></div>
+          <div style="position:relative;">${svg(70, cn.glyph(G), true)}</div>
+        </div></div>`;
+
+      // on black (white mark)
+      html += `<div class="card blk" style="position:absolute; left:${colX[2]}px; top:${y}px; width:${cardW}px; height:${cardH}px;">${svg(108, cn.glyph('#FAFAFA'), false)}</div>`;
+
+      // on white (ink mark)
+      html += `<div class="card wht" style="position:absolute; left:${colX[3]}px; top:${y}px; width:${cardW}px; height:${cardH}px;">${svg(108, cn.glyph('#101114'), false)}</div>`;
+    });
+
+    // ---- wordmark lockups -------------------------------------------
+    const ly = rowTop + concepts.length*rowGap + 24;
+    html += `<div style="position:absolute; left:48px; top:${ly}px; width:1124px;">
+      <div class="lbl" style="margin-bottom:12px;">Wordmark lockups · Fast-forward V + Spark V</div>
+      <div style="display:flex; gap:18px; flex-wrap:wrap;">
+        <div class="card dark" style="width:340px;height:120px;gap:16px;">
+          ${svg(46, ffV(G,13), true)}<span class="word" style="font-size:40px;color:var(--text-strong);">Vibed</span>
+        </div>
+        <div class="card dark" style="width:340px;height:120px;gap:8px;">
+          ${svg(42, sparkV(G), true)}
+          <span class="wmono" style="font-size:30px;color:var(--text-strong);">IBED</span>
+        </div>
+        <div class="card wht" style="width:340px;height:120px;gap:16px;">
+          ${svg(42, ffV('#101114',13), false)}<span class="word" style="font-size:38px;color:#101114;">Vibed</span>
+        </div>
+      </div>
+      <div class="rowcap" style="max-width:1124px;margin-top:10px;">Right card shows the mark <em>as</em> the V in the wordmark — "[V]IBED". The mark must also hold up flat black on white, with no glow.</div>
+    </div>`;
+
+    // current reference
+    html += `<div style="position:absolute; left:${colX[2]}px; top:${ly}px; width:420px;">
+      <div class="lbl" style="margin-bottom:12px;">Current (for reference)</div>
+      <div class="card dark" style="width:420px;height:120px;gap:16px;">
+        <img src="assets/logo.png" width="70" height="70" alt="current">
+        <div style="font-family:var(--f-mono);font-size:11px;color:var(--text-faint);line-height:1.6;text-align:left;">bolt form · shared by others<br>royal blue + yellow<br>no letter, no concept</div>
+      </div>
+    </div>`;
+
+    document.getElementById('grid').innerHTML = html;
+  </script>
+</body>
+</html>

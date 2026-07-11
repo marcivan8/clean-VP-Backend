@@ -1,0 +1,50 @@
+/* ============================================================
+   Vibed — Typography Tokens
+   Display: Instrument Serif (editorial, italic mixes)
+   Body/UI: Geist (with ss01, ss02, cv11 features)
+   Technical/eyebrow: JetBrains Mono (uppercase, tracked out)
+   ============================================================ */
+
+:root {
+  /* ---- Families ---------------------------------------------- */
+  --f-display: "Instrument Serif", "Times New Roman", serif; /* @kind font */
+  --f-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif; /* @kind font */
+  --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; /* @kind font */
+
+  /* Geist customized look */
+  --f-sans-features: "ss01" 1, "ss02" 1, "cv11" 1; /* @kind font */
+
+  /* ---- Type scale (px) -------------------------------------- */
+  --fs-display-xl: 96px;   /* hero */
+  --fs-display-lg: 72px;
+  --fs-display-md: 54px;
+  --fs-display-sm: 40px;   /* section headers */
+  --fs-h1: 32px;
+  --fs-h2: 26px;
+  --fs-h3: 21px;
+  --fs-lg: 18px;
+  --fs-body: 16px;
+  --fs-sm: 14px;
+  --fs-xs: 13px;
+  --fs-eyebrow: 12px;      /* mono eyebrow */
+
+  /* ---- Line heights ----------------------------------------- */
+  --lh-tight: 1.02; /* @kind font */
+  --lh-snug: 1.18;  /* @kind font */
+  --lh-normal: 1.5; /* @kind font */
+  --lh-relaxed: 1.65; /* @kind font */
+
+  /* ---- Weights ---------------------------------------------- */
+  --fw-light: 300; /* @kind font */
+  --fw-regular: 400; /* @kind font */
+  --fw-medium: 500; /* @kind font */
+  --fw-semibold: 600; /* @kind font */
+  --fw-bold: 700; /* @kind font */
+
+  /* ---- Letter spacing --------------------------------------- */
+  --ls-display: -0.02em;   /* tighten large serif @kind font */
+  --ls-tight: -0.01em; /* @kind font */
+  --ls-normal: 0; /* @kind font */
+  --ls-eyebrow: 0.18em;    /* heavily tracked mono @kind font */
+  --ls-mono-ui: 0.06em; /* @kind font */
+}
