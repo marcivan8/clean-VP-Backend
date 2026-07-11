@@ -429,6 +429,7 @@ export class EditJobManager {
         return {
             success: true,
             jobId,
+            operation: intentResult.operation,   // ← WorkflowController needs this to emit per-op UI
             message: feedback.message,
             suggestions: feedback.suggestions,
             details: executionResult.results,

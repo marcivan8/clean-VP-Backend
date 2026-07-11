@@ -13,6 +13,10 @@ const VideoPlayer = () => {
     const engineRef = useRef(null); // Persist engine instance
 
     // Connect to store
+    // NOTE: we subscribe to the full `tracks` array for clip lookups, but use
+    // a derived `avTracks` (audio+video only) as the dep for effects that talk
+    // to the playback engine.  This prevents text-clip position/style changes
+    // from triggering seek() / renderOnce() on every slider pixel.
     const { currentTime, isPlaying, tracks, assets, seek, setIsPlaying } = useTimelineStore(useShallow(state => ({
         currentTime:  state.currentTime,
         isPlaying:    state.isPlaying,
@@ -22,9 +26,16 @@ const VideoPlayer = () => {
         setIsPlaying: state.setIsPlaying,
     })));
 
+    // avTracks: only audio/video tracks — used as effect dependencies so that
+    // text-clip style/position changes don't trigger engine seek() / renderOnce().
+    const avTracks = React.useMemo(
+        () => tracks.filter(t => t.type === 'video' || t.type === 'audio'),
+        [tracks]
+    );
+
     // Determine Active Clip for Rendering & Logic
     // Search ALL video tracks — after split-speakers there are 2 (one per speaker).
-    const videoTracks = tracks.filter(t => t.type === 'video');
+    const videoTracks = avTracks.filter(t => t.type === 'video');
     const videoTrack = videoTracks[0]; // legacy compat for single-track code paths
     const activeClip = videoTracks
         .flatMap(t => t.clips)
@@ -182,7 +193,7 @@ const VideoPlayer = () => {
             }
         }
 
-    }, [isPlaying, currentTime, tracks, assets, activeClip]);
+    }, [isPlaying, currentTime, avTracks, assets, activeClip]);
 
     // --- Audio Track Loader & Sync ---
     useEffect(() => {
@@ -215,9 +226,9 @@ const VideoPlayer = () => {
         });
 
         // Pass Full Track Metadata to Engine for Fades/Effects Logic
-        engineRef.current.updateTrackMetadata(tracks);
+        engineRef.current.updateTrackMetadata(tracks); // pass full tracks for audio mixing
 
-    }, [tracks, assets]); // Run when tracks/assets change
+    }, [avTracks, assets]); // avTracks: only re-run when video/audio tracks change
 
     // Sync Seek (One-way: Store -> Engine)
     // We need to detect if Seek happened. Compare internal engine time vs store time?
