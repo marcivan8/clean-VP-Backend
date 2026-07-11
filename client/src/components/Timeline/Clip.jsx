@@ -5,7 +5,6 @@ import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../../store/useTimelineStore';
 import useAIStore from '../../store/useAIStore';
 import classNames from 'classnames';
-import Waveform from './Waveform';
 import ClipContextMenu from './ClipContextMenu';
 
 const AUDIO_EXTENSIONS = /\.(mp3|wav|m4a|aac|ogg|flac)$/i;
@@ -245,12 +244,12 @@ const Clip = ({ clip, trackId }) => {
             {...listeners}
             {...attributes}
             className={classNames(
-                "absolute top-0 bottom-0 rounded-md border border-white/10 overflow-hidden group flex flex-col select-none",
+                "absolute top-0 bottom-0 rounded-sm border border-white/10 overflow-hidden group flex flex-col select-none",
                 // Text clips use a CSS color (e.g. '#fff') for their content — use
                 // type-based Tailwind class for the timeline bar instead.
                 clip.type === 'text'
                     ? (clip.bgColor || 'bg-green-600/80')
-                    : (clip.color || 'bg-blue-500'),
+                    : (clip.color || 'bg-blue-700'),
                 (isActive || isSelected) ? "border-white ring-2 ring-primary/50 z-20" : "opacity-90 hover:opacity-100",
                 isDragging && "opacity-50 z-30 ring-2 ring-primary"
             )}
@@ -286,23 +285,7 @@ const Clip = ({ clip, trackId }) => {
                 </button>
             </div>
 
-            {/* Waveform — fills remaining clip height below the header */}
-            <div className="w-full flex-1 min-h-0 relative overflow-hidden">
-                {waveformData && (
-                    <Waveform
-                        peaks={waveformData.peaks}
-                        duration={waveformData.duration}
-                        offset={clip.offset || 0}
-                        zoomLevel={zoomLevel}
-                        waveColor={
-                            clip.type === 'audio'
-                                ? 'rgba(251, 146, 60, 0.80)'
-                                : 'rgba(74, 222, 128, 0.78)'
-                        }
-                        bgColor="rgba(0, 0, 0, 0.35)"
-                    />
-                )}
-            </div>
+            {/* Waveform rendered at track level (Track.jsx) — not per-clip */}
 
 
 
