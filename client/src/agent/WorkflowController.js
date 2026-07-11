@@ -131,17 +131,6 @@ const workflowMachine = createMachine({
                                     trackEvent(`ai_edit:${result.operation}`);
                                 }
 
-                                // After captions are generated, show font style cards
-                                if (result.operation === 'auto_captions') {
-                                    setTimeout(() => {
-                                        useAIStore.getState().addLog({
-                                            id: 'caption-styles-' + Date.now(),
-                                            type: 'caption_styles',
-                                            timestamp: new Date().toLocaleTimeString(),
-                                        });
-                                    }, 400);
-                                }
-
                                 if (result.operation === 'chat') {
                                     useAIStore.getState().addLog({
                                         id: 'chat-' + Date.now(),
@@ -170,6 +159,15 @@ const workflowMachine = createMachine({
                                         },
                                         timestamp: new Date().toLocaleTimeString()
                                     });
+
+                                    // Show font style picker immediately after caption generation
+                                    if (result.operation === 'auto_captions') {
+                                        useAIStore.getState().addLog({
+                                            id: 'caption-styles-' + Date.now(),
+                                            type: 'caption_styles',
+                                            timestamp: new Date().toLocaleTimeString(),
+                                        });
+                                    }
 
                                     // P5: seek to the first edit point so the user immediately
                                     // sees the result without having to manually press play.

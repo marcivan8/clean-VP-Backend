@@ -1,8 +1,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import React, { useState } from 'react';
 import useTimelineStore from '../store/useTimelineStore';
-import { Type, AlignLeft, AlignCenter, AlignRight, Plus, Bold, Italic, Underline, RotateCcw } from 'lucide-react';
-import classNames from 'classnames';
+import { AlignLeft, AlignCenter, AlignRight, Plus, Bold, Italic, Underline, RotateCcw, Type } from 'lucide-react';
 
 const FONTS = [
     { name: 'Inter',            value: 'Inter, sans-serif' },
@@ -16,128 +15,161 @@ const FONTS = [
 ];
 
 const ANIMATION_PRESETS = [
-    { id: 'none',       label: 'None' },
-    { id: 'fade-in',    label: 'Fade in' },
-    { id: 'slide-up',   label: 'Slide up' },
-    { id: 'pop',        label: 'Pop' },
+    { id: 'none',         label: 'None' },
+    { id: 'fade-in',      label: 'Fade in' },
+    { id: 'slide-up',     label: 'Slide up' },
+    { id: 'pop',          label: 'Pop' },
     { id: 'word-by-word', label: 'Word by word' },
 ];
 
-// ── Shared style editor (used by both global and per-clip modes) ──────────────
+// ── Shared style tokens ────────────────────────────────────────────────────────
+const S = {
+    label:   { fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.08em' },
+    section: { borderTop: '0.5px solid var(--line-soft)', paddingTop: 12, marginTop: 12 },
+    input:   { background: 'rgba(255,255,255,0.05)', border: '0.5px solid var(--line)', borderRadius: 6, padding: '5px 8px', color: 'var(--fg)', fontFamily: 'var(--f-sans)', fontSize: 12, width: '100%', outline: 'none' },
+    select:  { background: 'rgba(255,255,255,0.05)', border: '0.5px solid var(--line)', borderRadius: 6, padding: '5px 8px', color: 'var(--fg)', fontFamily: 'var(--f-sans)', fontSize: 12, width: '100%', outline: 'none' },
+    row:     { display: 'flex', gap: 8 },
+    pill:    (active) => ({
+        padding: '3px 10px', borderRadius: 999, fontSize: 10, fontFamily: 'var(--f-mono)',
+        border: active ? '1px solid var(--accent)' : '0.5px solid var(--line)',
+        background: active ? 'color-mix(in oklch, var(--accent) 15%, transparent)' : 'rgba(255,255,255,0.04)',
+        color: active ? 'var(--accent)' : 'var(--fg-3)',
+        cursor: 'pointer', transition: 'all 0.15s',
+    }),
+    iconBtn: (active) => ({
+        padding: 6, borderRadius: 5, cursor: 'pointer',
+        background: active ? 'rgba(255,255,255,0.12)' : 'transparent',
+        color: active ? 'var(--fg)' : 'var(--fg-4)',
+        border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'all 0.1s',
+    }),
+};
+
+// ── Shared style editor ────────────────────────────────────────────────────────
 const StyleEditor = ({ clip, onUpdate, showContent = true, showReset = false, onReset }) => {
     if (!clip) return null;
+
+    const activeAnim = clip.animation || 'none';
+
     return (
-        <div className="space-y-5">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
             {showContent && (
-                <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground">Content</label>
+                <div style={{ marginBottom: 12 }}>
+                    <div style={{ ...S.label, marginBottom: 4 }}>Content</div>
                     <textarea
                         value={clip.content || ''}
                         onChange={(e) => onUpdate({ content: e.target.value })}
-                        className="w-full bg-secondary rounded-md p-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                        style={{ ...S.input, resize: 'vertical', minHeight: 52, lineHeight: 1.4 }}
                         rows={2}
                     />
                 </div>
             )}
 
-            <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground">Size (px)</label>
+            <div style={{ ...S.row, marginBottom: 12 }}>
+                <div style={{ flex: 1 }}>
+                    <div style={{ ...S.label, marginBottom: 4 }}>Size</div>
                     <input type="number" value={clip.fontSize || 48}
                         onChange={(e) => onUpdate({ fontSize: parseInt(e.target.value) })}
-                        className="w-full bg-secondary rounded-md p-2 text-sm" />
+                        style={S.input} />
                 </div>
-                <div className="space-y-1.5">
-                    <label className="text-xs text-muted-foreground">Scale (x)</label>
+                <div style={{ flex: 1 }}>
+                    <div style={{ ...S.label, marginBottom: 4 }}>Scale</div>
                     <input type="number" step="0.1" min="0.1" max="5.0" value={clip.scale || 1.0}
                         onChange={(e) => onUpdate({ scale: parseFloat(e.target.value) })}
-                        className="w-full bg-secondary rounded-md p-2 text-sm" />
+                        style={S.input} />
                 </div>
             </div>
 
-            <div className="space-y-1.5">
-                <label className="text-xs text-muted-foreground">Font</label>
+            <div style={{ marginBottom: 12 }}>
+                <div style={{ ...S.label, marginBottom: 4 }}>Font</div>
                 <select value={clip.fontFamily || 'Inter'}
                     onChange={(e) => onUpdate({ fontFamily: e.target.value })}
-                    className="w-full bg-secondary rounded-md p-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary">
+                    style={S.select}>
                     {FONTS.map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
                 </select>
             </div>
 
-            <div className="flex gap-2 p-2 bg-secondary/30 rounded-lg flex-wrap">
-                <button onClick={() => onUpdate({ fontWeight: clip.fontWeight === 'bold' ? 'normal' : 'bold' })}
-                    className={classNames("p-2 rounded hover:bg-white/10 transition-colors", clip.fontWeight === 'bold' ? "bg-white/20 text-white" : "text-muted-foreground")} title="Bold">
-                    <Bold className="w-4 h-4" />
+            {/* Style buttons */}
+            <div style={{ display: 'flex', gap: 4, padding: '6px 8px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '0.5px solid var(--line)', marginBottom: 12, flexWrap: 'wrap' }}>
+                <button style={S.iconBtn(clip.fontWeight === 'bold')}
+                    onClick={() => onUpdate({ fontWeight: clip.fontWeight === 'bold' ? 'normal' : 'bold' })}>
+                    <Bold size={13} />
                 </button>
-                <button onClick={() => onUpdate({ fontStyle: clip.fontStyle === 'italic' ? 'normal' : 'italic' })}
-                    className={classNames("p-2 rounded hover:bg-white/10 transition-colors", clip.fontStyle === 'italic' ? "bg-white/20 text-white" : "text-muted-foreground")} title="Italic">
-                    <Italic className="w-4 h-4" />
+                <button style={S.iconBtn(clip.fontStyle === 'italic')}
+                    onClick={() => onUpdate({ fontStyle: clip.fontStyle === 'italic' ? 'normal' : 'italic' })}>
+                    <Italic size={13} />
                 </button>
-                <button onClick={() => onUpdate({ textDecoration: clip.textDecoration === 'underline' ? 'none' : 'underline' })}
-                    className={classNames("p-2 rounded hover:bg-white/10 transition-colors", clip.textDecoration === 'underline' ? "bg-white/20 text-white" : "text-muted-foreground")} title="Underline">
-                    <Underline className="w-4 h-4" />
+                <button style={S.iconBtn(clip.textDecoration === 'underline')}
+                    onClick={() => onUpdate({ textDecoration: clip.textDecoration === 'underline' ? 'none' : 'underline' })}>
+                    <Underline size={13} />
                 </button>
-                <div className="w-px bg-border mx-1" />
-                <button onClick={() => onUpdate({ textShadow: clip.textShadow ? null : '2px 2px 4px rgba(0,0,0,0.8)' })}
-                    className={classNames("px-2 py-1 text-[10px] rounded hover:bg-white/10 transition-colors border border-transparent", clip.textShadow ? "bg-white/10 border-white/20 text-white" : "text-muted-foreground")}>
+                <div style={{ width: '0.5px', background: 'var(--line)', margin: '0 2px' }} />
+                <button
+                    style={{ ...S.iconBtn(!!clip.textShadow), padding: '4px 8px', fontSize: 10, fontFamily: 'var(--f-mono)' }}
+                    onClick={() => onUpdate({ textShadow: clip.textShadow ? null : '2px 2px 4px rgba(0,0,0,0.8)' })}>
                     Shadow
                 </button>
-                <button onClick={() => onUpdate({ stroke: clip.stroke ? null : { width: 1, color: '#000000' } })}
-                    className={classNames("px-2 py-1 text-[10px] rounded hover:bg-white/10 transition-colors border border-transparent", clip.stroke ? "bg-white/10 border-white/20 text-white" : "text-muted-foreground")}>
+                <button
+                    style={{ ...S.iconBtn(!!clip.stroke), padding: '4px 8px', fontSize: 10, fontFamily: 'var(--f-mono)' }}
+                    onClick={() => onUpdate({ stroke: clip.stroke ? null : { width: 1, color: '#000000' } })}>
                     Stroke
                 </button>
             </div>
 
-            <div className="space-y-1.5">
-                <label className="text-xs text-muted-foreground">Color</label>
-                <div className="flex items-center gap-2">
+            {/* Color */}
+            <div style={{ marginBottom: 12 }}>
+                <div style={{ ...S.label, marginBottom: 6 }}>Color</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <input type="color" value={clip.color || '#ffffff'}
                         onChange={(e) => onUpdate({ color: e.target.value })}
-                        className="w-8 h-8 rounded cursor-pointer bg-transparent border-none" />
-                    <span className="text-xs font-mono opacity-50">{clip.color}</span>
+                        style={{ width: 28, height: 28, border: '0.5px solid var(--line)', borderRadius: 6, cursor: 'pointer', background: 'none', padding: 2 }} />
+                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)' }}>{clip.color || '#ffffff'}</span>
                 </div>
             </div>
 
-            <div className="space-y-1.5">
-                <label className="text-xs text-muted-foreground">Alignment</label>
-                <div className="flex bg-secondary rounded-md p-1">
-                    {['left', 'center', 'right'].map(align => (
+            {/* Alignment */}
+            <div style={{ marginBottom: 12 }}>
+                <div style={{ ...S.label, marginBottom: 6 }}>Alignment</div>
+                <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', borderRadius: 6, border: '0.5px solid var(--line)', padding: 3, gap: 2 }}>
+                    {[
+                        { align: 'left',   Icon: AlignLeft },
+                        { align: 'center', Icon: AlignCenter },
+                        { align: 'right',  Icon: AlignRight },
+                    ].map(({ align, Icon }) => (
                         <button key={align} onClick={() => onUpdate({ textAlign: align })}
-                            className={`flex-1 p-1 rounded hover:bg-white/10 flex justify-center ${clip.textAlign === align ? 'bg-white/20' : ''}`}>
-                            {align === 'left'   && <AlignLeft  className="w-4 h-4" />}
-                            {align === 'center' && <AlignCenter className="w-4 h-4" />}
-                            {align === 'right'  && <AlignRight  className="w-4 h-4" />}
+                            style={{ flex: 1, padding: 5, borderRadius: 4, border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center',
+                                background: clip.textAlign === align ? 'rgba(255,255,255,0.10)' : 'transparent',
+                                color: clip.textAlign === align ? 'var(--fg)' : 'var(--fg-4)' }}>
+                            <Icon size={13} />
                         </button>
                     ))}
                 </div>
             </div>
 
             {/* Position */}
-            <div className="space-y-3 pt-3 border-t border-border">
-                <div className="text-xs font-bold text-muted-foreground">Position</div>
+            <div style={S.section}>
+                <div style={{ ...S.label, marginBottom: 10 }}>Position</div>
                 {[{ key: 'x', label: 'X Axis' }, { key: 'y', label: 'Y Axis' }].map(({ key, label }) => (
-                    <div key={key} className="space-y-1">
-                        <div className="flex justify-between text-xs"><span>{label}</span><span>{clip[key] ?? 50}%</span></div>
+                    <div key={key} style={{ marginBottom: 10 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span style={{ fontFamily: 'var(--f-sans)', fontSize: 11, color: 'var(--fg-3)' }}>{label}</span>
+                            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)' }}>{clip[key] ?? 50}%</span>
+                        </div>
                         <input type="range" min="0" max="100" value={clip[key] ?? 50}
                             onChange={(e) => onUpdate({ [key]: parseInt(e.target.value) })}
-                            className="w-full h-1 bg-secondary rounded-lg appearance-none cursor-pointer" />
+                            style={{ width: '100%', accentColor: 'var(--accent)', height: 3, cursor: 'pointer' }} />
                     </div>
                 ))}
             </div>
 
-            {/* Animation presets (TASK 5) */}
-            <div className="space-y-2 pt-3 border-t border-border">
-                <div className="text-xs font-bold text-muted-foreground">Animation</div>
-                <div className="flex flex-wrap gap-1.5">
+            {/* Animation */}
+            <div style={S.section}>
+                <div style={{ ...S.label, marginBottom: 8 }}>Animation</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                     {ANIMATION_PRESETS.map(preset => (
                         <button key={preset.id}
                             onClick={() => onUpdate({ animation: preset.id === 'none' ? null : preset.id })}
-                            className={classNames(
-                                "px-2.5 py-1 text-[10px] rounded-full border transition-colors",
-                                (clip.animation === preset.id || (!clip.animation && preset.id === 'none'))
-                                    ? "border-primary/60 bg-primary/10 text-primary"
-                                    : "border-border bg-secondary/40 text-muted-foreground hover:text-white"
-                            )}>
+                            style={S.pill(activeAnim === preset.id)}>
                             {preset.label}
                         </button>
                     ))}
@@ -146,24 +178,24 @@ const StyleEditor = ({ clip, onUpdate, showContent = true, showReset = false, on
 
             {showReset && onReset && (
                 <button onClick={onReset}
-                    className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] text-muted-foreground hover:text-white rounded-md border border-border transition-colors">
-                    <RotateCcw className="w-3 h-3" /> Reset to global style
+                    style={{ marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                        padding: '6px 0', borderRadius: 6, background: 'transparent',
+                        border: '0.5px solid var(--line)', color: 'var(--fg-4)',
+                        fontFamily: 'var(--f-mono)', fontSize: 9, textTransform: 'uppercase',
+                        letterSpacing: '0.06em', cursor: 'pointer', width: '100%' }}>
+                    <RotateCcw size={10} /> Reset to global style
                 </button>
             )}
         </div>
     );
 };
 
-// ── Per-segment row in individual editing mode ────────────────────────────────
+// ── Per-segment row ────────────────────────────────────────────────────────────
 const SegmentRow = ({ clip, trackId, globalStyle, onActivate, isActive }) => {
     const { updateClip } = useTimelineStore.getState();
     const [expanded, setExpanded] = useState(false);
 
-    const handleToggle = () => {
-        onActivate(clip.id);
-        setExpanded(prev => !prev);
-    };
-
+    const handleToggle = () => { onActivate(clip.id); setExpanded(p => !p); };
     const handleUpdate = (updates) => updateClip(trackId, clip.id, updates);
 
     const hasOverrides = Object.keys(globalStyle).some(k => {
@@ -176,24 +208,24 @@ const SegmentRow = ({ clip, trackId, globalStyle, onActivate, isActive }) => {
         updateClip(trackId, clip.id, styleOnly);
     };
 
-    const formatTime = (s) => {
-        const m = Math.floor(s / 60);
-        const sec = (s % 60).toFixed(1);
-        return `${m}:${sec.padStart(4, '0')}`;
-    };
+    const fmt = (s) => { const m = Math.floor(s / 60); return `${m}:${(s % 60).toFixed(1).padStart(4, '0')}`; };
 
     return (
-        <div className={classNames("rounded-md border transition-all", isActive ? "border-primary/40 bg-primary/5" : "border-border/40 bg-secondary/20")}>
-            <button onClick={handleToggle} className="w-full flex items-center gap-2 px-2.5 py-2 text-left">
-                <span className="font-mono text-[9px] text-muted-foreground shrink-0">{formatTime(clip.start)}</span>
-                <span className="flex-1 truncate text-xs text-foreground">{clip.content || '—'}</span>
-                {hasOverrides && (
-                    <span className="text-[9px] text-primary/70 font-mono shrink-0">custom</span>
-                )}
-                <span className="text-muted-foreground text-xs">{expanded ? '▲' : '▼'}</span>
+        <div style={{
+            borderRadius: 7,
+            border: isActive ? '0.5px solid color-mix(in oklch, var(--accent) 50%, transparent)' : '0.5px solid var(--line)',
+            background: isActive ? 'color-mix(in oklch, var(--accent) 6%, transparent)' : 'rgba(255,255,255,0.02)',
+            marginBottom: 4,
+            overflow: 'hidden',
+        }}>
+            <button onClick={handleToggle} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
+                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', flexShrink: 0 }}>{fmt(clip.start)}</span>
+                <span style={{ flex: 1, fontSize: 11, color: 'var(--fg-2)', fontFamily: 'var(--f-sans)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{clip.content || '—'}</span>
+                {hasOverrides && <span style={{ fontFamily: 'var(--f-mono)', fontSize: 8, color: 'var(--accent)', flexShrink: 0 }}>custom</span>}
+                <span style={{ color: 'var(--fg-4)', fontSize: 9 }}>{expanded ? '▲' : '▼'}</span>
             </button>
             {expanded && (
-                <div className="px-3 pb-3 pt-1 border-t border-border/30">
+                <div style={{ padding: '4px 10px 10px', borderTop: '0.5px solid var(--line-soft)' }}>
                     <StyleEditor clip={clip} onUpdate={handleUpdate} showContent showReset={hasOverrides} onReset={handleReset} />
                 </div>
             )}
@@ -201,42 +233,55 @@ const SegmentRow = ({ clip, trackId, globalStyle, onActivate, isActive }) => {
     );
 };
 
-// ── Main TextPanel ────────────────────────────────────────────────────────────
+// ── Mode toggle ────────────────────────────────────────────────────────────────
+const ModeToggle = ({ mode, onChange }) => (
+    <div style={{ display: 'flex', borderRadius: 7, overflow: 'hidden', border: '0.5px solid var(--line)', flexShrink: 0 }}>
+        {['global', 'individual'].map((m) => (
+            <button key={m} onClick={() => onChange(m)}
+                style={{
+                    padding: '4px 10px', border: 'none', cursor: 'pointer',
+                    fontFamily: 'var(--f-mono)', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em',
+                    background: mode === m ? 'color-mix(in oklch, var(--accent) 14%, transparent)' : 'transparent',
+                    color: mode === m ? 'var(--accent)' : 'var(--fg-4)',
+                    borderLeft: m === 'individual' ? '0.5px solid var(--line)' : 'none',
+                    transition: 'all 0.15s',
+                }}>
+                {m === 'global' ? 'Global' : 'Per segment'}
+            </button>
+        ))}
+    </div>
+);
+
+// ── Main TextPanel ─────────────────────────────────────────────────────────────
 const TextPanel = () => {
     const { activeClipId, tracks, updateClip, addClip, addTextTrack, setActiveClip } = useTimelineStore(useShallow(state => ({
-        activeClipId: state.activeClipId,
-        tracks:       state.tracks,
-        updateClip:   state.updateClip,
-        addClip:      state.addClip,
-        addTextTrack: state.addTextTrack,
+        activeClipId:  state.activeClipId,
+        tracks:        state.tracks,
+        updateClip:    state.updateClip,
+        addClip:       state.addClip,
+        addTextTrack:  state.addTextTrack,
         setActiveClip: state.setActiveClip,
     })));
 
     const [applyToAll, setApplyToAll] = useState(true);
-    // editMode: 'global' = edit all together (default), 'individual' = per-segment
-    const [editMode, setEditMode] = useState('global');
+    const [editMode, setEditMode]     = useState('global');
 
     const activeTrack = tracks.find(t => t.clips.some(c => c.id === activeClipId));
     const activeClip  = activeTrack?.clips.find(c => c.id === activeClipId);
     const isTextClip  = activeTrack?.type === 'text';
 
-    // The text/caption track (may differ from activeTrack if nothing selected)
-    const textTrack = tracks.find(t => t.type === 'text');
+    const textTrack    = tracks.find(t => t.type === 'text');
     const captionClips = textTrack?.clips || [];
-
-    // Global style = first caption clip's style (reference)
-    const globalStyle = captionClips[0] || {};
+    const globalStyle  = captionClips[0] || {};
 
     const handleUpdate = (updates) => {
         if (!activeClip && !textTrack) return;
 
         if (editMode === 'global' || applyToAll) {
-            // Apply styles (not content) to ALL caption clips
             const { content, ...styleOnly } = updates;
             if (Object.keys(styleOnly).length > 0 && textTrack) {
                 textTrack.clips.forEach(clip => updateClip(textTrack.id, clip.id, styleOnly));
             }
-            // Content only to active clip
             if (content !== undefined && activeTrack && activeClip) {
                 updateClip(activeTrack.id, activeClip.id, { content });
             }
@@ -263,31 +308,21 @@ const TextPanel = () => {
         setActiveClip(id);
     };
 
-    // ── Individual mode (show list of all caption clips) ──────────────────────
+    // ── Individual mode ────────────────────────────────────────────────────────
     if (editMode === 'individual') {
         return (
-            <div className="space-y-4">
-                {/* Mode toggle */}
-                <div className="flex items-center justify-between">
-                    <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold">Captions</div>
-                    <div className="flex rounded-md overflow-hidden border border-border text-[10px] font-mono">
-                        <button onClick={() => setEditMode('global')}
-                            className="px-2.5 py-1 text-muted-foreground hover:text-white transition-colors">
-                            Global style
-                        </button>
-                        <button onClick={() => setEditMode('individual')}
-                            className="px-2.5 py-1 bg-primary/10 text-primary border-l border-border">
-                            Per segment
-                        </button>
-                    </div>
+            <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Captions</span>
+                    <ModeToggle mode="individual" onChange={setEditMode} />
                 </div>
 
                 {captionClips.length === 0 ? (
-                    <div className="p-4 rounded-md border border-dashed border-border text-center">
-                        <p className="text-xs text-muted-foreground">No captions yet. Ask the AI to add captions first.</p>
+                    <div style={{ padding: 20, borderRadius: 8, border: '0.5px dashed var(--line)', textAlign: 'center' }}>
+                        <p style={{ fontFamily: 'var(--f-sans)', fontSize: 11, color: 'var(--fg-4)' }}>No captions yet. Ask the AI to add captions first.</p>
                     </div>
                 ) : (
-                    <div className="space-y-1.5 max-h-[60vh] overflow-y-auto">
+                    <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
                         {captionClips
                             .slice()
                             .sort((a, b) => a.start - b.start)
@@ -308,31 +343,40 @@ const TextPanel = () => {
         );
     }
 
-    // ── Global style mode ─────────────────────────────────────────────────────
+    // ── Global mode (clip selected) ────────────────────────────────────────────
     if (activeClip && isTextClip) {
         return (
-            <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                    <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold">Text Properties</div>
-                    <div className="flex items-center gap-2">
+            <div>
+                {/* Header row */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, gap: 8 }}>
+                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em', flexShrink: 0 }}>
+                        Text Properties
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                         {captionClips.length > 1 && (
-                            <div className="flex rounded-md overflow-hidden border border-border text-[10px] font-mono">
-                                <button onClick={() => setEditMode('global')}
-                                    className="px-2.5 py-1 bg-primary/10 text-primary border-r border-border">
-                                    Global style
-                                </button>
-                                <button onClick={() => setEditMode('individual')}
-                                    className="px-2.5 py-1 text-muted-foreground hover:text-white transition-colors">
-                                    Per segment
-                                </button>
-                            </div>
+                            <ModeToggle mode="global" onChange={setEditMode} />
                         )}
-                        <label className="flex items-center gap-1.5 cursor-pointer group">
-                            <input type="checkbox" checked={applyToAll} onChange={(e) => setApplyToAll(e.target.checked)}
-                                className="w-3.5 h-3.5 rounded-sm bg-secondary border-border text-primary focus:ring-primary/50" />
-                            <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold group-hover:text-white transition-colors">Apply to All</span>
-                        </label>
-                        <div className="text-[10px] text-green-400 font-mono">EDITING</div>
+                        {/* Apply to all toggle */}
+                        <button
+                            onClick={() => setApplyToAll(v => !v)}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px',
+                                borderRadius: 6, border: '0.5px solid var(--line)', cursor: 'pointer',
+                                background: applyToAll ? 'color-mix(in oklch, var(--accent) 12%, transparent)' : 'rgba(255,255,255,0.04)',
+                                fontFamily: 'var(--f-mono)', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em',
+                                color: applyToAll ? 'var(--accent)' : 'var(--fg-4)',
+                                transition: 'all 0.15s',
+                            }}>
+                            <span style={{
+                                width: 10, height: 10, borderRadius: 3, flexShrink: 0,
+                                background: applyToAll ? 'var(--accent)' : 'transparent',
+                                border: `0.5px solid ${applyToAll ? 'var(--accent)' : 'var(--fg-4)'}`,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}>
+                                {applyToAll && <span style={{ color: '#000', fontSize: 7, lineHeight: 1, fontWeight: 'bold' }}>✓</span>}
+                            </span>
+                            All
+                        </button>
                     </div>
                 </div>
                 <StyleEditor clip={activeClip} onUpdate={handleUpdate} showContent />
@@ -340,35 +384,39 @@ const TextPanel = () => {
         );
     }
 
-    // ── Default: Add presets ──────────────────────────────────────────────────
+    // ── Default: Add presets ───────────────────────────────────────────────────
     return (
-        <div className="space-y-6">
-            <div className="flex items-center justify-between mb-2">
-                <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold">Add Text</div>
+        <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16 }}>
+                <Type size={13} style={{ color: 'var(--fg-4)' }} />
+                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Add Text</span>
             </div>
 
-            <div className="grid grid-cols-1 gap-3">
-                <button onClick={() => handleAddText({ name: 'Heading', content: 'Big Headline', fontSize: 72, fontWeight: 'bold' })}
-                    className="p-4 bg-secondary/50 hover:bg-secondary border border-border rounded-lg text-left transition-all hover:scale-[1.02]">
-                    <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">Heading</h1>
-                    <p className="text-[10px] text-muted-foreground mt-1">Large, bold title text.</p>
-                </button>
-                <button onClick={() => handleAddText({ name: 'Subheading', content: 'Subtitle Text', fontSize: 48, fontWeight: 'medium' })}
-                    className="p-4 bg-secondary/50 hover:bg-secondary border border-border rounded-lg text-left transition-all hover:scale-[1.02]">
-                    <h2 className="text-lg font-medium text-gray-200">Subheading</h2>
-                    <p className="text-[10px] text-muted-foreground mt-1">Secondary text for context.</p>
-                </button>
-                <button onClick={() => handleAddText({ name: 'Body Text', content: 'Body text content goes here.', fontSize: 24, fontWeight: 'normal' })}
-                    className="p-4 bg-secondary/50 hover:bg-secondary border border-border rounded-lg text-left transition-all hover:scale-[1.02]">
-                    <p className="text-sm text-gray-400">Body Text</p>
-                    <p className="text-[10px] text-muted-foreground mt-1">Small text for descriptions.</p>
-                </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+                {[
+                    { name: 'Heading',    content: 'Big Headline', fontSize: 72, fontWeight: 'bold',   preview: { fontSize: 20, fontWeight: 700 }, sub: 'Large, bold title text.' },
+                    { name: 'Subheading', content: 'Subtitle Text', fontSize: 48, fontWeight: 'medium', preview: { fontSize: 14, fontWeight: 500 }, sub: 'Secondary text for context.' },
+                    { name: 'Body Text',  content: 'Body text content goes here.', fontSize: 24,       preview: { fontSize: 11, fontWeight: 400 }, sub: 'Small text for descriptions.' },
+                ].map(preset => (
+                    <button key={preset.name} onClick={() => handleAddText(preset)}
+                        style={{ padding: 14, background: 'rgba(255,255,255,0.03)', border: '0.5px solid var(--line)', borderRadius: 8, textAlign: 'left', cursor: 'pointer', transition: 'background 0.15s' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.06)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}>
+                        <div style={{ ...preset.preview, fontFamily: 'var(--f-sans)', color: 'var(--fg)', marginBottom: 3 }}>{preset.name}</div>
+                        <div style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)' }}>{preset.sub}</div>
+                    </button>
+                ))}
             </div>
 
-            <div className="pt-4 border-t border-border">
+            <div style={{ borderTop: '0.5px solid var(--line)', paddingTop: 12 }}>
                 <button onClick={() => handleAddText({ name: 'Text', content: 'Enter text here', fontSize: 48 })}
-                    className="w-full flex items-center justify-center gap-2 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-md text-xs font-medium transition-colors">
-                    <Plus className="w-3 h-3" /> Add Text Layer
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                        padding: '8px 0', borderRadius: 7, cursor: 'pointer',
+                        background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
+                        border: '0.5px solid color-mix(in oklch, var(--accent) 30%, transparent)',
+                        color: 'var(--accent)', fontFamily: 'var(--f-mono)', fontSize: 10,
+                        textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    <Plus size={12} /> Add Text Layer
                 </button>
             </div>
         </div>
