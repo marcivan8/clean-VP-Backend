@@ -94,7 +94,7 @@ const Waveform = ({ peaks, duration, offset, zoomLevel, height = 40, waveColor, 
     return (
         <canvas
             ref={canvasRef}
-            className="w-full h-full block opacity-70 canvas-waveform"
+            className="w-full h-full block canvas-waveform"
             style={{ width: '100%', height: '100%' }}
         />
     );
