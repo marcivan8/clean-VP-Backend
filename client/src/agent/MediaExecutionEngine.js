@@ -1741,6 +1741,12 @@ export class MediaExecutionEngine {
             timestamp: new Date().toLocaleTimeString()
         });
 
+        // ── Save ONE history snapshot for the entire segment-replace operation ─
+        // Previously each addClip call saved its own entry, causing 100+ history
+        // pushes that could leave the timeline in an empty intermediate state if
+        // rhythm_zoom or any subsequent step inspected the store mid-operation.
+        timelineStore.saveToHistory?.();
+
         // Collect virtual-multicam data from existing clips BEFORE removing them.
         // When virtual_multicam ran before this cleanup pass, each clip has its own
         // angle (close_host / close_guest / wide). Blindly spreading ...baseClip would
@@ -1755,9 +1761,10 @@ export class MediaExecutionEngine {
                 virtualCam: c.virtualCam,
             }));
 
-        // Remove all clips in the range
+        // Remove all clips in the range — skipHistory because we already saved
+        // one snapshot above (prevents N intermediate empty-timeline states).
         for (const clip of baseClips) {
-            timelineStore.removeClip(videoTrack.id, clip.id);
+            timelineStore.removeClip(videoTrack.id, clip.id, { skipHistory: true });
         }
 
         // Insert replacement clips starting at rangeStart
@@ -1793,7 +1800,7 @@ export class MediaExecutionEngine {
                 sourceUrl:    baseClip.sourceUrl || persistentUrl,
                 virtualCam:   inheritedVirtualCam,
             };
-            timelineStore.addClip(videoTrack.id, newClip);
+            timelineStore.addClip(videoTrack.id, newClip, { skipHistory: true });
             currentStartTime += seg.duration;
             console.log(`[MediaExecutionEngine]   clip_${prefix}_${i}: timeline ${newClip.start.toFixed(2)}s–${currentStartTime.toFixed(2)}s  source ${seg.start.toFixed(2)}s–${seg.end.toFixed(2)}s  angle=${inheritedVirtualCam?.angle ?? 'none'}`);
         });
