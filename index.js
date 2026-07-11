@@ -247,6 +247,7 @@ app.use('/api/polar',    require('./routes/polarWebhook'));   // Polar subscript
 app.use('/api/checkout', require('./routes/polarWebhook'));  // alias: /api/checkout/create
 app.use('/api/projects',   require('./routes/projectRoutes'));   // Project thumbnail upload
 app.use('/api/interview', require('./routes/interviewRoutes')); // Interview/podcast smart editing
+app.use('/api/waveform',  require('./routes/waveformRoutes'));  // Waveform peak data extraction
 
 
 
