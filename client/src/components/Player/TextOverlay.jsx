@@ -4,18 +4,53 @@ import useTimelineStore from '../../store/useTimelineStore';
 
 // Map preset names to actual font families
 const FONT_MAP = {
-    'Inter':            'Inter, sans-serif',
-    'Anton':            '"Anton", sans-serif',
-    'Roboto':           '"Roboto", sans-serif',
-    'Lato':             '"Lato", sans-serif',
-    'Montserrat':       '"Montserrat", sans-serif',
-    'Nunito':           '"Nunito", sans-serif',
-    'Oswald':           '"Oswald", sans-serif',
-    'Merriweather':     '"Merriweather", serif',
-    'Playfair':         '"Playfair Display", serif',
-    'Playfair Display': '"Playfair Display", serif',
-    'Caveat':           '"Caveat", cursive',
-    'Handwriting':      '"Dancing Script", cursive',
+    // Talking Head
+    'Anton':              '"Anton", sans-serif',
+    'Bebas Neue':         '"Bebas Neue", sans-serif',
+    'Montserrat':         '"Montserrat", sans-serif',
+    'Inter':              'Inter, sans-serif',
+    'Barlow Condensed':   '"Barlow Condensed", sans-serif',
+    // Podcast / Doc
+    'Playfair Display':   '"Playfair Display", serif',
+    'Playfair':           '"Playfair Display", serif',
+    'Lora':               '"Lora", serif',
+    'Merriweather':       '"Merriweather", serif',
+    'DM Serif Display':   '"DM Serif Display", serif',
+    'Cormorant Garamond': '"Cormorant Garamond", serif',
+    // Lifestyle / Vlog
+    'Nunito':             '"Nunito", sans-serif',
+    'Poppins':            '"Poppins", sans-serif',
+    'Quicksand':          '"Quicksand", sans-serif',
+    'Josefin Sans':       '"Josefin Sans", sans-serif',
+    'Raleway':            '"Raleway", sans-serif',
+    // Gaming / Tech
+    'Rajdhani':           '"Rajdhani", sans-serif',
+    'Exo 2':              '"Exo 2", sans-serif',
+    'Orbitron':           '"Orbitron", sans-serif',
+    'Oxanium':            '"Oxanium", sans-serif',
+    'Roboto Condensed':   '"Roboto Condensed", sans-serif',
+    // Motivational
+    'Oswald':             '"Oswald", sans-serif',
+    'Teko':               '"Teko", sans-serif',
+    'Black Han Sans':     '"Black Han Sans", sans-serif',
+    'Saira Condensed':    '"Saira Condensed", sans-serif',
+    'Cabin':              '"Cabin", sans-serif',
+    // Handwritten
+    'Caveat':             '"Caveat", cursive',
+    'Pacifico':           '"Pacifico", cursive',
+    'Kalam':              '"Kalam", cursive',
+    'Satisfy':            '"Satisfy", cursive',
+    'Dancing Script':     '"Dancing Script", cursive',
+    'Handwriting':        '"Dancing Script", cursive',
+    // Neon / Glow
+    'Boogaloo':           '"Boogaloo", cursive',
+    'Righteous':          '"Righteous", cursive',
+    'Press Start 2P':     '"Press Start 2P", monospace',
+    'Audiowide':          '"Audiowide", sans-serif',
+    // Legacy
+    'Roboto':             '"Roboto", sans-serif',
+    'Lato':               '"Lato", sans-serif',
+    'Outfit':             '"Outfit", sans-serif',
 };
 
 // CSS keyframes injected once

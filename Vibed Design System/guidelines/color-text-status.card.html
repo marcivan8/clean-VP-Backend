@@ -1,0 +1,34 @@
+<!-- @dsCard group="Colors" viewport="700x180" name="Text Hierarchy & Status" subtitle="Opacity-based text + semantic status" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  html,body { margin:0; background:var(--ink-950); }
+  .wrap { padding:22px 32px; display:flex; gap:40px; font-family:var(--f-sans); }
+  .col { display:flex; flex-direction:column; gap:7px; }
+  .lbl { font-family:var(--f-mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--text-faint); margin-bottom:4px; }
+  .stat { display:flex; align-items:center; gap:8px; font-family:var(--f-mono); font-size:12px; color:var(--text-body); }
+  .d { width:9px; height:9px; border-radius:50%; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="col">
+      <div class="lbl">Text</div>
+      <span style="color:var(--text-strong); font-weight:600;">Strong · 100%</span>
+      <span style="color:var(--text-body);">Body · 78%</span>
+      <span style="color:var(--text-muted);">Muted · 55%</span>
+      <span style="color:var(--text-faint);">Faint · 38%</span>
+    </div>
+    <div class="col">
+      <div class="lbl">Status</div>
+      <span class="stat"><span class="d" style="background:#34D399;"></span>Success #34D399</span>
+      <span class="stat"><span class="d" style="background:#FBBF24;"></span>Warning #FBBF24</span>
+      <span class="stat"><span class="d" style="background:#FB6A6A;"></span>Danger #FB6A6A</span>
+      <span class="stat"><span class="d" style="background:#FF3B5C; box-shadow:0 0 8px rgba(255,59,92,.9);"></span>Rec #FF3B5C</span>
+    </div>
+  </div>
+</body>
+</html>

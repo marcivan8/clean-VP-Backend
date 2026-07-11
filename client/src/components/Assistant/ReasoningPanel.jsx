@@ -13,25 +13,48 @@ import { workflowController } from '../../agent/WorkflowController.js';
 
 // --- Sub-components ---
 
+// User's own message — right-aligned accent bubble
+const UserMessageItem = ({ log }) => {
+    const text = log.message.replace(/^You:\s*/i, '');
+    return (
+        <div className="flex justify-end mb-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+            <div style={{
+                background: 'color-mix(in oklch, var(--accent) 18%, rgba(255,255,255,0.08))',
+                border: '0.5px solid color-mix(in oklch, var(--accent) 35%, transparent)',
+                borderRadius: '10px 10px 3px 10px',
+                padding: '8px 12px',
+                maxWidth: '88%',
+                fontFamily: 'var(--f-sans)',
+                fontSize: 13,
+                color: 'var(--fg)',
+                lineHeight: 1.55,
+            }}>
+                {text}
+            </div>
+        </div>
+    );
+};
+
 const StepLogItem = ({ log }) => (
-    <div className="flex items-center gap-2 py-1.5 animate-in fade-in slide-in-from-bottom-1 duration-200">
+    <div className="flex items-center gap-2 py-1 animate-in fade-in slide-in-from-bottom-1 duration-200">
         {log.done
-            ? <Check className="w-3 h-3 shrink-0" style={{ color: 'var(--mint, #34d399)' }} />
+            ? <Check className="w-3 h-3 shrink-0" style={{ color: '#34d399' }} />
             : <Loader2 className="w-3 h-3 shrink-0 animate-spin" style={{ color: 'var(--accent)' }} />
         }
-        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: log.done ? 'var(--fg-4)' : 'var(--fg-3)', letterSpacing: '0.04em' }}>
+        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: log.done ? 'var(--fg-3)' : 'var(--fg-2)', letterSpacing: '0.02em' }}>
             {log.message}
         </span>
     </div>
 );
 
 const AssistantLogItem = ({ log }) => (
-    <div className="rounded-lg p-3 mb-1 animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ background: 'rgba(0,0,0,0.25)', border: '0.5px solid var(--line)' }}>
-        <div className="flex items-center gap-1.5 mb-2">
+    <div className="rounded-xl mb-2 animate-in fade-in slide-in-from-bottom-2 duration-300"
+         style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.1)' }}>
+        <div style={{ padding: '8px 12px 6px', borderBottom: '0.5px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 6 }}>
             <Sparkles className="w-3 h-3" style={{ color: 'var(--accent)' }} />
-            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Assistant</span>
+            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Assistant</span>
         </div>
-        <p className="whitespace-pre-wrap leading-relaxed" style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg-2)' }}>
+        <p className="whitespace-pre-wrap" style={{ fontFamily: 'var(--f-sans)', fontSize: 13, color: 'var(--fg)', lineHeight: 1.6, padding: '10px 12px 12px', margin: 0 }}>
             {log.message}
         </p>
     </div>
@@ -71,16 +94,16 @@ const TaskCompletionCard = ({ log }) => {
     };
 
     return (
-        <div className="rounded-lg mb-2 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300"
-             style={{ background: 'rgba(0,0,0,0.25)', border: '0.5px solid var(--line)' }}>
+        <div className="rounded-xl mb-2 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-300"
+             style={{ background: 'rgba(52,211,153,0.05)', border: '0.5px solid rgba(52,211,153,0.2)' }}>
             {/* Part 1: Bold confirmation header */}
-            <div className="px-3 py-2.5 flex items-center gap-2" style={{ borderBottom: '0.5px solid var(--line-soft)', background: 'rgba(52,211,153,0.06)' }}>
-                <Check className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--mint, #34d399)' }} />
-                <span className="font-semibold" style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg)' }}>
+            <div className="px-3 py-2.5 flex items-center gap-2" style={{ borderBottom: '0.5px solid rgba(52,211,153,0.12)', background: 'rgba(52,211,153,0.07)' }}>
+                <Check className="w-3.5 h-3.5 shrink-0" style={{ color: '#34d399' }} />
+                <span className="font-semibold" style={{ fontFamily: 'var(--f-sans)', fontSize: 13, color: 'var(--fg)' }}>
                     {log.message}
                 </span>
                 {stepsApplied > 0 && (
-                    <span className="ml-auto shrink-0" style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)' }}>
+                    <span className="ml-auto shrink-0" style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)' }}>
                         {stepsApplied} edit{stepsApplied !== 1 ? 's' : ''}
                     </span>
                 )}
@@ -89,7 +112,7 @@ const TaskCompletionCard = ({ log }) => {
             <div className="p-3">
                 {/* Part 2: Editorial description */}
                 {editDescription && (
-                    <p className="mb-3 leading-relaxed" style={{ fontFamily: 'var(--f-sans)', fontSize: 11, color: 'var(--fg-3)' }}>
+                    <p className="mb-3 leading-relaxed" style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg-2)' }}>
                         {editDescription}
                     </p>
                 )}
@@ -99,8 +122,8 @@ const TaskCompletionCard = ({ log }) => {
                     <ul className="mb-3 space-y-1">
                         {log.data.details.map((step, i) => (
                             <li key={i} className="flex items-start gap-2"
-                                style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)' }}>
-                                <span style={{ color: step.status === 'success' ? 'var(--mint, #34d399)' : 'var(--coral, #f87171)' }}>
+                                style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--fg-2)' }}>
+                                <span style={{ color: step.status === 'success' ? '#34d399' : '#f87171' }}>
                                     {step.status === 'success' ? '✓' : '✗'}
                                 </span>
                                 <span>{step.action}{step.result?.message ? ` — ${step.result.message}` : ''}</span>
@@ -112,9 +135,9 @@ const TaskCompletionCard = ({ log }) => {
                 {/* Part 3: Proactive suggestion */}
                 {nextSuggestion && (
                     <div className="mb-3 rounded-md px-2.5 py-2 flex items-center justify-between"
-                         style={{ background: 'rgba(255,255,255,0.04)', border: '0.5px solid var(--line)' }}>
-                        <span style={{ fontFamily: 'var(--f-sans)', fontSize: 11, color: 'var(--fg-3)' }}>
-                            Next: <strong style={{ color: 'var(--fg-2)' }}>{nextSuggestion}</strong>
+                         style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.1)' }}>
+                        <span style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg-2)' }}>
+                            Next: <strong style={{ color: 'var(--fg)' }}>{nextSuggestion}</strong>
                         </span>
                         <button
                             onClick={handleSuggestion}
@@ -156,58 +179,61 @@ const LogItem = ({ log }) => {
     if (log.type === 'assistant')       return <AssistantLogItem log={log} />;
     if (log.type === 'task_complete')   return <TaskCompletionCard log={log} />;
     if (log.type === 'caption_styles')  return <CaptionStylesCard log={log} />;
+    // User's own typed command — right-aligned bubble
+    if (log.id?.startsWith('user-') || log.message?.startsWith('You:'))
+        return <UserMessageItem log={log} />;
 
     const isSuccess = log.type === 'success';
     const isWarning = log.type === 'warning';
-    const isAgent = log.id.startsWith('agent-');
+    const isAgent   = log.id?.startsWith('agent-');
 
     return (
-        <div className="flex gap-3 text-xs animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <div className="flex flex-col items-center pt-1">
+        <div className="flex gap-2.5 animate-in fade-in slide-in-from-bottom-2 duration-300 mb-1">
+            <div className="flex flex-col items-center pt-1.5 shrink-0">
                 <div className={classNames(
                     "w-1.5 h-1.5 rounded-full shrink-0",
-                    isSuccess ? "bg-green-500" : isWarning ? "bg-orange-500" : "bg-blue-500"
-                )}></div>
-                <div className="w-px h-full bg-border my-1"></div>
+                    isSuccess ? "bg-green-400" : isWarning ? "bg-orange-400" : "bg-blue-400"
+                )} />
+                <div className="w-px flex-1 bg-white/10 mt-1" />
             </div>
-            <div className="pb-4 w-full">
-                <div className="flex items-center gap-2 mb-0.5">
-                    <span className="font-mono text-[10px] text-muted-foreground">{log.timestamp}</span>
-                    {isSuccess && <span className="text-[10px] text-green-400 font-medium">DETECTED</span>}
-                    {isAgent && log.data?.thought && <span className="text-[10px] text-purple-400 font-bold uppercase">AI Plan</span>}
+            <div className="pb-3 w-full min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)' }}>{log.timestamp}</span>
+                    {isSuccess && <span style={{ fontSize: 10, color: '#34d399', fontWeight: 600 }}>DETECTED</span>}
+                    {isAgent && log.data?.thought && <span style={{ fontSize: 10, color: '#a78bfa', fontWeight: 700 }}>AI PLAN</span>}
                 </div>
-                <p className="text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                <p style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.55, whiteSpace: 'pre-wrap', margin: 0 }}>
                     {log.message}
                 </p>
 
                 {/* Rich Agent Data */}
                 {log.data && (
-                    <div className="mt-2 bg-black/20 rounded p-2 border border-white/5">
+                    <div className="mt-2 rounded-lg p-2.5" style={{ background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.08)' }}>
                         {log.data.thought && (
-                            <div className="mb-2 italic text-purple-300/80 border-b border-white/5 pb-2">
-                                " {log.data.thought} "
+                            <div className="mb-2 pb-2" style={{ borderBottom: '0.5px solid rgba(255,255,255,0.07)', fontStyle: 'italic', fontSize: 11, color: '#c4b5fd', lineHeight: 1.5 }}>
+                                "{log.data.thought}"
                             </div>
                         )}
                         {log.data.details && (
                             <ul className="space-y-1">
                                 {log.data.details.map((active, i) => (
-                                    <li key={i} className="flex items-start gap-2 text-[10px]">
-                                        <span className={active.status === 'success' ? "text-green-500" : "text-red-500"}>
-                                            {active.status === 'success' ? "✓" : "✗"}
+                                    <li key={i} className="flex items-start gap-2" style={{ fontSize: 11 }}>
+                                        <span style={{ color: active.status === 'success' ? '#34d399' : '#f87171' }}>
+                                            {active.status === 'success' ? '✓' : '✗'}
                                         </span>
-                                        <span className="text-muted-foreground">
-                                            <span className="font-semibold text-foreground/80">{active.action}</span>
-                                            {active.result?.message && <span className="ml-1 opacity-70">- {active.result.message}</span>}
-                                            {active.error && <span className="ml-1 text-red-400">- {active.error}</span>}
+                                        <span style={{ color: 'var(--fg-2)' }}>
+                                            <span style={{ fontWeight: 600, color: 'var(--fg)' }}>{active.action}</span>
+                                            {active.result?.message && <span style={{ opacity: 0.7 }}> — {active.result.message}</span>}
+                                            {active.error && <span style={{ color: '#f87171' }}> — {active.error}</span>}
                                         </span>
                                     </li>
                                 ))}
                             </ul>
                         )}
                         {log.data.issues && log.data.issues.length > 0 && (
-                            <div className="mt-2 text-orange-400 bg-orange-500/10 p-1.5 rounded">
-                                <strong>⚠️ Verification Issues:</strong>
-                                <ul className="list-disc list-inside mt-1 opacity-80">
+                            <div className="mt-2 rounded-md p-2" style={{ background: 'rgba(251,146,60,0.1)', color: '#fb923c', fontSize: 11 }}>
+                                <strong>⚠ Issues:</strong>
+                                <ul className="list-disc list-inside mt-1" style={{ opacity: 0.85 }}>
                                     {log.data.issues.map((issue, idx) => <li key={idx}>{issue}</li>)}
                                 </ul>
                             </div>
@@ -238,11 +264,11 @@ const AgentPlanCard = ({ suggestion, onAccept, onReject }) => {
                 <div className="mb-2 italic text-purple-300/80 text-[11px] leading-relaxed border-l-2 border-purple-500/30 pl-2">
                     "{thought}"
                 </div>
-                <div className="bg-black/20 rounded p-2 max-h-32 overflow-y-auto">
+                <div className="rounded-lg p-2 max-h-32 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.3)' }}>
                     <ul className="space-y-1">
                         {actions.map((action, i) => (
-                            <li key={i} className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                                <span className="font-mono text-purple-400">[{action.name}]</span>
+                            <li key={i} className="flex items-center gap-2" style={{ fontSize: 11, color: 'var(--fg-2)' }}>
+                                <span style={{ fontFamily: 'var(--f-mono)', color: '#c4b5fd' }}>[{action.name}]</span>
                                 <span className="truncate">{JSON.stringify(action.args)}</span>
                             </li>
                         ))}
@@ -281,7 +307,7 @@ const SuggestionCard = ({ suggestion, onAccept, onReject }) => {
                 </span>
             </div>
 
-            <p className="text-xs text-muted-foreground leading-relaxed mb-3">
+            <p className="leading-relaxed mb-3" style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg-2)' }}>
                 {suggestion.message || suggestion.label || 'Apply this suggestion?'}
             </p>
 
@@ -298,6 +324,52 @@ const SuggestionCard = ({ suggestion, onAccept, onReject }) => {
                 >
                     <X className="w-3 h-3" /> Dismiss
                 </button>
+            </div>
+        </div>
+    );
+};
+
+// Next-action chips shown after a command completes.
+// Each suggestion is a standalone button that submits itself as a command.
+const NextActionsCard = ({ suggestion, onAccept, onReject }) => {
+    const items = suggestion.data?.suggestions || [];
+    if (items.length === 0) return null;
+    return (
+        <div
+            className="rounded-xl p-3 mb-2 animate-in fade-in slide-in-from-bottom-2 duration-300"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)' }}
+        >
+            <div className="flex items-center gap-1.5 mb-2.5">
+                <Sparkles className="w-3 h-3" style={{ color: 'var(--accent)' }} />
+                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+                    What's next?
+                </span>
+                <button
+                    onClick={() => onReject(suggestion.id)}
+                    style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg-3)', padding: 2 }}
+                >
+                    <X style={{ width: 10, height: 10 }} />
+                </button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                {items.map((item, i) => (
+                    <button
+                        key={i}
+                        onClick={() => onAccept(suggestion, item)}
+                        style={{
+                            width: '100%', textAlign: 'left', padding: '8px 10px',
+                            borderRadius: 8, cursor: 'pointer',
+                            background: 'rgba(255,255,255,0.05)',
+                            border: '0.5px solid rgba(255,255,255,0.08)',
+                            color: 'var(--fg-2)', fontFamily: 'var(--f-sans)', fontSize: 12,
+                            transition: 'all 0.15s',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.09)'; e.currentTarget.style.color = 'var(--fg)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.color = 'var(--fg-2)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; }}
+                    >
+                        {item}
+                    </button>
+                ))}
             </div>
         </div>
     );
@@ -363,12 +435,12 @@ const UploadStatusCard = ({ asset }) => {
 
 // Caption style presets for TASK 3
 const CAPTION_STYLES = [
-    { id: 'bold-impact',   name: 'Bold Impact',   font: 'Anton',           weight: 900, color: '#FFFFFF', stroke: { width: 2, color: '#000000' }, emoji: '💥' },
-    { id: 'clean-modern',  name: 'Clean Modern',  font: 'Montserrat',      weight: 600, color: '#FFFFFF', stroke: null,                           emoji: '✨' },
-    { id: 'soft-rounded',  name: 'Soft Rounded',  font: 'Nunito',          weight: 700, color: '#FFFFFF', stroke: null,                           emoji: '🌸' },
-    { id: 'cinematic',     name: 'Cinematic',     font: 'Playfair Display', weight: 400, style: 'italic', color: '#F5E6C8', stroke: null,          emoji: '🎬' },
-    { id: 'handwritten',   name: 'Handwritten',   font: 'Caveat',          weight: 700, color: '#FFFFFF', stroke: null,                           emoji: '✍️' },
-    { id: 'neon-glow',     name: 'Neon Glow',     font: 'Montserrat',      weight: 800, color: '#00FFFF', stroke: null, textShadow: '0 0 12px #00FFFF, 0 0 24px #00FFFF', emoji: '💫' },
+    { id: 'bold-impact',   name: 'Bold Impact',   font: 'Anton',            weight: 900, color: '#FFFFFF', stroke: { width: 2, color: '#000000' } },
+    { id: 'clean-modern',  name: 'Clean Modern',  font: 'Montserrat',       weight: 800, color: '#FFFFFF', stroke: null },
+    { id: 'soft-rounded',  name: 'Soft Rounded',  font: 'Nunito',           weight: 700, color: '#FFFFFF', stroke: null },
+    { id: 'cinematic',     name: 'Cinematic',     font: 'Playfair Display', weight: 700, style: 'italic', color: '#F5E6C8', stroke: null },
+    { id: 'handwritten',   name: 'Handwritten',   font: 'Caveat',           weight: 700, color: '#FFFFFF', stroke: null },
+    { id: 'motivational',  name: 'Motivational',  font: 'Oswald',           weight: 700, color: '#FFFFFF', stroke: { width: 1.5, color: '#000000' } },
 ];
 
 const CaptionStylesCard = ({ log }) => {
@@ -503,13 +575,20 @@ const ReasoningPanel = () => {
     const proxying = assets.filter(a => a.isProxying);
     const isEmpty = logs.length === 0 && suggestions.length === 0 && !isAnalyzing;
 
-    const handleAccept = async (suggestion) => {
-        console.log("Accepted suggestion:", suggestion);
-
+    const handleAccept = async (suggestion, commandText = null) => {
         if (suggestion.type === 'agent_plan') {
             // V2: Plans auto-execute, but legacy approval still supported
-            console.log('[ReasoningPanel] Legacy plan approval - V2 auto-executes');
             removeSuggestion(suggestion.id);
+            return;
+        }
+
+        // next_actions: user clicked a specific suggestion chip — submit it as a command
+        if (suggestion.type === 'next_actions') {
+            removeSuggestion(suggestion.id);
+            if (commandText && inputRef.current) {
+                inputRef.current.value = commandText;
+                await processCommand();
+            }
             return;
         }
 
@@ -518,12 +597,7 @@ const ReasoningPanel = () => {
         if (suggestion.type === 'music') recordDecision('music', true, suggestion.data);
         if (suggestion.type === 'captions') recordDecision('captions', true);
 
-        if (suggestion.executionData) {
-            const success = performAction(suggestion.executionData);
-            if (success) {
-                // Log success?
-            }
-        }
+        if (suggestion.executionData) performAction(suggestion.executionData);
 
         removeSuggestion(suggestion.id);
     };
@@ -625,16 +699,17 @@ const ReasoningPanel = () => {
             {/* Header */}
             <div className="p-3 border-b flex items-center justify-between" style={{ borderColor: "var(--line-soft)", background: "var(--glass)" }}>
                 <div className="flex items-center gap-2">
-                    <span className="studio-mono-label" style={{ color: "var(--fg-4)" }}>AI</span>
+                    <span className="studio-mono-label" style={{ color: "var(--accent)" }}>AI</span>
                     <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)", boxShadow: "0 0 8px var(--accent)", animation: "pulse-soft 2s infinite" }} />
-                    <span style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--fg-3)", letterSpacing: "0.04em" }}>Assistant</span>
+                    <span style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--fg-2)", letterSpacing: "0.04em" }}>Assistant</span>
                 </div>
                 <div className="flex items-center gap-2">
                     {isAnalyzing && <Activity className="w-3 h-3 text-purple-400 animate-pulse" />}
                     <div className={classNames(
                         "text-[10px] px-2 py-0.5 rounded-full border transition-colors",
-                        isAnalyzing ? "bg-purple-500/20 text-purple-300 border-purple-500/30" : "bg-black/40 text-muted-foreground border-white/10"
-                    )}>
+                        isAnalyzing ? "bg-purple-500/20 text-purple-300 border-purple-500/30" : "border-white/10"
+                    )}
+                    style={isAnalyzing ? {} : { background: 'rgba(255,255,255,0.06)', color: 'var(--fg-2)' }}>
                         {isAnalyzing ? "Agent Working..." : "Ready"}
                     </div>
                 </div>
@@ -651,37 +726,37 @@ const ReasoningPanel = () => {
                 {isEmpty && proxying.length === 0 && (
                     <div className="flex flex-col gap-4 pt-4 pb-2">
                         {contextualSuggestion ? (
-                            <div className="rounded-lg p-3 border" style={{ background: 'rgba(0,0,0,0.25)', borderColor: 'var(--line)' }}>
+                            <div className="rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.1)' }}>
                                 <div className="flex items-center gap-1.5 mb-2">
                                     <Sparkles className="w-3 h-3" style={{ color: 'var(--accent)' }} />
-                                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Try this</span>
+                                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Try this</span>
                                 </div>
                                 <button
                                     onClick={() => { if (inputRef.current) { inputRef.current.value = contextualSuggestion; inputRef.current.focus(); } }}
                                     className="text-left w-full"
-                                    style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.5 }}
+                                    style={{ fontFamily: 'var(--f-sans)', fontSize: 13, color: 'var(--fg)', lineHeight: 1.55 }}
                                 >
                                     "{contextualSuggestion}"
                                 </button>
                             </div>
                         ) : (
-                            <div className="flex flex-col items-center gap-2 py-6 opacity-40">
-                                <Brain className="w-8 h-8" style={{ color: 'var(--fg-4)' }} />
-                                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Assistant</span>
+                            <div className="flex flex-col items-center gap-2 py-6 opacity-50">
+                                <Brain className="w-8 h-8" style={{ color: 'var(--fg-3)' }} />
+                                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Ready</span>
                             </div>
                         )}
                         {/* Quick chips */}
                         <div>
-                            <span className="block mb-2" style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Quick actions</span>
+                            <span className="block mb-2" style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-2)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Quick actions</span>
                             <div className="flex flex-wrap gap-1.5">
                                 {quickChips.map(chip => (
                                     <button
                                         key={chip}
                                         onClick={() => { if (inputRef.current) { inputRef.current.value = chip; inputRef.current.focus(); } }}
                                         className="px-2.5 py-1 rounded-full text-[10px] transition-colors"
-                                        style={{ background: 'var(--glass-2)', border: '0.5px solid var(--glass-stroke)', color: 'var(--fg-3)', fontFamily: 'var(--f-sans)' }}
-                                        onMouseEnter={e => e.currentTarget.style.color = 'var(--fg)'}
-                                        onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-3)'}
+                                        style={{ background: 'rgba(255,255,255,0.07)', border: '0.5px solid rgba(255,255,255,0.12)', color: 'var(--fg-2)', fontFamily: 'var(--f-sans)' }}
+                                        onMouseEnter={e => { e.currentTarget.style.color = 'var(--fg)'; e.currentTarget.style.background = 'rgba(255,255,255,0.11)'; }}
+                                        onMouseLeave={e => { e.currentTarget.style.color = 'var(--fg-2)'; e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; }}
                                     >
                                         {chip}
                                     </button>
@@ -709,6 +784,13 @@ const ReasoningPanel = () => {
                 {suggestions.map(suggestion => (
                     suggestion.type === 'agent_plan' ? (
                         <AgentPlanCard
+                            key={suggestion.id}
+                            suggestion={suggestion}
+                            onAccept={handleAccept}
+                            onReject={removeSuggestion}
+                        />
+                    ) : suggestion.type === 'next_actions' ? (
+                        <NextActionsCard
                             key={suggestion.id}
                             suggestion={suggestion}
                             onAccept={handleAccept}
@@ -752,7 +834,7 @@ const ReasoningPanel = () => {
                                 Cancel
                             </button>
                         </div>
-                        <p className="text-[10px] leading-relaxed" style={{ color: 'var(--fg-4)', fontFamily: 'var(--f-sans)' }}>
+                        <p className="text-[10px] leading-relaxed" style={{ color: 'var(--fg-3)', fontFamily: 'var(--f-sans)' }}>
                             Steps appear above as they complete. This can take 10–30 s for longer videos.
                         </p>
                     </div>

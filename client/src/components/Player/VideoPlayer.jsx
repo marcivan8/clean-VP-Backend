@@ -16,6 +16,9 @@ const VideoPlayer = () => {
     // but don't need a new video decode — renderOnce() is enough.
     const prevTimeRef = useRef(null);
     const prevIsPlayingRef = useRef(null);
+    // Native video dimensions from onMetadata — used to pin canvas to source resolution
+    // so that ResizeObserver doesn't downgrade it back to container size.
+    const nativeVideoDimRef = useRef(null);
 
     // Connect to store
     // NOTE: we subscribe to the full `tracks` array for clip lookups, but use
@@ -89,8 +92,13 @@ const VideoPlayer = () => {
                 useTimelineStore.getState().addWaveform(trackId, peaks, duration);
             },
             onMetadata: (videoWidth, videoHeight) => {
-                // Sync canvas internal resolution to video's native dimensions
-                if (canvasRef.current) {
+                // Pin native resolution so ResizeObserver never downgrades it.
+                nativeVideoDimRef.current = { width: videoWidth, height: videoHeight };
+                // Sync canvas internal resolution to video's native dimensions.
+                // Also update GL viewport so subsequent render() calls use the right size.
+                if (canvasRef.current && engineRef.current) {
+                    engineRef.current.resize(videoWidth, videoHeight);
+                } else if (canvasRef.current) {
                     canvasRef.current.width = videoWidth;
                     canvasRef.current.height = videoHeight;
                 }
@@ -273,18 +281,18 @@ const VideoPlayer = () => {
             if (!containerRef.current) return;
             const { width, height } = containerRef.current.getBoundingClientRect();
 
-            // Apply scale based on quality
             const quality = useTimelineStore.getState().previewQuality;
-            const scale = quality === 'low' ? 0.5 : 1.0;
+            const qualityScale = quality === 'low' ? 0.5 : 1.0;
 
-            // Set canvas internal resolution
-            const targetWidth = Math.floor(width * scale);
-            const targetHeight = Math.floor(height * scale);
+            // Once we know the native video resolution, always render at native res
+            // (adjusted for quality) — never let container size downgrade the canvas.
+            // Before metadata arrives, fall back to container size so the canvas isn't blank.
+            const native = nativeVideoDimRef.current;
+            const targetWidth  = native ? Math.floor(native.width  * qualityScale) : Math.floor(width  * qualityScale);
+            const targetHeight = native ? Math.floor(native.height * qualityScale) : Math.floor(height * qualityScale);
 
             // Only update if changed to avoid thrashing
             if (canvasRef.current.width !== targetWidth || canvasRef.current.height !== targetHeight) {
-                canvasRef.current.width = targetWidth;
-                canvasRef.current.height = targetHeight;
                 engineRef.current.resize(targetWidth, targetHeight);
                 console.log(`[VideoPlayer] Resized to ${targetWidth}x${targetHeight} (${quality})`);
 
@@ -316,15 +324,21 @@ const VideoPlayer = () => {
         // 1. Tell Engine to update Worker quality (Downscaling pipeline)
         engineRef.current.setQuality(previewQuality);
 
-        // 2. Adjust Canvas Resolution (Fragment shader load)
-        const { width, height } = containerRef.current.getBoundingClientRect();
-        const scale = previewQuality === 'low' ? 0.5 : 1.0;
-        const targetWidth = Math.floor(width * scale);
-        const targetHeight = Math.floor(height * scale);
+        // 2. Adjust Canvas Resolution — use native video dims when available so
+        //    CSS scale() transforms don't stretch a low-res canvas buffer.
+        const qualityScale = previewQuality === 'low' ? 0.5 : 1.0;
+        const native = nativeVideoDimRef.current;
+        let targetWidth, targetHeight;
+        if (native) {
+            targetWidth  = Math.floor(native.width  * qualityScale);
+            targetHeight = Math.floor(native.height * qualityScale);
+        } else {
+            const { width, height } = containerRef.current.getBoundingClientRect();
+            targetWidth  = Math.floor(width  * qualityScale);
+            targetHeight = Math.floor(height * qualityScale);
+        }
 
         if (canvasRef.current.width !== targetWidth || canvasRef.current.height !== targetHeight) {
-            canvasRef.current.width = targetWidth;
-            canvasRef.current.height = targetHeight;
             engineRef.current.resize(targetWidth, targetHeight);
             console.log(`[VideoPlayer] Quality changed to ${previewQuality}, resized to ${targetWidth}x${targetHeight}`);
 

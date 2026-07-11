@@ -1,0 +1,27 @@
+<!-- @dsCard group="Brand" viewport="700x260" name="Glass Panel" subtitle="Backdrop blur over aurora glow" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  html,body { margin:0; background:var(--ink-950); height:100%; }
+  .stage { position:relative; height:260px; overflow:hidden; display:flex; align-items:center; justify-content:center; }
+  .panel { position:relative; z-index:2; width:380px; padding:24px; }
+  .eb { color:var(--accent); }
+  .t { font-family:var(--f-display); font-size:30px; color:var(--text-strong); margin:10px 0 6px; }
+  .p { font-size:14px; color:var(--text-body); }
+  .dotrow { display:flex; align-items:center; gap:8px; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="aurora"></div>
+    <div class="glass-panel panel">
+      <div class="dotrow"><span class="traffic-dot"></span><span class="eyebrow eb">Render ready</span></div>
+      <div class="t">A lit pane of <em style="font-style:italic;">glass</em></div>
+      <div class="p">backdrop-filter: blur(20px) saturate(160%) over softly blurred cyan + violet spheres.</div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,21 @@
+<!-- @dsCard group="Brand" viewport="700x240" name="Aurora Glow" subtitle="Blurred cyan + violet ambient ground" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  html,body { margin:0; background:var(--ink-950); }
+  .stage { position:relative; height:240px; overflow:hidden; display:flex; align-items:center; justify-content:center; }
+  .lbl { position:relative; z-index:2; font-family:var(--f-mono); font-size:12px; letter-spacing:.16em;
+         text-transform:uppercase; color:var(--text-strong); }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="aurora"></div>
+    <div class="film-grain" style="position:absolute;"></div>
+    <span class="lbl">filter: blur(120px) · cyan + violet</span>
+  </div>
+</body>
+</html>

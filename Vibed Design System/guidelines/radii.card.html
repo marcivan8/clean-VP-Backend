@@ -1,0 +1,25 @@
+<!-- @dsCard group="Spacing" viewport="700x180" name="Radii" subtitle="Corner radius scale" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  html,body { margin:0; background:var(--ink-950); }
+  .wrap { padding:24px 32px; display:flex; gap:16px; align-items:center; }
+  .item { display:flex; flex-direction:column; align-items:center; gap:8px; }
+  .box { width:80px; height:80px; background:var(--surface-card-strong); border:1px solid var(--border-strong); }
+  .lbl { font-family:var(--f-mono); font-size:10px; color:var(--text-faint); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="item"><div class="box" style="border-radius:4px;"></div><span class="lbl">xs·4</span></div>
+    <div class="item"><div class="box" style="border-radius:10px;"></div><span class="lbl">md·10</span></div>
+    <div class="item"><div class="box" style="border-radius:14px;"></div><span class="lbl">lg·14</span></div>
+    <div class="item"><div class="box" style="border-radius:20px;"></div><span class="lbl">xl·20</span></div>
+    <div class="item"><div class="box" style="border-radius:28px;"></div><span class="lbl">2xl·28</span></div>
+    <div class="item"><div class="box" style="border-radius:999px;"></div><span class="lbl">pill</span></div>
+  </div>
+</body>
+</html>

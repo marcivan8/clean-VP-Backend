@@ -910,6 +910,7 @@ export class TimelineStateManager {
                         stroke: clip.stroke,
                         color: clip.color,
                         textAlign: clip.textAlign,
+                        animation: clip.animation,
                         position: clip.position,
                         style: clip.style,
                         // Transform

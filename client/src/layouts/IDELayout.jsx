@@ -1358,10 +1358,13 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                                     { key: 'rotation', label: 'Rotation', min: -180, max: 180, toDisplay: v => v || 0, unit: '°', fromDisplay: v => v },
                                                 ].map(({ key, label, min, max, toDisplay, unit, fromDisplay }) => {
                                                     const displayVal = toDisplay(activeClip[key]);
+                                                    // Canvas renders at native video resolution (e.g. 1920px).
+                                                    // CSS scale() only degrades quality if the visual display
+                                                    // exceeds native res — unlikely below 300% on typical screens.
                                                     const scaleQuality = key === 'scale'
-                                                        ? (displayVal <= 100 ? { color: '#34d399', label: 'Sharp' }
-                                                        : displayVal <= 130 ? { color: '#fbbf24', label: 'Slight upscale' }
-                                                        : { color: '#f87171', label: 'Upscaled' })
+                                                        ? (displayVal <= 150 ? { color: '#34d399', label: 'Sharp' }
+                                                        : displayVal <= 250 ? { color: '#fbbf24', label: 'Zoomed in' }
+                                                        : { color: '#f87171', label: 'Extreme zoom' })
                                                         : null;
                                                     return (
                                                     <div key={key} className="space-y-2">
@@ -1384,8 +1387,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                                     </div>
                                                     );
                                                 })}
-                                                <p className="text-[10px] leading-relaxed pt-1" style={{ color: 'var(--fg-4)', fontFamily: 'var(--f-sans)' }}>
-                                                    Export always uses your original source file from GCS for maximum quality.
+                                                <p className="text-[10px] leading-relaxed pt-1" style={{ color: 'var(--fg-3)', fontFamily: 'var(--f-sans)' }}>
+                                                    Preview renders at native video resolution — quality stays sharp at most zoom levels. Export always uses the original source file.
                                                 </p>
                                                 <div className="pt-3 border-t border-border">
                                                     <button onClick={() => updateClip(activeTrackId, activeClip.id, { scale: 1, x: 0, y: 0, rotation: 0 })} className="w-full py-1.5 text-xs bg-secondary hover:bg-white/10 rounded text-muted-foreground transition-colors">Reset Transform</button>

@@ -1,0 +1,30 @@
+<!-- @dsCard group="Brand" viewport="700x170" name="Pro Buttons & Dots" subtitle="Glass-button-pro + traffic indicators" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  html,body { margin:0; background:var(--ink-900); }
+  .wrap { padding:30px 32px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  .primary { font-family:var(--f-mono); font-size:13px; text-transform:uppercase; letter-spacing:.06em;
+             color:#04161A; background:var(--accent); border:none; border-radius:10px; padding:9px 16px;
+             box-shadow:0 0 24px rgba(0,229,255,.3); cursor:pointer; }
+  .dots { display:flex; align-items:center; gap:16px; margin-left:8px; font-family:var(--f-mono); font-size:11px;
+          letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); }
+  .dl { display:flex; align-items:center; gap:7px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <button class="primary">Generate cut</button>
+    <button class="glass-button-pro">Export</button>
+    <button class="glass-button-pro">Caption</button>
+    <div class="dots">
+      <span class="dl"><span class="traffic-dot"></span>Live</span>
+      <span class="dl"><span class="traffic-dot violet"></span>Render</span>
+      <span class="dl"><span class="traffic-dot rec"></span>Rec</span>
+    </div>
+  </div>
+</body>
+</html>

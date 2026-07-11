@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="design_doc_mode" content="canvas">
+<title>Vibed — Logo Directions</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  body { margin:0; font-family:var(--f-sans); }
+  .lbl { font-family:var(--f-mono); font-size:12px; letter-spacing:.14em; text-transform:uppercase;
+         color:var(--text-muted); margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+  .lbl .n { color:var(--accent); }
+  .card { position:relative; border-radius:18px; overflow:hidden;
+          border:1px solid var(--border-hairline); box-shadow:var(--shadow-lg), var(--shadow-glass-top);
+          display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .dark { background:radial-gradient(120% 100% at 30% 15%, #15171c, #0a0a0b 72%); }
+  .cream { background:#F4F1EC; }
+  .cap { font-family:var(--f-sans); font-size:13px; line-height:1.45; color:var(--text-muted); margin-top:14px; max-width:330px; }
+  .mini { display:flex; align-items:flex-end; gap:16px; margin-top:24px; }
+  .mini .t { display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .mini .t span { font-family:var(--f-mono); font-size:10px; color:var(--text-faint); }
+  .word { font-family:var(--f-display); letter-spacing:-.01em; }
+  h1.title { font-family:var(--f-display); font-size:46px; color:var(--text-strong); margin:0 0 6px; letter-spacing:-.02em; }
+  h1.title em { font-style:italic; }
+  .sub { font-size:15px; color:var(--text-muted); max-width:620px; margin:0; }
+  .glow-cy { filter: drop-shadow(0 0 14px rgba(0,229,255,.55)) drop-shadow(0 0 30px rgba(0,229,255,.30)); }
+  .glow-vi { filter: drop-shadow(0 0 14px rgba(138,43,226,.5)) drop-shadow(0 0 30px rgba(138,43,226,.28)); }
+</style>
+</head>
+<body style="background:#070708;">
+
+  <!-- header -->
+  <div style="position:absolute; left:48px; top:40px; width:900px;">
+    <div class="lbl"><span class="traffic-dot"></span>Vibed · Logo refinement</div>
+    <h1 class="title">Same diagonal energy, <em>sharper</em> execution.</h1>
+    <p class="sub">Four directions on the brand's cinematic system — crisp geometry, neon bloom, and a video-native twist. Pan around; each is shown at mark size plus small-scale and lockup tests.</p>
+  </div>
+
+  <!-- A: solid gradient -->
+  <div style="position:absolute; left:48px; top:210px; width:360px;">
+    <div class="lbl" data-drags-parent="1"><span class="n">A</span> Solid gradient bolt</div>
+    <div class="card dark" style="height:360px; padding:24px;">
+      <svg width="150" height="150" viewBox="0 0 120 120" class="glow-cy" aria-label="Vibed bolt">
+        <defs><linearGradient id="ga" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#00E5FF"/><stop offset="1" stop-color="#8A2BE2"/>
+        </linearGradient></defs>
+        <path d="M72 10 L33 66 L56 66 L48 110 L92 51 L66 51 Z" fill="url(#ga)"/>
+      </svg>
+      <div class="mini">
+        <div class="t"><svg width="32" height="32" viewBox="0 0 120 120"><path d="M72 10 L33 66 L56 66 L48 110 L92 51 L66 51 Z" fill="url(#ga)"/></svg><span>32</span></div>
+        <div class="t"><svg width="22" height="22" viewBox="0 0 120 120"><path d="M72 10 L33 66 L56 66 L48 110 L92 51 L66 51 Z" fill="url(#ga)"/></svg><span>22</span></div>
+        <div class="t"><svg width="16" height="16" viewBox="0 0 120 120"><path d="M72 10 L33 66 L56 66 L48 110 L92 51 L66 51 Z" fill="url(#ga)"/></svg><span>16</span></div>
+      </div>
+    </div>
+    <p class="cap">The primary recommendation. Filled, confident, even angles — legible down to favicon size where the outline disappears.</p>
+  </div>
+
+  <!-- B: bolt as playhead -->
+  <div style="position:absolute; left:456px; top:210px; width:360px;">
+    <div class="lbl" data-drags-parent="1"><span class="n">B</span> Bolt as playhead</div>
+    <div class="card dark" style="height:360px; padding:24px;">
+      <svg width="240" height="170" viewBox="0 0 240 170" aria-label="Vibed bolt on a timeline">
+        <!-- timeline rule + ticks -->
+        <g stroke="rgba(250,250,250,0.18)" stroke-width="1.5">
+          <line x1="14" y1="118" x2="226" y2="118"/>
+          <line x1="34" y1="110" x2="34" y2="118"/><line x1="74" y1="110" x2="74" y2="118"/>
+          <line x1="166" y1="110" x2="166" y2="118"/><line x1="206" y1="110" x2="206" y2="118"/>
+        </g>
+        <!-- bolt as the playhead -->
+        <g class="glow-cy">
+          <path d="M133 28 L104 70 L121 70 L115 104 L148 62 L129 62 Z" fill="#00E5FF"/>
+        </g>
+        <!-- scrub dot where bolt meets line -->
+        <circle cx="120" cy="118" r="5.5" fill="#00E5FF"/>
+        <circle cx="120" cy="118" r="11" fill="none" stroke="#00E5FF" stroke-opacity="0.35"/>
+      </svg>
+      <div style="font-family:var(--f-mono); font-size:10px; letter-spacing:.12em; color:var(--text-faint); margin-top:8px;">00:00 ———————— 02:12</div>
+    </div>
+    <p class="cap">The bolt doubles as a playhead riding a timeline — instantly says "video editing," not just "energy." Strongest brand story.</p>
+  </div>
+
+  <!-- C: refined glowing outline -->
+  <div style="position:absolute; left:864px; top:210px; width:360px;">
+    <div class="lbl" data-drags-parent="1"><span class="n">C</span> Glowing outline</div>
+    <div class="card dark" style="height:360px; padding:24px;">
+      <svg width="150" height="150" viewBox="0 0 120 120" class="glow-cy" aria-label="Vibed outline bolt">
+        <path d="M72 10 L33 66 L56 66 L48 110 L92 51 L66 51 Z" fill="none"
+              stroke="#00E5FF" stroke-width="7" stroke-linejoin="round" stroke-linecap="round"/>
+      </svg>
+      <div class="mini">
+        <div class="t"><svg width="32" height="32" viewBox="0 0 120 120"><path d="M72 10 L33 66 L56 66 L48 110 L92 51 L66 51 Z" fill="none" stroke="#00E5FF" stroke-width="9" stroke-linejoin="round"/></svg><span>32</span></div>
+        <div class="t"><svg width="22" height="22" viewBox="0 0 120 120"><path d="M72 10 L33 66 L56 66 L48 110 L92 51 L66 51 Z" fill="none" stroke="#00E5FF" stroke-width="11" stroke-linejoin="round"/></svg><span>22</span></div>
+      </div>
+    </div>
+    <p class="cap">Keeps your outline instinct but with one even, rounded stroke and a neon bloom. Note it thins out at small sizes — best paired with A for favicons.</p>
+  </div>
+
+  <!-- D: app icon tile -->
+  <div style="position:absolute; left:1272px; top:210px; width:360px;">
+    <div class="lbl" data-drags-parent="1"><span class="n">D</span> App-icon tile</div>
+    <div class="card dark" style="height:360px; padding:24px;">
+      <div style="width:150px; height:150px; border-radius:34px; position:relative; overflow:hidden;
+                  background:radial-gradient(120% 120% at 30% 20%, #1a1c22, #0a0a0b 75%);
+                  border:1px solid var(--border-strong);
+                  box-shadow:0 20px 50px rgba(0,0,0,.6), inset 0 1px 0 rgba(250,250,250,.08);
+                  display:flex; align-items:center; justify-content:center;">
+        <div style="position:absolute; inset:0; background:radial-gradient(60% 70% at 65% 60%, rgba(0,229,255,.22), transparent 60%), radial-gradient(55% 60% at 30% 80%, rgba(138,43,226,.20), transparent 65%);"></div>
+        <svg width="92" height="92" viewBox="0 0 120 120" class="glow-cy" style="position:relative;">
+          <path d="M72 10 L33 66 L56 66 L48 110 L92 51 L66 51 Z" fill="url(#ga)"/>
+        </svg>
+      </div>
+      <div class="mini">
+        <div class="t">
+          <div style="width:40px;height:40px;border-radius:10px;background:radial-gradient(120% 120% at 30% 20%,#1a1c22,#0a0a0b 75%);border:1px solid var(--border-strong);display:flex;align-items:center;justify-content:center;">
+            <svg width="24" height="24" viewBox="0 0 120 120"><path d="M72 10 L33 66 L56 66 L48 110 L92 51 L66 51 Z" fill="url(#ga)"/></svg>
+          </div><span>home screen</span>
+        </div>
+      </div>
+    </div>
+    <p class="cap">How the mark lives as the product icon: glass tile, ambient aurora, lit bolt. The container — not the glyph — carries the glow on light backgrounds.</p>
+  </div>
+
+  <!-- lockups -->
+  <div style="position:absolute; left:48px; top:730px; width:760px;">
+    <div class="lbl" data-drags-parent="1">Wordmark lockup</div>
+    <div style="display:flex; gap:18px;">
+      <div class="card dark" style="flex:1; height:130px; flex-direction:row; gap:16px;">
+        <svg width="42" height="42" viewBox="0 0 120 120" class="glow-cy"><path d="M72 10 L33 66 L56 66 L48 110 L92 51 L66 51 Z" fill="url(#ga)"/></svg>
+        <span class="word" style="font-size:40px; color:var(--text-strong);">Vibed</span>
+      </div>
+      <div class="card cream" style="flex:1; height:130px; flex-direction:row; gap:16px;">
+        <svg width="40" height="40" viewBox="0 0 120 120"><path d="M72 10 L33 66 L56 66 L48 110 L92 51 L66 51 Z" fill="#16181B"/></svg>
+        <span class="word" style="font-size:38px; color:#16181B;">Vibed</span>
+      </div>
+    </div>
+    <p class="cap" style="max-width:760px;">Gradient + neon on dark; solid ink (mono) on the warm theme — the mark must hold up flat, with no glow, on light grounds.</p>
+  </div>
+
+  <!-- current, for reference -->
+  <div style="position:absolute; left:846px; top:730px; width:300px;">
+    <div class="lbl" data-drags-parent="1">Current (for reference)</div>
+    <div class="card dark" style="height:130px; flex-direction:row; gap:16px;">
+      <img src="assets/logo.png" width="74" height="74" alt="current logo">
+      <div style="font-family:var(--f-mono); font-size:11px; color:var(--text-faint); line-height:1.6; text-align:left;">
+        royal blue + yellow<br>hollow · uneven stroke<br>96% empty canvas
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

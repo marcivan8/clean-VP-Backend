@@ -1,0 +1,92 @@
+/* ============================================================
+   Vibed — Color Tokens
+   Cinematic studio palette: pitch-dark grounds, glowing neon
+   cyan + violet accents. Warm cream theme as alternative.
+   ============================================================ */
+
+:root {
+  /* ---- Brand accents ---------------------------------------- */
+  --cyan-500: #00E5FF;            /* primary accent — active, glow, dots */
+  --cyan-400: #5CEEFF;
+  --cyan-600: #00B8CC;
+  --violet-500: #8A2BE2;          /* secondary accent — gradient partner */
+  --violet-400: #A857EC;
+  --violet-600: #6E1FB8;
+
+  /* logo mark */
+  --logo-blue: #1B4DB3;
+  --logo-yellow: #FFC400;
+
+  /* ---- Neutral ramp (dark studio, default) ------------------ */
+  --ink-950: #0A0A0B;            /* deepest ground */
+  --ink-900: #121214;            /* panel ground */
+  --ink-850: #18181B;
+  --ink-800: #1F1F23;            /* raised surface */
+  --ink-700: #2A2A30;            /* hairline / stroke base */
+  --ink-600: #3A3A42;
+
+  --paper-0:  #FFFFFF;
+  --paper-50: #FAFAFA;           /* crisp off-white text */
+
+  /* ---- Warm theme grounds ----------------------------------- */
+  --cream-100: #F4F1EC;
+  --cream-200: #ECE7DF;
+  --cream-300: #E2DCD1;
+  --charcoal-900: #16181B;       /* warm-theme ink */
+
+  /* ---- Glass fills & strokes -------------------------------- */
+  --glass-fill: rgba(250, 250, 250, 0.04);
+  --glass-fill-strong: rgba(250, 250, 250, 0.07);
+  --glass-stroke: rgba(250, 250, 250, 0.10);
+  --glass-stroke-strong: rgba(250, 250, 250, 0.16);
+
+  /* ---- Semantic (dark theme defaults) ----------------------- */
+  --bg: var(--ink-950);
+  --bg-raised: var(--ink-900);
+  --surface-card: var(--glass-fill);
+  --surface-card-strong: var(--glass-fill-strong);
+  --border-hairline: var(--glass-stroke);
+  --border-strong: var(--glass-stroke-strong);
+
+  --text-strong: var(--paper-50);                  /* headings */
+  --text-body: rgba(250, 250, 250, 0.78);          /* body copy */
+  --text-muted: rgba(250, 250, 250, 0.55);         /* secondary */
+  --text-faint: rgba(250, 250, 250, 0.38);         /* tertiary / disabled */
+
+  --accent: var(--cyan-500);
+  --accent-2: var(--violet-500);
+  --accent-contrast: #04161A;                      /* text on cyan fills */
+
+  /* ---- Status ----------------------------------------------- */
+  --success: #34D399;
+  --warning: #FBBF24;
+  --danger:  #FB6A6A;
+  --rec:     #FF3B5C;                               /* record red */
+
+  /* ---- Signature gradients ---------------------------------- */
+  --grad-aurora: radial-gradient(60% 60% at 30% 20%, rgba(0,229,255,0.45), transparent 70%),
+                 radial-gradient(55% 55% at 75% 80%, rgba(138,43,226,0.40), transparent 70%); /* @kind color */
+  --grad-accent: linear-gradient(120deg, var(--cyan-500), var(--violet-500)); /* @kind color */
+  --grad-accent-soft: linear-gradient(120deg, rgba(0,229,255,0.18), rgba(138,43,226,0.18)); /* @kind color */
+}
+
+/* ---- Warm theme scope --------------------------------------- */
+.theme-warm {
+  --bg: var(--cream-100);
+  --bg-raised: var(--cream-200);
+  --surface-card: rgba(22, 24, 27, 0.03);
+  --surface-card-strong: rgba(22, 24, 27, 0.05);
+  --border-hairline: rgba(22, 24, 27, 0.10);
+  --border-strong: rgba(22, 24, 27, 0.18);
+
+  --text-strong: var(--charcoal-900);
+  --text-body: rgba(22, 24, 27, 0.80);
+  --text-muted: rgba(22, 24, 27, 0.58);
+  --text-faint: rgba(22, 24, 27, 0.40);
+
+  --glass-fill: rgba(22, 24, 27, 0.03);
+  --glass-fill-strong: rgba(22, 24, 27, 0.05);
+  --glass-stroke: rgba(22, 24, 27, 0.10);
+  --glass-stroke-strong: rgba(22, 24, 27, 0.18);
+  --accent-contrast: #04161A;
+}

@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="design_doc_mode" content="canvas">
+<title>Vibed — Waveform V Refinements</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  body { margin:0; font-family:var(--f-sans); background:#060607; }
+  .lbl  { font-family:var(--f-mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--text-muted); display:flex; align-items:center; gap:8px; }
+  .lbl .n { color:#00E5FF; }
+  .head { font-family:var(--f-display); font-size:44px; color:#FAFAFA; margin:0 0 6px; letter-spacing:-.02em; }
+  .head em { font-style:italic; }
+  .sub  { font-size:15px; color:rgba(250,250,250,.5); max-width:680px; margin:0; }
+  .colhead { font-family:var(--f-mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:rgba(250,250,250,.3); }
+  .rowcap { font-family:var(--f-sans); font-size:12px; color:rgba(250,250,250,.45); line-height:1.5; margin-top:7px; max-width:200px; }
+  .rowname { font-family:var(--f-mono); font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:rgba(250,250,250,.7); }
+  .card { position:absolute; border-radius:18px; overflow:hidden; display:flex; align-items:center; justify-content:center;
+          border:1px solid rgba(250,250,250,.06); }
+  .glow { filter: drop-shadow(0 0 12px rgba(0,229,255,.55)) drop-shadow(0 0 30px rgba(0,229,255,.28)); }
+  .gv-dark { background: radial-gradient(130% 110% at 30% 15%, #16181e, #0a0a0b 70%); }
+  .gv-blk  { background:#0D0D0F; }
+  .gv-wht  { background:#FFFFFF; border-color:rgba(0,0,0,.10); }
+  .word { font-family:'Instrument Serif', Georgia, serif; letter-spacing:-.01em; }
+  .rec-badge { font-family:var(--f-mono); font-size:9px; letter-spacing:.12em; text-transform:uppercase;
+               color:#00E5FF; border:1px solid rgba(0,229,255,.4); border-radius:4px; padding:2px 6px; }
+</style>
+</head>
+<body>
+
+<!-- shared gradient + defs -->
+<svg width="0" height="0" style="position:absolute;pointer-events:none;">
+  <defs>
+    <linearGradient id="gbar" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00E5FF"/>
+      <stop offset="100%" stop-color="#8A2BE2"/>
+    </linearGradient>
+    <linearGradient id="gbarV" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#00E5FF"/>
+      <stop offset="100%" stop-color="#8A2BE2"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+<div id="canvas"></div>
+
+<script>
+// ─── Geometry ──────────────────────────────────────────────────────────────
+const GRAD9 = ['#00E5FF','#17CDFB','#2EB5F7','#459DF3','#5B85EF','#726DEB','#8855E7','#9F3DE3','#8A2BE2'];
+const GRAD7 = ['#00E5FF','#22B8F9','#448BF3','#665FED','#8832E7','#8A2BE2','#8A2BE2'];
+
+// C1: Precision parabola — 9 bars
+function c1(color, size) {
+  const s = size / 100;
+  const bars = [
+    {h:70,x:2.5},{h:50,x:13.5},{h:34,x:24.5},{h:21,x:35.5},{h:14,x:46.5},
+    {h:21,x:57.5},{h:34,x:68.5},{h:50,x:79.5},{h:70,x:90.5}
+  ];
+  const bw = 7, rx = 3.5;
+  return bars.map((b,i) => {
+    const y = (100 - b.h) / 2;
+    const col = Array.isArray(color) ? color[i] : color;
+    return `<rect x="${(b.x*s).toFixed(1)}" y="${(y*s).toFixed(1)}" width="${(bw*s).toFixed(1)}" height="${(b.h*s).toFixed(1)}" rx="${(rx*s).toFixed(1)}" fill="${col}"/>`;
+  }).join('');
+}
+
+// C2: Signal — 9 bars + hairline V silhouette
+function c2(color, size) {
+  const s = size / 100;
+  const bars = [
+    {h:70,x:2.5},{h:50,x:13.5},{h:34,x:24.5},{h:21,x:35.5},{h:14,x:46.5},
+    {h:21,x:57.5},{h:34,x:68.5},{h:50,x:79.5},{h:70,x:90.5}
+  ];
+  const bw = 7, rx = 3.5;
+  // top centers of bars, bottom centers
+  const topPts = bars.map((b,i) => `${((b.x + bw/2)*s).toFixed(1)},${((100-b.h)/2*s).toFixed(1)}`).join(' ');
+  const botPts = bars.map((b,i) => `${((b.x + bw/2)*s).toFixed(1)},${((100+b.h)/2*s).toFixed(1)}`).join(' ');
+  const fillCol = Array.isArray(color) ? color[4] : color;
+  const edgeCol = Array.isArray(color) ? color[0] : color;
+  let html = '';
+  // hairlines
+  html += `<polyline points="${topPts}" fill="none" stroke="${edgeCol}" stroke-width="${s*1.5}" stroke-linejoin="round" stroke-linecap="round" opacity="0.55"/>`;
+  html += `<polyline points="${botPts}" fill="none" stroke="${edgeCol}" stroke-width="${s*1.5}" stroke-linejoin="round" stroke-linecap="round" opacity="0.55"/>`;
+  // bars at 80% opacity
+  html += bars.map((b,i) => {
+    const y = (100 - b.h) / 2;
+    const col = Array.isArray(color) ? color[i] : color;
+    return `<rect x="${(b.x*s).toFixed(1)}" y="${(y*s).toFixed(1)}" width="${(bw*s).toFixed(1)}" height="${(b.h*s).toFixed(1)}" rx="${(rx*s).toFixed(1)}" fill="${col}" opacity="0.82"/>`;
+  }).join('');
+  return html;
+}
+
+// C3: Organic — slight asymmetry, natural waveform feel
+function c3(color, size) {
+  const s = size / 100;
+  const bars = [
+    {h:73,x:2.5},{h:48,x:13.5},{h:37,x:24.5},{h:24,x:35.5},{h:14,x:46.5},
+    {h:20,x:57.5},{h:33,x:68.5},{h:55,x:79.5},{h:76,x:90.5}
+  ];
+  const bw = 7, rx = 3.5;
+  return bars.map((b,i) => {
+    const y = (100 - b.h) / 2;
+    const col = Array.isArray(color) ? color[i] : color;
+    return `<rect x="${(b.x*s).toFixed(1)}" y="${(y*s).toFixed(1)}" width="${(bw*s).toFixed(1)}" height="${(b.h*s).toFixed(1)}" rx="${(rx*s).toFixed(1)}" fill="${col}"/>`;
+  }).join('');
+}
+
+// C4: Bold — 7 bars, dramatic V dip, app-icon optimised
+function c4(color, size) {
+  const s = size / 100;
+  const bars = [
+    {h:78,x:4},{h:56,x:18},{h:34,x:32},{h:12,x:46},{h:34,x:60},{h:56,x:74},{h:78,x:88}
+  ];
+  const bw = 9, rx = 4.5;
+  return bars.map((b,i) => {
+    const y = (100 - b.h) / 2;
+    const col = Array.isArray(color) ? color[i] : color;
+    return `<rect x="${(b.x*s).toFixed(1)}" y="${(y*s).toFixed(1)}" width="${(bw*s).toFixed(1)}" height="${(b.h*s).toFixed(1)}" rx="${(rx*s).toFixed(1)}" fill="${col}"/>`;
+  }).join('');
+}
+
+function makeSVG(inner, size, glow) {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" ${glow ? 'class="glow"' : ''}>${inner}</svg>`;
+}
+
+function darkCard(inner, w, h) {
+  return `<div class="card gv-dark" style="width:${w}px;height:${h}px;">${inner}</div>`;
+}
+function blkCard(inner, w, h) {
+  return `<div class="card gv-blk" style="width:${w}px;height:${h}px;">${inner}</div>`;
+}
+function whtCard(inner, w, h) {
+  return `<div class="card gv-wht" style="width:${w}px;height:${h}px;">${inner}</div>`;
+}
+
+function appIcon(inner, tileSize, cardW, cardH) {
+  const bg = `radial-gradient(130% 130% at 30% 20%, #1a1d26, #0a0a0b 72%)`;
+  const aura = `radial-gradient(60% 70% at 65% 60%, rgba(0,229,255,.20), transparent 60%), radial-gradient(55% 60% at 30% 80%, rgba(138,43,226,.18), transparent 65%)`;
+  return `<div class="card gv-dark" style="width:${cardW}px;height:${cardH}px;">
+    <div style="width:${tileSize}px;height:${tileSize}px;border-radius:${Math.round(tileSize*0.225)}px;
+         background:${bg};border:1px solid rgba(250,250,250,.12);
+         box-shadow:0 16px 48px rgba(0,0,0,.7), inset 0 1px 0 rgba(250,250,250,.09);
+         display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;">
+      <div style="position:absolute;inset:0;background:${aura};"></div>
+      <div style="position:relative;">${inner}</div>
+    </div>
+  </div>`;
+}
+
+// ─── Build layout ──────────────────────────────────────────────────────────
+const variants = [
+  { id:'C1', name:'Precision V', fn:c1, colors9:GRAD9, colors7:null,
+    desc:'Smooth parabola — symmetry and mathematical elegance. Most versatile.' },
+  { id:'C2', name:'Signal V', fn:c2, colors9:GRAD9, colors7:null,
+    desc:'Bars + hairline connecting tips — the V silhouette is explicit at a glance.' },
+  { id:'C3', name:'Organic V', fn:c3, colors9:GRAD9, colors7:null,
+    desc:'Slight asymmetry reads as real audio — warmer, handcrafted energy.' },
+  { id:'C4', name:'Bold V', fn:c4, colors9:GRAD7, colors7:GRAD7,
+    desc:'7 bars, dramatic V dip — punchy at favicon and app-icon sizes.' },
+];
+
+const CARD = 200;
+const COL_GAP = 28;
+const ROW_GAP = 60;
+
+const colX   = [280, 280+CARD+COL_GAP, 280+2*(CARD+COL_GAP), 280+3*(CARD+COL_GAP)];
+const rowTopY = 190;
+const rowH    = CARD;
+
+let html = '';
+
+// ─ Header ─
+html += `
+  <div style="position:absolute;left:48px;top:44px;width:950px;">
+    <div class="lbl" style="margin-bottom:14px;"><span style="width:8px;height:8px;border-radius:50%;background:#00E5FF;box-shadow:0 0 8px #00E5FF;display:inline-block;"></span>&nbsp;Vibed · Waveform V — four refinements</div>
+    <h1 class="head">Premium waveform <em>marks.</em></h1>
+    <p class="sub">Same V-waveform idea — four takes on form, line quality, and identity sharpness. Each shown gradient · app-icon · on black · on white. C1 and C4 are the strongest starting points.</p>
+  </div>`;
+
+// ─ Column headers ─
+const colLabels = ['Gradient', 'App icon', 'On black', 'On white'];
+colLabels.forEach((l, i) => {
+  html += `<div class="colhead" style="position:absolute;left:${colX[i]}px;top:162px;width:${CARD}px;text-align:center;">${l}</div>`;
+});
+
+// ─ Variant rows ─
+variants.forEach((v, r) => {
+  const y = rowTopY + r * (rowH + ROW_GAP + 46);
+  const isRec = r === 0; // C1 is recommended
+
+  // Row label
+  html += `<div style="position:absolute;left:48px;top:${y+10}px;width:210px;">
+    <div class="lbl" style="gap:10px;">
+      <span class="n">${v.id}</span>
+      <span style="color:rgba(250,250,250,.8)">${v.name}</span>
+      ${isRec ? `<span class="rec-badge">Recommended</span>` : ''}
+    </div>
+    <p class="rowcap">${v.desc}</p>
+  </div>`;
+
+  const cols9 = v.colors9;
+  const colSingle_wht = '#0D0D11';
+  const colSingle_blk = '#F5F5F5';
+
+  // Col 0: gradient on dark
+  const mark0 = makeSVG(v.fn(cols9, 130), 130, true);
+  html += `<div style="position:absolute;left:${colX[0]}px;top:${y}px;">${darkCard(mark0, CARD, CARD)}</div>`;
+
+  // Col 1: app icon
+  const markApp = makeSVG(v.fn(cols9, 80), 80, true);
+  html += `<div style="position:absolute;left:${colX[1]}px;top:${y}px;">${appIcon(markApp, 130, CARD, CARD)}</div>`;
+
+  // Col 2: on black
+  const mark2 = makeSVG(v.fn(colSingle_blk, 130), 130, false);
+  html += `<div style="position:absolute;left:${colX[2]}px;top:${y}px;">${blkCard(mark2, CARD, CARD)}</div>`;
+
+  // Col 3: on white
+  const mark3 = makeSVG(v.fn(colSingle_wht, 130), 130, false);
+  html += `<div style="position:absolute;left:${colX[3]}px;top:${y}px;">${whtCard(mark3, CARD, CARD)}</div>`;
+});
+
+// ─ Mini scale test ─────────────────────────────────────────────────────────
+const scaleY = rowTopY + variants.length * (rowH + ROW_GAP + 46) + 20;
+html += `<div style="position:absolute;left:48px;top:${scaleY}px;width:1090px;">
+  <div class="lbl" style="margin-bottom:14px;">Scale tests · C1 Precision V + C4 Bold V</div>
+  <div style="display:flex;gap:0;align-items:flex-end;">`;
+
+// C1 at sizes 120, 80, 48, 32, 22, 16
+const scSizes = [120, 80, 48, 32, 22, 16];
+scSizes.forEach(sz => {
+  html += `<div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin-right:${sz+16}px;">
+    <div class="gv-dark" style="width:${sz+16}px;height:${sz+16}px;display:flex;align-items:center;justify-content:center;border-radius:10px;border:1px solid rgba(250,250,250,.06);">
+      ${makeSVG(c1(GRAD9,sz),sz,sz>=40)}
+    </div>
+    <span class="colhead">${sz}</span>
+  </div>`;
+});
+
+html += `<div style="width:1px;height:${scSizes[0]+16}px;background:rgba(250,250,250,.08);margin-right:24px;align-self:center;"></div>`;
+
+// C4 at sizes
+[80, 48, 32, 22, 16].forEach(sz => {
+  html += `<div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin-right:${sz+16}px;">
+    <div class="gv-dark" style="width:${sz+16}px;height:${sz+16}px;display:flex;align-items:center;justify-content:center;border-radius:10px;border:1px solid rgba(250,250,250,.06);">
+      ${makeSVG(c4(GRAD7,sz),sz,sz>=40)}
+    </div>
+    <span class="colhead">${sz}</span>
+  </div>`;
+});
+
+html += `</div></div>`;
+
+// ─ Wordmark lockups ────────────────────────────────────────────────────────
+const lockY = scaleY + 200;
+html += `<div style="position:absolute;left:48px;top:${lockY}px;width:1090px;">
+  <div class="lbl" style="margin-bottom:14px;">Wordmark lockups</div>
+  <div style="display:flex;gap:18px;flex-wrap:wrap;">`;
+
+// 1. Dark — C1 gradient + serif
+html += `<div class="card gv-dark" style="width:320px;height:116px;gap:16px;">
+  ${makeSVG(c1(GRAD9,44),44,true)}
+  <span class="word" style="font-size:40px;color:#FAFAFA;line-height:1;">Vibed</span>
+</div>`;
+
+// 2. Dark — C4 gradient + serif (bold)
+html += `<div class="card gv-dark" style="width:320px;height:116px;gap:16px;">
+  ${makeSVG(c4(GRAD7,44),44,true)}
+  <span class="word" style="font-size:40px;color:#FAFAFA;line-height:1;">Vibed</span>
+</div>`;
+
+// 3. White bg — C1 ink
+html += `<div class="card gv-wht" style="width:320px;height:116px;gap:16px;">
+  ${makeSVG(c1('#0D0D11',44),44,false)}
+  <span class="word" style="font-size:40px;color:#0D0D11;line-height:1;">Vibed</span>
+</div>`;
+
+// 4. Mark only — minimal wordmark as mono type
+html += `<div class="card gv-dark" style="width:240px;height:116px;gap:0px;flex-direction:column;padding:0 20px;">
+  <span style="font-family:'Instrument Serif',Georgia,serif;font-size:48px;color:#FAFAFA;letter-spacing:-.01em;line-height:1;display:flex;align-items:center;gap:4px;">
+    <span style="display:inline-flex;align-items:center;margin-right:2px;">${makeSVG(c1(GRAD9,44),44,true)}</span>ibed
+  </span>
+  <span style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.18em;color:rgba(250,250,250,.35);text-transform:uppercase;margin-top:4px;">conversational video</span>
+</div>`;
+
+html += `</div></div>`;
+
+document.getElementById('canvas').innerHTML = html;
+</script>
+</body>
+</html>
