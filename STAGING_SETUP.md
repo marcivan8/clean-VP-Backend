@@ -1,112 +1,167 @@
-# Staging Environment + CI/CD Setup
+# Staging Setup — Dashboard Feature
 
-One-time steps to get the full pipeline running.
+Follow these steps once to wire up the staging environment and deploy the
+multi-project dashboard for testing.
 
 ---
 
-## 1 — Create the `staging` branch
+## 1. Update the staging branch
+
+The staging branch is behind main. Bring it current, then add the new code:
 
 ```bash
-git checkout -b staging
-git push -u origin staging
+git checkout staging
+git merge main          # pulls in TDZ fix, Redis fix, skill files, etc.
+git push origin staging
+```
+
+The code changes for the dashboard (planLimits, useUserPlan, App.jsx,
+EditorPage, DashboardPage) are already in your working tree on main.
+After the merge they'll be on staging too.
+
+---
+
+## 2. Run migrations on the staging Supabase project
+
+Open **Supabase Dashboard → SQL Editor** for your **staging** project and run
+each migration in order:
+
+### 002_usage_gates.sql
+```sql
+alter table public.profiles
+    add column if not exists plan text not null default 'free'
+        check (plan in ('free', 'creator', 'pro')),
+    add column if not exists plan_expires_at timestamptz;
+
+create table if not exists public.usage_events (
+    id         uuid        primary key default gen_random_uuid(),
+    user_id    uuid        not null references auth.users(id) on delete cascade,
+    operation  text        not null,
+    created_at timestamptz not null default now()
+);
+create index if not exists usage_events_user_month_idx
+    on public.usage_events (user_id, created_at desc);
+alter table public.usage_events enable row level security;
+create policy "usage_events: own rows read"
+    on public.usage_events for select using (auth.uid() = user_id);
+```
+
+### 003_projects.sql
+```sql
+create table if not exists public.projects (
+  id            uuid          primary key default gen_random_uuid(),
+  user_id       uuid          not null references auth.users(id) on delete cascade,
+  name          text          not null default 'Untitled Project',
+  thumbnail_url text,
+  aspect_ratio  text          not null default '16:9',
+  duration      numeric(10,3) not null default 0,
+  timeline_state jsonb        not null default '{}'::jsonb,
+  created_at    timestamptz   not null default now(),
+  updated_at    timestamptz   not null default now()
+);
+create index if not exists projects_user_updated_idx
+    on public.projects (user_id, updated_at desc);
+alter table public.projects enable row level security;
+drop policy if exists "users_own_projects" on public.projects;
+create policy "users_own_projects"
+    on public.projects for all
+    using  (auth.uid() = user_id)
+    with check (auth.uid() = user_id);
+
+create or replace function public.set_updated_at()
+returns trigger language plpgsql as $$
+begin new.updated_at = now(); return new; end; $$;
+drop trigger if exists projects_set_updated_at on public.projects;
+create trigger projects_set_updated_at
+    before update on public.projects
+    for each row execute procedure public.set_updated_at();
+```
+
+### Profiles RLS (allow users to read their own plan)
+If not already present, add this policy so `useUserPlan` can read the plan column:
+```sql
+-- Check if it already exists first
+select policyname from pg_policies
+where tablename = 'profiles' and policyname like '%select%';
+
+-- If missing, add it:
+create policy "profiles: own row select"
+    on public.profiles for select using (auth.uid() = id);
 ```
 
 ---
 
-## 2 — Set up Railway environments
+## 3. Set environment variables on the Railway staging service
 
-### 2a — Open your Railway project
+In **Railway → staging service → Variables**, confirm these are set:
 
-Go to [railway.app](https://railway.app) → your project.
-
-### 2b — Create a Staging environment
-
-1. In the project header, click the **environment switcher** (shows "Production").
-2. Click **"New Environment"** → name it **`staging`**.
-3. Railway clones all your services and variables from production into the new environment.
-
-### 2c — Wire each environment to a Git branch
-
-**Production environment:**
-1. Select **Production** in the switcher.
-2. Click your service → **Settings** → **Source** → **Branch** → set to `main`.
-3. **Disable** "Auto Deploy" (GitHub Actions will trigger deploys instead).
-
-**Staging environment:**
-1. Select **Staging** in the switcher.
-2. Click your service → **Settings** → **Source** → **Branch** → set to `staging`.
-3. **Disable** "Auto Deploy" (same reason).
-
-### 2d — Get Railway deploy tokens
-
-You need one token per environment.
-
-1. Go to **railway.app/account/tokens** → **"Create Token"**.
-2. Name it `GitHub Actions — staging`, scope it to your project + **staging** environment.
-3. Copy the token.
-4. Repeat for production (`GitHub Actions — production`, **production** environment).
-
-### 2e — Add staging-specific env vars
-
-In the **Staging** environment, override any variables that differ from production:
-
-| Variable | Suggested staging value |
-|---|---|
-| `NODE_ENV` | `staging` |
-| `BYPASS_USAGE_GATE` | `true` (so you can test without hitting quota) |
-| `SENTRY_DSN` | same DSN, or a separate staging Sentry project |
-| `VITE_SENTRY_DSN` | same as SENTRY_DSN |
-| `FRONTEND_URL` | your staging Railway URL |
+| Variable | Value |
+|----------|-------|
+| `SUPABASE_URL` | Your **staging** Supabase project URL |
+| `SUPABASE_ANON_KEY` | Staging anon key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Staging service role key |
+| `VITE_SUPABASE_URL` | Same as SUPABASE_URL (Vite client) |
+| `VITE_SUPABASE_ANON_KEY` | Same as anon key (Vite client) |
+| `REDIS_URL` | Staging Redis instance |
+| `GCS_BUCKET_NAME` | Staging GCS bucket (or reuse prod bucket with a staging/ prefix) |
+| `AWS_LAMBDA_FUNCTION_NAME` | Lambda function name (e.g. `revideo-render-lambda`) |
+| `AWS_REGION` | Lambda region (e.g. `us-east-1`) |
+| `POLAR_WEBHOOK_SECRET` | Can be omitted on staging |
+| `POLAR_PRODUCT_CREATOR` | Optional — only needed to test upgrade flow |
+| `POLAR_PRODUCT_PRO` | Optional — only needed to test upgrade flow |
 
 ---
 
-## 3 — Add GitHub secrets
+## 4. Deploy
 
-Go to your repo → **Settings → Secrets and variables → Actions → New repository secret**.
+Railway auto-deploys when you push to the staging branch:
 
-### Required
+```bash
+git push origin staging
+```
 
-| Secret | Where to get it |
-|---|---|
-| `RAILWAY_TOKEN_STAGING` | From step 2d above |
-| `RAILWAY_TOKEN_PRODUCTION` | From step 2d above |
-
-### Required for Sentry source maps (once you have a Sentry account)
-
-| Secret | Where to get it |
-|---|---|
-| `VITE_SENTRY_DSN` | Sentry dashboard → Project → Settings → Client Keys → DSN |
-| `SENTRY_ORG` | Your Sentry organisation slug (URL slug, e.g. `viralpilotr`) |
-| `SENTRY_PROJECT` | Your Sentry project slug |
-| `SENTRY_AUTH_TOKEN` | Sentry → Settings → Auth Tokens → Create (scopes: `project:releases`, `org:read`) |
+Watch the deploy log. When it goes green, open your staging URL.
 
 ---
 
-## 4 — Set up Sentry
+## 5. Test checklist
 
-1. Go to [sentry.io](https://sentry.io) → create a free account.
-2. Create a new **Project** → choose **React** as the platform.
-3. Copy the DSN shown during setup.
-4. Add `SENTRY_DSN` + `VITE_SENTRY_DSN` to your Railway production **and** staging environments.
-5. Add the four Sentry GitHub secrets from the table above.
+Go through each of these before merging to main:
 
-That's it — after the next push to `staging`, the full pipeline runs:
+- [ ] `/auth` — sign up a new user, verify profile row created with `plan = 'free'`
+- [ ] `/dashboard` — redirects to `/auth` when not logged in
+- [ ] `/dashboard` — shows empty state for new user
+- [ ] **New project** — creates project, navigates to `/editor/:projectId`
+- [ ] **Editor loads** — timeline is empty, project name appears in header
+- [ ] **Autosave** — make an edit, wait 3s, reload — changes persist
+- [ ] **Reopen project** — go back to `/dashboard`, click the project card, editor loads
+- [ ] **Plan limit (free = 1)** — create 1 project, try to create a 2nd → limit modal appears
+- [ ] **Limit modal** — "Upgrade" button navigates somewhere sensible
+- [ ] **Rename** — 3-dot menu → rename works
+- [ ] **Duplicate** — creates a copy, count increments
+- [ ] **Delete** — removes project, count decrements
+- [ ] **Search** — filters project cards correctly
 
+### To test Creator/Pro limits without Polar:
+```sql
+-- In staging Supabase SQL Editor:
+update public.profiles set plan = 'creator' where email = 'your@email.com';
+-- Refresh dashboard → limit is now 10
+update public.profiles set plan = 'pro' where email = 'your@email.com';
+-- Refresh dashboard → limit shows ∞
 ```
-push to staging
-  → GitHub Actions: lint + test + build
-  → Upload source maps to Sentry
-  → railway up → staging Railway environment
-  → sentry release created
-```
-
-And the same on `main` → production.
 
 ---
 
-## 5 — Day-to-day workflow
+## 6. Merge to production
 
+Once all checks pass:
+
+```bash
+git checkout main
+git merge staging
+git push origin main   # Railway production auto-deploys
 ```
-feature branch → PR → CI checks pass → merge to staging → auto-deploy to staging
-staging passes QA  → PR into main → merge → auto-deploy to production
-```
+
+Run the same SQL migrations on the **production** Supabase project if not
+already done (003_projects.sql is idempotent — safe to re-run).

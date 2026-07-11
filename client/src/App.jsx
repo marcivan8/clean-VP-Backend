@@ -37,10 +37,10 @@ function App() {
                 <Route path="/"        element={<HomePage />} />
                 <Route path="/auth"    element={<AuthPage />} />
 
-                {/* Dashboard — authenticated users only */}
+                {/* Dashboard — authenticated users only (DashboardPage handles its own redirect) */}
                 <Route path="/dashboard" element={<DashboardPage />} />
 
-                {/* Editor — /editor for new/anonymous, /editor/:projectId to open saved project */}
+                {/* Editor — /editor for new/anonymous, /editor/:projectId to open a saved project */}
                 <Route path="/editor"            element={<EditorPage />} />
                 <Route path="/editor/:projectId" element={<EditorPage />} />
 
