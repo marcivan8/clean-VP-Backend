@@ -560,12 +560,18 @@ const useTimelineStore = create(
 
                 set({ tracks: timelineManager.toLegacyTracks() });
 
-                // Force the player to redraw the current frame if paused
-                // This prevents the screen from going dark after scale/position edits
-                if (!get().isPlaying) {
-                    setTimeout(() => {
-                        get().seek(get().currentTime);
-                    }, 10);
+                // Force the player to redraw the current frame if paused so edits
+                // (crop, scale, grading) are visible immediately.
+                // Skip for text/caption tracks — their changes are pure CSS and don't
+                // require a video seek; doing so on every slider pixel causes repeated
+                // re-decodes and visible quality degradation.
+                if (!options.skipHistory && !get().isPlaying) {
+                    const updatedTrack = timelineManager.toLegacyTracks().find(t =>
+                        t.id === trackId && t.type !== 'text'
+                    );
+                    if (updatedTrack) {
+                        setTimeout(() => { get().seek(get().currentTime); }, 10);
+                    }
                 }
             },
 

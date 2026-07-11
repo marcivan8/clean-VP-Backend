@@ -46,7 +46,11 @@ const S = {
 };
 
 // ── Shared style editor ────────────────────────────────────────────────────────
-const StyleEditor = ({ clip, onUpdate, showContent = true, showReset = false, onReset }) => {
+// onUpdate       — commit change to history (buttons, select, etc.)
+// onLiveUpdate   — skipHistory drag preview; onUpdate fires on pointerUp to commit
+const StyleEditor = ({ clip, onUpdate, onLiveUpdate, showContent = true, showReset = false, onReset }) => {
+    // Fall back to onUpdate if no live variant provided
+    const live = onLiveUpdate || onUpdate;
     if (!clip) return null;
 
     const activeAnim = clip.animation || 'none';
@@ -156,7 +160,8 @@ const StyleEditor = ({ clip, onUpdate, showContent = true, showReset = false, on
                             <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)' }}>{clip[key] ?? 50}%</span>
                         </div>
                         <input type="range" min="0" max="100" value={clip[key] ?? 50}
-                            onChange={(e) => onUpdate({ [key]: parseInt(e.target.value) })}
+                            onChange={(e) => live({ [key]: parseInt(e.target.value) })}
+                            onPointerUp={(e) => onUpdate({ [key]: parseInt(e.target.value) })}
                             style={{ width: '100%', accentColor: 'var(--accent)', height: 3, cursor: 'pointer' }} />
                     </div>
                 ))}
@@ -274,21 +279,25 @@ const TextPanel = () => {
     const captionClips = textTrack?.clips || [];
     const globalStyle  = captionClips[0] || {};
 
-    const handleUpdate = (updates) => {
+    const handleUpdate = (updates, skipHistory = false) => {
         if (!activeClip && !textTrack) return;
+        const opts = skipHistory ? { skipHistory: true } : undefined;
 
         if (editMode === 'global' || applyToAll) {
             const { content, ...styleOnly } = updates;
             if (Object.keys(styleOnly).length > 0 && textTrack) {
-                textTrack.clips.forEach(clip => updateClip(textTrack.id, clip.id, styleOnly));
+                textTrack.clips.forEach(clip => updateClip(textTrack.id, clip.id, styleOnly, opts));
             }
             if (content !== undefined && activeTrack && activeClip) {
-                updateClip(activeTrack.id, activeClip.id, { content });
+                updateClip(activeTrack.id, activeClip.id, { content }, opts);
             }
         } else if (activeTrack && activeClip) {
-            updateClip(activeTrack.id, activeClip.id, updates);
+            updateClip(activeTrack.id, activeClip.id, updates, opts);
         }
     };
+
+    // Live update: no history entry (called on every slider pixel during drag)
+    const handleLiveUpdate = (updates) => handleUpdate(updates, true);
 
     const handleAddText = (preset) => {
         let track = tracks.find(t => t.type === 'text');
@@ -379,7 +388,7 @@ const TextPanel = () => {
                         </button>
                     </div>
                 </div>
-                <StyleEditor clip={activeClip} onUpdate={handleUpdate} showContent />
+                <StyleEditor clip={activeClip} onUpdate={handleUpdate} onLiveUpdate={handleLiveUpdate} showContent />
             </div>
         );
     }
