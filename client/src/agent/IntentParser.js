@@ -370,10 +370,66 @@ export class IntentParser {
      * Returns a result if the prompt clearly maps to one operation, null otherwise.
      * Runs BEFORE the API call to prevent conversation-history contamination.
      */
+    /**
+     * Build a context-aware chat reply for conversational/question prompts
+     * without going through the edit pipeline or hitting the API.
+     */
+    static _buildQuestionResponse(lower) {
+        const ctx = ContextGenerator.getStructuredContext();
+        const { hasTranscript, transcriptSummary, contentType } = ctx?.MediaMetadata ?? {};
+
+        const isAboutQuestion  = /\b(about|regarding|cover|topic|content|subject)\b/.test(lower);
+        const isSummaryRequest = /\b(summar|overview|recap|synopsis|brief)\b/.test(lower);
+        const isTranscriptAsk  = /\b(transcript|transcription|words|said|dialogue|speech|spoken)\b/.test(lower);
+
+        if (isTranscriptAsk) {
+            if (!hasTranscript)
+                return 'No transcript yet — run "add captions" first and I\'ll be able to read the dialogue.';
+            const preview = transcriptSummary?.slice(0, 400) ?? '';
+            return `Here's what was said in the video:\n\n"${preview}${preview.length >= 400 ? '…' : ''}"`;
+        }
+
+        if (isAboutQuestion || isSummaryRequest) {
+            if (!hasTranscript) {
+                return contentType
+                    ? `I can see this is a ${contentType.replace(/_/g, ' ')} video, but I don't have a transcript yet. Run "add captions" and I'll be able to give you a full summary of the content.`
+                    : 'I don\'t have a transcript for this video yet. Run "add captions" and I\'ll be able to tell you exactly what it\'s about.';
+            }
+            const preview = transcriptSummary?.slice(0, 500) ?? '';
+            const typeLine = contentType ? ` It looks like a **${contentType.replace(/_/g, ' ')}** format.` : '';
+            return `Based on the transcript, here's what the video covers:${typeLine}\n\n"${preview}${preview.length >= 500 ? '…' : ''}"`;
+        }
+
+        // Generic question fallback
+        if (!hasTranscript) {
+            return 'I\'d need a transcript to answer that. Run "add captions" first and I can analyse the content.';
+        }
+        return `Here's the transcript so far:\n\n"${(transcriptSummary ?? '').slice(0, 400)}"`;
+    }
+
     static tryLocalFirst(prompt) {
         const lower = prompt.toLowerCase().trim();
         const matches = (category) =>
             NLP_MAP[category]?.some(phrase => lower === phrase || lower.startsWith(phrase + ' ') || lower.endsWith(' ' + phrase) || lower.includes(' ' + phrase + ' ')) ?? false;
+
+        // ── Conversational questions — catch BEFORE the API so they never spin up
+        // the edit pipeline. The API frequently misclassifies "what is the video about"
+        // and similar questions as edit intents.
+        // Exclude phrases that overlap with real edit commands (analyze, extract, etc.).
+        if (
+            matches('conversational') &&
+            !matches('autoCaptions') && !matches('analyze') &&
+            !matches('extractHighlights') && !matches('silence') &&
+            !matches('fillerWords') && !matches('buildFromRushes')
+        ) {
+            return {
+                intent: 'chat',
+                operation: 'chat',
+                message: this._buildQuestionResponse(lower),
+                confidence: 'HIGH',
+                missingParameters: [],
+            };
+        }
 
         // ── Caption / transcription (highest priority — most misclassified) ──
         if (matches('autoCaptions')) {
