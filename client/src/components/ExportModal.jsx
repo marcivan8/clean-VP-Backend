@@ -117,16 +117,20 @@ const NLE_TARGETS = [
 ];
 
 // ============================================================================
-// VIBED LOGO (inline SVG — no external dep, always matches brand)
+// VIBED LOGO — waveform bars, cyan→violet gradient (matches brand mark)
 // ============================================================================
 
 const VibedLogoIcon = ({ size = 18 }) => (
-    <svg width={size} height={size} viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path
-            d="M310 110 L185 265 L250 245 L200 390 L325 230 L258 248 Z"
-            fill="none" stroke="#1a3fa8" strokeWidth="20" strokeLinejoin="round" strokeLinecap="round"
-        />
-        <line x1="248" y1="248" x2="195" y2="268" stroke="#FFB800" strokeWidth="10" strokeLinecap="round" />
+    <svg width={size} height={size} viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <rect x="2.5"  y="15"   width="7" height="70" rx="3.5" fill="#00E5FF" />
+        <rect x="13.5" y="25"   width="7" height="50" rx="3.5" fill="#17CDFB" />
+        <rect x="24.5" y="33"   width="7" height="34" rx="3.5" fill="#2EB5F7" />
+        <rect x="35.5" y="39.5" width="7" height="21" rx="3.5" fill="#459DF3" />
+        <rect x="46.5" y="43"   width="7" height="14" rx="3.5" fill="#5B85EF" />
+        <rect x="57.5" y="39.5" width="7" height="21" rx="3.5" fill="#726DEB" />
+        <rect x="68.5" y="33"   width="7" height="34" rx="3.5" fill="#8855E7" />
+        <rect x="79.5" y="25"   width="7" height="50" rx="3.5" fill="#9F3DE3" />
+        <rect x="90.5" y="15"   width="7" height="70" rx="3.5" fill="#8A2BE2" />
     </svg>
 );
 
@@ -396,10 +400,24 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                     )}
                                 </div>
                                 <div className="flex gap-2 w-full">
-                                    <a href={exportResult.url} download={exportResult.filename}
+                                    <button
+                                        onClick={async () => {
+                                            try {
+                                                const res = await fetch(exportResult.url);
+                                                const blob = await res.blob();
+                                                const blobUrl = URL.createObjectURL(blob);
+                                                const a = document.createElement('a');
+                                                a.href = blobUrl;
+                                                a.download = exportResult.filename || 'vibed-export.mp4';
+                                                a.click();
+                                                URL.revokeObjectURL(blobUrl);
+                                            } catch {
+                                                window.open(exportResult.url, '_blank');
+                                            }
+                                        }}
                                         className="flex-1 py-3 rounded-xl bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-green-500/20 transition-all">
                                         <Download className="w-4 h-4" /> Download
-                                    </a>
+                                    </button>
                                     <button onClick={() => setStep('configure')}
                                         className="px-4 py-3 rounded-xl bg-white/6 border border-white/10 hover:bg-white/10 text-white/60 text-sm font-medium transition-all">
                                         Export Again
