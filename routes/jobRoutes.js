@@ -11,7 +11,7 @@
 
 const express = require('express');
 const router  = express.Router();
-const { videoQueue, audioQueue, analysisQueue } = require('../queue/queues');
+const { videoQueue, audioQueue, analysisQueue, exportQueue } = require('../queue/queues');
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
@@ -21,6 +21,8 @@ async function findJob(jobId) {
     job = await audioQueue.getJob(jobId);
     if (job) return job;
     job = await analysisQueue.getJob(jobId);
+    if (job) return job;
+    job = await exportQueue.getJob(jobId);
     return job;
 }
 

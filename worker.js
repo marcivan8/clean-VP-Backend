@@ -3,9 +3,10 @@ const { Worker } = require('bullmq');
 const { connection } = require('./queue/connection');
 
 // Import job handlers
-const processVideoJob = require('./jobs/videoProcessor');
-const processAudioJob = require('./jobs/audioProcessor');
+const processVideoJob    = require('./jobs/videoProcessor');
+const processAudioJob    = require('./jobs/audioProcessor');
 const processAnalysisJob = require('./jobs/analysisProcessor');
+const processExportJob   = require('./jobs/exportProcessor');
 
 console.log('👷 Worker service starting...');
 
@@ -47,6 +48,19 @@ analysisWorker.on('completed', job => {
 });
 analysisWorker.on('failed', (job, err) => {
     console.error(`❌ [AnalysisQueue] Job ${job.id} failed:`, err.message);
+});
+
+// 4. Export Processing Worker (timeline render)
+const exportWorker = new Worker('export-processing', processExportJob, {
+    connection,
+    concurrency: 1, // exports are very CPU/disk intensive — one at a time
+});
+
+exportWorker.on('completed', job => {
+    console.log(`✅ [ExportQueue] Job ${job.id} completed`);
+});
+exportWorker.on('failed', (job, err) => {
+    console.error(`❌ [ExportQueue] Job ${job.id} failed:`, err.message);
 });
 
 console.log('👷 Worker service is running and listening to queues.');

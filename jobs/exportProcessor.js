@@ -1,0 +1,514 @@
+'use strict';
+
+/**
+ * jobs/exportProcessor.js
+ *
+ * BullMQ job handler for timeline exports.
+ * Replaces the synchronous HTTP handler in routes/exportRoutes.js.
+ *
+ * Job data shape:
+ *   { timeline, settings, userId, assetMap }
+ *
+ * Returns:
+ *   { url, filename, metadata }
+ *   url = '/api/proxy/gcs-media/exports/{userId}/{jobId}.mp4'  (GCS)
+ *      OR '/uploads/exports/{jobId}.mp4'                       (local dev fallback)
+ */
+
+const ffmpeg = require('fluent-ffmpeg');
+const ffmpegPath = require('ffmpeg-static');
+const path = require('path');
+const fs = require('fs');
+const axios = require('axios');
+const storageConfig = require('../config/storage');
+
+ffmpeg.setFfmpegPath(ffmpegPath);
+
+const gcsBucket = storageConfig.bucket;
+
+// ─── Helpers (mirrors exportRoutes.js) ───────────────────────────────────────
+
+const isServerUsableUrl = (u) => u && !u.startsWith('blob:');
+
+async function downloadToTemp(url, destPath) {
+    const response = await axios({ url, method: 'GET', responseType: 'stream', timeout: 120_000 });
+    await new Promise((resolve, reject) => {
+        const writer = fs.createWriteStream(destPath);
+        response.data.pipe(writer);
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+        response.data.on('error', reject);
+    });
+}
+
+function resolveSourcePath(clip, uploadsDir) {
+    if (clip.fsPath && fs.existsSync(clip.fsPath)) return clip.fsPath;
+    const inUploads = path.join(uploadsDir, clip.name);
+    if (fs.existsSync(inUploads)) return inUploads;
+    return null;
+}
+
+function buildScaleFilter(width, height) {
+    return `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
+}
+
+const PLATFORM_PRESETS = {
+    tiktok:  { label: 'TikTok',             width: 1080, height: 1920, fps: 30,  bitrate: '6000k', audioBitrate: '128k', codec: 'libx264', profile: 'high', level: '4.0' },
+    youtube: { label: 'YouTube',             width: 1920, height: 1080, fps: 30,  bitrate: '8000k', audioBitrate: '192k', codec: 'libx264', profile: 'high', level: '4.2' },
+    reels:   { label: 'Instagram Reels',     width: 1080, height: 1920, fps: 30,  bitrate: '5500k', audioBitrate: '128k', codec: 'libx264', profile: 'high', level: '4.0' },
+    shorts:  { label: 'YouTube Shorts',      width: 1080, height: 1920, fps: 60,  bitrate: '6000k', audioBitrate: '192k', codec: 'libx264', profile: 'high', level: '4.1' },
+};
+
+const RESOLUTION_PRESETS = {
+    '720p':  { width: 1280, height: 720,  bitrate: '4000k' },
+    '1080p': { width: 1920, height: 1080, bitrate: '8000k' },
+    '2k':    { width: 2560, height: 1440, bitrate: '16000k' },
+    '4k':    { width: 3840, height: 2160, bitrate: '35000k' },
+};
+
+// ─── Main job handler ─────────────────────────────────────────────────────────
+
+module.exports = async function processExportJob(job) {
+    const startTime = Date.now();
+    const { timeline, settings = {}, userId = 'anonymous', assetMap = {} } = job.data;
+
+    await job.updateProgress(2);
+
+    // ── Resolve platform / resolution settings ─────────────────────────────
+    const platform   = settings.platform && PLATFORM_PRESETS[settings.platform] ? PLATFORM_PRESETS[settings.platform] : null;
+    const resPreset  = RESOLUTION_PRESETS[settings.resolution] || RESOLUTION_PRESETS['1080p'];
+
+    const targetWidth  = platform?.width  || resPreset.width;
+    const targetHeight = platform?.height || resPreset.height;
+    const targetFps    = platform?.fps    || settings.fps    || 30;
+    const codec        = platform?.codec  || 'libx264';
+    const profile      = platform?.profile || 'high';
+
+    let videoBitrate;
+    switch (settings.quality) {
+        case 'high':   videoBitrate = platform?.bitrate || '8000k';  break;
+        case 'medium': videoBitrate = '5000k'; break;
+        case 'low':    videoBitrate = '2000k'; break;
+        default:       videoBitrate = platform?.bitrate || resPreset.bitrate;
+    }
+
+    const audioBitrate = platform?.audioBitrate || '192k';
+
+    console.log(`🎬 [ExportJob ${job.id}] ${targetWidth}x${targetHeight} @ ${targetFps}fps | ${videoBitrate} | ${platform?.label || settings.resolution || '1080p'}`);
+
+    // ── Gather clips ───────────────────────────────────────────────────────
+    const videoTracks = timeline.tracks.filter(t =>
+        (t.type === 'video' || t.type === 'image') && t.clips?.length > 0
+    );
+    const audioTracks = timeline.tracks.filter(t =>
+        t.type === 'audio' && t.clips?.length > 0
+    );
+
+    if (videoTracks.length === 0) {
+        throw new Error('No video or image clips found in timeline');
+    }
+
+    const uploadsDir = path.join(__dirname, '../uploads/temp');
+    const publicDir  = path.join(__dirname, '../client/public');
+    const exportsDir = path.join(__dirname, '../uploads/exports');
+    if (!fs.existsSync(exportsDir)) fs.mkdirSync(exportsDir, { recursive: true });
+
+    const jobId      = `render-${job.id}-${Date.now()}`;
+    const outputPath = path.join(exportsDir, `${jobId}.mp4`);
+    const tmpDir     = path.join(exportsDir, jobId);
+    fs.mkdirSync(tmpDir, { recursive: true });
+
+    // ── URL/GCS helpers ────────────────────────────────────────────────────
+    const bucketName = process.env.GCS_BUCKET_NAME || 'viral-pilot_bucket';
+
+    const sanitizeFilename = (name) =>
+        name.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9._-]/g, '');
+
+    const gcsPathFromStorageUrl = (url) => {
+        if (!url || !url.startsWith(`https://storage.googleapis.com/${bucketName}/`)) return null;
+        try { return decodeURIComponent(new URL(url).pathname.replace(`/${bucketName}/`, '')); }
+        catch (_) { return null; }
+    };
+
+    const gcsPathFromProxyUrl = (url) => {
+        if (!url) return null;
+        const match = url.match(/\/api\/proxy\/gcs-media\/([^?#]+)/);
+        return match ? decodeURIComponent(match[1]) : null;
+    };
+
+    const resolveGcsPath = async (clip) => {
+        let effectiveClip = clip;
+        if (clip.assetId && assetMap[clip.assetId]) {
+            const asset = assetMap[clip.assetId];
+            const hasUsableUrl = isServerUsableUrl(clip.sourceUrl) || isServerUsableUrl(clip.url) || isServerUsableUrl(clip.proxyUrl);
+            if (!hasUsableUrl) {
+                effectiveClip = { ...clip, sourceUrl: asset.sourceUrl, url: asset.proxyUrl || asset.url, proxyUrl: asset.proxyUrl };
+            }
+        }
+
+        const candidates = [effectiveClip.sourceUrl, effectiveClip.url, effectiveClip.src, effectiveClip.videoUrl, effectiveClip.proxyUrl];
+
+        for (const raw of candidates) {
+            const p = gcsPathFromStorageUrl(raw);
+            if (p) return p;
+        }
+        for (const raw of candidates) {
+            const p = gcsPathFromProxyUrl(raw);
+            if (p) return p;
+        }
+
+        const assetForClip = clip.assetId ? assetMap[clip.assetId] : null;
+        const filename = effectiveClip.originalName || assetForClip?.name || effectiveClip.name || clip.name;
+        if (!filename || !gcsBucket) return null;
+
+        const safeName = sanitizeFilename(filename);
+        const rawName  = filename;
+
+        let listUserId = userId;
+        if (listUserId === 'anonymous') {
+            const proxyUrls = [effectiveClip.proxyUrl, effectiveClip.url, effectiveClip.sourceUrl, clip.proxyUrl, clip.url, clip.sourceUrl];
+            for (const raw of proxyUrls) {
+                const m = raw?.match(/\/api\/proxy\/gcs-media\/(?:proxies|raw)\/([^/]+)\//);
+                if (m) { listUserId = m[1]; break; }
+            }
+        }
+
+        for (const name of [rawName, safeName]) {
+            if (!name) continue;
+            const exactPath = `raw/${listUserId}/${name}`;
+            try {
+                const [exists] = await gcsBucket.file(exactPath).exists();
+                if (exists) return exactPath;
+            } catch (_) {}
+        }
+
+        try {
+            const [files] = await gcsBucket.getFiles({ prefix: `raw/${listUserId}/` });
+            const match = files.find(f => {
+                const base = f.name.split('/').pop();
+                return base === rawName || base === safeName
+                    || base.endsWith(`-${rawName}`) || base.endsWith(`-${safeName}`);
+            });
+            if (match) return match.name;
+        } catch (_) {}
+
+        return null;
+    };
+
+    const fetchClipSource = async (clip, localPath) => {
+        let c = clip;
+        if (clip.assetId && assetMap[clip.assetId] && !(isServerUsableUrl(clip.sourceUrl) || isServerUsableUrl(clip.url) || isServerUsableUrl(clip.proxyUrl))) {
+            const asset = assetMap[clip.assetId];
+            c = { ...clip, sourceUrl: asset.sourceUrl, url: asset.proxyUrl || asset.url, proxyUrl: asset.proxyUrl };
+        }
+
+        if (gcsBucket) {
+            const gcsPath = await resolveGcsPath(c);
+            if (gcsPath) {
+                console.log(`[ExportJob] GCS download: ${gcsPath}`);
+                await gcsBucket.file(gcsPath).download({ destination: localPath });
+                return localPath;
+            }
+        }
+
+        const localSrc = resolveSourcePath(c, uploadsDir);
+        if (localSrc) return localSrc;
+
+        for (const raw of [c.sourceUrl, c.url, c.src, c.videoUrl]) {
+            if (raw && !raw.startsWith('blob:') && !raw.includes('/api/proxy') && raw.startsWith('http')) {
+                let safeUrl = raw;
+                try {
+                    const parsed = new URL(raw);
+                    parsed.pathname = parsed.pathname.split('/').map(seg => encodeURIComponent(decodeURIComponent(seg))).join('/');
+                    safeUrl = parsed.toString();
+                } catch (_) {}
+                await downloadToTemp(safeUrl, localPath);
+                return localPath;
+            }
+        }
+
+        console.warn(`[ExportJob] Cannot resolve source for clip "${clip.name}"`);
+        return null;
+    };
+
+    // ── Collect & sort clips ───────────────────────────────────────────────
+    let allClips = [];
+    for (const track of videoTracks) {
+        for (const clip of track.clips) {
+            allClips.push({ ...clip, trackVolume: track.volume ?? 1.0 });
+        }
+    }
+    allClips.sort((a, b) => a.start - b.start);
+
+    const scaleFilter = buildScaleFilter(targetWidth, targetHeight);
+
+    await job.updateProgress(5);
+
+    // ── STEP 1: Trim each clip into a segment ──────────────────────────────
+    const segments = [];
+    for (let i = 0; i < allClips.length; i++) {
+        const clip    = allClips[i];
+        const ext     = path.extname(clip.name || '.mp4') || '.mp4';
+        const dlPath  = path.join(tmpDir, `dl-${i}${ext}`);
+        const src     = await fetchClipSource(clip, dlPath);
+
+        if (!src) {
+            console.warn(`⚠️  [ExportJob] No source for "${clip.name}", skipping`);
+            continue;
+        }
+
+        const segPath = path.join(tmpDir, `seg-${i}.mp4`);
+        const inPoint = clip.offset || 0;
+        const dur     = clip.duration;
+        const vol     = (clip.volume ?? 1.0) * (clip.trackVolume ?? 1.0);
+        const speed   = clip.speed || 1.0;
+        const isImage = clip.type === 'image';
+
+        await new Promise((resolve, reject) => {
+            let cmd;
+            if (isImage) {
+                cmd = ffmpeg().input(src).inputOptions(['-loop', '1']).setDuration(dur / speed);
+            } else {
+                cmd = ffmpeg(src).setStartTime(inPoint).setDuration(dur / speed);
+            }
+
+            const vFilters = [scaleFilter];
+            const aFilters = [];
+
+            if (speed !== 1.0) {
+                vFilters.push(`setpts=${(1 / speed).toFixed(4)}*PTS`);
+                if (!isImage) {
+                    const aTempo = Math.min(Math.max(speed, 0.5), 2.0);
+                    aFilters.push(`atempo=${aTempo.toFixed(4)}`);
+                }
+            }
+            if (!isImage && vol !== 1.0) aFilters.push(`volume=${vol.toFixed(4)}`);
+
+            cmd.videoFilters(vFilters.join(','));
+
+            if (isImage) {
+                cmd.input(`anullsrc=channel_layout=stereo:sample_rate=44100`).inputOptions(['-f', 'lavfi']);
+            } else if (aFilters.length) {
+                cmd.audioFilters(aFilters.join(','));
+            }
+
+            cmd
+                .fps(targetFps)
+                .videoCodec(codec)
+                .addOutputOption('-profile:v', profile)
+                .addOutputOption('-pix_fmt', 'yuv420p')
+                .addOutputOption('-movflags', '+faststart')
+                .addOutputOption('-shortest')
+                .audioBitrate(audioBitrate)
+                .output(segPath)
+                .on('end', () => { segments.push(segPath); resolve(); })
+                .on('error', (err, _stdout, stderr) => {
+                    console.error(`[ExportJob] ffmpeg failed clip ${i + 1}: ${err.message}`);
+                    if (stderr) console.error(stderr.slice(-1000));
+                    reject(err);
+                })
+                .run();
+        });
+
+        const pct = 5 + Math.round(((i + 1) / allClips.length) * 55);
+        await job.updateProgress(pct);
+        console.log(`  ✅ Segment ${i + 1}/${allClips.length}: "${clip.name}"`);
+    }
+
+    if (segments.length === 0) {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+        throw new Error('No valid clips could be processed');
+    }
+
+    // ── STEP 2: Concatenate ────────────────────────────────────────────────
+    let finalVideoPath = outputPath;
+    if (segments.length === 1) {
+        fs.renameSync(segments[0], outputPath);
+    } else {
+        const concatList = path.join(tmpDir, 'concat.txt');
+        fs.writeFileSync(concatList, segments.map(s => `file '${s}'`).join('\n'));
+
+        await new Promise((resolve, reject) => {
+            ffmpeg()
+                .input(concatList)
+                .inputOptions(['-f', 'concat', '-safe', '0'])
+                .videoCodec('copy')
+                .audioCodec('copy')
+                .output(outputPath)
+                .on('end', resolve)
+                .on('error', reject)
+                .run();
+        });
+        console.log(`  ✅ Concatenated ${segments.length} segments`);
+    }
+
+    await job.updateProgress(70);
+
+    // ── STEP 3: Mix audio tracks ───────────────────────────────────────────
+    if (audioTracks.length > 0) {
+        const audioSegments = [];
+        for (let i = 0; i < audioTracks.length; i++) {
+            const track = audioTracks[i];
+            for (let j = 0; j < track.clips.length; j++) {
+                const clip    = track.clips[j];
+                const ext     = path.extname(clip.name || '.mp3') || '.mp3';
+                const aDlPath = path.join(tmpDir, `adl-${i}-${j}${ext}`);
+                const src     = await fetchClipSource(clip, aDlPath);
+                if (!src) continue;
+
+                const aSegPath = path.join(tmpDir, `audio-${i}-${j}.aac`);
+                const vol      = (clip.volume ?? 1.0) * (track.volume ?? 1.0);
+
+                await new Promise((resolve, reject) => {
+                    ffmpeg(src)
+                        .setStartTime(clip.offset || 0)
+                        .setDuration(clip.duration)
+                        .audioFilters(`volume=${vol.toFixed(4)}`)
+                        .audioBitrate(audioBitrate)
+                        .output(aSegPath)
+                        .on('end', () => { audioSegments.push({ path: aSegPath, startTime: clip.start }); resolve(); })
+                        .on('error', reject)
+                        .run();
+                });
+            }
+        }
+
+        if (audioSegments.length > 0) {
+            const mixedPath = path.join(tmpDir, 'mixed.mp4');
+            await new Promise((resolve, reject) => {
+                let cmd = ffmpeg(finalVideoPath);
+                for (const seg of audioSegments) cmd = cmd.input(seg.path);
+
+                const amixInputs  = 1 + audioSegments.length;
+                const filterComplex =
+                    `[0:a]volume=1[va];` +
+                    audioSegments.map((seg, i) => `[${i + 1}:a]adelay=${Math.round(seg.startTime * 1000)}|${Math.round(seg.startTime * 1000)}[da${i}]`).join(';') +
+                    `;[va]${audioSegments.map((_, i) => `[da${i}]`).join('')}amix=inputs=${amixInputs}:duration=first:dropout_transition=0[aout]`;
+
+                cmd
+                    .complexFilter(filterComplex, 'aout')
+                    .videoCodec('copy')
+                    .audioBitrate(audioBitrate)
+                    .output(mixedPath)
+                    .on('end', () => { finalVideoPath = mixedPath; resolve(); })
+                    .on('error', reject)
+                    .run();
+            });
+            console.log('  ✅ Audio tracks mixed');
+        }
+    }
+
+    await job.updateProgress(82);
+
+    // ── STEP 4: Text overlays ──────────────────────────────────────────────
+    const textTracks  = timeline.tracks.filter(t => t.type === 'text' && t.clips?.length > 0);
+    const defaultFontPath = path.join(publicDir, 'fonts', 'Roboto-Regular.ttf');
+    const fontPath = fs.existsSync(defaultFontPath)
+        ? defaultFontPath
+        : [
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+            '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+            '/System/Library/Fonts/Helvetica.ttc',
+          ].find(p => fs.existsSync(p)) || null;
+
+    const textFilters = [];
+    for (const track of textTracks) {
+        for (const clip of track.clips) {
+            if (!fontPath) break;
+            const startSec = clip.start;
+            const endSec   = clip.start + clip.duration;
+            const text = (clip.content || clip.name || '')
+                .replace(/\\/g, '\\\\')
+                .replace(/'/g, "\\'")
+                .replace(/:/g, '\\:')
+                .replace(/%/g, '%%');
+            const color = (clip.color || '#ffffff').replace('#', '0x');
+            const size  = clip.fontSize || 48;
+
+            let x = '(w-text_w)/2';
+            let y = '(h-text_h)/2';
+            if (clip.position === 'bottom') y = 'h-text_h-80';
+            if (clip.position === 'top')    y = '80';
+            if (typeof clip.x === 'number') x = clip.x + (targetWidth / 2);
+            if (typeof clip.y === 'number') y = clip.y + (targetHeight / 2);
+
+            textFilters.push(
+                `drawtext=fontfile='${fontPath.replace(/\\/g, '/').replace(/:/g, '\\:')}':text='${text}':fontsize=${size}:fontcolor=${color}:x=${x}:y=${y}:enable='gte(t,${startSec})*lte(t,${endSec})'`
+            );
+        }
+    }
+
+    if (textFilters.length > 0) {
+        const textOverlayPath = path.join(tmpDir, 'with_text.mp4');
+        try {
+            await new Promise((resolve, reject) => {
+                ffmpeg(finalVideoPath)
+                    .addOutputOption('-vf', textFilters.join(','))
+                    .videoCodec(codec)
+                    .audioCodec('copy')
+                    .output(textOverlayPath)
+                    .on('end', () => { finalVideoPath = textOverlayPath; resolve(); })
+                    .on('error', reject)
+                    .run();
+            });
+            console.log('  ✅ Text overlays applied');
+        } catch (textErr) {
+            console.warn(`  ⚠️  Text overlay failed (skipping): ${textErr.message}`);
+        }
+    }
+
+    if (finalVideoPath !== outputPath) {
+        fs.renameSync(finalVideoPath, outputPath);
+    }
+
+    await job.updateProgress(90);
+
+    // ── Upload to GCS or keep local ────────────────────────────────────────
+    const filename = path.basename(outputPath);
+    let resultUrl;
+
+    if (gcsBucket) {
+        const gcsDestPath = `exports/${userId}/${filename}`;
+        try {
+            await gcsBucket.upload(outputPath, {
+                destination: gcsDestPath,
+                metadata: { contentType: 'video/mp4' },
+            });
+            // Remove local file after successful GCS upload
+            fs.unlinkSync(outputPath);
+            resultUrl = `/api/proxy/gcs-media/${gcsDestPath}`;
+            console.log(`  ✅ Uploaded to GCS: ${gcsDestPath}`);
+        } catch (uploadErr) {
+            console.warn(`  ⚠️  GCS upload failed, falling back to local: ${uploadErr.message}`);
+            resultUrl = `/uploads/exports/${filename}`;
+        }
+    } else {
+        resultUrl = `/uploads/exports/${filename}`;
+    }
+
+    // ── Cleanup temp dir ───────────────────────────────────────────────────
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+
+    await job.updateProgress(100);
+
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    const stats    = fs.existsSync(outputPath) ? fs.statSync(outputPath) : null;
+    const sizeMB   = stats ? (stats.size / 1024 / 1024).toFixed(1) : '?';
+
+    console.log(`🏁 [ExportJob ${job.id}] Complete: ${sizeMB}MB in ${duration}s → ${resultUrl}`);
+
+    return {
+        success: true,
+        url: resultUrl,
+        filename,
+        metadata: {
+            duration:   `${duration}s render time`,
+            sizeMB:     parseFloat(sizeMB) || 0,
+            resolution: `${targetWidth}x${targetHeight}`,
+            fps:        targetFps,
+            codec,
+            segments:   allClips.length,
+            platform:   platform?.label || null,
+        },
+    };
+};

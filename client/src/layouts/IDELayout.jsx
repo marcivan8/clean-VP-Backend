@@ -869,41 +869,32 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         setExportUrl(null);
 
         try {
-            // Attach auth token if one exists in localStorage
-            const headers = { 'Content-Type': 'application/json' };
-            try {
-                for (let i = 0; i < localStorage.length; i++) {
-                    const key = localStorage.key(i);
-                    if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
-                        const parsed = JSON.parse(localStorage.getItem(key) || '{}');
-                        if (parsed?.access_token) {
-                            headers['Authorization'] = `Bearer ${parsed.access_token}`;
-                            break;
-                        }
-                    }
-                }
-            } catch (_) { /* no token — dev mode, route uses optionalAuth */ }
+            const { authFetch }     = await import('../utils/authFetch.js');
+            const { pollJobResult } = await import('../utils/jobPoller.js');
 
-            // POST to /api/render — the pure FFmpeg export engine
-            const response = await fetch('/api/render', {
+            // Enqueue the export job — returns { jobId } immediately
+            const response = await authFetch('/api/render', {
                 method: 'POST',
-                headers,
                 body: JSON.stringify({
                     timeline: { tracks, duration, assets: assets || [] },
                     settings: {
                         platform: settings.aspectRatio === '9:16' ? 'tiktok' : 'youtube',
                         quality: 'high',
-                        resolution: settings.resolution || '1080p'
-                    } 
-                })
+                        resolution: settings.resolution || '1080p',
+                    },
+                }),
             });
+
             const data = await response.json();
-            
             if (!response.ok) throw new Error(data.error || data.message || 'Export failed');
-            
-            // FFmpeg route is completely synchronous, so we get the final URL immediately
-            setExportResult({ success: true, url: data.url });
-            setExportUrl(data.url);
+            if (!data.jobId)   throw new Error('Export response missing jobId');
+
+            // Poll until the worker finishes (handles Railway timeouts gracefully)
+            const result = await pollJobResult(data.jobId);
+            if (!result?.url) throw new Error('Export completed but no URL returned');
+
+            setExportResult({ success: true, url: result.url });
+            setExportUrl(result.url);
         } catch (err) {
             console.error('Export Failed:', err);
             setExportError(err.message);
