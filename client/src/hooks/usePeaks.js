@@ -21,7 +21,7 @@ const _cache = new Map();
 /** In-flight promises to deduplicate concurrent requests for the same asset */
 const _inflight = new Map();
 
-export function usePeaks(assetId, gcsPath) {
+export function usePeaks(assetId, gcsPath, proxyUrl) {
     const [state, setState] = useState(() => {
         if (!assetId) return { peaks: null, duration: null, loading: false, error: null };
         const hit = _cache.get(assetId);
@@ -52,7 +52,7 @@ export function usePeaks(assetId, gcsPath) {
                 const extractRes = await fetch('/api/waveform/extract', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ assetId, gcsPath }),
+                    body: JSON.stringify({ assetId, gcsPath, proxyUrl }),
                 });
 
                 if (!extractRes.ok) {

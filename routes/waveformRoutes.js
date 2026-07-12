@@ -95,7 +95,16 @@ function extractPeaks(inputPath, inputStream) {
  * Body: { assetId: string, gcsPath?: string }
  */
 router.post('/extract', optionalAuth, async (req, res) => {
-    const { assetId, gcsPath } = req.body || {};
+    const { assetId, gcsPath: rawGcsPath, proxyUrl } = req.body || {};
+
+    // Derive GCS path from proxyUrl when gcsPath is not stored on the asset.
+    // proxyUrl is served via /api/proxy/gcs-media/<gcsPath>, so strip that prefix.
+    const gcsPath = rawGcsPath || (() => {
+        if (!proxyUrl) return null;
+        const marker = '/api/proxy/gcs-media/';
+        const idx = proxyUrl.indexOf(marker);
+        return idx !== -1 ? proxyUrl.slice(idx + marker.length) : null;
+    })();
 
     if (!assetId) {
         return res.status(400).json({ error: 'assetId is required' });

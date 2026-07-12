@@ -93,6 +93,7 @@ const Clip = ({ clip, trackId }) => {
     const { peaks: wsPeaks, duration: wsDuration, loading: wsLoading } = usePeaks(
         isTextClip ? null : clip.assetId,
         asset?.gcsPath,
+        asset?.proxyUrl,
     );
     const wsColor = clip.type === 'audio'
         ? 'rgba(251,146,60,0.6)'

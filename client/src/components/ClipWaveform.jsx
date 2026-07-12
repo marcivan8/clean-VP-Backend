@@ -61,14 +61,11 @@ const ClipWaveform = ({
 
         wsRef.current = ws;
 
-        // Load with pre-computed peaks when available — no audio decoding needed.
-        // WaveSurfer still needs a URL for its internal <audio> element but it
-        // won't fetch/decode the file when channelData is provided.
+        // Only load when pre-computed peaks are available.
+        // Never call ws.load(url) without peaks — video containers (.mp4) cannot
+        // be decoded by the Web Audio API and will throw EncodingError.
         if (peaks && peaks.length > 0 && audioUrl) {
             ws.load(audioUrl, [peaks], duration ?? undefined);
-        } else if (audioUrl) {
-            // Fallback: let WaveSurfer decode from the URL (slower, but works)
-            ws.load(audioUrl);
         }
 
         return () => {
