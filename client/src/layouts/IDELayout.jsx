@@ -893,7 +893,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             const result = await pollJobResult(data.jobId);
             if (!result?.url) throw new Error('Export completed but no URL returned');
 
-            setExportResult({ success: true, url: result.url });
+            setExportResult({ success: true, url: result.url, filename: result.filename, metadata: result.metadata });
             setExportUrl(result.url);
         } catch (err) {
             console.error('Export Failed:', err);
