@@ -298,23 +298,7 @@ const Clip = ({ clip, trackId }) => {
                 </button>
             </div>
 
-            {/* Waveform — fills remaining clip height below the header */}
-            <div className="w-full flex-1 min-h-0 relative overflow-hidden">
-                {waveformData && (
-                    <Waveform
-                        peaks={waveformData.peaks}
-                        duration={waveformData.duration}
-                        offset={clip.offset || 0}
-                        zoomLevel={zoomLevel}
-                        waveColor={
-                            clip.type === 'audio'
-                                ? 'rgba(251, 146, 60, 0.80)'
-                                : 'rgba(74, 222, 128, 0.78)'
-                        }
-                        bgColor="rgba(0, 0, 0, 0.35)"
-                    />
-                )}
-            </div>
+            {/* Waveform rendered via ClipWaveform (WaveSurfer) below */}
 
 
 
