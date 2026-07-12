@@ -1,126 +1,45 @@
 import React, { useState, useEffect } from 'react';
-import { X, Film, Download, Tv2, Smartphone, Youtube, Clapperboard, CheckCircle2, Loader2, AlertCircle, FileCode2, Scissors, Zap } from 'lucide-react';
+import {
+    X, Film, Download, Tv2, Smartphone, Youtube,
+    Clapperboard, CheckCircle2, Loader2, AlertCircle,
+    Scissors, ArrowRight,
+} from 'lucide-react';
 import { exportToNLE } from '../services/nleExportService';
 import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../store/useTimelineStore';
 
-// ============================================================================
-// PLATFORM DEFINITIONS (mirrors backend)
-// ============================================================================
+// ─── Data ─────────────────────────────────────────────────────────────────────
 
 const PLATFORMS = [
-    {
-        id: 'youtube',
-        label: 'YouTube',
-        icon: Youtube,
-        aspectRatio: '16:9',
-        resolution: '1920×1080',
-        fps: 30,
-        color: 'from-red-500/20 to-red-600/10',
-        border: 'border-red-500/40',
-        text: 'text-red-400',
-        badge: 'bg-red-500/20 text-red-300'
-    },
-    {
-        id: 'tiktok',
-        label: 'TikTok',
-        icon: Smartphone,
-        aspectRatio: '9:16',
-        resolution: '1080×1920',
-        fps: 30,
-        color: 'from-pink-500/20 to-fuchsia-600/10',
-        border: 'border-pink-500/40',
-        text: 'text-pink-400',
-        badge: 'bg-pink-500/20 text-pink-300'
-    },
-    {
-        id: 'reels',
-        label: 'IG Reels',
-        icon: Clapperboard,
-        aspectRatio: '9:16',
-        resolution: '1080×1920',
-        fps: 30,
-        color: 'from-orange-500/20 to-amber-600/10',
-        border: 'border-orange-500/40',
-        text: 'text-orange-400',
-        badge: 'bg-orange-500/20 text-orange-300'
-    },
-    {
-        id: 'shorts',
-        label: 'Shorts',
-        icon: Tv2,
-        aspectRatio: '9:16',
-        resolution: '1080×1920',
-        fps: 60,
-        color: 'from-sky-500/20 to-blue-600/10',
-        border: 'border-sky-500/40',
-        text: 'text-sky-400',
-        badge: 'bg-sky-500/20 text-sky-300'
-    }
+    { id: 'youtube', label: 'YouTube',      icon: Youtube,      ar: '16:9', fps: 30, res: '1920×1080' },
+    { id: 'tiktok',  label: 'TikTok',       icon: Smartphone,   ar: '9:16', fps: 30, res: '1080×1920' },
+    { id: 'reels',   label: 'IG Reels',     icon: Clapperboard, ar: '9:16', fps: 30, res: '1080×1920' },
+    { id: 'shorts',  label: 'YT Shorts',    icon: Tv2,          ar: '9:16', fps: 60, res: '1080×1920' },
 ];
 
 const RESOLUTIONS = [
     { id: '720p',  label: '720p',  sub: 'HD' },
-    { id: '1080p', label: '1080p', sub: 'Full HD' },
+    { id: '1080p', label: '1080p', sub: 'FHD' },
     { id: '2k',    label: '2K',    sub: 'QHD' },
-    { id: '4k',    label: '4K',    sub: 'Ultra HD' }
+    { id: '4k',    label: '4K',    sub: 'UHD' },
 ];
 
 const QUALITY_PROFILES = [
-    { id: 'high',   label: 'Pro',    sub: 'Max bitrate',    bitrate: '8 Mbps' },
-    { id: 'medium', label: 'Social', sub: 'Optimized',      bitrate: '5 Mbps' },
-    { id: 'low',    label: 'Draft',  sub: 'Fast render',    bitrate: '2 Mbps' }
+    { id: 'high',   label: 'Pro',    bitrate: '8 Mbps',  sub: 'Max bitrate'  },
+    { id: 'medium', label: 'Social', bitrate: '5 Mbps',  sub: 'Balanced'     },
+    { id: 'low',    label: 'Draft',  bitrate: '2 Mbps',  sub: 'Fast render'  },
 ];
 
-// NLE target definitions — IDs must match POST /api/export/nle `target` values
 const NLE_TARGETS = [
-    {
-        id:     'premiere',
-        label:  'Premiere Pro',
-        sub:    'xmeml v5 (.xml)',
-        ext:    '.xml',
-        color:  'from-indigo-500/20 to-purple-600/10',
-        border: 'border-indigo-500/40',
-        text:   'text-indigo-400',
-        badge:  'bg-indigo-500/20 text-indigo-300',
-    },
-    {
-        id:     'fcpx',
-        label:  'Final Cut Pro',
-        sub:    'FCPXML 1.8 (.fcpxml)',
-        ext:    '.fcpxml',
-        color:  'from-gray-500/20 to-slate-600/10',
-        border: 'border-gray-400/40',
-        text:   'text-gray-300',
-        badge:  'bg-gray-500/20 text-gray-300',
-    },
-    {
-        id:     'resolve',
-        label:  'DaVinci Resolve',
-        sub:    'xmeml v5 + OTIO',
-        ext:    '.xml + .otio',
-        color:  'from-yellow-500/20 to-amber-600/10',
-        border: 'border-yellow-500/40',
-        text:   'text-yellow-400',
-        badge:  'bg-yellow-500/20 text-yellow-300',
-    },
-    {
-        id:     'otio',
-        label:  'OpenTimelineIO',
-        sub:    'Universal interchange',
-        ext:    '.otio',
-        color:  'from-teal-500/20 to-cyan-600/10',
-        border: 'border-teal-500/40',
-        text:   'text-teal-400',
-        badge:  'bg-teal-500/20 text-teal-300',
-    },
+    { id: 'premiere', label: 'Premiere Pro',    sub: 'xmeml v5',          ext: '.xml'         },
+    { id: 'fcpx',     label: 'Final Cut Pro',   sub: 'FCPXML 1.8',        ext: '.fcpxml'      },
+    { id: 'resolve',  label: 'DaVinci Resolve', sub: 'xmeml + OTIO',      ext: '.xml + .otio' },
+    { id: 'otio',     label: 'OpenTimelineIO',  sub: 'Universal format',  ext: '.otio'        },
 ];
 
-// ============================================================================
-// VIBED LOGO — waveform bars, cyan→violet gradient (matches brand mark)
-// ============================================================================
+// ─── Vibed logo mark (waveform bars, cyan→violet) ────────────────────────────
 
-const VibedLogoIcon = ({ size = 18 }) => (
+const VibedMark = ({ size = 20 }) => (
     <svg width={size} height={size} viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="2.5"  y="15"   width="7" height="70" rx="3.5" fill="#00E5FF" />
         <rect x="13.5" y="25"   width="7" height="50" rx="3.5" fill="#17CDFB" />
@@ -134,207 +53,309 @@ const VibedLogoIcon = ({ size = 18 }) => (
     </svg>
 );
 
-// ============================================================================
-// EXPORT MODAL
-// ============================================================================
+// ─── Atoms ────────────────────────────────────────────────────────────────────
+
+/** Mono eyebrow label */
+const Label = ({ children }) => (
+    <p style={{
+        fontFamily: 'var(--f-mono)',
+        fontSize: 10,
+        letterSpacing: '0.16em',
+        textTransform: 'uppercase',
+        color: 'var(--fg-4)',
+        margin: 0,
+    }}>
+        {children}
+    </p>
+);
+
+/** Thin separator */
+const Sep = () => (
+    <div style={{ height: 1, background: 'var(--line)', margin: '0 -24px' }} />
+);
+
+// ─── Main component ───────────────────────────────────────────────────────────
 
 const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exportError }) => {
-    const [activeTab, setActiveTab] = useState('video');   // 'video' | 'nle'
-    const [settings, setSettings] = useState({
-        platform: null,
-        resolution: '1080p',
-        fps: 30,
-        format: 'mp4',
-        quality: 'high'
-    });
-    const [step, setStep] = useState('configure');
-    const [progress, setProgress] = useState(0);
-    const [nleStatus,      setNleStatus]      = useState(null); // null | 'success' | 'error'
-    const [nleError,       setNleError]       = useState(null);
-    const [nleLoadingId,   setNleLoadingId]   = useState(null); // id of card currently exporting
+    const [activeTab, setActiveTab] = useState('video');
+    const [settings, setSettings]   = useState({ platform: null, resolution: '1080p', fps: 30, format: 'mp4', quality: 'high' });
+    const [step, setStep]           = useState('configure');
+    const [progress, setProgress]   = useState(0);
+    const [nleStatus, setNleStatus] = useState(null);
+    const [nleError,  setNleError]  = useState(null);
+    const [nleLoading, setNleLoading] = useState(null);
 
-    const { tracks, aspectRatio } = useTimelineStore(useShallow(state => ({
-        tracks:      state.tracks,
-        aspectRatio: state.aspectRatio,
-    })));
+    const { tracks, aspectRatio } = useTimelineStore(useShallow(s => ({ tracks: s.tracks, aspectRatio: s.aspectRatio })));
 
     useEffect(() => {
         if (isExporting) {
             setStep('exporting');
             let p = 0;
-            const ticker = setInterval(() => {
-                p = Math.min(p + Math.random() * 8, 90);
-                setProgress(Math.round(p));
-            }, 400);
-            return () => clearInterval(ticker);
+            const t = setInterval(() => { p = Math.min(p + Math.random() * 6, 88); setProgress(Math.round(p)); }, 500);
+            return () => clearInterval(t);
         }
     }, [isExporting]);
 
-    useEffect(() => {
-        if (exportResult) { setStep('done'); setProgress(100); }
-    }, [exportResult]);
-
-    useEffect(() => {
-        if (exportError) { setStep('error'); }
-    }, [exportError]);
+    useEffect(() => { if (exportResult) { setStep('done'); setProgress(100); } }, [exportResult]);
+    useEffect(() => { if (exportError)  { setStep('error'); } }, [exportError]);
 
     if (!isOpen) return null;
 
     const selectedPlatform = PLATFORMS.find(p => p.id === settings.platform);
 
     const handleClose = () => {
-        setStep('configure');
-        setProgress(0);
-        setNleStatus(null);
-        setNleError(null);
+        setStep('configure'); setProgress(0);
+        setNleStatus(null); setNleError(null);
         onClose();
     };
 
-    const handlePlatformSelect = (platformId) => {
-        const p = PLATFORMS.find(pl => pl.id === platformId);
-        setSettings(s => ({ ...s, platform: platformId, fps: p?.fps || 30 }));
-    };
-
-    const handleExport = () => {
-        setProgress(0);
-        onExport(settings);
-    };
-
-    const handleNLEExport = async (format) => {
-        setNleStatus(null);
-        setNleError(null);
-        setNleLoadingId(format);
+    const handleNLEExport = async (id) => {
+        setNleStatus(null); setNleError(null); setNleLoading(id);
         try {
-            await exportToNLE(format, tracks, {
-                fps: settings.fps || 30,
-                aspectRatio: aspectRatio || '16:9',
-                title: 'Viral Pilot Export',
-            });
+            await exportToNLE(id, tracks, { fps: settings.fps || 30, aspectRatio: aspectRatio || '16:9', title: 'Vibed Export' });
             setNleStatus('success');
         } catch (err) {
-            setNleStatus('error');
-            setNleError(err.message);
+            setNleStatus('error'); setNleError(err.message);
         } finally {
-            setNleLoadingId(null);
+            setNleLoading(null);
         }
     };
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md">
-            <div className="w-full max-w-lg glass-panel rounded-2xl overflow-hidden relative">
+    // ── Shared styles ──────────────────────────────────────────────────────────
 
-                {/* Header */}
-                <div className="relative flex items-center justify-between px-6 py-4 border-b border-white/5 bg-card/80">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-white/5 border border-white/10 text-primary">
-                            <VibedLogoIcon size={18} />
-                        </div>
+    const overlay = {
+        position: 'fixed', inset: 0, zIndex: 50,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(0,0,0,0.72)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+    };
+
+    const modal = {
+        width: '100%', maxWidth: 488,
+        background: 'var(--bg-2)',
+        border: '0.5px solid var(--glass-stroke)',
+        borderRadius: 'var(--r-xl)',
+        boxShadow: '0 40px 80px -20px rgba(0,0,0,0.8), 0 0 0 0.5px rgba(255,255,255,0.04) inset',
+        overflow: 'hidden',
+        display: 'flex', flexDirection: 'column',
+        maxHeight: '90vh',
+    };
+
+    const selCard = (active) => ({
+        padding: '12px 14px',
+        borderRadius: 'var(--r-md)',
+        border: active ? '0.5px solid var(--accent)' : '0.5px solid var(--line)',
+        background: active
+            ? 'color-mix(in oklch, var(--accent) 12%, transparent)'
+            : 'var(--glass)',
+        cursor: 'pointer',
+        transition: 'all 0.15s ease',
+        boxShadow: active ? '0 0 16px -4px color-mix(in oklch, var(--accent) 30%, transparent)' : 'none',
+        textAlign: 'left',
+        display: 'flex', flexDirection: 'column', gap: 4,
+    });
+
+    const pill = (active) => ({
+        flex: 1, padding: '8px 0',
+        borderRadius: 'var(--r-sm)',
+        border: active ? '0.5px solid var(--accent)' : '0.5px solid transparent',
+        background: active ? 'color-mix(in oklch, var(--accent) 14%, transparent)' : 'transparent',
+        color: active ? 'var(--fg)' : 'var(--fg-4)',
+        fontFamily: 'var(--f-mono)', fontSize: 11, fontWeight: 500,
+        letterSpacing: '0.02em', textAlign: 'center', cursor: 'pointer',
+        transition: 'all 0.12s ease',
+    });
+
+    // ── Render ─────────────────────────────────────────────────────────────────
+
+    return (
+        <div style={overlay}>
+            <div style={modal}>
+
+                {/* ── Header ── */}
+                <div style={{ padding: '20px 24px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <VibedMark size={22} />
                         <div>
-                            <h2 className="text-sm font-extrabold tracking-tight text-foreground">Export Media</h2>
-                            <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest">Video render · NLE project</p>
+                            <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--fg)', letterSpacing: '-0.01em' }}>
+                                Export
+                            </p>
+                            <Label>Publish your work</Label>
                         </div>
                     </div>
-                    <button onClick={handleClose} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-muted-foreground hover:text-foreground">
-                        <X className="w-5 h-5" />
+                    <button
+                        onClick={handleClose}
+                        style={{
+                            width: 30, height: 30, borderRadius: 'var(--r-sm)',
+                            border: '0.5px solid var(--line)',
+                            background: 'var(--glass)',
+                            color: 'var(--fg-3)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            cursor: 'pointer', transition: 'all 0.12s ease',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.color = 'var(--fg)'; e.currentTarget.style.background = 'var(--glass-2)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.color = 'var(--fg-3)'; e.currentTarget.style.background = 'var(--glass)'; }}
+                    >
+                        <X size={14} />
                     </button>
                 </div>
 
-                {/* Tab Switcher */}
-                <div className="relative flex border-b border-white/5 px-5 pt-3 gap-2 bg-card/40">
-                    <button
-                        onClick={() => setActiveTab('video')}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-t-lg text-xs font-bold tracking-wide transition-all ${activeTab === 'video' ? 'bg-white/5 text-foreground border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'}`}
-                    >
-                        <Film className="w-3.5 h-3.5" /> Video File
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('nle')}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-t-lg text-xs font-bold tracking-wide transition-all ${activeTab === 'nle' ? 'bg-white/5 text-foreground border-b-2 border-accent' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'}`}
-                    >
-                        <Scissors className="w-3.5 h-3.5" /> NLE Project
-                    </button>
-                </div>
-                
-                {/* Scrollable Body */}
-                <div className="relative max-h-[70vh] overflow-y-auto">
+                <Sep />
 
-                {/* ── VIDEO TAB ── */}
-                {activeTab === 'video' && (
-                    <>
-                        {/* CONFIGURE step */}
+                {/* ── Tab switcher ── */}
+                <div style={{ display: 'flex', gap: 2, padding: '8px 24px 0', background: 'var(--bg-2)' }}>
+                    {[
+                        { id: 'video', icon: Film,    label: 'Video file' },
+                        { id: 'nle',   icon: Scissors, label: 'NLE project' },
+                    ].map(tab => {
+                        const active = activeTab === tab.id;
+                        const Icon = tab.icon;
+                        return (
+                            <button
+                                key={tab.id}
+                                onClick={() => setActiveTab(tab.id)}
+                                style={{
+                                    display: 'flex', alignItems: 'center', gap: 6,
+                                    padding: '8px 14px',
+                                    borderRadius: 'var(--r-sm) var(--r-sm) 0 0',
+                                    border: active ? '0.5px solid var(--line)' : '0.5px solid transparent',
+                                    borderBottom: active ? '0.5px solid var(--bg-3)' : '0.5px solid transparent',
+                                    background: active ? 'var(--bg-3)' : 'transparent',
+                                    color: active ? 'var(--fg)' : 'var(--fg-4)',
+                                    fontSize: 12, fontWeight: 500,
+                                    letterSpacing: '-0.005em',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.12s ease',
+                                    marginBottom: -1,
+                                }}
+                            >
+                                <Icon size={12} />
+                                {tab.label}
+                            </button>
+                        );
+                    })}
+                </div>
+
+                {/* ── Body ── */}
+                <div style={{ background: 'var(--bg-3)', flex: 1, overflowY: 'auto', borderTop: '0.5px solid var(--line)' }}>
+
+                    {/* ════ VIDEO TAB ════ */}
+                    {activeTab === 'video' && (
+
+                        <>
+                        {/* Configure */}
                         {step === 'configure' && (
-                            <div className="p-5 space-y-5">
-                                {/* Platform Profiles */}
-                                <div className="space-y-2">
-                                    <label className="text-xs font-semibold text-white/50 uppercase tracking-widest">Platform</label>
-                                    <div className="grid grid-cols-2 gap-2">
+                            <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 22 }}>
+
+                                {/* Platform */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                    <Label>Platform</Label>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                                         {PLATFORMS.map(pl => {
                                             const Icon = pl.icon;
-                                            const isActive = settings.platform === pl.id;
+                                            const active = settings.platform === pl.id;
                                             return (
                                                 <button
                                                     key={pl.id}
-                                                    onClick={() => handlePlatformSelect(pl.id)}
-                                                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all text-left ${isActive ? `bg-gradient-to-br ${pl.color} ${pl.border} shadow-md` : 'bg-white/4 border-white/8 hover:bg-white/8'}`}
+                                                    onClick={() => setSettings(s => ({ ...s, platform: pl.id === s.platform ? null : pl.id, fps: pl.fps }))}
+                                                    style={selCard(active)}
                                                 >
-                                                    <Icon className={`w-4 h-4 shrink-0 ${isActive ? pl.text : 'text-white/40'}`} />
-                                                    <div className="min-w-0">
-                                                        <div className={`text-xs font-bold ${isActive ? pl.text : 'text-white/70'}`}>{pl.label}</div>
-                                                        <div className="text-[9px] text-white/30 truncate">{pl.aspectRatio} · {pl.fps}fps</div>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                        <Icon size={14} style={{ color: active ? 'var(--accent)' : 'var(--fg-3)', flexShrink: 0 }} />
+                                                        <span style={{ fontSize: 13, fontWeight: 600, color: active ? 'var(--fg)' : 'var(--fg-2)', letterSpacing: '-0.005em' }}>
+                                                            {pl.label}
+                                                        </span>
                                                     </div>
-                                                    {isActive && (
-                                                        <span className={`ml-auto text-[8px] px-1.5 py-0.5 rounded-full ${pl.badge} shrink-0`}>{pl.resolution}</span>
-                                                    )}
+                                                    <p style={{ margin: 0, fontFamily: 'var(--f-mono)', fontSize: 10, color: active ? 'var(--fg-3)' : 'var(--fg-4)', letterSpacing: '0.04em' }}>
+                                                        {pl.ar} · {pl.fps}fps
+                                                    </p>
                                                 </button>
                                             );
                                         })}
                                     </div>
-                                    <button
-                                        onClick={() => setSettings(s => ({ ...s, platform: null }))}
-                                        className={`w-full text-xs py-2 rounded-lg border transition-all ${settings.platform === null ? 'bg-white/10 border-white/20 text-white' : 'bg-white/3 border-white/6 text-white/40 hover:bg-white/6'}`}
-                                    >
-                                        Custom settings
-                                    </button>
                                 </div>
 
-                                {/* Resolution */}
+                                {/* Resolution — only when no platform preset */}
                                 {!settings.platform && (
-                                    <div className="space-y-2">
-                                        <label className="text-xs font-semibold text-white/50 uppercase tracking-widest">Resolution</label>
-                                        <div className="grid grid-cols-4 gap-1.5">
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                        <Label>Resolution</Label>
+                                        <div style={{
+                                            display: 'flex', gap: 2,
+                                            background: 'var(--glass)',
+                                            border: '0.5px solid var(--line)',
+                                            borderRadius: 'var(--r-sm)',
+                                            padding: 3,
+                                        }}>
                                             {RESOLUTIONS.map(r => (
                                                 <button
                                                     key={r.id}
                                                     onClick={() => setSettings(s => ({ ...s, resolution: r.id }))}
-                                                    className={`py-2 rounded-lg border text-center transition-all ${settings.resolution === r.id ? 'bg-blue-500/20 border-blue-500/50 text-blue-300 shadow-md shadow-blue-500/10' : 'bg-white/4 border-white/8 text-white/50 hover:bg-white/8'}`}
+                                                    style={pill(settings.resolution === r.id)}
                                                 >
-                                                    <div className="text-xs font-bold">{r.label}</div>
-                                                    <div className="text-[9px] opacity-60">{r.sub}</div>
+                                                    <div style={{ fontWeight: 600, fontSize: 11 }}>{r.label}</div>
+                                                    <div style={{ fontSize: 9, opacity: 0.6 }}>{r.sub}</div>
                                                 </button>
                                             ))}
                                         </div>
                                     </div>
                                 )}
 
-                                {/* FPS + Format */}
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="space-y-2">
-                                        <label className="text-xs font-semibold text-white/50 uppercase tracking-widest">Frame Rate</label>
-                                        <div className="flex bg-white/4 rounded-lg p-0.5">
+                                {/* Quality */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                    <Label>Quality</Label>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+                                        {QUALITY_PROFILES.map(q => {
+                                            const active = settings.quality === q.id;
+                                            return (
+                                                <button
+                                                    key={q.id}
+                                                    onClick={() => setSettings(s => ({ ...s, quality: q.id }))}
+                                                    style={selCard(active)}
+                                                >
+                                                    <span style={{ fontSize: 13, fontWeight: 600, color: active ? 'var(--fg)' : 'var(--fg-2)' }}>
+                                                        {q.label}
+                                                    </span>
+                                                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: active ? 'color-mix(in oklch, var(--accent) 80%, var(--fg-3))' : 'var(--fg-4)', letterSpacing: '0.02em' }}>
+                                                        {q.bitrate}
+                                                    </span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                {/* FPS / Format — compact row */}
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                        <Label>Frame rate</Label>
+                                        <div style={{
+                                            display: 'flex', gap: 2,
+                                            background: 'var(--glass)',
+                                            border: '0.5px solid var(--line)',
+                                            borderRadius: 'var(--r-sm)',
+                                            padding: 3,
+                                            opacity: settings.platform ? 0.4 : 1,
+                                            pointerEvents: settings.platform ? 'none' : 'auto',
+                                        }}>
                                             {[24, 30, 60].map(fps => (
-                                                <button key={fps} onClick={() => setSettings(s => ({ ...s, fps }))} disabled={!!settings.platform}
-                                                    className={`flex-1 py-1.5 text-[11px] font-medium rounded-md transition-all ${settings.fps === fps ? 'bg-white/20 text-white' : 'text-white/30 hover:text-white/60'} ${settings.platform ? 'opacity-40 cursor-not-allowed' : ''}`}>
+                                                <button key={fps} onClick={() => setSettings(s => ({ ...s, fps }))} style={pill(settings.fps === fps)}>
                                                     {fps}
                                                 </button>
                                             ))}
                                         </div>
                                     </div>
-                                    <div className="space-y-2">
-                                        <label className="text-xs font-semibold text-white/50 uppercase tracking-widest">Format</label>
-                                        <div className="flex bg-white/4 rounded-lg p-0.5">
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                        <Label>Format</Label>
+                                        <div style={{
+                                            display: 'flex', gap: 2,
+                                            background: 'var(--glass)',
+                                            border: '0.5px solid var(--line)',
+                                            borderRadius: 'var(--r-sm)',
+                                            padding: 3,
+                                        }}>
                                             {['mp4', 'webm'].map(fmt => (
-                                                <button key={fmt} onClick={() => setSettings(s => ({ ...s, format: fmt }))}
-                                                    className={`flex-1 py-1.5 text-[11px] font-medium rounded-md transition-all ${settings.format === fmt ? 'bg-white/20 text-white' : 'text-white/30 hover:text-white/60'}`}>
+                                                <button key={fmt} onClick={() => setSettings(s => ({ ...s, format: fmt }))} style={pill(settings.format === fmt)}>
                                                     {fmt.toUpperCase()}
                                                 </button>
                                             ))}
@@ -342,64 +363,119 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                     </div>
                                 </div>
 
-                                {/* Quality */}
-                                <div className="space-y-2">
-                                    <label className="text-xs font-semibold text-white/50 uppercase tracking-widest">Quality</label>
-                                    <div className="grid grid-cols-3 gap-2">
-                                        {QUALITY_PROFILES.map(q => (
-                                            <button key={q.id} onClick={() => setSettings(s => ({ ...s, quality: q.id }))}
-                                                className={`py-2.5 rounded-xl border text-center transition-all ${settings.quality === q.id ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300 shadow-md' : 'bg-white/4 border-white/8 text-white/50 hover:bg-white/8'}`}>
-                                                <div className="text-xs font-bold">{q.label}</div>
-                                                <div className="text-[9px] opacity-70 mt-0.5">{q.bitrate}</div>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <button onClick={handleExport}
-                                    className="glass-button-pro w-full py-4 mt-2 flex items-center justify-center gap-2 text-sm uppercase tracking-wider font-extrabold hover:scale-[1.01]">
-                                    <Download className="w-4 h-4" />
-                                    {selectedPlatform ? `Export for ${selectedPlatform.label}` : 'Export Video'}
+                                {/* CTA */}
+                                <button
+                                    onClick={() => { setProgress(0); onExport(settings); }}
+                                    className="glass-button-pro"
+                                    style={{
+                                        width: '100%', padding: '14px 0',
+                                        borderRadius: 'var(--r-md)',
+                                        fontSize: 13, fontWeight: 700, letterSpacing: '0.06em',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                                        marginTop: 4,
+                                    }}
+                                >
+                                    <Download size={14} />
+                                    {selectedPlatform ? `Export for ${selectedPlatform.label}` : 'Export video'}
+                                    <ArrowRight size={13} style={{ opacity: 0.6 }} />
                                 </button>
                             </div>
                         )}
 
-                        {/* EXPORTING step */}
+                        {/* Exporting */}
                         {step === 'exporting' && (
-                            <div className="p-8 flex flex-col items-center gap-5">
-                                <div className="w-16 h-16 rounded-full bg-blue-500/10 flex items-center justify-center">
-                                    <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+                            <div style={{ padding: '52px 32px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24 }}>
+                                {/* Spinner with glow */}
+                                <div style={{ position: 'relative', width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    <div style={{
+                                        position: 'absolute', inset: 0, borderRadius: '50%',
+                                        background: 'color-mix(in oklch, var(--accent) 15%, transparent)',
+                                        boxShadow: '0 0 32px color-mix(in oklch, var(--accent) 30%, transparent)',
+                                    }} />
+                                    <Loader2 size={28} style={{ color: 'var(--accent)', animation: 'spin 1s linear infinite', position: 'relative' }} />
                                 </div>
-                                <div className="text-center">
-                                    <p className="text-sm font-bold text-white">Rendering your video…</p>
-                                    <p className="text-xs text-white/40 mt-1">FFmpeg is concatenating clips and encoding</p>
+
+                                <div style={{ textAlign: 'center' }}>
+                                    <p style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 600, color: 'var(--fg)', letterSpacing: '-0.01em' }}>
+                                        Rendering
+                                    </p>
+                                    <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-4)', fontFamily: 'var(--f-mono)' }}>
+                                        FFmpeg is encoding your timeline
+                                    </p>
                                 </div>
-                                <div className="w-full bg-white/8 rounded-full h-1.5 overflow-hidden">
-                                    <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
+
+                                {/* Progress bar */}
+                                <div style={{ width: '100%', maxWidth: 280 }}>
+                                    <div style={{
+                                        height: 3, width: '100%',
+                                        background: 'var(--glass)',
+                                        borderRadius: 99, overflow: 'hidden',
+                                    }}>
+                                        <div style={{
+                                            height: '100%',
+                                            width: `${progress}%`,
+                                            background: 'linear-gradient(90deg, var(--accent), var(--violet))',
+                                            borderRadius: 99,
+                                            transition: 'width 0.4s ease',
+                                            boxShadow: '0 0 8px var(--accent)',
+                                        }} />
+                                    </div>
+                                    <p style={{ margin: '8px 0 0', textAlign: 'center', fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--fg-4)' }}>
+                                        {progress}%
+                                    </p>
                                 </div>
-                                <p className="text-xs text-white/30 font-mono">{progress}% complete</p>
                             </div>
                         )}
 
-                        {/* DONE step */}
+                        {/* Done */}
                         {step === 'done' && exportResult && (
-                            <div className="p-8 flex flex-col items-center gap-5">
-                                <div className="w-16 h-16 rounded-full bg-green-500/15 flex items-center justify-center">
-                                    <CheckCircle2 className="w-8 h-8 text-green-400" />
+                            <div style={{ padding: '36px 24px 28px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 }}>
+                                {/* Success badge */}
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                                    <div style={{
+                                        width: 52, height: 52, borderRadius: '50%',
+                                        background: 'color-mix(in srgb, #00c97a 12%, transparent)',
+                                        border: '0.5px solid color-mix(in srgb, #00c97a 30%, transparent)',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        boxShadow: '0 0 24px color-mix(in srgb, #00c97a 20%, transparent)',
+                                    }}>
+                                        <CheckCircle2 size={24} style={{ color: '#00c97a' }} />
+                                    </div>
+                                    <div style={{ textAlign: 'center' }}>
+                                        <p style={{ margin: '0 0 2px', fontSize: 15, fontWeight: 600, color: 'var(--fg)', letterSpacing: '-0.01em' }}>
+                                            Render complete
+                                        </p>
+                                        <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-4)', fontFamily: 'var(--f-mono)' }}>
+                                            {exportResult.metadata?.resolution} · {exportResult.metadata?.sizeMB} MB
+                                        </p>
+                                    </div>
                                 </div>
-                                <div className="text-center">
-                                    <p className="text-sm font-bold text-white">Export Complete! 🎉</p>
-                                    <p className="text-xs text-white/40 mt-1">{exportResult.metadata?.resolution} · {exportResult.metadata?.sizeMB} MB · {exportResult.metadata?.duration}</p>
+
+                                {/* Metadata grid */}
+                                <div style={{
+                                    width: '100%',
+                                    background: 'var(--glass)',
+                                    border: '0.5px solid var(--line)',
+                                    borderRadius: 'var(--r-md)',
+                                    padding: '14px 16px',
+                                    display: 'grid', gridTemplateColumns: '1fr 1fr',
+                                    gap: '10px 24px',
+                                }}>
+                                    {[
+                                        { k: 'Codec',    v: exportResult.metadata?.codec || 'H.264' },
+                                        { k: 'Size',     v: `${exportResult.metadata?.sizeMB || '?'} MB` },
+                                        { k: 'Clips',    v: exportResult.metadata?.segments ?? '—' },
+                                        { k: 'Platform', v: exportResult.metadata?.platform || 'Custom' },
+                                    ].map(({ k, v }) => (
+                                        <div key={k}>
+                                            <p style={{ margin: '0 0 2px', fontFamily: 'var(--f-mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--fg-4)' }}>{k}</p>
+                                            <p style={{ margin: 0, fontFamily: 'var(--f-mono)', fontSize: 12, color: 'var(--fg-2)' }}>{v}</p>
+                                        </div>
+                                    ))}
                                 </div>
-                                <div className="w-full bg-white/4 rounded-xl border border-white/8 p-4 text-xs space-y-1.5 font-mono">
-                                    <div className="flex justify-between"><span className="text-white/40">Codec</span><span className="text-green-300">{exportResult.metadata?.codec || 'h264'}</span></div>
-                                    <div className="flex justify-between"><span className="text-white/40">Resolution</span><span className="text-white/80">{exportResult.metadata?.resolution}</span></div>
-                                    <div className="flex justify-between"><span className="text-white/40">Clips merged</span><span className="text-white/80">{exportResult.metadata?.segments}</span></div>
-                                    {exportResult.metadata?.platform && (
-                                        <div className="flex justify-between"><span className="text-white/40">Platform</span><span className="text-blue-300">{exportResult.metadata.platform}</span></div>
-                                    )}
-                                </div>
-                                <div className="flex gap-2 w-full">
+
+                                {/* Actions */}
+                                <div style={{ display: 'flex', gap: 8, width: '100%' }}>
                                     <button
                                         onClick={async () => {
                                             try {
@@ -415,95 +491,143 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                                 window.open(exportResult.url, '_blank');
                                             }
                                         }}
-                                        className="flex-1 py-3 rounded-xl bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-green-500/20 transition-all">
-                                        <Download className="w-4 h-4" /> Download
+                                        className="glass-button-pro"
+                                        style={{
+                                            flex: 1, padding: '13px 0',
+                                            borderRadius: 'var(--r-md)',
+                                            fontSize: 13, fontWeight: 700, letterSpacing: '0.06em',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+                                        }}
+                                    >
+                                        <Download size={14} /> Download
                                     </button>
-                                    <button onClick={() => setStep('configure')}
-                                        className="px-4 py-3 rounded-xl bg-white/6 border border-white/10 hover:bg-white/10 text-white/60 text-sm font-medium transition-all">
-                                        Export Again
+                                    <button
+                                        onClick={() => setStep('configure')}
+                                        style={{
+                                            padding: '13px 18px',
+                                            borderRadius: 'var(--r-md)',
+                                            border: '0.5px solid var(--line)',
+                                            background: 'var(--glass)',
+                                            color: 'var(--fg-3)', fontSize: 12, fontWeight: 500,
+                                            cursor: 'pointer', transition: 'all 0.12s ease',
+                                        }}
+                                        onMouseEnter={e => { e.currentTarget.style.color = 'var(--fg)'; e.currentTarget.style.background = 'var(--glass-2)'; }}
+                                        onMouseLeave={e => { e.currentTarget.style.color = 'var(--fg-3)'; e.currentTarget.style.background = 'var(--glass)'; }}
+                                    >
+                                        Again
                                     </button>
                                 </div>
                             </div>
                         )}
 
-                        {/* ERROR step */}
+                        {/* Error */}
                         {step === 'error' && (
-                            <div className="p-8 flex flex-col items-center gap-5">
-                                <div className="w-16 h-16 rounded-full bg-red-500/15 flex items-center justify-center">
-                                    <AlertCircle className="w-8 h-8 text-red-400" />
+                            <div style={{ padding: '48px 32px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 }}>
+                                <div style={{
+                                    width: 52, height: 52, borderRadius: '50%',
+                                    background: 'color-mix(in srgb, #f04040 10%, transparent)',
+                                    border: '0.5px solid color-mix(in srgb, #f04040 25%, transparent)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                }}>
+                                    <AlertCircle size={22} style={{ color: '#f04040' }} />
                                 </div>
-                                <div className="text-center">
-                                    <p className="text-sm font-bold text-white">Export Failed</p>
-                                    <p className="text-xs text-red-400/70 mt-1 max-w-xs">{exportError || 'An unknown error occurred during rendering.'}</p>
+                                <div style={{ textAlign: 'center' }}>
+                                    <p style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 600, color: 'var(--fg)' }}>Render failed</p>
+                                    <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-4)', fontFamily: 'var(--f-mono)', maxWidth: 280 }}>
+                                        {exportError || 'An unknown error occurred.'}
+                                    </p>
                                 </div>
-                                <button onClick={() => setStep('configure')}
-                                    className="w-full py-3 rounded-xl bg-white/6 border border-white/10 hover:bg-white/10 text-white font-bold text-sm transition-all">
-                                    Try Again
+                                <button
+                                    onClick={() => setStep('configure')}
+                                    style={{
+                                        padding: '12px 32px',
+                                        borderRadius: 'var(--r-md)',
+                                        border: '0.5px solid var(--line)',
+                                        background: 'var(--glass)',
+                                        color: 'var(--fg)', fontSize: 13, fontWeight: 600,
+                                        cursor: 'pointer',
+                                    }}
+                                >
+                                    Try again
                                 </button>
                             </div>
                         )}
-                    </>
-                )}
+                        </>
+                    )}
 
-                {/* ── NLE TAB ── */}
-                {activeTab === 'nle' && (
-                    <div className="p-5 space-y-4">
-                        <p className="text-[11px] text-white/40 leading-relaxed">
-                            Export your timeline as a project file that can be imported directly into your editing software. No re-encoding — your original media stays intact.
-                        </p>
-
-                        <div className="grid grid-cols-2 gap-2">
-                            {NLE_TARGETS.map(nle => {
-                                const isLoading = nleLoadingId === nle.id;
-                                return (
-                                    <button
-                                        key={nle.id}
-                                        onClick={() => handleNLEExport(nle.id)}
-                                        disabled={!!nleLoadingId}
-                                        className={`flex flex-col gap-1.5 px-4 py-3 rounded-xl border text-left transition-all bg-gradient-to-br ${nle.color} ${nle.border} hover:brightness-110 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed`}
-                                    >
-                                        <div className="flex items-center justify-between">
-                                            <span className={`text-xs font-bold ${nle.text}`}>{nle.label}</span>
-                                            <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-mono ${nle.badge}`}>{nle.ext}</span>
-                                        </div>
-                                        <span className="text-[10px] text-white/40">{nle.sub}</span>
-                                        <div className={`flex items-center gap-1 mt-1 text-[10px] ${nle.text}`}>
-                                            {isLoading
-                                                ? <><Loader2 className="w-3 h-3 animate-spin" /><span>Generating…</span></>
-                                                : <><Download className="w-3 h-3" /><span>Download</span></>}
-                                        </div>
-                                    </button>
-                                );
-                            })}
-                        </div>
-
-                        {/* Status messages */}
-                        {nleStatus === 'success' && (
-                            <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-green-500/10 border border-green-500/30">
-                                <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />
-                                <span className="text-xs text-green-300">Project file downloaded successfully!</span>
-                            </div>
-                        )}
-                        {nleStatus === 'error' && (
-                            <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/30">
-                                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                                <span className="text-xs text-red-300">{nleError || 'Failed to generate project file.'}</span>
-                            </div>
-                        )}
-
-                        <div className="pt-1 border-t border-white/6">
-                            <p className="text-[10px] text-white/25 leading-relaxed">
-                                <strong className="text-white/40">Premiere Pro</strong> — File → Import → .xml (xmeml v5)<br />
-                                <strong className="text-white/40">Final Cut Pro</strong> — File → Import → XML → .fcpxml (FCPXML 1.8)<br />
-                                <strong className="text-white/40">DaVinci Resolve</strong> — downloads both .xml &amp; .otio (Resolve 18+ supports OTIO natively)<br />
-                                <strong className="text-white/40">OTIO</strong> — universal interchange; works in Resolve 18, Premiere (beta), Kdenlive 20+
+                    {/* ════ NLE TAB ════ */}
+                    {activeTab === 'nle' && (
+                        <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                            <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-4)', lineHeight: 1.6, fontFamily: 'var(--f-mono)' }}>
+                                Export as a project file — no re-encoding. Your original media stays intact.
                             </p>
-                        </div>
-                    </div>
-                )}
-                </div>
 
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                                {NLE_TARGETS.map(nle => {
+                                    const loading = nleLoading === nle.id;
+                                    return (
+                                        <button
+                                            key={nle.id}
+                                            onClick={() => handleNLEExport(nle.id)}
+                                            disabled={!!nleLoading}
+                                            style={{
+                                                ...selCard(false),
+                                                opacity: nleLoading && !loading ? 0.4 : 1,
+                                                cursor: nleLoading ? 'not-allowed' : 'pointer',
+                                                gap: 8,
+                                            }}
+                                            onMouseEnter={e => { if (!nleLoading) { e.currentTarget.style.background = 'var(--glass-2)'; e.currentTarget.style.borderColor = 'var(--line-strong)'; } }}
+                                            onMouseLeave={e => { e.currentTarget.style.background = 'var(--glass)'; e.currentTarget.style.borderColor = 'var(--line)'; }}
+                                        >
+                                            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-2)' }}>{nle.label}</span>
+                                            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)' }}>{nle.sub}</span>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 4, color: 'var(--accent)', fontSize: 11 }}>
+                                                {loading
+                                                    ? <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Generating…</>
+                                                    : <><Download size={11} /> <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10 }}>{nle.ext}</span></>
+                                                }
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            {nleStatus === 'success' && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 'var(--r-sm)', background: 'color-mix(in srgb, #00c97a 8%, transparent)', border: '0.5px solid color-mix(in srgb, #00c97a 25%, transparent)' }}>
+                                    <CheckCircle2 size={14} style={{ color: '#00c97a', flexShrink: 0 }} />
+                                    <span style={{ fontSize: 12, color: '#00c97a', fontFamily: 'var(--f-mono)' }}>Project file downloaded</span>
+                                </div>
+                            )}
+                            {nleStatus === 'error' && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 'var(--r-sm)', background: 'color-mix(in srgb, #f04040 8%, transparent)', border: '0.5px solid color-mix(in srgb, #f04040 25%, transparent)' }}>
+                                    <AlertCircle size={14} style={{ color: '#f04040', flexShrink: 0 }} />
+                                    <span style={{ fontSize: 12, color: '#f04040', fontFamily: 'var(--f-mono)' }}>{nleError || 'Failed to generate.'}</span>
+                                </div>
+                            )}
+
+                            <Sep />
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                {[
+                                    ['Premiere Pro',    'File → Import → .xml'],
+                                    ['Final Cut Pro',   'File → Import → XML'],
+                                    ['DaVinci Resolve', '.xml + .otio (Resolve 18+)'],
+                                    ['OpenTimelineIO',  'Universal — Resolve, Premiere (beta), Kdenlive 20+'],
+                                ].map(([app, hint]) => (
+                                    <div key={app} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                                        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)', minWidth: 110 }}>{app}</span>
+                                        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)' }}>{hint}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                </div>
             </div>
+
+            {/* Spin keyframe — injected once */}
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
     );
 };
