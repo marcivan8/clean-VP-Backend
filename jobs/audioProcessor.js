@@ -400,13 +400,25 @@ module.exports = async function processAudioJob(job) {
         }
 
         case 'transcribe': {
-            console.log(`[Job ${job.id}] 🎤 Transcribing with Whisper: ${inputPath}`);
+            const AssemblyAIService = require('../services/AssemblyAIService');
+
+            // ── PRIMARY: AssemblyAI (handles upload + transcription server-side) ─
+            if (AssemblyAIService.isAvailable) {
+                console.log(`[Job ${job.id}] 🎙️ Transcribing with AssemblyAI: ${inputPath}`);
+                const result = await AssemblyAIService.transcribe(inputPath, language || null);
+                console.log(`[Job ${job.id}] 📝 AssemblyAI transcription complete: ${result.words.length} words`);
+                await job.updateProgress(100);
+                return result;
+            }
+
+            // ── FALLBACK: OpenAI Whisper ─────────────────────────────────────────
+            console.log(`[Job ${job.id}] 🎤 AssemblyAI not configured — falling back to Whisper: ${inputPath}`);
             let tTempAudio = null;
-            
-            console.log(`[Job ${job.id}] Extracting audio for Whisper to ensure compatibility and speed...`);
+
+            console.log(`[Job ${job.id}] Extracting audio for Whisper...`);
             tTempAudio = await extractAudioForWhisper(inputPath, tempDir);
             let tWhisperPath = tTempAudio;
-            
+
             try {
                 const openai = getOpenAI();
                 let transcription;
@@ -430,11 +442,10 @@ module.exports = async function processAudioJob(job) {
                     throw whisperErr;
                 }
                 await job.updateProgress(100);
-                // Some Whisper API versions return words at top level; others nest them inside segments
                 const topWords = transcription.words || [];
                 const segWords = (transcription.segments || []).flatMap(s => s.words || []);
                 const words = topWords.length > 0 ? topWords : segWords;
-                console.log(`[Job ${job.id}] 📝 Transcription complete: ${words.length} words`);
+                console.log(`[Job ${job.id}] 📝 Whisper transcription complete: ${words.length} words`);
                 return { text: transcription.text, words };
             } finally {
                 if (tTempAudio && fs.existsSync(tTempAudio)) fs.unlinkSync(tTempAudio);
