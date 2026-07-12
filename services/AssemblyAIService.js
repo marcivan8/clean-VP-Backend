@@ -106,4 +106,47 @@ async function diarize(filePath, language = null) {
     return { words, speakers, language: detectedLanguage };
 }
 
-module.exports = { isAvailable, diarize };
+/**
+ * Transcribe an audio/video file without speaker diarization.
+ * Cheaper and faster than diarize() — use this for caption generation.
+ *
+ * Returns the same { text, words } shape expected by the 'transcribe' job case.
+ */
+async function transcribe(filePath, language = null) {
+    if (!isAvailable) {
+        throw new Error('ASSEMBLYAI_API_KEY is not set — AssemblyAI transcription unavailable');
+    }
+
+    let AssemblyAI;
+    try {
+        ({ AssemblyAI } = require('assemblyai'));
+    } catch (e) {
+        throw new Error('assemblyai npm package not installed — run: npm install assemblyai');
+    }
+
+    const client = new AssemblyAI({ apiKey: API_KEY });
+
+    console.log(`[AssemblyAI] Submitting ${filePath} for transcription…`);
+
+    const params = { audio: filePath };
+    if (language && language !== 'auto') params.language_code = language;
+
+    const transcript = await client.transcripts.transcribe(params);
+
+    if (transcript.status === 'error') {
+        throw new Error(`AssemblyAI transcription failed: ${transcript.error}`);
+    }
+
+    // AssemblyAI timestamps are in milliseconds; convert to seconds.
+    const words = (transcript.words || []).map(w => ({
+        word:  w.text,
+        start: w.start / 1000,
+        end:   w.end   / 1000,
+    }));
+
+    console.log(`[AssemblyAI] Done — ${words.length} words, lang: ${transcript.language_code || language || 'en'}`);
+
+    return { text: transcript.text || '', words };
+}
+
+module.exports = { isAvailable, diarize, transcribe };
