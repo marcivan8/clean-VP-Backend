@@ -1234,7 +1234,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             <span className="font-bold text-sm">Media & Assets</span>
                         </div>
 
-                        <input type="file" ref={fileInputRef} onChange={handleFileImport} className="hidden" accept="video/*,audio/*,image/*" multiple />
+                        <input id="media-file-input" type="file" ref={fileInputRef} onChange={handleFileImport} className="hidden" accept="video/*,audio/*,image/*" multiple />
 
                         <div className="p-2 border-b flex gap-1 overflow-x-auto no-scrollbar" style={{ borderColor: "var(--line-soft)" }}>
                             {['media', 'captions', 'transcript', 'color', 'audio', 'transform', 'settings'].map(tab => (
@@ -1267,16 +1267,17 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 <section className="p-4 border-b" style={{ borderColor: "var(--line-soft)" }}>
                                     <div className="flex items-center justify-between mb-4">
                                         <div className="studio-mono-label" style={{ color: 'var(--fg-2)' }}>BIN · {assets.length} CLIPS</div>
-                                        <button onClick={triggerImport} className="text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-colors flex items-center gap-1" style={{ fontFamily: "var(--f-mono)" }}>
+                                        <label htmlFor="media-file-input" className="text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-colors flex items-center gap-1 cursor-pointer" style={{ fontFamily: "var(--f-mono)" }}>
                                             <Upload className="w-3 h-3" /> Import
-                                        </button>
+                                        </label>
                                     </div>
                                     <div className="grid grid-cols-2 gap-2">
                                         {assets.length === 0 && (
-                                            <div onClick={triggerImport} className="aspect-video border border-dashed border-border rounded-md flex flex-col items-center justify-center text-muted-foreground hover:bg-secondary/30 cursor-pointer transition-colors p-4 text-center col-span-2">
+                                            <label htmlFor="media-file-input" className="aspect-video border border-dashed border-border rounded-md flex flex-col items-center justify-center text-muted-foreground hover:bg-secondary/30 cursor-pointer transition-colors p-4 text-center col-span-2">
                                                 <Upload className="w-6 h-6 mb-2 opacity-50" />
-                                                <span className="text-xs">Drop media here</span>
-                                            </div>
+                                                <span className="text-xs">Tap or drop media</span>
+                                                <span className="text-[10px] opacity-50 mt-1">video · audio · image</span>
+                                            </label>
                                         )}
                                         {assets.map(asset => (
                                             <DraggableAsset key={asset.id} asset={asset} />

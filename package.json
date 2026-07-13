@@ -4,6 +4,7 @@
   "description": "AI-powered video virality analysis platform",
   "main": "index.js",
   "scripts": {
+    "build": "cd client && npm install && npm run build",
     "start": "node index.js",
     "start:worker": "node worker.js",
     "dev": "nodemon index.js",

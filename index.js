@@ -268,9 +268,19 @@ app.get('/api', (req, res) => {
 });
 
 // ── Serve React Frontend (Production) ─────────────────────────────────────────
-// Serve static files from the React build
+// Serve static files from the React build.
+// index.html is served with no-cache so browsers always fetch a fresh copy after
+// a redeploy — hashed asset filenames (JS/CSS) are safe to cache long-term.
 const clientBuildPath = path.join(__dirname, 'client', 'dist');
-app.use(express.static(clientBuildPath));
+app.use(express.static(clientBuildPath, {
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('index.html')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  },
+}));
 
 // Catch-all route for React client-side routing.
 // Must be placed AFTER all API routes but BEFORE the 404 handler.
@@ -290,6 +300,9 @@ app.get('*', (req, res, next) => {
 
   const indexPath = path.join(clientBuildPath, 'index.html');
   if (fs.existsSync(indexPath)) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.sendFile(indexPath);
   } else {
     next(); // Fall through to 404 if frontend hasn't been built
