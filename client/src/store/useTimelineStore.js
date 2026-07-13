@@ -952,7 +952,13 @@ const useTimelineStore = create(
                 try {
                     captions.forEach((cap, i) => {
                         const clipId = `caption-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`;
-                        const duration = Math.max(0.3, (cap.end || 0) - (cap.start || 0));
+                        // Clamp end to the next caption's start so ASR timing jitter never
+                        // causes two clips to be active at the same time (overlap bug).
+                        const nextStart = captions[i + 1]?.start;
+                        const clampedEnd = nextStart != null
+                            ? Math.min(cap.end || 0, nextStart)
+                            : (cap.end || 0);
+                        const duration = Math.max(0.3, clampedEnd - (cap.start || 0));
 
                         // Add the clip entity (metadata / visual properties)
                         // Preserve any existing global style from the text track (so style

@@ -435,13 +435,43 @@ const UploadStatusCard = ({ asset }) => {
 
 // Caption style presets for TASK 3
 const CAPTION_STYLES = [
-    { id: 'bold-impact',   name: 'Bold Impact',   font: 'Anton',            weight: 900, color: '#FFFFFF', stroke: { width: 2, color: '#000000' } },
-    { id: 'clean-modern',  name: 'Clean Modern',  font: 'Montserrat',       weight: 800, color: '#FFFFFF', stroke: null },
-    { id: 'soft-rounded',  name: 'Soft Rounded',  font: 'Nunito',           weight: 700, color: '#FFFFFF', stroke: null },
-    { id: 'cinematic',     name: 'Cinematic',     font: 'Playfair Display', weight: 700, style: 'italic', color: '#F5E6C8', stroke: null },
-    { id: 'handwritten',   name: 'Handwritten',   font: 'Caveat',           weight: 700, color: '#FFFFFF', stroke: null },
-    { id: 'motivational',  name: 'Motivational',  font: 'Oswald',           weight: 700, color: '#FFFFFF', stroke: { width: 1.5, color: '#000000' } },
+    {
+        id: 'bold-impact',  name: 'Bold Impact',  font: 'Anton',            weight: 900,
+        color: '#FACC15',   stroke: { width: 2, color: '#000000' },
+        textShadow: '2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000',
+        transform: 'uppercase', sample: 'AHA',
+    },
+    {
+        id: 'clean-modern', name: 'Clean Modern', font: 'Montserrat',       weight: 800,
+        color: '#FFFFFF',   stroke: null, textShadow: '0 2px 8px rgba(0,0,0,0.7)',
+        transform: 'uppercase', sample: 'Aha',
+    },
+    {
+        id: 'soft-rounded', name: 'Soft Rounded', font: 'Nunito',           weight: 700,
+        color: '#FFFFFF',   stroke: null, textShadow: '0 2px 12px rgba(0,0,0,0.5)',
+        transform: 'none',  sample: 'Aha',
+    },
+    {
+        id: 'cinematic',    name: 'Cinematic',    font: 'Playfair Display', weight: 700,
+        style: 'italic',    color: '#F5E6C8', stroke: null,
+        textShadow: '0 2px 16px rgba(0,0,0,0.8)', transform: 'none', sample: 'Aha',
+    },
+    {
+        id: 'handwritten',  name: 'Handwritten',  font: 'Caveat',           weight: 700,
+        color: '#FFFFFF',   stroke: null, textShadow: '0 2px 6px rgba(0,0,0,0.4)',
+        transform: 'none',  sample: 'Aha',
+    },
+    {
+        id: 'motivational', name: 'Motivational', font: 'Oswald',           weight: 700,
+        color: '#FFFFFF',   stroke: { width: 1.5, color: '#000000' },
+        textShadow: '0 2px 8px rgba(0,0,0,0.6)', transform: 'uppercase', sample: 'AHA',
+    },
 ];
+
+const FONT_STACK = (font) =>
+    font === 'Caveat' ? `"${font}", cursive`
+    : font === 'Playfair Display' ? `"${font}", serif`
+    : `"${font}", sans-serif`;
 
 const CaptionStylesCard = ({ log }) => {
     const [applied, setApplied] = useState(null);
@@ -491,12 +521,11 @@ const CaptionStylesCard = ({ log }) => {
                             onClick={() => applyStyle(style)}
                             className="flex-shrink-0 transition-all"
                             style={{
-                                minWidth: 78,
+                                minWidth: 82,
                                 borderRadius: 10,
                                 padding: 0,
                                 border: 'none',
                                 cursor: 'pointer',
-                                // Gradient border trick when active
                                 background: isActive
                                     ? 'linear-gradient(135deg, #00E5FF 0%, #8A2BE2 100%)'
                                     : 'rgba(255,255,255,0.06)',
@@ -509,29 +538,48 @@ const CaptionStylesCard = ({ log }) => {
                             <div style={{
                                 margin: isActive ? 1.5 : 1,
                                 borderRadius: isActive ? 8.5 : 9,
-                                background: isActive ? '#0d0d0f' : 'rgba(255,255,255,0.03)',
+                                background: isActive ? '#0a0a0c' : '#111114',
                                 border: isActive ? 'none' : '0.5px solid rgba(255,255,255,0.08)',
-                                padding: '10px 8px 8px',
+                                overflow: 'hidden',
                                 textAlign: 'center',
                             }}>
-                                {/* Abc preview */}
+                                {/* Video-like preview area */}
                                 <div style={{
-                                    fontFamily: `"${style.font}", ${style.font === 'Caveat' ? 'cursive' : style.font === 'Playfair Display' ? 'serif' : 'sans-serif'}`,
-                                    fontWeight: style.weight,
-                                    fontStyle:  style.style || 'normal',
-                                    fontSize:   17,
-                                    color:      style.color,
-                                    textShadow: style.textShadow || 'none',
-                                    WebkitTextStroke: style.stroke ? `${style.stroke.width}px ${style.stroke.color}` : 'none',
-                                    lineHeight: 1,
-                                    marginBottom: 7,
-                                    letterSpacing: style.id === 'bold-impact' ? '0.04em' : 'normal',
-                                    transition: 'all 0.2s',
+                                    height: 52,
+                                    background: 'linear-gradient(160deg, #1a1a2e 0%, #0d0d1a 100%)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    padding: '0 6px',
+                                    position: 'relative',
+                                    overflow: 'hidden',
                                 }}>
-                                    Abc
+                                    {/* Subtle video scanline texture */}
+                                    <div style={{
+                                        position: 'absolute', inset: 0,
+                                        backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px)',
+                                        pointerEvents: 'none',
+                                    }} />
+                                    <span style={{
+                                        fontFamily: FONT_STACK(style.font),
+                                        fontWeight: style.weight,
+                                        fontStyle:  style.style || 'normal',
+                                        fontSize:   style.id === 'handwritten' ? 22 : 20,
+                                        color:      style.color,
+                                        textShadow: style.textShadow || 'none',
+                                        WebkitTextStroke: style.stroke ? `${style.stroke.width}px ${style.stroke.color}` : 'none',
+                                        textTransform: style.transform || 'none',
+                                        letterSpacing: style.id === 'bold-impact' || style.id === 'motivational' ? '0.04em' : 'normal',
+                                        lineHeight: 1,
+                                        position: 'relative',
+                                        zIndex: 1,
+                                    }}>
+                                        {style.sample}
+                                    </span>
                                 </div>
                                 {/* Style name */}
                                 <div style={{
+                                    padding: '5px 4px 6px',
                                     fontFamily: 'var(--f-mono)',
                                     fontSize:   7.5,
                                     color:      isActive ? '#00E5FF' : 'var(--fg-4)',
