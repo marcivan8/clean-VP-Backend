@@ -11,11 +11,9 @@ const VideoPlayer = () => {
     const canvasRef = useRef(null);
     const containerRef = useRef(null); // Added containerRef
     const engineRef = useRef(null); // Persist engine instance
-    // Track previous time/playState to detect whether seek() is actually needed.
-    // Property-only changes (x, y, scale, rotation, grading) update avTracks/activeClip
-    // but don't need a new video decode — renderOnce() is enough.
-    const prevTimeRef = useRef(null);
-    const prevIsPlayingRef = useRef(null);
+    // (prevTimeRef / prevIsPlayingRef removed — seek-on-scrub is now handled by a
+    //  dedicated useEffect([currentTime, isPlaying]) so these stale-closure guards
+    //  are no longer needed)
     // Native video dimensions from onMetadata — used to pin canvas to source resolution
     // so that ResizeObserver doesn't downgrade it back to container size.
     const nativeVideoDimRef = useRef(null);
@@ -215,28 +213,28 @@ const VideoPlayer = () => {
                 engineRef.current.setCrop(0, 0, 1, 1);
             }
 
-            // When paused the RAF loop stops, so setCrop() above updates cropParams but
-            // nothing re-renders the canvas.  Trigger a one-shot frame render here —
-            // AFTER setCrop — so the crop uniforms are already correct when the frame
-            // arrives from the worker and is drawn.
+                // When paused the RAF loop stops — renderOnce() makes the next incoming frame
+            // draw immediately so crop/grading changes show up without a seek.
             if (!isPlaying && typeof engineRef.current.renderOnce === 'function') {
                 engineRef.current.renderOnce();
-                // seek() flushes stale buffered frames and asks the worker for a fresh
-                // one — but it also forces expensive video frame decoding.  Only call it
-                // when the current time or play state actually changed.  Property-only
-                // updates (x, y, scale, rotation, grading) change avTracks/activeClip
-                // references but don't need a new frame decode; renderOnce() is enough.
-                const timeChanged = prevTimeRef.current !== currentTime;
-                const playChanged = prevIsPlayingRef.current !== isPlaying;
-                if ((timeChanged || playChanged) && typeof engineRef.current.seek === 'function') {
-                    engineRef.current.seek(currentTime);
-                }
             }
         }
-        prevTimeRef.current = currentTime;
-        prevIsPlayingRef.current = isPlaying;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isPlaying, avTracks, assets, activeClipForEngine]);
 
-    }, [isPlaying, currentTime, avTracks, assets, activeClipForEngine]);
+    // --- Paused-scrub seek effect ---
+    // Runs only when currentTime changes while paused so the preview frame stays in sync
+    // with the scrubber.  Separated from the play/pause effect to avoid calling play()
+    // ~60fps during playback (which was the root cause of the canvas-clear quality bug).
+    useEffect(() => {
+        if (!engineRef.current || isPlaying) return;
+        if (typeof engineRef.current.seek === 'function') {
+            engineRef.current.seek(currentTime);
+        }
+        if (typeof engineRef.current.renderOnce === 'function') {
+            engineRef.current.renderOnce();
+        }
+    }, [currentTime, isPlaying]);
 
     // --- Audio Track Loader & Sync ---
     useEffect(() => {

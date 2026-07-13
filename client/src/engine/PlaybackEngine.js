@@ -428,8 +428,16 @@ class PlaybackEngine {
      */
     async play(url) {
         if (url) {
+            // Only reset _metadataEmitted when loading a genuinely different URL.
+            // play() is called every tick (60fps) from the VideoPlayer useEffect because
+            // currentTime is in its dependency array.  Resetting the flag here (before the
+            // PLAYING guard) caused onMetadata → resize() → canvas.width = X to fire on
+            // every incoming frame, clearing the WebGL canvas each tick and producing
+            // black flashes between frames (the "quality degrades on play" bug).
+            if (url !== this.currentUrl) {
+                this._metadataEmitted = false; // Only reset for a genuinely new URL
+            }
             this.currentUrl = url;
-            this._metadataEmitted = false; // Reset so onMetadata fires for new media
         }
         const targetUrl = url || this.currentUrl;
 
