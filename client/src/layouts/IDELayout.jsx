@@ -1267,17 +1267,35 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 <section className="p-4 border-b" style={{ borderColor: "var(--line-soft)" }}>
                                     <div className="flex items-center justify-between mb-4">
                                         <div className="studio-mono-label" style={{ color: 'var(--fg-2)' }}>BIN · {assets.length} CLIPS</div>
-                                        <label htmlFor="media-file-input" className="text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-colors flex items-center gap-1 cursor-pointer" style={{ fontFamily: "var(--f-mono)" }}>
+                                        {/* Import button — input overlaid directly so Android taps hit the input itself */}
+                                        <div className="relative text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-colors flex items-center gap-1" style={{ fontFamily: "var(--f-mono)" }}>
                                             <Upload className="w-3 h-3" /> Import
-                                        </label>
+                                            <input
+                                                type="file"
+                                                onChange={handleFileImport}
+                                                accept="video/*,audio/*,image/*"
+                                                multiple
+                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                style={{ fontSize: 0 }}
+                                            />
+                                        </div>
                                     </div>
                                     <div className="grid grid-cols-2 gap-2">
                                         {assets.length === 0 && (
-                                            <label htmlFor="media-file-input" className="aspect-video border border-dashed border-border rounded-md flex flex-col items-center justify-center text-muted-foreground hover:bg-secondary/30 cursor-pointer transition-colors p-4 text-center col-span-2">
+                                            /* Dropzone — same overlay trick: invisible input fills the entire card */
+                                            <div className="relative aspect-video border border-dashed border-border rounded-md flex flex-col items-center justify-center text-muted-foreground hover:bg-secondary/30 transition-colors p-4 text-center col-span-2">
                                                 <Upload className="w-6 h-6 mb-2 opacity-50" />
                                                 <span className="text-xs">Tap or drop media</span>
                                                 <span className="text-[10px] opacity-50 mt-1">video · audio · image</span>
-                                            </label>
+                                                <input
+                                                    type="file"
+                                                    onChange={handleFileImport}
+                                                    accept="video/*,audio/*,image/*"
+                                                    multiple
+                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                    style={{ fontSize: 0 }}
+                                                />
+                                            </div>
                                         )}
                                         {assets.map(asset => (
                                             <DraggableAsset key={asset.id} asset={asset} />
