@@ -17,12 +17,32 @@
 
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
+const { spawnSync, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
 const storageConfig = require('../config/storage');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
+
+// ── drawtext / libfreetype detection ─────────────────────────────────────────
+// ffmpeg-static omits libfreetype on most platforms, so the drawtext filter
+// (used to burn captions into the exported video) is unavailable.  We probe
+// once at startup: if the static binary lacks it we fall back to the system
+// ffmpeg (installed via apt in the Dockerfile) which ships with libfreetype.
+function _probeDrawtext(bin) {
+    try {
+        const r = spawnSync(bin, ['-filters'], { encoding: 'utf-8', timeout: 8000 });
+        return (r.stdout || r.stderr || '').includes('drawtext');
+    } catch (_) { return false; }
+}
+const SYSTEM_FFMPEG = '/usr/bin/ffmpeg';
+const DRAWTEXT_BIN  =
+    _probeDrawtext(ffmpegPath)                             ? ffmpegPath   :
+    (fs.existsSync(SYSTEM_FFMPEG) && _probeDrawtext(SYSTEM_FFMPEG)) ? SYSTEM_FFMPEG :
+    ffmpegPath; // last resort — drawtext will still fail but at least logs why
+console.log(`[exportProcessor] drawtext ffmpeg: ${DRAWTEXT_BIN === ffmpegPath ? 'static' : 'system ('+SYSTEM_FFMPEG+')'}`);
+// ─────────────────────────────────────────────────────────────────────────────
 
 const gcsBucket = storageConfig.bucket;
 
@@ -462,13 +482,14 @@ module.exports = async function processExportJob(job) {
     // ── STEP 4: Text overlays ──────────────────────────────────────────────
     const textTracks  = timeline.tracks.filter(t => t.type === 'text' && t.clips?.length > 0);
     const defaultFontPath = path.join(publicDir, 'fonts', 'Roboto-Regular.ttf');
-    const fontPath = fs.existsSync(defaultFontPath)
-        ? defaultFontPath
-        : [
-            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-            '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-            '/System/Library/Fonts/Helvetica.ttc',
-          ].find(p => fs.existsSync(p)) || null;
+    const fontPath = [
+        defaultFontPath,
+        // Debian/Ubuntu system fonts installed alongside ffmpeg (apt install ffmpeg)
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+        '/System/Library/Fonts/Helvetica.ttc',
+    ].find(p => fs.existsSync(p)) || null;
 
     const textFilters = [];
     for (const track of textTracks) {
@@ -499,20 +520,39 @@ module.exports = async function processExportJob(job) {
 
     if (textFilters.length > 0) {
         const textOverlayPath = path.join(tmpDir, 'with_text.mp4');
+        // Use spawn directly so we can (a) use a different binary (DRAWTEXT_BIN) without
+        // mutating the global fluent-ffmpeg path, (b) capture stderr for real error messages,
+        // and (c) map audio optionally — '-map 0:a?' silently skips missing audio streams
+        // instead of failing when a source clip has no audio track.
+        const drawtextArgs = [
+            '-i',  finalVideoPath,
+            '-vf', textFilters.join(','),
+            '-map', '0:v',
+            '-map', '0:a?',       // '?' = optional — won't error on video-only sources
+            '-c:v', codec,
+            '-c:a', 'copy',
+            '-y',
+            textOverlayPath,
+        ];
         try {
             await new Promise((resolve, reject) => {
-                ffmpeg(finalVideoPath)
-                    .addOutputOption('-vf', textFilters.join(','))
-                    .videoCodec(codec)
-                    .audioCodec('copy')
-                    .output(textOverlayPath)
-                    .on('end', () => { finalVideoPath = textOverlayPath; resolve(); })
-                    .on('error', reject)
-                    .run();
+                const proc = spawn(DRAWTEXT_BIN, drawtextArgs);
+                const stderrChunks = [];
+                proc.stderr.on('data', chunk => stderrChunks.push(chunk));
+                proc.on('error', reject);
+                proc.on('close', code => {
+                    if (code === 0) {
+                        resolve();
+                    } else {
+                        const errTail = Buffer.concat(stderrChunks).toString('utf-8').slice(-800);
+                        reject(new Error(`ffmpeg drawtext exited ${code}:\n${errTail}`));
+                    }
+                });
             });
+            finalVideoPath = textOverlayPath;
             console.log('  ✅ Text overlays applied');
         } catch (textErr) {
-            console.warn(`  ⚠️  Text overlay failed (skipping): ${textErr.message}`);
+            console.warn(`  ⚠️  Text overlay failed (skipping captions):\n${textErr.message}`);
         }
     }
 

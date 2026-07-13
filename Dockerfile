@@ -17,6 +17,8 @@ FROM node:20-slim
 WORKDIR /usr/src/app
 
 # Install system dependencies needed for canvas/sharp/tensorflow
+# ffmpeg is installed here (not just ffmpeg-static) because the static npm build
+# omits libfreetype, which is required by the drawtext filter used for caption export.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3 \
@@ -26,6 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgif-dev \
     librsvg2-dev \
     curl \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
