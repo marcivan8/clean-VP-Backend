@@ -192,12 +192,19 @@ module.exports = async function processVideoJob(job) {
         await job.updateProgress(100);
         console.log(`[Job ${job.id}] Completed proxy generation.`);
 
+        // rawGcsPath lets the client set sourceUrl on the asset so the
+        // export worker can fetch the original file directly from GCS.
+        const rawGcsPath = storageConfig.bucket && !storageConfig.useLocalStorage
+            ? `raw/${userId}/${filename.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9._-]/g, '')}`
+            : null;
+
         return {
             proxyUrl: mp4Url,
             waveformUrl: waveformUrl,
             originalPath: inputPath,
             // proxyPath = uploads-relative raw file path; audioRoutes resolves from uploads/ dir
             proxyPath: inputPath,
+            rawGcsPath,
         };
 
     } finally {

@@ -203,17 +203,56 @@ module.exports = async function processExportJob(job) {
         }
 
         if (gcsBucket) {
+            // ── 1. Try proxy/storage URL from clip metadata ──────────────────
             const gcsPath = await resolveGcsPath(c);
             if (gcsPath) {
                 console.log(`[ExportJob] GCS download: ${gcsPath}`);
-                await gcsBucket.file(gcsPath).download({ destination: localPath });
-                return localPath;
+                try {
+                    await gcsBucket.file(gcsPath).download({ destination: localPath });
+                    return localPath;
+                } catch (gcsErr) {
+                    console.warn(`[ExportJob] GCS proxy download failed (${gcsPath}): ${gcsErr.message} — trying raw file`);
+                }
+            }
+
+            // ── 2. Try raw/{userId}/{filename} — uploaded by proxyRoutes ────
+            const clipName = c.name || clip.name;
+            if (clipName) {
+                const safeName = sanitizeFilename(clipName);
+                for (const name of [clipName, safeName]) {
+                    if (!name) continue;
+                    const rawPath = `raw/${userId}/${name}`;
+                    try {
+                        const [exists] = await gcsBucket.file(rawPath).exists();
+                        if (exists) {
+                            console.log(`[ExportJob] GCS raw fallback: ${rawPath}`);
+                            await gcsBucket.file(rawPath).download({ destination: localPath });
+                            return localPath;
+                        }
+                    } catch (_) {}
+                }
+                // Try listing in case filename was prefixed with a timestamp
+                try {
+                    const [files] = await gcsBucket.getFiles({ prefix: `raw/${userId}/` });
+                    const match = files.find(f => {
+                        const base = f.name.split('/').pop();
+                        return base === clipName || base === safeName
+                            || base.endsWith(`-${clipName}`) || base.endsWith(`-${safeName}`);
+                    });
+                    if (match) {
+                        console.log(`[ExportJob] GCS raw fallback (listed): ${match.name}`);
+                        await gcsBucket.file(match.name).download({ destination: localPath });
+                        return localPath;
+                    }
+                } catch (_) {}
             }
         }
 
+        // ── 3. Local filesystem (monolith / dev mode) ────────────────────────
         const localSrc = resolveSourcePath(c, uploadsDir);
         if (localSrc) return localSrc;
 
+        // ── 4. Absolute HTTP URLs (signed GCS URLs, CDN, etc.) ───────────────
         for (const raw of [c.sourceUrl, c.url, c.src, c.videoUrl]) {
             if (raw && !raw.startsWith('blob:') && !raw.includes('/api/proxy') && raw.startsWith('http')) {
                 let safeUrl = raw;
@@ -222,12 +261,32 @@ module.exports = async function processExportJob(job) {
                     parsed.pathname = parsed.pathname.split('/').map(seg => encodeURIComponent(decodeURIComponent(seg))).join('/');
                     safeUrl = parsed.toString();
                 } catch (_) {}
-                await downloadToTemp(safeUrl, localPath);
-                return localPath;
+                try {
+                    await downloadToTemp(safeUrl, localPath);
+                    return localPath;
+                } catch (httpErr) {
+                    console.warn(`[ExportJob] HTTP download failed (${raw}): ${httpErr.message}`);
+                }
             }
         }
 
-        console.warn(`[ExportJob] Cannot resolve source for clip "${clip.name}"`);
+        // ── 5. Proxy URL via internal server URL (cross-container fallback) ──
+        const proxyRelUrl = c.proxyUrl || c.url;
+        if (proxyRelUrl && proxyRelUrl.startsWith('/api/proxy/')) {
+            const serverBase = process.env.PUBLIC_URL
+                || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : null)
+                || `http://localhost:${process.env.PORT || 3000}`;
+            const fullUrl = `${serverBase.replace(/\/$/, '')}${proxyRelUrl}`;
+            try {
+                console.log(`[ExportJob] Internal proxy download: ${fullUrl}`);
+                await downloadToTemp(fullUrl, localPath);
+                return localPath;
+            } catch (err) {
+                console.warn(`[ExportJob] Internal proxy download failed: ${err.message}`);
+            }
+        }
+
+        console.warn(`[ExportJob] Cannot resolve source for clip "${clip.name}" — skipping`);
         return null;
     };
 
