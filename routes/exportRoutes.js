@@ -108,12 +108,17 @@ router.post('/', authMiddleware, async (req, res) => {
 
         const userId = req.user ? req.user.id : 'anonymous';
 
+        // Use a prefixed job ID so findJob() can never confuse this with
+        // a numeric-ID job from the audio or analysis queues (which also
+        // use BullMQ's default incrementing counter).
+        const uniqueJobId = `export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
         const job = await exportQueue.add('render', {
             timeline,
             settings,
             userId,
             assetMap,
-        });
+        }, { jobId: uniqueJobId });
 
         console.log(`🎬 Export job ${job.id} queued for user ${userId}`);
 

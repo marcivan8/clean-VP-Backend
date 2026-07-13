@@ -151,19 +151,23 @@ router.post('/upload', authMiddleware, (req, res, next) => {
 
         console.log(`[ProxyRoute] Upload received: ${videoRelativePath} (user: ${userId})`);
 
-        // If using GCS, upload the raw file immediately so background workers
-        // running on different nodes (e.g. Railway) can access it.
+        // If using GCS, upload the raw file BEFORE enqueuing the proxy job so
+        // the worker (which may be a separate Railway container) can always find
+        // the source file in GCS when it picks up the job.
+        let rawGcsPath = null;
         if (storageConfig.bucket && !storageConfig.useLocalStorage) {
             const safeFilename = req.file.filename
                 .replace(/\s+/g, '_')
                 .replace(/[^a-zA-Z0-9._-]/g, '');
-            const destPath = `raw/${userId}/${safeFilename}`;
-            console.log(`[ProxyRoute] Uploading raw file to GCS: ${destPath}...`);
-            storageConfig.bucket.upload(req.file.path, { destination: destPath })
-                .then(() => console.log(`[ProxyRoute] Raw file uploaded to GCS.`))
-                .catch(err => console.error(`[ProxyRoute] GCS upload failed:`, err));
-            // Note: We don't delete the local file here in case there's a local worker
-            // or the export node needs it. The storage will clean it up later.
+            rawGcsPath = `raw/${userId}/${safeFilename}`;
+            console.log(`[ProxyRoute] Uploading raw file to GCS: ${rawGcsPath}...`);
+            try {
+                await storageConfig.bucket.upload(req.file.path, { destination: rawGcsPath });
+                console.log(`[ProxyRoute] Raw file uploaded to GCS: ${rawGcsPath}`);
+            } catch (err) {
+                console.error(`[ProxyRoute] GCS raw upload failed (will retry in worker):`, err.message);
+                rawGcsPath = null; // don't lie to the worker if upload failed
+            }
         }
 
         console.log(`[ProxyRoute] Enqueuing proxy generation...`);
@@ -182,7 +186,7 @@ router.post('/upload', authMiddleware, (req, res, next) => {
             jobId: job.id,
             status: 'queued',
             originalPath: videoRelativePath,
-            gcsPath: storageConfig.bucket && !storageConfig.useLocalStorage ? `raw/${userId}/${req.file.filename.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9._-]/g, '')}` : null
+            gcsPath: rawGcsPath,
         });
     } catch (error) {
         console.error('[ProxyRoute Upload] Error:', error);
