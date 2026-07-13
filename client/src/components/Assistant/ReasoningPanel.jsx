@@ -437,32 +437,38 @@ const UploadStatusCard = ({ asset }) => {
 const CAPTION_STYLES = [
     {
         id: 'bold-impact',  name: 'Bold Impact',  font: 'Anton',            weight: 900,
+        fontLabel: 'Anton',             tag: 'TikTok / viral',
         color: '#FACC15',   stroke: { width: 2, color: '#000000' },
         textShadow: '2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000',
         transform: 'uppercase', sample: 'AHA',
     },
     {
         id: 'clean-modern', name: 'Clean Modern', font: 'Montserrat',       weight: 800,
+        fontLabel: 'Montserrat 800',    tag: 'Universal',
         color: '#FFFFFF',   stroke: null, textShadow: '0 2px 8px rgba(0,0,0,0.7)',
         transform: 'uppercase', sample: 'Aha',
     },
     {
         id: 'soft-rounded', name: 'Soft Rounded', font: 'Nunito',           weight: 700,
+        fontLabel: 'Nunito Bold',       tag: 'Lifestyle',
         color: '#FFFFFF',   stroke: null, textShadow: '0 2px 12px rgba(0,0,0,0.5)',
         transform: 'none',  sample: 'Aha',
     },
     {
         id: 'cinematic',    name: 'Cinematic',    font: 'Playfair Display', weight: 700,
+        fontLabel: 'Playfair Italic',   tag: 'Documentary',
         style: 'italic',    color: '#F5E6C8', stroke: null,
         textShadow: '0 2px 16px rgba(0,0,0,0.8)', transform: 'none', sample: 'Aha',
     },
     {
         id: 'handwritten',  name: 'Handwritten',  font: 'Caveat',           weight: 700,
+        fontLabel: 'Caveat Bold',       tag: 'Authentic',
         color: '#FFFFFF',   stroke: null, textShadow: '0 2px 6px rgba(0,0,0,0.4)',
         transform: 'none',  sample: 'Aha',
     },
     {
         id: 'motivational', name: 'Motivational', font: 'Oswald',           weight: 700,
+        fontLabel: 'Oswald Bold',       tag: 'Coaching',
         color: '#FFFFFF',   stroke: { width: 1.5, color: '#000000' },
         textShadow: '0 2px 8px rgba(0,0,0,0.6)', transform: 'uppercase', sample: 'AHA',
     },
@@ -577,18 +583,43 @@ const CaptionStylesCard = ({ log }) => {
                                         {style.sample}
                                     </span>
                                 </div>
-                                {/* Style name */}
-                                <div style={{
-                                    padding: '5px 4px 6px',
-                                    fontFamily: 'var(--f-mono)',
-                                    fontSize:   7.5,
-                                    color:      isActive ? '#00E5FF' : 'var(--fg-4)',
-                                    letterSpacing: '0.07em',
-                                    textTransform: 'uppercase',
-                                    lineHeight: 1.3,
-                                    transition: 'color 0.2s',
-                                }}>
-                                    {style.name}
+                                {/* Style name + font label + tag */}
+                                <div style={{ padding: '4px 4px 5px', textAlign: 'center' }}>
+                                    <div style={{
+                                        fontFamily: 'var(--f-mono)',
+                                        fontSize:   7.5,
+                                        color:      isActive ? '#00E5FF' : 'var(--fg-3)',
+                                        letterSpacing: '0.07em',
+                                        textTransform: 'uppercase',
+                                        lineHeight: 1.3,
+                                        transition: 'color 0.2s',
+                                    }}>
+                                        {style.name}
+                                    </div>
+                                    <div style={{
+                                        fontFamily: FONT_STACK(style.font),
+                                        fontWeight: style.weight,
+                                        fontStyle:  style.style || 'normal',
+                                        fontSize:   7,
+                                        color:      isActive ? 'rgba(0,229,255,0.7)' : 'rgba(255,255,255,0.35)',
+                                        lineHeight: 1.4,
+                                        transition: 'color 0.2s',
+                                        whiteSpace: 'nowrap',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                    }}>
+                                        {style.fontLabel}
+                                    </div>
+                                    <div style={{
+                                        fontFamily: 'var(--f-mono)',
+                                        fontSize:   6,
+                                        color:      isActive ? 'rgba(0,229,255,0.5)' : 'rgba(255,255,255,0.2)',
+                                        letterSpacing: '0.05em',
+                                        lineHeight: 1.4,
+                                        transition: 'color 0.2s',
+                                    }}>
+                                        {style.tag}
+                                    </div>
                                 </div>
                             </div>
                         </button>
