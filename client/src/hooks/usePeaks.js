@@ -40,11 +40,18 @@ export function usePeaks(assetId, gcsPath, proxyUrl) {
             return;
         }
 
+        // Without a proxyUrl the server has no file to read — skip this run.
+        // The effect will re-fire when proxyUrl becomes available (it's in deps).
+        if (!proxyUrl && !gcsPath) return;
+
         let cancelled = false;
         setState(s => ({ ...s, loading: true, error: null }));
 
-        // Re-use an in-flight promise if another instance is already fetching
-        let promise = _inflight.get(assetId);
+        // Key inflight by assetId+proxyUrl so that a null-proxyUrl failure
+        // (fired on clip mount before proxy is ready) doesn't block the valid
+        // retry that fires once proxyUrl is set by the proxy job completion.
+        const inflightKey = `${assetId}|${proxyUrl || ''}`;
+        let promise = _inflight.get(inflightKey);
 
         if (!promise) {
             promise = (async () => {
@@ -71,9 +78,9 @@ export function usePeaks(assetId, gcsPath, proxyUrl) {
                 _cache.set(assetId, data); // populate cache for future callers
                 return data;
             })()
-            .finally(() => _inflight.delete(assetId));
+            .finally(() => _inflight.delete(inflightKey));
 
-            _inflight.set(assetId, promise);
+            _inflight.set(inflightKey, promise);
         }
 
         promise
@@ -85,10 +92,11 @@ export function usePeaks(assetId, gcsPath, proxyUrl) {
             });
 
         return () => { cancelled = true; };
-    // gcsPath intentionally excluded — assetId is the stable identity key.
-    // If gcsPath changes for the same asset, a page refresh is needed anyway.
+    // proxyUrl is in deps so the hook retries once the proxy job completes and
+    // the asset's proxyUrl is set (clip is placed before proxy is ready → first
+    // call fires with proxyUrl=null → 400 → never retried without this dep).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [assetId]);
+    }, [assetId, proxyUrl]);
 
     return state;
 }
