@@ -1,6 +1,6 @@
 import { useShallow } from 'zustand/react/shallow';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Menu, Upload, Palette, Move } from 'lucide-react';
+import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Menu, Upload, Palette, Move, X } from 'lucide-react';
 import classNames from 'classnames';
 import { Player } from '@revideo/player-react';
 import project from '../revideo/project';
@@ -15,7 +15,7 @@ import DraggableAsset from '../components/DraggableAsset';
 import TextPanel from '../components/TextPanel';
 import TranscriptPanel from '../components/TranscriptPanel';
 import TextOverlay from '../components/Player/TextOverlay';
-import MobileBottomNav from '../components/MobileBottomNav';
+import MobileToolbar from '../components/MobileToolbar';
 import useDeviceType from '../hooks/useDeviceType';
 import MixerPanel from '../components/Sidebar/MixerPanel';
 import InterviewEditPanel from '../components/InterviewEditPanel';
@@ -408,7 +408,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const [showAI, setShowAI] = React.useState(false);
     
     const { isMobile } = useDeviceType();
-    const [mobileTab, setMobileTab] = React.useState('ai'); // Default to AI on mobile as per user preference
+    // null = nothing open; 'media' | 'ai' | 'audio' | 'more' = bottom sheet open
+    const [mobileSheet, setMobileSheet] = React.useState(null);
 
     const fileInputRef = useRef(null);
 
@@ -460,6 +461,21 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
     const activeTab    = useAIStore(s => s.activeTab);
     const setActiveTab = useAIStore(s => s.setActiveTab);
+
+    // Toggle a mobile bottom sheet. 'audio' maps to the media panel with the audio tab pre-selected.
+    const handleMobileSheet = useCallback((sheet) => {
+        setMobileSheet(prev => {
+            if (sheet === 'audio') {
+                // Audio always opens the media panel at the audio tab; tapping again closes
+                if (prev === 'audio') return null;
+                setActiveTab('audio');
+                return 'audio';
+            }
+            if (sheet === 'media') setActiveTab('media');
+            return prev === sheet ? null : sheet;
+        });
+    }, [setActiveTab]);
+
     const [activeColorRange, setActiveColorRange] = React.useState('reds');
     const [openMenu, setOpenMenu] = React.useState(null);
 
@@ -1194,9 +1210,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     </div>
 
                     <div className="flex items-center gap-2 md:gap-3 ml-auto">
-                        <button onClick={() => setShowAI(!showAI)} className={classNames("md:hidden p-2 rounded-full transition-colors", showAI ? "bg-purple-500/20 text-purple-400" : "text-muted-foreground hover:bg-secondary")}>
-                            <Sparkles className="w-5 h-5" />
-                        </button>
                         <button onClick={() => setActiveTab('settings')} className={classNames("hidden md:block p-2 hover:bg-secondary rounded-full transition-colors", activeTab === 'settings' ? "bg-secondary text-foreground" : "")}>
                             <Settings className="w-4 h-4 text-muted-foreground" />
                         </button>
@@ -1219,19 +1232,31 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 </header>
 
                 {/* Main Workspace */}
-                <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative pb-[64px] md:pb-0">
+                <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative pb-14 md:pb-0">
 
-                    {/* Left Sidebar (Media/Effects) */}
-                    <aside 
+                    {/* Left Sidebar (Media/Effects) — bottom sheet on mobile, static sidebar on desktop */}
+                    <aside
                         className={classNames(
-                            "border-r border-[var(--line-soft)] flex flex-col z-30 transition-transform duration-300 ease-in-out font-sans shrink-0",
-                            "absolute inset-0 md:static md:translate-x-0 w-full md:w-72 md:shadow-none",
-                            (!isMobile || mobileTab === 'media') ? "translate-x-0" : "-translate-x-full"
+                            "flex flex-col font-sans shrink-0 transition-transform duration-300 ease-in-out",
+                            "border-[var(--line-soft)]",
+                            // Mobile: fixed bottom sheet above toolbar
+                            "fixed inset-x-0 bottom-14 z-40 max-h-[65svh] rounded-t-2xl border-t overflow-hidden",
+                            // Desktop: revert to static left sidebar
+                            "md:static md:inset-auto md:bottom-auto md:z-30 md:max-h-none md:rounded-none md:border-t-0 md:border-r md:w-72 md:shadow-none md:overflow-y-auto md:translate-y-0",
+                            // Mobile visibility
+                            ['media', 'audio', 'more'].includes(mobileSheet) ? "translate-y-0" : "translate-y-full"
                         )}
                         style={{ background: "linear-gradient(180deg, var(--glass), transparent)" }}
                     >
-                        <div className="md:hidden p-3 border-b border-[var(--line-soft)] flex justify-between items-center" style={{ background: "var(--glass)" }}>
-                            <span className="font-bold text-sm">Media & Assets</span>
+                        <div className="md:hidden p-3 border-b border-[var(--line-soft)] flex justify-between items-center shrink-0" style={{ background: "var(--glass)" }}>
+                            <span className="font-bold text-sm" style={{ color: "var(--fg)" }}>Media & Assets</span>
+                            <button
+                                onClick={() => setMobileSheet(null)}
+                                className="p-1 rounded-full transition-colors hover:bg-white/10"
+                                style={{ color: "var(--fg-3)" }}
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
                         </div>
 
                         <input id="media-file-input" type="file" ref={fileInputRef} onChange={handleFileImport} className="hidden" accept="video/*,audio/*,image/*" multiple />
@@ -1440,15 +1465,25 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                     {showSidebar && <div className="fixed inset-0 bg-black/50 z-20 md:hidden" onClick={() => setShowSidebar(false)} />}
 
-                    {/* Center — Viewport & Timeline */}
-                    <main className={classNames(
-                        "flex-1 flex flex-col min-w-0 relative",
-                        isMobile && mobileTab !== 'player' && mobileTab !== 'edit' ? "hidden" : "flex"
-                    )}>
-                        <div className={classNames(
-                            "flex-1 flex items-center justify-center md:p-8 p-4 relative overflow-hidden",
-                            isMobile && mobileTab === 'edit' ? "hidden" : "flex"
-                        )} style={{ background: "radial-gradient(60% 80% at 50% 40%, #1c1f24 0%, #0c0d10 100%)" }}>
+                    {/* Backdrop — closes any open mobile sheet on tap */}
+                    {isMobile && mobileSheet !== null && (
+                        <div
+                            className="fixed inset-0 bg-black/60 z-30 md:hidden"
+                            style={{ backdropFilter: 'blur(2px)' }}
+                            onClick={() => setMobileSheet(null)}
+                        />
+                    )}
+
+                    {/* Center — Viewport & Timeline (always visible on all screen sizes) */}
+                    <main className="flex-1 flex flex-col min-w-0 relative">
+                        <div
+                            className={classNames(
+                                "flex items-center justify-center relative overflow-hidden",
+                                "md:flex-1 md:p-8 p-2",
+                                isMobile ? "h-[42svh] shrink-0" : "flex-1"
+                            )}
+                            style={{ background: "radial-gradient(60% 80% at 50% 40%, #1c1f24 0%, #0c0d10 100%)" }}
+                        >
                             <div className={classNames(
                                 "bg-black rounded-lg shadow-2xl relative border border-white/5 group overflow-hidden transition-all duration-500 ease-in-out",
                                 aspectRatio === '9:16'
@@ -1504,23 +1539,31 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             </div>
                         </div>
 
-                        {/* Always show timeline in desktop. On mobile, show only in edit tab. */}
-                        {mode === 'editor' && (!isMobile || mobileTab === 'edit') && (
-                            <div className={classNames(
-                                "border-t flex flex-col overflow-hidden shrink-0",
-                                isMobile ? "flex-1 h-full" : "h-48 md:h-72"
-                            )} style={{ background: "var(--bg-2)", borderColor: "var(--line-soft)" }}>
+                        {/* Timeline — always visible. Mini (h-28) on mobile, full-height on desktop. */}
+                        {mode === 'editor' && (
+                            <div
+                                className={classNames(
+                                    "border-t flex flex-col overflow-hidden shrink-0",
+                                    isMobile ? "h-28" : "h-48 md:h-72"
+                                )}
+                                style={{ background: "var(--bg-2)", borderColor: "var(--line-soft)" }}
+                            >
                                 <Timeline />
                             </div>
                         )}
                     </main>
 
-                    {/* Right Sidebar — AI + Phase 7 panels */}
+                    {/* Right Sidebar — AI panel. Bottom sheet on mobile, static sidebar on desktop. */}
                     <aside
                         className={classNames(
-                            "border-l border-[var(--line-soft)] flex flex-col z-30 transition-transform duration-300 ease-in-out font-sans shrink-0",
-                            "absolute inset-0 md:static w-full md:w-80 shadow-2xl md:shadow-none",
-                            (!isMobile && showAI) || (isMobile && mobileTab === 'ai') ? "translate-x-0" : "translate-x-full md:translate-x-0"
+                            "flex flex-col font-sans shrink-0 transition-transform duration-300 ease-in-out",
+                            "border-[var(--line-soft)]",
+                            // Mobile: fixed bottom sheet above toolbar (taller than media panel for the chat)
+                            "fixed inset-x-0 bottom-14 z-40 max-h-[80svh] rounded-t-2xl border-t overflow-hidden",
+                            // Desktop: revert to static right sidebar (always visible)
+                            "md:static md:inset-auto md:bottom-auto md:z-30 md:max-h-none md:rounded-none md:border-t-0 md:border-l md:w-80 md:shadow-none md:overflow-y-auto md:translate-y-0",
+                            // Mobile visibility
+                            mobileSheet === 'ai' ? "translate-y-0" : "translate-y-full"
                         )}
                         style={{ background: "linear-gradient(180deg, var(--glass), transparent)" }}
                     >
@@ -1531,8 +1574,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     </aside>
                 </div>
                 
-                {/* Mobile Bottom Navigation */}
-                <MobileBottomNav activeTab={mobileTab} onTabChange={setMobileTab} />
+                {/* Mobile Bottom Toolbar */}
+                <MobileToolbar
+                    activeSheet={mobileSheet}
+                    onSheetChange={handleMobileSheet}
+                    onImport={triggerImport}
+                />
             </div>
 
             <DragOverlay>
