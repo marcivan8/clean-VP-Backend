@@ -289,7 +289,7 @@ const Clip = ({ clip, trackId }) => {
             <div className="px-2 py-0.5 text-[10px] font-medium text-white truncate drop-shadow-md flex justify-between items-center bg-black/10 pointer-events-none sticky top-0 z-10">
                 <span className="pointer-events-auto">{clip.name}</span>
                 <button
-                    className="p-0.5 hover:bg-white/20 rounded-full opacity-0 group-hover:opacity-100 transition-opacity pointer-events-auto"
+                    className={`p-0.5 hover:bg-white/20 rounded-full transition-opacity pointer-events-auto ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                     onPointerDown={(e) => {
                         e.stopPropagation(); // Prevent drag start
                         removeClip(trackId, clip.id);

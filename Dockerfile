@@ -29,6 +29,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     librsvg2-dev \
     curl \
     ffmpeg \
+    fonts-liberation \
+    fonts-dejavu-core \
+    fonts-freefont-ttf \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
@@ -36,6 +39,20 @@ RUN npm ci --only=production
 
 COPY . .
 COPY --from=frontend-build /app/client/dist ./client/dist
+
+# Download caption fonts for FFmpeg drawtext at build time.
+# Uses the legacy CSS1 endpoint with an old UA to get TTF (not woff2) URLs.
+# If the download fails (e.g. network restricted build env), the worker will
+# attempt to download them on first export instead (see exportProcessor.js).
+RUN for family in "Anton" "Bebas+Neue" "Oswald" "Montserrat:700"; do \
+      cssUrl="https://fonts.googleapis.com/css?family=${family}"; \
+      ttfUrl=$(curl -sf -A "Mozilla/4.0 (compatible; MSIE 6.0)" "$cssUrl" \
+               | grep -oP 'url\(\K[^)]+\.ttf(?=\))' | head -1); \
+      [ -n "$ttfUrl" ] && \
+        name=$(echo "$family" | sed 's/:.*//;s/+/ /g' | tr -d ' ') && \
+        curl -sfL "$ttfUrl" -o "/usr/src/app/client/public/fonts/${name}-Regular.ttf" && \
+        echo "Downloaded $name font" || echo "Skipped $family (network unavailable)"; \
+    done
 
 RUN chown -R node:node /usr/src/app
 USER node

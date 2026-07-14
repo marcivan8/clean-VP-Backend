@@ -491,6 +491,14 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         setActiveClip(null);
     }, [setActiveClip]);
 
+    // Called when user taps Delete in the mobile clip context toolbar.
+    const handleDeleteClip = useCallback(() => {
+        if (activeTrackId && activeClipId) {
+            useTimelineStore.getState().removeClip(activeTrackId, activeClipId);
+        }
+        handleDeselect();
+    }, [activeTrackId, activeClipId, handleDeselect]);
+
     const [activeColorRange, setActiveColorRange] = React.useState('reds');
     const [openMenu, setOpenMenu] = React.useState(null);
 
@@ -909,8 +917,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 body: JSON.stringify({
                     timeline: { tracks, duration, assets: assets || [] },
                     settings: {
-                        platform: settings.aspectRatio === '9:16' ? 'tiktok' : 'youtube',
-                        quality: 'high',
+                        platform: settings.platform || null,
+                        quality:  settings.quality  || 'high',
                         resolution: settings.resolution || '1080p',
                     },
                 }),
@@ -1630,6 +1638,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     activeTrackType={isMobile ? activeTrackType : null}
                     onClipAction={handleClipAction}
                     onDeselect={handleDeselect}
+                    onDeleteClip={handleDeleteClip}
                 />
             </div>
 
