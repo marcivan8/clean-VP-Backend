@@ -120,7 +120,7 @@ function ContextMenu({ projectId, projectName, onRename, onDuplicate, onDelete, 
 
 // ── project card ──────────────────────────────────────────────────────────────
 
-function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete }) {
+function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete, isMobile }) {
     const [menuOpen, setMenuOpen] = useState(false);
     const isLandscape = (project.aspect_ratio ?? '16:9') !== '9:16';
 
@@ -149,10 +149,11 @@ function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete }) {
             {/* Thumbnail */}
             <div style={{
                 width: '100%',
-                paddingTop: isLandscape ? '56.25%' : '177.78%',
+                // Portrait thumbnails: full 9:16 ratio on desktop, square on mobile
+                // (otherwise in a 2-col grid each card would be 300px+ tall)
+                paddingTop: isLandscape ? '56.25%' : (isMobile ? '100%' : '177.78%'),
                 background: 'var(--bg-3)',
                 position: 'relative',
-                maxHeight: isLandscape ? 'none' : 180,
                 overflow: 'hidden',
                 borderRadius: 'var(--r-lg) var(--r-lg) 0 0',
             }}>
@@ -177,9 +178,9 @@ function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete }) {
             </div>
 
             {/* Card body */}
-            <div style={{ padding: '14px 16px', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                    <span className="h-card" style={{ flex: 1, fontSize: 14, fontWeight: 500 }}>
+            <div style={{ padding: isMobile ? '10px 12px' : '14px 16px', flex: 1, display: 'flex', flexDirection: 'column', gap: isMobile ? 4 : 8 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                    <span className="h-card" style={{ flex: 1, fontSize: isMobile ? 12 : 14, fontWeight: 500 }}>
                         {project.name}
                     </span>
 
@@ -237,7 +238,7 @@ function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete }) {
 
 // ── new project modal ─────────────────────────────────────────────────────────
 
-function NewProjectModal({ onClose, onCreate }) {
+function NewProjectModal({ onClose, onCreate, modalWidth }) {
     const [name, setName]       = useState('');
     const [loading, setLoading] = useState(false);
 
@@ -260,9 +261,9 @@ function NewProjectModal({ onClose, onCreate }) {
             <div
                 className="card"
                 style={{
-                    width: 420,
-                    padding: 32,
-                    display: 'flex', flexDirection: 'column', gap: 24,
+                    width: modalWidth || 420,
+                    padding: modalWidth ? 24 : 32,
+                    display: 'flex', flexDirection: 'column', gap: 20,
                     boxShadow: '0 32px 80px -24px rgba(0,0,0,0.8)',
                 }}
             >
@@ -321,7 +322,7 @@ function NewProjectModal({ onClose, onCreate }) {
 
 // ── rename modal ──────────────────────────────────────────────────────────────
 
-function RenameModal({ projectId, currentName, onClose, onSave }) {
+function RenameModal({ projectId, currentName, onClose, onSave, modalWidth }) {
     const [name, setName]   = useState(currentName);
     const [saving, setSaving] = useState(false);
 
@@ -345,7 +346,7 @@ function RenameModal({ projectId, currentName, onClose, onSave }) {
         >
             <div
                 className="card"
-                style={{ width: 380, padding: 28, display: 'flex', flexDirection: 'column', gap: 20 }}
+                style={{ width: modalWidth || 380, padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}
             >
                 <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--fg)', letterSpacing: '-0.015em' }}>Rename project</h2>
                 <input
@@ -384,7 +385,7 @@ function RenameModal({ projectId, currentName, onClose, onSave }) {
 
 // ── delete confirm ────────────────────────────────────────────────────────────
 
-function DeleteConfirm({ projectId, projectName, onClose, onConfirm }) {
+function DeleteConfirm({ projectId, projectName, onClose, onConfirm, modalWidth }) {
     const [deleting, setDeleting] = useState(false);
 
     async function handle() {
@@ -406,7 +407,7 @@ function DeleteConfirm({ projectId, projectName, onClose, onConfirm }) {
         >
             <div
                 className="card"
-                style={{ width: 360, padding: 28, display: 'flex', flexDirection: 'column', gap: 20 }}
+                style={{ width: modalWidth || 360, padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}
             >
                 <div>
                     <h2 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 600, color: 'var(--fg)' }}>Delete project?</h2>
@@ -438,7 +439,7 @@ function DeleteConfirm({ projectId, projectName, onClose, onConfirm }) {
 
 // ── plan limit modal ──────────────────────────────────────────────────────────
 
-function PlanLimitModal({ plan, limit, onClose, onUpgrade }) {
+function PlanLimitModal({ plan, limit, onClose, onUpgrade, modalWidth }) {
     const nextPlan = plan === 'free' ? 'Creator' : 'Pro';
     return (
         <div
@@ -452,7 +453,7 @@ function PlanLimitModal({ plan, limit, onClose, onUpgrade }) {
         >
             <div
                 className="card"
-                style={{ width: 380, padding: 32, display: 'flex', flexDirection: 'column', gap: 24, textAlign: 'center' }}
+                style={{ width: modalWidth || 380, padding: 24, display: 'flex', flexDirection: 'column', gap: 20, textAlign: 'center' }}
             >
                 {/* Icon */}
                 <div style={{
@@ -545,6 +546,15 @@ export default function DashboardPage() {
     const [renameModal,   setRenameModal]   = useState(null); // { id, name }
     const [deleteModal,   setDeleteModal]   = useState(null); // { id, name }
     const [search,        setSearch]        = useState('');
+    const [showMobileSearch, setShowMobileSearch] = useState(false);
+
+    // ── responsive ────────────────────────────────────────────────────────────
+    const [isMobile, setIsMobile] = useState(() => window.innerWidth < 640);
+    useEffect(() => {
+        const handler = () => setIsMobile(window.innerWidth < 640);
+        window.addEventListener('resize', handler);
+        return () => window.removeEventListener('resize', handler);
+    }, []);
 
     // ── auth guard ────────────────────────────────────────────────────────────
     useEffect(() => {
@@ -650,6 +660,8 @@ export default function DashboardPage() {
 
     // ─────────────────────────────────────────────────────────────────────────
 
+    const modalWidth = isMobile ? 'calc(100vw - 32px)' : undefined;
+
     return (
         <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)', fontFamily: 'var(--f-sans)' }}>
 
@@ -659,57 +671,62 @@ export default function DashboardPage() {
                 background: 'rgba(14,15,17,0.85)',
                 backdropFilter: 'blur(20px) saturate(160%)',
                 borderBottom: '0.5px solid var(--line)',
-                padding: '0 28px',
-                display: 'flex', alignItems: 'center', gap: 16, height: 56,
+                padding: isMobile ? '0 16px' : '0 28px',
+                display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 16,
+                height: isMobile ? 52 : 56,
             }}>
                 {/* Logo + wordmark */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <Logo size={24} variant="gradient" />
-                    <span style={{ fontWeight: 700, fontSize: 16, letterSpacing: '-0.02em', color: 'var(--fg)' }}>Vibed</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                    <Logo size={22} variant="gradient" />
+                    <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: '-0.02em', color: 'var(--fg)' }}>Vibed</span>
                 </div>
 
-                {/* Breadcrumb */}
-                <span style={{ color: 'var(--line-strong)', fontSize: 18, lineHeight: 1 }}>/</span>
-                <span className="eyebrow" style={{ fontSize: 10 }}>Projects</span>
+                {/* Breadcrumb — desktop only */}
+                {!isMobile && <>
+                    <span style={{ color: 'var(--line-strong)', fontSize: 18, lineHeight: 1 }}>/</span>
+                    <span className="eyebrow" style={{ fontSize: 10 }}>Projects</span>
+                </>}
 
                 {/* Spacer */}
                 <div style={{ flex: 1 }} />
 
-                {/* Search */}
-                <div style={{ position: 'relative' }}>
-                    <span style={{
-                        position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
-                        color: 'var(--fg-4)', fontSize: 13, pointerEvents: 'none', userSelect: 'none',
-                    }}>⌕</span>
-                    <input
-                        value={search}
-                        onChange={e => setSearch(e.target.value)}
-                        placeholder="Search projects…"
-                        style={{
-                            background: 'var(--bg-3)',
-                            border: '0.5px solid var(--glass-stroke)',
-                            borderRadius: 999,
-                            padding: '7px 14px 7px 32px',
-                            color: 'var(--fg)',
-                            fontFamily: 'var(--f-sans)',
-                            fontSize: 13,
-                            width: 220,
-                            outline: 'none',
-                            transition: 'border-color 0.15s, width 0.2s',
-                        }}
-                        onFocus={e => {
-                            e.currentTarget.style.borderColor = 'var(--accent)';
-                            e.currentTarget.style.width = '280px';
-                        }}
-                        onBlur={e => {
-                            e.currentTarget.style.borderColor = 'var(--glass-stroke)';
-                            e.currentTarget.style.width = '220px';
-                        }}
-                    />
-                </div>
+                {/* Search — desktop only (mobile uses in-body search) */}
+                {!isMobile && (
+                    <div style={{ position: 'relative' }}>
+                        <span style={{
+                            position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
+                            color: 'var(--fg-4)', fontSize: 13, pointerEvents: 'none', userSelect: 'none',
+                        }}>⌕</span>
+                        <input
+                            value={search}
+                            onChange={e => setSearch(e.target.value)}
+                            placeholder="Search projects…"
+                            style={{
+                                background: 'var(--bg-3)',
+                                border: '0.5px solid var(--glass-stroke)',
+                                borderRadius: 999,
+                                padding: '7px 14px 7px 32px',
+                                color: 'var(--fg)',
+                                fontFamily: 'var(--f-sans)',
+                                fontSize: 13,
+                                width: 220,
+                                outline: 'none',
+                                transition: 'border-color 0.15s, width 0.2s',
+                            }}
+                            onFocus={e => {
+                                e.currentTarget.style.borderColor = 'var(--accent)';
+                                e.currentTarget.style.width = '280px';
+                            }}
+                            onBlur={e => {
+                                e.currentTarget.style.borderColor = 'var(--glass-stroke)';
+                                e.currentTarget.style.width = '220px';
+                            }}
+                        />
+                    </div>
+                )}
 
-                {/* Plan usage pill */}
-                {!loading && (
+                {/* Plan usage pill — desktop only */}
+                {!isMobile && !loading && (
                     <div style={{
                         fontFamily: 'var(--f-mono)', fontSize: 10,
                         letterSpacing: '0.10em', textTransform: 'uppercase',
@@ -725,9 +742,28 @@ export default function DashboardPage() {
                     </div>
                 )}
 
+                {/* Mobile: search icon toggle */}
+                {isMobile && (
+                    <button
+                        onClick={() => setShowMobileSearch(v => !v)}
+                        style={{
+                            background: 'none', border: 'none', cursor: 'pointer',
+                            color: showMobileSearch ? 'var(--accent)' : 'var(--fg-3)',
+                            fontSize: 18, padding: '6px', borderRadius: 8,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            flexShrink: 0,
+                        }}
+                        aria-label="Search"
+                    >⌕</button>
+                )}
+
                 {/* New project */}
-                <button className="btn btn-primary" style={{ height: 36, padding: '0 16px', fontSize: 13 }} onClick={requestNewProject}>
-                    + New project
+                <button
+                    className="btn btn-primary"
+                    style={{ height: isMobile ? 34 : 36, padding: isMobile ? '0 12px' : '0 16px', fontSize: 13, flexShrink: 0 }}
+                    onClick={requestNewProject}
+                >
+                    {isMobile ? '+' : '+ New project'}
                 </button>
 
                 {/* Avatar / sign out */}
@@ -735,7 +771,7 @@ export default function DashboardPage() {
                     title="Sign out"
                     onClick={handleSignOut}
                     style={{
-                        width: 32, height: 32,
+                        width: 30, height: 30,
                         borderRadius: '50%',
                         background: 'var(--accent-soft)',
                         border: '0.5px solid var(--glass-stroke)',
@@ -752,28 +788,82 @@ export default function DashboardPage() {
                 </button>
             </header>
 
+            {/* ── Mobile search bar (slides in below nav) ── */}
+            {isMobile && showMobileSearch && (
+                <div style={{
+                    padding: '8px 16px',
+                    background: 'rgba(14,15,17,0.95)',
+                    borderBottom: '0.5px solid var(--line)',
+                }}>
+                    <div style={{ position: 'relative' }}>
+                        <span style={{
+                            position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
+                            color: 'var(--fg-4)', fontSize: 13, pointerEvents: 'none',
+                        }}>⌕</span>
+                        <input
+                            autoFocus
+                            value={search}
+                            onChange={e => setSearch(e.target.value)}
+                            placeholder="Search projects…"
+                            style={{
+                                width: '100%', boxSizing: 'border-box',
+                                background: 'var(--bg-3)',
+                                border: '0.5px solid var(--accent)',
+                                borderRadius: 999,
+                                padding: '9px 14px 9px 34px',
+                                color: 'var(--fg)',
+                                fontFamily: 'var(--f-sans)',
+                                fontSize: 14,
+                                outline: 'none',
+                            }}
+                        />
+                    </div>
+                </div>
+            )}
+
             {/* ── Body ── */}
-            <main style={{ maxWidth: 1280, margin: '0 auto', padding: '40px 28px' }}>
+            <main style={{ maxWidth: 1280, margin: '0 auto', padding: isMobile ? '20px 16px' : '40px 28px' }}>
 
                 {/* Page header */}
-                <div style={{ marginBottom: 36 }}>
-                    <h1 style={{ margin: '0 0 6px', fontSize: 28, fontWeight: 700, letterSpacing: '-0.025em', color: 'var(--fg)' }}>
-                        Projects
-                    </h1>
-                    <p className="body" style={{ margin: 0, fontSize: 14 }}>
-                        {loading ? 'Loading…' : `${projects.length} project${projects.length !== 1 ? 's' : ''}`}
-                    </p>
+                <div style={{ marginBottom: isMobile ? 20 : 36, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                        <h1 style={{ margin: '0 0 4px', fontSize: isMobile ? 22 : 28, fontWeight: 700, letterSpacing: '-0.025em', color: 'var(--fg)' }}>
+                            Projects
+                        </h1>
+                        <p className="body" style={{ margin: 0, fontSize: 13 }}>
+                            {loading ? 'Loading…' : `${projects.length} project${projects.length !== 1 ? 's' : ''}`}
+                        </p>
+                    </div>
+                    {/* Mobile: plan pill next to title */}
+                    {isMobile && !loading && (
+                        <div style={{
+                            fontFamily: 'var(--f-mono)', fontSize: 10,
+                            letterSpacing: '0.08em', textTransform: 'uppercase',
+                            color: atLimit(plan, projects.length) ? 'var(--accent)' : 'var(--fg-3)',
+                            padding: '3px 8px',
+                            borderRadius: 999,
+                            border: `0.5px solid ${atLimit(plan, projects.length) ? 'rgba(0,229,255,0.3)' : 'var(--glass-stroke)'}`,
+                            background: atLimit(plan, projects.length) ? 'rgba(0,229,255,0.06)' : 'transparent',
+                            whiteSpace: 'nowrap', flexShrink: 0,
+                        }}>
+                            {projects.length}/{getProjectLimit(plan) === Infinity ? '∞' : getProjectLimit(plan)} · {plan}
+                        </div>
+                    )}
                 </div>
 
                 {/* Loading skeleton */}
                 {loading && (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 20 }}>
+                    <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fill, minmax(260px, 1fr))',
+                        gap: isMobile ? 12 : 20,
+                    }}>
                         {[...Array(4)].map((_, i) => (
                             <div
                                 key={i}
                                 className="card"
                                 style={{
-                                    height: 220,
+                                    height: isMobile ? 160 : 220,
                                     animation: 'pulse-soft 1.6s ease-in-out infinite',
                                     animationDelay: `${i * 0.12}s`,
                                 }}
@@ -786,20 +876,22 @@ export default function DashboardPage() {
                 {!loading && filtered.length === 0 && (
                     <div style={{
                         display: 'flex', flexDirection: 'column', alignItems: 'center',
-                        justifyContent: 'center', gap: 20, paddingTop: 80, paddingBottom: 80,
+                        justifyContent: 'center', gap: 16,
+                        paddingTop: isMobile ? 48 : 80,
+                        paddingBottom: isMobile ? 48 : 80,
                         textAlign: 'center',
                     }}>
-                        <div style={{ opacity: 0.4 }}><Logo size={48} variant="gradient" /></div>
+                        <div style={{ opacity: 0.4 }}><Logo size={40} variant="gradient" /></div>
                         <div>
-                            <p style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 600, color: 'var(--fg)' }}>
+                            <p style={{ margin: '0 0 6px', fontSize: isMobile ? 16 : 18, fontWeight: 600, color: 'var(--fg)' }}>
                                 {search ? 'No projects match your search' : 'No projects yet'}
                             </p>
-                            <p className="body" style={{ margin: 0, fontSize: 14 }}>
+                            <p className="body" style={{ margin: 0, fontSize: 13 }}>
                                 {search ? 'Try a different search term.' : 'Create your first project to get started.'}
                             </p>
                         </div>
                         {!search && (
-                            <button className="btn btn-primary" style={{ height: 42, padding: '0 22px' }} onClick={requestNewProject}>
+                            <button className="btn btn-primary" style={{ height: 40, padding: '0 20px' }} onClick={requestNewProject}>
                                 Create project
                             </button>
                         )}
@@ -810,8 +902,8 @@ export default function DashboardPage() {
                 {!loading && filtered.length > 0 && (
                     <div style={{
                         display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-                        gap: 20,
+                        gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fill, minmax(260px, 1fr))',
+                        gap: isMobile ? 12 : 20,
                     }}>
                         {/* "New project" quick-add card */}
                         <button
@@ -825,8 +917,8 @@ export default function DashboardPage() {
                                 flexDirection: 'column',
                                 alignItems: 'center',
                                 justifyContent: 'center',
-                                gap: 10,
-                                minHeight: 180,
+                                gap: 8,
+                                minHeight: isMobile ? 120 : 180,
                                 color: 'var(--fg-3)',
                                 transition: 'background 0.18s, border-color 0.18s, color 0.18s',
                             }}
@@ -841,8 +933,8 @@ export default function DashboardPage() {
                                 e.currentTarget.style.color = 'var(--fg-3)';
                             }}
                         >
-                            <span style={{ fontSize: 28, lineHeight: 1 }}>+</span>
-                            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 11, letterSpacing: '0.10em', textTransform: 'uppercase' }}>
+                            <span style={{ fontSize: isMobile ? 22 : 28, lineHeight: 1 }}>+</span>
+                            <span style={{ fontFamily: 'var(--f-mono)', fontSize: isMobile ? 9 : 11, letterSpacing: '0.10em', textTransform: 'uppercase' }}>
                                 New project
                             </span>
                         </button>
@@ -855,6 +947,7 @@ export default function DashboardPage() {
                                 onRename={(id, name) => setRenameModal({ id, name })}
                                 onDuplicate={handleDuplicate}
                                 onDelete={(id) => setDeleteModal({ id, name: project.name })}
+                                isMobile={isMobile}
                             />
                         ))}
                     </div>
@@ -862,16 +955,11 @@ export default function DashboardPage() {
             </main>
 
             {/* ── Modals ── */}
-            {showLimitModal && (
-                <PlanLimitModal
-                    plan={plan}
-                    onClose={() => setShowLimitModal(false)}
-                />
-            )}
             {showNew && (
                 <NewProjectModal
                     onClose={() => setShowNew(false)}
                     onCreate={handleCreate}
+                    modalWidth={modalWidth}
                 />
             )}
             {renameModal && (
@@ -880,6 +968,7 @@ export default function DashboardPage() {
                     currentName={renameModal.name}
                     onClose={() => setRenameModal(null)}
                     onSave={handleRename}
+                    modalWidth={modalWidth}
                 />
             )}
             {deleteModal && (
@@ -888,6 +977,7 @@ export default function DashboardPage() {
                     projectName={deleteModal.name}
                     onClose={() => setDeleteModal(null)}
                     onConfirm={handleDelete}
+                    modalWidth={modalWidth}
                 />
             )}
             {showLimitModal && (
@@ -897,8 +987,9 @@ export default function DashboardPage() {
                     onClose={() => setShowLimitModal(false)}
                     onUpgrade={() => {
                         setShowLimitModal(false);
-                        navigate('/success'); // or link to pricing — adjust as needed
+                        navigate('/success');
                     }}
+                    modalWidth={modalWidth}
                 />
             )}
         </div>
