@@ -480,79 +480,147 @@ module.exports = async function processExportJob(job) {
     await job.updateProgress(82);
 
     // ── STEP 4: Text overlays ──────────────────────────────────────────────
-    const textTracks  = timeline.tracks.filter(t => t.type === 'text' && t.clips?.length > 0);
-    const defaultFontPath = path.join(publicDir, 'fonts', 'Roboto-Regular.ttf');
-    const fontPath = [
-        defaultFontPath,
-        // Debian/Ubuntu system fonts installed alongside ffmpeg (apt install ffmpeg)
-        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-        '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-        '/System/Library/Fonts/Helvetica.ttc',
-    ].find(p => fs.existsSync(p)) || null;
+    const textTracks = timeline.tracks.filter(t => t.type === 'text' && t.clips?.length > 0);
 
-    const textFilters = [];
-    for (const track of textTracks) {
-        for (const clip of track.clips) {
-            if (!fontPath) break;
-            const startSec = clip.start;
-            const endSec   = clip.start + clip.duration;
-            const text = (clip.content || clip.name || '')
-                .replace(/\\/g, '\\\\')
-                .replace(/'/g, "\\'")
-                .replace(/:/g, '\\:')
-                .replace(/%/g, '%%');
-            const color = (clip.color || '#ffffff').replace('#', '0x');
-            const size  = clip.fontSize || 48;
+    if (textTracks.length > 0) {
+        // ── Font resolution ────────────────────────────────────────────────
+        // Build a per-family lookup: keys are fontFamily values used in caption clips.
+        // Values are filesystem paths to TTF/OTF files. Falls back to the default.
+        const fontsDir = path.join(publicDir, 'fonts');
+        const FAMILY_PATHS = {
+            // Fonts shipped in client/public/fonts/
+            'Roboto':      path.join(fontsDir, 'Roboto-Regular.ttf'),
+            'Anton':       path.join(fontsDir, 'Anton-Regular.ttf'),
+            'Bebas Neue':  path.join(fontsDir, 'BebasNeue-Regular.ttf'),
+            // System fonts (present when Dockerfile includes fonts-liberation)
+            'Liberation Sans': '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+            // Debian default fonts
+            'DejaVu Sans': '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+            'FreeSans':    '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
+            // macOS (local dev)
+            'Helvetica':   '/System/Library/Fonts/Helvetica.ttc',
+        };
 
-            let x = '(w-text_w)/2';
-            let y = '(h-text_h)/2';
-            if (clip.position === 'bottom') y = 'h-text_h-80';
-            if (clip.position === 'top')    y = '80';
-            if (typeof clip.x === 'number') x = clip.x + (targetWidth / 2);
-            if (typeof clip.y === 'number') y = clip.y + (targetHeight / 2);
+        const defaultFontPath = path.join(fontsDir, 'Roboto-Regular.ttf');
+        // Ordered fallback list for when a specific family isn't found
+        const fallbackFontPath = [
+            defaultFontPath,
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+            '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+            '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
+            '/System/Library/Fonts/Helvetica.ttc',
+        ].find(p => fs.existsSync(p)) || null;
 
-            textFilters.push(
-                `drawtext=fontfile='${fontPath.replace(/\\/g, '/').replace(/:/g, '\\:')}':text='${text}':fontsize=${size}:fontcolor=${color}:x=${x}:y=${y}:enable='gte(t,${startSec})*lte(t,${endSec})'`
-            );
-        }
-    }
+        if (!fallbackFontPath) {
+            console.warn('  ⚠️  No usable font found for caption export — skipping text overlay');
+        } else {
+            // ── Build drawtext filter chain ────────────────────────────────
+            // IMPORTANT: Use textfile= (not text=) so ffmpeg reads text from a file.
+            // This completely avoids ffmpeg filter-string escaping issues — apostrophes,
+            // commas, colons, quotes, etc. in caption text all work transparently.
+            const textFilters = [];
+            let filterIdx = 0;
 
-    if (textFilters.length > 0) {
-        const textOverlayPath = path.join(tmpDir, 'with_text.mp4');
-        // Use spawn directly so we can (a) use a different binary (DRAWTEXT_BIN) without
-        // mutating the global fluent-ffmpeg path, (b) capture stderr for real error messages,
-        // and (c) map audio optionally — '-map 0:a?' silently skips missing audio streams
-        // instead of failing when a source clip has no audio track.
-        const drawtextArgs = [
-            '-i',  finalVideoPath,
-            '-vf', textFilters.join(','),
-            '-map', '0:v',
-            '-map', '0:a?',       // '?' = optional — won't error on video-only sources
-            '-c:v', codec,
-            '-c:a', 'copy',
-            '-y',
-            textOverlayPath,
-        ];
-        try {
-            await new Promise((resolve, reject) => {
-                const proc = spawn(DRAWTEXT_BIN, drawtextArgs);
-                const stderrChunks = [];
-                proc.stderr.on('data', chunk => stderrChunks.push(chunk));
-                proc.on('error', reject);
-                proc.on('close', code => {
-                    if (code === 0) {
-                        resolve();
-                    } else {
-                        const errTail = Buffer.concat(stderrChunks).toString('utf-8').slice(-800);
-                        reject(new Error(`ffmpeg drawtext exited ${code}:\n${errTail}`));
+            for (const track of textTracks) {
+                for (const clip of track.clips) {
+                    const rawText  = clip.content || clip.name || '';
+                    const startSec = typeof clip.start    === 'number' ? clip.start    : 0;
+                    const endSec   = typeof clip.duration === 'number'
+                        ? startSec + clip.duration
+                        : startSec + 3;
+
+                    if (endSec <= startSec) continue; // skip zero/negative duration
+
+                    // Write the caption text to a temp file — no escaping needed
+                    const textFilePath = path.join(tmpDir, `cap-${filterIdx}.txt`);
+                    fs.writeFileSync(textFilePath, rawText, 'utf8');
+                    // Escape the file path for the drawtext option (only : needs escaping)
+                    const escapedTextFile = textFilePath.replace(/\\/g, '/').replace(/:/g, '\\:');
+
+                    // Font: prefer the clip's declared fontFamily, fall back to default
+                    const declaredFamily = clip.fontFamily;
+                    const familyPath = declaredFamily && FAMILY_PATHS[declaredFamily]
+                        ? FAMILY_PATHS[declaredFamily]
+                        : null;
+                    const resolvedFont = (familyPath && fs.existsSync(familyPath))
+                        ? familyPath
+                        : fallbackFontPath;
+                    const escapedFont = resolvedFont.replace(/\\/g, '/').replace(/:/g, '\\:');
+
+                    const color    = (clip.color || '#ffffff').replace('#', '0x');
+                    const size     = clip.fontSize || 48;
+
+                    let x = '(w-text_w)/2';
+                    let y = '(h-text_h)/2';
+                    if (clip.position === 'bottom') y = 'h-text_h-80';
+                    if (clip.position === 'top')    y = '80';
+                    if (typeof clip.x === 'number') x = Math.round(clip.x + targetWidth  / 2);
+                    if (typeof clip.y === 'number') y = Math.round(clip.y + targetHeight / 2);
+
+                    // Stroke (border) — maps directly to drawtext borderw / bordercolor
+                    let strokePart = '';
+                    if (clip.stroke?.width && clip.stroke.width > 0) {
+                        const strokeColor = (clip.stroke.color || '#000000').replace('#', '0x');
+                        strokePart = `:borderw=${clip.stroke.width}:bordercolor=${strokeColor}`;
                     }
-                });
-            });
-            finalVideoPath = textOverlayPath;
-            console.log('  ✅ Text overlays applied');
-        } catch (textErr) {
-            console.warn(`  ⚠️  Text overlay failed (skipping captions):\n${textErr.message}`);
+
+                    textFilters.push(
+                        `drawtext=fontfile='${escapedFont}'` +
+                        `:textfile='${escapedTextFile}'` +
+                        `:fontsize=${size}:fontcolor=${color}` +
+                        `:x=${x}:y=${y}` +
+                        strokePart +
+                        `:enable='gte(t,${startSec})*lte(t,${endSec})'`
+                    );
+                    filterIdx++;
+                }
+            }
+
+            if (textFilters.length > 0) {
+                const textOverlayPath = path.join(tmpDir, 'with_text.mp4');
+                // Join filters with comma; each drawtext is one element in the vf chain.
+                // Note: commas inside individual filter options are already inside
+                // single-quoted strings so they don't act as filter separators.
+                const vfChain = textFilters.join(',');
+                const drawtextArgs = [
+                    '-i',  finalVideoPath,
+                    '-vf', vfChain,
+                    '-map', '0:v',
+                    '-map', '0:a?',
+                    '-c:v', codec,
+                    '-profile:v', profile,
+                    '-pix_fmt', 'yuv420p',
+                    '-c:a', 'copy',
+                    '-y',
+                    textOverlayPath,
+                ];
+                console.log(`  🔤 Applying ${textFilters.length} caption(s) with ${DRAWTEXT_BIN === ffmpegPath ? 'static' : 'system'} ffmpeg`);
+                try {
+                    await new Promise((resolve, reject) => {
+                        const proc = spawn(DRAWTEXT_BIN, drawtextArgs);
+                        const stderrChunks = [];
+                        proc.stderr.on('data', chunk => stderrChunks.push(chunk));
+                        proc.on('error', reject);
+                        proc.on('close', code => {
+                            if (code === 0) {
+                                resolve();
+                            } else {
+                                const errTail = Buffer.concat(stderrChunks).toString('utf-8').slice(-1200);
+                                reject(new Error(`ffmpeg drawtext exited ${code}:\n${errTail}`));
+                            }
+                        });
+                    });
+                    finalVideoPath = textOverlayPath;
+                    console.log('  ✅ Text overlays applied');
+                } catch (textErr) {
+                    // Log the full error — this used to silently skip captions.
+                    // Now the error is visible in worker logs to aid debugging.
+                    console.error(`  ❌ Text overlay failed — captions will be missing:\n${textErr.message}`);
+                    // Swallow: we still deliver the video without captions rather than
+                    // failing the whole export job over a text-rendering issue.
+                }
+            }
         }
     }
 
