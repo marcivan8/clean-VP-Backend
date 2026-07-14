@@ -304,13 +304,13 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         }
     }, [nameInput, projectName, projectId, setProjectName]);
 
-    const { activeClip, activeTrackId } = React.useMemo(() => {
-        if (!activeClipId) return { activeClip: null, activeTrackId: null };
+    const { activeClip, activeTrackId, activeTrackType } = React.useMemo(() => {
+        if (!activeClipId) return { activeClip: null, activeTrackId: null, activeTrackType: null };
         for (const track of tracks) {
             const clip = track.clips.find(c => c.id === activeClipId);
-            if (clip) return { activeClip: clip, activeTrackId: track.id };
+            if (clip) return { activeClip: clip, activeTrackId: track.id, activeTrackType: track.type };
         }
-        return { activeClip: null, activeTrackId: null };
+        return { activeClip: null, activeTrackId: null, activeTrackType: null };
     }, [tracks, activeClipId]);
 
     // Defer track changes so rapid caption/clip additions coalesce into a
@@ -475,6 +475,20 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             return prev === sheet ? null : sheet;
         });
     }, [setActiveTab]);
+
+    // Called when user taps a clip action in the context toolbar.
+    // Opens the left panel at the appropriate tab.
+    const handleClipAction = useCallback((tabName) => {
+        setActiveTab(tabName);
+        setMobileSheet('media');
+    }, [setActiveTab]);
+
+    // Called when user taps Done in the context toolbar.
+    // Closes any open panel and deselects the clip.
+    const handleDeselect = useCallback(() => {
+        setMobileSheet(null);
+        setActiveClip(null);
+    }, [setActiveClip]);
 
     const [activeColorRange, setActiveColorRange] = React.useState('reds');
     const [openMenu, setOpenMenu] = React.useState(null);
@@ -1478,19 +1492,36 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     <main className="flex-1 flex flex-col min-w-0 relative">
                         <div
                             className={classNames(
-                                "flex items-center justify-center relative overflow-hidden",
-                                "md:flex-1 md:p-8 p-2",
-                                isMobile ? "h-[42svh] shrink-0" : "flex-1"
+                                "relative overflow-hidden",
+                                isMobile
+                                    // Mobile: width-driven; height derived from the inner aspect-ratio div
+                                    ? "w-full shrink-0"
+                                    // Desktop: unchanged flex centering
+                                    : "flex-1 flex items-center justify-center md:p-8 p-4"
                             )}
                             style={{ background: "radial-gradient(60% 80% at 50% 40%, #1c1f24 0%, #0c0d10 100%)" }}
                         >
                             <div className={classNames(
                                 "bg-black rounded-lg shadow-2xl relative border border-white/5 group overflow-hidden transition-all duration-500 ease-in-out",
-                                aspectRatio === '9:16'
-                                    ? 'aspect-[9/16] max-h-[70vh] md:max-h-[550px] w-auto'
-                                    : aspectRatio === '1:1'
-                                        ? 'aspect-square max-h-[50vh] md:max-h-[450px] w-auto'
-                                        : 'aspect-video max-w-full max-h-full md:max-h-[60vh] w-auto'
+                                isMobile
+                                    // Mobile: let aspect-ratio determine height from full device width.
+                                    // 16:9 → fills screen width, height = width × 9/16
+                                    // 9:16 or 1:1 → centered, capped to avoid overflowing above timeline
+                                    ? (
+                                        aspectRatio === '9:16'
+                                            ? 'mx-auto aspect-[9/16] max-h-[45svh] w-auto'
+                                            : aspectRatio === '1:1'
+                                                ? 'mx-auto aspect-square max-h-[45svh] w-auto'
+                                                : 'w-full aspect-video'
+                                      )
+                                    // Desktop: unchanged
+                                    : (
+                                        aspectRatio === '9:16'
+                                            ? 'aspect-[9/16] max-h-[70vh] md:max-h-[550px] w-auto'
+                                            : aspectRatio === '1:1'
+                                                ? 'aspect-square max-h-[50vh] md:max-h-[450px] w-auto'
+                                                : 'aspect-video max-w-full max-h-full md:max-h-[60vh] w-auto'
+                                      )
                             )}>
                                 <ErrorBoundary>
                                     {(() => {
@@ -1526,7 +1557,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             </div>
 
                             {/* Floating Playback Controls */}
-                            <div className="absolute bottom-5 flex items-center gap-3 backdrop-blur-xl px-4 py-2 rounded-full shadow-xl z-20 scale-90 md:scale-100 origin-bottom" style={{ background: "rgba(14,15,17,0.85)", border: "0.5px solid var(--line-strong)" }}>
+                            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-3 backdrop-blur-xl px-4 py-2 rounded-full shadow-xl z-20 scale-90 md:scale-100 origin-bottom" style={{ background: "rgba(14,15,17,0.85)", border: "0.5px solid var(--line-strong)" }}>
                                 <button className="hover:text-primary transition-colors" onClick={() => useTimelineStore.getState().seek(0)} style={{ color: "var(--fg-3)" }}><SkipBack /></button>
                                 <button className="hover:text-primary transition-colors" onClick={() => useTimelineStore.getState().togglePlay()} style={{ color: "var(--fg)" }}>
                                     {!isPlaying ? <Play className="fill-current" /> : <Pause className="fill-current" />}
@@ -1544,7 +1575,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             <div
                                 className={classNames(
                                     "border-t flex flex-col overflow-hidden shrink-0",
-                                    isMobile ? "h-28" : "h-48 md:h-72"
+                                    isMobile ? "h-36" : "h-48 md:h-72"
                                 )}
                                 style={{ background: "var(--bg-2)", borderColor: "var(--line-soft)" }}
                             >
@@ -1579,6 +1610,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     activeSheet={mobileSheet}
                     onSheetChange={handleMobileSheet}
                     onImport={triggerImport}
+                    activeTrackType={isMobile ? activeTrackType : null}
+                    onClipAction={handleClipAction}
+                    onDeselect={handleDeselect}
                 />
             </div>
 
