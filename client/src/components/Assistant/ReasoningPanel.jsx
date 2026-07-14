@@ -472,11 +472,35 @@ const CAPTION_STYLES = [
         color: '#FFFFFF',   stroke: { width: 1.5, color: '#000000' },
         textShadow: '0 2px 8px rgba(0,0,0,0.6)', transform: 'uppercase', sample: 'AHA',
     },
+    {
+        id: 'modern-tech',  name: 'Modern Tech',  font: 'Inter',            weight: 800,
+        fontLabel: 'Inter ExtraBold',   tag: 'Tech / Media',
+        color: '#FFFFFF',   stroke: null,
+        textShadow: '0 2px 12px rgba(0,0,0,0.8)', transform: 'none', sample: 'Aha',
+    },
+    {
+        id: 'extended-bold', name: 'Extended Bold', font: 'Unbounded',      weight: 900,
+        fontLabel: 'Unbounded Black',   tag: 'Brand / Logo',
+        color: '#FFFFFF',   stroke: null,
+        textShadow: 'none', transform: 'uppercase', sample: 'DO',
+    },
+    {
+        id: 'platform-sans', name: 'Platform Sans', font: 'DM Sans',        weight: 600,
+        fontLabel: 'DM Sans SemiBold',  tag: 'App / Native',
+        color: '#FFFFFF',   stroke: null,
+        textShadow: '0 1px 6px rgba(0,0,0,0.6)', transform: 'none', sample: 'Aha',
+    },
+    {
+        id: 'editorial',    name: 'Editorial',    font: 'Cormorant Garamond', weight: 700,
+        fontLabel: 'Cormorant Bold Italic', tag: 'Editorial / Luxury',
+        style: 'italic',    color: '#F5E6D3', stroke: null,
+        textShadow: '0 2px 16px rgba(0,0,0,0.85)', transform: 'none', sample: 'grace',
+    },
 ];
 
 const FONT_STACK = (font) =>
     font === 'Caveat' ? `"${font}", cursive`
-    : font === 'Playfair Display' ? `"${font}", serif`
+    : (font === 'Playfair Display' || font === 'Cormorant Garamond') ? `"${font}", serif`
     : `"${font}", sans-serif`;
 
 const CaptionStylesCard = ({ log }) => {
