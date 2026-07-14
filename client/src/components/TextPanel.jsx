@@ -225,17 +225,19 @@ const SegmentRow = ({ clip, trackId, globalStyle, onActivate, isActive }) => {
 
     return (
         <div style={{
-            borderRadius: 7,
-            border: isActive ? '0.5px solid color-mix(in oklch, var(--accent) 50%, transparent)' : '0.5px solid var(--line)',
-            background: isActive ? 'color-mix(in oklch, var(--accent) 6%, transparent)' : 'rgba(255,255,255,0.02)',
-            marginBottom: 4,
+            borderRadius: 5,
+            border: isActive
+                ? '1px solid color-mix(in oklch, var(--accent) 55%, transparent)'
+                : '1px solid var(--line)',
+            background: isActive ? 'color-mix(in oklch, var(--accent) 7%, transparent)' : 'rgba(255,255,255,0.03)',
+            marginBottom: 3,
             overflow: 'hidden',
         }}>
-            <button onClick={handleToggle} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
-                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', flexShrink: 0 }}>{fmt(clip.start)}</span>
-                <span style={{ flex: 1, fontSize: 11, color: 'var(--fg-2)', fontFamily: 'var(--f-sans)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{clip.content || '—'}</span>
-                {hasOverrides && <span style={{ fontFamily: 'var(--f-mono)', fontSize: 8, color: 'var(--accent)', flexShrink: 0 }}>custom</span>}
-                <span style={{ color: 'var(--fg-4)', fontSize: 9 }}>{expanded ? '▲' : '▼'}</span>
+            <button onClick={handleToggle} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
+                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 8, color: 'var(--fg-4)', flexShrink: 0, letterSpacing: '0.02em' }}>{fmt(clip.start)}</span>
+                <span style={{ flex: 1, fontSize: 10, color: 'var(--fg-2)', fontFamily: 'var(--f-sans)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }}>{clip.content || '—'}</span>
+                {hasOverrides && <span style={{ fontFamily: 'var(--f-mono)', fontSize: 7, color: 'var(--accent)', flexShrink: 0, letterSpacing: '0.04em' }}>custom</span>}
+                <span style={{ color: 'var(--fg-4)', fontSize: 8 }}>{expanded ? '▲' : '▼'}</span>
             </button>
             {expanded && (
                 <div style={{ padding: '4px 10px 10px', borderTop: '0.5px solid var(--line-soft)' }}>
@@ -275,6 +277,7 @@ const TextPanel = () => {
     })));
 
     const [editMode, setEditMode] = useState('global');
+    const [globalFlash, setGlobalFlash] = useState(false);
 
     const activeTrack = tracks.find(t => t.clips.some(c => c.id === activeClipId));
     const activeClip  = activeTrack?.clips.find(c => c.id === activeClipId);
@@ -308,6 +311,11 @@ const TextPanel = () => {
                 freshText.clips.forEach(clip =>
                     store.updateClip(freshText.id, clip.id, styleOnly, { skipHistory: true })
                 );
+                // Flash the count badge so the user can see the fan-out happened
+                if (!skipHistory) {
+                    setGlobalFlash(true);
+                    setTimeout(() => setGlobalFlash(false), 900);
+                }
             }
             // Content is per-segment — update only the active caption clip
             if (content !== undefined && freshIsText && freshActTrk && freshActClp) {
@@ -384,19 +392,59 @@ const TextPanel = () => {
     // ── Shared header (always shown when captions exist) ───────────────────────
     const Header = () => (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, gap: 8 }}>
-            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em', flexShrink: 0 }}>
-                {editMode === 'global' ? 'Caption Style' : 'Segments'}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, minWidth: 0 }}>
+                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                    {editMode === 'global' ? 'Caption Style' : 'Segments'}
+                </span>
+                {editMode === 'global' && captionClips.length > 0 && (
+                    <span style={{
+                        fontFamily: 'var(--f-mono)', fontSize: 8, padding: '1px 6px', borderRadius: 99,
+                        background: globalFlash
+                            ? 'color-mix(in oklch, var(--accent) 30%, transparent)'
+                            : 'color-mix(in oklch, var(--accent) 12%, transparent)',
+                        color: 'var(--accent)',
+                        border: `0.5px solid color-mix(in oklch, var(--accent) ${globalFlash ? 70 : 30}%, transparent)`,
+                        transition: 'all 0.3s ease',
+                    }}>
+                        {captionClips.length} captions
+                    </span>
+                )}
+            </div>
             <ModeToggle mode={editMode} onChange={setEditMode} />
         </div>
     );
+
+    // Count how many segments have per-segment overrides vs. global style
+    const customCount = captionClips.filter(clip =>
+        Object.keys(globalStyle).some(k => k !== 'content' && clip[k] !== undefined && clip[k] !== globalStyle[k])
+    ).length;
 
     // ── Individual mode ────────────────────────────────────────────────────────
     if (editMode === 'individual') {
         return (
             <div>
                 <Header />
-                <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+                <div style={{
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    marginBottom: 8, padding: '4px 8px',
+                    background: 'rgba(255,255,255,0.025)',
+                    borderRadius: 5, border: '0.5px solid var(--line-soft)',
+                }}>
+                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)' }}>
+                        ↓ Expand a caption to edit its style
+                    </span>
+                    {customCount > 0 && (
+                        <span style={{
+                            marginLeft: 'auto', fontFamily: 'var(--f-mono)', fontSize: 8,
+                            color: 'var(--accent)', padding: '1px 5px',
+                            background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
+                            borderRadius: 99, border: '0.5px solid color-mix(in oklch, var(--accent) 25%, transparent)',
+                        }}>
+                            {customCount} custom
+                        </span>
+                    )}
+                </div>
+                <div style={{ maxHeight: '55vh', overflowY: 'auto' }}>
                     {captionClips
                         .slice()
                         .sort((a, b) => a.start - b.start)

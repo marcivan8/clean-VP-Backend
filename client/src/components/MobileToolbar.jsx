@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layers, Plus, Palette, Move, Music2, Type, X } from 'lucide-react';
+import { Layers, Plus, Palette, Move, Music2, Type, X, Trash2 } from 'lucide-react';
 import classNames from 'classnames';
 
 /**
@@ -52,6 +52,7 @@ export default function MobileToolbar({
     activeTrackType,
     onClipAction,
     onDeselect,
+    onDeleteClip,
 }) {
     const hasClip = !!activeTrackType;
     const clipActions = CLIP_ACTIONS[activeTrackType] ?? [];
@@ -76,6 +77,7 @@ export default function MobileToolbar({
                     activeSheet={activeSheet}
                     onClipAction={onClipAction}
                     onDeselect={onDeselect}
+                    onDeleteClip={onDeleteClip}
                 />
             ) : (
                 /* ── Default state ─────────────────────────────────────────────── */
@@ -132,9 +134,19 @@ function DefaultBar({ activeSheet, onSheetChange, onImport }) {
 }
 
 /* ── Clip-selected state ──────────────────────────────────────────────────── */
-function ClipContextBar({ trackType, actions, activeSheet, onClipAction, onDeselect }) {
-    // Friendly label shown as a small chip on the left
+function ClipContextBar({ trackType, actions, activeSheet, onClipAction, onDeselect, onDeleteClip }) {
     const typeLabel = { video: 'VIDEO', audio: 'AUDIO', text: 'TEXT', image: 'IMAGE' }[trackType] ?? trackType.toUpperCase();
+    const [confirmDelete, setConfirmDelete] = React.useState(false);
+
+    const handleDeletePress = () => {
+        if (confirmDelete) {
+            onDeleteClip?.();
+        } else {
+            setConfirmDelete(true);
+            // Auto-reset after 2.5s if user doesn't confirm
+            setTimeout(() => setConfirmDelete(false), 2500);
+        }
+    };
 
     return (
         <>
@@ -180,13 +192,25 @@ function ClipContextBar({ trackType, actions, activeSheet, onClipAction, onDesel
                 );
             })}
 
-            {/* Push Done to the right */}
+            {/* Push right-side buttons to the right */}
             <div className="flex-1" />
+
+            {/* Delete — tap once to arm (turns red), tap again to confirm */}
+            <button
+                onClick={handleDeletePress}
+                className="flex flex-col items-center justify-center gap-0.5 px-4 transition-all duration-150 active:scale-95"
+                style={{ color: confirmDelete ? '#FF5A5A' : 'var(--fg-3)' }}
+            >
+                <Trash2 className="w-5 h-5" />
+                <span className="text-[9px] font-medium tracking-wide" style={{ fontFamily: 'var(--f-mono)' }}>
+                    {confirmDelete ? 'Confirm' : 'Delete'}
+                </span>
+            </button>
 
             {/* Done / Deselect */}
             <button
                 onClick={onDeselect}
-                className="flex flex-col items-center justify-center gap-0.5 px-5 transition-all duration-150 active:opacity-70"
+                className="flex flex-col items-center justify-center gap-0.5 px-4 transition-all duration-150 active:opacity-70"
                 style={{ color: 'var(--fg-3)' }}
             >
                 <X className="w-5 h-5" />
