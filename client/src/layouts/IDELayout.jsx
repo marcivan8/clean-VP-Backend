@@ -16,6 +16,7 @@ import TextPanel from '../components/TextPanel';
 import TranscriptPanel from '../components/TranscriptPanel';
 import TextOverlay from '../components/Player/TextOverlay';
 import MobileToolbar from '../components/MobileToolbar';
+import MobileAIBar from '../components/MobileAIBar';
 import useDeviceType from '../hooks/useDeviceType';
 import MixerPanel from '../components/Sidebar/MixerPanel';
 import InterviewEditPanel from '../components/InterviewEditPanel';
@@ -1492,27 +1493,37 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     <main className="flex-1 flex flex-col min-w-0 relative">
                         <div
                             className={classNames(
-                                "relative overflow-hidden",
+                                "relative overflow-hidden shrink-0",
                                 isMobile
-                                    // Mobile: width-driven; height derived from the inner aspect-ratio div
-                                    ? "w-full shrink-0"
-                                    // Desktop: unchanged flex centering
+                                    // Mobile: explicit height so child canvas height:100% resolves in Safari.
+                                    // CSS aspect-ratio alone does NOT create a "definite height" for child
+                                    // height:100% in WebKit — the canvas collapses to 0 and nothing plays.
+                                    ? "w-full flex items-center justify-center"
+                                    // Desktop: unchanged
                                     : "flex-1 flex items-center justify-center md:p-8 p-4"
                             )}
-                            style={{ background: "radial-gradient(60% 80% at 50% 40%, #1c1f24 0%, #0c0d10 100%)" }}
+                            style={{
+                                background: "radial-gradient(60% 80% at 50% 40%, #1c1f24 0%, #0c0d10 100%)",
+                                // Explicit height in viewport units gives the canvas a definite parent height.
+                                // 16:9 → 56.25vw (= 100vw × 9/16, fills phone width exactly, no wasted space)
+                                // 9:16 / 1:1 → 45svh (portrait/square capped to avoid overflowing timeline)
+                                ...(isMobile && {
+                                    height: (aspectRatio === '9:16' || aspectRatio === '1:1') ? '45svh' : '56.25vw',
+                                }),
+                            }}
                         >
                             <div className={classNames(
                                 "bg-black rounded-lg shadow-2xl relative border border-white/5 group overflow-hidden transition-all duration-500 ease-in-out",
                                 isMobile
-                                    // Mobile: let aspect-ratio determine height from full device width.
-                                    // 16:9 → fills screen width, height = width × 9/16
-                                    // 9:16 or 1:1 → centered, capped to avoid overflowing above timeline
+                                    // Mobile: inner fills the outer's explicit height.
+                                    // 16:9 → w-full h-full (fills entire container, no gaps)
+                                    // 9:16 / 1:1 → height-driven, width from aspect-ratio, centered by flex
                                     ? (
                                         aspectRatio === '9:16'
-                                            ? 'mx-auto aspect-[9/16] max-h-[45svh] w-auto'
+                                            ? 'h-full w-auto aspect-[9/16]'
                                             : aspectRatio === '1:1'
-                                                ? 'mx-auto aspect-square max-h-[45svh] w-auto'
-                                                : 'w-full aspect-video'
+                                                ? 'h-full w-auto aspect-square'
+                                                : 'w-full h-full'
                                       )
                                     // Desktop: unchanged
                                     : (
@@ -1570,7 +1581,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             </div>
                         </div>
 
-                        {/* Timeline — always visible. Mini (h-28) on mobile, full-height on desktop. */}
+                        {/* Timeline — always visible. Mini (h-36) on mobile, full-height on desktop. */}
                         {mode === 'editor' && (
                             <div
                                 className={classNames(
@@ -1581,6 +1592,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             >
                                 <Timeline />
                             </div>
+                        )}
+
+                        {/* Compact AI bar — always visible on mobile, between timeline and toolbar */}
+                        {isMobile && (
+                            <MobileAIBar onExpand={() => setMobileSheet('ai')} />
                         )}
                     </main>
 
