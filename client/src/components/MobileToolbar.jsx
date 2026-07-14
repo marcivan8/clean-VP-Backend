@@ -65,6 +65,7 @@ export default function MobileToolbar({
                 paddingBottom: 'env(safe-area-inset-bottom)',
                 height: 'calc(3.5rem + env(safe-area-inset-bottom))',
                 transition: 'border-color 200ms',
+                touchAction: 'manipulation',   // prevents 300ms tap delay on Android
             }}
         >
             {hasClip ? (

@@ -1255,11 +1255,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             "flex flex-col font-sans shrink-0 transition-transform duration-300 ease-in-out",
                             "border-[var(--line-soft)]",
                             // Mobile: fixed bottom sheet above toolbar
-                            "fixed inset-x-0 bottom-14 z-40 max-h-[65svh] rounded-t-2xl border-t overflow-hidden",
+                            "fixed inset-x-0 bottom-14 z-40 max-h-[65vh] rounded-t-2xl border-t overflow-hidden",
                             // Desktop: revert to static left sidebar
                             "md:static md:inset-auto md:bottom-auto md:z-30 md:max-h-none md:rounded-none md:border-t-0 md:border-r md:w-72 md:shadow-none md:overflow-y-auto md:translate-y-0",
-                            // Mobile visibility
-                            ['media', 'audio', 'more'].includes(mobileSheet) ? "translate-y-0" : "translate-y-full"
+                            // Mobile visibility + disable pointer events when hidden (prevents touch bleed-through)
+                            ['media', 'audio', 'more'].includes(mobileSheet) ? "translate-y-0" : "translate-y-full pointer-events-none md:pointer-events-auto"
                         )}
                         style={{ background: "linear-gradient(180deg, var(--glass), transparent)" }}
                     >
@@ -1506,9 +1506,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 background: "radial-gradient(60% 80% at 50% 40%, #1c1f24 0%, #0c0d10 100%)",
                                 // Explicit height in viewport units gives the canvas a definite parent height.
                                 // 16:9 → 56.25vw (= 100vw × 9/16, fills phone width exactly, no wasted space)
-                                // 9:16 / 1:1 → 45svh (portrait/square capped to avoid overflowing timeline)
+                                // 9:16 / 1:1 → 45vh (portrait/square capped to avoid overflowing timeline)
+                                // Using vh (not svh) for universal iOS/Android support
                                 ...(isMobile && {
-                                    height: (aspectRatio === '9:16' || aspectRatio === '1:1') ? '45svh' : '56.25vw',
+                                    height: (aspectRatio === '9:16' || aspectRatio === '1:1') ? '45vh' : '56.25vw',
                                 }),
                             }}
                         >
@@ -1606,11 +1607,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             "flex flex-col font-sans shrink-0 transition-transform duration-300 ease-in-out",
                             "border-[var(--line-soft)]",
                             // Mobile: fixed bottom sheet above toolbar (taller than media panel for the chat)
-                            "fixed inset-x-0 bottom-14 z-40 max-h-[80svh] rounded-t-2xl border-t overflow-hidden",
+                            "fixed inset-x-0 bottom-14 z-40 max-h-[80vh] rounded-t-2xl border-t overflow-hidden",
                             // Desktop: revert to static right sidebar (always visible)
                             "md:static md:inset-auto md:bottom-auto md:z-30 md:max-h-none md:rounded-none md:border-t-0 md:border-l md:w-80 md:shadow-none md:overflow-y-auto md:translate-y-0",
-                            // Mobile visibility
-                            mobileSheet === 'ai' ? "translate-y-0" : "translate-y-full"
+                            // Mobile visibility + disable pointer events when hidden
+                            mobileSheet === 'ai' ? "translate-y-0" : "translate-y-full pointer-events-none md:pointer-events-auto"
                         )}
                         style={{ background: "linear-gradient(180deg, var(--glass), transparent)" }}
                     >

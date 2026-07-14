@@ -96,7 +96,7 @@ export default function MobileAIBar({ onExpand }) {
     return (
         <div
             className="md:hidden w-full shrink-0 flex flex-col border-t"
-            style={{ background: 'var(--bg-2)', borderColor: 'var(--line-soft)' }}
+            style={{ background: 'var(--bg-2)', borderColor: 'var(--line-soft)', touchAction: 'manipulation' }}
         >
             {/* ── Preview strip — tap to expand full AI panel ── */}
             <button
