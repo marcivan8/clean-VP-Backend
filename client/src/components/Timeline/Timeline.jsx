@@ -149,6 +149,64 @@ const Timeline = () => {
         document.addEventListener('mouseup', onUp);
     }, [getContentPos]);
 
+    // ── Mobile pinch-to-zoom ─────────────────────────────────────────────────────
+    // Without this, the browser intercepts 2-finger pinches anywhere on the page
+    // and zooms the entire viewport instead of the timeline.
+    // We attach non-passive listeners so we can call preventDefault() on pinch
+    // starts, then drive zoomLevel ourselves from the finger distance ratio.
+    React.useEffect(() => {
+        const el = tracksAreaRef.current;
+        if (!el) return;
+
+        let pinchStartDist = null;
+        let pinchStartZoom = null;
+
+        const dist = (touches) => {
+            const dx = touches[0].clientX - touches[1].clientX;
+            const dy = touches[0].clientY - touches[1].clientY;
+            return Math.hypot(dx, dy);
+        };
+
+        const onTouchStart = (e) => {
+            if (e.touches.length === 2) {
+                // Prevent the browser from stealing this as a page-zoom gesture
+                e.preventDefault();
+                pinchStartDist = dist(e.touches);
+                pinchStartZoom = useTimelineStore.getState().zoomLevel;
+            }
+        };
+
+        const onTouchMove = (e) => {
+            if (e.touches.length === 2 && pinchStartDist !== null) {
+                e.preventDefault();
+                const scale   = dist(e.touches) / pinchStartDist;
+                const newZoom = Math.max(2, Math.min(300, pinchStartZoom * scale));
+                useTimelineStore.getState().setZoomLevel(newZoom);
+            }
+        };
+
+        const onTouchEnd = (e) => {
+            if (e.touches.length < 2) {
+                pinchStartDist = null;
+                pinchStartZoom = null;
+            }
+        };
+
+        // { passive: false } is required — passive listeners cannot call preventDefault()
+        el.addEventListener('touchstart', onTouchStart, { passive: false });
+        el.addEventListener('touchmove',  onTouchMove,  { passive: false });
+        el.addEventListener('touchend',   onTouchEnd);
+        el.addEventListener('touchcancel', onTouchEnd);
+
+        return () => {
+            el.removeEventListener('touchstart', onTouchStart);
+            el.removeEventListener('touchmove',  onTouchMove);
+            el.removeEventListener('touchend',   onTouchEnd);
+            el.removeEventListener('touchcancel', onTouchEnd);
+        };
+    }, []);
+    // ─────────────────────────────────────────────────────────────────────────────
+
     React.useEffect(() => {
         let rafId;
         const updatePlayhead = () => {
@@ -231,6 +289,27 @@ const Timeline = () => {
         const clickedTime = x / zoomLevel;
         seek(clickedTime);
     };
+
+    // Touch-seek: tap or drag a single finger on the ruler to scrub
+    const handleRulerTouchStart = React.useCallback((e) => {
+        if (e.touches.length !== 1) return;
+        e.preventDefault(); // prevent scroll while scrubbing ruler
+        const rect = e.currentTarget.getBoundingClientRect();
+        const area = tracksAreaRef.current;
+        const scrollOffset = area ? area.scrollLeft : 0;
+        const x = e.touches[0].clientX - rect.left + scrollOffset;
+        seek(Math.max(0, x / zoomLevel));
+    }, [seek, zoomLevel]);
+
+    const handleRulerTouchMove = React.useCallback((e) => {
+        if (e.touches.length !== 1) return;
+        e.preventDefault();
+        const rect = e.currentTarget.getBoundingClientRect();
+        const area = tracksAreaRef.current;
+        const scrollOffset = area ? area.scrollLeft : 0;
+        const x = e.touches[0].clientX - rect.left + scrollOffset;
+        seek(Math.max(0, x / zoomLevel));
+    }, [seek, zoomLevel]);
 
 
     return (
@@ -377,7 +456,7 @@ const Timeline = () => {
             <div
                 ref={tracksAreaRef}
                 className="flex-1 overflow-auto relative custom-scrollbar flex flex-col"
-                style={{ WebkitOverflowScrolling: 'touch' }}
+                style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
                 onMouseDown={handleTracksMouseDown}
             >
                 {/* Ruler */}
@@ -385,8 +464,10 @@ const Timeline = () => {
                     <div className="w-32 border-r shrink-0" style={{ borderColor: "var(--line-soft)", background: "var(--bg-2)" }}></div>
                     <div
                         className="flex-1 relative cursor-pointer"
-                        style={{ width: `${duration * zoomLevel}px`, minWidth: '100%' }}
+                        style={{ width: `${duration * zoomLevel}px`, minWidth: '100%', touchAction: 'none' }}
                         onClick={handleSeekClick}
+                        onTouchStart={handleRulerTouchStart}
+                        onTouchMove={handleRulerTouchMove}
                     >
                         {/* Ruler ticks */}
                         {Array.from({ length: Math.ceil(duration / 5) }).map((_, i) => (

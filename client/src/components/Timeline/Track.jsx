@@ -25,11 +25,14 @@ const Track = ({ track }) => {
         data: { trackId: track.id }
     });
 
+    const isText = track.type === 'text';
+
     return (
         <div className="flex w-full mb-1 group">
             {/* Track Header */}
             <div className={classNames(
-                "w-32 bg-card border-r border-border flex flex-col justify-center px-2 py-1 gap-1 shrink-0 select-none group/header relative",
+                "w-32 bg-card border-r border-border flex flex-col justify-center px-2 shrink-0 select-none group/header relative",
+                isText ? "py-0.5 gap-0.5" : "py-1 gap-1",
                 track.type === 'video' && 'border-l-2 border-l-blue-500/50',
                 track.type === 'audio' && 'border-l-2 border-l-orange-500/50'
             )}>
@@ -40,48 +43,50 @@ const Track = ({ track }) => {
                     </div>
                 </div>
                 
-                {/* Controls that appear on hover or when active */}
-                <div className="flex items-center gap-1 mt-0.5">
-                    <button 
-                        onClick={() => useTimelineStore.getState().toggleTrackMute(track.id)}
-                        className={classNames(
-                            "w-5 h-5 rounded flex items-center justify-center transition-colors",
-                            track.muted ? "bg-red-500/20 text-red-500" : "bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white"
-                        )}
-                        title="Mute Track"
-                    >
-                        {track.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
-                    </button>
-                    <button 
-                        onClick={() => useTimelineStore.getState().toggleTrackSolo(track.id)}
-                        className={classNames(
-                            "w-5 h-5 rounded flex items-center justify-center transition-colors",
-                            track.solo ? "bg-yellow-500/20 text-yellow-500" : "bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white"
-                        )}
-                        title="Solo Track"
-                    >
-                        <Headphones className="w-3 h-3" />
-                    </button>
-                    {/* Volume Slider Popover/Hover */}
-                    <div className="flex-1 px-1 pointer-events-auto opacity-0 group-hover/header:opacity-100 transition-opacity flex items-center">
-                        <input 
-                            type="range" 
-                            min="0" 
-                            max="1" 
-                            step="0.05" 
-                            value={track.volume ?? 1} 
-                            onChange={(e) => useTimelineStore.getState().setTrackVolume(track.id, parseFloat(e.target.value))}
-                            className="w-full h-1 bg-secondary rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white cursor-pointer"
-                        />
+                {/* Controls — audio/video tracks only */}
+                {!isText && (
+                    <div className="flex items-center gap-1 mt-0.5">
+                        <button
+                            onClick={() => useTimelineStore.getState().toggleTrackMute(track.id)}
+                            className={classNames(
+                                "w-5 h-5 rounded flex items-center justify-center transition-colors",
+                                track.muted ? "bg-red-500/20 text-red-500" : "bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white"
+                            )}
+                            title="Mute Track"
+                        >
+                            {track.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
+                        </button>
+                        <button
+                            onClick={() => useTimelineStore.getState().toggleTrackSolo(track.id)}
+                            className={classNames(
+                                "w-5 h-5 rounded flex items-center justify-center transition-colors",
+                                track.solo ? "bg-yellow-500/20 text-yellow-500" : "bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white"
+                            )}
+                            title="Solo Track"
+                        >
+                            <Headphones className="w-3 h-3" />
+                        </button>
+                        <div className="flex-1 px-1 pointer-events-auto opacity-0 group-hover/header:opacity-100 transition-opacity flex items-center">
+                            <input
+                                type="range"
+                                min="0"
+                                max="1"
+                                step="0.05"
+                                value={track.volume ?? 1}
+                                onChange={(e) => useTimelineStore.getState().setTrackVolume(track.id, parseFloat(e.target.value))}
+                                className="w-full h-1 bg-secondary rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white cursor-pointer"
+                            />
+                        </div>
                     </div>
-                </div>
+                )}
             </div>
 
-            {/* Track Content Area */}
+            {/* Track Content Area — text tracks are slimmer (no waveform) */}
             <div
                 ref={setNodeRef}
                 className={classNames(
-                    "flex-1 relative h-20 border-b border-white/5 transition-colors",
+                    "flex-1 relative border-b border-white/5 transition-colors",
+                    isText ? "h-8" : "h-20",
                     isOver ? "bg-white/5" : "bg-black/20 group-hover:bg-black/30"
                 )}
                 style={{ width: `${duration * zoomLevel}px`, minWidth: '100%' }}
