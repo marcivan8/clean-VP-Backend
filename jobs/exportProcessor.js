@@ -17,7 +17,10 @@
 
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
+const ffprobeInstaller = require('@ffprobe-installer/ffprobe');
 const { spawnSync, spawn } = require('child_process');
+
+ffmpeg.setFfprobePath(ffprobeInstaller.path);
 const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
@@ -70,6 +73,62 @@ function resolveSourcePath(clip, uploadsDir) {
 
 function buildScaleFilter(width, height) {
     return `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
+}
+
+/**
+ * Probe a video file and return its stored rotation in degrees (0, 90, 180, 270).
+ * Phone-recorded portrait videos are often stored as landscape with a rotate=90
+ * metadata tag. We need to correct for this before applying the scale filter,
+ * otherwise the dimensions are swapped and the video ends up tiny with black bars.
+ */
+function getVideoRotation(filePath) {
+    return new Promise((resolve) => {
+        ffmpeg.ffprobe(filePath, (err, metadata) => {
+            if (err) { resolve(0); return; }
+            const vStream = (metadata?.streams || []).find(s => s.codec_type === 'video');
+            if (!vStream) { resolve(0); return; }
+            // Old-style: stream.tags.rotate (e.g. "90")
+            const tagRotate = parseInt(vStream?.tags?.rotate || 0, 10);
+            if (tagRotate) { resolve(tagRotate); return; }
+            // New-style: side_data_list with a Display Matrix entry
+            const sd = (vStream?.side_data_list || []).find(d =>
+                d.side_data_type === 'Display Matrix' || d.rotation !== undefined
+            );
+            if (sd?.rotation !== undefined) {
+                // FFmpeg reports the stored rotation as a negative angle (e.g. -90 for CW 90°)
+                resolve(((-sd.rotation) % 360 + 360) % 360);
+            } else {
+                resolve(0);
+            }
+        });
+    });
+}
+
+/**
+ * Download a Google Font TTF to `destPath` if it isn't already present.
+ * Uses the legacy CSS1 API (old browser UA) so the response contains TTF URLs.
+ */
+async function downloadFontIfMissing(destPath, familyName) {
+    if (fs.existsSync(destPath) && fs.statSync(destPath).size > 10_000) return;
+    try {
+        const cssUrl = `https://fonts.googleapis.com/css?family=${encodeURIComponent(familyName)}`;
+        const cssRes = await axios.get(cssUrl, {
+            headers: { 'User-Agent': 'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1)' },
+            timeout: 15_000,
+        });
+        const match = (cssRes.data || '').match(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+\.ttf)\)/);
+        if (!match) throw new Error('No TTF URL found in Google Fonts CSS');
+        const response = await axios({ url: match[1], method: 'GET', responseType: 'stream', timeout: 30_000 });
+        await new Promise((resolve, reject) => {
+            const writer = fs.createWriteStream(destPath);
+            response.data.pipe(writer);
+            writer.on('finish', resolve);
+            writer.on('error', reject);
+        });
+        console.log(`[fonts] Downloaded ${path.basename(destPath)}`);
+    } catch (err) {
+        console.warn(`[fonts] Could not auto-download ${familyName}: ${err.message}`);
+    }
 }
 
 const PLATFORM_PRESETS = {
@@ -343,15 +402,35 @@ module.exports = async function processExportJob(job) {
         const speed   = clip.speed || 1.0;
         const isImage = clip.type === 'image';
 
+        // Probe rotation BEFORE we build the filter chain.
+        // Phones store portrait clips as landscape + rotate=90 metadata. When
+        // we add a -vf filter chain, FFmpeg's automatic display-matrix rotation
+        // can be suppressed, so we detect and correct it explicitly.
+        const rotation = isImage ? 0 : await getVideoRotation(src);
+
         await new Promise((resolve, reject) => {
             let cmd;
             if (isImage) {
                 cmd = ffmpeg().input(src).inputOptions(['-loop', '1']).setDuration(dur / speed);
             } else {
-                cmd = ffmpeg(src).setStartTime(inPoint).setDuration(dur / speed);
+                // -noautorotate disables FFmpeg's implicit rotation so we can
+                // handle it ourselves in the filter chain (avoids double-rotate).
+                cmd = ffmpeg(src)
+                    .inputOptions(['-noautorotate'])
+                    .setStartTime(inPoint)
+                    .setDuration(dur / speed);
             }
 
-            const vFilters = [scaleFilter];
+            // Build rotation-correction filter.
+            // rotate=90 (phone portrait stored as landscape CW) → transpose=1 (CW 90°)
+            // rotate=270 (stored landscape CCW)                 → transpose=2 (CCW 90°)
+            // rotate=180                                        → hflip,vflip
+            let correctionFilters = [];
+            if      (rotation === 90)                  correctionFilters = ['transpose=1'];
+            else if (rotation === 270 || rotation === -90) correctionFilters = ['transpose=2'];
+            else if (rotation === 180)                 correctionFilters = ['hflip', 'vflip'];
+
+            const vFilters = [...correctionFilters, scaleFilter];
             const aFilters = [];
 
             if (speed !== 1.0) {
@@ -487,11 +566,23 @@ module.exports = async function processExportJob(job) {
         // Build a per-family lookup: keys are fontFamily values used in caption clips.
         // Values are filesystem paths to TTF/OTF files. Falls back to the default.
         const fontsDir = path.join(publicDir, 'fonts');
+
+        // Attempt to auto-download any missing Google Fonts TTFs on first use.
+        // The files persist on disk so subsequent exports skip the download.
+        await Promise.all([
+            downloadFontIfMissing(path.join(fontsDir, 'Anton-Regular.ttf'),      'Anton'),
+            downloadFontIfMissing(path.join(fontsDir, 'BebasNeue-Regular.ttf'),  'Bebas Neue'),
+            downloadFontIfMissing(path.join(fontsDir, 'Montserrat-Bold.ttf'),    'Montserrat:700'),
+            downloadFontIfMissing(path.join(fontsDir, 'Oswald-Regular.ttf'),     'Oswald'),
+        ]);
+
         const FAMILY_PATHS = {
-            // Fonts shipped in client/public/fonts/
+            // Fonts shipped in client/public/fonts/ (or just downloaded above)
             'Roboto':      path.join(fontsDir, 'Roboto-Regular.ttf'),
             'Anton':       path.join(fontsDir, 'Anton-Regular.ttf'),
             'Bebas Neue':  path.join(fontsDir, 'BebasNeue-Regular.ttf'),
+            'Montserrat':  path.join(fontsDir, 'Montserrat-Bold.ttf'),
+            'Oswald':      path.join(fontsDir, 'Oswald-Regular.ttf'),
             // System fonts (present when Dockerfile includes fonts-liberation)
             'Liberation Sans': '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
             // Debian default fonts
@@ -501,10 +592,11 @@ module.exports = async function processExportJob(job) {
             'Helvetica':   '/System/Library/Fonts/Helvetica.ttc',
         };
 
-        const defaultFontPath = path.join(fontsDir, 'Roboto-Regular.ttf');
-        // Ordered fallback list for when a specific family isn't found
+        // Ordered fallback list for when a specific family isn't found.
+        // Anton first — that's the Vibed caption default, and it's now downloaded above.
         const fallbackFontPath = [
-            defaultFontPath,
+            path.join(fontsDir, 'Anton-Regular.ttf'),
+            path.join(fontsDir, 'Roboto-Regular.ttf'),
             '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
             '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
             '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
@@ -548,7 +640,9 @@ module.exports = async function processExportJob(job) {
                         : fallbackFontPath;
                     const escapedFont = resolvedFont.replace(/\\/g, '/').replace(/:/g, '\\:');
 
-                    const color    = (clip.color || '#ffffff').replace('#', '0x');
+                    // Vibed caption defaults must match addCaptionClips defaults
+                    // (#FACC15 yellow + Anton 48 — not plain white Roboto).
+                    const color    = (clip.color || '#FACC15').replace('#', '0x');
                     const size     = clip.fontSize || 48;
 
                     let x = '(w-text_w)/2';
@@ -558,12 +652,13 @@ module.exports = async function processExportJob(job) {
                     if (typeof clip.x === 'number') x = Math.round(clip.x + targetWidth  / 2);
                     if (typeof clip.y === 'number') y = Math.round(clip.y + targetHeight / 2);
 
-                    // Stroke (border) — maps directly to drawtext borderw / bordercolor
-                    let strokePart = '';
-                    if (clip.stroke?.width && clip.stroke.width > 0) {
-                        const strokeColor = (clip.stroke.color || '#000000').replace('#', '0x');
-                        strokePart = `:borderw=${clip.stroke.width}:bordercolor=${strokeColor}`;
-                    }
+                    // Stroke (border) — maps directly to drawtext borderw / bordercolor.
+                    // Default matches addCaptionClips: 2px black outline.
+                    const strokeWidth = clip.stroke?.width ?? 2;
+                    const strokeColor = (clip.stroke?.color || '#000000').replace('#', '0x');
+                    const strokePart  = strokeWidth > 0
+                        ? `:borderw=${strokeWidth}:bordercolor=${strokeColor}`
+                        : '';
 
                     textFilters.push(
                         `drawtext=fontfile='${escapedFont}'` +
