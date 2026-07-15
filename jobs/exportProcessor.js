@@ -108,27 +108,117 @@ function getVideoRotation(filePath) {
  * Download a Google Font TTF to `destPath` if it isn't already present.
  * Uses the legacy CSS1 API (old browser UA) so the response contains TTF URLs.
  */
-async function downloadFontIfMissing(destPath, familyName) {
-    if (fs.existsSync(destPath) && fs.statSync(destPath).size > 10_000) return;
+// ── Font registry ─────────────────────────────────────────────────────────────
+// Maps every font offered in TextPanel.jsx + ReasoningPanel.jsx to a local
+// filename + jsDelivr download spec (@fontsource v4 packages include TTF files).
+// jsDelivr: reliable CDN, no auth, no UA tricks, no rate limits.
+// URL pattern: https://cdn.jsdelivr.net/npm/@fontsource/{slug}@4/files/{slug}-{subset}-{weight}-normal.ttf
+const FONT_SPECS = {
+    // Talking Head
+    'Anton':              { file: 'Anton-Regular.ttf',             slug: 'anton',              weight: 400, subset: 'latin' },
+    'Bebas Neue':         { file: 'BebasNeue-Regular.ttf',         slug: 'bebas-neue',         weight: 400, subset: 'latin' },
+    'Montserrat':         { file: 'Montserrat-Bold.ttf',           slug: 'montserrat',         weight: 800, subset: 'latin' },
+    'Inter':              { file: 'Inter-Regular.ttf',             slug: 'inter',              weight: 400, subset: 'latin' },
+    'Barlow Condensed':   { file: 'BarlowCondensed-Bold.ttf',      slug: 'barlow-condensed',   weight: 700, subset: 'latin' },
+    // Podcast / Doc
+    'Playfair Display':   { file: 'PlayfairDisplay-Regular.ttf',   slug: 'playfair-display',   weight: 400, subset: 'latin' },
+    'Lora':               { file: 'Lora-Regular.ttf',              slug: 'lora',               weight: 400, subset: 'latin' },
+    'Merriweather':       { file: 'Merriweather-Regular.ttf',      slug: 'merriweather',       weight: 400, subset: 'latin' },
+    'DM Serif Display':   { file: 'DMSerifDisplay-Regular.ttf',    slug: 'dm-serif-display',   weight: 400, subset: 'latin' },
+    'Cormorant Garamond': { file: 'CormorantGaramond-Regular.ttf', slug: 'cormorant-garamond', weight: 400, subset: 'latin' },
+    // Lifestyle / Vlog
+    'Nunito':             { file: 'Nunito-Regular.ttf',            slug: 'nunito',             weight: 400, subset: 'latin' },
+    'Poppins':            { file: 'Poppins-Regular.ttf',           slug: 'poppins',            weight: 400, subset: 'latin' },
+    'Quicksand':          { file: 'Quicksand-Regular.ttf',         slug: 'quicksand',          weight: 400, subset: 'latin' },
+    'Josefin Sans':       { file: 'JosefinSans-Regular.ttf',       slug: 'josefin-sans',       weight: 400, subset: 'latin' },
+    'Raleway':            { file: 'Raleway-Regular.ttf',           slug: 'raleway',            weight: 400, subset: 'latin' },
+    // Gaming / Tech
+    'Rajdhani':           { file: 'Rajdhani-Regular.ttf',          slug: 'rajdhani',           weight: 400, subset: 'latin' },
+    'Exo 2':              { file: 'Exo2-Regular.ttf',              slug: 'exo-2',              weight: 400, subset: 'latin' },
+    'Orbitron':           { file: 'Orbitron-Regular.ttf',          slug: 'orbitron',           weight: 400, subset: 'latin' },
+    'Oxanium':            { file: 'Oxanium-Regular.ttf',           slug: 'oxanium',            weight: 400, subset: 'latin' },
+    'Roboto Condensed':   { file: 'RobotoCondensed-Regular.ttf',   slug: 'roboto-condensed',   weight: 400, subset: 'latin' },
+    // Motivational
+    'Oswald':             { file: 'Oswald-Regular.ttf',            slug: 'oswald',             weight: 400, subset: 'latin' },
+    'Teko':               { file: 'Teko-Regular.ttf',              slug: 'teko',               weight: 400, subset: 'latin' },
+    'Black Han Sans':     { file: 'BlackHanSans-Regular.ttf',      slug: 'black-han-sans',     weight: 400, subset: 'latin' },
+    'Saira Condensed':    { file: 'SairaCondensed-Regular.ttf',    slug: 'saira-condensed',    weight: 400, subset: 'latin' },
+    'Cabin':              { file: 'Cabin-Regular.ttf',             slug: 'cabin',              weight: 400, subset: 'latin' },
+    // Handwritten
+    'Caveat':             { file: 'Caveat-Regular.ttf',            slug: 'caveat',             weight: 400, subset: 'latin' },
+    'Pacifico':           { file: 'Pacifico-Regular.ttf',          slug: 'pacifico',           weight: 400, subset: 'latin' },
+    'Kalam':              { file: 'Kalam-Regular.ttf',             slug: 'kalam',              weight: 400, subset: 'latin' },
+    'Satisfy':            { file: 'Satisfy-Regular.ttf',           slug: 'satisfy',            weight: 400, subset: 'latin' },
+    'Dancing Script':     { file: 'DancingScript-Regular.ttf',     slug: 'dancing-script',     weight: 400, subset: 'latin' },
+    // Neon / Glow
+    'Boogaloo':           { file: 'Boogaloo-Regular.ttf',          slug: 'boogaloo',           weight: 400, subset: 'latin' },
+    'Righteous':          { file: 'Righteous-Regular.ttf',         slug: 'righteous',          weight: 400, subset: 'latin' },
+    'Press Start 2P':     { file: 'PressStart2P-Regular.ttf',      slug: 'press-start-2p',     weight: 400, subset: 'latin' },
+    'Audiowide':          { file: 'Audiowide-Regular.ttf',         slug: 'audiowide',          weight: 400, subset: 'latin' },
+};
+
+/**
+ * Download a font TTF to `destPath` if not already present.
+ * Primary:  jsDelivr CDN (@fontsource v4) — reliable, no rate limits, no UA tricks.
+ *           Tries latin subset first, falls back to 'all' subset.
+ * Fallback: Google Fonts CSS1 API with legacy UA (returns TTF for old browsers).
+ *           Does NOT use encodeURIComponent on the full name — encodes the space
+ *           as '+' and passes weight as ':700' (not '%3A700') so the API parses it.
+ */
+async function downloadFont(destPath, spec) {
+    if (fs.existsSync(destPath) && fs.statSync(destPath).size > 5_000) return;
+    const { slug, weight, subset = 'latin' } = spec;
+
+    // ── Primary: jsDelivr ────────────────────────────────────────────────────
+    for (const sub of [subset, 'all']) {
+        const url = `https://cdn.jsdelivr.net/npm/@fontsource/${slug}@4/files/${slug}-${sub}-${weight}-normal.ttf`;
+        try {
+            const response = await axios({ url, method: 'GET', responseType: 'stream', timeout: 20_000,
+                validateStatus: s => s === 200 });
+            await new Promise((resolve, reject) => {
+                const writer = fs.createWriteStream(destPath);
+                response.data.pipe(writer);
+                writer.on('finish', resolve);
+                writer.on('error', reject);
+            });
+            if (fs.existsSync(destPath) && fs.statSync(destPath).size > 5_000) {
+                console.log(`[fonts] ✓ ${path.basename(destPath)} (jsDelivr ${sub})`);
+                return;
+            }
+            fs.existsSync(destPath) && fs.unlinkSync(destPath);
+        } catch { /* try next */ }
+    }
+
+    // ── Fallback: Google Fonts CSS1 API (legacy TTF endpoint) ────────────────
+    // Encode space as '+', weight as ':700' (NOT %3A700 — that breaks the API).
+    const familyParam = spec.file
+        .replace(/-.*/, '')                         // strip weight/style suffix
+        .replace(/([a-z])([A-Z])/g, '$1 $2')       // CamelCase → words
+        .replace(/ /g, '+');                        // spaces → +
+    const weightSuffix = weight !== 400 ? `:${weight}` : '';
+    const cssUrl = `https://fonts.googleapis.com/css?family=${familyParam}${weightSuffix}`;
     try {
-        const cssUrl = `https://fonts.googleapis.com/css?family=${encodeURIComponent(familyName)}`;
         const cssRes = await axios.get(cssUrl, {
             headers: { 'User-Agent': 'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1)' },
             timeout: 15_000,
         });
         const match = (cssRes.data || '').match(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+\.ttf)\)/);
-        if (!match) throw new Error('No TTF URL found in Google Fonts CSS');
-        const response = await axios({ url: match[1], method: 'GET', responseType: 'stream', timeout: 30_000 });
-        await new Promise((resolve, reject) => {
-            const writer = fs.createWriteStream(destPath);
-            response.data.pipe(writer);
-            writer.on('finish', resolve);
-            writer.on('error', reject);
-        });
-        console.log(`[fonts] Downloaded ${path.basename(destPath)}`);
-    } catch (err) {
-        console.warn(`[fonts] Could not auto-download ${familyName}: ${err.message}`);
-    }
+        if (match) {
+            const response = await axios({ url: match[1], method: 'GET', responseType: 'stream', timeout: 30_000 });
+            await new Promise((resolve, reject) => {
+                const writer = fs.createWriteStream(destPath);
+                response.data.pipe(writer);
+                writer.on('finish', resolve);
+                writer.on('error', reject);
+            });
+            if (fs.existsSync(destPath) && fs.statSync(destPath).size > 5_000) {
+                console.log(`[fonts] ✓ ${path.basename(destPath)} (Google Fonts fallback)`);
+                return;
+            }
+        }
+    } catch { /* silent */ }
+
+    console.warn(`[fonts] ✗ Could not download ${path.basename(destPath)} — will use fallback font`);
 }
 
 const PLATFORM_PRESETS = {
@@ -563,37 +653,44 @@ module.exports = async function processExportJob(job) {
 
     if (textTracks.length > 0) {
         // ── Font resolution ────────────────────────────────────────────────
-        // Build a per-family lookup: keys are fontFamily values used in caption clips.
-        // Values are filesystem paths to TTF/OTF files. Falls back to the default.
         const fontsDir = path.join(publicDir, 'fonts');
+        if (!fs.existsSync(fontsDir)) fs.mkdirSync(fontsDir, { recursive: true });
 
-        // Attempt to auto-download any missing Google Fonts TTFs on first use.
-        // The files persist on disk so subsequent exports skip the download.
-        await Promise.all([
-            downloadFontIfMissing(path.join(fontsDir, 'Anton-Regular.ttf'),      'Anton'),
-            downloadFontIfMissing(path.join(fontsDir, 'BebasNeue-Regular.ttf'),  'Bebas Neue'),
-            downloadFontIfMissing(path.join(fontsDir, 'Montserrat-Bold.ttf'),    'Montserrat:700'),
-            downloadFontIfMissing(path.join(fontsDir, 'Oswald-Regular.ttf'),     'Oswald'),
-        ]);
+        // Collect only the font families actually used in this export
+        const neededFamilies = new Set(['Anton']); // Anton always needed as fallback
+        for (const track of textTracks) {
+            for (const clip of track.clips) {
+                if (clip.fontFamily) neededFamilies.add(clip.fontFamily);
+            }
+        }
 
-        const FAMILY_PATHS = {
-            // Fonts shipped in client/public/fonts/ (or just downloaded above)
-            'Roboto':      path.join(fontsDir, 'Roboto-Regular.ttf'),
-            'Anton':       path.join(fontsDir, 'Anton-Regular.ttf'),
-            'Bebas Neue':  path.join(fontsDir, 'BebasNeue-Regular.ttf'),
-            'Montserrat':  path.join(fontsDir, 'Montserrat-Bold.ttf'),
-            'Oswald':      path.join(fontsDir, 'Oswald-Regular.ttf'),
-            // System fonts (present when Dockerfile includes fonts-liberation)
+        // Download missing fonts in parallel (files persist across exports)
+        await Promise.all(
+            [...neededFamilies].map(family => {
+                const spec = FONT_SPECS[family];
+                if (!spec) return Promise.resolve();
+                return downloadFont(path.join(fontsDir, spec.file), spec);
+            })
+        );
+
+        // Build FAMILY_PATHS from FONT_SPECS (only include files that exist on disk)
+        const FAMILY_PATHS = {};
+        for (const [family, spec] of Object.entries(FONT_SPECS)) {
+            const p = path.join(fontsDir, spec.file);
+            if (fs.existsSync(p) && fs.statSync(p).size > 5_000) FAMILY_PATHS[family] = p;
+        }
+        // Also include system fonts as aliases
+        const systemFontAliases = {
             'Liberation Sans': '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-            // Debian default fonts
-            'DejaVu Sans': '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-            'FreeSans':    '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
-            // macOS (local dev)
-            'Helvetica':   '/System/Library/Fonts/Helvetica.ttc',
+            'DejaVu Sans':     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+            'FreeSans':        '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
+            'Helvetica':       '/System/Library/Fonts/Helvetica.ttc',
         };
+        for (const [family, p] of Object.entries(systemFontAliases)) {
+            if (fs.existsSync(p)) FAMILY_PATHS[family] = p;
+        }
 
-        // Ordered fallback list for when a specific family isn't found.
-        // Anton first — that's the Vibed caption default, and it's now downloaded above.
+        // Ordered fallback list — Anton first (Vibed default)
         const fallbackFontPath = [
             path.join(fontsDir, 'Anton-Regular.ttf'),
             path.join(fontsDir, 'Roboto-Regular.ttf'),
