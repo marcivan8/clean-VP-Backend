@@ -155,6 +155,9 @@ const FONT_SPECS = {
     'Righteous':          { file: 'Righteous-Regular.ttf',         slug: 'righteous',          weight: 400, subset: 'latin' },
     'Press Start 2P':     { file: 'PressStart2P-Regular.ttf',      slug: 'press-start-2p',     weight: 400, subset: 'latin' },
     'Audiowide':          { file: 'Audiowide-Regular.ttf',         slug: 'audiowide',          weight: 400, subset: 'latin' },
+    // Caption style picker extras (CaptionStylesCard)
+    'DM Sans':            { file: 'DMSans-Regular.ttf',            slug: 'dm-sans',            weight: 400, subset: 'latin' },
+    'Unbounded':          { file: 'Unbounded-Regular.ttf',         slug: 'unbounded',          weight: 400, subset: 'latin' },
 };
 
 /**

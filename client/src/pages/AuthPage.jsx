@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabaseClient';
 import useSessionStore from '../store/useSessionStore';
 
@@ -19,6 +20,7 @@ const Spinner = () => (
 
 export default function AuthPage() {
     const navigate = useNavigate();
+    const { t } = useTranslation('auth');
     const { migrateSession, clearSession } = useSessionStore();
 
     const [tab, setTab]           = useState('signin'); // 'signin' | 'signup'
@@ -49,7 +51,7 @@ export default function AuthPage() {
         setError(null);
         const cleanEmail = sanitizeEmail(email);
         if (!cleanEmail || !password) {
-            setError('Email et mot de passe requis.');
+            setError(t('error.emailRequired'));
             return;
         }
         setLoading(true);
@@ -62,11 +64,10 @@ export default function AuthPage() {
             await migrateSession(data.user.id);
             navigate('/dashboard');
         } catch (err) {
-            // Return a generic message for invalid credentials to avoid user enumeration
             if (err.message?.toLowerCase().includes('invalid login credentials')) {
-                setError('Email ou mot de passe incorrect.');
+                setError(t('error.invalidCredentials'));
             } else if (err.message?.toLowerCase().includes('rate limit') || err.status === 429) {
-                setError('Trop de tentatives. Réessaie dans quelques minutes.');
+                setError(t('error.rateLimit'));
             } else {
                 setError(err.message);
             }
@@ -80,11 +81,11 @@ export default function AuthPage() {
         setError(null);
         const cleanEmail = sanitizeEmail(email);
         if (!cleanEmail) {
-            setError('Adresse email invalide.');
+            setError(t('error.emailInvalid'));
             return;
         }
         if (password.length < 6) {
-            setError('Le mot de passe doit contenir au moins 6 caractères.');
+            setError(t('error.passwordTooShort'));
             return;
         }
         setLoading(true);
@@ -92,11 +93,18 @@ export default function AuthPage() {
             const { data, error: signUpErr } = await supabase.auth.signUp({
                 email: cleanEmail,
                 password,
+                options: {
+                    // After clicking the confirmation email, redirect to the dashboard.
+                    // Must be listed in Supabase → Auth → URL Configuration → Redirect URLs:
+                    //   https://vibedstudio.com/dashboard
+                    //   http://localhost:5173/dashboard
+                    emailRedirectTo: `${window.location.origin}/dashboard`,
+                },
             });
             if (signUpErr) throw signUpErr;
 
             if (data.user && !data.user.identities?.length) {
-                throw new Error('Un compte existe déjà avec cet email.');
+                throw new Error(t('error.emailExists'));
             }
 
             // Create profile in our DB
@@ -112,11 +120,11 @@ export default function AuthPage() {
                 await migrateSession(data.user.id);
                 navigate('/dashboard');
             } else {
-                setSuccess('Compte créé ! Vérifie ta boîte mail pour confirmer ton adresse.');
+                setSuccess(t('success.checkEmail'));
             }
         } catch (err) {
             if (err.message?.toLowerCase().includes('rate limit') || err.status === 429) {
-                setError('Trop de tentatives. Réessaie dans quelques minutes.');
+                setError(t('error.rateLimit'));
             } else {
                 setError(err.message);
             }
@@ -145,7 +153,7 @@ export default function AuthPage() {
             });
             if (!res.ok) {
                 const body = await res.json().catch(() => ({}));
-                throw new Error(body.error || 'Erreur lors de la suppression.');
+                throw new Error(body.error || t('error.deleteError'));
             }
             await supabase.auth.signOut();
             clearSession();
@@ -161,7 +169,7 @@ export default function AuthPage() {
     // ── Logged-in view ────────────────────────────────────────────────────────
     if (currentUser) {
         return (
-            <Page>
+            <Page t={t}>
                 <Card>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24, textAlign: 'center' }}>
                         <Avatar email={currentUser.email} />
@@ -170,14 +178,14 @@ export default function AuthPage() {
                                 {currentUser.email}
                             </p>
                         </div>
-                        <StatusBadge registered={!!currentUser.email_confirmed_at} />
+                        <StatusBadge registered={!!currentUser.email_confirmed_at} t={t} />
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%' }}>
                             <button
                                 className="btn btn-primary"
                                 style={{ width: '100%', justifyContent: 'center', borderRadius: 12 }}
                                 onClick={() => navigate('/dashboard')}
                             >
-                                Mes projets
+                                {t('button.myProjects')}
                             </button>
                             <button
                                 className="btn btn-ghost"
@@ -185,7 +193,7 @@ export default function AuthPage() {
                                 onClick={handleSignOut}
                                 disabled={loading}
                             >
-                                {loading ? <Spinner /> : 'Se déconnecter'}
+                                {loading ? <Spinner /> : t('button.signout')}
                             </button>
                         </div>
 
@@ -206,7 +214,7 @@ export default function AuthPage() {
                                     onMouseEnter={e => e.currentTarget.style.color = 'var(--coral)'}
                                     onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-4)'}
                                 >
-                                    Supprimer mon compte
+                                    {t('button.deleteAccount')}
                                 </button>
                             ) : (
                                 <div style={{
@@ -215,9 +223,9 @@ export default function AuthPage() {
                                     border: '0.5px solid color-mix(in oklch, var(--coral) 28%, transparent)',
                                     display: 'flex', flexDirection: 'column', gap: 12,
                                 }}>
-                                    <p style={{ margin: 0, fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.5 }}>
-                                        Cette action est <strong>permanente et irréversible</strong>. Tous tes fichiers et projets seront supprimés immédiatement.
-                                    </p>
+                                    <p style={{ margin: 0, fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.5 }}
+                                       dangerouslySetInnerHTML={{ __html: t('delete.confirm') }}
+                                    />
                                     <div style={{ display: 'flex', gap: 8 }}>
                                         <button
                                             onClick={handleDeleteAccount}
@@ -231,7 +239,7 @@ export default function AuthPage() {
                                                 opacity: deleteLoading ? 0.7 : 1,
                                             }}
                                         >
-                                            {deleteLoading ? <Spinner /> : 'Confirmer la suppression'}
+                                            {deleteLoading ? <Spinner /> : t('delete.confirmButton')}
                                         </button>
                                         <button
                                             onClick={() => setShowDeleteConfirm(false)}
@@ -244,7 +252,7 @@ export default function AuthPage() {
                                                 fontFamily: 'inherit',
                                             }}
                                         >
-                                            Annuler
+                                            {t('delete.cancel')}
                                         </button>
                                     </div>
                                 </div>
@@ -259,7 +267,7 @@ export default function AuthPage() {
     // ── Loading ───────────────────────────────────────────────────────────────
     if (currentUser === undefined) {
         return (
-            <Page>
+            <Page t={t}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200 }}>
                     <Spinner />
                 </div>
@@ -269,23 +277,21 @@ export default function AuthPage() {
 
     // ── Auth form ─────────────────────────────────────────────────────────────
     return (
-        <Page>
+        <Page t={t}>
             <Card>
                 {/* Logo + title */}
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 28 }}>
                     <Logo size={32} />
                     <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em', color: 'var(--fg)' }}>
-                        {tab === 'signin' ? 'Bon retour' : 'Créer un compte'}
+                        {tab === 'signin' ? t('heading.signin') : t('heading.signup')}
                     </h1>
                     <p style={{ margin: 0, fontSize: 13.5, color: 'var(--fg-3)' }}>
-                        {tab === 'signin'
-                            ? 'Connecte-toi pour accéder à tes projets'
-                            : 'Commence à créer des vidéos virales'}
+                        {tab === 'signin' ? t('sub.signin') : t('sub.signup')}
                     </p>
                 </div>
 
                 {/* Tabs */}
-                <TabBar tab={tab} setTab={(t) => { setTab(t); setError(null); setSuccess(null); }} />
+                <TabBar tab={tab} setTab={(v) => { setTab(v); setError(null); setSuccess(null); }} t={t} />
 
                 {/* Success message */}
                 {success && (
@@ -313,11 +319,11 @@ export default function AuthPage() {
 
                 {/* Form */}
                 <form onSubmit={tab === 'signin' ? handleSignIn : handleSignUp} style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <Field label="Email" id="email">
+                    <Field label={t('field.email')} id="email">
                         <input
                             id="email"
                             type="email"
-                            placeholder="toi@exemple.com"
+                            placeholder={t('field.emailPlaceholder')}
                             value={email}
                             onChange={e => setEmail(e.target.value)}
                             required
@@ -327,11 +333,11 @@ export default function AuthPage() {
                             style={inputStyle}
                         />
                     </Field>
-                    <Field label="Mot de passe" id="password">
+                    <Field label={t('field.password')} id="password">
                         <input
                             id="password"
                             type="password"
-                            placeholder={tab === 'signup' ? 'Min. 6 caractères' : '••••••••'}
+                            placeholder={tab === 'signup' ? t('field.passwordPlaceholderSignup') : t('field.passwordPlaceholderSignin')}
                             value={password}
                             onChange={e => setPassword(e.target.value)}
                             required
@@ -350,23 +356,23 @@ export default function AuthPage() {
                     >
                         {loading
                             ? <Spinner />
-                            : tab === 'signin' ? 'Se connecter' : 'Créer mon compte'}
+                            : tab === 'signin' ? t('button.signin') : t('button.signup')}
                     </button>
                 </form>
 
                 {/* AI Transparency Notice */}
                 <p style={{ margin: '20px 0 0', textAlign: 'center', fontSize: 12, color: 'var(--fg-4)', lineHeight: 1.4, padding: '0 10px' }}>
-                    VIBED utilise l'IA pour analyser et modifier votre contenu vidéo.
+                    {t('aiNotice')}
                 </p>
 
                 {/* Footer link */}
                 <p style={{ margin: '20px 0 0', textAlign: 'center', fontSize: 13, color: 'var(--fg-3)' }}>
                     {tab === 'signin'
-                        ? <>Pas encore de compte ?{' '}
-                            <button onClick={() => { setTab('signup'); setError(null); }} style={linkBtn}>S'inscrire</button>
+                        ? <>{t('footer.noAccount')}{' '}
+                            <button onClick={() => { setTab('signup'); setError(null); }} style={linkBtn}>{t('footer.register')}</button>
                           </>
-                        : <>Déjà un compte ?{' '}
-                            <button onClick={() => { setTab('signin'); setError(null); }} style={linkBtn}>Se connecter</button>
+                        : <>{t('footer.alreadyAccount')}{' '}
+                            <button onClick={() => { setTab('signin'); setError(null); }} style={linkBtn}>{t('footer.login')}</button>
                           </>
                     }
                 </p>
@@ -377,7 +383,7 @@ export default function AuthPage() {
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
-function Page({ children }) {
+function Page({ children, t }) {
     return (
         <div style={{
             minHeight: '100vh', background: 'var(--bg)',
@@ -396,7 +402,7 @@ function Page({ children }) {
                 onMouseEnter={e => e.currentTarget.style.color = 'var(--fg)'}
                 onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-3)'}
             >
-                ← Retour
+                {t('back')}
             </button>
             {children}
         </div>
@@ -418,14 +424,14 @@ function Card({ children }) {
     );
 }
 
-function TabBar({ tab, setTab }) {
+function TabBar({ tab, setTab, t }) {
     return (
         <div style={{
             display: 'flex', gap: 4,
             background: 'var(--glass)', border: '0.5px solid var(--glass-stroke)',
             borderRadius: 10, padding: 4,
         }}>
-            {[['signin', 'Connexion'], ['signup', 'Inscription']].map(([key, label]) => (
+            {[['signin', t('tab.signin')], ['signup', t('tab.signup')]].map(([key, label]) => (
                 <button
                     key={key}
                     onClick={() => setTab(key)}
@@ -471,7 +477,7 @@ function Avatar({ email }) {
     );
 }
 
-function StatusBadge({ registered }) {
+function StatusBadge({ registered, t }) {
     return (
         <div style={{
             display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -485,7 +491,7 @@ function StatusBadge({ registered }) {
             color: registered ? 'var(--mint)' : 'var(--coral)',
         }}>
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />
-            {registered ? 'Compte vérifié' : 'Email non vérifié'}
+            {registered ? t('status.verified') : t('status.unverified')}
         </div>
     );
 }
