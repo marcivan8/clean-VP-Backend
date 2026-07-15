@@ -9,6 +9,7 @@
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Logo } from '../components/Logo.jsx';
 import { supabase } from '../lib/supabaseClient.js';
 
@@ -37,16 +38,16 @@ import { atLimit, planLimitLabel, getProjectLimit } from '../lib/planLimits.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-function formatDate(iso) {
+function formatDate(iso, t, lang) {
     if (!iso) return '';
     const d = new Date(iso);
     const now = new Date();
     const diff = (now - d) / 1000;
-    if (diff < 60)    return 'just now';
-    if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
-    return d.toLocaleDateString('en', { month: 'short', day: 'numeric', year: diff > 31536000 ? 'numeric' : undefined });
+    if (diff < 60)     return t('formatDate.justNow');
+    if (diff < 3600)   return t('formatDate.minutesAgo', { count: Math.floor(diff / 60) });
+    if (diff < 86400)  return t('formatDate.hoursAgo',   { count: Math.floor(diff / 3600) });
+    if (diff < 604800) return t('formatDate.daysAgo',    { count: Math.floor(diff / 86400) });
+    return d.toLocaleDateString(lang || 'en', { month: 'short', day: 'numeric', year: diff > 31536000 ? 'numeric' : undefined });
 }
 
 function formatDuration(secs) {
@@ -60,6 +61,7 @@ function formatDuration(secs) {
 
 function ContextMenu({ projectId, projectName, onRename, onDuplicate, onDelete, onClose }) {
     const ref = useRef(null);
+    const { t } = useTranslation('dashboard');
 
     useEffect(() => {
         function handler(e) {
@@ -110,10 +112,10 @@ function ContextMenu({ projectId, projectName, onRename, onDuplicate, onDelete, 
                 boxShadow: '0 16px 40px -12px rgba(0,0,0,0.6)',
             }}
         >
-            {item('Rename', () => onRename(projectId, projectName))}
-            {item('Duplicate', () => onDuplicate(projectId, projectName))}
+            {item(t('contextMenu.rename'),    () => onRename(projectId, projectName))}
+            {item(t('contextMenu.duplicate'), () => onDuplicate(projectId, projectName))}
             <div style={{ height: 1, background: 'var(--line)', margin: '4px 10px' }} />
-            {item('Delete', () => onDelete(projectId), true)}
+            {item(t('contextMenu.delete'),    () => onDelete(projectId), true)}
         </div>
     );
 }
@@ -122,6 +124,7 @@ function ContextMenu({ projectId, projectName, onRename, onDuplicate, onDelete, 
 
 function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete, isMobile }) {
     const [menuOpen, setMenuOpen] = useState(false);
+    const { t, i18n } = useTranslation('dashboard');
     const isLandscape = (project.aspect_ratio ?? '16:9') !== '9:16';
 
     return (
@@ -228,7 +231,7 @@ function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete, isMobil
                         {formatDuration(project.duration)}
                     </span>
                     <span className="caption" style={{ marginLeft: 'auto', fontSize: 12 }}>
-                        {formatDate(project.updated_at)}
+                        {formatDate(project.updated_at, t, i18n.language)}
                     </span>
                 </div>
             </div>
@@ -241,10 +244,11 @@ function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete, isMobil
 function NewProjectModal({ onClose, onCreate, modalWidth }) {
     const [name, setName]       = useState('');
     const [loading, setLoading] = useState(false);
+    const { t } = useTranslation('dashboard');
 
     async function handleCreate() {
         setLoading(true);
-        await onCreate(name.trim() || 'Untitled Project');
+        await onCreate(name.trim() || t('newModal.namePlaceholder'));
         setLoading(false);
     }
 
@@ -268,23 +272,23 @@ function NewProjectModal({ onClose, onCreate, modalWidth }) {
                 }}
             >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <span className="eyebrow">New Project</span>
+                    <span className="eyebrow">{t('newModal.eyebrow')}</span>
                     <h2 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: 'var(--fg)', letterSpacing: '-0.02em' }}>
-                        Create project
+                        {t('newModal.title')}
                     </h2>
                 </div>
 
                 {/* Name */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <label className="caption" style={{ fontSize: 12, color: 'var(--fg-3)', letterSpacing: '0.04em', textTransform: 'uppercase', fontFamily: 'var(--f-mono)' }}>
-                        Project name
+                        {t('newModal.nameLabel')}
                     </label>
                     <input
                         autoFocus
                         value={name}
                         onChange={e => setName(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && handleCreate()}
-                        placeholder="Untitled Project"
+                        placeholder={t('newModal.namePlaceholder')}
                         style={{
                             background: 'var(--bg-3)',
                             border: '0.5px solid var(--glass-stroke)',
@@ -304,7 +308,7 @@ function NewProjectModal({ onClose, onCreate, modalWidth }) {
                 {/* Actions */}
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
                     <button className="btn btn-ghost" style={{ height: 40, padding: '0 18px', fontSize: 14 }} onClick={onClose}>
-                        Cancel
+                        {t('newModal.cancel')}
                     </button>
                     <button
                         className="btn btn-primary"
@@ -312,7 +316,7 @@ function NewProjectModal({ onClose, onCreate, modalWidth }) {
                         onClick={handleCreate}
                         disabled={loading}
                     >
-                        {loading ? 'Creating…' : 'Create project'}
+                        {loading ? t('newModal.creating') : t('newModal.create')}
                     </button>
                 </div>
             </div>
@@ -325,6 +329,7 @@ function NewProjectModal({ onClose, onCreate, modalWidth }) {
 function RenameModal({ projectId, currentName, onClose, onSave, modalWidth }) {
     const [name, setName]   = useState(currentName);
     const [saving, setSaving] = useState(false);
+    const { t } = useTranslation('dashboard');
 
     async function handleSave() {
         if (!name.trim()) return;
@@ -348,7 +353,7 @@ function RenameModal({ projectId, currentName, onClose, onSave, modalWidth }) {
                 className="card"
                 style={{ width: modalWidth || 380, padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}
             >
-                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--fg)', letterSpacing: '-0.015em' }}>Rename project</h2>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--fg)', letterSpacing: '-0.015em' }}>{t('renameModal.title')}</h2>
                 <input
                     autoFocus
                     value={name}
@@ -368,14 +373,14 @@ function RenameModal({ projectId, currentName, onClose, onSave, modalWidth }) {
                     onBlur={e  => e.currentTarget.style.borderColor = 'var(--glass-stroke)'}
                 />
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                    <button className="btn btn-ghost" style={{ height: 38, padding: '0 16px', fontSize: 14 }} onClick={onClose}>Cancel</button>
+                    <button className="btn btn-ghost" style={{ height: 38, padding: '0 16px', fontSize: 14 }} onClick={onClose}>{t('renameModal.cancel')}</button>
                     <button
                         className="btn btn-primary"
                         style={{ height: 38, padding: '0 18px', fontSize: 14, opacity: saving ? 0.6 : 1 }}
                         onClick={handleSave}
                         disabled={saving}
                     >
-                        {saving ? 'Saving…' : 'Rename'}
+                        {saving ? t('renameModal.saving') : t('renameModal.save')}
                     </button>
                 </div>
             </div>
@@ -387,6 +392,7 @@ function RenameModal({ projectId, currentName, onClose, onSave, modalWidth }) {
 
 function DeleteConfirm({ projectId, projectName, onClose, onConfirm, modalWidth }) {
     const [deleting, setDeleting] = useState(false);
+    const { t } = useTranslation('dashboard');
 
     async function handle() {
         setDeleting(true);
@@ -410,13 +416,13 @@ function DeleteConfirm({ projectId, projectName, onClose, onConfirm, modalWidth 
                 style={{ width: modalWidth || 360, padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}
             >
                 <div>
-                    <h2 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 600, color: 'var(--fg)' }}>Delete project?</h2>
+                    <h2 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 600, color: 'var(--fg)' }}>{t('deleteModal.title')}</h2>
                     <p className="body" style={{ margin: 0, fontSize: 14 }}>
-                        <strong style={{ color: 'var(--fg)' }}>"{projectName}"</strong> will be permanently removed. This cannot be undone.
+                        {t('deleteModal.body', { name: projectName })}
                     </p>
                 </div>
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                    <button className="btn btn-ghost" style={{ height: 38, padding: '0 16px', fontSize: 14 }} onClick={onClose}>Cancel</button>
+                    <button className="btn btn-ghost" style={{ height: 38, padding: '0 16px', fontSize: 14 }} onClick={onClose}>{t('deleteModal.cancel')}</button>
                     <button
                         style={{
                             height: 38, padding: '0 18px', fontSize: 14,
@@ -429,7 +435,7 @@ function DeleteConfirm({ projectId, projectName, onClose, onConfirm, modalWidth 
                         onClick={handle}
                         disabled={deleting}
                     >
-                        {deleting ? 'Deleting…' : 'Delete'}
+                        {deleting ? t('deleteModal.deleting') : t('deleteModal.confirm')}
                     </button>
                 </div>
             </div>
@@ -440,6 +446,7 @@ function DeleteConfirm({ projectId, projectName, onClose, onConfirm, modalWidth 
 // ── plan limit modal ──────────────────────────────────────────────────────────
 
 function PlanLimitModal({ plan, limit, onClose, onUpgrade, modalWidth }) {
+    const { t } = useTranslation('dashboard');
     const nextPlan = plan === 'free' ? 'Creator' : 'Pro';
     return (
         <div
@@ -470,13 +477,11 @@ function PlanLimitModal({ plan, limit, onClose, onUpgrade, modalWidth }) {
                 {/* Copy */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--fg)' }}>
-                        Project limit reached
+                        {t('limitModal.title')}
                     </h2>
-                    <p style={{ margin: 0, fontSize: 14, color: 'var(--fg-2)', lineHeight: 1.6 }}>
-                        Your <strong style={{ color: 'var(--fg)', textTransform: 'capitalize' }}>{plan}</strong> plan
-                        includes <strong style={{ color: 'var(--fg)' }}>{planLimitLabel(plan)}</strong>.
-                        Upgrade to {nextPlan} to create more.
-                    </p>
+                    <p style={{ margin: 0, fontSize: 14, color: 'var(--fg-2)', lineHeight: 1.6 }}
+                       dangerouslySetInnerHTML={{ __html: t('limitModal.body', { plan, limit: planLimitLabel(plan), next: nextPlan }) }}
+                    />
                 </div>
 
                 {/* Plan comparison */}
@@ -490,8 +495,8 @@ function PlanLimitModal({ plan, limit, onClose, onUpgrade, modalWidth }) {
                     gap: 16,
                 }}>
                     {[
-                        { label: 'Creator', projects: '10 projects' },
-                        { label: 'Pro', projects: 'Unlimited' },
+                        { label: 'Creator', projects: t('limitModal.creatorProjects') },
+                        { label: 'Pro',     projects: t('limitModal.proProjects') },
                     ].map(({ label, projects }) => (
                         <div key={label} style={{ textAlign: 'center' }}>
                             <div style={{
@@ -514,14 +519,14 @@ function PlanLimitModal({ plan, limit, onClose, onUpgrade, modalWidth }) {
                         style={{ flex: 1, height: 40, fontSize: 14 }}
                         onClick={onClose}
                     >
-                        Maybe later
+                        {t('limitModal.maybeLater')}
                     </button>
                     <button
                         className="btn btn-primary"
                         style={{ flex: 2, height: 40, fontSize: 14 }}
                         onClick={onUpgrade}
                     >
-                        Upgrade to {nextPlan}
+                        {t('limitModal.upgradeTo', { plan: nextPlan })}
                     </button>
                 </div>
             </div>
@@ -534,6 +539,7 @@ function PlanLimitModal({ plan, limit, onClose, onUpgrade, modalWidth }) {
 export default function DashboardPage() {
     const navigate  = useNavigate();
     const location  = useLocation();
+    const { t }     = useTranslation('dashboard');
     const { setProjectId, setProjectName, loadProject } = useTimelineStore();
     const { plan }  = useUserPlan();
 
@@ -684,7 +690,7 @@ export default function DashboardPage() {
                 {/* Breadcrumb — desktop only */}
                 {!isMobile && <>
                     <span style={{ color: 'var(--line-strong)', fontSize: 18, lineHeight: 1 }}>/</span>
-                    <span className="eyebrow" style={{ fontSize: 10 }}>Projects</span>
+                    <span className="eyebrow" style={{ fontSize: 10 }}>{t('breadcrumb')}</span>
                 </>}
 
                 {/* Spacer */}
@@ -700,7 +706,7 @@ export default function DashboardPage() {
                         <input
                             value={search}
                             onChange={e => setSearch(e.target.value)}
-                            placeholder="Search projects…"
+                            placeholder={t('search')}
                             style={{
                                 background: 'var(--bg-3)',
                                 border: '0.5px solid var(--glass-stroke)',
@@ -763,12 +769,12 @@ export default function DashboardPage() {
                     style={{ height: isMobile ? 34 : 36, padding: isMobile ? '0 12px' : '0 16px', fontSize: 13, flexShrink: 0 }}
                     onClick={requestNewProject}
                 >
-                    {isMobile ? '+' : '+ New project'}
+                    {isMobile ? t('newProjectShort') : t('newProject')}
                 </button>
 
                 {/* Avatar / sign out */}
                 <button
-                    title="Sign out"
+                    title={t('signout')}
                     onClick={handleSignOut}
                     style={{
                         width: 30, height: 30,
@@ -804,7 +810,7 @@ export default function DashboardPage() {
                             autoFocus
                             value={search}
                             onChange={e => setSearch(e.target.value)}
-                            placeholder="Search projects…"
+                            placeholder={t('search')}
                             style={{
                                 width: '100%', boxSizing: 'border-box',
                                 background: 'var(--bg-3)',
@@ -828,10 +834,10 @@ export default function DashboardPage() {
                 <div style={{ marginBottom: isMobile ? 20 : 36, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div>
                         <h1 style={{ margin: '0 0 4px', fontSize: isMobile ? 22 : 28, fontWeight: 700, letterSpacing: '-0.025em', color: 'var(--fg)' }}>
-                            Projects
+                            {t('title')}
                         </h1>
                         <p className="body" style={{ margin: 0, fontSize: 13 }}>
-                            {loading ? 'Loading…' : `${projects.length} project${projects.length !== 1 ? 's' : ''}`}
+                            {loading ? t('loading') : t('count', { count: projects.length })}
                         </p>
                     </div>
                     {/* Mobile: plan pill next to title */}
@@ -884,15 +890,15 @@ export default function DashboardPage() {
                         <div style={{ opacity: 0.4 }}><Logo size={40} variant="gradient" /></div>
                         <div>
                             <p style={{ margin: '0 0 6px', fontSize: isMobile ? 16 : 18, fontWeight: 600, color: 'var(--fg)' }}>
-                                {search ? 'No projects match your search' : 'No projects yet'}
+                                {search ? t('empty.noMatch') : t('empty.noProjects')}
                             </p>
                             <p className="body" style={{ margin: 0, fontSize: 13 }}>
-                                {search ? 'Try a different search term.' : 'Create your first project to get started.'}
+                                {search ? t('empty.noMatchSub') : t('empty.noProjectsSub')}
                             </p>
                         </div>
                         {!search && (
                             <button className="btn btn-primary" style={{ height: 40, padding: '0 20px' }} onClick={requestNewProject}>
-                                Create project
+                                {t('empty.createFirst')}
                             </button>
                         )}
                     </div>
@@ -935,7 +941,7 @@ export default function DashboardPage() {
                         >
                             <span style={{ fontSize: isMobile ? 22 : 28, lineHeight: 1 }}>+</span>
                             <span style={{ fontFamily: 'var(--f-mono)', fontSize: isMobile ? 9 : 11, letterSpacing: '0.10em', textTransform: 'uppercase' }}>
-                                New project
+                                {t('quickAdd')}
                             </span>
                         </button>
 

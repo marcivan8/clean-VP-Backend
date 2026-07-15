@@ -35,6 +35,10 @@ export const handler: Handler = async (event) => {
 
         console.log(`🎬 Render start: ${duration}s, ${width}x${height}`);
 
+        // Chromium needs a writable HOME to cache fontconfig indexes and its
+        // own profile data. Lambda's filesystem is read-only except /tmp.
+        process.env.HOME = '/tmp';
+
         await renderVideo({
             projectFile: path.join(__dirname, 'revideo', 'src', 'project.ts'),
             variables: { tracks, duration, aspectRatio, fps, backendUrl },

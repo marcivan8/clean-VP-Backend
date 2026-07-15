@@ -1,22 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 export default function SuccessPage() {
     const navigate = useNavigate();
+    const { t } = useTranslation('common');
     const [params] = useSearchParams();
     const checkoutId = params.get('checkout_id');
     const [countdown, setCountdown] = useState(5);
 
     useEffect(() => {
         if (!checkoutId) { navigate('/dashboard'); return; }
-        const t = setInterval(() => {
+        const timer = setInterval(() => {
             setCountdown(n => {
-                if (n <= 1) { clearInterval(t); navigate('/dashboard'); }
+                if (n <= 1) { clearInterval(timer); navigate('/dashboard'); }
                 return n - 1;
             });
         }, 1000);
-        return () => clearInterval(t);
+        return () => clearInterval(timer);
     }, [checkoutId, navigate]);
 
     return (
@@ -28,18 +30,17 @@ export default function SuccessPage() {
         }}>
             <CheckCircle2 size={56} strokeWidth={1.5} color="var(--mint)" />
             <h1 className="display" style={{ fontSize: 'clamp(32px, 5vw, 56px)', margin: 0 }}>
-                You're in.
+                {t('success.heading')}
             </h1>
             <p className="body-lg" style={{ margin: 0, maxWidth: 480, color: 'var(--fg-2)' }}>
-                Your plan is now active. Every feature is unlocked and ready.
-                Taking you to the editor in {countdown}…
+                {t('success.body', { count: countdown })}
             </p>
             <button
                 className="btn btn-primary"
                 style={{ padding: '0 32px', height: 48, fontSize: 16 }}
                 onClick={() => navigate('/dashboard')}
             >
-                Go to editor now
+                {t('success.cta')}
             </button>
         </div>
     );
