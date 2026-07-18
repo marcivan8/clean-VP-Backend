@@ -15,18 +15,19 @@
     "kickerBoldFg": "That's time you could spend creating.",
     "kickerBoldFg2": "",
     "pains": [
-      { "label": "Silence removal", "before": "45 min", "after": "10 sec" },
-      { "label": "Adding captions", "before": "60 min", "after": "30 sec" },
-      { "label": "Zoom & reframe", "before": "90 min", "after": "20 sec" }
+      { "num": "01", "headline": "Silence removal eats your time", "body": "Hunting dead air clip by clip — 45 minutes of your life, every single video.", "bodyAccent": "45 minutes" },
+      { "num": "02", "headline": "Captions that need constant fixing", "body": "Auto-captions are wrong 30% of the time. Correcting them manually costs another hour.", "bodyAccent": "wrong 30% of the time" },
+      { "num": "03", "headline": "Reformatting for every platform", "body": "The same crop, the same reframe — done separately for TikTok, Shorts, and LinkedIn.", "bodyAccent": "separately" }
     ]
   },
   "workflow": {
     "eyebrow": "How it works",
     "headline": "Just describe it",
     "moments": [
-      { "command": "Remove all silences", "result": "Done in 10 seconds" },
-      { "command": "Add captions in my style", "result": "Done in 30 seconds" },
-      { "command": "Zoom to speaker on key moments", "result": "Done in 20 seconds" }
+      { "title": "Conversational editing", "copy": "Tell the AI what to do, and watch the timeline update in seconds." },
+      { "title": "Your transcript is your timeline", "copy": "Click any sentence in the transcript — the playhead jumps right there." },
+      { "title": "Type what you want to cut", "copy": "\"Cut from 'so anyway' to 'let's move on'\" — the cut appears instantly." },
+      { "title": "Speaker-scoped commands", "copy": "\"Remove all of Marc's hesitations\" — Vibed highlights and cuts them automatically." }
     ]
   },
   "beforeAfter": {
@@ -39,9 +40,9 @@
     "totalWithout": "4h 15m",
     "totalWith": "18 min",
     "rows": [
-      { "task": "Silence removal", "without": "45 min", "with": "10 sec" },
-      { "task": "Captions", "without": "60 min", "with": "30 sec" },
-      { "task": "Zoom effects", "without": "90 min", "with": "20 sec" }
+      { "without": "Manual silence removal", "withoutTime": "45 min", "with": "AI silence detection", "withTime": "10 sec" },
+      { "without": "Writing & syncing captions", "withoutTime": "60 min", "with": "AI caption generation", "withTime": "30 sec" },
+      { "without": "Zoom effects & reframing", "withoutTime": "90 min", "with": "Speaker zoom command", "withTime": "20 sec" }
     ]
   },
   "personas": {
@@ -49,10 +50,28 @@
     "headline": "Whatever you make,\nVibed makes it faster.",
     "personaLabel": "Creator type",
     "list": [
-      { "type": "YouTubers", "benefit": "Cut editing time from hours to minutes" },
-      { "type": "Podcasters", "benefit": "Auto-remove dead air, add captions" },
-      { "type": "Course creators", "benefit": "Perfect pacing, chapter markers" },
-      { "type": "Social media", "benefit": "Reformat once, publish everywhere" }
+      {
+        "role": "YouTubers",
+        "description": "Long-form creators who edit hours of footage down to polished videos.",
+        "before": "Spending 4+ hours per video on silences, captions, and manual cuts.",
+        "beforeAccent": "4+ hours per video",
+        "after": "Same edit done in under 30 minutes with AI-assisted commands.",
+        "afterMint": "under 30 minutes"
+      },
+      {
+        "role": "Podcasters",
+        "description": "Audio-first creators who need clean recordings and readable transcripts.",
+        "before": "Manually scrubbing every episode for dead air and filler words.",
+        "after": "Silence removed, transcript synced, and captions ready — automatically.",
+        "afterBold": "automatically"
+      },
+      {
+        "role": "Course creators",
+        "description": "Educators building structured video content with consistent pacing.",
+        "before": "Struggling to keep pacing tight across long, multi-section recordings.",
+        "after": "Clean chapters, perfect pacing, and chapter markers added in one command.",
+        "afterMint": "one command"
+      }
     ]
   },
   "exports": {

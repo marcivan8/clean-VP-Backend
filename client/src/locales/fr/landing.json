@@ -15,18 +15,19 @@
     "kickerBoldFg": "C'est du temps que vous pourriez consacrer à créer.",
     "kickerBoldFg2": "",
     "pains": [
-      { "label": "Suppression des silences", "before": "45 min", "after": "10 sec" },
-      { "label": "Ajout de sous-titres", "before": "60 min", "after": "30 sec" },
-      { "label": "Zoom & recadrage", "before": "90 min", "after": "20 sec" }
+      { "num": "01", "headline": "Les silences dévorent votre temps", "body": "Chercher les silences plan par plan — 45 minutes de votre vie, à chaque vidéo.", "bodyAccent": "45 minutes" },
+      { "num": "02", "headline": "Des sous-titres à corriger en permanence", "body": "Les sous-titres automatiques sont faux 30 % du temps. Les corriger manuellement coûte une heure de plus.", "bodyAccent": "faux 30 % du temps" },
+      { "num": "03", "headline": "Reformater pour chaque plateforme", "body": "Le même recadrage, la même mise en forme — à refaire séparément pour TikTok, Shorts et LinkedIn.", "bodyAccent": "séparément" }
     ]
   },
   "workflow": {
     "eyebrow": "Comment ça marche",
     "headline": "Décrivez-le simplement",
     "moments": [
-      { "command": "Supprimer tous les silences", "result": "Fait en 10 secondes" },
-      { "command": "Ajouter des sous-titres dans mon style", "result": "Fait en 30 secondes" },
-      { "command": "Zoom sur le locuteur aux moments clés", "result": "Fait en 20 secondes" }
+      { "title": "Édition conversationnelle", "copy": "Dites à l'IA ce que vous voulez — regardez la timeline se mettre à jour en quelques secondes." },
+      { "title": "Votre transcript, c'est votre timeline", "copy": "Cliquez sur n'importe quelle phrase — la tête de lecture y saute directement." },
+      { "title": "Tapez ce que vous voulez couper", "copy": "\"Couper de 'donc voilà' à 'passons à la suite'\" — la coupe apparaît instantanément." },
+      { "title": "Commandes par interlocuteur", "copy": "\"Supprimer toutes les hésitations de Marc\" — Vibed les surligne et les coupe automatiquement." }
     ]
   },
   "beforeAfter": {
@@ -39,9 +40,9 @@
     "totalWithout": "4h 15m",
     "totalWith": "18 min",
     "rows": [
-      { "task": "Suppression des silences", "without": "45 min", "with": "10 sec" },
-      { "task": "Sous-titres", "without": "60 min", "with": "30 sec" },
-      { "task": "Effets de zoom", "without": "90 min", "with": "20 sec" }
+      { "without": "Suppression manuelle des silences", "withoutTime": "45 min", "with": "Détection IA des silences", "withTime": "10 sec" },
+      { "without": "Rédaction & sync des sous-titres", "withoutTime": "60 min", "with": "Génération IA des sous-titres", "withTime": "30 sec" },
+      { "without": "Effets de zoom & recadrage", "withoutTime": "90 min", "with": "Commande zoom locuteur", "withTime": "20 sec" }
     ]
   },
   "personas": {
@@ -49,10 +50,28 @@
     "headline": "Quoi que vous fassiez,\nVibed le fait plus vite.",
     "personaLabel": "Type de créateur",
     "list": [
-      { "type": "YouTubeurs", "benefit": "Réduisez le temps d'édition de heures à minutes" },
-      { "type": "Podcasteurs", "benefit": "Supprimez automatiquement les silences, ajoutez des sous-titres" },
-      { "type": "Créateurs de cours", "benefit": "Rythme parfait, marqueurs de chapitres" },
-      { "type": "Réseaux sociaux", "benefit": "Reformatez une fois, publiez partout" }
+      {
+        "role": "YouTubeurs",
+        "description": "Créateurs de contenu long format qui éditent des heures de footage.",
+        "before": "Passer 4h+ par vidéo sur les silences, les sous-titres et les coupes manuelles.",
+        "beforeAccent": "4h+ par vidéo",
+        "after": "Le même montage bouclé en moins de 30 minutes grâce aux commandes IA.",
+        "afterMint": "moins de 30 minutes"
+      },
+      {
+        "role": "Podcasteurs",
+        "description": "Créateurs audio qui ont besoin d'enregistrements propres et de transcripts lisibles.",
+        "before": "Parcourir chaque épisode manuellement pour trouver les silences et les mots de remplissage.",
+        "after": "Silences supprimés, transcript synchronisé, sous-titres prêts — automatiquement.",
+        "afterBold": "automatiquement"
+      },
+      {
+        "role": "Créateurs de cours",
+        "description": "Enseignants qui construisent du contenu vidéo structuré avec un rythme cohérent.",
+        "before": "Difficile de maintenir un rythme serré sur de longs enregistrements multi-sections.",
+        "after": "Chapitres propres, rythme parfait et marqueurs ajoutés en une seule commande.",
+        "afterMint": "une seule commande"
+      }
     ]
   },
   "exports": {

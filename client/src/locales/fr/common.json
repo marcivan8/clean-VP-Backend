@@ -11,5 +11,19 @@
     "heading": "Tout est prêt !",
     "body": "Redirection vers l'éditeur dans {{count}} secondes…",
     "cta": "Aller à l'éditeur →"
+  },
+  "footer": {
+    "tagline": "Édition vidéo IA pour les créateurs qui publient.",
+    "madeWith": "Fait avec ♥ à Paris",
+    "company": "Entreprise",
+    "legal": "Mentions légales",
+    "gdpr": "RGPD",
+    "copyright": "© {{year}} Vibed. Tous droits réservés.",
+    "links": {
+      "about": "À propos",
+      "privacyPolicy": "Politique de confidentialité",
+      "cookiePolicy": "Politique des cookies",
+      "yourData": "Vos données"
+    }
   }
 }
