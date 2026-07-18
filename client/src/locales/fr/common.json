@@ -3,9 +3,26 @@
     "product": "Produit",
     "exports": "Exports",
     "about": "À propos",
-    "account": "Tableau de bord",
-    "logIn": "Se connecter",
-    "startFree": "Commencer gratuitement"
+    "logIn": "Connexion",
+    "startFree": "Commencer",
+    "account": "Mon compte"
+  },
+  "actions": {
+    "export": "Exporter",
+    "import": "Importer",
+    "accept": "Accepter",
+    "reject": "Rejeter",
+    "cancel": "Annuler",
+    "save": "Enregistrer",
+    "delete": "Supprimer",
+    "seePlans": "Voir les offres",
+    "redirecting": "Redirection…"
+  },
+  "plans": {
+    "free": "Gratuit",
+    "creator": "Créateur",
+    "pro": "Pro",
+    "mostPopular": "PLUS POPULAIRE"
   },
   "success": {
     "heading": "Tout est prêt !",
@@ -13,17 +30,17 @@
     "cta": "Aller à l'éditeur →"
   },
   "footer": {
-    "tagline": "Édition vidéo IA pour les créateurs qui publient.",
-    "madeWith": "Fait avec ♥ à Paris",
+    "tagline": "Le système d'exploitation créatif pour les créateurs, monteurs et studios modernes.",
+    "gdpr": "Conforme RGPD · Processeur de données GCS · Rétention 30 jours",
     "company": "Entreprise",
-    "legal": "Mentions légales",
-    "gdpr": "RGPD",
-    "copyright": "© {{year}} Vibed. Tous droits réservés.",
+    "legal": "Légal",
     "links": {
       "about": "À propos",
       "privacyPolicy": "Politique de confidentialité",
       "cookiePolicy": "Politique des cookies",
       "yourData": "Vos données"
-    }
+    },
+    "copyright": "© 2026 Vibed. Tous droits réservés.",
+    "madeWith": ""
   }
 }
