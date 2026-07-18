@@ -40,19 +40,23 @@ RUN npm ci --only=production
 COPY . .
 COPY --from=frontend-build /app/client/dist ./client/dist
 
-# Download caption fonts for FFmpeg drawtext at build time.
-# Uses the legacy CSS1 endpoint with an old UA to get TTF (not woff2) URLs.
-# If the download fails (e.g. network restricted build env), the worker will
-# attempt to download them on first export instead (see exportProcessor.js).
-RUN for family in "Anton" "Bebas+Neue" "Oswald" "Montserrat:700"; do \
-      cssUrl="https://fonts.googleapis.com/css?family=${family}"; \
-      ttfUrl=$(curl -sf -A "Mozilla/4.0 (compatible; MSIE 6.0)" "$cssUrl" \
-               | grep -oP 'url\(\K[^)]+\.ttf(?=\))' | head -1); \
-      [ -n "$ttfUrl" ] && \
-        name=$(echo "$family" | sed 's/:.*//;s/+/ /g' | tr -d ' ') && \
-        curl -sfL "$ttfUrl" -o "/usr/src/app/client/public/fonts/${name}-Regular.ttf" && \
-        echo "Downloaded $name font" || echo "Skipped $family (network unavailable)"; \
-    done
+# Download caption fonts at build time via jsDelivr (@fontsource v4 TTF files).
+# Uses individual curl calls — no bash-specific syntax (declare -A), so this
+# works correctly under Debian's /bin/sh (dash). Each font is independent;
+# || true ensures a single CDN miss doesn't abort the build.
+RUN set -e && mkdir -p /usr/src/app/client/public/fonts && F=/usr/src/app/client/public/fonts && B=https://cdn.jsdelivr.net/npm/@fontsource && \
+    curl -sfL "${B}/anton@4/files/anton-latin-400-normal.ttf"               -o "${F}/Anton-Regular.ttf"              && echo "✓ Anton"         || echo "✗ Anton (skipped)"; \
+    curl -sfL "${B}/bebas-neue@4/files/bebas-neue-latin-400-normal.ttf"     -o "${F}/BebasNeue-Regular.ttf"          && echo "✓ BebasNeue"     || echo "✗ BebasNeue (skipped)"; \
+    curl -sfL "${B}/montserrat@4/files/montserrat-latin-800-normal.ttf"     -o "${F}/Montserrat-Bold.ttf"            && echo "✓ Montserrat"    || echo "✗ Montserrat (skipped)"; \
+    curl -sfL "${B}/oswald@4/files/oswald-latin-400-normal.ttf"             -o "${F}/Oswald-Regular.ttf"             && echo "✓ Oswald"        || echo "✗ Oswald (skipped)"; \
+    curl -sfL "${B}/inter@4/files/inter-latin-400-normal.ttf"               -o "${F}/Inter-Regular.ttf"              && echo "✓ Inter"         || echo "✗ Inter (skipped)"; \
+    curl -sfL "${B}/nunito@4/files/nunito-latin-400-normal.ttf"             -o "${F}/Nunito-Regular.ttf"             && echo "✓ Nunito"        || echo "✗ Nunito (skipped)"; \
+    curl -sfL "${B}/playfair-display@4/files/playfair-display-latin-400-normal.ttf" -o "${F}/PlayfairDisplay-Regular.ttf"  && echo "✓ Playfair"      || echo "✗ Playfair (skipped)"; \
+    curl -sfL "${B}/caveat@4/files/caveat-latin-400-normal.ttf"             -o "${F}/Caveat-Regular.ttf"             && echo "✓ Caveat"        || echo "✗ Caveat (skipped)"; \
+    curl -sfL "${B}/dm-sans@4/files/dm-sans-latin-400-normal.ttf"           -o "${F}/DMSans-Regular.ttf"             && echo "✓ DM Sans"       || echo "✗ DM Sans (skipped)"; \
+    curl -sfL "${B}/unbounded@4/files/unbounded-latin-400-normal.ttf"       -o "${F}/Unbounded-Regular.ttf"          && echo "✓ Unbounded"     || echo "✗ Unbounded (skipped)"; \
+    curl -sfL "${B}/cormorant-garamond@4/files/cormorant-garamond-latin-400-normal.ttf" -o "${F}/CormorantGaramond-Regular.ttf" && echo "✓ Cormorant" || echo "✗ Cormorant (skipped)"; \
+    true
 
 RUN chown -R node:node /usr/src/app
 USER node
