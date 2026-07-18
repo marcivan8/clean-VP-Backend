@@ -1,66 +1,9 @@
 {
-  "assistant": {
-    "ready": "Prêt",
-    "working": "Agent en cours...",
-    "placeholder": "Dites à l'agent quoi faire...",
-    "tryThis": "Essayez",
-    "quickActions": "Actions rapides",
-    "planning": "Planification des modifications...",
-    "executing": "Exécution de {{count}} opération(s)...",
-    "applying": "Application de {{count}} segment(s) à la timeline...",
-    "verifying": "Vérification des modifications...",
-    "done": "Terminé",
-    "modifications": "{{count}} modifications"
-  },
-  "timeline": {
-    "videoTrack": "Vidéo {{number}}",
-    "audioTrack": "Audio {{number}}",
-    "addTrack": "+ Piste",
-    "addTransition": "+ Transition"
-  },
-  "quickActions": {
-    "removeSilences": "Supprimer les silences",
-    "cleanUpSpeech": "Nettoyer la parole",
-    "trimIntro": "Couper l'intro",
-    "exportYouTube": "Exporter pour YouTube"
-  },
-  "inspector": {
-    "audio": "Audio",
-    "transform": "Transformation",
-    "settings": "Paramètres",
-    "scale": "Échelle",
-    "positionX": "Position X",
-    "positionY": "Position Y",
-    "rotation": "Rotation",
-    "opacity": "Opacité",
-    "resetTransform": "Réinitialiser"
-  },
-  "transcript": {
-    "words": "{{count}} mots",
-    "cutWords": "Couper {{count}} mots",
-    "noTranscript": "Aucune transcription disponible",
-    "generating": "Génération de la transcription..."
-  },
-  "export": {
-    "title": "Exporter le média",
-    "subtitle": "RENDU VIDÉO · PROJET NLE",
-    "videoFile": "Fichier vidéo",
-    "nleProject": "Projet NLE",
-    "download": "Télécharger",
-    "nleDescription": "Exportez votre timeline sous forme de fichier projet importable directement dans votre logiciel de montage. Sans réencodage — vos médias originaux restent intacts."
-  },
-  "approval": {
-    "title": "Réviser les modifications",
-    "accept": "Accepter",
-    "reject": "Rejeter",
-    "acceptAll": "Tout accepter",
-    "rejectAll": "Tout rejeter"
-  },
   "exportModal": {
     "header": "Exporter",
-    "headerSub": "Publiez votre travail",
-    "tabVideo": "Fichier vidéo",
-    "tabNle": "Projet NLE",
+    "headerSub": "Choisissez votre format et votre plateforme",
+    "tabVideo": "Vidéo",
+    "tabNle": "NLE",
     "labelPlatform": "Plateforme",
     "labelResolution": "Résolution",
     "labelQuality": "Qualité",
@@ -68,22 +11,22 @@
     "labelFormat": "Format",
     "exportFor": "Exporter pour {{platform}}",
     "exportVideo": "Exporter la vidéo",
-    "rendering": "Rendu en cours",
-    "renderingSub": "FFmpeg encode votre timeline",
-    "renderComplete": "Rendu terminé",
+    "rendering": "Rendu de votre vidéo…",
+    "renderingSub": "Cela prend généralement 1 à 3 minutes",
+    "renderComplete": "Export terminé",
     "metaCodec": "Codec",
-    "metaSize": "Taille",
+    "metaSize": "Taille du fichier",
     "metaClips": "Clips",
     "metaPlatform": "Plateforme",
     "metaCustom": "Personnalisé",
     "downloadBtn": "Télécharger",
-    "exportAgain": "Recommencer",
-    "renderFailed": "Rendu échoué",
+    "exportAgain": "Exporter à nouveau",
+    "renderFailed": "Échec de l'export",
     "tryAgain": "Réessayer",
-    "nleDescription": "Exportez en fichier projet — sans réencodage. Vos médias originaux restent intacts.",
+    "nleDescription": "Exportez un XML Premiere Pro ou DaVinci Resolve pour continuer l'édition dans votre NLE.",
     "nleGenerating": "Génération…",
-    "nleSuccess": "Fichier projet téléchargé",
-    "nleFailed": "Impossible de générer le fichier."
+    "nleSuccess": "XML prêt — cliquez pour télécharger",
+    "nleFailed": "Échec de la génération XML"
   },
   "settings": {
     "title": "Paramètres",
@@ -93,21 +36,17 @@
     "portrait": "Portrait",
     "square": "Carré",
     "standard": "Standard",
-    "previewQuality": "Qualité d'aperçu",
-    "qualityHigh": "Haute (pleine résolution)",
-    "qualityLow": "Basse (optimisée)",
-    "qualityHint": "La qualité basse améliore les performances lors du scrubbing.",
+    "previewQuality": "Qualité de prévisualisation",
+    "qualityHigh": "Haute",
+    "qualityLow": "Basse (plus rapide)",
+    "qualityHint": "Une qualité inférieure accélère la lecture sur les machines lentes",
     "shortcuts": "Raccourcis clavier",
     "shortcutUndo": "Annuler",
     "shortcutRedo": "Rétablir",
-    "shortcutSplit": "Diviser le clip",
-    "shortcutDelete": "Supprimer le clip",
+    "shortcutSplit": "Couper le clip",
+    "shortcutDelete": "Supprimer la sélection",
     "shortcutPlay": "Lecture / Pause",
-    "version": "Version 0.9.0 (Bêta)",
-    "appName": "Vibed Editor"
-  },
-  "mobileToolbar": {
-    "delete": "Supprimer",
-    "deleteConfirm": "Confirmer"
+    "version": "Vibed",
+    "appName": "Éditeur vidéo IA"
   }
 }

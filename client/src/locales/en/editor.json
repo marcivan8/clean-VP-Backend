@@ -1,66 +1,9 @@
 {
-  "assistant": {
-    "ready": "Ready",
-    "working": "Agent Working...",
-    "placeholder": "Tell the agent what to do...",
-    "tryThis": "Try this",
-    "quickActions": "Quick Actions",
-    "planning": "Planning edits...",
-    "executing": "Executing {{count}} operation(s)...",
-    "applying": "Applying {{count}} segment(s) to timeline...",
-    "verifying": "Verifying edits...",
-    "done": "Done",
-    "modifications": "{{count}} modifications"
-  },
-  "timeline": {
-    "videoTrack": "Video {{number}}",
-    "audioTrack": "Audio {{number}}",
-    "addTrack": "+ Track",
-    "addTransition": "+ Transition"
-  },
-  "quickActions": {
-    "removeSilences": "Remove silences",
-    "cleanUpSpeech": "Clean up speech",
-    "trimIntro": "Trim the intro",
-    "exportYouTube": "Export for YouTube"
-  },
-  "inspector": {
-    "audio": "Audio",
-    "transform": "Transform",
-    "settings": "Settings",
-    "scale": "Scale",
-    "positionX": "Position X",
-    "positionY": "Position Y",
-    "rotation": "Rotation",
-    "opacity": "Opacity",
-    "resetTransform": "Reset Transform"
-  },
-  "transcript": {
-    "words": "{{count}} words",
-    "cutWords": "Cut {{count}} words",
-    "noTranscript": "No transcript available",
-    "generating": "Generating transcript..."
-  },
-  "export": {
-    "title": "Export Media",
-    "subtitle": "VIDEO RENDER · NLE PROJECT",
-    "videoFile": "Video File",
-    "nleProject": "NLE Project",
-    "download": "Download",
-    "nleDescription": "Export your timeline as a project file that can be imported directly into your editing software. No re-encoding — your original media stays intact."
-  },
-  "approval": {
-    "title": "Review Edits",
-    "accept": "Accept",
-    "reject": "Reject",
-    "acceptAll": "Accept all",
-    "rejectAll": "Reject all"
-  },
   "exportModal": {
     "header": "Export",
-    "headerSub": "Publish your work",
-    "tabVideo": "Video file",
-    "tabNle": "NLE project",
+    "headerSub": "Choose your format and platform",
+    "tabVideo": "Video",
+    "tabNle": "NLE",
     "labelPlatform": "Platform",
     "labelResolution": "Resolution",
     "labelQuality": "Quality",
@@ -68,46 +11,42 @@
     "labelFormat": "Format",
     "exportFor": "Export for {{platform}}",
     "exportVideo": "Export video",
-    "rendering": "Rendering",
-    "renderingSub": "FFmpeg is encoding your timeline",
-    "renderComplete": "Render complete",
+    "rendering": "Rendering your video…",
+    "renderingSub": "This usually takes 1–3 minutes",
+    "renderComplete": "Export complete",
     "metaCodec": "Codec",
-    "metaSize": "Size",
+    "metaSize": "File size",
     "metaClips": "Clips",
     "metaPlatform": "Platform",
     "metaCustom": "Custom",
     "downloadBtn": "Download",
-    "exportAgain": "Again",
-    "renderFailed": "Render failed",
+    "exportAgain": "Export again",
+    "renderFailed": "Export failed",
     "tryAgain": "Try again",
-    "nleDescription": "Export as a project file — no re-encoding. Your original media stays intact.",
+    "nleDescription": "Export a Premiere Pro or DaVinci Resolve XML to continue editing in your NLE.",
     "nleGenerating": "Generating…",
-    "nleSuccess": "Project file downloaded",
-    "nleFailed": "Failed to generate."
+    "nleSuccess": "XML ready — click to download",
+    "nleFailed": "XML generation failed"
   },
   "settings": {
     "title": "Settings",
-    "projectSettings": "Project Settings",
-    "aspectRatio": "Aspect Ratio",
+    "projectSettings": "Project settings",
+    "aspectRatio": "Aspect ratio",
     "landscape": "Landscape",
     "portrait": "Portrait",
     "square": "Square",
     "standard": "Standard",
-    "previewQuality": "Preview Quality",
-    "qualityHigh": "High (Full Res)",
-    "qualityLow": "Low (Optimized)",
-    "qualityHint": "Low quality improves performance on scrubbing.",
-    "shortcuts": "Keyboard Shortcuts",
+    "previewQuality": "Preview quality",
+    "qualityHigh": "High",
+    "qualityLow": "Low (faster)",
+    "qualityHint": "Lower quality speeds up playback on slower machines",
+    "shortcuts": "Keyboard shortcuts",
     "shortcutUndo": "Undo",
     "shortcutRedo": "Redo",
-    "shortcutSplit": "Split Clip",
-    "shortcutDelete": "Delete Clip",
+    "shortcutSplit": "Split clip",
+    "shortcutDelete": "Delete selection",
     "shortcutPlay": "Play / Pause",
-    "version": "Version 0.9.0 (Beta)",
-    "appName": "Vibed Editor"
-  },
-  "mobileToolbar": {
-    "delete": "Delete",
-    "deleteConfirm": "Confirm"
+    "version": "Vibed",
+    "appName": "AI Video Editor"
   }
 }

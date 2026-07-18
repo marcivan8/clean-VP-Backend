@@ -3,44 +3,13 @@
     "product": "Product",
     "exports": "Exports",
     "about": "About",
+    "account": "Dashboard",
     "logIn": "Log in",
-    "startFree": "Start free",
-    "account": "Account"
-  },
-  "actions": {
-    "export": "Export",
-    "import": "Import",
-    "accept": "Accept",
-    "reject": "Reject",
-    "cancel": "Cancel",
-    "save": "Save",
-    "delete": "Delete",
-    "seePlans": "See plans",
-    "redirecting": "Redirecting…"
-  },
-  "plans": {
-    "free": "Free",
-    "creator": "Creator",
-    "pro": "Pro",
-    "mostPopular": "MOST POPULAR"
+    "startFree": "Start free"
   },
   "success": {
-    "heading": "You're in.",
-    "body": "Your plan is now active. Every feature is unlocked and ready. Taking you to the editor in {{count}}…",
-    "cta": "Go to editor now"
-  },
-  "footer": {
-    "tagline": "The creative operating system for modern storytellers, editors and studios.",
-    "gdpr": "GDPR Compliant · GCS Data Processor · 30-Day Retention",
-    "company": "Company",
-    "legal": "Legal",
-    "links": {
-      "about": "About",
-      "privacyPolicy": "Privacy Policy",
-      "cookiePolicy": "Cookie Policy",
-      "yourData": "Your data"
-    },
-    "copyright": "© 2026 Vibed Studios",
-    "madeWith": "Made with care, for makers."
+    "heading": "You're all set!",
+    "body": "Redirecting you to the editor in {{count}} seconds…",
+    "cta": "Go to editor →"
   }
 }
