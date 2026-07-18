@@ -24,6 +24,11 @@
     "pro": "Pro",
     "mostPopular": "PLUS POPULAIRE"
   },
+  "success": {
+    "heading": "C'est parti.",
+    "body": "Votre offre est maintenant active. Toutes les fonctionnalités sont débloquées. Redirection vers l'éditeur dans {{count}}…",
+    "cta": "Aller à l'éditeur"
+  },
   "footer": {
     "tagline": "Le système d'exploitation créatif pour les créateurs, monteurs et studios modernes.",
     "gdpr": "Conforme RGPD · Processeur de données GCS · Rétention 30 jours",

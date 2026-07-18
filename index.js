@@ -234,10 +234,12 @@ app.use('/api/audio', uploadLimiter, audioRoutes);          // audio processing
 app.use('/api/filler', uploadLimiter, audioRoutes);         // alias: /api/filler/detect → /api/audio/filler/detect
 app.use('/api/silence', require('./routes/silenceRoutes'));
 app.use('/api/ai', aiLimiter, require('./routes/aiRoutes')); // GPT-4o — expensive
+app.use('/api/brain', aiLimiter, require('./server/routes/brainRoutes')); // Editorial Brain
 app.use('/api/effects', require('./routes/effectsRoutes'));
 app.use('/api/proxy', uploadLimiter, require('./routes/proxyRoutes'));
 app.use('/api/revideo', require('./routes/revideoRenderRoutes')); // headless Chrome
-app.use('/api/presets', require('./routes/presetRoutes'));
+// app.use('/api/presets', require('./routes/presetRoutes'));  // OLD — superseded by asset engine
+app.use('/api/presets', require('./server/routes/presetRoutes')); // Asset Engine: presets CRUD + execute
 app.use('/api/export', uploadLimiter, require('./routes/nleExport')); // NLE export (OTIO)
 app.use('/api/jobs', require('./routes/jobRoutes')); // Job Queue SSE monitoring
 app.use('/api/session', require('./routes/sessionRoutes')); // Anonymous sessions
@@ -249,7 +251,12 @@ app.use('/api/projects',   require('./routes/projectRoutes'));   // Project thum
 app.use('/api/interview', require('./routes/interviewRoutes')); // Interview/podcast smart editing
 app.use('/api/waveform',  require('./routes/waveformRoutes'));  // Waveform peak data extraction
 
-
+// ── Creative Asset Intelligence System ────────────────────────────────────────
+app.use('/api/luts',   require('./server/routes/lutRoutes'));          // LUT library + CSS preview
+app.use('/api/audio',  require('./server/routes/audioEngineRoutes'));  // Asset search + recommendations
+app.use('/api/audio',  require('./server/routes/audioExportRoutes')); // Audio-only export (mp3/wav/aac/m4a)
+// NOTE: /api/presets is already mounted above (line 241). The new server/routes/presetRoutes.js
+// extends it — update the require() path when the old routes/presetRoutes.js is retired.
 
 // API documentation endpoint
 app.get('/api', (req, res) => {
