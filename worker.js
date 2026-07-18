@@ -63,4 +63,33 @@ exportWorker.on('failed', (job, err) => {
     console.error(`❌ [ExportQueue] Job ${job.id} failed:`, err.message);
 });
 
+// 5. Asset Analysis Worker (Editorial Brain — vision + audio classification)
+// concurrency: 2 — vision calls are I/O bound (OpenAI API), not CPU bound
+const { MediaIntelligencePipeline } = require('./server/brain/media/MediaIntelligencePipeline');
+
+const assetAnalysisWorker = new Worker('asset-analysis', async (job) => {
+    const { assetId, filePath, projectId, userId } = job.data;
+    const pipeline = new MediaIntelligencePipeline();
+    await pipeline.analyzeAsset(assetId, filePath, projectId, userId);
+}, { connection, concurrency: 2 });
+
+assetAnalysisWorker.on('completed', job => {
+    console.log(`✅ [AssetAnalysisQueue] Job ${job.id} completed`);
+});
+assetAnalysisWorker.on('failed', (job, err) => {
+    console.error(`❌ [AssetAnalysisQueue] Job ${job.id} failed:`, err.message);
+});
+
+// 6. Asset Embedding Worker (Creative Asset Intelligence — vector embeddings)
+// concurrency: 3 — embedding calls are I/O bound (OpenAI text-embedding-3-small)
+const { createEmbeddingWorker } = require('./server/audio-engine/embeddings/EmbeddingWorker.js');
+const embeddingWorker = createEmbeddingWorker();
+
+embeddingWorker.on('completed', job => {
+    console.log(`✅ [EmbeddingQueue] Job ${job.id} completed (${job.data?.assetId || job.data?.batchAssetIds?.length + ' batch' || 'seed-all'})`);
+});
+embeddingWorker.on('failed', (job, err) => {
+    console.error(`❌ [EmbeddingQueue] Job ${job.id} failed:`, err.message);
+});
+
 console.log('👷 Worker service is running and listening to queues.');

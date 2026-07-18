@@ -24,6 +24,11 @@
     "pro": "Pro",
     "mostPopular": "MOST POPULAR"
   },
+  "success": {
+    "heading": "You're in.",
+    "body": "Your plan is now active. Every feature is unlocked and ready. Taking you to the editor in {{count}}…",
+    "cta": "Go to editor now"
+  },
   "footer": {
     "tagline": "The creative operating system for modern storytellers, editors and studios.",
     "gdpr": "GDPR Compliant · GCS Data Processor · 30-Day Retention",
