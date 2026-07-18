@@ -1,146 +1,211 @@
 {
   "hero": {
-    "badge": "AI-powered editing",
-    "version": "v2.0",
-    "headline": "Edit faster.\nShip better content.",
-    "body": "Vibed cuts your edit time in half. Just describe what you want — remove silences, add captions, zoom to speaker — and watch it happen.",
-    "cta": "Start editing free",
-    "caption": "No credit card required · Works with any video"
+    "badge": "Vibed Studio",
+    "version": "v0.6 \"Cinema\"",
+    "headline": "Create at the\nspeed of thought.",
+    "body": "Vibed is the creative operating system for storytellers and editors. Edit, organize and refine your footage in conversation with an assistant that respects your taste. Every edit lands as a named, reversible action.",
+    "cta": "See plans",
+    "caption": "No credit card required. Bring your own clips."
   },
+
   "problem": {
-    "eyebrow": "The problem",
-    "headline": "Editing is the bottleneck",
-    "kicker": "Most creators spend 4+ hours editing a single video.",
-    "kickerAccent": "4+ hours",
-    "kickerBoldFg": "That's time you could spend creating.",
-    "kickerBoldFg2": "",
+    "eyebrow": "The reality",
+    "headline": "You shouldn't spend your weekend editing.",
     "pains": [
-      { "num": "01", "headline": "Silence removal eats your time", "body": "Hunting dead air clip by clip — 45 minutes of your life, every single video.", "bodyAccent": "45 minutes" },
-      { "num": "02", "headline": "Captions that need constant fixing", "body": "Auto-captions are wrong 30% of the time. Correcting them manually costs another hour.", "bodyAccent": "wrong 30% of the time" },
-      { "num": "03", "headline": "Reformatting for every platform", "body": "The same crop, the same reframe — done separately for TikTok, Shorts, and LinkedIn.", "bodyAccent": "separately" }
-    ]
+      {
+        "num": "01",
+        "headline": "Every minute of silence costs you two.",
+        "body": "A 10-minute video contains 3–4 minutes of silence, stumbles, and filler words — all cut manually, one by one.",
+        "bodyAccent": "3–4 minutes",
+        "bodyBold": "manually, one by one."
+      },
+      {
+        "num": "02",
+        "headline": "One video. Four exports. Endless hours.",
+        "body": "The same video needs to be reformatted, re-encoded, and re-captioned for every platform — a process that can take as long as the original edit.",
+        "bodyAccent": "reformatted, re-encoded, and re-captioned",
+        "bodyBold": "as long as the original edit."
+      },
+      {
+        "num": "03",
+        "headline": "Pro tools are built for pros, not creators.",
+        "body": "Professional tools are powerful but designed for full-time editors, not creators who edit as part of a larger job.",
+        "bodyAccent": "full-time editors",
+        "bodyBold": "as part of a larger job."
+      }
+    ],
+    "kicker": "The result: you either publish content that isn't as good as it could be, or spend your weekend editing.",
+    "kickerBoldFg": "isn't as good as it could be",
+    "kickerAccent": "weekend",
+    "kickerBoldFg2": "editing."
   },
+
   "workflow": {
-    "eyebrow": "How it works",
-    "headline": "Just describe it",
+    "eyebrow": "The workflow",
+    "headline": "AI that works with your creativity.",
     "moments": [
-      { "title": "Conversational editing", "copy": "Tell the AI what to do, and watch the timeline update in seconds." },
-      { "title": "Your transcript is your timeline", "copy": "Click any sentence in the transcript — the playhead jumps right there." },
-      { "title": "Type what you want to cut", "copy": "\"Cut from 'so anyway' to 'let's move on'\" — the cut appears instantly." },
-      { "title": "Speaker-scoped commands", "copy": "\"Remove all of Marc's hesitations\" — Vibed highlights and cuts them automatically." }
+      {
+        "title": "Conversational Editing",
+        "copy": "Tell the AI what to do, and watch the timeline update."
+      },
+      {
+        "title": "Your transcript is your timeline",
+        "copy": "Click a sentence, the playhead is already there."
+      },
+      {
+        "title": "Type what you want to cut",
+        "copy": "Show 'cut from so anyway to let's move on' → the cut appears."
+      },
+      {
+        "title": "Speaker-scoped commands",
+        "copy": "Cut all of Marc's stumbles — VIBED highlights segments and removes them."
+      }
     ]
   },
+
   "beforeAfter": {
-    "eyebrow": "Before & after",
-    "headline": "The numbers\nspeak for themselves.",
-    "subtitle": "Average time for a 10-minute talking-head video",
-    "withoutHeader": "Without Vibed",
-    "withHeader": "With Vibed",
-    "totalLabel": "Total edit time",
-    "totalWithout": "4h 15m",
-    "totalWith": "18 min",
+    "eyebrow": "The difference",
+    "headline": "Your 3-hour edit.\nDone in 20 minutes.",
+    "subtitle": "What changes when you edit with VIBED",
+    "withoutHeader": "WITHOUT VIBED",
+    "withHeader": "WITH VIBED",
     "rows": [
-      { "without": "Manual silence removal", "withoutTime": "45 min", "with": "AI silence detection", "withTime": "10 sec" },
-      { "without": "Writing & syncing captions", "withoutTime": "60 min", "with": "AI caption generation", "withTime": "30 sec" },
-      { "without": "Zoom effects & reframing", "withoutTime": "90 min", "with": "Speaker zoom command", "withTime": "20 sec" }
-    ]
+      { "without": "Scrub recording for silences",           "withoutTime": "45 min",  "with": "AI silence detection & auto-cut",       "withTime": "2 min"  },
+      { "without": "Cut filler words one by one",            "withoutTime": "30 min",  "with": "AI filler removal pass",                "withTime": "1 min"  },
+      { "without": "Manual audio normalization",             "withoutTime": "15 min",  "with": "One-click normalize",                   "withTime": "30 sec" },
+      { "without": "Type and sync captions manually",        "withoutTime": "60 min",  "with": "Auto-captions with word timestamps",    "withTime": "2 min"  },
+      { "without": "Re-export for each platform separately", "withoutTime": "30 min",  "with": "Parallel platform exports",             "withTime": "3 min"  }
+    ],
+    "totalLabel": "Total per video",
+    "totalWithout": "~3 hours",
+    "totalWith": "~25 min"
   },
+
   "personas": {
-    "eyebrow": "Built for creators",
-    "headline": "Whatever you make,\nVibed makes it faster.",
-    "personaLabel": "Creator type",
+    "eyebrow": "Who it's for",
+    "headline": "Built for everyone\nwho creates with video.",
+    "personaLabel": "PERSONA",
     "list": [
       {
-        "role": "YouTubers",
-        "description": "Long-form creators who edit hours of footage down to polished videos.",
-        "before": "Spending 4+ hours per video on silences, captions, and manual cuts.",
-        "beforeAccent": "4+ hours per video",
-        "after": "Same edit done in under 30 minutes with AI-assisted commands.",
-        "afterMint": "under 30 minutes"
+        "role": "The Solo Creator",
+        "description": "Records and edits everything alone. Publishes 2–5 videos a week.",
+        "before": "3–5 hours editing per video",
+        "beforeAccent": "3–5 hours",
+        "after": "20–40 minutes. AI handles cleanup; you focus only on content decisions.",
+        "afterMint": "20–40 minutes.",
+        "afterBold": "content decisions."
       },
       {
-        "role": "Podcasters",
-        "description": "Audio-first creators who need clean recordings and readable transcripts.",
-        "before": "Manually scrubbing every episode for dead air and filler words.",
-        "after": "Silence removed, transcript synced, and captions ready — automatically.",
-        "afterBold": "automatically"
+        "role": "The Podcast Producer",
+        "description": "Long-form interviews, multiple guests, 30–90 minute episodes.",
+        "before": "Manual scrubbing, separate transcription, clip selection by ear",
+        "beforeAccent": "clip selection by ear",
+        "after": "Filler and silence cleaned in minutes. Speaker-colored transcript makes multi-guest editing feel like working in a text document.",
+        "afterMint": "minutes.",
+        "afterBold": "working in a text document."
       },
       {
-        "role": "Course creators",
-        "description": "Educators building structured video content with consistent pacing.",
-        "before": "Struggling to keep pacing tight across long, multi-section recordings.",
-        "after": "Clean chapters, perfect pacing, and chapter markers added in one command.",
-        "afterMint": "one command"
+        "role": "The Production Team",
+        "description": "Agencies and studios delivering corporate video, events, brand campaigns.",
+        "before": "Junior editors spend 50% of their time on cleanup before a senior editor sees the footage",
+        "beforeAccent": "50% of their time",
+        "after": "AI cleanup runs unattended. Senior editor gets a pre-cleaned rough cut with FCPXML ready for Final Cut or DaVinci.",
+        "afterBold": "FCPXML",
+        "afterMint": "Final Cut or DaVinci."
       }
     ]
   },
+
+  "roi": {
+    "body": "At 2.5 hours saved per video and 3 videos per week, VIBED saves you 30 hours a month. The Creator plan costs less than one hour of your time.",
+    "boldPart": "VIBED saves you 30 hours a month.",
+    "accentPart": "one hour of your time."
+  },
+
   "exports": {
-    "eyebrow": "Export anywhere",
-    "headline": "Every format. Every platform.",
-    "body1": "Export directly to TikTok, YouTube, Instagram Reels, and LinkedIn — optimized for each platform's requirements.",
-    "body2": "Or download as MP4, and export XML for Premiere Pro or DaVinci Resolve.",
-    "formatTag": "MP4 · MOV · XML",
-    "metadataTag": "Optimized metadata included",
+    "eyebrow": "Roundtrip-ready",
+    "headline": "Works with the suite you already finish in.",
+    "body1": "Vibed isn't the last app you'll ever open — it's the first. Hand off cleanly to professional editing tools the moment you're ready to polish.",
+    "body2": "The transcript edit happens in VIBED. The finishing happens where you've always finished.",
+    "formatTag": "XML · FCPXML · EDL · OTIO",
+    "metadataTag": "Bin metadata preserved",
     "tools": {
-      "premiere":  { "name": "Premiere Pro",    "fmt": "XML · MOGRT" },
-      "resolve":   { "name": "DaVinci Resolve", "fmt": "DRP · OFX" },
-      "finalcut":  { "name": "Final Cut Pro",   "fmt": "FCPXML · iCloud" },
-      "otio":      { "name": "OpenTimelineIO",  "fmt": "Open standard" }
+      "premiere": { "name": "Premiere Pro",    "fmt": "XML · MOGRT" },
+      "resolve":  { "name": "DaVinci Resolve", "fmt": "DRP · OFX"  },
+      "finalcut": { "name": "Final Cut Pro",   "fmt": "FCPXML · iCloud" },
+      "otio":     { "name": "OpenTimelineIO",  "fmt": "Open standard" }
     }
   },
+
   "pricing": {
     "eyebrow": "Simple pricing",
-    "headline": "Start free. Scale when you're ready.",
-    "subtitle": "No hidden fees. Cancel anytime.",
+    "headline": "One tool. Three speeds.",
+    "subtitle": "Start free. Upgrade when the product earns it.",
     "plans": {
       "free": {
-        "tagline": "Perfect for trying Vibed",
+        "tagline": "Edit your first project. Feel what conversational editing is.",
         "cta": "Start free",
-        "features": ["2 projects", "10 AI operations / month", "720p export", "Standard captions"],
-        "locked":   ["Unlimited projects", "HD export", "Priority processing"]
+        "features": [
+          "2 active projects",
+          "Videos up to 20 minutes",
+          "7-day storage",
+          "10 AI operations / month",
+          "Silence removal & trim — unlimited",
+          "MP4 export — no watermark"
+        ],
+        "locked": ["NLE export", "Transcript intelligence"]
       },
       "creator": {
-        "tagline": "For creators who ship weekly",
-        "cta": "Start Creator",
-        "features": ["Unlimited projects", "100 AI operations / month", "1080p export", "Custom caption styles", "Priority processing"],
-        "locked":   ["4K export"]
+        "tagline": "Edit every week. Export to any tool you already use.",
+        "cta": "Get Creator",
+        "features": [
+          "Unlimited projects",
+          "Videos up to 90 minutes",
+          "30-day storage",
+          "100 AI operations / month",
+          "All AI commands — filler, captions, best moments",
+          "Full transcript + content intelligence",
+          "MP4 export",
+          "NLE export — Premiere, Final Cut, DaVinci, OTIO"
+        ],
+        "locked": []
       },
       "pro": {
-        "tagline": "For studios and power users",
-        "cta": "Start Pro",
-        "features": ["Unlimited projects", "Unlimited AI operations", "4K export", "Custom caption styles", "Priority processing", "Early access to new features"],
-        "locked":   []
+        "tagline": "Edit without limits. Bring your team.",
+        "cta": "Get Pro",
+        "features": [
+          "Everything in Creator",
+          "Videos up to 4 hours",
+          "90-day storage",
+          "Unlimited AI operations",
+          "Priority processing queue",
+          "2 team seats",
+          "Virality scoring + performance analysis",
+          "Early access to new features"
+        ],
+        "locked": []
       }
     }
   },
+
   "socialProof": {
     "quotes": [
-      { "text": "Vibed cut my editing time from 4 hours to 20 minutes. I can finally post consistently.", "author": "Alex R.", "role": "YouTube creator, 180k subscribers" },
-      { "text": "The silence removal alone saves me an hour per episode. Then I add captions in one click.", "author": "Maria T.", "role": "Podcast host" }
+      {
+        "text": "Finally, an AI editor that knows when to get out of the way. It lets me work at the speed of thought without messing up my timeline.",
+        "author": "Alex",
+        "role": "Senior Video Editor"
+      },
+      {
+        "text": "The fact that I can dump it straight into Resolve when the rough cut is done is a complete game-changer for my agency workflow.",
+        "author": "Sarah",
+        "role": "Creative Director"
+      }
     ]
   },
-  "roi": {
-    "boldPart": "Save 3+ hours",
-    "accentPart": " per video.",
-    "body": "At 4 videos per month, that's 12 hours back in your life."
-  },
+
   "finalCta": {
-    "headline": "Ready to edit faster?",
-    "cta": "Start editing free",
-    "caption": "No credit card · Instant access"
-  },
-  "footer": {
-    "tagline": "AI video editing for creators who ship.",
-    "madeWith": "Made with",
-    "company": "Vibed",
-    "legal": "Legal",
-    "gdpr": "GDPR",
-    "copyright": "© {{year}} Vibed. All rights reserved.",
-    "links": {
-      "about": "About",
-      "privacyPolicy": "Privacy Policy",
-      "cookiePolicy": "Cookie Policy",
-      "yourData": "Your Data"
-    }
+    "headline": "The future of editing\nis collaborative.",
+    "cta": "See plans",
+    "caption": "Start free. No credit card. Bring your own clips."
   }
 }

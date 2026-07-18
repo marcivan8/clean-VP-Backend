@@ -3,9 +3,26 @@
     "product": "Product",
     "exports": "Exports",
     "about": "About",
-    "account": "Dashboard",
     "logIn": "Log in",
-    "startFree": "Start free"
+    "startFree": "Start free",
+    "account": "Account"
+  },
+  "actions": {
+    "export": "Export",
+    "import": "Import",
+    "accept": "Accept",
+    "reject": "Reject",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "seePlans": "See plans",
+    "redirecting": "Redirecting…"
+  },
+  "plans": {
+    "free": "Free",
+    "creator": "Creator",
+    "pro": "Pro",
+    "mostPopular": "MOST POPULAR"
   },
   "success": {
     "heading": "You're all set!",
@@ -13,17 +30,17 @@
     "cta": "Go to editor →"
   },
   "footer": {
-    "tagline": "AI video editing for creators who ship.",
-    "madeWith": "Made with ♥ in Paris",
+    "tagline": "The creative operating system for modern storytellers, editors and studios.",
+    "gdpr": "GDPR Compliant · GCS Data Processor · 30-Day Retention",
     "company": "Company",
     "legal": "Legal",
-    "gdpr": "GDPR",
-    "copyright": "© {{year}} Vibed. All rights reserved.",
     "links": {
       "about": "About",
       "privacyPolicy": "Privacy Policy",
       "cookiePolicy": "Cookie Policy",
-      "yourData": "Your Data"
-    }
+      "yourData": "Your data"
+    },
+    "copyright": "© 2026 Vibed. All rights reserved.",
+    "madeWith": ""
   }
 }
