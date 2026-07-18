@@ -23,7 +23,7 @@ const multer   = require('multer');
 const path     = require('path');
 const { v4: uuidv4 } = require('uuid');
 
-const { authenticateUser }     = require('../middleware/auth.js');
+const { authenticateUser }     = require('../../middleware/auth.js');
 const { lutService }           = require('../lut-engine/library/LUTService.js');
 const { recommendationEngine } = require('../audio-engine/recommendations/RecommendationEngine.js');
 const { QueryParser }          = require('../audio-engine/search/QueryParser.js');
