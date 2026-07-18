@@ -11,5 +11,19 @@
     "heading": "You're all set!",
     "body": "Redirecting you to the editor in {{count}} seconds…",
     "cta": "Go to editor →"
+  },
+  "footer": {
+    "tagline": "AI video editing for creators who ship.",
+    "madeWith": "Made with ♥ in Paris",
+    "company": "Company",
+    "legal": "Legal",
+    "gdpr": "GDPR",
+    "copyright": "© {{year}} Vibed. All rights reserved.",
+    "links": {
+      "about": "About",
+      "privacyPolicy": "Privacy Policy",
+      "cookiePolicy": "Cookie Policy",
+      "yourData": "Your Data"
+    }
   }
 }
