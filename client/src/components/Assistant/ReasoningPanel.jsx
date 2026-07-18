@@ -9,6 +9,8 @@ import { parseAgentCommand } from '../../services/autoEditService';
 import classNames from 'classnames';
 import useUserPreferences from '../../store/useUserPreferences';
 import { workflowController } from '../../agent/WorkflowController.js';
+import { useBrain } from '../../hooks/useBrain.js';
+import BrainPanel from '../BrainPanel.jsx';
 
 
 // --- Sub-components ---
@@ -250,45 +252,72 @@ const AgentPlanCard = ({ suggestion, onAccept, onReject }) => {
     const { thought, actions } = suggestion.data;
 
     return (
-        <div className="bg-gradient-to-br from-purple-500/10 to-blue-500/10 rounded-lg p-3 border border-purple-500/30 shadow-md relative overflow-hidden mb-4 opacity-0 animate-in fade-in zoom-in-95 duration-500">
-            <div className="flex items-center gap-2 mb-2 relative z-10">
-                <div className="bg-purple-500/20 p-1 rounded">
-                    <Brain className="w-3 h-3 text-purple-400" />
-                </div>
-                <span className="text-xs font-bold text-purple-300 uppercase tracking-wider">
-                    Agent Proposal
-                </span>
-            </div>
+        <div
+            className="rounded-xl mb-4 overflow-hidden animate-in fade-in zoom-in-95 duration-500"
+            style={{
+                background: 'color-mix(in oklch, var(--violet) 8%, rgba(255,255,255,0.03))',
+                border: '0.5px solid color-mix(in oklch, var(--violet) 30%, transparent)',
+            }}
+        >
+            {/* Top accent bar */}
+            <div className="h-px w-full" style={{ background: 'linear-gradient(90deg, var(--violet), var(--accent))' }} />
 
-            <div className="mb-3">
-                <div className="mb-2 italic text-purple-300/80 text-[11px] leading-relaxed border-l-2 border-purple-500/30 pl-2">
-                    "{thought}"
+            <div className="p-3">
+                {/* Header */}
+                <div className="flex items-center gap-2 mb-3">
+                    <div
+                        className="p-1 rounded"
+                        style={{ background: 'color-mix(in oklch, var(--violet) 18%, transparent)', border: '0.5px solid color-mix(in oklch, var(--violet) 32%, transparent)' }}
+                    >
+                        <Brain className="w-3 h-3" style={{ color: 'var(--violet)' }} />
+                    </div>
+                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--violet)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+                        Agent Proposal
+                    </span>
                 </div>
-                <div className="rounded-lg p-2 max-h-32 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.3)' }}>
-                    <ul className="space-y-1">
-                        {actions.map((action, i) => (
-                            <li key={i} className="flex items-center gap-2" style={{ fontSize: 11, color: 'var(--fg-2)' }}>
-                                <span style={{ fontFamily: 'var(--f-mono)', color: '#c4b5fd' }}>[{action.name}]</span>
-                                <span className="truncate">{JSON.stringify(action.args)}</span>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            </div>
 
-            <div className="flex gap-2 relative z-10">
-                <button
-                    onClick={() => onAccept(suggestion)}
-                    className="flex-1 bg-purple-600 hover:bg-purple-700 text-white text-xs py-1.5 rounded-md transition-colors font-medium shadow-lg shadow-purple-900/20 flex items-center justify-center gap-1"
-                >
-                    <Check className="w-3 h-3" /> Approve Plan
-                </button>
-                <button
-                    onClick={() => onReject(suggestion.id)}
-                    className="flex-1 bg-secondary hover:bg-secondary/80 text-xs py-1.5 rounded-md transition-colors border border-white/5 flex items-center justify-center gap-1"
-                >
-                    <X className="w-3 h-3" /> Resize
-                </button>
+                <div className="mb-3">
+                    <div
+                        className="mb-2 pl-2 text-[11px] leading-relaxed"
+                        style={{ fontStyle: 'italic', color: 'var(--fg-3)', borderLeft: '1.5px solid color-mix(in oklch, var(--violet) 40%, transparent)' }}
+                    >
+                        "{thought}"
+                    </div>
+                    <div className="rounded-lg p-2 max-h-32 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.3)', border: '0.5px solid rgba(255,255,255,0.06)' }}>
+                        <ul className="space-y-1">
+                            {actions.map((action, i) => (
+                                <li key={i} className="flex items-center gap-2" style={{ fontSize: 11, color: 'var(--fg-2)' }}>
+                                    <span style={{ fontFamily: 'var(--f-mono)', color: 'var(--accent)' }}>[{action.name}]</span>
+                                    <span className="truncate">{JSON.stringify(action.args)}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                </div>
+
+                <div className="flex gap-2">
+                    <button
+                        onClick={() => onAccept(suggestion)}
+                        className="flex-1 text-xs py-1.5 rounded-md transition-all font-semibold flex items-center justify-center gap-1"
+                        style={{
+                            background: 'linear-gradient(135deg, var(--accent), var(--violet))',
+                            color: '#fff',
+                            border: 'none',
+                            boxShadow: '0 2px 12px color-mix(in oklch, var(--accent) 15%, transparent)',
+                        }}
+                    >
+                        <Check className="w-3 h-3" /> Approve Plan
+                    </button>
+                    <button
+                        onClick={() => onReject(suggestion.id)}
+                        className="flex-1 text-xs py-1.5 rounded-md transition-all flex items-center justify-center gap-1"
+                        style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.1)', color: 'var(--fg-3)' }}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.09)'; e.currentTarget.style.color = 'var(--fg)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.color = 'var(--fg-3)'; }}
+                    >
+                        <X className="w-3 h-3" /> Revise
+                    </button>
+                </div>
             </div>
         </div>
     );
@@ -297,12 +326,18 @@ const AgentPlanCard = ({ suggestion, onAccept, onReject }) => {
 
 const SuggestionCard = ({ suggestion, onAccept, onReject }) => {
     return (
-        <div className="bg-secondary/50 rounded-lg p-3 border border-border shadow-sm mb-3 opacity-0 animate-in fade-in zoom-in-95 duration-500">
+        <div
+            className="rounded-xl p-3 mb-3 animate-in fade-in zoom-in-95 duration-500"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.09)' }}
+        >
             <div className="flex items-center gap-2 mb-2">
-                <div className="bg-blue-500/20 p-1 rounded">
-                    <Sparkles className="w-3 h-3 text-blue-400" />
+                <div
+                    className="p-1 rounded"
+                    style={{ background: 'color-mix(in oklch, var(--accent) 14%, transparent)', border: '0.5px solid color-mix(in oklch, var(--accent) 28%, transparent)' }}
+                >
+                    <Sparkles className="w-3 h-3" style={{ color: 'var(--accent)' }} />
                 </div>
-                <span className="text-xs font-semibold text-foreground/80 capitalize">
+                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
                     {suggestion.type || 'Suggestion'}
                 </span>
             </div>
@@ -314,13 +349,23 @@ const SuggestionCard = ({ suggestion, onAccept, onReject }) => {
             <div className="flex gap-2">
                 <button
                     onClick={() => onAccept(suggestion)}
-                    className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground text-xs py-1.5 rounded-md transition-colors font-medium flex items-center justify-center gap-1"
+                    className="flex-1 text-xs py-1.5 rounded-md transition-all font-semibold flex items-center justify-center gap-1"
+                    style={{
+                        background: 'color-mix(in oklch, var(--accent) 18%, transparent)',
+                        border: '0.5px solid color-mix(in oklch, var(--accent) 35%, transparent)',
+                        color: 'var(--accent)',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'color-mix(in oklch, var(--accent) 26%, transparent)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'color-mix(in oklch, var(--accent) 18%, transparent)'; }}
                 >
                     <Check className="w-3 h-3" /> Apply
                 </button>
                 <button
                     onClick={() => onReject(suggestion.id)}
-                    className="flex-1 bg-secondary hover:bg-secondary/80 text-xs py-1.5 rounded-md transition-colors border border-white/5 flex items-center justify-center gap-1"
+                    className="flex-1 text-xs py-1.5 rounded-md transition-all flex items-center justify-center gap-1"
+                    style={{ background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.08)', color: 'var(--fg-3)' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.09)'; e.currentTarget.style.color = 'var(--fg)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = 'var(--fg-3)'; }}
                 >
                     <X className="w-3 h-3" /> Dismiss
                 </button>
@@ -722,6 +767,14 @@ const ReasoningPanel = () => {
 
     // ... (existing helper components)
 
+    // --- Editorial Brain (parallel layer, non-blocking) ---
+    const {
+        sendCommand:    brainSendCommand,
+        sendFeedback:   brainSendFeedback,
+        isProcessing:   brainIsProcessing,
+        lastResponse:   brainLastResponse,
+    } = useBrain();
+
     // --- Command Handling Logic ---
     const inputRef = useRef(null);
     const lastSubmitRef = useRef(0);
@@ -772,6 +825,9 @@ const ReasoningPanel = () => {
 
         try {
             workflowController.processUserPrompt(command);
+            // Fire brain in parallel — does NOT block or affect the existing pipeline.
+            // brainSendCommand is safe to call without await here; it handles its own errors.
+            brainSendCommand(command);
         } catch (err) {
             setIsAnalyzing(false);
             console.error(err);
@@ -987,6 +1043,20 @@ const ReasoningPanel = () => {
                     </div>
                 </div>
             </div>
+
+            {/* Editorial Brain suggestions — rendered below the command input */}
+            <BrainPanel
+                brainOutput={brainLastResponse}
+                isProcessing={brainIsProcessing}
+                onSendCommand={(text) => {
+                    if (inputRef.current) {
+                        inputRef.current.value = text;
+                        inputRef.current.focus();
+                    }
+                    brainSendCommand(text);
+                }}
+                onSendFeedback={brainSendFeedback}
+            />
         </aside>
     );
 };

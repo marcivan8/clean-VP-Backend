@@ -225,6 +225,147 @@ export const TOOL_DEFINITIONS = [
             },
             required: ["clipId", "trackId", "targetPosition"]
         }
+    },
+
+    // ── Asset Engine tools (Creative Asset Intelligence System) ────────────────
+    {
+        name: "search_assets",
+        description: "Search the asset library (SFX, LUTs, presets) using a natural language query.",
+        parameters: {
+            type: "object",
+            properties: {
+                query:      { type: "string",  description: "Natural language search query" },
+                assetTypes: { type: "array",   items: { type: "string" }, description: "Filter by asset types: SOUND_EFFECT, LUT, TEMPLATE" },
+                limit:      { type: "number",  description: "Max results (default 10)" }
+            },
+            required: ["query"]
+        }
+    },
+    {
+        name: "search_sfx",
+        description: "Search for sound effects (whoosh, impact, comedy, notification, etc.) by natural language.",
+        parameters: {
+            type: "object",
+            properties: {
+                query: { type: "string", description: "Describe the sound you need" },
+                limit: { type: "number", description: "Max results (default 10)" }
+            },
+            required: ["query"]
+        }
+    },
+    {
+        name: "search_luts",
+        description: "Search for color grade LUTs by style (cinematic, warm, cold, vintage, etc.).",
+        parameters: {
+            type: "object",
+            properties: {
+                query:         { type: "string",  description: "Style description" },
+                cinematicOnly: { type: "boolean", description: "Only cinematic LUTs" },
+                limit:         { type: "number",  description: "Max results (default 10)" }
+            },
+            required: ["query"]
+        }
+    },
+    {
+        name: "search_presets",
+        description: "List or filter presets by type (COLOR_GRADE, CAPTION_STYLE, SOUND_SETTINGS, EXPORT_SETTINGS, FULL_EDIT).",
+        parameters: {
+            type: "object",
+            properties: {
+                presetType: { type: "string", description: "Preset type filter" },
+                limit:      { type: "number", description: "Max results (default 10)" }
+            }
+        }
+    },
+    {
+        name: "apply_lut",
+        description: "Apply a color grade LUT to the project. Shows a CSS filter preview instantly; LUT is baked into export via FFmpeg.",
+        parameters: {
+            type: "object",
+            properties: {
+                lutId: { type: "string", description: "UUID of the LUT to apply" }
+            },
+            required: ["lutId"]
+        }
+    },
+    {
+        name: "clear_lut",
+        description: "Remove the current color grade LUT from the project.",
+        parameters: { type: "object", properties: {} }
+    },
+    {
+        name: "add_sfx",
+        description: "Add a sound effect to the audio track at a specific timeline position.",
+        parameters: {
+            type: "object",
+            properties: {
+                sfxId:    { type: "string", description: "UUID of the SFX asset" },
+                assetUrl: { type: "string", description: "Direct URL to the audio file (alternative to sfxId)" },
+                atTime:   { type: "number", description: "Timeline position in seconds" },
+                volume:   { type: "number", description: "Volume 0-1 (default 0.8)" },
+                fadeIn:   { type: "number", description: "Fade-in duration in seconds" },
+                fadeOut:  { type: "number", description: "Fade-out duration in seconds" },
+                label:    { type: "string", description: "Display label" }
+            }
+        }
+    },
+    {
+        name: "apply_preset",
+        description: "Apply a named preset to the project. FULL_EDIT presets require approved=true (user must confirm).",
+        parameters: {
+            type: "object",
+            properties: {
+                presetId:  { type: "string",  description: "UUID of the preset" },
+                projectId: { type: "string",  description: "Project ID (defaults to current project)" },
+                approved:  { type: "boolean", description: "User has approved (required for FULL_EDIT presets)" }
+            },
+            required: ["presetId"]
+        }
+    },
+    {
+        name: "export_audio",
+        description: "Export the project audio track as a standalone audio file (mp3, wav, aac, m4a). Triggers a browser download.",
+        parameters: {
+            type: "object",
+            properties: {
+                format:    { type: "string",  enum: ["mp3", "wav", "aac", "m4a"], description: "Output format" },
+                bitrate:   { type: "string",  description: "Bitrate e.g. '192k' (ignored for wav)" },
+                normalize: { type: "boolean", description: "Apply EBU R128 loudness normalisation" },
+                trimStart: { type: "number",  description: "Start time in seconds" },
+                trimEnd:   { type: "number",  description: "End time in seconds" }
+            }
+        }
+    },
+    {
+        name: "recommend_sfx",
+        description: "Fetch AI-recommended sound effects for the current project. Results appear in the Asset Panel.",
+        parameters: {
+            type: "object",
+            properties: {
+                limit: { type: "number", description: "Max recommendations (default 5)" }
+            }
+        }
+    },
+    {
+        name: "recommend_luts",
+        description: "Fetch AI-recommended LUT color grades for the current project.",
+        parameters: {
+            type: "object",
+            properties: {
+                limit: { type: "number", description: "Max recommendations (default 3)" }
+            }
+        }
+    },
+    {
+        name: "recommend_presets",
+        description: "Fetch AI-recommended editing presets for the current project and content type.",
+        parameters: {
+            type: "object",
+            properties: {
+                presetType: { type: "string", description: "Filter by preset type" },
+                limit:      { type: "number", description: "Max recommendations (default 5)" }
+            }
+        }
     }
 ];
 
@@ -322,6 +463,20 @@ export class VideoEditorTools {
             case 'reorder_clips': return await this.reorderClips(action.args, action.signal);
             case 'reorder_segment': return this.reorderSegment(action.args);
             case 'cut_segment': return this.cutSegment(action.args);
+
+            // Asset Engine — Creative Asset Intelligence System
+            case 'search_assets':     return await this.searchAssets(action.args);
+            case 'search_sfx':        return await this.searchSFX(action.args);
+            case 'search_luts':       return await this.searchLUTs(action.args);
+            case 'search_presets':    return await this.searchPresets(action.args);
+            case 'apply_lut':         return await this.applyLUT(action.args);
+            case 'clear_lut':         return this.clearLUT();
+            case 'add_sfx':           return this.addSFX(action.args);
+            case 'apply_preset':      return await this.applyPreset(action.args);
+            case 'export_audio':      return await this.exportAudio(action.args);
+            case 'recommend_sfx':     return await this.recommendSFX(action.args);
+            case 'recommend_luts':    return await this.recommendLUTs(action.args);
+            case 'recommend_presets': return await this.recommendPresets(action.args);
 
             default:
                 throw new Error(`Unknown tool: ${action.name}`);
@@ -899,5 +1054,106 @@ export class VideoEditorTools {
         });
 
         return { success: true, message: `Cut segment ${start.toFixed(1)}s–${end.toFixed(1)}s` };
+    }
+
+    // ── Asset Engine Implementations ───────────────────────────────────────────
+    // All use dynamic import for audioEngineAPI to keep the initial bundle lean.
+
+    async searchAssets({ query = '', assetTypes = null, limit = 10 } = {}) {
+        const { audioEngineAPI } = await import('../audio-engine/AudioEngineAPI.js');
+        return audioEngineAPI.searchAssets(query, { assetTypes, limit });
+    }
+
+    async searchSFX({ query = '', limit = 10 } = {}) {
+        const { audioEngineAPI } = await import('../audio-engine/AudioEngineAPI.js');
+        return audioEngineAPI.searchAssets(query, { assetTypes: ['SOUND_EFFECT'], limit });
+    }
+
+    async searchLUTs({ query = '', cinematicOnly = false, limit = 10 } = {}) {
+        const { audioEngineAPI } = await import('../audio-engine/AudioEngineAPI.js');
+        return audioEngineAPI.searchLUTs(query, { cinematicOnly, limit });
+    }
+
+    async searchPresets({ presetType = null, limit = 10 } = {}) {
+        const { audioEngineAPI } = await import('../audio-engine/AudioEngineAPI.js');
+        return audioEngineAPI.listPresets(presetType, limit);
+    }
+
+    /**
+     * Apply a LUT to the project.
+     * Stores lutId in Zustand state (no store action needed — setState is always valid).
+     * Fetches CSS preview filter for immediate visual feedback.
+     */
+    async applyLUT({ lutId } = {}) {
+        if (!lutId) return { success: false, message: 'lutId is required' };
+        const { audioEngineAPI } = await import('../audio-engine/AudioEngineAPI.js');
+        const cssFilter = await audioEngineAPI.getLUTPreview(lutId);
+        // Store lutId + cssFilter in timeline state without a named action
+        useTimelineStore.setState({ projectLUTId: lutId, projectLUTFilter: cssFilter });
+        return { success: true, message: `LUT applied`, lutId, cssFilter };
+    }
+
+    clearLUT() {
+        useTimelineStore.setState({ projectLUTId: null, projectLUTFilter: 'none' });
+        return { success: true, message: 'LUT cleared' };
+    }
+
+    /**
+     * Add a sound effect clip to the first audio track at atTime.
+     * Duration defaults to 2s; PlaybackEngine updates it once the asset loads.
+     */
+    addSFX({ sfxId = null, assetUrl = null, atTime = 0, trackId = null, volume = 0.8, fadeIn = 0, fadeOut = 0, label = 'SFX' } = {}) {
+        if (!sfxId && !assetUrl) return { success: false, message: 'sfxId or assetUrl required' };
+        const store = this.store;
+        const target = trackId
+            ? store.tracks.find(t => t.id === trackId)
+            : store.tracks.find(t => t.type === 'audio');
+        if (!target) return { success: false, message: 'No audio track found' };
+
+        store.addClip(target.id, {
+            id:       `sfx_${Date.now()}`,
+            type:     'audio',
+            src:      assetUrl || sfxId,
+            assetId:  sfxId,
+            start:    atTime,
+            duration: 2,
+            volume,
+            fadeIn,
+            fadeOut,
+            name:     label,
+            isSFX:    true,
+        });
+        return { success: true, message: `SFX "${label}" added at ${atTime}s` };
+    }
+
+    async applyPreset({ presetId, projectId, approved = false } = {}) {
+        if (!presetId) return { success: false, message: 'presetId is required' };
+        const { audioEngineAPI } = await import('../audio-engine/AudioEngineAPI.js');
+        const pid = projectId || this.store.projectId || null;
+        return audioEngineAPI.applyPreset(presetId, pid, approved);
+    }
+
+    async exportAudio({ format = 'mp3', bitrate = '192k', normalize = false, trimStart, trimEnd } = {}) {
+        const { audioEngineAPI } = await import('../audio-engine/AudioEngineAPI.js');
+        const projectId = this.store.projectId || null;
+        return audioEngineAPI.requestAudioExport({ projectId, format, bitrate, normalize, trimStart, trimEnd });
+    }
+
+    async recommendSFX({ limit = 5 } = {}) {
+        const { audioEngineAPI } = await import('../audio-engine/AudioEngineAPI.js');
+        const { tracks, aspectRatio } = this.store;
+        return audioEngineAPI.recommendSFX({ tracks, aspectRatio }, { limit });
+    }
+
+    async recommendLUTs({ limit = 3 } = {}) {
+        const { audioEngineAPI } = await import('../audio-engine/AudioEngineAPI.js');
+        const { tracks, aspectRatio } = this.store;
+        return audioEngineAPI.recommendLUTs({ tracks, aspectRatio }, { limit });
+    }
+
+    async recommendPresets({ presetType = null, limit = 5 } = {}) {
+        const { audioEngineAPI } = await import('../audio-engine/AudioEngineAPI.js');
+        const { tracks, aspectRatio } = this.store;
+        return audioEngineAPI.recommendPresets({ tracks, aspectRatio }, { presetType, limit });
     }
 }
