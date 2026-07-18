@@ -216,7 +216,7 @@ const LogItem = ({ log }) => {
                                 "{log.data.thought}"
                             </div>
                         )}
-                        {log.data.details && (
+                        {Array.isArray(log.data.details) && log.data.details.length > 0 && (
                             <ul className="space-y-1">
                                 {log.data.details.map((active, i) => (
                                     <li key={i} className="flex items-start gap-2" style={{ fontSize: 11 }}>
@@ -285,7 +285,7 @@ const AgentPlanCard = ({ suggestion, onAccept, onReject }) => {
                     </div>
                     <div className="rounded-lg p-2 max-h-32 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.3)', border: '0.5px solid rgba(255,255,255,0.06)' }}>
                         <ul className="space-y-1">
-                            {actions.map((action, i) => (
+                            {(Array.isArray(actions) ? actions : []).map((action, i) => (
                                 <li key={i} className="flex items-center gap-2" style={{ fontSize: 11, color: 'var(--fg-2)' }}>
                                     <span style={{ fontFamily: 'var(--f-mono)', color: 'var(--accent)' }}>[{action.name}]</span>
                                     <span className="truncate">{JSON.stringify(action.args)}</span>

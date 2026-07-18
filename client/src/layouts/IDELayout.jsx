@@ -357,7 +357,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     id: t.id,
                     type: t.type,
                     order: t.order ?? idx,
-                    clips: t.clips.map(c => {
+                    clips: (t.clips || []).map(c => {
                         const sourceAsset = assets.find(a => a.id === c.assetId);
                         // Resolution order:
                         // 1. proxyUrl (server-relative or blob) — already correct format
