@@ -65,11 +65,29 @@ exportWorker.on('failed', (job, err) => {
 
 // 5. Asset Analysis Worker (Editorial Brain — vision + audio classification)
 // concurrency: 2 — vision calls are I/O bound (OpenAI API), not CPU bound
-const { MediaIntelligencePipeline } = require('./server/brain/media/MediaIntelligencePipeline');
+//
+// DEPLOYMENT NOTE: requires server/brain/media/MediaIntelligencePipeline.js
+// and its transitive deps (AudioClassifier, VisualAnalyzer, ContentClassifier,
+// server/brain/UserProfileEngine, server/brain/PatternLearner, etc.).
+// All of these live in server/brain/ — ensure that directory is committed and
+// included in the Docker build context before deploying worker.js changes.
+//
+// Loaded lazily so a missing module degrades gracefully instead of crashing
+// the entire worker process (which would also kill video exports).
+let _MediaIntelligencePipeline = null;
+try {
+    _MediaIntelligencePipeline = require('./server/brain/media/MediaIntelligencePipeline').MediaIntelligencePipeline;
+    console.log('✅ [AssetAnalysisQueue] MediaIntelligencePipeline loaded');
+} catch (err) {
+    console.error('⚠️  [AssetAnalysisQueue] MediaIntelligencePipeline not available — asset analysis jobs will fail gracefully:', err.message);
+}
 
 const assetAnalysisWorker = new Worker('asset-analysis', async (job) => {
+    if (!_MediaIntelligencePipeline) {
+        throw new Error('MediaIntelligencePipeline not loaded — redeploy with server/brain/ committed');
+    }
     const { assetId, filePath, projectId, userId } = job.data;
-    const pipeline = new MediaIntelligencePipeline();
+    const pipeline = new _MediaIntelligencePipeline();
     await pipeline.analyzeAsset(assetId, filePath, projectId, userId);
 }, { connection, concurrency: 2 });
 
@@ -82,14 +100,23 @@ assetAnalysisWorker.on('failed', (job, err) => {
 
 // 6. Asset Embedding Worker (Creative Asset Intelligence — vector embeddings)
 // concurrency: 3 — embedding calls are I/O bound (OpenAI text-embedding-3-small)
-const { createEmbeddingWorker } = require('./server/audio-engine/embeddings/EmbeddingWorker.js');
-const embeddingWorker = createEmbeddingWorker();
+//
+// DEPLOYMENT NOTE: requires server/audio-engine/embeddings/EmbeddingWorker.js
+// and its transitive deps. Same server/ directory constraint as worker 5 above.
+let embeddingWorker = null;
+try {
+    const { createEmbeddingWorker } = require('./server/audio-engine/embeddings/EmbeddingWorker.js');
+    embeddingWorker = createEmbeddingWorker();
+    console.log('✅ [EmbeddingQueue] EmbeddingWorker loaded');
 
-embeddingWorker.on('completed', job => {
-    console.log(`✅ [EmbeddingQueue] Job ${job.id} completed (${job.data?.assetId || job.data?.batchAssetIds?.length + ' batch' || 'seed-all'})`);
-});
-embeddingWorker.on('failed', (job, err) => {
-    console.error(`❌ [EmbeddingQueue] Job ${job.id} failed:`, err.message);
-});
+    embeddingWorker.on('completed', job => {
+        console.log(`✅ [EmbeddingQueue] Job ${job.id} completed (${job.data?.assetId || (job.data?.batchAssetIds?.length ?? 0) + ' batch' || 'seed-all'})`);
+    });
+    embeddingWorker.on('failed', (job, err) => {
+        console.error(`❌ [EmbeddingQueue] Job ${job.id} failed:`, err.message);
+    });
+} catch (err) {
+    console.error('⚠️  [EmbeddingQueue] EmbeddingWorker not available — embedding jobs will be skipped:', err.message);
+}
 
 console.log('👷 Worker service is running and listening to queues.');

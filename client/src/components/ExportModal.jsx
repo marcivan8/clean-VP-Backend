@@ -4,6 +4,7 @@ import {
     Clapperboard, CheckCircle2, Loader2, AlertCircle,
     Scissors, ArrowRight,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { exportToNLE } from '../services/nleExportService';
 import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../store/useTimelineStore';
@@ -77,6 +78,7 @@ const Sep = () => (
 // ─── Main component ───────────────────────────────────────────────────────────
 
 const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exportError }) => {
+    const { t } = useTranslation('editor');
     const [activeTab, setActiveTab] = useState('video');
     const [settings, setSettings]   = useState({ platform: null, resolution: '1080p', fps: 30, format: 'mp4', quality: 'high' });
     const [step, setStep]           = useState('configure');
@@ -179,9 +181,9 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                         <VibedMark size={22} />
                         <div>
                             <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--fg)', letterSpacing: '-0.01em' }}>
-                                Export
+                                {t('exportModal.header')}
                             </p>
-                            <Label>Publish your work</Label>
+                            <Label>{t('exportModal.headerSub')}</Label>
                         </div>
                     </div>
                     <button
@@ -206,8 +208,8 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                 {/* ── Tab switcher ── */}
                 <div style={{ display: 'flex', gap: 2, padding: '8px 24px 0', background: 'var(--bg-2)' }}>
                     {[
-                        { id: 'video', icon: Film,    label: 'Video file' },
-                        { id: 'nle',   icon: Scissors, label: 'NLE project' },
+                        { id: 'video', icon: Film,    label: t('exportModal.tabVideo') },
+                        { id: 'nle',   icon: Scissors, label: t('exportModal.tabNle') },
                     ].map(tab => {
                         const active = activeTab === tab.id;
                         const Icon = tab.icon;
@@ -250,7 +252,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
 
                                 {/* Platform */}
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                    <Label>Platform</Label>
+                                    <Label>{t('exportModal.labelPlatform')}</Label>
                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                                         {PLATFORMS.map(pl => {
                                             const Icon = pl.icon;
@@ -279,7 +281,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                 {/* Resolution — only when no platform preset */}
                                 {!settings.platform && (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                        <Label>Resolution</Label>
+                                        <Label>{t('exportModal.labelResolution')}</Label>
                                         <div style={{
                                             display: 'flex', gap: 2,
                                             background: 'var(--glass)',
@@ -303,7 +305,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
 
                                 {/* Quality */}
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                    <Label>Quality</Label>
+                                    <Label>{t('exportModal.labelQuality')}</Label>
                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
                                         {QUALITY_PROFILES.map(q => {
                                             const active = settings.quality === q.id;
@@ -328,7 +330,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                 {/* FPS / Format — compact row */}
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                        <Label>Frame rate</Label>
+                                        <Label>{t('exportModal.labelFrameRate')}</Label>
                                         <div style={{
                                             display: 'flex', gap: 2,
                                             background: 'var(--glass)',
@@ -346,7 +348,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                         </div>
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                        <Label>Format</Label>
+                                        <Label>{t('exportModal.labelFormat')}</Label>
                                         <div style={{
                                             display: 'flex', gap: 2,
                                             background: 'var(--glass)',
@@ -376,7 +378,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                     }}
                                 >
                                     <Download size={14} />
-                                    {selectedPlatform ? `Export for ${selectedPlatform.label}` : 'Export video'}
+                                    {selectedPlatform ? t('exportModal.exportFor', { platform: selectedPlatform.label }) : t('exportModal.exportVideo')}
                                     <ArrowRight size={13} style={{ opacity: 0.6 }} />
                                 </button>
                             </div>
@@ -397,10 +399,10 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
 
                                 <div style={{ textAlign: 'center' }}>
                                     <p style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 600, color: 'var(--fg)', letterSpacing: '-0.01em' }}>
-                                        Rendering
+                                        {t('exportModal.rendering')}
                                     </p>
                                     <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-4)', fontFamily: 'var(--f-mono)' }}>
-                                        FFmpeg is encoding your timeline
+                                        {t('exportModal.renderingSub')}
                                     </p>
                                 </div>
 
@@ -443,7 +445,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                     </div>
                                     <div style={{ textAlign: 'center' }}>
                                         <p style={{ margin: '0 0 2px', fontSize: 15, fontWeight: 600, color: 'var(--fg)', letterSpacing: '-0.01em' }}>
-                                            Render complete
+                                            {t('exportModal.renderComplete')}
                                         </p>
                                         <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-4)', fontFamily: 'var(--f-mono)' }}>
                                             {exportResult.metadata?.resolution} · {exportResult.metadata?.sizeMB} MB
@@ -462,10 +464,10 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                     gap: '10px 24px',
                                 }}>
                                     {[
-                                        { k: 'Codec',    v: exportResult.metadata?.codec || 'H.264' },
-                                        { k: 'Size',     v: `${exportResult.metadata?.sizeMB || '?'} MB` },
-                                        { k: 'Clips',    v: exportResult.metadata?.segments ?? '—' },
-                                        { k: 'Platform', v: exportResult.metadata?.platform || 'Custom' },
+                                        { k: t('exportModal.metaCodec'),    v: exportResult.metadata?.codec || 'H.264' },
+                                        { k: t('exportModal.metaSize'),     v: `${exportResult.metadata?.sizeMB || '?'} MB` },
+                                        { k: t('exportModal.metaClips'),    v: exportResult.metadata?.segments ?? '—' },
+                                        { k: t('exportModal.metaPlatform'), v: exportResult.metadata?.platform || t('exportModal.metaCustom') },
                                     ].map(({ k, v }) => (
                                         <div key={k}>
                                             <p style={{ margin: '0 0 2px', fontFamily: 'var(--f-mono)', fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--fg-4)' }}>{k}</p>
@@ -499,7 +501,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
                                         }}
                                     >
-                                        <Download size={14} /> Download
+                                        <Download size={14} /> {t('exportModal.downloadBtn')}
                                     </button>
                                     <button
                                         onClick={() => setStep('configure')}
@@ -514,7 +516,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                         onMouseEnter={e => { e.currentTarget.style.color = 'var(--fg)'; e.currentTarget.style.background = 'var(--glass-2)'; }}
                                         onMouseLeave={e => { e.currentTarget.style.color = 'var(--fg-3)'; e.currentTarget.style.background = 'var(--glass)'; }}
                                     >
-                                        Again
+                                        {t('exportModal.exportAgain')}
                                     </button>
                                 </div>
                             </div>
@@ -532,9 +534,9 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                     <AlertCircle size={22} style={{ color: '#f04040' }} />
                                 </div>
                                 <div style={{ textAlign: 'center' }}>
-                                    <p style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 600, color: 'var(--fg)' }}>Render failed</p>
+                                    <p style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 600, color: 'var(--fg)' }}>{t('exportModal.renderFailed')}</p>
                                     <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-4)', fontFamily: 'var(--f-mono)', maxWidth: 280 }}>
-                                        {exportError || 'An unknown error occurred.'}
+                                        {exportError || ''}
                                     </p>
                                 </div>
                                 <button
@@ -548,7 +550,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                         cursor: 'pointer',
                                     }}
                                 >
-                                    Try again
+                                    {t('exportModal.tryAgain')}
                                 </button>
                             </div>
                         )}
@@ -559,7 +561,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                     {activeTab === 'nle' && (
                         <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
                             <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-4)', lineHeight: 1.6, fontFamily: 'var(--f-mono)' }}>
-                                Export as a project file — no re-encoding. Your original media stays intact.
+                                {t('exportModal.nleDescription')}
                             </p>
 
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -583,7 +585,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                             <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)' }}>{nle.sub}</span>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 4, color: 'var(--accent)', fontSize: 11 }}>
                                                 {loading
-                                                    ? <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> Generating…</>
+                                                    ? <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> {t('exportModal.nleGenerating')}</>
                                                     : <><Download size={11} /> <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10 }}>{nle.ext}</span></>
                                                 }
                                             </div>
@@ -595,13 +597,13 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                             {nleStatus === 'success' && (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 'var(--r-sm)', background: 'color-mix(in srgb, #00c97a 8%, transparent)', border: '0.5px solid color-mix(in srgb, #00c97a 25%, transparent)' }}>
                                     <CheckCircle2 size={14} style={{ color: '#00c97a', flexShrink: 0 }} />
-                                    <span style={{ fontSize: 12, color: '#00c97a', fontFamily: 'var(--f-mono)' }}>Project file downloaded</span>
+                                    <span style={{ fontSize: 12, color: '#00c97a', fontFamily: 'var(--f-mono)' }}>{t('exportModal.nleSuccess')}</span>
                                 </div>
                             )}
                             {nleStatus === 'error' && (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 'var(--r-sm)', background: 'color-mix(in srgb, #f04040 8%, transparent)', border: '0.5px solid color-mix(in srgb, #f04040 25%, transparent)' }}>
                                     <AlertCircle size={14} style={{ color: '#f04040', flexShrink: 0 }} />
-                                    <span style={{ fontSize: 12, color: '#f04040', fontFamily: 'var(--f-mono)' }}>{nleError || 'Failed to generate.'}</span>
+                                    <span style={{ fontSize: 12, color: '#f04040', fontFamily: 'var(--f-mono)' }}>{nleError || t('exportModal.nleFailed')}</span>
                                 </div>
                             )}
 

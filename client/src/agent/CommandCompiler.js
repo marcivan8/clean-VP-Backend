@@ -717,6 +717,162 @@ function compileVirtualMulticam(step, ctx) {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ── Asset Engine commands (Creative Asset Intelligence System) ─────────────────
+// All pure + synchronous — compile to ENGINE.API or ENGINE.STORE, never fetch.
+
+function compileSearchAssets(step, ctx) {
+    const q = step.query || step.q || '';
+    return ok(step.step_id, [
+        cmd(ENGINE.API, 'searchAssets', {
+            endpoint: '/api/audio/search',
+            method:   'POST',
+            payload:  {
+                query:      q,
+                assetTypes: step.asset_types || step.assetTypes || null,
+                intents:    step.intents    || null,
+                limit:      step.limit      || 10,
+            },
+        }, { source_step_id: step.step_id, description: `Search assets: "${q}"` }),
+    ]);
+}
+
+function compileSearchSFX(step, ctx) {
+    return compileSearchAssets(
+        { ...step, asset_types: ['SOUND_EFFECT'], query: step.query || step.sfx_query || '' },
+        ctx
+    );
+}
+
+function compileSearchLUTs(step, ctx) {
+    const q = step.query || '';
+    return ok(step.step_id, [
+        cmd(ENGINE.API, 'searchLUTs', {
+            endpoint: '/api/luts/search',
+            method:   'POST',
+            payload:  {
+                query:         q,
+                cinematicOnly: step.cinematic_only || false,
+                limit:         step.limit || 10,
+            },
+        }, { source_step_id: step.step_id, description: `Search LUTs: "${q}"` }),
+    ]);
+}
+
+function compileSearchPresets(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.API, 'searchPresets', {
+            endpoint: '/api/presets',
+            method:   'GET',
+            payload:  { type: step.preset_type || null, limit: step.limit || 10 },
+        }, { source_step_id: step.step_id, description: `Search presets${step.preset_type ? ` (${step.preset_type})` : ''}` }),
+    ]);
+}
+
+function compileApplyLUT(step, ctx) {
+    const lutId = step.lut_id || step.lutId || null;
+    if (!lutId) return validationError(step.step_id, 'apply_lut requires lut_id', VALIDATION_ERRORS.MISSING_PARAM);
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'setProjectLUT', { lutId },
+            { source_step_id: step.step_id, description: `Apply LUT: ${lutId}` }),
+    ]);
+}
+
+function compileClearLUT(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'setProjectLUT', { lutId: null },
+            { source_step_id: step.step_id, description: 'Clear LUT' }),
+    ]);
+}
+
+function compileAddSFX(step, ctx) {
+    const sfxId    = step.sfx_id    || step.assetId  || null;
+    const assetUrl = step.asset_url || step.url       || null;
+    const atTime   = step.at_time   != null ? step.at_time : '$playhead';
+    if (!sfxId && !assetUrl) {
+        return validationError(step.step_id, 'add_sfx requires sfx_id or asset_url', VALIDATION_ERRORS.MISSING_PARAM);
+    }
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'addSFX', {
+            sfxId,
+            assetUrl,
+            trackId:  step.track_id || '$audio_track',
+            atTime,
+            volume:   step.volume   ?? 0.8,
+            fadeIn:   step.fade_in  ?? 0,
+            fadeOut:  step.fade_out ?? 0,
+            label:    step.label    || 'SFX',
+        }, { source_step_id: step.step_id, description: `Add SFX at ${atTime}s` }),
+    ]);
+}
+
+function compileApplyPreset(step, ctx) {
+    const presetId = step.preset_id || step.presetId || null;
+    if (!presetId) return validationError(step.step_id, 'apply_preset requires preset_id', VALIDATION_ERRORS.MISSING_PARAM);
+    const isFullEdit = step.preset_type === 'FULL_EDIT' || step.is_full_edit === true;
+    return ok(step.step_id, [
+        cmd(ENGINE.API, 'applyPreset', {
+            endpoint:          `/api/presets/${presetId}/apply`,
+            method:            'POST',
+            payload:           {
+                projectId: step.project_id || '$project_id',
+                approved:  isFullEdit ? (step.approved ?? false) : true,
+            },
+            requires_approval: isFullEdit,
+        }, { source_step_id: step.step_id, description: `Apply preset ${presetId}` }),
+    ]);
+}
+
+function compileExportAudio(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.API, 'exportAudio', {
+            endpoint: '/api/audio/export',
+            method:   'POST',
+            payload:  {
+                projectId:  step.project_id || '$project_id',
+                format:     step.format     || 'mp3',
+                bitrate:    step.bitrate    || '192k',
+                normalize:  step.normalize  ?? false,
+                trimStart:  step.trim_start || null,
+                trimEnd:    step.trim_end   || null,
+            },
+            stream: true, // executor triggers browser download
+        }, { source_step_id: step.step_id, description: `Export audio as ${step.format || 'mp3'}` }),
+    ]);
+}
+
+function compileRecommendSFX(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.API, 'recommendSFX', {
+            endpoint:        '/api/audio/recommend/sfx',
+            method:          'POST',
+            payload:         { limit: step.limit || 5 },
+            fire_and_forget: true,
+        }, { source_step_id: step.step_id, description: 'Fetch SFX recommendations' }),
+    ]);
+}
+
+function compileRecommendLUTs(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.API, 'recommendLUTs', {
+            endpoint:        '/api/luts/recommend',
+            method:          'POST',
+            payload:         { limit: step.limit || 3 },
+            fire_and_forget: true,
+        }, { source_step_id: step.step_id, description: 'Fetch LUT recommendations' }),
+    ]);
+}
+
+function compileRecommendPresets(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.API, 'recommendPresets', {
+            endpoint:        '/api/presets/recommend',
+            method:          'POST',
+            payload:         { presetType: step.preset_type || null, limit: step.limit || 5 },
+            fire_and_forget: true,
+        }, { source_step_id: step.step_id, description: 'Fetch preset recommendations' }),
+    ]);
+}
+
 // §7  COMMAND REGISTRY
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -796,6 +952,20 @@ const COMMAND_REGISTRY = new Map([
     // Additional long-form steps
     ['cut_segment', { compiler: compileCutSegment }],
     ['add_transitions_to_sections', { compiler: compileAddTransitionsToSections }],
+
+    // Asset Engine — Creative Asset Intelligence System
+    ['search_assets',     { compiler: compileSearchAssets }],
+    ['search_sfx',        { compiler: compileSearchSFX }],
+    ['search_luts',       { compiler: compileSearchLUTs }],
+    ['search_presets',    { compiler: compileSearchPresets }],
+    ['apply_lut',         { compiler: compileApplyLUT }],
+    ['clear_lut',         { compiler: compileClearLUT }],
+    ['add_sfx',           { compiler: compileAddSFX }],
+    ['apply_preset',      { compiler: compileApplyPreset }],
+    ['export_audio',      { compiler: compileExportAudio }],
+    ['recommend_sfx',     { compiler: compileRecommendSFX }],
+    ['recommend_luts',    { compiler: compileRecommendLUTs }],
+    ['recommend_presets', { compiler: compileRecommendPresets }],
 ]);
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -11,43 +11,35 @@
 
 import React, { useState } from 'react';
 import { X, Sparkles, Download, Save, Clock, ArrowRight, Check, Loader2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabaseClient';
 import useSessionStore from '../store/useSessionStore';
 
-const TRIGGER_CONFIG = {
-    export: {
-        icon:    Download,
-        heading: 'One step to download',
-        body:    'Create a free account to download your edit. Takes 10 seconds — no card needed.',
-        cta:     'Create account & download',
-        accent:  'var(--accent)',
-    },
-    ai_success: {
-        icon:    Sparkles,
-        heading: 'That worked.',
-        body:    'Create an account so your project is saved. Close the tab and come back anytime.',
-        cta:     'Save my project',
-        accent:  'var(--accent)',
-    },
-    timer: {
-        icon:    Clock,
-        heading: "You've been editing for a while.",
-        body:    'Save your progress with a free account. Your timeline, clips, and edits are all kept.',
-        cta:     'Save my progress',
-        accent:  'oklch(0.78 0.13 32)',
-    },
-    exit_intent: {
-        icon:    Save,
-        heading: "Don't lose your edit.",
-        body:    'Create a free account in 10 seconds. Your project will be waiting when you come back.',
-        cta:     'Save before I leave',
-        accent:  'var(--accent)',
-    },
+const TRIGGER_ICONS = {
+    export:      Download,
+    ai_success:  Sparkles,
+    timer:       Clock,
+    exit_intent: Save,
+};
+
+const TRIGGER_ACCENTS = {
+    export:      'var(--accent)',
+    ai_success:  'var(--accent)',
+    timer:       'oklch(0.78 0.13 32)',
+    exit_intent: 'var(--accent)',
 };
 
 const AuthPromptModal = ({ trigger = 'export', onDismiss, onSuccess }) => {
-    const config = TRIGGER_CONFIG[trigger] || TRIGGER_CONFIG.export;
-    const Icon   = config.icon;
+    const { t } = useTranslation('auth');
+    const triggerKey = TRIGGER_ICONS[trigger] ? trigger : 'export';
+    const Icon   = TRIGGER_ICONS[triggerKey];
+    const config = {
+        icon:    Icon,
+        heading: t(`prompt.${triggerKey}.heading`),
+        body:    t(`prompt.${triggerKey}.body`),
+        cta:     t(`prompt.${triggerKey}.cta`),
+        accent:  TRIGGER_ACCENTS[triggerKey],
+    };
 
     const [mode,     setMode]     = useState('signup'); // 'signup' | 'signin'
     const [email,    setEmail]    = useState('');
@@ -67,7 +59,11 @@ const AuthPromptModal = ({ trigger = 'export', onDismiss, onSuccess }) => {
             let userId;
 
             if (mode === 'signup') {
-                const { data, error } = await supabase.auth.signUp({ email, password });
+                const { data, error } = await supabase.auth.signUp({
+                    email,
+                    password,
+                    options: { emailRedirectTo: `${window.location.origin}/dashboard` },
+                });
                 if (error) throw error;
                 userId = data.user?.id;
             } else {
@@ -132,14 +128,14 @@ const AuthPromptModal = ({ trigger = 'export', onDismiss, onSuccess }) => {
                                 <Check className="w-5 h-5 text-green-400" />
                             </div>
                             <p style={{ fontFamily: 'var(--f-sans)', fontSize: 13, color: 'var(--fg-2)' }}>
-                                {mode === 'signup' ? 'Account created. Project saved.' : 'Signed in. Project saved.'}
+                                {mode === 'signup' ? t('prompt.saved.signup') : t('prompt.saved.signin')}
                             </p>
                         </div>
                     ) : (
                         <form onSubmit={submit} className="flex flex-col gap-3">
                             <input
                                 type="email"
-                                placeholder="Email"
+                                placeholder={t('prompt.emailPlaceholder')}
                                 value={email}
                                 onChange={e => setEmail(e.target.value)}
                                 required
@@ -148,7 +144,7 @@ const AuthPromptModal = ({ trigger = 'export', onDismiss, onSuccess }) => {
                             />
                             <input
                                 type="password"
-                                placeholder="Password (min 8 chars)"
+                                placeholder={t('prompt.passwordPlaceholder')}
                                 value={password}
                                 onChange={e => setPassword(e.target.value)}
                                 minLength={8}
@@ -173,17 +169,18 @@ const AuthPromptModal = ({ trigger = 'export', onDismiss, onSuccess }) => {
                                     ? <Loader2 className="w-4 h-4 animate-spin" />
                                     : <><span>{config.cta}</span><ArrowRight className="w-3.5 h-3.5" /></>
                                 }
+
                             </button>
 
                             {/* Mode toggle */}
                             <p className="text-center" style={{ fontFamily: 'var(--f-sans)', fontSize: 11, color: 'var(--fg-4)' }}>
-                                {mode === 'signup' ? 'Already have an account? ' : 'New here? '}
+                                {mode === 'signup' ? t('prompt.signinPrompt') + ' ' : t('prompt.signupPrompt') + ' '}
                                 <button
                                     type="button"
                                     onClick={() => { setMode(mode === 'signup' ? 'signin' : 'signup'); setErrorMsg(''); }}
                                     style={{ color: 'var(--fg-2)', textDecoration: 'underline' }}
                                 >
-                                    {mode === 'signup' ? 'Sign in' : 'Create account'}
+                                    {mode === 'signup' ? t('prompt.signinLabel') : t('prompt.signupLabel')}
                                 </button>
                             </p>
                         </form>
@@ -193,7 +190,7 @@ const AuthPromptModal = ({ trigger = 'export', onDismiss, onSuccess }) => {
                 {/* Subtle trust footer */}
                 <div className="px-6 pb-4">
                     <p style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textAlign: 'center', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                        Free forever · No credit card · Your files stay yours
+                        {t('prompt.trust')}
                     </p>
                 </div>
             </div>
