@@ -17,7 +17,7 @@
 const express = require('express');
 const router  = express.Router();
 
-const { authenticateUser }       = require('../middleware/auth.js');
+const { authenticateUser }       = require('../../middleware/auth.js');
 const { assetSearchEngine }      = require('../audio-engine/search/AssetSearchEngine.js');
 const { recommendationEngine }   = require('../audio-engine/recommendations/RecommendationEngine.js');
 const { userPreferenceEngine }   = require('../audio-engine/search/UserPreferenceEngine.js');

@@ -31,7 +31,7 @@
 const express = require('express');
 const router  = express.Router();
 
-const { authenticateUser }   = require('../middleware/auth.js');
+const { authenticateUser }   = require('../../middleware/auth.js');
 const { audioExportService } = require('../audio-engine/export/AudioExportService.js');
 const { supabaseAdmin }      = require('../../config/database.js');
 

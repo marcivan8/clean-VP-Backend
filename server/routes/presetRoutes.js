@@ -17,7 +17,7 @@
 const express  = require('express');
 const router   = express.Router();
 
-const { authenticateUser } = require('../middleware/auth.js');
+const { authenticateUser } = require('../../middleware/auth.js');
 const { presetExecutor }   = require('../presets-engine/library/PresetExecutor.js');
 const { presetLearner }    = require('../presets-engine/library/PresetLearner.js');
 const { TaxonomyService }  = require('../audio-engine/search/TaxonomyService.js');
