@@ -1,0 +1,51 @@
+{
+  "breadcrumb": "Projects",
+  "search": "Search projects…",
+  "newProject": "New project",
+  "newProjectShort": "New",
+  "signout": "Sign out",
+  "formatDate": {
+    "justNow": "Just now",
+    "minutesAgo": "{{count}} minute ago",
+    "minutesAgo_other": "{{count}} minutes ago",
+    "hoursAgo": "{{count}} hour ago",
+    "hoursAgo_other": "{{count}} hours ago",
+    "daysAgo": "{{count}} day ago",
+    "daysAgo_other": "{{count}} days ago"
+  },
+  "contextMenu": {
+    "rename": "Rename",
+    "duplicate": "Duplicate",
+    "delete": "Delete"
+  },
+  "newModal": {
+    "eyebrow": "New project",
+    "title": "Name your project",
+    "nameLabel": "Project name",
+    "namePlaceholder": "Untitled project",
+    "cancel": "Cancel",
+    "creating": "Creating…",
+    "create": "Create"
+  },
+  "renameModal": {
+    "title": "Rename project",
+    "cancel": "Cancel",
+    "saving": "Saving…",
+    "save": "Save"
+  },
+  "deleteModal": {
+    "title": "Delete project?",
+    "body": "\"{{name}}\" will be permanently deleted. This cannot be undone.",
+    "cancel": "Cancel",
+    "deleting": "Deleting…",
+    "confirm": "Delete"
+  },
+  "limitModal": {
+    "title": "Project limit reached",
+    "body": "Your <strong>{{plan}}</strong> plan includes up to {{limit}} projects. Upgrade to {{next}} for more.",
+    "creatorProjects": "10 projects",
+    "proProjects": "Unlimited",
+    "maybeLater": "Maybe later",
+    "upgradeTo": "Upgrade to {{plan}}"
+  }
+}

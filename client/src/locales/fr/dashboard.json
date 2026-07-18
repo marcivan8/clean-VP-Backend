@@ -1,0 +1,51 @@
+{
+  "breadcrumb": "Projets",
+  "search": "Rechercher des projets…",
+  "newProject": "Nouveau projet",
+  "newProjectShort": "Nouveau",
+  "signout": "Se déconnecter",
+  "formatDate": {
+    "justNow": "À l'instant",
+    "minutesAgo": "Il y a {{count}} minute",
+    "minutesAgo_other": "Il y a {{count}} minutes",
+    "hoursAgo": "Il y a {{count}} heure",
+    "hoursAgo_other": "Il y a {{count}} heures",
+    "daysAgo": "Il y a {{count}} jour",
+    "daysAgo_other": "Il y a {{count}} jours"
+  },
+  "contextMenu": {
+    "rename": "Renommer",
+    "duplicate": "Dupliquer",
+    "delete": "Supprimer"
+  },
+  "newModal": {
+    "eyebrow": "Nouveau projet",
+    "title": "Nommez votre projet",
+    "nameLabel": "Nom du projet",
+    "namePlaceholder": "Projet sans titre",
+    "cancel": "Annuler",
+    "creating": "Création…",
+    "create": "Créer"
+  },
+  "renameModal": {
+    "title": "Renommer le projet",
+    "cancel": "Annuler",
+    "saving": "Enregistrement…",
+    "save": "Enregistrer"
+  },
+  "deleteModal": {
+    "title": "Supprimer le projet ?",
+    "body": "\"{{name}}\" sera définitivement supprimé. Cette action est irréversible.",
+    "cancel": "Annuler",
+    "deleting": "Suppression…",
+    "confirm": "Supprimer"
+  },
+  "limitModal": {
+    "title": "Limite de projets atteinte",
+    "body": "Votre plan <strong>{{plan}}</strong> inclut jusqu'à {{limit}} projets. Passez à {{next}} pour en avoir plus.",
+    "creatorProjects": "10 projets",
+    "proProjects": "Illimité",
+    "maybeLater": "Peut-être plus tard",
+    "upgradeTo": "Passer à {{plan}}"
+  }
+}
