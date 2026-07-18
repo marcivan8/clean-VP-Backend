@@ -61,12 +61,44 @@
     "body1": "Export directly to TikTok, YouTube, Instagram Reels, and LinkedIn — optimized for each platform's requirements.",
     "body2": "Or download as MP4, and export XML for Premiere Pro or DaVinci Resolve.",
     "formatTag": "MP4 · MOV · XML",
-    "metadataTag": "Optimized metadata included"
+    "metadataTag": "Optimized metadata included",
+    "tools": {
+      "premiere":  { "name": "Premiere Pro",    "fmt": "XML · MOGRT" },
+      "resolve":   { "name": "DaVinci Resolve", "fmt": "DRP · OFX" },
+      "finalcut":  { "name": "Final Cut Pro",   "fmt": "FCPXML · iCloud" },
+      "otio":      { "name": "OpenTimelineIO",  "fmt": "Open standard" }
+    }
   },
   "pricing": {
     "eyebrow": "Simple pricing",
     "headline": "Start free. Scale when you're ready.",
-    "subtitle": "No hidden fees. Cancel anytime."
+    "subtitle": "No hidden fees. Cancel anytime.",
+    "plans": {
+      "free": {
+        "tagline": "Perfect for trying Vibed",
+        "cta": "Start free",
+        "features": ["2 projects", "10 AI operations / month", "720p export", "Standard captions"],
+        "locked":   ["Unlimited projects", "HD export", "Priority processing"]
+      },
+      "creator": {
+        "tagline": "For creators who ship weekly",
+        "cta": "Start Creator",
+        "features": ["Unlimited projects", "100 AI operations / month", "1080p export", "Custom caption styles", "Priority processing"],
+        "locked":   ["4K export"]
+      },
+      "pro": {
+        "tagline": "For studios and power users",
+        "cta": "Start Pro",
+        "features": ["Unlimited projects", "Unlimited AI operations", "4K export", "Custom caption styles", "Priority processing", "Early access to new features"],
+        "locked":   []
+      }
+    }
+  },
+  "socialProof": {
+    "quotes": [
+      { "text": "Vibed cut my editing time from 4 hours to 20 minutes. I can finally post consistently.", "author": "Alex R.", "role": "YouTube creator, 180k subscribers" },
+      { "text": "The silence removal alone saves me an hour per episode. Then I add captions in one click.", "author": "Maria T.", "role": "Podcast host" }
+    ]
   },
   "roi": {
     "boldPart": "Save 3+ hours",

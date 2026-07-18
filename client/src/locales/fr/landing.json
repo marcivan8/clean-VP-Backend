@@ -61,12 +61,44 @@
     "body1": "Exportez directement vers TikTok, YouTube, Instagram Reels et LinkedIn — optimisé pour les exigences de chaque plateforme.",
     "body2": "Ou téléchargez en MP4, et exportez en XML pour Premiere Pro ou DaVinci Resolve.",
     "formatTag": "MP4 · MOV · XML",
-    "metadataTag": "Métadonnées optimisées incluses"
+    "metadataTag": "Métadonnées optimisées incluses",
+    "tools": {
+      "premiere":  { "name": "Premiere Pro",    "fmt": "XML · MOGRT" },
+      "resolve":   { "name": "DaVinci Resolve", "fmt": "DRP · OFX" },
+      "finalcut":  { "name": "Final Cut Pro",   "fmt": "FCPXML · iCloud" },
+      "otio":      { "name": "OpenTimelineIO",  "fmt": "Standard ouvert" }
+    }
   },
   "pricing": {
     "eyebrow": "Tarification simple",
     "headline": "Commencez gratuitement. Évoluez quand vous êtes prêt.",
-    "subtitle": "Aucun frais caché. Annulez à tout moment."
+    "subtitle": "Aucun frais caché. Annulez à tout moment.",
+    "plans": {
+      "free": {
+        "tagline": "Parfait pour essayer Vibed",
+        "cta": "Commencer gratuitement",
+        "features": ["2 projets", "10 opérations IA / mois", "Export 720p", "Sous-titres standard"],
+        "locked":   ["Projets illimités", "Export HD", "Traitement prioritaire"]
+      },
+      "creator": {
+        "tagline": "Pour les créateurs qui publient chaque semaine",
+        "cta": "Démarrer Creator",
+        "features": ["Projets illimités", "100 opérations IA / mois", "Export 1080p", "Styles de sous-titres personnalisés", "Traitement prioritaire"],
+        "locked":   ["Export 4K"]
+      },
+      "pro": {
+        "tagline": "Pour les studios et utilisateurs avancés",
+        "cta": "Démarrer Pro",
+        "features": ["Projets illimités", "Opérations IA illimitées", "Export 4K", "Styles de sous-titres personnalisés", "Traitement prioritaire", "Accès anticipé aux nouvelles fonctionnalités"],
+        "locked":   []
+      }
+    }
+  },
+  "socialProof": {
+    "quotes": [
+      { "text": "Vibed a réduit mon temps de montage de 4 heures à 20 minutes. Je peux enfin publier régulièrement.", "author": "Alex R.", "role": "Créateur YouTube, 180k abonnés" },
+      { "text": "La suppression des silences seule me fait gagner une heure par épisode. Puis j'ajoute les sous-titres en un clic.", "author": "Maria T.", "role": "Animatrice de podcast" }
+    ]
   },
   "roi": {
     "boldPart": "Économisez 3h+",

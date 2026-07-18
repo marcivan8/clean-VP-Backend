@@ -210,7 +210,8 @@ const ProblemSection = () => {
     const { t } = useTranslation('landing');
     const [ref, visible] = useReveal();
 
-    const pains = t('problem.pains', { returnObjects: true });
+    const _rawPains = t('problem.pains', { returnObjects: true });
+    const pains = Array.isArray(_rawPains) ? _rawPains : [];
 
     return (
         <section style={{
@@ -833,7 +834,8 @@ const Pricing = () => {
 
 const SocialProof = () => {
     const { t } = useTranslation('landing');
-    const quotes = t('socialProof.quotes', { returnObjects: true }) || [];
+    const _rawQuotes = t('socialProof.quotes', { returnObjects: true });
+    const quotes = Array.isArray(_rawQuotes) ? _rawQuotes : [];
 
     return (
         <section style={{ padding: "80px 0", background: "var(--bg-2)" }}>
