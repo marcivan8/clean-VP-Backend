@@ -477,6 +477,15 @@ module.exports = async function processExportJob(job) {
 
     // ── STEP 1: Trim each clip into a segment ──────────────────────────────
     const segments = [];
+    // Caption timing: track the output-video start time for every successful
+    // segment so that STEP 4 can map Vibed-timeline positions → output times.
+    // The output video concatenates clips back-to-back (no gaps), so a caption
+    // at Vibed t=30 could appear at output t=12 if there were 18 seconds of
+    // gaps or deliberate empty space before that point in the Vibed timeline.
+    const segOutputStarts = []; // output video start time (s) for each segment
+    const segClips        = []; // allClips entry that produced each segment
+    let   cumulativeOut   = 0;  // running total output duration (s)
+
     for (let i = 0; i < allClips.length; i++) {
         const clip    = allClips[i];
         const ext     = path.extname(clip.name || '.mp4') || '.mp4';
@@ -552,7 +561,14 @@ module.exports = async function processExportJob(job) {
                 .addOutputOption('-shortest')
                 .audioBitrate(audioBitrate)
                 .output(segPath)
-                .on('end', () => { segments.push(segPath); resolve(); })
+                .on('end', () => {
+                    segments.push(segPath);
+                    // Record this clip's output start time BEFORE incrementing.
+                    segOutputStarts.push(cumulativeOut);
+                    segClips.push(clip);
+                    cumulativeOut += dur / speed;
+                    resolve();
+                })
                 .on('error', (err, _stdout, stderr) => {
                     console.error(`[ExportJob] ffmpeg failed clip ${i + 1}: ${err.message}`);
                     if (stderr) console.error(stderr.slice(-1000));
@@ -652,6 +668,8 @@ module.exports = async function processExportJob(job) {
     await job.updateProgress(82);
 
     // ── STEP 4: Text overlays ──────────────────────────────────────────────
+    // captionError is set if the burn-in step fails; surfaced in job result.
+    let captionError = null;
     const textTracks = timeline.tracks.filter(t => t.type === 'text' && t.clips?.length > 0);
 
     if (textTracks.length > 0) {
@@ -707,6 +725,26 @@ module.exports = async function processExportJob(job) {
         if (!fallbackFontPath) {
             console.warn('  ⚠️  No usable font found for caption export — skipping text overlay');
         } else {
+            // ── Vibed-timeline → output-video time mapping ─────────────────
+            // The exported video has all clips concatenated with no gaps.
+            // segClips[i] is the source clip and segOutputStarts[i] is where it
+            // starts in the output video.  Captions carry Vibed timeline times,
+            // which must be converted to output times before writing the enable expr.
+            const vibedToOutputTime = (vibedTime) => {
+                for (let si = 0; si < segClips.length; si++) {
+                    const sc = segClips[si];
+                    const clipEnd = sc.start + sc.duration;
+                    if (vibedTime >= sc.start && vibedTime < clipEnd) {
+                        // Linear interpolation within the clip, corrected for speed.
+                        return segOutputStarts[si] + (vibedTime - sc.start) / (sc.speed || 1.0);
+                    }
+                }
+                // Before the first clip → clamp to output t=0
+                if (segClips.length === 0 || vibedTime <= segClips[0].start) return 0;
+                // Past the last clip → clamp to total output duration
+                return cumulativeOut;
+            };
+
             // ── Build drawtext filter chain ────────────────────────────────
             // IMPORTANT: Use textfile= (not text=) so ffmpeg reads text from a file.
             // This completely avoids ffmpeg filter-string escaping issues — apostrophes,
@@ -716,13 +754,14 @@ module.exports = async function processExportJob(job) {
 
             for (const track of textTracks) {
                 for (const clip of track.clips) {
-                    const rawText  = clip.content || clip.name || '';
-                    const startSec = typeof clip.start    === 'number' ? clip.start    : 0;
-                    const endSec   = typeof clip.duration === 'number'
-                        ? startSec + clip.duration
-                        : startSec + 3;
+                    const rawText    = clip.content || clip.name || '';
+                    // Convert Vibed timeline positions to output video positions.
+                    const vibedStart = typeof clip.start    === 'number' ? clip.start    : 0;
+                    const vibedDur   = typeof clip.duration === 'number' ? clip.duration : 3;
+                    const startSec   = Math.max(0, vibedToOutputTime(vibedStart));
+                    const endSec     = vibedToOutputTime(vibedStart + vibedDur);
 
-                    if (endSec <= startSec) continue; // skip zero/negative duration
+                    if (endSec <= startSec) continue; // skip zero/negative duration or out-of-range
 
                     // Write the caption text to a temp file — no escaping needed
                     const textFilePath = path.join(tmpDir, `cap-${filterIdx}.txt`);
@@ -784,6 +823,7 @@ module.exports = async function processExportJob(job) {
                     '-map', '0:v',
                     '-map', '0:a?',
                     '-c:v', codec,
+                    '-b:v', videoBitrate,  // preserve quality on caption re-encode
                     '-profile:v', profile,
                     '-pix_fmt', 'yuv420p',
                     '-c:a', 'copy',
@@ -809,11 +849,11 @@ module.exports = async function processExportJob(job) {
                     finalVideoPath = textOverlayPath;
                     console.log('  ✅ Text overlays applied');
                 } catch (textErr) {
-                    // Log the full error — this used to silently skip captions.
-                    // Now the error is visible in worker logs to aid debugging.
-                    console.error(`  ❌ Text overlay failed — captions will be missing:\n${textErr.message}`);
-                    // Swallow: we still deliver the video without captions rather than
-                    // failing the whole export job over a text-rendering issue.
+                    captionError = textErr.message.slice(0, 800);
+                    console.error(`  ❌ Text overlay failed — captions missing:\n${textErr.message}`);
+                    // Deliver the video without captions rather than failing the
+                    // whole job.  The error is surfaced in the job result so the
+                    // client can show a toast ("Video exported, but captions failed").
                 }
             }
         }
@@ -863,6 +903,8 @@ module.exports = async function processExportJob(job) {
         success: true,
         url: resultUrl,
         filename,
+        // Populated when the caption burn-in step failed (video still exported).
+        captionWarning: captionError || undefined,
         metadata: {
             duration:   `${duration}s render time`,
             sizeMB:     parseFloat(sizeMB) || 0,
