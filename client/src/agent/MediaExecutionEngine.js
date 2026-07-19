@@ -1313,6 +1313,24 @@ export class MediaExecutionEngine {
             }
         }
 
+        // Guard: if $uploaded_file couldn't resolve to a real GCS path, the
+        // server can't locate the file. Surface a clear error now rather than
+        // sending a request that will fail with a cryptic 400/502.
+        if (endpoint === '/api/audio/filler/detect' || endpoint === '/api/silence/detect') {
+            const resolvedFilename = resolvedPayload.filename || '';
+            const looksUnresolved = resolvedFilename === 'video.mp4' ||
+                (!resolvedFilename.startsWith('raw/') && !resolvedFilename.startsWith('temp/') && resolvedFilename !== '');
+            if (looksUnresolved) {
+                console.warn(`[MediaExecutionEngine] ⚠️  ${endpoint}: filename "${resolvedFilename}" looks unresolved — aborting to avoid server 400`);
+                return {
+                    engine: 'api',
+                    success: false,
+                    endpoint,
+                    error: `Can't find the source video on the server. Try re-uploading the file — or run "Generate captions" first, which stores the video path needed for filler and silence removal.`,
+                };
+            }
+        }
+
         // If we already have a Whisper transcript for this file, derive caption
         // timestamps directly from the current timeline clip positions instead of
         // calling Whisper again. This handles both fresh sessions (single clip,
@@ -1697,7 +1715,35 @@ export class MediaExecutionEngine {
                     baseClip  = baseClips[0];
                 }
             } else {
-                baseClips = [baseClip];
+                // Filename match found — but expand to ALL clips sharing the same
+                // assetId, not just the first one.
+                //
+                // When virtual_multicam ran before this pass it split the original
+                // single clip into N angle-tagged sub-clips (each with the same
+                // assetId). sortedByStart.find() returns only the first of those N
+                // clips. If baseClips = [baseClip], srcVirtualCamRanges covers only
+                // that first clip's source range, and every silence-removed segment
+                // outside that range falls back to the same zoom level — wiping every
+                // other virtual-multicam angle.
+                //
+                // Expanding here gives the full VM range map so each new clip
+                // inherits the correct angle from the right diarization segment.
+                const foundAssetId = baseClip.assetId;
+                if (foundAssetId) {
+                    baseClips = videoTrack.clips
+                        .filter(c => c.assetId === foundAssetId)
+                        .sort((a, b) => a.start - b.start);
+                    baseClip = baseClips[0]; // re-anchor to sorted first
+                    if (baseClips.length > 1) {
+                        console.log(
+                            `[MediaExecutionEngine] _applySegmentsToTimeline: expanded baseClips ` +
+                            `from 1 to ${baseClips.length} clips (same assetId "${foundAssetId}") ` +
+                            `— preserves per-clip virtualCam angles through silence removal`
+                        );
+                    }
+                } else {
+                    baseClips = [baseClip];
+                }
             }
         }
 

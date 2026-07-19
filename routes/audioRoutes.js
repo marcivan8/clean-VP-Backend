@@ -301,6 +301,22 @@ router.post('/filler/detect', ...authAndGate, async (req, res) => {
 
         const uploadsDir = path.resolve(__dirname, '../uploads');
         const normalizedFilename = (filename || '').replace(/\\/g, '/').replace(/^\/|\.\.\/|\.\.$/g, '');
+
+        // Reject unresolved fallback filenames. If the client couldn't find the
+        // real GCS path for a loaded project the agent falls back to 'video.mp4',
+        // which will never exist on GCS — reject it here with a clear message so
+        // the user gets actionable feedback instead of a silent job failure.
+        const looksLikeRealPath = normalizedFilename.startsWith('raw/') ||
+            normalizedFilename.startsWith('temp/') ||
+            (filePath && path.resolve(filePath).startsWith(path.resolve(__dirname, '../uploads')));
+        if (!looksLikeRealPath && storageConfig.bucket && !storageConfig.useLocalStorage) {
+            // Bare filename that isn't a GCS path — we know the worker can't find it.
+            console.warn(`[audioRoutes] filler/detect: filename "${normalizedFilename}" is not a GCS path — rejecting before enqueueing`);
+            return res.status(400).json({
+                error: `Could not locate the source video. Please re-upload the file or run "Generate captions" first so the server knows where your video is stored.`,
+            });
+        }
+
         let inputPath = filePath
             ? path.resolve(filePath)
             : path.resolve(uploadsDir, normalizedFilename);
