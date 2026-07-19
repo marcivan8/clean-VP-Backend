@@ -117,8 +117,10 @@ class EditorialBrain {
             : 'none';
 
         const transcriptSnippet = ctx.transcriptPreview
-            ? `"${ctx.transcriptPreview.slice(0, 300)}…"`
+            ? ctx.transcriptPreview          // already trimmed to 500 chars; includes speaker labels if multi-speaker
             : '(no captions/transcript yet)';
+
+        const inferredContentType = ctx.inferredContentType || 'unknown';
 
         const hiddenNote = permanentlyHidden.length > 0
             ? `NEVER suggest these — user permanently dismissed them: ${permanentlyHidden.join(', ')}`
@@ -164,11 +166,24 @@ PLATFORM RULES (${platform})
 ${_platformRulesText(platformKey)}
 
 ═══════════════════════════════════════════════
-TRANSCRIPT CONTEXT
+CONTENT FORMAT (derived from transcript + media)
 ═══════════════════════════════════════════════
-Speaking pace:  ${ctx.speakingPace ? ctx.speakingPace + ' wpm' : 'unknown'}
-Speakers:       ${ctx.detectedSpeakers || 0}
-Transcript preview: ${transcriptSnippet}
+Detected format: ${inferredContentType.toUpperCase()}
+Speakers:        ${ctx.detectedSpeakers || 0}
+Speaking pace:   ${ctx.speakingPace ? ctx.speakingPace + ' wpm' : 'unknown'}
+
+IMPORTANT — use the detected format to drive your assessment and suggestions:
+  • interview (2+ speakers): acknowledge it's a conversation/Q&A/podcast. Suggest
+    cutting to best exchanges, trimming dead air between turns, adding reaction shots
+    if B-roll is available, extracting the sharpest Q&A moments for Shorts/Reels,
+    and pacing cuts to match speaking rhythm between speakers.
+  • monologue (1 speaker): focus on silence removal, filler words, zoom rhythm to
+    keep attention, and energy pacing — treat it as a talking-head or tutorial.
+  • unknown (no transcript yet): acknowledge the format is unclear and ask the user
+    to generate captions first so you can give a proper assessment.
+
+Transcript preview (speaker-labelled if multiple speakers):
+${transcriptSnippet}
 
 ═══════════════════════════════════════════════
 MEDIA BIN
@@ -251,7 +266,13 @@ PERSONA RULES
 - Warnings should only surface issues that affect the final output
 - ASSET ENGINE: If hasColorGrade=false and completionScore>60, include recommend_luts in suggestions
 - ASSET ENGINE: If hasSFX=false and cutRate>4, include search_sfx "impact" in suggestions
-- ASSET ENGINE: Never invent a lutId — only suggest apply_lut if you received a specific id from a prior search_luts result`;
+- ASSET ENGINE: Never invent a lutId — only suggest apply_lut if you received a specific id from a prior search_luts result
+
+CONTENT FORMAT RULES (critical — do not override with generic assessment):
+- NEVER describe an interview/2-speaker video as a "talking head" or "vlog"
+- When detected format is "interview": your response.message MUST acknowledge it's a conversation between ${ctx.detectedSpeakers || 'multiple'} people, and your suggestions MUST be interview-appropriate (extract highlights, clean dialogue pacing, Shorts-ready Q&A clips)
+- When detected format is "monologue": your response.message may classify as talking head, tutorial, or vlog based on content and duration
+- The transcript preview is speaker-labelled — use it to understand who is speaking and what the conversation is about before writing your assessment`;
     }
 
     /**

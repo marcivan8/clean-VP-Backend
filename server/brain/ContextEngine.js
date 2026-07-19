@@ -91,10 +91,11 @@ class ContextEngine {
             editsDone:      editHistory,
 
             // Captions
-            transcriptPreview:  captionContext.transcriptPreview,
-            speakingPace:       captionContext.speakingPace,
-            topicSentences:     captionContext.topicSentences,
-            detectedSpeakers:   captionContext.detectedSpeakers,
+            transcriptPreview:    captionContext.transcriptPreview,
+            speakingPace:         captionContext.speakingPace,
+            topicSentences:       captionContext.topicSentences,
+            detectedSpeakers:     captionContext.detectedSpeakers,
+            inferredContentType:  captionContext.inferredContentType,
 
             // Media bin
             totalAssets:    binContext.totalAssets,
@@ -151,16 +152,59 @@ class ContextEngine {
                 speakingPace: null,
                 topicSentences: [],
                 detectedSpeakers: 0,
+                inferredContentType: 'unknown',
             };
         }
 
         // Build full transcript text
         const allText = captions
-            .map(c => c.text || c.content || '')
+            .map(c => c.text || c.word || c.content || '')
             .join(' ')
             .trim();
 
-        const transcriptPreview = allText.slice(0, 400);
+        // Unique speakers — check all common diarization field names
+        // (Assembly.AI uses `speaker` at both utterance and word level)
+        const speakers = new Set(
+            captions
+                .map(c => c.speaker || c.speakerId || c.speaker_id || c.speakerLabel || c.speaker_label)
+                .filter(Boolean)
+        );
+        const speakerCount = speakers.size;
+
+        // Build transcript preview. For multi-speaker content, format as labelled
+        // dialogue so the LLM can see who said what and recognise interview/conversation
+        // structure — raw concatenated text loses all conversational context.
+        let transcriptPreview;
+        if (speakerCount >= 2) {
+            const lines = [];
+            let lastSpeaker = null;
+            let buffer = [];
+
+            for (const c of captions) {
+                const spk = c.speaker || c.speakerId || c.speaker_id || c.speakerLabel || c.speaker_label;
+                const text = (c.text || c.word || c.content || '').trim();
+                if (!text) continue;
+
+                if (spk !== lastSpeaker) {
+                    if (buffer.length > 0) {
+                        lines.push(`${lastSpeaker || 'Speaker'}: ${buffer.join(' ')}`);
+                    }
+                    lastSpeaker = spk;
+                    buffer = [text];
+                } else {
+                    buffer.push(text);
+                }
+
+                // Stop once we have enough preview text
+                if (lines.join('\n').length > 450) break;
+            }
+            if (buffer.length > 0) {
+                lines.push(`${lastSpeaker || 'Speaker'}: ${buffer.join(' ')}`);
+            }
+            transcriptPreview = lines.join('\n').slice(0, 550);
+        } else {
+            transcriptPreview = allText.slice(0, 400);
+        }
 
         // Speaking pace: words per minute
         const wordCount = allText.split(/\s+/).filter(Boolean).length;
@@ -173,22 +217,27 @@ class ContextEngine {
         // Top 5 sentences with high confidence
         const sentences = captions
             .filter(c => (c.confidence || 1) >= 0.7)
-            .map(c => c.text || c.content || '')
-            .filter(t => t.split(' ').length >= 5)   // skip tiny fragments
+            .map(c => c.text || c.word || c.content || '')
+            .filter(t => t.split(' ').length >= 5)
             .slice(0, 5);
 
-        // Unique speakers (from diarization)
-        const speakers = new Set(
-            captions
-                .map(c => c.speaker || c.speakerId)
-                .filter(Boolean)
-        );
+        // Infer content format from speaker count so the brain can give
+        // format-appropriate suggestions without guessing from duration alone.
+        let inferredContentType;
+        if (speakerCount >= 2) {
+            inferredContentType = 'interview'; // conversation / Q&A / podcast
+        } else if (speakerCount === 1 || wordCount > 0) {
+            inferredContentType = 'monologue'; // solo talking head / tutorial / vlog
+        } else {
+            inferredContentType = 'unknown';
+        }
 
         return {
             transcriptPreview,
             speakingPace,
             topicSentences: sentences,
-            detectedSpeakers: speakers.size,
+            detectedSpeakers: speakerCount,
+            inferredContentType,
         };
     }
 
