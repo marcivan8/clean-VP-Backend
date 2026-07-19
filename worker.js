@@ -27,7 +27,14 @@ videoWorker.on('failed', (job, err) => {
 // 2. Audio Processing Worker (transcribe, denoise, normalize, beat-detect, silence-detect)
 const audioWorker = new Worker('audio-processing', processAudioJob, {
     connection,
-    concurrency: 2,
+    // Keep at 1: each filler-detect job downloads a raw MP4 from GCS, runs
+    // FFmpeg audio extraction, then calls OpenAI Whisper. Two concurrent jobs
+    // on a Railway 512 MB instance reliably causes OOM → 502 on all in-flight
+    // HTTP requests. Running serially keeps memory predictable.
+    concurrency: 1,
+    // 5-minute lock so BullMQ doesn't consider a still-running Whisper call
+    // stalled and retry it (which would double memory usage and cause a crash).
+    lockDuration: 5 * 60 * 1000,
 });
 
 audioWorker.on('completed', job => {
