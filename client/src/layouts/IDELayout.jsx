@@ -1248,24 +1248,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             {isExporting ? <span className="animate-spin">⏳</span> : <Share className="w-3 h-3" />}
                             {isExporting ? "Rendering..." : "Export"}
                         </button>
-                        {exportUrl && (
-                            <a
-                                href={exportUrl}
-                                download
-                                onClick={() => setExportUrl(null)}
-                                className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[10px] font-semibold transition-all"
-                                style={{
-                                    background: 'color-mix(in oklch, var(--accent) 15%, transparent)',
-                                    border: '0.5px solid color-mix(in oklch, var(--accent) 35%, transparent)',
-                                    color: 'var(--accent)',
-                                    textDecoration: 'none',
-                                }}
-                                onMouseEnter={e => { e.currentTarget.style.background = 'color-mix(in oklch, var(--accent) 25%, transparent)'; }}
-                                onMouseLeave={e => { e.currentTarget.style.background = 'color-mix(in oklch, var(--accent) 15%, transparent)'; }}
-                            >
-                                ↓ Download
-                            </a>
-                        )}
                     </div>
                 </header>
 

@@ -258,7 +258,12 @@ const Clip = ({ clip, trackId }) => {
                 setDroppableRef(node);
             }}
             data-clip-id={clip.id}
-            style={style}
+            style={{
+                ...style,
+                // Two-tone gradient over the Tailwind bg color:
+                // lighter top (label area) → darker bottom (waveform area) for contrast
+                backgroundImage: 'linear-gradient(to bottom, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.04) 55%, rgba(0,0,0,0.28) 100%)',
+            }}
             {...listeners}
             {...attributes}
             className={classNames(
