@@ -1,4 +1,5 @@
 const OpenAI = require('openai');
+const { analyzeStructure } = require('../viralEngine/structure.js');
 
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -1492,12 +1493,14 @@ const analyzeContentHandler = async (req, res) => {
         // ── Step 2: Ask GPT-4 to semantically cluster segments ─────────────
         let gptAnalysis = null;
 
+        // Cap at 150 segments — 1000 segments can exceed 50k tokens and blow
+        // past Railway's 30s proxy timeout. 150 segments covers ~25 min of video
+        // at word-level granularity, which is enough for accurate structural analysis.
         if (openai && transcript.segments && transcript.segments.length > 0) {
             gptAnalysis = await _gptAnalyzeSegments(transcript, duration, contentType, platform, targetDuration);
         }
 
         // ── Step 3: Build structural output ───────────────────────────────
-        const { analyzeStructure } = require('../viralEngine/structure.js');
         const structureAnalysis = analyzeStructure({
             duration,
             transcript: transcript.text,
@@ -1565,8 +1568,9 @@ function _inferPlatformFromMode(editMode, duration) {
 }
 
 async function _gptAnalyzeSegments(transcript, duration, contentType, platform, targetDuration) {
-    // Pass full segment list (up to 1000 chunks) to fully utilize the 128k context window of GPT-4o
-    const whisperSegs = (transcript.segments || []).slice(0, 1000).map(s => ({
+    // Cap at 150 segments (~25 min at word granularity). Sending all 1000 segments
+    // produces payloads that take >30s to process, triggering Railway's proxy timeout (502).
+    const whisperSegs = (transcript.segments || []).slice(0, 150).map(s => ({
         id: s.id,
         start: parseFloat(s.start.toFixed(1)),
         end: parseFloat(s.end.toFixed(1)),

@@ -1,7 +1,21 @@
 /** @jsxImportSource @revideo/2d/lib */
-import { makeProject } from '@revideo/core';
+import { makeProject, DependencyContext } from '@revideo/core';
 import { makeScene2D, Video, Audio, Img, Txt, Node, brightness, contrast, saturate, hue } from '@revideo/2d';
 import { waitFor, useScene, all, any, createRef } from '@revideo/core';
+
+/**
+ * PATCH: DependencyContext.collectPromise uses Promise.all in consumePromises(),
+ * which fails on ANY rejection. video.play() can legitimately reject (autoplay
+ * policy, pause-during-play race) and permanently stop the render loop.
+ * Wrapping every collected promise in .catch(→null) makes consumePromises safe.
+ */
+;(function patchDependencyContext() {
+    const orig = DependencyContext.collectPromise.bind(DependencyContext);
+    (DependencyContext as any).collectPromise = function(promise: Promise<any>, initialValue: any = null) {
+        const safe = Promise.resolve(promise).catch(() => null);
+        return orig(safe, initialValue);
+    };
+})();
 
 /**
  * Evaluate a keyframe array at a given local clip time.
