@@ -920,6 +920,22 @@ export class VideoEditorTools {
             };
         }
 
+        // Safety guard: refuse to remove all clips or more than 50% of the timeline.
+        // This prevents ambiguous commands like "clean up" from wiping the whole edit.
+        if (removeIds.size >= clips.length) {
+            return {
+                success: false,
+                message: `⚠️ Smart cleanup would remove all ${clips.length} clips — this is likely not what you intended. Please be more specific: for example, "remove the false starts" or "cut the repeated sections".`,
+            };
+        }
+
+        if (removeIds.size > Math.floor(clips.length * 0.5)) {
+            return {
+                success: false,
+                message: `⚠️ Smart cleanup wants to remove ${removeIds.size} of ${clips.length} clips (more than half). Please be more specific about what to clean up, for example: "remove the silences" or "cut the repeated sentences".`,
+            };
+        }
+
         // Remove identified clips
         const freshStore = useTimelineStore.getState();
         const freshTrack = freshStore.tracks?.find(t => t.id === videoTrack.id);

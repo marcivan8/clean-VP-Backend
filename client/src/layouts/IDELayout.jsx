@@ -1248,9 +1248,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             {isExporting ? <span className="animate-spin">⏳</span> : <Share className="w-3 h-3" />}
                             {isExporting ? "Rendering..." : "Export"}
                         </button>
-                        {exportUrl && (
-                            <a href={exportUrl} download className="hidden md:block text-[10px] text-green-400 hover:text-green-300 underline" onClick={() => setExportUrl(null)}>Download</a>
-                        )}
                     </div>
                 </header>
 

@@ -104,10 +104,15 @@ class ProxyService {
         // (e.g. transcription) without waiting for proxy encoding to finish.
         try { onUploadComplete?.(destPath); } catch (_) {}
 
-        // 3. Notify backend to process the file
+        // 3. Notify backend to process the file.
+        // Re-build auth headers here — the GCS upload can take minutes for large
+        // files, and the Supabase token may have been refreshed since step 1.
+        // Using the stale token would cause optionalAuth to see req.user = null,
+        // making resolveUserId return null/'dev-user' and failing the destPath check.
+        const processHeaders = await buildHeaders({ 'Content-Type': 'application/json' });
         const processResponse = await fetch(`${API_URL}/api/proxy/process-direct`, {
             method: 'POST',
-            headers,
+            headers: processHeaders,
             body: JSON.stringify({ destPath, originalFilename: file.name })
         });
 

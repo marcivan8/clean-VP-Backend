@@ -998,6 +998,22 @@ const ReasoningPanel = () => {
                         </p>
                     </div>
                 )}
+
+                {/* Editorial Brain — rendered inside the scroll container so it
+                    flows naturally as part of the conversation, not as a fixed
+                    section below the input. */}
+                <BrainPanel
+                    brainOutput={brainLastResponse}
+                    isProcessing={brainIsProcessing}
+                    onSendCommand={(text) => {
+                        if (inputRef.current) {
+                            inputRef.current.value = text;
+                            inputRef.current.focus();
+                        }
+                        brainSendCommand(text);
+                    }}
+                    onSendFeedback={brainSendFeedback}
+                />
             </div>
 
             {/* Persistent Edit Captions chip — visible whenever captions exist */}
@@ -1044,19 +1060,6 @@ const ReasoningPanel = () => {
                 </div>
             </div>
 
-            {/* Editorial Brain suggestions — rendered below the command input */}
-            <BrainPanel
-                brainOutput={brainLastResponse}
-                isProcessing={brainIsProcessing}
-                onSendCommand={(text) => {
-                    if (inputRef.current) {
-                        inputRef.current.value = text;
-                        inputRef.current.focus();
-                    }
-                    brainSendCommand(text);
-                }}
-                onSendFeedback={brainSendFeedback}
-            />
         </aside>
     );
 };
