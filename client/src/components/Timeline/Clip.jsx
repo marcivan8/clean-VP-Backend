@@ -90,15 +90,19 @@ const Clip = ({ clip, trackId }) => {
     }, [resolvedWaveformUrl, !!waveformData]);
 
     // WaveSurfer peaks — fetched from server (independent of canvas waveform above)
+    // Pass wsAudioUrl as the proxyUrl fallback so that clips whose asset isn't
+    // fully hydrated (no asset.proxyUrl) still trigger peak extraction via their
+    // clip-level URL (sourceUrl / url).  Without this fallback, usePeaks returns
+    // early (no gcsPath and no proxyUrl) and the waveform never appears.
+    const wsAudioUrl = asset?.proxyUrl || clip.url || clip.sourceUrl || null;
     const { peaks: wsPeaks, duration: wsDuration, loading: wsLoading } = usePeaks(
         isTextClip ? null : clip.assetId,
         asset?.gcsPath,
-        asset?.proxyUrl,
+        asset?.proxyUrl || wsAudioUrl,   // fallback to clip URL when asset not hydrated
     );
     const wsColor = clip.type === 'audio'
         ? 'rgba(251,146,60,0.6)'
         : 'rgba(52,211,153,0.6)';
-    const wsAudioUrl = asset?.proxyUrl || clip.url || clip.sourceUrl || null;
 
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: clip.id,

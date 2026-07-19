@@ -215,8 +215,8 @@ RESPONSE FORMAT — return ONLY valid JSON matching this exact schema:
     "message": "conversational response to user — direct and expert, no filler phrases",
     "suggestions": [
       {
-        "type": "suggestion_type_key",
-        "text": "short label for chip (3-5 words)",
+        "type": "remove_silences",
+        "text": "Remove silences",
         "command": "exact vibed command string",
         "reason": "why this matters for their content",
         "priority": "critical|high|medium|low"
@@ -224,8 +224,8 @@ RESPONSE FORMAT — return ONLY valid JSON matching this exact schema:
     ],
     "warnings": [
       {
-        "type": "warning_type_key",
-        "text": "warning message",
+        "type": "no_audio",
+        "text": "warning message shown to user",
         "severity": "critical|warning|info"
       }
     ],

@@ -42,7 +42,13 @@ const SuggestionChip = ({ suggestion, onAccept, onDismiss }) => {
 
     const priority = getPriority(suggestion);
     const colors   = PRIORITY_COLORS[priority] || PRIORITY_COLORS.low;
-    const label    = suggestion?.label || suggestion?.type || 'Suggestion';
+    // Schema: suggestion.text = human-readable chip label (3-5 words)
+    //         suggestion.type = snake_case machine key (e.g. 'remove_silences')
+    // GPT sometimes echoes 'suggestion_type_key' literally from the schema
+    // example — filter that out and fall back through .text → .label → .type.
+    const rawType  = suggestion?.type;
+    const safeType = (rawType && rawType !== 'suggestion_type_key') ? rawType.replace(/_/g, ' ') : null;
+    const label    = suggestion?.text || suggestion?.label || safeType || 'Suggestion';
     const reason   = suggestion?.reason || suggestion?.description || null;
 
     const handleAccept = () => {
