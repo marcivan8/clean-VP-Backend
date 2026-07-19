@@ -315,6 +315,9 @@ router.get('/gcs-media/*', async (req, res) => {
         res.setHeader('Content-Type', contentType);
         res.setHeader('Cache-Control', 'public, max-age=31536000');
         res.setHeader('Access-Control-Allow-Origin', '*');
+        // Always advertise range support — required for video seeking in browsers
+        // and to prevent HTTP/2 ERR_HTTP2_PROTOCOL_ERROR when the browser retries.
+        res.setHeader('Accept-Ranges', 'bytes');
 
         // ── Cache hit ──────────────────────────────────────────────────────
         if (cachedBuf) {
@@ -325,7 +328,6 @@ router.get('/gcs-media/*', async (req, res) => {
                 const end = endStr ? parseInt(endStr) : fileSize - 1;
                 res.status(206);
                 res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
-                res.setHeader('Accept-Ranges', 'bytes');
                 res.setHeader('Content-Length', end - start + 1);
                 return res.end(cachedBuf.slice(start, end + 1));
             }
@@ -338,17 +340,27 @@ router.get('/gcs-media/*', async (req, res) => {
         const [exists] = await file.exists();
         if (!exists) return res.status(404).end();
 
+        // Fetch metadata once — needed for Content-Length (full response) and
+        // Content-Range (range response). Always required for video seeking.
+        const [metadata] = await file.getMetadata();
+        const fileSize = parseInt(metadata.size);
+
         if (req.headers.range) {
-            const [metadata] = await file.getMetadata();
-            const fileSize = parseInt(metadata.size);
             const [startStr, endStr] = req.headers.range.replace(/bytes=/, '').split('-');
             const start = parseInt(startStr);
             const end = endStr ? parseInt(endStr) : fileSize - 1;
+            const chunkLen = end - start + 1;
             res.status(206);
             res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
-            res.setHeader('Accept-Ranges', 'bytes');
-            res.setHeader('Content-Length', end - start + 1);
-            return file.createReadStream({ start, end }).pipe(res);
+            res.setHeader('Content-Length', chunkLen);
+            const stream = file.createReadStream({ start, end });
+            stream.on('error', (err) => {
+                console.error('[proxy/gcs-media] Range stream error', gcsPath, ':', err.message);
+                if (!res.headersSent) res.status(500).end();
+            });
+            // Destroy GCS stream if client disconnects to avoid hanging connections
+            res.on('close', () => stream.destroy());
+            return stream.pipe(res);
         }
 
         if (CACHEABLE_EXTS.has(ext)) {
@@ -367,8 +379,17 @@ router.get('/gcs-media/*', async (req, res) => {
                 if (!res.headersSent) res.status(500).end();
             });
         } else {
-            // Large video files (mp4/mov/webm) — stream directly, never buffer
-            file.createReadStream().pipe(res);
+            // Large video files (mp4/mov/webm) — stream directly with Content-Length.
+            // Without Content-Length Railway's HTTP/2 proxy returns ERR_HTTP2_PROTOCOL_ERROR
+            // because it can't frame the response correctly over a multiplexed connection.
+            res.setHeader('Content-Length', fileSize);
+            const stream = file.createReadStream();
+            stream.on('error', (err) => {
+                console.error('[proxy/gcs-media] Video stream error', gcsPath, ':', err.message);
+                if (!res.headersSent) res.status(500).end();
+            });
+            res.on('close', () => stream.destroy());
+            stream.pipe(res);
         }
     } catch (err) {
         console.error('[proxy/gcs-media] Error streaming', gcsPath, ':', err.message);
