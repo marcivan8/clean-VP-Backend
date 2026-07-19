@@ -858,9 +858,8 @@ const ReasoningPanel = () => {
             {/* Header */}
             <div className="p-3 border-b flex items-center justify-between" style={{ borderColor: "var(--line-soft)", background: "var(--glass)" }}>
                 <div className="flex items-center gap-2">
-                    <span className="studio-mono-label" style={{ color: "var(--accent)" }}>AI</span>
                     <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)", boxShadow: "0 0 8px var(--accent)", animation: "pulse-soft 2s infinite" }} />
-                    <span style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--fg-2)", letterSpacing: "0.04em" }}>Assistant</span>
+                    <span style={{ fontFamily: "var(--f-mono)", fontSize: 11, color: "var(--fg)", letterSpacing: "0.08em", fontWeight: 600 }}>ROKA</span>
                 </div>
                 <div className="flex items-center gap-2">
                     {isAnalyzing && <Activity className="w-3 h-3 text-purple-400 animate-pulse" />}
