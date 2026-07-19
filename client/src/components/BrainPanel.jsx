@@ -229,7 +229,7 @@ const BrainResponseMessage = ({ message }) => {
                     textTransform: 'uppercase',
                     letterSpacing: '0.12em',
                 }}>
-                    Brain
+                    ROKA
                 </span>
             </div>
             {/* Body */}
@@ -291,38 +291,12 @@ const BrainPanel = ({ brainOutput, isProcessing, onSendCommand, onSendFeedback }
                 padding:   '10px 12px 12px',
             }}
         >
-            {/* Section header */}
-            <div
-                className="flex items-center gap-1.5 mb-3"
-                style={{
-                    // Top accent bar — brain identity marker
-                    paddingTop: 8,
-                }}
-            >
-                <div
-                    style={{
-                        height:     '1px',
-                        width:      20,
-                        background: 'linear-gradient(90deg, var(--accent), var(--violet))',
-                        borderRadius: 2,
-                        flexShrink: 0,
-                    }}
-                />
-                <span
-                    style={{
-                        fontFamily:    'var(--f-mono)',
-                        fontSize:      9,
-                        color:         'var(--fg-3)',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.10em',
-                    }}
-                >
-                    Editorial Brain
-                </span>
-
+            {/* Subtle divider — no separate "Brain" title; this content flows as part of ROKA */}
+            <div className="flex items-center gap-2 mb-3" style={{ paddingTop: 8 }}>
+                <div style={{ flex: 1, height: '0.5px', background: 'rgba(255,255,255,0.07)' }} />
                 {isProcessing && (
                     <Loader2
-                        className="w-2.5 h-2.5 ml-auto animate-spin"
+                        className="w-2.5 h-2.5 animate-spin"
                         style={{ color: 'var(--accent)' }}
                     />
                 )}
