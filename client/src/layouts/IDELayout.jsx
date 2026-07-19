@@ -20,6 +20,7 @@ import MobileAIBar from '../components/MobileAIBar';
 import useDeviceType from '../hooks/useDeviceType';
 import MixerPanel from '../components/Sidebar/MixerPanel';
 import InterviewEditPanel from '../components/InterviewEditPanel';
+import AssetPanel from '../components/AssetPanel';
 import ExportModal from '../components/ExportModal';
 import { Type } from 'lucide-react';
 import { ClarificationDialog } from '../components/ClarificationDialog';
@@ -342,13 +343,28 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     }, []);
 
     const playerVariables = React.useMemo(() => {
+        // Text tracks are rendered exclusively by <TextOverlay />, which also
+        // handles interactive drag/resize. Passing them to the Revideo player
+        // would cause duplicate captions AND make every text-clip mutation
+        // (e.g. scale drag) reload the scene generator, jumping the playhead.
+        const nonTextTracks = deferredTracks.filter(t => t.type !== 'text');
+        const isAnySolo = deferredTracks.some(tr => tr.solo);
+
+        // Compute duration from non-text (video/audio/image) clips only.
+        // If we used the store's `duration` directly, adding a caption that
+        // extends the timeline would change playerVariables, trigger
+        // playback.reload(), run recalculate(), and hit Revideo's loop-guard
+        // which seeks the playhead back to frame 0 while playing. Deriving
+        // duration from the clips we actually pass to Revideo prevents this.
+        const playerDuration = (() => {
+            const clips = nonTextTracks.flatMap(t => t.clips || []);
+            if (clips.length === 0) return Math.max(duration, 1);
+            const maxEnd = clips.reduce((m, c) => Math.max(m, (c.start || 0) + (c.duration || 0)), 0);
+            return Math.max(maxEnd, 1);
+        })();
+
         return {
-            // Text tracks are rendered exclusively by <TextOverlay />, which also
-            // handles interactive drag/resize. Passing them to the Revideo player
-            // would cause duplicate captions AND make every text-clip mutation
-            // (e.g. scale drag) reload the scene generator, jumping the playhead.
-            tracks: deferredTracks.filter(t => t.type !== 'text').map((t, idx) => {
-                const isAnySolo = deferredTracks.some(tr => tr.solo);
+            tracks: nonTextTracks.map((t, idx) => {
                 const shouldMute = t.muted || (isAnySolo && !t.solo);
                 const rawVol = t.volume !== undefined ? t.volume : 1;
                 const trackVol = shouldMute ? 0 : rawVol;
@@ -379,7 +395,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     })
                 };
             }),
-            duration: duration,
+            duration: playerDuration,
             aspectRatio: aspectRatio,
             fps: 30,
             // Tell the Revideo scene which origin to prefix /api/ and /uploads/ paths
@@ -509,6 +525,26 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         playerRef.current = revideoPlayer;
         useTimelineStore.getState().setPlayerRef(revideoPlayer);
         console.log("[IDELayout] Revideo Player Ready", revideoPlayer);
+
+        // Safety net: if a variables change slips through and triggers a Revideo reload
+        // while playing, the loop-guard in Player.prepare() overrides the saved seek
+        // position to frame 0. Subscribe to onRecalculated and, if we were playing at
+        // a non-zero position, request a seek back to the correct frame AFTER the
+        // loop-guard has run (setTimeout(0) defers past the current prepare() call).
+        if (revideoPlayer.onRecalculated?.subscribe) {
+            revideoPlayer.onRecalculated.subscribe(() => {
+                const { isPlaying, currentTime } = useTimelineStore.getState();
+                if (isPlaying && currentTime > 0.1) {
+                    const fps = revideoPlayer.playback?.fps ?? 30;
+                    setTimeout(() => {
+                        // Guard: don't seek if the player has been replaced by a remount
+                        if (playerRef.current === revideoPlayer) {
+                            revideoPlayer.requestSeek(Math.round(currentTime * fps));
+                        }
+                    }, 0);
+                }
+            });
+        }
     };
 
     const handleSelectiveGradingChange = (range, key, value) => {
@@ -1282,7 +1318,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         <input id="media-file-input" type="file" ref={fileInputRef} onChange={handleFileImport} className="hidden" accept="video/*,audio/*,image/*" multiple />
 
                         <div className="p-2 border-b flex gap-1 overflow-x-auto no-scrollbar" style={{ borderColor: "var(--line-soft)" }}>
-                            {['media', 'captions', 'transcript', 'color', 'audio', 'transform', 'settings'].map(tab => (
+                            {['media', 'captions', 'transcript', 'color', 'assets', 'audio', 'transform', 'settings'].map(tab => (
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab)}
@@ -1292,6 +1328,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     {tab === 'captions'   && <Type     className="w-2.5 h-2.5" />}
                                     {tab === 'transcript' && <span style={{ fontSize: 9 }}>📝</span>}
                                     {tab === 'color'      && <Palette  className="w-2.5 h-2.5" />}
+                                    {tab === 'assets'     && <Sparkles className="w-2.5 h-2.5" />}
                                     {tab === 'audio'      && <span style={{ fontSize: 9 }}>🎤</span>}
                                     {tab === 'transform'  && <Move     className="w-2.5 h-2.5" />}
                                     {tab === 'settings'   && <Settings className="w-2.5 h-2.5" />}
@@ -1307,7 +1344,14 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             </div>
                         )}
 
-                        <div className={classNames("flex-1 overflow-y-auto pb-24 md:pb-20", activeTab === 'transcript' && "hidden")}>
+                        {/* Assets panel (SFX · LUTs · Presets) — managed its own scroll */}
+                        {activeTab === 'assets' && (
+                            <div className="flex-1 overflow-hidden" style={{ minHeight: 0 }}>
+                                <AssetPanel onClose={() => setActiveTab('media')} />
+                            </div>
+                        )}
+
+                        <div className={classNames("flex-1 overflow-y-auto pb-24 md:pb-20", (activeTab === 'transcript' || activeTab === 'assets') && "hidden")}>
                             {activeTab === 'media' && (
                                 <section className="p-4 border-b" style={{ borderColor: "var(--line-soft)" }}>
                                     <div className="flex items-center justify-between mb-4">
