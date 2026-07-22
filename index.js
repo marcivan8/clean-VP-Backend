@@ -53,7 +53,10 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc:              ["'self'"],
-      scriptSrc:               ["'self'", "https://cdn.iubenda.com",
+      scriptSrc:               ["'self'",
+                                "https://cdn.iubenda.com",
+                                // GA4 tag runner — loads the actual measurement script
+                                "https://www.googletagmanager.com",
                                 // Hash of the Iubenda config inline script in the old build.
                                 // Safe to remove once the frontend is rebuilt (the new build
                                 // loads /iubenda-config.js as an external file instead).
@@ -71,6 +74,10 @@ app.use(helmet({
         // Sentry error reporting — both ingest domains (EU + global)
         "https://*.ingest.sentry.io",
         "https://*.ingest.de.sentry.io",
+        // Google Analytics 4 beacon + GTM fetch calls
+        "https://www.google-analytics.com",
+        "https://analytics.google.com",
+        "https://www.googletagmanager.com",
         ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
       ],
       // blob: is required for Web Workers created by Vite/Revideo at runtime.
