@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -737,6 +735,51 @@ section { padding: 96px 0; position: relative; }
 @layer utilities {
   .glass-panel {
     @apply bg-[var(--glass)] border border-[var(--glass-stroke)] backdrop-blur-[20px] shadow-[0_24px_60px_-24px_rgba(0,0,0,0.6)];
+  }
+}
+
+/* ─── Mobile responsiveness & performance ─── */
+
+/* Disable expensive GPU backdrop-filter on mobile */
+@media (max-width: 768px) {
+  .card {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  /* Force single-column layout for alternating feature moment rows.
+     The inline gridTemplateColumns style is overridden with !important
+     because inline styles beat media queries. */
+  .feature-moment-grid {
+    grid-template-columns: 1fr !important;
+    gap: 28px !important;
+  }
+
+  /* Stack before/after comparison cells vertically on narrow screens */
+  .before-after-cell {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    padding: 12px 16px !important;
+    gap: 4px !important;
+  }
+
+  /* Reduce display font size so it doesn't overflow on small phones */
+  .display {
+    font-size: clamp(40px, 11vw, 72px);
+  }
+
+  /* Hero section: less top padding so content isn't buried */
+  .hero-section {
+    padding-top: 100px !important;
+  }
+}
+
+/* Respect user motion preferences — disable all fade-up animations */
+@media (prefers-reduced-motion: reduce) {
+  .fade-up {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
   }
 }
 

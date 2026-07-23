@@ -95,9 +95,12 @@ const Nav = () => {
                             <span style={{
                                 fontSize: 12.5, color: "var(--fg-3)", padding: "0 12px",
                                 display: "flex", alignItems: "center", gap: 6,
+                                maxWidth: "clamp(80px, 20vw, 200px)", overflow: "hidden",
                             }}>
-                                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--mint)", display: "inline-block" }} />
-                                {user.email}
+                                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--mint)", flexShrink: 0, display: "inline-block" }} />
+                                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                                    {user.email}
+                                </span>
                             </span>
                             <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/dashboard')}>{t('nav.account')}</button>
                         </>
@@ -122,13 +125,27 @@ const HeroFrame = () => {
         "/NLE Export.png"
     ];
     const [activeIndex, setActiveIndex] = useState(0);
+    // Track which images have been mounted — starts with only image 0.
+    // Each tick adds the upcoming image so it pre-fetches while the previous
+    // one is still visible. Images are never unmounted (browser cache keeps
+    // them in memory and avoids re-downloads on repeat cycles).
+    const [loadedIndices, setLoadedIndices] = useState(() => new Set([0]));
+    const activeRef = useRef(0);
 
     useEffect(() => {
         const timer = setInterval(() => {
-            setActiveIndex(i => (i + 1) % images.length);
+            const next = (activeRef.current + 1) % images.length;
+            activeRef.current = next;
+            setActiveIndex(next);
+            setLoadedIndices(prev => {
+                if (prev.has(next)) return prev;
+                const s = new Set(prev);
+                s.add(next);
+                return s;
+            });
         }, 3000);
         return () => clearInterval(timer);
-    }, []);
+    }, [images.length]);
 
     return (
         <div style={{
@@ -143,20 +160,26 @@ const HeroFrame = () => {
             alignItems: "center",
             justifyContent: "center"
         }}>
-            {images.map((src, i) => (
-                <img
-                    key={src}
-                    src={src}
-                    alt={`Hero sequence frame ${i}`}
-                    style={{
-                        position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover",
-                        opacity: activeIndex === i ? 1 : 0,
-                        transform: activeIndex === i ? "scale(1.05)" : "scale(1.0)",
-                        transition: "opacity 1s ease-in-out, transform 4s cubic-bezier(0.25, 1, 0.5, 1)",
-                        pointerEvents: "none"
-                    }}
-                />
-            ))}
+            {images.map((src, i) => {
+                if (!loadedIndices.has(i)) return null;
+                return (
+                    <img
+                        key={src}
+                        src={src}
+                        alt={`Vibed editor — screen ${i + 1}`}
+                        loading={i === 0 ? "eager" : "lazy"}
+                        width={1920}
+                        height={1080}
+                        style={{
+                            position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover",
+                            opacity: activeIndex === i ? 1 : 0,
+                            transform: activeIndex === i ? "scale(1.05)" : "scale(1.0)",
+                            transition: "opacity 1s ease-in-out, transform 4s cubic-bezier(0.25, 1, 0.5, 1)",
+                            pointerEvents: "none"
+                        }}
+                    />
+                );
+            })}
         </div>
     );
 };
@@ -346,7 +369,7 @@ const FeatureMoments = () => {
                             gridTemplateColumns: i % 2 === 0 ? "1fr 1.2fr" : "1.2fr 1fr",
                             gap: 48,
                             alignItems: "center"
-                        }} className="md:grid-cols-[1fr_1fr] grid-cols-1">
+                        }} className="md:grid-cols-[1fr_1fr] grid-cols-1 feature-moment-grid">
                             <div style={{ order: i % 2 === 0 ? 1 : 2 }} className="md:order-none order-2">
                                 <div style={{
                                     width: 48, height: 48, borderRadius: 12, background: "var(--bg-2)", border: "0.5px solid var(--line)",
@@ -367,6 +390,9 @@ const FeatureMoments = () => {
                                     <img
                                         src={m.img}
                                         alt={m.title}
+                                        loading="lazy"
+                                        width={1280}
+                                        height={720}
                                         style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                                         onError={(e) => {
                                             e.target.style.display = 'none';
@@ -434,7 +460,7 @@ const BeforeAfterSection = () => {
                             transform: visible ? "translateX(0)" : "translateX(-12px)",
                             transition: `opacity 0.55s ease ${i * 0.07}s, transform 0.55s ease ${i * 0.07}s`,
                         }}>
-                            <div style={{
+                            <div className="before-after-cell" style={{
                                 padding: "20px 28px", borderRight: "0.5px solid var(--line)",
                                 display: "flex", justifyContent: "space-between", alignItems: "center",
                                 background: "rgba(239, 68, 68, 0.025)",
@@ -442,7 +468,7 @@ const BeforeAfterSection = () => {
                                 <span style={{ fontSize: 14, color: "var(--fg-2)", lineHeight: 1.4 }}>{row.without}</span>
                                 <span style={{ fontSize: 14, fontWeight: 700, color: "#EF4444", flexShrink: 0, marginLeft: 20 }}>{row.withoutTime}</span>
                             </div>
-                            <div style={{
+                            <div className="before-after-cell" style={{
                                 padding: "20px 28px",
                                 display: "flex", justifyContent: "space-between", alignItems: "center",
                                 background: "rgba(16, 185, 129, 0.025)",

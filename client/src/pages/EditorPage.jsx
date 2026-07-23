@@ -6,6 +6,35 @@ import { getProject } from '../lib/projectsApi.js';
 
 console.log('[EditorPage] Component Rendered');
 
+// All 35 caption-editor fonts, injected on-demand rather than blocking the
+// landing page. Loaded once per session — browser caches the font files so
+// subsequent editor opens have zero latency.
+const EDITOR_FONTS_URL =
+    'https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Montserrat:wght@300;400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700;800&family=Barlow+Condensed:wght@600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400;1,700&family=Lora:wght@400;700&family=Merriweather:ital,wght@0,300;0,400;0,700;1,400&family=DM+Serif+Display&family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700&family=DM+Sans:wght@400;500;600&family=Unbounded:wght@700;900&family=Nunito:wght@400;600;700;800&family=Poppins:wght@400;500;600;700&family=Quicksand:wght@400;500;700&family=Josefin+Sans:wght@400;700&family=Raleway:wght@400;500;700&family=Rajdhani:wght@500;600;700&family=Exo+2:wght@600;700;800&family=Orbitron:wght@700;900&family=Oxanium:wght@600;700&family=Roboto+Condensed:wght@400;700&family=Oswald:wght@400;500;600;700&family=Teko:wght@500;600;700&family=Black+Han+Sans&family=Saira+Condensed:wght@700;800&family=Cabin:wght@600;700&family=Caveat:wght@400;600;700&family=Pacifico&family=Kalam:wght@400;700&family=Satisfy&family=Dancing+Script:wght@400;700&family=Boogaloo&family=Righteous&family=Press+Start+2P&family=Audiowide&family=Outfit:wght@300;400;500;600;700;800&family=Roboto:wght@300;400;500;700&family=Lato:wght@300;400;700&display=swap';
+
+function injectEditorFonts() {
+    if (document.getElementById('vibed-editor-fonts')) return; // already injected
+    const pc1 = document.createElement('link');
+    pc1.rel = 'preconnect';
+    pc1.href = 'https://fonts.googleapis.com';
+    pc1.id = 'vibed-fonts-pc1';
+
+    const pc2 = document.createElement('link');
+    pc2.rel = 'preconnect';
+    pc2.href = 'https://fonts.gstatic.com';
+    pc2.crossOrigin = 'anonymous';
+    pc2.id = 'vibed-fonts-pc2';
+
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = EDITOR_FONTS_URL;
+    link.id = 'vibed-editor-fonts';
+
+    document.head.appendChild(pc1);
+    document.head.appendChild(pc2);
+    document.head.appendChild(link);
+}
+
 /**
  * EditorPage
  *
@@ -20,6 +49,12 @@ const EditorPage = () => {
     const { projectId } = useParams();
     const navigate = useNavigate();
     const { loadProject, setProjectId, setProjectName } = useTimelineStore();
+
+    // Inject caption-editor Google Fonts on first mount.
+    // Fonts are not in index.html because they're not needed on the landing page.
+    useEffect(() => {
+        injectEditorFonts();
+    }, []);
 
     // Show a loading screen while the cloud project hydrates
     const [cloudLoading, setCloudLoading] = useState(!!projectId);
