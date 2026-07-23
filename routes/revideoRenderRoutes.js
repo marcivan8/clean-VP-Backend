@@ -49,6 +49,27 @@ const renderLimiter = rateLimit({
   message: { error: 'Render rate limit reached. Please wait before starting another render.' }
 });
 
+/**
+ * Scans tracks for the first caption/text clip and returns its style.
+ * Used as a fallback when the client doesn't send captionStyle explicitly.
+ */
+function extractCaptionStyleFromTracks(tracks) {
+    for (const track of (tracks || [])) {
+        for (const clip of (track.clips || [])) {
+            if (clip.type === 'caption' || clip.type === 'text') {
+                return {
+                    fontFamily:      clip.fontFamily      || null,
+                    fontSize:        clip.fontSize        || null,
+                    fontWeight:      clip.fontWeight      || null,
+                    color:           clip.color           || null,
+                    backgroundColor: clip.backgroundColor || null,
+                };
+            }
+        }
+    }
+    return null;
+}
+
 // POST /api/revideo/render
 router.post('/render', authenticateUser, renderLimiter, async (req, res) => {
     console.log('[render] body keys:', Object.keys(req.body));
@@ -66,6 +87,10 @@ router.post('/render', authenticateUser, renderLimiter, async (req, res) => {
         }
 
         const { tracks = [], duration = 10, fps = 30, sourceVideoUrl } = req.body.timeline || req.body;
+
+        // Extract caption style from the request body, or scan tracks as fallback.
+        // This is forwarded to the Lambda so FontInstaller knows which font to load.
+        const captionStyle = req.body.captionStyle || extractCaptionStyleFromTracks(tracks);
 
         // Whitelist aspectRatio
         const ALLOWED_RATIOS = ['16:9', '9:16', '1:1', '4:5'];
@@ -147,6 +172,7 @@ router.post('/render', authenticateUser, renderLimiter, async (req, res) => {
             fps,
             aspectRatio,
             backendUrl,
+            captionStyle,   // ← font family + style so Lambda can pre-load the right font
             webhookUrl: `${backendUrl}/api/revideo/webhook?jobId=${jobId}`
         };
 

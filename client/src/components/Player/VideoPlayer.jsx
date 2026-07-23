@@ -213,10 +213,17 @@ const VideoPlayer = () => {
                 engineRef.current.setCrop(0, 0, 1, 1);
             }
 
-                // When paused the RAF loop stops — renderOnce() makes the next incoming frame
-            // draw immediately so crop/grading changes show up without a seek.
-            if (!isPlaying && typeof engineRef.current.renderOnce === 'function') {
-                engineRef.current.renderOnce();
+                // When paused the RAF loop stops — renderOnce() alone isn't enough because
+            // _wantOneRender is only consumed when a NEW_FRAME arrives from the worker.
+            // seek() triggers the worker to decode and send a fresh frame, so the two
+            // must always be paired (as documented on renderOnce()).
+            if (!isPlaying) {
+                if (typeof engineRef.current.renderOnce === 'function') {
+                    engineRef.current.renderOnce();
+                }
+                if (typeof engineRef.current.seek === 'function') {
+                    engineRef.current.seek(currentTime);
+                }
             }
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps

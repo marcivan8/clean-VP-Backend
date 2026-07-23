@@ -1211,12 +1211,22 @@ export class MediaExecutionEngine {
                     `host=${host} on ${hostSide}`
                 );
 
-                // NOTE: The paused-preview redraw (renderOnce + seek) is triggered by
-                // VideoPlayer's main effect, which fires when `tracks` changes here.
-                // That effect calls setCrop() first — then renderOnce + seek — so the
-                // crop uniforms are always set before the new frame is rendered.
-                // (Calling renderOnce + seek here, BEFORE React fires setCrop, caused
-                //  a race where the frame rendered with stale full-frame cropParams.)
+                // Seek to the first non-wide clip so the user immediately sees a close-up.
+                // The VideoPlayer main effect fires when `tracks` changes above — it calls
+                // setCrop() before renderOnce()+seek() — so crop uniforms are always set
+                // before the new frame arrives. We just need to position the playhead there.
+                const allNewClips = newTracks
+                    .filter(t => t.type === 'video')
+                    .flatMap(t => t.clips ?? []);
+                const firstCloseUp = allNewClips.find(c =>
+                    c.virtualCam && c.virtualCam.angle && c.virtualCam.angle !== 'wide'
+                );
+                if (firstCloseUp) {
+                    // Small offset into the clip avoids boundary edge cases
+                    const previewTime = firstCloseUp.start + Math.min(0.5, firstCloseUp.duration * 0.3);
+                    useTimelineStore.getState().seek(previewTime);
+                    console.log(`[virtual_multicam] Seeking to first close-up at t=${previewTime.toFixed(2)} (clip: ${firstCloseUp.virtualCam.angle})`);
+                }
 
                 const rxTotal = angleCounts.reactionA + angleCounts.reactionB;
                 return {
@@ -1228,7 +1238,7 @@ export class MediaExecutionEngine {
                         `${angleCounts.speakerA + angleCounts.speakerB} close-ups  ·  ` +
                         `${rxTotal} reaction shots\n\n` +
                         `Host (${host}) detected on the ${hostSide}. ` +
-                        `Camera angles switch as speakers take turns — scrub the timeline to see them.`,
+                        `Jumped to the first close-up — scrub the timeline to review all angle cuts.`,
                 };
             }
 
