@@ -156,9 +156,8 @@ function buildProxyReadyMessage(type, duration) {
         case 'talking_head':
         default:
             if (duration > 300) {
-                // Long talking head — YouTube, course, vlog episode, etc.
                 return (
-                    `Your ${durLabel} recording is ready. Looks like a longer talking head — YouTube, course content, or a vlog episode.\n\n` +
+                    `Your ${durLabel} recording is ready.\n\n` +
                     `Here's what I can do:\n` +
                     `• "clean this clip" — remove silences and filler words across the whole recording\n` +
                     `• "add captions" — auto-generate subtitles\n` +
@@ -167,7 +166,7 @@ function buildProxyReadyMessage(type, duration) {
                 );
             }
             return (
-                `Your ${durLabel} clip is ready. Looks like a talking head or vlog-style recording.\n\n` +
+                `Your ${durLabel} clip is ready.\n\n` +
                 `Here's what I can do:\n` +
                 `• "make it more dynamic" — simulate multi-camera with zoom rhythm\n` +
                 `• "clean this clip" — remove silences and filler words\n` +

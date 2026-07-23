@@ -71,7 +71,11 @@ router.post('/denoise', optionalAuth, async (req, res) => {
         const uniqueJobId = `denoise-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
         const job = await audioQueue.add('denoise-audio', {
             action: 'denoise',
-            filePath: inputPath
+            filePath: inputPath,
+            // Also forward the original filename so the worker can reconstruct the
+            // GCS object path when the local file is absent (production / Railway).
+            filename: filename || null,
+            userId: req.user?.id || 'anonymous',
         }, {
             jobId: uniqueJobId
         });
@@ -183,7 +187,9 @@ router.post('/normalize', optionalAuth, async (req, res) => {
         const uniqueJobId = `normalize-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
         const job = await audioQueue.add('normalize-audio', {
             action: 'normalize',
-            filePath: inputPath
+            filePath: inputPath,
+            filename: filename || null,
+            userId: req.user?.id || 'anonymous',
         }, {
             jobId: uniqueJobId
         });

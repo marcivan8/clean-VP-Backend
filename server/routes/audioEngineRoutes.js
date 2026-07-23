@@ -44,9 +44,11 @@ router.post('/search', async (req, res) => {
     }
 
     try {
-        // Parse the natural language query into a structured SemanticSearchQuery
+        // Parse the natural language query into a structured SemanticSearchQuery.
+        // NOTE: QueryParser reads context.forcedAssetType (singular) — the plural
+        // form was a typo that caused the type hint to be silently ignored.
         const parsed = qp.parse(query, {
-            forcedAssetTypes: assetTypes || undefined,
+            forcedAssetType: assetTypes?.length === 1 ? assetTypes[0] : undefined,
         });
 
         // Override limit from request

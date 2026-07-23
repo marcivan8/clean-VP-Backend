@@ -27,6 +27,14 @@ const MixerPanel = () => {
     const [processing, setProcessing] = React.useState({});
     const volumeRef = React.useRef(null);
 
+    // Local slider state while the user is dragging — avoids updating the store (and
+    // therefore playerVariables) on every mouse-move event. Without this, each tick
+    // of the range input triggers a Revideo scene reload which jumps the playhead.
+    const [localVolume, setLocalVolume] = React.useState(null);
+
+    // Reset local volume when the selected clip changes so the slider stays in sync.
+    React.useEffect(() => { setLocalVolume(null); }, [activeClipId]);
+
     // TASK 8: Scroll to volume/fade controls when an audio clip is selected
     React.useEffect(() => {
         if (!activeClipId) return;
@@ -53,8 +61,23 @@ const MixerPanel = () => {
     const runAudioProcess = async (type) => {
         if (!activeClip) return;
         const store = useTimelineStore.getState();
-        const filename = store.uploadedFilePath || store.uploadedFile?.name;
-        if (!filename) return;
+
+        // Derive the server-side GCS path from the active clip's asset.
+        // Priority: raw GCS path embedded in sourceUrl > global uploadedFilePath fallback.
+        // Using uploadedFilePath alone is wrong for multi-clip projects — it always
+        // points to whichever file was uploaded last, not the currently selected clip.
+        const asset = store.assets.find(a => a.id === activeClip.assetId);
+        let filename = null;
+        if (asset?.sourceUrl) {
+            // sourceUrl format: 'https://storage.googleapis.com/BUCKET/raw/userId/file.mp4'
+            const match = asset.sourceUrl.match(/storage\.googleapis\.com\/[^/]+\/(.+)/);
+            if (match) filename = match[1]; // yields 'raw/userId/file.mp4'
+        }
+        if (!filename) filename = store.uploadedFilePath || null;
+        if (!filename) {
+            console.error(`[MixerPanel] ${type}: no server-side path for clip "${activeClip.id}" — cannot process`);
+            return;
+        }
 
         setProcessing(p => ({ ...p, [type]: true }));
         try {
@@ -71,8 +94,7 @@ const MixerPanel = () => {
             if (data.jobId) {
                 const result = await pollJobResult(data.jobId);
                 if (result?.url) {
-                    // Update asset proxyUrl so the player picks up the processed audio
-                    const asset = store.assets.find(a => a.id === activeClip.assetId);
+                    // Update asset proxyUrl so the player picks up the processed file
                     if (asset) store.updateAsset(asset.id, { proxyUrl: result.url });
                     updateActive({ [type]: true });
                 }
@@ -111,12 +133,26 @@ const MixerPanel = () => {
                             <div ref={volumeRef} className="mb-4">
                                 <div className="flex justify-between text-xs mb-1">
                                     <span className="text-white/50">Gain</span>
-                                    <span className="text-primary font-mono">{((activeClip.volume ?? 1.0) * 100).toFixed(0)}%</span>
+                                    <span className="text-primary font-mono">
+                                        {(((localVolume ?? activeClip.volume) ?? 1.0) * 100).toFixed(0)}%
+                                    </span>
                                 </div>
                                 <input
                                     type="range" min="0" max="2" step="0.05"
-                                    value={activeClip.volume ?? 1.0}
-                                    onChange={(e) => updateActive({ volume: parseFloat(e.target.value) })}
+                                    value={(localVolume ?? activeClip.volume) ?? 1.0}
+                                    onChange={(e) => setLocalVolume(parseFloat(e.target.value))}
+                                    onMouseUp={(e) => {
+                                        const val = parseFloat(e.target.value);
+                                        setLocalVolume(null);
+                                        updateActive({ volume: val });
+                                    }}
+                                    onTouchEnd={() => {
+                                        if (localVolume !== null) {
+                                            const val = localVolume;
+                                            setLocalVolume(null);
+                                            updateActive({ volume: val });
+                                        }
+                                    }}
                                     className="w-full accent-primary h-1.5 bg-white/10 rounded-full appearance-none cursor-pointer"
                                 />
                             </div>

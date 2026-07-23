@@ -1,5 +1,5 @@
 import { useShallow } from 'zustand/react/shallow';
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import useTimelineStore from '../store/useTimelineStore';
 import { AlignLeft, AlignCenter, AlignRight, Plus, Bold, Italic, Underline, RotateCcw, Type } from 'lucide-react';
 
@@ -47,12 +47,38 @@ const S = {
 // ── Shared style editor ────────────────────────────────────────────────────────
 // onUpdate       — commit change to history (buttons, select, etc.)
 // onLiveUpdate   — skipHistory drag preview; onUpdate fires on pointerUp to commit
-const StyleEditor = ({ clip, onUpdate, onLiveUpdate, showContent = true, showReset = false, onReset }) => {
+// livePos        — { x, y } override from parent's drag state (avoids reading stale clip)
+const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true, showReset = false, onReset }) => {
     // Fall back to onUpdate if no live variant provided
     const live = onLiveUpdate || onUpdate;
+
+    // Local state for number inputs — prevents fan-out on every keystroke.
+    // Committed to the store on blur or Enter; cleared when clip identity changes.
+    const [localFontSize, setLocalFontSize] = useState(null);
+    const [localScale,    setLocalScale]    = useState(null);
+    const prevClipRef = useRef(null);
+
+    useEffect(() => {
+        // When a different clip is displayed, discard any locally typed-but-uncommitted values
+        if (prevClipRef.current !== clip?.id) {
+            setLocalFontSize(null);
+            setLocalScale(null);
+            prevClipRef.current = clip?.id;
+        }
+    });
+
     if (!clip) return null;
 
-    const activeAnim = clip.animation || 'none';
+    const activeAnim   = clip.animation || 'none';
+    const displayX     = livePos?.x ?? clip.x ?? 50;
+    const displayY     = livePos?.y ?? clip.y ?? 50;
+
+    const commitFontSize = () => {
+        if (localFontSize !== null) { onUpdate({ fontSize: localFontSize }); setLocalFontSize(null); }
+    };
+    const commitScale = () => {
+        if (localScale !== null) { onUpdate({ scale: localScale }); setLocalScale(null); }
+    };
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
@@ -71,14 +97,22 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, showContent = true, showRes
             <div style={{ ...S.row, marginBottom: 12 }}>
                 <div style={{ flex: 1 }}>
                     <div style={{ ...S.label, marginBottom: 4 }}>Size</div>
-                    <input type="number" value={clip.fontSize || 48}
-                        onChange={(e) => onUpdate({ fontSize: parseInt(e.target.value) })}
+                    <input
+                        type="number"
+                        value={localFontSize ?? (clip.fontSize || 48)}
+                        onChange={(e) => setLocalFontSize(parseInt(e.target.value) || 1)}
+                        onBlur={commitFontSize}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { commitFontSize(); e.target.blur(); } }}
                         style={S.input} />
                 </div>
                 <div style={{ flex: 1 }}>
                     <div style={{ ...S.label, marginBottom: 4 }}>Scale</div>
-                    <input type="number" step="0.1" min="0.1" max="5.0" value={clip.scale || 1.0}
-                        onChange={(e) => onUpdate({ scale: parseFloat(e.target.value) })}
+                    <input
+                        type="number" step="0.1" min="0.1" max="5.0"
+                        value={localScale ?? (clip.scale || 1.0)}
+                        onChange={(e) => setLocalScale(parseFloat(e.target.value) || 0.1)}
+                        onBlur={commitScale}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { commitScale(); e.target.blur(); } }}
                         style={S.input} />
                 </div>
             </div>
@@ -156,13 +190,13 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, showContent = true, showRes
             {/* Position */}
             <div style={S.section}>
                 <div style={{ ...S.label, marginBottom: 10 }}>Position</div>
-                {[{ key: 'x', label: 'X Axis' }, { key: 'y', label: 'Y Axis' }].map(({ key, label }) => (
+                {[{ key: 'x', label: 'X Axis', display: displayX }, { key: 'y', label: 'Y Axis', display: displayY }].map(({ key, label, display }) => (
                     <div key={key} style={{ marginBottom: 10 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                             <span style={{ fontFamily: 'var(--f-sans)', fontSize: 11, color: 'var(--fg-3)' }}>{label}</span>
-                            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)' }}>{clip[key] ?? 50}%</span>
+                            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)' }}>{display}%</span>
                         </div>
-                        <input type="range" min="0" max="100" value={clip[key] ?? 50}
+                        <input type="range" min="0" max="100" value={display}
                             onChange={(e) => live({ [key]: parseInt(e.target.value) })}
                             onPointerUp={(e) => onUpdate({ [key]: parseInt(e.target.value) })}
                             style={{ width: '100%', accentColor: 'var(--accent)', height: 3, cursor: 'pointer' }} />
@@ -278,6 +312,9 @@ const TextPanel = () => {
 
     const [editMode, setEditMode] = useState('global');
     const [globalFlash, setGlobalFlash] = useState(false);
+    // Live drag state: holds position/style values being dragged before store commit.
+    // Prevents the N-clip fan-out from firing on every drag pixel.
+    const [liveOverride, setLiveOverride] = useState({});
 
     const activeTrack = tracks.find(t => t.clips.some(c => c.id === activeClipId));
     const activeClip  = activeTrack?.clips.find(c => c.id === activeClipId);
@@ -288,9 +325,19 @@ const TextPanel = () => {
     // Representative clip for global mode display: prefer the active text clip,
     // fall back to the first caption clip so the editor is always populated.
     const globalStyle  = captionClips[0] || {};
-    const displayClip  = (activeClip && isTextClip) ? activeClip : globalStyle;
+    const baseClip     = (activeClip && isTextClip) ? activeClip : globalStyle;
+    // Merge live-drag overrides so the panel UI reflects drag instantly,
+    // without waiting for the store update to propagate back through Zustand.
+    const displayClip  = Object.keys(liveOverride).length > 0
+        ? { ...baseClip, ...liveOverride }
+        : baseClip;
 
     const handleUpdate = (updates, skipHistory = false) => {
+        // Clear any pending live-drag overrides before committing to the store.
+        // (setLiveOverride is async, but the store fan-out below is what actually
+        // matters; the state flush happens on the same React tick.)
+        if (!skipHistory) setLiveOverride({});
+
         // Always read fresh from the store — avoids stale-closure issues when
         // multiple clips are updated in the same event (N _saveHistory calls
         // would create N intermediate undo entries and risk partial fan-out).
@@ -328,8 +375,27 @@ const TextPanel = () => {
         }
     };
 
-    // Live update: no history entry (called on every slider pixel during drag)
-    const handleLiveUpdate = (updates) => handleUpdate(updates, true);
+    // Live update: no history, no full fan-out.
+    // 1. Update local state so the StyleEditor panel reflects the drag immediately.
+    // 2. Update only ONE clip in the store so the TextOverlay shows live preview.
+    // The full fan-out to all clips happens on pointerUp via handleUpdate.
+    const handleLiveUpdate = (updates) => {
+        const { content, ...styleOnly } = updates;
+        if (Object.keys(styleOnly).length === 0) return;
+
+        // Update panel display via local state (zero React children re-renders)
+        setLiveOverride(prev => ({ ...prev, ...styleOnly }));
+
+        // Update the display clip only (1 store write instead of N)
+        const store = useTimelineStore.getState();
+        const freshText = store.tracks?.find(t => t.type === 'text');
+        if (!freshText) return;
+        const displayTarget =
+            freshText.clips.find(c => c.id === activeClipId) || freshText.clips[0];
+        if (displayTarget) {
+            store.updateClip(freshText.id, displayTarget.id, styleOnly, { skipHistory: true });
+        }
+    };
 
     const handleAddText = (preset) => {
         let track = tracks.find(t => t.type === 'text');
@@ -468,6 +534,12 @@ const TextPanel = () => {
     // displayClip is the active text clip if selected, otherwise the first caption.
     // All style changes fan out to every caption clip via handleUpdate.
     // Content is per-segment: only shown when a specific clip is active.
+    // livePos passes the current drag position values so StyleEditor can display
+    // them without reading from the (not-yet-updated) store.
+    const livePos = (liveOverride.x !== undefined || liveOverride.y !== undefined)
+        ? { x: liveOverride.x, y: liveOverride.y }
+        : null;
+
     return (
         <div>
             <Header />
@@ -475,6 +547,7 @@ const TextPanel = () => {
                 clip={displayClip}
                 onUpdate={handleUpdate}
                 onLiveUpdate={handleLiveUpdate}
+                livePos={livePos}
                 showContent={activeClip && isTextClip}
             />
         </div>
