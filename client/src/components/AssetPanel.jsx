@@ -27,7 +27,7 @@ const TABS = [
 ];
 
 const PANEL = {
-    width:      320,
+    width:      '100%',
     background: 'rgba(10,10,14,0.97)',
     border:     '0.5px solid rgba(255,255,255,0.1)',
     borderRadius: 10,
@@ -36,7 +36,6 @@ const PANEL = {
     fontFamily: 'var(--f-sans)',
     overflow:   'hidden',
     height:     '100%',
-    maxHeight:  560,
 };
 
 export default function AssetPanel({ onClose }) {
@@ -244,8 +243,8 @@ export default function AssetPanel({ onClose }) {
                             {/* SFX tab */}
                             {tab === 'sfx' && (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 4 }}>
-                                    {sfxResults.length === 0 && (
-                                        <Empty label="Search for a sound effect above" />
+                                    {sfxResults.length === 0 && !loading && (
+                                        <Empty label={query ? 'No results found — try a different keyword' : 'Search for a sound effect above'} />
                                     )}
                                     {sfxResults.map((r, i) => (
                                         <SoundCard
