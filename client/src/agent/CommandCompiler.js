@@ -682,6 +682,34 @@ function compileSplitSpeakers(step, ctx) {
     ]);
 }
 
+// ── Remove speaker — "remove the interviewer / guest" ────────────────────────
+// MediaExecutionEngine looks up the speaker by role in speakerMap, groups their
+// word timestamps into segments, and cuts each one from the timeline.
+function compileRemoveSpeaker(step, ctx) {
+    const role      = step.role      || step.parameters?.role      || null;
+    const speakerId = step.speakerId || step.parameters?.speakerId || null;
+    if (!role && !speakerId) {
+        return validationError(step.step_id, 'remove_speaker requires role (interviewer|guest) or speakerId', VALIDATION_ERRORS.MISSING_FIELD);
+    }
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'remove_speaker', { role, speakerId },
+            { source_step_id: step.step_id, description: `Remove ${role || speakerId} from timeline` }),
+    ]);
+}
+
+// ── Semantic cut — "remove the part where I hesitate to say X" ──────────────
+// GPT-4o resolves the target segment from SpeakerWordTimestamps in context and
+// returns { start, end } in the plan. Executor performs the cut.
+function compileSemanticCut(step, ctx) {
+    const description = step.description || step.parameters?.description || '';
+    const start       = step.start       ?? step.parameters?.start       ?? null;
+    const end         = step.end         ?? step.parameters?.end         ?? null;
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'semantic_cut', { description, start, end },
+            { source_step_id: step.step_id, description: `Semantic cut: ${description.slice(0, 60)}` }),
+    ]);
+}
+
 // ── Zoom rhythm — "make it feel multi-camera" ─────────────────────────────────
 // Delegates to the rhythm_zoom case in MediaExecutionEngine.executeStoreAction,
 // which calls /api/interview/rhythm-zoom and applies scale keyframes directly.
@@ -912,6 +940,8 @@ const COMMAND_REGISTRY = new Map([
     // Interview / talking-head / clip organization
     ['rhythm_zoom',      { compiler: compileRhythmZoom }],
     ['split_speakers',   { compiler: compileSplitSpeakers }],
+    ['remove_speaker',   { compiler: compileRemoveSpeaker }],
+    ['semantic_cut',     { compiler: compileSemanticCut }],
     ['organize_clips',   { compiler: compileOrganizeClips }],
     ['virtual_multicam', { compiler: compileVirtualMulticam }],
 

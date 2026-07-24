@@ -2,7 +2,7 @@ import React from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { useShallow } from 'zustand/react/shallow';
 import Clip from './Clip';
-import { Video, Music, Type, Volume2, VolumeX, Headphones } from 'lucide-react';
+import { Video, Music, Type, Volume2, VolumeX, Headphones, X } from 'lucide-react';
 import classNames from 'classnames';
 import useTimelineStore from '../../store/useTimelineStore';
 
@@ -41,6 +41,14 @@ const Track = ({ track }) => {
                         <TrackIcon type={track.type} />
                         <span className="text-[10px] font-medium text-muted-foreground truncate">{track.name}</span>
                     </div>
+                    {/* Delete track — visible on header hover only */}
+                    <button
+                        onClick={() => useTimelineStore.getState().removeTrack(track.id)}
+                        className="opacity-0 group-hover/header:opacity-100 transition-opacity shrink-0 w-4 h-4 rounded flex items-center justify-center hover:bg-red-500/20 hover:text-red-400 text-muted-foreground"
+                        title="Delete track"
+                    >
+                        <X className="w-2.5 h-2.5" />
+                    </button>
                 </div>
                 
                 {/* Controls — audio/video tracks only */}

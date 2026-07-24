@@ -67,7 +67,7 @@ export class ContextGenerator {
      */
     static getStructuredContext() {
         const state = useTimelineStore.getState();
-        const { tracks, duration, currentTime, aspectRatio, activeClipId, captions, pacingSegments, beatMarkers, assets, transcriptionAttempted } = state;
+        const { tracks, duration, currentTime, aspectRatio, activeClipId, captions, pacingSegments, beatMarkers, assets, transcriptionAttempted, speakerMap } = state;
 
         // --- Collect all clips ---
         const allClips = [];
@@ -183,6 +183,32 @@ export class ContextGenerator {
             // Used by SMART_CLEANUP, reorganization, and "what's this about?" queries.
             // Only sent when a transcript is available to avoid inflating token count.
             ...(clipTranscript.length > 0 ? { ClipTranscript: clipTranscript } : {}),
+
+            // Speaker diarization context — enables remove_speaker and semantic_cut.
+            // Populated after split_speakers completes and identify-speakers resolves.
+            // Budget: up to 150 words per speaker (word-level timestamps for GPT search).
+            ...(speakerMap && Object.keys(speakerMap).length > 0 ? {
+                SpeakerContext: Object.entries(speakerMap).map(([id, info]) => ({
+                    id,
+                    role:  info.role  || 'unknown',
+                    label: info.label || id,
+                    wordCount: (info.words || []).length,
+                    // 150-word sample so GPT can understand speech patterns
+                    sample: (info.words || []).slice(0, 150).map(w => w.word).join(' '),
+                })),
+                // Word-level timestamps with speaker labels for semantic search.
+                // GPT uses these to resolve "remove where I hesitate to say X" →
+                // finds the cluster of words around "problem" with large preceding gap.
+                // Budget capped at 600 words total across all speakers to stay within token limits.
+                SpeakerWordTimestamps: Object.entries(speakerMap).flatMap(([id, info]) =>
+                    (info.words || []).slice(0, Math.floor(600 / Math.max(Object.keys(speakerMap).length, 1))).map(w => ({
+                        s: id,            // speaker id
+                        w: w.word,        // word text
+                        t: parseFloat((w.start || 0).toFixed(2)),  // start time (seconds)
+                        e: parseFloat((w.end   || 0).toFixed(2)),  // end time (seconds)
+                    }))
+                ),
+            } : {}),
 
             // Long-Form Intelligence Engine context (populated after ContentAnalyzer runs)
             LongFormContext: state.contentAnalysis ? {

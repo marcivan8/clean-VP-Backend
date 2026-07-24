@@ -1348,4 +1348,136 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
     }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/interview/identify-speakers
+// Body: { words: [{word, start, end, speaker}], speakers: string[] }
+//
+// Analyzes speech patterns to assign roles to anonymous speaker labels.
+// Looks at: question frequency, turn length, who speaks first, monologue ratio.
+// Returns: { SPEAKER_00: { role: 'interviewer'|'guest', confidence: number } }
+//
+// Non-blocking — called after split_speakers to enrich the speakerMap.
+// Falls back gracefully if GPT is unavailable or analysis is inconclusive.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/identify-speakers', ...authAndGate, async (req, res) => {
+    try {
+        const { words = [], speakers = [] } = req.body;
+
+        if (!words.length || speakers.length < 2) {
+            return res.status(400).json({ error: 'words and at least 2 speakers are required' });
+        }
+
+        if (!process.env.OPENAI_API_KEY) {
+            return res.status(503).json({ error: 'OPENAI_API_KEY not configured' });
+        }
+
+        // ── Compute per-speaker statistics for the prompt ──────────────────────
+        const stats = {};
+        for (const spk of speakers) {
+            stats[spk] = { wordCount: 0, turnCount: 0, questionCount: 0, longestTurnWords: 0 };
+        }
+
+        // Group consecutive words into turns per speaker
+        let curSpeaker = null;
+        let curTurnWords = 0;
+
+        for (const w of words) {
+            const spk = w.speaker;
+            if (!spk || !stats[spk]) continue;
+
+            stats[spk].wordCount++;
+
+            if (spk !== curSpeaker) {
+                // Close previous turn
+                if (curSpeaker && stats[curSpeaker]) {
+                    stats[curSpeaker].turnCount++;
+                    stats[curSpeaker].longestTurnWords = Math.max(stats[curSpeaker].longestTurnWords, curTurnWords);
+                }
+                curSpeaker = spk;
+                curTurnWords = 1;
+            } else {
+                curTurnWords++;
+            }
+
+            // Simple question detection — ends with '?' or starts with a question word
+            const text = (w.word || '').trim();
+            if (text.endsWith('?') || /^(who|what|where|when|why|how|do|did|does|can|could|would|is|are|was|were|have|has)\b/i.test(text)) {
+                stats[spk].questionCount++;
+            }
+        }
+        // Close final turn
+        if (curSpeaker && stats[curSpeaker]) {
+            stats[curSpeaker].turnCount++;
+            stats[curSpeaker].longestTurnWords = Math.max(stats[curSpeaker].longestTurnWords, curTurnWords);
+        }
+
+        // ── Build a compact summary for GPT ───────────────────────────────────
+        // Sample 200 chars of each speaker's actual words so GPT can read speech style
+        const samples = {};
+        for (const spk of speakers) {
+            const spkWords = words.filter(w => w.speaker === spk).map(w => w.word).join(' ');
+            samples[spk] = spkWords.slice(0, 200);
+        }
+
+        const statLines = speakers.map(spk => {
+            const s = stats[spk];
+            return `${spk}: ${s.wordCount} words, ${s.turnCount} turns, ${s.questionCount} questions, longest turn ${s.longestTurnWords} words\nSample: "${samples[spk]}"`;
+        }).join('\n\n');
+
+        const OpenAI = require('openai');
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 15_000 });
+
+        const completion = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [{
+                role: 'user',
+                content:
+`Analyze these two speakers from an interview/podcast and identify who is the interviewer (asks questions, shorter turns) vs the guest (gives long answers, monologues).
+
+${statLines}
+
+Return ONLY valid JSON:
+{
+  "${speakers[0]}": { "role": "interviewer"|"guest", "confidence": 0.0-1.0 },
+  "${speakers[1]}": { "role": "interviewer"|"guest", "confidence": 0.0-1.0 }
+}
+
+Rules:
+- If one speaker has significantly more questions, they are the interviewer
+- If one speaker has much longer average turns, they are the guest
+- Roles must be different — assign one interviewer and one guest
+- If truly indistinguishable, set confidence to 0.5 for both`,
+            }],
+            response_format: { type: 'json_object' },
+            temperature: 0,
+            max_tokens: 120,
+        });
+
+        const parsed = JSON.parse(completion.choices[0].message.content);
+
+        // Validate structure
+        const result = {};
+        for (const spk of speakers) {
+            const r = parsed[spk];
+            if (r?.role && ['interviewer', 'guest'].includes(r.role)) {
+                result[spk] = { role: r.role, confidence: Math.min(1, Math.max(0, r.confidence || 0.7)) };
+            }
+        }
+
+        // Fallback: if GPT output was malformed, default by word count (more words = guest)
+        if (Object.keys(result).length < 2) {
+            const sorted = [...speakers].sort((a, b) => (stats[b]?.wordCount || 0) - (stats[a]?.wordCount || 0));
+            result[sorted[0]] = { role: 'guest',       confidence: 0.5 };
+            result[sorted[1]] = { role: 'interviewer', confidence: 0.5 };
+        }
+
+        console.log('[interviewRoutes] identify-speakers result:', JSON.stringify(result));
+        res.json(result);
+
+    } catch (err) {
+        console.error('[interviewRoutes] /identify-speakers error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;

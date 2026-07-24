@@ -11,7 +11,7 @@ router.post('/profile', authenticateUser, async (req, res) => {
   try {
     // Always use the verified user ID from the token, NOT from req.body
     const userId = req.user.id;
-    const { email, fullName } = req.body;
+    const { email, fullName, role } = req.body;
 
     if (!email) {
       return res.status(400).json({ error: 'Missing required field: email' });
@@ -54,6 +54,7 @@ router.post('/profile', authenticateUser, async (req, res) => {
       id:                userId,
       email:             email.trim().toLowerCase().slice(0, 254),
       full_name:         fullName ? fullName.trim().slice(0, 100) : null,
+      role:              role || null,
       monthly_usage:     { analyses: 0 },
       subscription_tier: 'explorer',
       tier_expires_at:   defaultResetDate,
@@ -201,15 +202,19 @@ router.get('/profile', authenticateUser, async (req, res) => {
 // Update user profile
 router.patch('/profile', authenticateUser, async (req, res) => {
   try {
-    const { full_name } = req.body;
+    const { full_name, role } = req.body;
     const userId = req.user.id;
-    
+
     const updateData = {
       updated_at: new Date().toISOString()
     };
-    
+
     if (full_name !== undefined) {
       updateData.full_name = full_name ? full_name.trim() : null;
+    }
+
+    if (role !== undefined) {
+      updateData.role = role || null;
     }
     
     const { data: profile, error } = await supabaseAdmin

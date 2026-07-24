@@ -90,6 +90,23 @@ const PATTERNS = [
         intent: () => ({ type: 'edit', action: 'remove_filler_words', confidence: 'high' })
     },
 
+    // ── REMOVE SPEAKER ─────────────────────────────────────────────────────
+    {
+        regex: /(?:remove|cut|delete|strip)\s+(?:everything\s+(?:the\s+)?|all\s+(?:of\s+)?(?:the\s+)?)?(?:the\s+)?(interview(?:er|ee)?|host|guest|speaker\s*\d*)\s*(?:says?|speaks?|talks?)?/i,
+        intent: (m) => {
+            const rawRole = (m[1] || '').toLowerCase();
+            const role = rawRole.startsWith('interview') || rawRole === 'host' ? 'interviewer' : 'guest';
+            return { type: 'edit', action: 'remove_speaker', constraints: { role }, confidence: 'high' };
+        }
+    },
+
+    // ── SEMANTIC CUT ──────────────────────────────────────────────────────
+    // Catches "remove the part where I hesitate to say X", "cut where I mention Y"
+    {
+        regex: /(?:remove|cut|delete)\s+(?:the\s+)?(?:part|section|moment|bit|place|where|when)\s+(?:where\s+|when\s+)?(?:i|he|she|they)\s+.{3,80}/i,
+        intent: (m) => ({ type: 'edit', action: 'semantic_cut', constraints: { description: m[0] }, confidence: 'medium' })
+    },
+
     // ── SPEED ──────────────────────────────────────────────────────────────
     {
         regex: /^(?:speed\s+up|make\s+(?:it\s+)?faster?)\s*(?:(?:by\s+)?(\d+(?:\.\d+)?)x?)?$/i,
