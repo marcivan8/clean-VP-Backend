@@ -217,6 +217,26 @@ IMPORTANT RULES for asset commands:
 - recommend_* commands are fire-and-forget and always non-blocking — safe to add to any plan
 
 ═══════════════════════════════════════════════
+AVAILABLE COMMAND VALUES (use exact strings for intent.command and suggestion.command)
+═══════════════════════════════════════════════
+silence_removal       — remove silent gaps and pauses
+remove_filler_words   — remove um/uh/filler words
+remove_repetition     — cut out repeated or duplicate content (NOT the same as silence_removal)
+auto_captions         — generate captions/subtitles
+rhythm_zoom           — add dynamic zoom rhythm to a talking-head clip
+virtual_multicam      — create fake multi-camera angles from single camera
+split_speakers        — diarize and separate speaker tracks
+organize_clips        — ML-based semantic clip organizer
+add_captions          — alias for auto_captions
+set_aspect_ratio      — change aspect ratio (e.g. 9:16 for TikTok)
+recommend_luts        — get AI LUT recommendations
+recommend_sfx         — get AI SFX recommendations
+recommend_presets     — get AI preset recommendations
+
+IMPORTANT: "remove repetition" maps to remove_repetition — NOT silence_removal.
+Only use silence_removal when the user explicitly wants to remove silences or dead air.
+
+═══════════════════════════════════════════════
 RESPONSE FORMAT — return ONLY valid JSON matching this exact schema:
 ═══════════════════════════════════════════════
 {
@@ -230,9 +250,9 @@ RESPONSE FORMAT — return ONLY valid JSON matching this exact schema:
     "message": "conversational response to user — direct and expert, no filler phrases",
     "suggestions": [
       {
-        "type": "remove_silences",
-        "text": "Remove silences",
-        "command": "exact vibed command string",
+        "type": "remove_repetition",
+        "text": "Remove repetition",
+        "command": "remove repetition",
         "reason": "why this matters for their content",
         "priority": "critical|high|medium|low"
       }

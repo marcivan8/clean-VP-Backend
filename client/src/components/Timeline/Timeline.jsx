@@ -2,7 +2,7 @@ import { useShallow } from 'zustand/react/shallow';
 import React from 'react';
 import Track from './Track';
 import useTimelineStore from '../../store/useTimelineStore';
-import { Scissors, ZoomIn, ZoomOut, Copy, Type, Palette } from 'lucide-react';
+import { Scissors, ZoomIn, ZoomOut, Copy, Type, Palette, Undo2, Redo2, ChevronsRight } from 'lucide-react';
 
 const RULER_H    = 24;   // h-6 = 24px (ruler height)
 const LABEL_W    = 128;  // w-32 = 128px (track label column)
@@ -10,14 +10,18 @@ const EDGE_ZONE  = 60;   // px from edge that triggers auto-scroll
 const SCROLL_SPD = 10;   // base px/frame; scales with proximity to edge
 
 const Timeline = () => {
-    const { tracks, duration, zoomLevel, seek, setZoomLevel, addTrack } = useTimelineStore(useShallow(state => ({
-    tracks: state.tracks,
-    duration: state.duration,
-    zoomLevel: state.zoomLevel,
-    seek: state.seek,
-    setZoomLevel: state.setZoomLevel,
-    addTrack: state.addTrack
-})));
+    const { tracks, duration, zoomLevel, seek, setZoomLevel, addTrack, undo, redo, past, future } = useTimelineStore(useShallow(state => ({
+        tracks:      state.tracks,
+        duration:    state.duration,
+        zoomLevel:   state.zoomLevel,
+        seek:        state.seek,
+        setZoomLevel: state.setZoomLevel,
+        addTrack:    state.addTrack,
+        undo:        state.undo,
+        redo:        state.redo,
+        past:        state.past,
+        future:      state.future,
+    })));
 
     const timeDisplayRef = React.useRef(null);
     const playheadLineRef = React.useRef(null);
@@ -27,6 +31,21 @@ const Timeline = () => {
     const tracksAreaRef = React.useRef(null);
     const selDragRef = React.useRef(null);
     const [selBox, setSelBox] = React.useState(null);
+
+    // Scroll hint: show briefly when horizontal content overflows
+    const [showScrollHint, setShowScrollHint] = React.useState(false);
+    React.useEffect(() => {
+        const el = tracksAreaRef.current;
+        if (!el) return;
+        const timer = setTimeout(() => {
+            const canScroll = el.scrollWidth > el.clientWidth + 4;
+            if (canScroll) {
+                setShowScrollHint(true);
+                setTimeout(() => setShowScrollHint(false), 3000);
+            }
+        }, 800);
+        return () => clearTimeout(timer);
+    }, [tracks.length]);
 
     const getContentPos = React.useCallback((clientX, clientY) => {
         const area = tracksAreaRef.current;
@@ -250,6 +269,18 @@ const Timeline = () => {
             }
         }
 
+        // Undo (Cmd+Z)
+        if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+            e.preventDefault();
+            useTimelineStore.getState().undo();
+        }
+
+        // Redo (Cmd+Shift+Z)
+        if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey) {
+            e.preventDefault();
+            useTimelineStore.getState().redo();
+        }
+
         // Split (Cmd+B)
         if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
             e.preventDefault();
@@ -318,6 +349,24 @@ const Timeline = () => {
             <div className="h-10 border-b flex items-center px-4 justify-between z-20 shrink-0" style={{ background: "var(--glass)", borderColor: "var(--line-soft)" }}>
                 <div className="flex items-center gap-4">
                     <span ref={timeDisplayRef} className="text-xs w-16 text-center studio-mono-label" style={{ color: "var(--accent)" }}>0.00s</span>
+                    <div className="h-4 w-px mx-2" style={{ background: "var(--line-soft)" }}></div>
+                    {/* Undo / Redo */}
+                    <button
+                        className="p-1 rounded group transition-colors hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Undo (Cmd+Z)"
+                        disabled={!past?.length}
+                        onClick={() => undo()}
+                    >
+                        <Undo2 className="w-3 h-3 text-muted-foreground group-hover:text-primary" />
+                    </button>
+                    <button
+                        className="p-1 rounded group transition-colors hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Redo (Cmd+Shift+Z)"
+                        disabled={!future?.length}
+                        onClick={() => redo()}
+                    >
+                        <Redo2 className="w-3 h-3 text-muted-foreground group-hover:text-primary" />
+                    </button>
                     <div className="h-4 w-px mx-2" style={{ background: "var(--line-soft)" }}></div>
                     <button
                         className="p-1 rounded relative group transition-colors hover:bg-white/5"
@@ -458,7 +507,20 @@ const Timeline = () => {
                 className="flex-1 overflow-auto relative custom-scrollbar flex flex-col"
                 style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
                 onMouseDown={handleTracksMouseDown}
+                onScroll={() => setShowScrollHint(false)}
             >
+                {/* Scroll hint — fades in briefly when horizontal content overflows */}
+                {showScrollHint && (
+                    <div
+                        className="pointer-events-none absolute right-0 top-6 bottom-0 z-30 flex items-center pr-2"
+                        style={{ width: 64, background: 'linear-gradient(to right, transparent, rgba(0,0,0,0.55))' }}
+                    >
+                        <ChevronsRight
+                            className="w-4 h-4 ml-auto animate-pulse"
+                            style={{ color: 'var(--accent)', opacity: 0.7 }}
+                        />
+                    </div>
+                )}
                 {/* Ruler */}
                 <div className="flex h-6 border-b border-white/5 bg-black/20 sticky top-0 z-10 shrink-0">
                     <div className="w-32 border-r shrink-0" style={{ borderColor: "var(--line-soft)", background: "var(--bg-2)" }}></div>

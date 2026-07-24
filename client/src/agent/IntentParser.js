@@ -313,6 +313,24 @@ const NLP_MAP = {
     ],
     // ── Auto-captions: must be a dedicated category so it is caught BEFORE
     // the generic 'text' category, which maps to add_text_overlay.
+    removeSpeaker: [
+        'remove the interviewer', 'cut the interviewer', 'delete the interviewer',
+        'remove the host', 'cut the host', 'delete the host',
+        'remove the guest', 'cut the guest', 'delete the guest',
+        'remove the speaker', 'cut the speaker', 'remove speaker',
+        'remove everything the interviewer says', 'cut everything the interviewer says',
+        'remove everything the host says', 'remove everything the guest says',
+        'delete all interviewer', 'delete all guest', 'delete all host',
+        // French
+        'supprimer l\'intervieweur', 'supprimer l\'animateur', 'supprimer l\'invité',
+        'retirer l\'intervieweur', 'enlever l\'interviewer', 'couper l\'interviewer',
+    ],
+    semanticCut: [
+        'remove where i', 'remove the part where', 'cut the part where',
+        'delete the part where', 'remove where he', 'remove where she',
+        'cut where i', 'remove the section where', 'cut the section where',
+        'remove when i', 'cut when i', 'find and remove', 'find and cut',
+    ],
     autoCaptions: [
         'add captions', 'add caption', 'auto captions', 'auto caption',
         'captions', 'generate captions', 'add subtitles', 'subtitles',
@@ -602,6 +620,52 @@ export class IntentParser {
                 parameters: {},
                 confidence: 'HIGH',
                 missingParameters: []
+            };
+        }
+
+        // ── Remove repetition — must be deterministic to avoid conversation-history
+        // contamination (GPT-4o can mis-map "remove repetition" → silence_removal when
+        // prior turns involved silence operations).
+        if (matches('removeRepetition')) {
+            return {
+                intent: 'edit',
+                operation: 'remove_repetition',
+                parameters: {},
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+
+        // ── Remove speaker — "remove the interviewer / guest / host" ─────────
+        // Deterministic: caught before API to prevent mis-routing. Role is resolved
+        // from speakerMap at execution time (interviewer → SPEAKER_00 or SPEAKER_01).
+        if (matches('removeSpeaker')) {
+            const roleMatch = lower.match(/\b(interview(?:er|ee)?|host|guest|speaker\s*\d*)\b/i);
+            const rawRole   = (roleMatch?.[1] || '').toLowerCase();
+            const role      = rawRole.startsWith('interview') ? 'interviewer'
+                            : rawRole === 'host'              ? 'interviewer'
+                            : rawRole === 'guest'             ? 'guest'
+                            : null;
+            return {
+                intent: 'edit',
+                operation: 'remove_speaker',
+                parameters: { role: role || 'unknown' },
+                confidence: 'HIGH',
+                missingParameters: role ? [] : ['role'],
+            };
+        }
+
+        // ── Semantic cut — "remove the part where I hesitate / mention X" ───
+        // Cannot be fully resolved locally (needs word timestamps from GPT-4o).
+        // We still catch it here to set operation correctly; GPT-4o in EditPlanner
+        // resolves the exact start/end from SpeakerWordTimestamps in context.
+        if (matches('semanticCut')) {
+            return {
+                intent: 'edit',
+                operation: 'semantic_cut',
+                parameters: { description: lower },
+                confidence: 'HIGH',
+                missingParameters: [],
             };
         }
 

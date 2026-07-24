@@ -23,12 +23,15 @@ export default function AuthPage() {
     const { t } = useTranslation('auth');
     const { migrateSession, clearSession } = useSessionStore();
 
-    const [tab, setTab]           = useState('signin'); // 'signin' | 'signup'
-    const [email, setEmail]       = useState('');
-    const [password, setPassword] = useState('');
-    const [loading, setLoading]   = useState(false);
-    const [error, setError]       = useState(null);
-    const [success, setSuccess]   = useState(null);
+    const [tab, setTab]               = useState('signin'); // 'signin' | 'signup'
+    const [email, setEmail]           = useState('');
+    const [password, setPassword]     = useState('');
+    const [fullName, setFullName]     = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [role, setRole]             = useState('');
+    const [loading, setLoading]       = useState(false);
+    const [error, setError]           = useState(null);
+    const [success, setSuccess]       = useState(null);
     const [currentUser, setCurrentUser] = useState(undefined); // undefined = loading
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [deleteLoading, setDeleteLoading] = useState(false);
@@ -84,8 +87,20 @@ export default function AuthPage() {
             setError(t('error.emailInvalid'));
             return;
         }
+        if (!fullName.trim()) {
+            setError(t('error.fullNameRequired'));
+            return;
+        }
         if (password.length < 6) {
             setError(t('error.passwordTooShort'));
+            return;
+        }
+        if (password !== confirmPassword) {
+            setError(t('error.passwordMismatch'));
+            return;
+        }
+        if (!role) {
+            setError(t('error.roleRequired'));
             return;
         }
         setLoading(true);
@@ -115,7 +130,7 @@ export default function AuthPage() {
                         'Content-Type': 'application/json',
                         Authorization: `Bearer ${data.session.access_token}`,
                     },
-                    body: JSON.stringify({ email: cleanEmail }),
+                    body: JSON.stringify({ email: cleanEmail, fullName: fullName.trim(), role }),
                 });
                 await migrateSession(data.user.id);
                 navigate('/dashboard');
@@ -291,7 +306,7 @@ export default function AuthPage() {
                 </div>
 
                 {/* Tabs */}
-                <TabBar tab={tab} setTab={(v) => { setTab(v); setError(null); setSuccess(null); }} t={t} />
+                <TabBar tab={tab} setTab={(v) => { setTab(v); setError(null); setSuccess(null); setFullName(''); setConfirmPassword(''); setRole(''); }} t={t} />
 
                 {/* Success message */}
                 {success && (
@@ -333,6 +348,23 @@ export default function AuthPage() {
                             style={inputStyle}
                         />
                     </Field>
+
+                    {tab === 'signup' && (
+                        <Field label={t('field.fullName')} id="fullName">
+                            <input
+                                id="fullName"
+                                type="text"
+                                placeholder={t('field.fullNamePlaceholder')}
+                                value={fullName}
+                                onChange={e => setFullName(e.target.value)}
+                                required
+                                maxLength={100}
+                                autoComplete="name"
+                                style={inputStyle}
+                            />
+                        </Field>
+                    )}
+
                     <Field label={t('field.password')} id="password">
                         <input
                             id="password"
@@ -347,6 +379,39 @@ export default function AuthPage() {
                             style={inputStyle}
                         />
                     </Field>
+
+                    {tab === 'signup' && (
+                        <Field label={t('field.confirmPassword')} id="confirmPassword">
+                            <input
+                                id="confirmPassword"
+                                type="password"
+                                placeholder={t('field.confirmPasswordPlaceholder')}
+                                value={confirmPassword}
+                                onChange={e => setConfirmPassword(e.target.value)}
+                                required
+                                maxLength={128}
+                                autoComplete="new-password"
+                                style={inputStyle}
+                            />
+                        </Field>
+                    )}
+
+                    {tab === 'signup' && (
+                        <Field label={t('field.role')} id="role">
+                            <select
+                                id="role"
+                                value={role}
+                                onChange={e => setRole(e.target.value)}
+                                required
+                                style={{ ...inputStyle, cursor: 'pointer', appearance: 'auto' }}
+                            >
+                                <option value="" disabled>{t('field.rolePlaceholder')}</option>
+                                {['content_creator', 'podcaster', 'filmmaker', 'business', 'freelancer', 'other'].map(k => (
+                                    <option key={k} value={k}>{t(`field.roles.${k}`)}</option>
+                                ))}
+                            </select>
+                        </Field>
+                    )}
 
                     <button
                         type="submit"

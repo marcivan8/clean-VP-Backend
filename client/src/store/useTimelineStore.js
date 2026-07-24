@@ -164,6 +164,10 @@ const useTimelineStore = create(
             // Long-Form Intelligence Engine — stores ContentAnalyzer result
             contentAnalysis: null,
 
+            // Speaker diarization map — populated after split_speakers completes.
+            // Shape: { SPEAKER_00: { role: 'interviewer'|'guest'|null, label: string|null, words: [{word, start, end}] } }
+            speakerMap: {},
+
             // Preview
             previewQuality: 'high',
 
@@ -394,6 +398,15 @@ const useTimelineStore = create(
             // Long-Form Intelligence Engine
             setContentAnalysis: (analysis) => set({ contentAnalysis: analysis }),
             clearContentAnalysis: () => set({ contentAnalysis: null }),
+
+            // Speaker diarization
+            setSpeakerMap: (speakerMap) => set({ speakerMap }),
+            setSpeakerRole: (speakerId, role, label = null) => set(state => ({
+                speakerMap: {
+                    ...state.speakerMap,
+                    [speakerId]: { ...(state.speakerMap[speakerId] || {}), role, label },
+                }
+            })),
 
             /**
              * Move a clip to the front of its track (position 0).
@@ -763,6 +776,12 @@ const useTimelineStore = create(
                     type: 'text',
                     order: 0 // text tracks go on top
                 }));
+                set({ tracks: timelineManager.toLegacyTracks() });
+            },
+
+            removeTrack: (trackId) => {
+                get()._saveHistory();
+                timelineManager.dispatch(TimelineActions.removeLayer(trackId));
                 set({ tracks: timelineManager.toLegacyTracks() });
             },
 

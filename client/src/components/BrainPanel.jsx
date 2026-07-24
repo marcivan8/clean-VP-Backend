@@ -273,7 +273,10 @@ const BrainPanel = ({ brainOutput, isProcessing, onSendCommand, onSendFeedback }
     if (!hasContent && !isProcessing) return null;
 
     const handleAccept = (suggestion) => {
-        const commandText = suggestion?.command || suggestion?.label || suggestion?.type;
+        // Prefer human-readable text over machine keys so the standard pipeline
+        // can parse the chip correctly. "Remove silences" → tryLocalFirst matches;
+        // "remove_silences" (snake_case type key) does not, causing GPT-4o to guess.
+        const commandText = suggestion?.text || suggestion?.label || suggestion?.command || suggestion?.type;
         if (commandText) {
             onSendCommand?.(commandText);
         }

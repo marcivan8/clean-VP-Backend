@@ -764,6 +764,38 @@ export class MediaExecutionEngine {
                     });
                 });
 
+                // ── 5. Persist speakerMap ─────────────────────────────────────
+                // Group words by speaker so ContextGenerator can include them in
+                // GPT-4o context — enabling remove_speaker and semantic_cut.
+                const speakerMapInit = {};
+                for (const spk of speakers) {
+                    speakerMapInit[spk] = {
+                        role:  null,
+                        label: null,
+                        words: words.filter(w => w.speaker === spk),
+                    };
+                }
+                useTimelineStore.getState().setSpeakerMap(speakerMapInit);
+                console.log(`[MediaExecutionEngine] speakerMap stored: ${speakers.join(', ')}`);
+
+                // ── 6. Identify speaker roles (non-blocking) ──────────────────
+                // Fire-and-forget: enriches speakerMap with role labels (interviewer/guest).
+                // Failure is safe — speakerMap still works with null roles.
+                authFetch('/api/interview/identify-speakers', {
+                    method: 'POST',
+                    body: JSON.stringify({ words, speakers }),
+                }).then(async r => {
+                    if (!r.ok) return;
+                    const roles = await r.json();
+                    const store = useTimelineStore.getState();
+                    for (const [spk, info] of Object.entries(roles)) {
+                        if (info?.role) {
+                            store.setSpeakerRole(spk, info.role, info.role === 'interviewer' ? 'Interviewer' : 'Guest');
+                        }
+                    }
+                    console.log('[MediaExecutionEngine] speaker roles identified:', JSON.stringify(roles));
+                }).catch(e => console.warn('[MediaExecutionEngine] identify-speakers failed (non-critical):', e.message));
+
                 const summary = speakerTracks
                     .map((t, i) => `Speaker ${i + 1}: ${t.clips.length} clip${t.clips.length !== 1 ? 's' : ''}`)
                     .join(' · ');
@@ -771,7 +803,185 @@ export class MediaExecutionEngine {
                 return {
                     action,
                     success: true,
-                    message: `Split into ${speakerTracks.length} speaker tracks — ${summary}. You can now edit each track independently.`,
+                    message: `Split into ${speakerTracks.length} speaker tracks — ${summary}. You can now say "remove the interviewer" or "cut everything the guest says".`,
+                };
+            }
+
+            // ── Remove speaker — "remove everything the interviewer says" ────────
+            // Reads speakerMap from store, finds the target speaker by role or id,
+            // groups their word timestamps into continuous segments, and cuts each
+            // from the timeline using the existing silence_removal segment logic.
+            case 'remove_speaker': {
+                const rsStore = useTimelineStore.getState();
+                const { speakerMap } = rsStore;
+
+                if (!speakerMap || Object.keys(speakerMap).length === 0) {
+                    return {
+                        action, success: false,
+                        message: 'No speaker data found. Run "split speakers" first so I can identify who said what.',
+                    };
+                }
+
+                // Resolve speaker by role or explicit id
+                const { role, speakerId } = args;
+                let targetId = speakerId || null;
+
+                if (!targetId && role) {
+                    // Match by role (set by identify-speakers) or by label substring
+                    const normalizedRole = role.toLowerCase();
+                    for (const [id, info] of Object.entries(speakerMap)) {
+                        const infoRole  = (info.role  || '').toLowerCase();
+                        const infoLabel = (info.label || '').toLowerCase();
+                        if (infoRole === normalizedRole || infoLabel.includes(normalizedRole)) {
+                            targetId = id;
+                            break;
+                        }
+                    }
+                }
+
+                // Fallback: if role is 'interviewer' and no match, pick the speaker
+                // with fewer total words (interviewers speak less than guests on average).
+                if (!targetId && role) {
+                    const sorted = Object.entries(speakerMap).sort(
+                        (a, b) => (a[1].words?.length || 0) - (b[1].words?.length || 0)
+                    );
+                    const isInterviewerLookup = /interview|host/.test(role.toLowerCase());
+                    targetId = isInterviewerLookup ? sorted[0]?.[0] : sorted[sorted.length - 1]?.[0];
+                    console.warn(`[MediaExecutionEngine] remove_speaker: no role match for "${role}", falling back to word-count heuristic → ${targetId}`);
+                }
+
+                if (!targetId || !speakerMap[targetId]) {
+                    return {
+                        action, success: false,
+                        message: `I couldn't identify a "${role}" in the speaker data. Try "split speakers" again — I'll label the interviewer and guest automatically.`,
+                    };
+                }
+
+                const targetInfo = speakerMap[targetId];
+                const targetWords = targetInfo.words || [];
+                if (targetWords.length === 0) {
+                    return { action, success: true, message: `No words found for ${targetInfo.label || targetId}.` };
+                }
+
+                // Group consecutive words (gap ≤ 0.5s) into segments to cut
+                const MERGE_GAP = 0.5;
+                const segments = [];
+                let segStart = targetWords[0].start;
+                let segEnd   = targetWords[0].end;
+
+                for (let i = 1; i < targetWords.length; i++) {
+                    const w = targetWords[i];
+                    if ((w.start - segEnd) <= MERGE_GAP) {
+                        segEnd = w.end;
+                    } else {
+                        segments.push({ start: segStart, end: segEnd });
+                        segStart = w.start;
+                        segEnd   = w.end;
+                    }
+                }
+                segments.push({ start: segStart, end: segEnd });
+
+                console.log(`[MediaExecutionEngine] remove_speaker: cutting ${segments.length} segments for ${targetId} (${targetInfo.role || 'unknown role'})`);
+
+                // Apply cuts in reverse order so earlier indices stay valid
+                const videoTrack = useTimelineStore.getState().tracks?.find(t => t.type === 'video');
+                if (!videoTrack) {
+                    return { action, success: false, message: 'No video track found.' };
+                }
+
+                let cutCount = 0;
+                for (const seg of [...segments].reverse()) {
+                    const clipsInRange = videoTrack.clips.filter(c =>
+                        c.start < seg.end && (c.start + c.duration) > seg.start
+                    );
+                    for (const clip of clipsInRange) {
+                        const clipEnd = clip.start + clip.duration;
+                        // Full removal
+                        if (clip.start >= seg.start && clipEnd <= seg.end) {
+                            useTimelineStore.getState().removeClip(videoTrack.id, clip.id);
+                            cutCount++;
+                        } else if (clip.start < seg.start && clipEnd > seg.end) {
+                            // Segment is in the middle — trim the clip (keep before seg)
+                            useTimelineStore.getState().updateClip(videoTrack.id, clip.id, { duration: seg.start - clip.start });
+                            cutCount++;
+                        } else if (clip.start < seg.end && clipEnd > seg.start) {
+                            // Partial overlap — trim to exclude the speaker segment
+                            if (clip.start < seg.start) {
+                                useTimelineStore.getState().updateClip(videoTrack.id, clip.id, { duration: seg.start - clip.start });
+                            } else {
+                                const newStart = seg.end;
+                                const newDur   = clipEnd - seg.end;
+                                if (newDur > 0.1) {
+                                    useTimelineStore.getState().updateClip(videoTrack.id, clip.id, { start: newStart, offset: (clip.offset || 0) + (seg.end - clip.start), duration: newDur });
+                                } else {
+                                    useTimelineStore.getState().removeClip(videoTrack.id, clip.id);
+                                }
+                                cutCount++;
+                            }
+                        }
+                    }
+                }
+
+                const label = targetInfo.label || targetInfo.role || targetId;
+                return {
+                    action, success: true,
+                    message: `Removed ${cutCount} segment${cutCount !== 1 ? 's' : ''} from ${label} — ${segments.length} speaking turn${segments.length !== 1 ? 's' : ''} cut.`,
+                };
+            }
+
+            // ── Semantic cut — "remove the part where I hesitate to say X" ────────
+            // GPT-4o already resolved { start, end } from SpeakerWordTimestamps in
+            // context during the planning phase. We just apply the cut here.
+            // If start/end are missing, we return a helpful error so the user can
+            // rephrase more specifically.
+            case 'semantic_cut': {
+                const { description, start, end } = args;
+
+                if (start == null || end == null) {
+                    return {
+                        action, success: false,
+                        message: `I wasn't able to locate that specific moment in the transcript. Try phrasing it with a keyword: "remove the part where I say [specific word or phrase]".`,
+                    };
+                }
+
+                if (typeof start !== 'number' || typeof end !== 'number' || end <= start) {
+                    return {
+                        action, success: false,
+                        message: `Invalid segment range: start=${start}, end=${end}. The AI may have returned bad timestamps.`,
+                    };
+                }
+
+                // Use the existing cut_segment-style logic: find clips in range and trim/remove
+                const scStore = useTimelineStore.getState();
+                const scTrack = scStore.tracks?.find(t => t.type === 'video');
+                if (!scTrack) return { action, success: false, message: 'No video track found.' };
+
+                const clipsInRange = scTrack.clips.filter(c => c.start < end && (c.start + c.duration) > start);
+                let cutCount = 0;
+
+                for (const clip of [...clipsInRange].reverse()) {
+                    const clipEnd = clip.start + clip.duration;
+                    if (clip.start >= start && clipEnd <= end) {
+                        scStore.removeClip(scTrack.id, clip.id);
+                        cutCount++;
+                    } else if (clip.start < start) {
+                        scStore.updateClip(scTrack.id, clip.id, { duration: start - clip.start });
+                        cutCount++;
+                    } else {
+                        const newDur = clipEnd - end;
+                        if (newDur > 0.1) {
+                            scStore.updateClip(scTrack.id, clip.id, { start: end, offset: (clip.offset || 0) + (end - clip.start), duration: newDur });
+                        } else {
+                            scStore.removeClip(scTrack.id, clip.id);
+                        }
+                        cutCount++;
+                    }
+                }
+
+                const durSec = (end - start).toFixed(1);
+                return {
+                    action, success: true,
+                    message: `Cut ${durSec}s segment (${start.toFixed(2)}s – ${end.toFixed(2)}s)${description ? ` — "${description.slice(0, 60)}"` : ''}.`,
                 };
             }
 
