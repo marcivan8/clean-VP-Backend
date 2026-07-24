@@ -72,6 +72,10 @@ class PlaybackEngine {
         this.lastFrameRendered = null; // Debug info
         this.currentUrl = null; // Cache URL for resume
 
+        // Perf counters
+        this._lastTickNotify = 0;  // Throttle onTick to ~12fps so React re-renders don't flood main thread
+        this._playGeneration = 0;  // Incremented on every play()/pause() to abort stale preload awaits
+
         this.gradingParams = {
             brightness: 1.0,
             contrast: 1.0,
@@ -109,6 +113,9 @@ class PlaybackEngine {
 
         // Initialize Audio Context & Worklet
         this.initAudio();
+
+        // Bind loop once so requestAnimationFrame doesn't create a new function object at 60fps
+        this._boundLoop = this.loop.bind(this);
 
         console.log('[PlaybackEngine] Initialized with WebGL2');
 
@@ -282,10 +289,11 @@ class PlaybackEngine {
         const fs = this.createShader(gl, gl.FRAGMENT_SHADER, fsSource);
         this.program = this.createProgram(gl, vs, fs);
 
-        // Look up locations
+        // Look up locations (cached once — never call getUniformLocation inside the render loop)
         this.loc = {
             position:   gl.getAttribLocation(this.program,  "a_position"),
             texCoord:   gl.getAttribLocation(this.program,  "a_texCoord"),
+            image:      gl.getUniformLocation(this.program, "u_image"),      // sampler — was called every frame!
             brightness: gl.getUniformLocation(this.program, "u_brightness"),
             contrast:   gl.getUniformLocation(this.program, "u_contrast"),
             saturation: gl.getUniformLocation(this.program, "u_saturation"),
@@ -467,6 +475,13 @@ class PlaybackEngine {
         // If already playing, do nothing
         if (this._state === PlaybackState.PLAYING) return;
 
+        // If already preloading this URL, don't stack a second preload loop — just wait
+        if (this._state === PlaybackState.PRELOADING) return;
+
+        // Generation stamp: pause() increments this, so any preload started before
+        // a pause() call will see the mismatch and bail without starting playback.
+        const myGeneration = ++this._playGeneration;
+
         // If we have a new URL or buffers are empty, go to PRELOADING
         const needsPreload = !this.isPreloadComplete();
 
@@ -484,12 +499,15 @@ class PlaybackEngine {
             const preloadTimeout = 5000; // 5 seconds max
             const startTime = Date.now();
 
-            await new Promise((resolve, reject) => {
+            await new Promise((resolve) => {
                 const checkPreload = () => {
+                    // Bail immediately if a newer play()/pause() call superseded us
+                    if (myGeneration !== this._playGeneration || this.isDestroyed) {
+                        resolve();
+                        return;
+                    }
                     if (this.isPreloadComplete()) {
                         resolve();
-                    } else if (this.isDestroyed) {
-                        reject(new Error('Engine destroyed during preload'));
                     } else if (Date.now() - startTime > preloadTimeout) {
                         console.warn('[PlaybackEngine] Preload timeout, starting anyway');
                         resolve(); // Start anyway with partial buffer
@@ -500,8 +518,14 @@ class PlaybackEngine {
                 checkPreload();
             });
 
+            // If we were superseded (pause() was called, or a new play() arrived), abort
+            if (myGeneration !== this._playGeneration || this.isDestroyed) return;
+
             this.setState(PlaybackState.READY);
         }
+
+        // Final generation check before committing to PLAYING
+        if (myGeneration !== this._playGeneration || this.isDestroyed) return;
 
         // Now start playback
         this.setState(PlaybackState.PLAYING);
@@ -511,8 +535,10 @@ class PlaybackEngine {
     }
 
     pause() {
-        if (this._state !== PlaybackState.PLAYING) return;
+        // Also abort a PRELOADING state: increment generation so the preload await exits
+        if (this._state !== PlaybackState.PLAYING && this._state !== PlaybackState.PRELOADING) return;
 
+        this._playGeneration++; // Signals any in-flight play() preload to abort
         this.setState(PlaybackState.PAUSED);
         this.clock.pause();
         this.stopLoop();
@@ -1085,7 +1111,7 @@ class PlaybackEngine {
 
     startLoop() {
         if (this.rafId) return; // évite le double démarrage
-        this.rafId = requestAnimationFrame(this.loop.bind(this));
+        this.rafId = requestAnimationFrame(this._boundLoop);
     }
 
     stopLoop() {
@@ -1096,15 +1122,22 @@ class PlaybackEngine {
     }
 
     loop() {
-        // Schedule next tick
-        this.rafId = requestAnimationFrame(this.loop.bind(this));
+        // Schedule next tick (using pre-bound reference — avoids creating a new function at 60fps)
+        this.rafId = requestAnimationFrame(this._boundLoop);
 
         if (!this.clock.isPlaying) return;
 
         const masterTime = this.clock.getCurrentTime();
 
-        // 1. Notify external subscribers (e.g. UI scrubber)
-        this.onTick(masterTime);
+        // 1. Notify external subscribers (e.g. UI scrubber) — throttled to ~12fps.
+        // Canvas rendering continues at full 60fps; only the React store update is throttled
+        // to prevent flooding Zustand with 60 state updates/second which would trigger
+        // VideoPlayer re-renders at 60fps and saturate the main thread during user interaction.
+        const now = performance.now();
+        if (now - this._lastTickNotify >= 80) {
+            this.onTick(masterTime);
+            this._lastTickNotify = now;
+        }
 
         // 2. Drift Correction & Frame Selection
         let candidate = this.buffer.peek();
@@ -1114,7 +1147,7 @@ class PlaybackEngine {
 
         // Skip frames that are too old (Drift Correction)
         while (candidate && candidate.timestamp < masterTime - this.driftTolerance) {
-            console.warn(`[Drift] Dropping late frame: ${candidate.timestamp.toFixed(3)}s (Master: ${masterTime.toFixed(3)}s)`);
+            console.debug(`[Drift] Dropping late frame: ${candidate.timestamp.toFixed(3)}s (Master: ${masterTime.toFixed(3)}s)`);
 
             // Release logic
             const dropped = this.buffer.pop();
@@ -1172,7 +1205,7 @@ class PlaybackEngine {
         // Need to be careful about format. VideoFrame usually RGBA or similar.
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frameItem.data);
 
-        gl.uniform1i(gl.getUniformLocation(this.program, "u_image"), 0);
+        gl.uniform1i(this.loc.image, 0); // cached in initGL() — never look this up per-frame
 
         // Update Uniforms
         gl.uniform1f(this.loc.brightness, this.gradingParams.brightness);

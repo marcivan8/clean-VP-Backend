@@ -119,22 +119,31 @@ const VideoPlayer = () => {
     useEffect(() => {
         if (!engineRef.current) return;
 
-        // Find active clip URL if available
-        // (activeClip is now derived in component scope)
-
-        // Resolve URL from assets
-        // Resolve URL from assets
-        let mediaUrl = activeClip?.url;
-        if (!mediaUrl && activeClip?.assetId) {
+        // Resolve the best available URL for this clip.
+        // Priority: asset.proxyUrl > clip.url > asset.url (raw).
+        // We must always check asset.proxyUrl first: a clip may have been created with
+        // clip.url pointing at a raw unprocessed upload.  Once the proxy job finishes,
+        // assets[].proxyUrl is set and this effect re-runs — the engine then switches
+        // to the streamable proxy automatically.
+        let mediaUrl = null;
+        if (activeClip?.assetId) {
             const asset = assets.find(a => a.id === activeClip.assetId);
-            // Prefer proxy for playback if available
-            mediaUrl = asset?.proxyUrl || asset?.url;
-            if (mediaUrl && (mediaUrl.startsWith('proxies/') || mediaUrl.startsWith('raw/'))) {
-                mediaUrl = `/api/proxy/gcs-media/${mediaUrl}`;
-            }
             if (asset?.proxyUrl) {
-                console.log(`[VideoPlayer] Using Proxy: ${mediaUrl}`);
+                mediaUrl = asset.proxyUrl;
+                if (mediaUrl.startsWith('proxies/') || mediaUrl.startsWith('raw/')) {
+                    mediaUrl = `/api/proxy/gcs-media/${mediaUrl}`;
+                }
+            } else if (activeClip?.url) {
+                // Proxy not ready yet — use the clip's stored URL as a fallback
+                mediaUrl = activeClip.url;
+            } else if (asset?.url) {
+                mediaUrl = asset.url;
+                if (mediaUrl.startsWith('proxies/') || mediaUrl.startsWith('raw/')) {
+                    mediaUrl = `/api/proxy/gcs-media/${mediaUrl}`;
+                }
             }
+        } else {
+            mediaUrl = activeClip?.url || null;
         }
 
         // --- URL Sync Fix for Paused State ---
@@ -144,50 +153,33 @@ const VideoPlayer = () => {
             // If playing, play() handles it below. But if paused, we must explicit load.
             if (!isPlaying) {
                 engineRef.current.load(mediaUrl);
-                // Force a seek to refresh the frame (since load() sends START_GENERATING frame 0?)
-                // Actually load() triggers START_GENERATING with currentTime.
-                // So the frame should arrive.
             }
-        } else if (!mediaUrl) {
-            // No active clip, clear the canvas
+        } else if (!mediaUrl && !activeClip) {
+            // No clip on the timeline at all — clear to black.
+            // If activeClip exists but mediaUrl is null (proxy still generating),
+            // we leave the canvas as-is rather than clearing it.
             engineRef.current.clearCanvas();
         }
 
         if (isPlaying) {
             if (activeClip) {
-                console.log('[VideoPlayer] Active Clip:', mediaUrl);
-                engineRef.current.play(mediaUrl);
-                // Initial Grading & Volume
-                if (activeClip.grading) {
-                    engineRef.current.setGrading({
-                        brightness: activeClip.grading.brightness,
-                        contrast: activeClip.grading.contrast,
-                        saturate: activeClip.grading.saturate,
-                        hueRotate: activeClip.grading.hueRotate,
-                        selective: activeClip.grading.selective
-                    });
+                if (!mediaUrl) {
+                    // Proxy not yet generated for this clip — don't hand the engine a null URL
+                    // or a huge unprocessed raw file that can't stream.  The assets array will
+                    // update when the proxy job finishes, re-triggering this effect with a real URL.
+                    console.log('[VideoPlayer] Proxy not ready yet — waiting for generation job to finish');
                 } else {
-                    engineRef.current.setGrading({});
-                }
-                // Set Volume
-                engineRef.current.setMasterVolume(activeClip.volume !== undefined ? activeClip.volume : 1.0);
-                // Virtual multicam crop — apply the stored crop region if present
-                if (activeClip.virtualCam) {
-                    const { cropX = 0, cropY = 0, cropW = 1, cropH = 1 } = activeClip.virtualCam;
-                    engineRef.current.setCrop(cropX, cropY, cropW, cropH);
-                } else {
-                    engineRef.current.setCrop(0, 0, 1, 1); // full frame
+                    engineRef.current.play(mediaUrl);
                 }
             } else {
-                console.warn('[VideoPlayer] Playing without Active Clip URL');
                 engineRef.current.resumeAudio();
-                engineRef.current.play(); // May fail if no URL cached
+                engineRef.current.play(); // No active clip — attempt resume on cached URL
             }
         } else {
             engineRef.current.pause();
         }
 
-        // Sync Grading & Volume (Real-time updates)
+        // Sync grading, volume, and virtual-cam crop — runs for both playing and paused states.
         if (engineRef.current) {
             // Update Grading Real-time
             if (activeClip && activeClip.grading) {
@@ -436,12 +428,22 @@ const VideoPlayer = () => {
         }
     }
 
+    // Show overlay when user presses play but no proxy exists yet.
+    // Computed here (not in the effect) so it stays reactive to the store subscription.
+    const proxyGenerating = (() => {
+        if (!isPlaying || !activeClip) return false;
+        if (!activeClip.assetId) return !activeClip.url;
+        const asset = assets.find(a => a.id === activeClip.assetId);
+        return !(asset?.proxyUrl || activeClip?.url);
+    })();
+
     return (
         <div
             ref={containerRef}
             className="relative w-full h-full flex items-center justify-center bg-black overflow-hidden"
             style={{ aspectRatio: dynamicRatio }}
         >
+            {proxyGenerating && <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>}
             {/* The Custom Rendering Surface */}
             <canvas
                 ref={canvasRef}
@@ -454,6 +456,29 @@ const VideoPlayer = () => {
                     transformOrigin,
                 }}
             />
+
+            {/* Proxy still generating — shown when user presses play before the
+                background proxy job finishes. Engine is NOT started in this state. */}
+            {proxyGenerating && (
+                <div style={{
+                    position: 'absolute', inset: 0,
+                    display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(0,0,0,0.72)',
+                    color: 'var(--fg-2, #a0a0b0)',
+                    fontSize: 13,
+                    fontFamily: 'var(--f-sans, system-ui)',
+                    gap: 10,
+                    pointerEvents: 'none',
+                }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                        style={{ animation: 'spin 1s linear infinite', opacity: 0.7 }}
+                        xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                    </svg>
+                    Generating preview…
+                </div>
+            )}
         </div>
     );
 };
