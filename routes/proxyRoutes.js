@@ -100,6 +100,31 @@ router.post('/generate', authMiddleware, async (req, res) => {
 
 const storageConfig = require('../config/storage');
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GCS retry helper
+// Wraps a single GCS API call with up to `attempts` retries on transient
+// network errors (socket hang up / ECONNRESET from Railway → GCS).
+// Auth errors (401/403) and not-found (404) are rethrown immediately — retrying
+// them wastes time and would mask real problems.
+// ─────────────────────────────────────────────────────────────────────────────
+async function gcsRetry(fn, label, attempts = 3) {
+    let lastErr;
+    for (let i = 1; i <= attempts; i++) {
+        try {
+            return await fn();
+        } catch (err) {
+            lastErr = err;
+            const code = err.code ?? err.response?.statusCode;
+            if (code === 404 || code === 403 || code === 401) throw err; // deterministic — no point retrying
+            if (i < attempts) {
+                console.warn(`[proxy/gcs-media] ${label} attempt ${i}/${attempts} failed: ${err.message} — retrying in ${250 * i}ms`);
+                await new Promise(r => setTimeout(r, 250 * i)); // 250ms → 500ms → 750ms
+            }
+        }
+    }
+    throw lastErr;
+}
+
 // ── In-memory segment cache ───────────────────────────────────────────────────
 // Caches small GCS objects (HLS .ts segments, .m3u8 playlists) so seek-backs
 // after playback.reload() are instant instead of re-fetching from GCS each time.
@@ -337,12 +362,20 @@ router.get('/gcs-media/*', async (req, res) => {
 
         // ── Cache miss: fetch from GCS ─────────────────────────────────────
         const file = bucket.file(gcsPath);
-        const [exists] = await file.exists();
-        if (!exists) return res.status(404).end();
 
-        // Fetch metadata once — needed for Content-Length (full response) and
-        // Content-Range (range response). Always required for video seeking.
-        const [metadata] = await file.getMetadata();
+        // Single retried getMetadata() replaces the old exists() + getMetadata() two-call
+        // pattern.  getMetadata() throws ApiError{code:404} when the object doesn't exist,
+        // so we get not-found detection for free without an extra round-trip.
+        // Retrying covers the "socket hang up" / ECONNRESET that Railway → GCS occasionally
+        // produces on stale connection-pool sockets.
+        let metadata;
+        try {
+            [metadata] = await gcsRetry(() => file.getMetadata(), 'getMetadata');
+        } catch (metaErr) {
+            const code = metaErr.code ?? metaErr.response?.statusCode;
+            if (code === 404) return res.status(404).end();
+            throw metaErr; // re-throw to outer catch for logging + 500
+        }
         const fileSize = parseInt(metadata.size);
 
         if (req.headers.range) {
