@@ -19,7 +19,7 @@
 const { Worker } = require('bullmq');
 const { supabaseAdmin } = require('../../../config/database.js');
 const { embeddingService } = require('./EmbeddingService.js');
-const { redisConnection } = require('../../../queue/connection.js');
+const { connection: redisConnection } = require('../../../queue/connection.js');
 
 const QUEUE_NAME = 'asset-embeddings';
 const BATCH_SIZE = 20;
