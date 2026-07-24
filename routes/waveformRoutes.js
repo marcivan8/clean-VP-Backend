@@ -160,13 +160,38 @@ router.post('/extract', optionalAuth, async (req, res) => {
         const jsonStr   = JSON.stringify(peaksData);
 
         // ── 4. Store result ───────────────────────────────────────────────────
-        let peaksUrl;
+        let peaksUrl = null;
 
         if (useGCS) {
-            await storageConfig.bucket
-                .file(gcsDestPath)
-                .save(jsonStr, { contentType: 'application/json', resumable: false });
-            peaksUrl = `/api/proxy/gcs-media/${gcsDestPath}`;
+            // Retry up to 3 times — GCS uploads on Railway can fail with a transient
+            // "socket hang up" (ECONNRESET) when the connection pool serves a stale
+            // socket.  Simple backoff (500ms, 1s, 2s) covers the vast majority of cases.
+            const GCS_RETRIES = 3;
+            let lastUploadErr = null;
+
+            for (let attempt = 1; attempt <= GCS_RETRIES; attempt++) {
+                try {
+                    await storageConfig.bucket
+                        .file(gcsDestPath)
+                        .save(jsonStr, { contentType: 'application/json', resumable: false });
+                    peaksUrl = `/api/proxy/gcs-media/${gcsDestPath}`;
+                    lastUploadErr = null;
+                    break;
+                } catch (uploadErr) {
+                    lastUploadErr = uploadErr;
+                    console.warn(`[waveformRoutes] GCS upload attempt ${attempt}/${GCS_RETRIES} failed: ${uploadErr.message}`);
+                    if (attempt < GCS_RETRIES) {
+                        await new Promise(r => setTimeout(r, 500 * attempt)); // 500ms → 1s → 2s
+                    }
+                }
+            }
+
+            // If all retries failed, return peaks inline so the client isn't left empty-handed.
+            // The data is in memory — returning it now is better than a 500 that drops everything.
+            if (lastUploadErr) {
+                console.error('[waveformRoutes] GCS upload failed after retries — returning peaks inline:', lastUploadErr.message);
+                return res.json({ peaksUrl: null, cached: false, peaks: peaksData.peaks, duration: peaksData.duration });
+            }
         } else {
             const localDir = path.join(__dirname, '../uploads/waveforms', userId);
             fs.mkdirSync(localDir, { recursive: true });

@@ -66,7 +66,16 @@ export function usePeaks(assetId, gcsPath, proxyUrl) {
                     throw new Error(`Waveform extract failed: ${extractRes.status}`);
                 }
 
-                const { peaksUrl } = await extractRes.json();
+                const { peaksUrl, peaks: inlinePeaks, duration: inlineDuration } = await extractRes.json();
+
+                // If the GCS upload failed after retries, the server returns peaks inline
+                // rather than a URL (peaksUrl === null).  Use them directly.
+                if (!peaksUrl) {
+                    if (!inlinePeaks) throw new Error('No peaks data in server response');
+                    const data = { peaks: inlinePeaks, duration: inlineDuration };
+                    _cache.set(assetId, data);
+                    return data;
+                }
 
                 // 2. Fetch the peaks JSON from the returned URL
                 const peaksRes = await fetch(peaksUrl);
