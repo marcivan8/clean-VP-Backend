@@ -74,6 +74,17 @@ const PATTERNS = [
         intent: () => ({ type: 'edit', action: 'silence_removal', constraints: { threshold: '-30dB' }, confidence: 'high' })
     },
 
+    // ── SILENCE REMOVAL — French ───────────────────────────────────────────
+    // "retire les parties où le son est trop bas", "supprimer les silences", etc.
+    {
+        regex: /(?:retir|supprim|enlev|couper?)(?:\w+\s+)*(?:silence|silences|pauses?|parties?\s+silencieuses?)/i,
+        intent: () => ({ type: 'edit', action: 'silence_removal', constraints: { threshold: '-30dB' }, confidence: 'high' })
+    },
+    {
+        regex: /(?:son|audio|volume)\s+trop\s+bas|parties?\s+(?:où\s+le\s+son|silencieuses?)/i,
+        intent: () => ({ type: 'edit', action: 'silence_removal', constraints: { threshold: '-20dB' }, confidence: 'high' })
+    },
+
     {
         regex: /^(?:remove|cut|strip)\s+(?:filler|um+s?|uh+s?|erm+s?|like+s?)\s*(?:words?)?$/i,
         intent: () => ({ type: 'edit', action: 'remove_filler_words', confidence: 'high' })
