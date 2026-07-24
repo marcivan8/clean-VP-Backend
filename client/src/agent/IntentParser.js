@@ -66,6 +66,24 @@ const NLP_MAP = {
         'clean up audio', 'tighten audio', 'remove gaps',
         'no silence', 'without silence', 'kill the silence',
         'eliminate silence', 'trim silence', 'auto trim',
+        // French — silence removal
+        'supprimer les silences', 'supprimer le silence',
+        'couper les silences', 'couper le silence',
+        'enlever les silences', 'enlever le silence',
+        'retirer les silences', 'retirer le silence',
+        'retirer les parties silencieuses', 'supprimer les parties silencieuses',
+        'enlever les parties silencieuses', 'couper les parties silencieuses',
+        'nettoyer l\'audio', 'supprimer les pauses', 'enlever les pauses',
+        'couper les pauses', 'retirer les pauses',
+        'pas de silence', 'sans silence', 'suppression des silences',
+        // French — low-audio / quiet-parts removal ("son trop bas")
+        'son trop bas', 'le son est trop bas', 'son bas',
+        'retirer les parties où le son est trop bas',
+        'retire les parties où le son est trop bas',
+        'supprimer les parties où le son est bas',
+        'enlever les parties où le son est bas',
+        'parties où le son est bas', 'parties silencieuses',
+        'parties trop silencieuses', 'audio trop bas', 'volume trop bas',
     ],
     aspect: [
         'vertical', 'horizontal', 'square', 'portrait', 'landscape',
@@ -449,6 +467,28 @@ export class IntentParser {
         // ── Silence removal (unambiguous verb + object) ──
         if (lower.match(/^(remove|cut|delete|trim)\s+(silence|silences|dead\s*air|pauses|quiet\s*parts|gaps)$/)) {
             return { intent: 'edit', operation: 'silence_removal', parameters: { threshold: '-30dB' }, confidence: 'HIGH', missingParameters: [] };
+        }
+
+        // ── French: silence / low-audio removal ──
+        // Covers "retire les parties où le son est trop bas", "supprimer les silences",
+        // "enlever les pauses", "son trop bas", etc.
+        if (
+            /\b(supprim|retir|enlev|couper?)\b.*\b(silences?|pauses?|parties?\s+silencieuses?)\b/.test(lower) ||
+            /\b(son|audio|volume)\s+trop\s+bas\b/.test(lower) ||
+            /\bparties?\s+(où\s+le\s+son|silencieuses?)\b/.test(lower) ||
+            matches('silence')
+        ) {
+            // Use a slightly higher threshold (-20dB) for "son trop bas" (quiet speech)
+            // vs strict silence (-30dB) to catch more borderline quiet segments.
+            // NOTE: must use `constraints` (not `parameters`) — validateAndNormalize reads constraints.
+            const isQuietSpeech = /\b(trop\s+bas|quiet|low)\b/.test(lower);
+            return {
+                intent: 'edit',
+                operation: 'silence_removal',
+                constraints: { threshold: isQuietSpeech ? '-20dB' : '-30dB' },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
         }
 
         // ── Filler words (unambiguous) ──
