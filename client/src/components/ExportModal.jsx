@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     X, Film, Download, Tv2, Smartphone, Youtube,
     Clapperboard, CheckCircle2, Loader2, AlertCircle,
-    Scissors, ArrowRight,
+    Scissors, ArrowRight, Music2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { exportToNLE } from '../services/nleExportService';
 import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../store/useTimelineStore';
+import { useAudioEngine } from '../hooks/useAudioEngine.js';
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,15 @@ const QUALITY_PROFILES = [
     { id: 'medium', label: 'Social', bitrate: '5 Mbps',  sub: 'Balanced'     },
     { id: 'low',    label: 'Draft',  bitrate: '2 Mbps',  sub: 'Fast render'  },
 ];
+
+const AUDIO_FORMATS = [
+    { value: 'mp3', label: 'MP3', hintKey: 'audioFormatHintMp3' },
+    { value: 'wav', label: 'WAV', hintKey: 'audioFormatHintWav' },
+    { value: 'm4a', label: 'M4A', hintKey: 'audioFormatHintM4a' },
+    { value: 'aac', label: 'AAC', hintKey: 'audioFormatHintAac' },
+];
+
+const AUDIO_BITRATES = ['128k', '192k', '256k', '320k'];
 
 const NLE_TARGETS = [
     { id: 'premiere', label: 'Premiere Pro',    sub: 'xmeml v5',          ext: '.xml'         },
@@ -87,7 +97,36 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
     const [nleError,  setNleError]  = useState(null);
     const [nleLoading, setNleLoading] = useState(null);
 
+    // Audio export tab state
+    const { exportAudio } = useAudioEngine();
+    const [audioFormat,    setAudioFormat]    = useState('mp3');
+    const [audioBitrate,   setAudioBitrate]   = useState('192k');
+    const [audioNormalize, setAudioNormalize] = useState(false);
+    const [audioTrimStart, setAudioTrimStart] = useState('');
+    const [audioTrimEnd,   setAudioTrimEnd]   = useState('');
+    const [audioStatus,    setAudioStatus]    = useState('idle'); // idle | exporting | done | error
+    const [audioError,     setAudioError]     = useState('');
+
     const { tracks, aspectRatio } = useTimelineStore(useShallow(s => ({ tracks: s.tracks, aspectRatio: s.aspectRatio })));
+
+    const handleAudioExport = useCallback(async () => {
+        setAudioStatus('exporting');
+        setAudioError('');
+        try {
+            await exportAudio({
+                format:    audioFormat,
+                bitrate:   audioBitrate,
+                normalize: audioNormalize,
+                trimStart: audioTrimStart ? Number(audioTrimStart) : undefined,
+                trimEnd:   audioTrimEnd   ? Number(audioTrimEnd)   : undefined,
+            });
+            setAudioStatus('done');
+        } catch (e) {
+            console.error('[ExportModal] audio export error:', e.message);
+            setAudioError(e.message);
+            setAudioStatus('error');
+        }
+    }, [exportAudio, audioFormat, audioBitrate, audioNormalize, audioTrimStart, audioTrimEnd]);
 
     useEffect(() => {
         if (isExporting) {
@@ -108,6 +147,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
     const handleClose = () => {
         setStep('configure'); setProgress(0);
         setNleStatus(null); setNleError(null);
+        setAudioStatus('idle'); setAudioError('');
         onClose();
     };
 
@@ -209,6 +249,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                 <div style={{ display: 'flex', gap: 2, padding: '8px 24px 0', background: 'var(--bg-2)' }}>
                     {[
                         { id: 'video', icon: Film,    label: t('exportModal.tabVideo') },
+                        { id: 'audio', icon: Music2,  label: t('exportModal.tabAudio') },
                         { id: 'nle',   icon: Scissors, label: t('exportModal.tabNle') },
                     ].map(tab => {
                         const active = activeTab === tab.id;
@@ -555,6 +596,141 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                             </div>
                         )}
                         </>
+                    )}
+
+                    {/* ════ AUDIO TAB ════ */}
+                    {activeTab === 'audio' && (
+                        <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
+                            <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-4)', lineHeight: 1.6, fontFamily: 'var(--f-mono)' }}>
+                                {t('exportModal.audioDescription')}
+                            </p>
+
+                            {/* Format */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                <Label>{t('exportModal.labelAudioFormat')}</Label>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 6 }}>
+                                    {AUDIO_FORMATS.map(f => {
+                                        const active = audioFormat === f.value;
+                                        return (
+                                            <button key={f.value} onClick={() => setAudioFormat(f.value)} style={selCard(active)}>
+                                                <span style={{ fontSize: 13, fontWeight: 700, color: active ? 'var(--fg)' : 'var(--fg-2)', textAlign: 'center' }}>
+                                                    {f.label}
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                <p style={{ margin: 0, fontSize: 10.5, color: 'var(--fg-4)', fontFamily: 'var(--f-mono)' }}>
+                                    {t(`exportModal.${AUDIO_FORMATS.find(f => f.value === audioFormat)?.hintKey}`)}
+                                </p>
+                            </div>
+
+                            {/* Bitrate (hidden for wav) */}
+                            {audioFormat !== 'wav' && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                    <Label>{t('exportModal.labelAudioBitrate')}</Label>
+                                    <div style={{
+                                        display: 'flex', gap: 2,
+                                        background: 'var(--glass)',
+                                        border: '0.5px solid var(--line)',
+                                        borderRadius: 'var(--r-sm)',
+                                        padding: 3,
+                                    }}>
+                                        {AUDIO_BITRATES.map(b => (
+                                            <button key={b} onClick={() => setAudioBitrate(b)} style={pill(audioBitrate === b)}>
+                                                {b}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Normalize */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <span style={{ fontSize: 12, color: 'var(--fg-2)' }}>{t('exportModal.audioNormalize')}</span>
+                                <button
+                                    onClick={() => setAudioNormalize(n => !n)}
+                                    style={{
+                                        width: 34, height: 18, borderRadius: 9,
+                                        border: 'none', cursor: 'pointer',
+                                        background: audioNormalize
+                                            ? 'linear-gradient(135deg, var(--accent), var(--violet))'
+                                            : 'var(--glass)',
+                                        transition: 'background 0.15s',
+                                        position: 'relative', flexShrink: 0,
+                                    }}
+                                >
+                                    <span style={{
+                                        position: 'absolute',
+                                        top: 2, left: audioNormalize ? 18 : 2,
+                                        width: 14, height: 14, borderRadius: '50%',
+                                        background: '#fff', transition: 'left 0.15s',
+                                    }} />
+                                </button>
+                            </div>
+
+                            {/* Trim */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                    <Label>{t('exportModal.audioTrimStart')}</Label>
+                                    <input
+                                        type="number" min="0" step="0.1" placeholder="0"
+                                        value={audioTrimStart}
+                                        onChange={e => setAudioTrimStart(e.target.value)}
+                                        style={{
+                                            width: '100%', padding: '7px 10px', boxSizing: 'border-box',
+                                            background: 'var(--glass)', border: '0.5px solid var(--line)',
+                                            borderRadius: 'var(--r-sm)', color: 'var(--fg)', fontSize: 12,
+                                            fontFamily: 'var(--f-mono)', outline: 'none',
+                                        }}
+                                    />
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                    <Label>{t('exportModal.audioTrimEnd')}</Label>
+                                    <input
+                                        type="number" min="0" step="0.1" placeholder="end"
+                                        value={audioTrimEnd}
+                                        onChange={e => setAudioTrimEnd(e.target.value)}
+                                        style={{
+                                            width: '100%', padding: '7px 10px', boxSizing: 'border-box',
+                                            background: 'var(--glass)', border: '0.5px solid var(--line)',
+                                            borderRadius: 'var(--r-sm)', color: 'var(--fg)', fontSize: 12,
+                                            fontFamily: 'var(--f-mono)', outline: 'none',
+                                        }}
+                                    />
+                                </div>
+                            </div>
+
+                            {audioStatus === 'error' && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 'var(--r-sm)', background: 'color-mix(in srgb, #f04040 8%, transparent)', border: '0.5px solid color-mix(in srgb, #f04040 25%, transparent)' }}>
+                                    <AlertCircle size={14} style={{ color: '#f04040', flexShrink: 0 }} />
+                                    <span style={{ fontSize: 12, color: '#f04040', fontFamily: 'var(--f-mono)' }}>{audioError}</span>
+                                </div>
+                            )}
+
+                            {/* CTA */}
+                            <button
+                                onClick={audioStatus === 'done' ? () => setAudioStatus('idle') : handleAudioExport}
+                                disabled={audioStatus === 'exporting'}
+                                className="glass-button-pro"
+                                style={{
+                                    width: '100%', padding: '14px 0',
+                                    borderRadius: 'var(--r-md)',
+                                    fontSize: 13, fontWeight: 700, letterSpacing: '0.06em',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                                    cursor: audioStatus === 'exporting' ? 'not-allowed' : 'pointer',
+                                    opacity: audioStatus === 'exporting' ? 0.7 : 1,
+                                }}
+                            >
+                                {audioStatus === 'exporting' ? (
+                                    <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> {t('exportModal.audioExporting')}</>
+                                ) : audioStatus === 'done' ? (
+                                    <><CheckCircle2 size={14} /> {t('exportModal.audioDownloaded')}</>
+                                ) : (
+                                    <><Download size={14} /> {t('exportModal.exportAudioBtn', { format: audioFormat.toUpperCase() })}</>
+                                )}
+                            </button>
+                        </div>
                     )}
 
                     {/* ════ NLE TAB ════ */}
