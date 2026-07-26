@@ -13,6 +13,11 @@
  *   height    {number}   Canvas height in px (default 40)
  *   color     {string}   Waveform bar colour (default semi-transparent white)
  *   loading   {boolean}  Show skeleton placeholder while peaks are loading
+ *   error     {string}   Error message from usePeaks — when set (and peaks
+ *                        never arrived), shows a distinct dashed-line state
+ *                        instead of silently rendering nothing forever. This
+ *                        exists so a broken extraction pipeline is visible
+ *                        during QA instead of looking identical to "loading".
  */
 
 import React, { useEffect, useRef } from 'react';
@@ -25,6 +30,7 @@ const ClipWaveform = ({
     height   = 40,
     color    = 'rgba(255,255,255,0.5)',
     loading  = false,
+    error    = null,
 }) => {
     const containerRef = useRef(null);
     const wsRef        = useRef(null);
@@ -107,6 +113,21 @@ const ClipWaveform = ({
                         background:   'rgba(255,255,255,0.06)',
                         borderRadius: 2,
                         animation:    'pulse 1.4s ease-in-out infinite',
+                    }}
+                />
+            )}
+
+            {/* Extraction failed (server 400/500, etc.) — a flat dashed line so
+                this is visually distinct from "still loading" during QA. See
+                usePeaks.js's console.warn for the actual error message. */}
+            {!loading && !peaks && error && (
+                <div
+                    title={`Waveform unavailable: ${error}`}
+                    style={{
+                        position:        'absolute',
+                        left: 4, right: 4, top: '50%',
+                        borderTop:       '1px dashed rgba(255,255,255,0.25)',
+                        transform:       'translateY(-50%)',
                     }}
                 />
             )}

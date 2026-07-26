@@ -24,6 +24,7 @@ const fs         = require('fs');
 
 const storageConfig  = require('../config/storage');
 const { optionalAuth } = require('../middleware/auth');
+const { deriveGcsPath } = require('../utils/waveformPath');
 
 // ─── Peak extraction ──────────────────────────────────────────────────────────
 
@@ -97,27 +98,7 @@ function extractPeaks(inputPath, inputStream) {
 router.post('/extract', optionalAuth, async (req, res) => {
     const { assetId, gcsPath: rawGcsPath, proxyUrl } = req.body || {};
 
-    // Derive a storage-relative path from proxyUrl when gcsPath is not stored on
-    // the asset. proxyUrl comes from jobs/videoProcessor.js's uploadToStorage(),
-    // which returns TWO different URL shapes depending on storage mode:
-    //   - GCS:   /api/proxy/gcs-media/<destinationPath>
-    //   - local: /uploads/<destinationPath>
-    // Only stripping the GCS marker meant that in local storage mode (the
-    // default when no GOOGLE_CLOUD_BUCKET_NAME/credentials are configured —
-    // see config/storage.js) this always resolved to null, which fell through
-    // to the 400 "gcsPath is required" response below and permanently failed
-    // every waveform extraction — the on-screen symptom being clips with no
-    // waveform at all, forever, in local/dev storage mode.
-    const gcsPath = rawGcsPath || (() => {
-        if (!proxyUrl) return null;
-        const gcsMarker   = '/api/proxy/gcs-media/';
-        const localMarker = '/uploads/';
-        let idx = proxyUrl.indexOf(gcsMarker);
-        if (idx !== -1) return proxyUrl.slice(idx + gcsMarker.length);
-        idx = proxyUrl.indexOf(localMarker);
-        if (idx !== -1) return proxyUrl.slice(idx + localMarker.length);
-        return null;
-    })();
+    const gcsPath = deriveGcsPath(rawGcsPath, proxyUrl);
 
     if (!assetId) {
         return res.status(400).json({ error: 'assetId is required' });

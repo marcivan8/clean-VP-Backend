@@ -552,8 +552,14 @@ const CaptionStylesCard = ({ log }) => {
     const [applied, setApplied] = useState(null);
     const applyStyle = (style) => {
         const { tracks, updateClip } = useTimelineStore.getState();
-        const textTrack = tracks.find(t => t.type === 'text');
-        if (!textTrack) return;
+        // Apply to EVERY text track, not just the first match. tracks.find()
+        // here used to silently leave clips on any second text track (e.g. a
+        // separate title/lower-third track alongside the auto-captions track)
+        // on their old fontFamily — a project with two text tracks would only
+        // ever see the style change apply to one of them, and the export would
+        // then burn in whatever stale font the untouched track still had.
+        const textTracks = tracks.filter(t => t.type === 'text');
+        if (textTracks.length === 0) return;
         const updates = {
             fontFamily: style.font,
             fontWeight: style.weight,
@@ -562,7 +568,9 @@ const CaptionStylesCard = ({ log }) => {
             textShadow: style.textShadow || null,
             fontStyle: style.style || 'normal',
         };
-        textTrack.clips.forEach(clip => updateClip(textTrack.id, clip.id, updates));
+        textTracks.forEach(track => {
+            track.clips.forEach(clip => updateClip(track.id, clip.id, updates));
+        });
         setApplied(style.id);
         useAIStore.getState().setActiveTab('captions');
     };
