@@ -670,6 +670,11 @@ module.exports = async function processExportJob(job) {
     // ── STEP 4: Text overlays ──────────────────────────────────────────────
     // captionError is set if the burn-in step fails; surfaced in job result.
     let captionError = null;
+    // Fonts the user actually asked for that couldn't be resolved to a real file
+    // and were silently substituted with the fallback (Anton). Previously this
+    // was invisible — the export "succeeded" with the wrong font baked in and
+    // no warning anywhere. Collected here and folded into captionWarning below.
+    const fontFallbackWarnings = new Set();
     const textTracks = timeline.tracks.filter(t => t.type === 'text' && t.clips?.length > 0);
 
     if (textTracks.length > 0) {
@@ -774,9 +779,19 @@ module.exports = async function processExportJob(job) {
                     const familyPath = declaredFamily && FAMILY_PATHS[declaredFamily]
                         ? FAMILY_PATHS[declaredFamily]
                         : null;
-                    const resolvedFont = (familyPath && fs.existsSync(familyPath))
-                        ? familyPath
-                        : fallbackFontPath;
+                    const familyResolved = !!(familyPath && fs.existsSync(familyPath));
+                    const resolvedFont = familyResolved ? familyPath : fallbackFontPath;
+                    // Track silent substitutions: the user asked for a specific font
+                    // (that isn't already the fallback itself) and it couldn't be
+                    // resolved — either it's missing from FONT_SPECS entirely, or it
+                    // IS registered but the file never downloaded successfully.
+                    if (declaredFamily && !familyResolved && declaredFamily !== 'Anton') {
+                        fontFallbackWarnings.add(
+                            FONT_SPECS[declaredFamily]
+                                ? `"${declaredFamily}" (download failed — see [fonts] log above)`
+                                : `"${declaredFamily}" (unknown font — not in FONT_SPECS)`
+                        );
+                    }
                     const escapedFont = resolvedFont.replace(/\\/g, '/').replace(/:/g, '\\:');
 
                     // Vibed caption defaults must match addCaptionClips defaults
@@ -899,12 +914,24 @@ module.exports = async function processExportJob(job) {
 
     console.log(`🏁 [ExportJob ${job.id}] Complete: ${sizeMB}MB in ${duration}s → ${resultUrl}`);
 
+    // Combine drawtext failure (video has NO captions) with font-substitution
+    // warnings (video has captions, but in the wrong font) into one field so
+    // any future UI toast surfaces both without needing a second field wired up.
+    let fontWarningMsg = null;
+    if (fontFallbackWarnings.size > 0) {
+        const list = [...fontFallbackWarnings].join(', ');
+        fontWarningMsg = `Caption font fallback: ${list} — used the default font instead.`;
+        console.warn(`  ⚠️  [ExportJob ${job.id}] ${fontWarningMsg}`);
+    }
+    const captionWarning = captionError || fontWarningMsg || undefined;
+
     return {
         success: true,
         url: resultUrl,
         filename,
-        // Populated when the caption burn-in step failed (video still exported).
-        captionWarning: captionError || undefined,
+        // Populated when the caption burn-in step failed outright (no captions
+        // at all) OR when captions rendered but with a substituted font.
+        captionWarning,
         metadata: {
             duration:   `${duration}s render time`,
             sizeMB:     parseFloat(sizeMB) || 0,
