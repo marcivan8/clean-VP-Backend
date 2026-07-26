@@ -5,7 +5,20 @@ const { videoQueue } = require('../queue/queues');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const rateLimit = require('express-rate-limit');
 const { authenticateUser, optionalAuth } = require('../middleware/auth');
+
+// Upload + transcode trigger endpoints only — 10 req/min per IP.
+// Scoped here (rather than mounted router-wide in index.js) so it never touches
+// GET /gcs-media/*, which is hit continuously during normal video playback
+// (range requests, seeking, HLS segments, waveform JSON). Applying an upload-
+// oriented limit to that read path was rate-limiting playback itself (429s
+// on proxy.mp4 within seconds of pressing play).
+const uploadLimiter = rateLimit({
+    windowMs: 60_000, max: 10,
+    standardHeaders: true, legacyHeaders: false,
+    message: { error: 'Upload rate limit reached. Please wait a moment.' }
+});
 
 const uploadsDir = path.resolve(__dirname, '../uploads');
 const uploadDir  = path.join(uploadsDir, 'temp');
@@ -51,7 +64,7 @@ function resolveUserId(req) {
  */
 const authMiddleware = process.env.NODE_ENV === 'production' ? authenticateUser : optionalAuth;
 
-router.post('/generate', authMiddleware, async (req, res) => {
+router.post('/generate', uploadLimiter, authMiddleware, async (req, res) => {
     try {
         const { videoPath } = req.body;
 
@@ -157,7 +170,7 @@ function _cachePut(key, buf) {
  * Uses optionalAuth for the same reason as /generate above.
  * Swap to authenticateUser before going to production.
  */
-router.post('/upload', authMiddleware, (req, res, next) => {
+router.post('/upload', uploadLimiter, authMiddleware, (req, res, next) => {
     upload.single('video')(req, res, (err) => {
         if (err) {
             if (err.code === 'LIMIT_FILE_SIZE') {
@@ -227,7 +240,7 @@ router.post('/upload', authMiddleware, (req, res, next) => {
  * POST /api/proxy/upload-url
  * Generate a Resumable Session URL for direct-to-GCS browser uploads.
  */
-router.post('/upload-url', authMiddleware, async (req, res) => {
+router.post('/upload-url', uploadLimiter, authMiddleware, async (req, res) => {
     try {
         const { filename, contentType } = req.body;
         if (!storageConfig.bucket || storageConfig.useLocalStorage) {
@@ -258,7 +271,7 @@ router.post('/upload-url', authMiddleware, async (req, res) => {
  * POST /api/proxy/process-direct
  * Triggers the proxy generation job for a file that was just directly uploaded to GCS.
  */
-router.post('/process-direct', authMiddleware, async (req, res) => {
+router.post('/process-direct', uploadLimiter, authMiddleware, async (req, res) => {
     try {
         const { destPath, originalFilename } = req.body;
         const userId = resolveUserId(req);
