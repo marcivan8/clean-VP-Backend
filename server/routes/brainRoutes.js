@@ -89,13 +89,15 @@ router.post('/analyze', authenticateUser, async (req, res) => {
             userId:   req.user.id,
             rawInput: null,
             trigger,
+            // Forces the orchestrator to treat any 'execute' intent as 'advise' —
+            // this route must never run a command, only observe and suggest.
+            adviceOnly: true,
             context: {
                 ...projectState,
                 projectId: projectState.projectId || null,
             },
         };
 
-        // Force advise-only: patch intent before returning
         const brainOutput = await orchestrator.process(input);
 
         // Return only response fields — no intent or learning exposed

@@ -701,11 +701,12 @@ const CaptionStylesCard = ({ log }) => {
 
 const ReasoningPanel = () => {
     const { logs, suggestions, isAnalyzing, setIsAnalyzing, addLog, removeSuggestion, contextualSuggestion, quickChips, setActiveTab } = useAIStore();
-    const { uploadedFile, performAction, assets, tracks } = useTimelineStore(useShallow(state => ({
+    const { uploadedFile, performAction, assets, tracks, projectId } = useTimelineStore(useShallow(state => ({
         uploadedFile:  state.uploadedFile,
         performAction: state.performAction,
         assets:        state.assets,
         tracks:        state.tracks,
+        projectId:     state.projectId,
     })));
 
     // Detect if any caption/text clips exist on the timeline
@@ -767,13 +768,42 @@ const ReasoningPanel = () => {
 
     // ... (existing helper components)
 
-    // --- Editorial Brain (parallel layer, non-blocking) ---
+    // --- Editorial Brain ---
+    // The Brain used to re-interpret every typed command with its own separate
+    // GPT-4o call (see git history) — a second, independent guess at the same
+    // input that could disagree with the real pipeline below, and whose
+    // "execution" never actually touched the timeline. It's now advisory-only:
+    // it observes project state via analyzeProject() and surfaces suggestions/
+    // warnings in BrainPanel. It no longer parses raw user text.
     const {
-        sendCommand:    brainSendCommand,
+        analyzeProject,
         sendFeedback:   brainSendFeedback,
         isProcessing:   brainIsProcessing,
         lastResponse:   brainLastResponse,
     } = useBrain();
+
+    // Advisory trigger: analyze once per project load ("project_opened").
+    const analyzedProjectRef = useRef(null);
+    useEffect(() => {
+        if (!projectId || analyzedProjectRef.current === projectId) return;
+        analyzedProjectRef.current = projectId;
+        analyzeProject('project_opened');
+    }, [projectId, analyzeProject]);
+
+    // Advisory trigger: analyze when a new asset finishes uploading ("asset_added").
+    // Tracks the count of non-proxying assets so it only fires once per new asset,
+    // not on every proxy-progress re-render. Seeded with the CURRENT count (not 0)
+    // so re-opening a project that already has clips doesn't immediately double-fire
+    // this right after the project_opened effect above.
+    const lastReadyAssetCountRef = useRef(assets.filter(a => !a.isProxying).length);
+    useEffect(() => {
+        const readyCount = assets.filter(a => !a.isProxying).length;
+        const isNewAsset = readyCount > lastReadyAssetCountRef.current;
+        lastReadyAssetCountRef.current = readyCount;
+        if (isNewAsset && projectId && analyzedProjectRef.current === projectId) {
+            analyzeProject('asset_added');
+        }
+    }, [assets, projectId, analyzeProject]);
 
     // --- Command Handling Logic ---
     const inputRef = useRef(null);
@@ -825,9 +855,6 @@ const ReasoningPanel = () => {
 
         try {
             workflowController.processUserPrompt(command);
-            // Fire brain in parallel — does NOT block or affect the existing pipeline.
-            // brainSendCommand is safe to call without await here; it handles its own errors.
-            brainSendCommand(command);
         } catch (err) {
             setIsAnalyzing(false);
             console.error(err);
@@ -1005,11 +1032,14 @@ const ReasoningPanel = () => {
                     brainOutput={brainLastResponse}
                     isProcessing={brainIsProcessing}
                     onSendCommand={(text) => {
+                        // Tapping a suggestion chip is a one-click "accept" gesture
+                        // (the chip dismisses itself immediately) — it must actually
+                        // run the command through the real pipeline, not just fill
+                        // the input box and wait for Enter.
                         if (inputRef.current) {
                             inputRef.current.value = text;
-                            inputRef.current.focus();
                         }
-                        brainSendCommand(text);
+                        processCommand();
                     }}
                     onSendFeedback={brainSendFeedback}
                 />

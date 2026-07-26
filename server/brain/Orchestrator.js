@@ -92,7 +92,17 @@ class BrainOrchestrator {
         });
 
         // PHASE 4 — EARLY EXITS (no execution)
-        const intentType = brainOutput?.intent?.type;
+        // input.adviceOnly is set by brainRoutes.js's /analyze route (used for
+        // 'project_opened' / 'asset_added' triggers, which must NEVER execute a
+        // command — only observe and suggest). We don't trust the model's own
+        // intent.type classification for this: GPT-4o can decide something needs
+        // fixing and return 'execute' even when asked only to analyze, which would
+        // otherwise fall through to PHASE 5 and PipelineAdapter's execution call.
+        let intentType = brainOutput?.intent?.type;
+        if (input?.adviceOnly && intentType === 'execute') {
+            intentType = 'advise';
+            brainOutput.intent.type = 'advise';
+        }
 
         if (intentType === 'clarify') {
             // No await — fire-and-forget

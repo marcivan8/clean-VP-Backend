@@ -3,7 +3,6 @@ import { Send, ChevronUp, Loader2 } from 'lucide-react';
 import useAIStore from '../store/useAIStore';
 import useTimelineStore from '../store/useTimelineStore';
 import { workflowController } from '../agent/WorkflowController.js';
-import { useBrain } from '../hooks/useBrain.js';
 
 // Inline SVG sparkles (avoids re-importing from lucide just for this)
 const SparklesIcon = ({ style }) => (
@@ -40,9 +39,6 @@ export default function MobileAIBar({ onExpand }) {
     const inputRef      = useRef(null);
     const logEndRef     = useRef(null);
     const lastSubmitRef = useRef(0);
-
-    // Editorial Brain — parallel layer, non-blocking
-    const { sendCommand: brainSendCommand } = useBrain();
 
     const logs           = useAIStore(s => s.logs);
     const isAnalyzing    = useAIStore(s => s.isAnalyzing);
@@ -101,7 +97,6 @@ export default function MobileAIBar({ onExpand }) {
 
         try {
             workflowController.processUserPrompt(text);
-            brainSendCommand(text); // parallel — fire-and-forget
         } catch (err) {
             setIsAnalyzing(false);
             addLog({
