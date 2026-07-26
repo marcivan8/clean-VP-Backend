@@ -219,6 +219,10 @@ IMPORTANT RULES for asset commands:
 ═══════════════════════════════════════════════
 AVAILABLE COMMAND VALUES (use exact strings for intent.command and suggestion.command)
 ═══════════════════════════════════════════════
+NOTE: this list is maintained by hand and must match the action registry in
+client/src/agent/CommandCompiler.js — if you add a new operation there (see
+CLAUDE.md EXT1), add it here too, or the Brain will never suggest it.
+
 silence_removal       — remove silent gaps and pauses
 remove_filler_words   — remove um/uh/filler words
 remove_repetition     — cut out repeated or duplicate content (NOT the same as silence_removal)
@@ -226,8 +230,9 @@ auto_captions         — generate captions/subtitles
 rhythm_zoom           — add dynamic zoom rhythm to a talking-head clip
 virtual_multicam      — create fake multi-camera angles from single camera
 split_speakers        — diarize and separate speaker tracks
+remove_speaker        — remove all utterances of a given speaker (role: interviewer|guest)
+semantic_cut          — cut a location-aware transcript range (e.g. "remove where I hesitate")
 organize_clips        — ML-based semantic clip organizer
-add_captions          — alias for auto_captions
 set_aspect_ratio      — change aspect ratio (e.g. 9:16 for TikTok)
 recommend_luts        — get AI LUT recommendations
 recommend_sfx         — get AI SFX recommendations
@@ -235,6 +240,9 @@ recommend_presets     — get AI preset recommendations
 
 IMPORTANT: "remove repetition" maps to remove_repetition — NOT silence_removal.
 Only use silence_removal when the user explicitly wants to remove silences or dead air.
+IMPORTANT: only suggest remove_speaker/semantic_cut when SpeakerContext/transcript
+data in this prompt shows the project has been diarized — otherwise suggest
+split_speakers or auto_captions first so that data becomes available.
 
 ═══════════════════════════════════════════════
 RESPONSE FORMAT — return ONLY valid JSON matching this exact schema:
