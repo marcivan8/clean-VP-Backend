@@ -28,32 +28,57 @@ import { authFetch } from '../utils/authFetch';
 function buildProjectState() {
     const state = useTimelineStore.getState();
 
-    const tracks    = state.tracks    || [];
-    const assets    = state.assets    || [];
-    const duration  = state.duration  || 0;
+    const tracks      = state.tracks      || [];
+    const assets      = state.assets      || [];
+    const duration    = state.duration    || 0;
+    const rawCaptions = state.captions    || []; // ASR transcript (word/segment array)
+    const speakerMap  = state.speakerMap  || {}; // populated after split_speakers
 
     const clipCount = tracks.reduce((n, t) => n + (t.clips?.length || 0), 0);
 
-    // Transcript preview: first 300 chars of any caption track's text clips
-    let transcriptPreview = null;
-    for (const track of tracks) {
-        if (track.type === 'text') {
-            const texts = (track.clips || [])
-                .map(c => c.text || c.caption || '')
-                .filter(Boolean);
-            if (texts.length > 0) {
-                transcriptPreview = texts.join(' ').slice(0, 300);
-                break;
-            }
-        }
-    }
+    // ── Transcript ───────────────────────────────────────────────────────────
+    // IMPORTANT: server/brain/ContextEngine.js reads `projectState.captions` as a
+    // real array (it computes transcriptPreview, speaker count, and speaking pace
+    // from it itself) — it does NOT read a pre-joined `transcriptPreview` string.
+    // Sending anything else here is silently ignored server-side, which is what
+    // made the Brain always think "no transcript" even when captions existed.
+    //
+    // Prefer diarized, speaker-labeled words (same source ContextGenerator.js
+    // uses for the client-side agent after "split speakers") so the Brain and the
+    // in-editor agent reason over the same transcript instead of two different
+    // views of the project. Fall back to the raw ASR transcript otherwise.
+    const diarizedWords = Object.entries(speakerMap)
+        .flatMap(([spkId, s]) => (s.words || []).map(w => ({ ...w, speaker: s.label || spkId })))
+        .sort((a, b) => (a.start || 0) - (b.start || 0));
 
-    const hasCaptions = tracks.some(t =>
+    const captions = diarizedWords.length > 0
+        ? diarizedWords
+        : rawCaptions.map(c => ({
+            text:  c.word || c.text || c.content || '',
+            start: c.start || 0,
+            end:   c.end   || 0,
+        }));
+
+    const hasCaptions = captions.length > 0 || tracks.some(t =>
         t.type === 'text' && (t.clips || []).length > 0
     );
     const hasMusicTrack = tracks.some(t =>
         t.type === 'audio' && (t.clips || []).some(c => c.assetId)
     );
+
+    // ── Media bin ────────────────────────────────────────────────────────────
+    // Same rule as captions above: ContextEngine.build() only reads
+    // `projectState.mediaBin` (an array). It never reads `assetSummary`, so that
+    // field name previously left totalAssets stuck at 0 server-side regardless
+    // of how many assets were actually in the project.
+    const mediaBin = assets.map(a => ({
+        id:               a.id,
+        name:             a.name || a.filename || '',
+        type:             a.type || a.contentType || '',
+        duration:         a.duration || a.sourceDuration || 0,
+        originalDuration: a.duration || a.sourceDuration || 0,
+        analysis_status:  a.analysis_status || null,
+    }));
 
     return {
         projectId:        state.projectId    || null,
@@ -63,15 +88,8 @@ function buildProjectState() {
         clipCount,
         hasCaptions,
         hasMusicTrack,
-        transcriptPreview,
-        // Summary of assets in the bin (type counts only — not full blobs)
-        assetSummary: assets.map(a => ({
-            id:       a.id,
-            type:     a.type,
-            name:     a.name,
-            duration: a.duration || a.sourceDuration || 0,
-            analysis_status: a.analysis_status || null,
-        })),
+        mediaBin,
+        captions,
         // Lightweight track summary for the brain's context engine
         tracks: tracks.map(t => ({
             id:        t.id,

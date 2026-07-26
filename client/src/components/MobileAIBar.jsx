@@ -89,7 +89,7 @@ export default function MobileAIBar({ onExpand }) {
                 id:        'agent-err-' + now,
                 timestamp: new Date().toLocaleTimeString(),
                 type:      'warning',
-                message:   'Agent: No file selected. Please import a file first.',
+                message:   'ROKA: No file selected. Please import a file first.',
             });
             setIsAnalyzing(false);
             return;
@@ -103,7 +103,7 @@ export default function MobileAIBar({ onExpand }) {
                 id:        'agent-crash-' + now,
                 timestamp: new Date().toLocaleTimeString(),
                 type:      'warning',
-                message:   `Agent Error: ${err.message}`,
+                message:   `ROKA error: ${err.message}`,
             });
         }
     };
@@ -154,7 +154,7 @@ export default function MobileAIBar({ onExpand }) {
                         textTransform: 'uppercase',
                     }}
                 >
-                    {isAnalyzing ? 'Agent working…' : 'AI Chat'}
+                    {isAnalyzing ? 'ROKA is working…' : 'ROKA'}
                 </span>
                 <ChevronUp className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--fg-3)' }} />
             </button>
@@ -200,7 +200,7 @@ export default function MobileAIBar({ onExpand }) {
                             const isUser = log.type === 'info' && log.message.startsWith('You:');
                             const text   = isUser
                                 ? log.message.replace(/^You:\s*/, '')
-                                : log.message.replace(/^(Agent:|Assistant:)\s*/i, '');
+                                : log.message.replace(/^(ROKA:|Agent:|Assistant:)\s*/i, '');
 
                             return (
                                 <div
