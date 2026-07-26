@@ -10,13 +10,12 @@ const EDGE_ZONE  = 60;   // px from edge that triggers auto-scroll
 const SCROLL_SPD = 10;   // base px/frame; scales with proximity to edge
 
 const Timeline = () => {
-    const { tracks, duration, zoomLevel, seek, setZoomLevel, addTrack, undo, redo, past, future } = useTimelineStore(useShallow(state => ({
+    const { tracks, duration, zoomLevel, seek, setZoomLevel, undo, redo, past, future } = useTimelineStore(useShallow(state => ({
         tracks:      state.tracks,
         duration:    state.duration,
         zoomLevel:   state.zoomLevel,
         seek:        state.seek,
         setZoomLevel: state.setZoomLevel,
-        addTrack:    state.addTrack,
         undo:        state.undo,
         redo:        state.redo,
         past:        state.past,
@@ -486,13 +485,6 @@ const Timeline = () => {
                     </select>
                 </div>
                 <div className="flex items-center gap-2">
-                    <button
-                        className="text-[10px] px-2 py-1 rounded text-muted-foreground transition-colors hover:bg-white/10"
-                        style={{ background: "var(--glass-2)", fontFamily: "var(--f-mono)" }}
-                        onClick={() => addTrack('video')}
-                    >
-                        + Track
-                    </button>
                     <button onClick={() => setZoomLevel(zoomLevel * 0.8)} className="group"><ZoomOut className="w-3 h-3 text-muted-foreground group-hover:text-foreground" /></button>
                     <div className="w-20 h-1 rounded-full overflow-hidden relative" style={{ background: "var(--glass-2)" }}>
                         <div className="absolute inset-y-0 left-0 bg-primary/50 w-full" style={{ width: '50%' }}></div>
