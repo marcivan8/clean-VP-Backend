@@ -1,6 +1,6 @@
 import { useShallow } from 'zustand/react/shallow';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Menu, Upload, Palette, Move, X } from 'lucide-react';
+import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Menu, Upload, Palette, Move, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import classNames from 'classnames';
 import { Player } from '@revideo/player-react';
 import project from '../revideo/project';
@@ -428,6 +428,38 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const [mobileSheet, setMobileSheet] = React.useState(null);
 
     const fileInputRef = useRef(null);
+
+    // Tab bar horizontal scroll indicators (media/captions/transcript/... row overflows on narrow sidebars)
+    const tabBarRef = useRef(null);
+    const [tabScroll, setTabScroll] = React.useState({ left: false, right: false });
+
+    const updateTabScrollState = useCallback(() => {
+        const el = tabBarRef.current;
+        if (!el) return;
+        const maxScroll = el.scrollWidth - el.clientWidth;
+        setTabScroll({
+            left:  el.scrollLeft > 2,
+            right: el.scrollLeft < maxScroll - 2,
+        });
+    }, []);
+
+    useEffect(() => {
+        updateTabScrollState();
+        const el = tabBarRef.current;
+        if (!el) return;
+        el.addEventListener('scroll', updateTabScrollState, { passive: true });
+        window.addEventListener('resize', updateTabScrollState);
+        return () => {
+            el.removeEventListener('scroll', updateTabScrollState);
+            window.removeEventListener('resize', updateTabScrollState);
+        };
+    }, [updateTabScrollState]);
+
+    const scrollTabBar = useCallback((dir) => {
+        const el = tabBarRef.current;
+        if (!el) return;
+        el.scrollBy({ left: dir * 120, behavior: 'smooth' });
+    }, []);
 
     const [isExporting, setIsExporting] = React.useState(false);
     const [exportUrl, setExportUrl] = React.useState(null);
@@ -1316,24 +1348,62 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                         <input id="media-file-input" type="file" ref={fileInputRef} onChange={handleFileImport} className="hidden" accept="video/*,audio/*,image/*" multiple />
 
-                        <div className="p-2 border-b flex gap-1 overflow-x-auto no-scrollbar" style={{ borderColor: "var(--line-soft)" }}>
-                            {['media', 'captions', 'transcript', 'color', 'assets', 'audio', 'transform', 'settings'].map(tab => (
-                                <button
-                                    key={tab}
-                                    onClick={() => setActiveTab(tab)}
-                                    className={classNames("studio-tab-btn", activeTab === tab && "active")}
-                                >
-                                    {tab === 'media'      && <Layers   className="w-2.5 h-2.5" />}
-                                    {tab === 'captions'   && <Type     className="w-2.5 h-2.5" />}
-                                    {tab === 'transcript' && <span style={{ fontSize: 9 }}>📝</span>}
-                                    {tab === 'color'      && <Palette  className="w-2.5 h-2.5" />}
-                                    {tab === 'assets'     && <Sparkles className="w-2.5 h-2.5" />}
-                                    {tab === 'audio'      && <span style={{ fontSize: 9 }}>🎤</span>}
-                                    {tab === 'transform'  && <Move     className="w-2.5 h-2.5" />}
-                                    {tab === 'settings'   && <Settings className="w-2.5 h-2.5" />}
-                                    {tab}
-                                </button>
-                            ))}
+                        <div className="relative border-b" style={{ borderColor: "var(--line-soft)" }}>
+                            <div ref={tabBarRef} className="p-2 flex gap-1 overflow-x-auto no-scrollbar">
+                                {['media', 'captions', 'transcript', 'color', 'assets', 'audio', 'transform', 'settings'].map(tab => (
+                                    <button
+                                        key={tab}
+                                        onClick={() => setActiveTab(tab)}
+                                        className={classNames("studio-tab-btn", activeTab === tab && "active")}
+                                    >
+                                        {tab === 'media'      && <Layers   className="w-2.5 h-2.5" />}
+                                        {tab === 'captions'   && <Type     className="w-2.5 h-2.5" />}
+                                        {tab === 'transcript' && <span style={{ fontSize: 9 }}>📝</span>}
+                                        {tab === 'color'      && <Palette  className="w-2.5 h-2.5" />}
+                                        {tab === 'assets'     && <Sparkles className="w-2.5 h-2.5" />}
+                                        {tab === 'audio'      && <span style={{ fontSize: 9 }}>🎤</span>}
+                                        {tab === 'transform'  && <Move     className="w-2.5 h-2.5" />}
+                                        {tab === 'settings'   && <Settings className="w-2.5 h-2.5" />}
+                                        {tab}
+                                    </button>
+                                ))}
+                            </div>
+
+                            {/* Left scroll fade + arrow — only visible when scrolled away from the start */}
+                            {tabScroll.left && (
+                                <>
+                                    <div
+                                        className="pointer-events-none absolute inset-y-0 left-0 w-6"
+                                        style={{ background: "linear-gradient(90deg, var(--bg-2, #111), transparent)" }}
+                                    />
+                                    <button
+                                        onClick={() => scrollTabBar(-1)}
+                                        className="absolute left-0 top-0 bottom-0 flex items-center justify-center w-5"
+                                        style={{ color: "var(--fg-3)" }}
+                                        aria-label="Scroll tabs left"
+                                    >
+                                        <ChevronLeft className="w-3 h-3" />
+                                    </button>
+                                </>
+                            )}
+
+                            {/* Right scroll fade + arrow — only visible when more tabs overflow to the right */}
+                            {tabScroll.right && (
+                                <>
+                                    <div
+                                        className="pointer-events-none absolute inset-y-0 right-0 w-6"
+                                        style={{ background: "linear-gradient(270deg, var(--bg-2, #111), transparent)" }}
+                                    />
+                                    <button
+                                        onClick={() => scrollTabBar(1)}
+                                        className="absolute right-0 top-0 bottom-0 flex items-center justify-center w-5"
+                                        style={{ color: "var(--fg-3)" }}
+                                        aria-label="Scroll tabs right"
+                                    >
+                                        <ChevronRight className="w-3 h-3" />
+                                    </button>
+                                </>
+                            )}
                         </div>
 
                         {/* Transcript panel manages its own internal scroll */}
