@@ -54,7 +54,7 @@ const AssistantLogItem = ({ log }) => (
          style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.1)' }}>
         <div style={{ padding: '8px 12px 6px', borderBottom: '0.5px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', gap: 6 }}>
             <Sparkles className="w-3 h-3" style={{ color: 'var(--accent)' }} />
-            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Assistant</span>
+            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>ROKA</span>
         </div>
         <p className="whitespace-pre-wrap" style={{ fontFamily: 'var(--f-sans)', fontSize: 13, color: 'var(--fg)', lineHeight: 1.6, padding: '10px 12px 12px', margin: 0 }}>
             {log.message}
@@ -272,7 +272,7 @@ const AgentPlanCard = ({ suggestion, onAccept, onReject }) => {
                         <Brain className="w-3 h-3" style={{ color: 'var(--violet)' }} />
                     </div>
                     <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--violet)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
-                        Agent Proposal
+                        ROKA Plan
                     </span>
                 </div>
 
@@ -847,7 +847,7 @@ const ReasoningPanel = () => {
                 id: 'agent-err-' + now,
                 timestamp: new Date().toLocaleTimeString(),
                 type: 'warning',
-                message: `Agent: No file selected. Please import a file first.`
+                message: `ROKA: No file selected. Please import a file first.`
             });
             setIsAnalyzing(false);
             return;
@@ -862,7 +862,7 @@ const ReasoningPanel = () => {
                 id: 'agent-crash-' + now,
                 timestamp: new Date().toLocaleTimeString(),
                 type: 'warning',
-                message: `Agent Error: ${err.message}`
+                message: `ROKA error: ${err.message}`
             });
         }
     };
@@ -895,7 +895,7 @@ const ReasoningPanel = () => {
                         isAnalyzing ? "bg-purple-500/20 text-purple-300 border-purple-500/30" : "border-white/10"
                     )}
                     style={isAnalyzing ? {} : { background: 'rgba(255,255,255,0.06)', color: 'var(--fg-2)' }}>
-                        {isAnalyzing ? "Agent Working..." : "Ready"}
+                        {isAnalyzing ? "ROKA is working…" : "Ready"}
                     </div>
                 </div>
             </div>
@@ -998,7 +998,7 @@ const ReasoningPanel = () => {
                                 <Loader2 className="w-4 h-4 animate-spin absolute inset-0" style={{ color: 'var(--accent)' }} />
                             </div>
                             <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-2)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                                Agent working
+                                ROKA is working
                             </span>
                             <button
                                 onClick={() => {
@@ -1071,7 +1071,7 @@ const ReasoningPanel = () => {
                         disabled={isAnalyzing}
                         onKeyDown={handleKeyDown}
                         onInput={handleInput}
-                        placeholder={isAnalyzing ? "Agent is working…" : contextualSuggestion ? `Try: ${contextualSuggestion}` : "Tell the agent what to do…"}
+                        placeholder={isAnalyzing ? "ROKA is working…" : contextualSuggestion ? `Try: ${contextualSuggestion}` : "Tell ROKA what to do…"}
                         className="w-full resize-none px-4 pt-3 pb-10 text-sm focus:outline-none transition-all disabled:opacity-50 placeholder:opacity-40"
                         style={{ background: 'transparent', color: 'var(--fg)', fontFamily: 'var(--f-sans)', lineHeight: '1.5', minHeight: '88px', maxHeight: '160px' }}
                     />

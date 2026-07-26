@@ -7,7 +7,7 @@ const MobileBottomNav = ({ activeTab, onTabChange }) => {
         { id: 'player', icon: Film, label: 'Player' },
         { id: 'edit', icon: Scissors, label: 'Edit' },
         { id: 'media', icon: ImageIcon, label: 'Media' },
-        { id: 'ai', icon: Sparkles, label: 'AI Agent' }
+        { id: 'ai', icon: Sparkles, label: 'ROKA' }
     ];
 
     return (
