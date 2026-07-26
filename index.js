@@ -55,8 +55,6 @@ app.use(helmet({
       defaultSrc:              ["'self'"],
       scriptSrc:               ["'self'",
                                 "https://cdn.iubenda.com",
-                                // GA4 tag runner — loads the actual measurement script
-                                "https://www.googletagmanager.com",
                                 // Hash of the Iubenda config inline script in the old build.
                                 // Safe to remove once the frontend is rebuilt (the new build
                                 // loads /iubenda-config.js as an external file instead).
@@ -74,10 +72,6 @@ app.use(helmet({
         // Sentry error reporting — both ingest domains (EU + global)
         "https://*.ingest.sentry.io",
         "https://*.ingest.de.sentry.io",
-        // Google Analytics 4 beacon + GTM fetch calls
-        "https://www.google-analytics.com",
-        "https://analytics.google.com",
-        "https://www.googletagmanager.com",
         ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
       ],
       // blob: is required for Web Workers created by Vite/Revideo at runtime.
@@ -243,7 +237,13 @@ app.use('/api/silence', require('./routes/silenceRoutes'));
 app.use('/api/ai', aiLimiter, require('./routes/aiRoutes')); // GPT-4o — expensive
 app.use('/api/brain', aiLimiter, require('./server/routes/brainRoutes')); // Editorial Brain
 app.use('/api/effects', require('./routes/effectsRoutes'));
-app.use('/api/proxy', uploadLimiter, require('./routes/proxyRoutes'));
+// NOTE: uploadLimiter is NOT applied router-wide here — it would also throttle
+// GET /api/proxy/gcs-media/*, the read-heavy route that streams video/audio/
+// waveform data during normal playback (range requests, seeking, HLS segments).
+// At 10 req/min that endpoint gets rate-limited within seconds of pressing play,
+// producing 429s on proxy.mp4 mid-playback. proxyRoutes.js applies uploadLimiter
+// itself, scoped only to the actual upload/generate POST endpoints.
+app.use('/api/proxy', require('./routes/proxyRoutes'));
 app.use('/api/revideo', require('./routes/revideoRenderRoutes')); // headless Chrome
 // app.use('/api/presets', require('./routes/presetRoutes'));  // OLD — superseded by asset engine
 app.use('/api/presets', require('./server/routes/presetRoutes')); // Asset Engine: presets CRUD + execute
