@@ -11,14 +11,13 @@
  */
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { Search, Music2, Palette, Layers, Loader2, RefreshCw, Download } from 'lucide-react';
+import { Search, Music2, Palette, Layers, Loader2, RefreshCw } from 'lucide-react';
 import { useAudioEngine }        from '../hooks/useAudioEngine.js';
 import useTimelineStore          from '../store/useTimelineStore.js';
 import SoundCard                 from './SoundCard.jsx';
 import LUTCard                   from './LUTCard.jsx';
 import PresetCard                from './PresetCard.jsx';
 import PresetApprovalModal       from './PresetApprovalModal.jsx';
-import AudioExportPanel          from './AudioExportPanel.jsx';
 
 const TABS = [
     { key: 'sfx',     label: 'SFX',    icon: Music2  },
@@ -42,7 +41,6 @@ export default function AssetPanel({ onClose }) {
     const [tab,          setTab]          = useState('sfx');
     const [query,        setQuery]        = useState('');
     const [approvalPreset, setApprovalPreset] = useState(null);
-    const [showExport,   setShowExport]   = useState(false);
     const [applyResult,  setApplyResult]  = useState(null); // { success, executed }
 
     const projectLUTId = useTimelineStore(s => s.projectLUTId);
@@ -116,10 +114,6 @@ export default function AssetPanel({ onClose }) {
         setApprovalPreset(null);
     }, [approvalPreset, handlePresetApply]);
 
-    if (showExport) {
-        return <AudioExportPanel onClose={() => setShowExport(false)} />;
-    }
-
     return (
         <>
             <div style={PANEL}>
@@ -129,17 +123,6 @@ export default function AssetPanel({ onClose }) {
                 {/* Header */}
                 <div style={{ padding: '10px 14px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg)', letterSpacing: '-0.01em' }}>Assets</span>
-                    <button
-                        onClick={() => setShowExport(true)}
-                        title="Export audio"
-                        style={{
-                            background: 'rgba(0,229,255,0.1)', border: 'none', borderRadius: 5,
-                            color: 'var(--accent)', cursor: 'pointer', padding: '3px 7px',
-                            display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 600,
-                        }}
-                    >
-                        <Download size={10} /> Export Audio
-                    </button>
                 </div>
 
                 {/* Tabs */}
