@@ -95,7 +95,7 @@ const Clip = ({ clip, trackId }) => {
     // clip-level URL (sourceUrl / url).  Without this fallback, usePeaks returns
     // early (no gcsPath and no proxyUrl) and the waveform never appears.
     const wsAudioUrl = asset?.proxyUrl || clip.url || clip.sourceUrl || null;
-    const { peaks: wsPeaks, duration: wsDuration, loading: wsLoading } = usePeaks(
+    const { peaks: wsPeaks, duration: wsDuration, loading: wsLoading, error: wsError } = usePeaks(
         isTextClip ? null : clip.assetId,
         asset?.gcsPath,
         asset?.proxyUrl || wsAudioUrl,   // fallback to clip URL when asset not hydrated
@@ -325,6 +325,7 @@ const Clip = ({ clip, trackId }) => {
                         height={32}
                         color={wsColor}
                         loading={wsLoading}
+                        error={wsError}
                     />
                 </div>
             )}

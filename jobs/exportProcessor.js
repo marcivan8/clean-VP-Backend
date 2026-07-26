@@ -782,10 +782,21 @@ module.exports = async function processExportJob(job) {
                     const familyResolved = !!(familyPath && fs.existsSync(familyPath));
                     const resolvedFont = familyResolved ? familyPath : fallbackFontPath;
                     // Track silent substitutions: the user asked for a specific font
-                    // (that isn't already the fallback itself) and it couldn't be
-                    // resolved — either it's missing from FONT_SPECS entirely, or it
-                    // IS registered but the file never downloaded successfully.
-                    if (declaredFamily && !familyResolved && declaredFamily !== 'Anton') {
+                    // and it couldn't be resolved — either it's missing from
+                    // FONT_SPECS entirely, or it IS registered but the file never
+                    // downloaded successfully.
+                    //
+                    // IMPORTANT: this used to skip warning when declaredFamily was
+                    // 'Anton', on the assumption "Anton is the fallback anyway, so
+                    // Anton-requests-Anton is never a substitution." That's true only
+                    // when Anton's OWN file actually resolves. If Anton's file is
+                    // missing too (e.g. a fresh deployment before fonts finish baking/
+                    // downloading), resolvedFont falls further down fallbackFontPath
+                    // to Roboto/DejaVu/system fonts — a real substitution that the
+                    // Anton exclusion was hiding with zero warning. Captions rendered
+                    // in a plain system font instead of Anton, silently, on every
+                    // export, until this was removed.
+                    if (declaredFamily && !familyResolved) {
                         fontFallbackWarnings.add(
                             FONT_SPECS[declaredFamily]
                                 ? `"${declaredFamily}" (download failed — see [fonts] log above)`
@@ -799,12 +810,26 @@ module.exports = async function processExportJob(job) {
                     const color    = (clip.color || '#FACC15').replace('#', '0x');
                     const size     = clip.fontSize || 48;
 
+                    // IMPORTANT: clip.x/clip.y are 0-100 PERCENTAGES of the frame,
+                    // representing where the CENTER of the text box sits — this is
+                    // exactly what client/src/components/Player/TextOverlay.jsx uses
+                    // for the live preview: `left:${clip.x}%; top:${clip.y}%` plus
+                    // `transform: translate(-50%,-50%)` to center the box on that
+                    // point. This used to be treated as a raw pixel offset added to
+                    // targetWidth/2 (`Math.round(clip.x + targetWidth/2)`), which was
+                    // wrong on two counts: wrong unit (percent vs pixels) and it threw
+                    // away the text_w/text_h centering term entirely, so drawtext's
+                    // x= (which is the text box's LEFT edge, not its center) landed
+                    // far past where the text should start — pushing captions off the
+                    // right/bottom edge of the frame, worse the wider the text. The
+                    // fix mirrors the preview's math as an ffmpeg eval expression so
+                    // exported captions land exactly where the editor showed them.
                     let x = '(w-text_w)/2';
                     let y = '(h-text_h)/2';
-                    if (clip.position === 'bottom') y = 'h-text_h-80';
-                    if (clip.position === 'top')    y = '80';
-                    if (typeof clip.x === 'number') x = Math.round(clip.x + targetWidth  / 2);
-                    if (typeof clip.y === 'number') y = Math.round(clip.y + targetHeight / 2);
+                    if (clip.position === 'bottom') y = 'h*0.85-text_h/2';
+                    if (clip.position === 'top')    y = 'h*0.12-text_h/2';
+                    if (typeof clip.x === 'number') x = `(${(clip.x / 100).toFixed(6)})*w-text_w/2`;
+                    if (typeof clip.y === 'number') y = `(${(clip.y / 100).toFixed(6)})*h-text_h/2`;
 
                     // Stroke (border) — maps directly to drawtext borderw / bordercolor.
                     // Default matches addCaptionClips: 2px black outline.

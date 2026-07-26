@@ -97,6 +97,11 @@ export function usePeaks(assetId, gcsPath, proxyUrl) {
                 if (!cancelled) setState({ peaks, duration, loading: false, error: null });
             })
             .catch(err => {
+                // Log loudly — this used to fail completely silently (only a bare
+                // "400" in the Network tab, nothing in Console), which made a
+                // permanently-broken waveform pipeline indistinguishable from
+                // "still loading" for anyone not actively inspecting Network.
+                console.warn(`[usePeaks] extraction failed for asset ${assetId}:`, err.message);
                 if (!cancelled) setState({ peaks: null, duration: null, loading: false, error: err.message });
             });
 

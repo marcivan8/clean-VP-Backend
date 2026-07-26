@@ -112,69 +112,14 @@ function detectVideoType(filename, resolution, duration, fps) {
     return 'talking_head'; // safe default: single-person on-camera
 }
 
-function buildProxyReadyMessage(type, duration) {
-    const m = Math.floor(duration / 60);
-    const s = Math.floor(duration % 60);
-    const durLabel = m > 0
-        ? `${m}:${s.toString().padStart(2, '0')}`
-        : `${Math.round(duration)}s`;
-
-    switch (type) {
-        case 'screen_recording':
-            return (
-                `Looks like a screen recording or tutorial.\n\n` +
-                `Here's what I can do with it:\n` +
-                `• "add captions" — subtitles make tutorials accessible and searchable\n` +
-                `• "clean this clip" — cut silences and thinking pauses between steps\n` +
-                `• "make it vertical" — reframe to 9:16 for TikTok or YouTube Shorts\n\n` +
-                `What are you creating this for?`
-            );
-        case 'interview_or_call':
-            return (
-                `Your ${durLabel} recording is ready — looks like a call or multi-person session.\n\n` +
-                `Here's what I can do:\n` +
-                `• "split speakers" — separate each person onto their own track\n` +
-                `• "clean this clip" — remove silences, crosstalk gaps, and filler words\n` +
-                `• "add captions" — auto-generate subtitles for all speakers\n` +
-                `• "extract highlights" — pull the best moments for short-form content`
-            );
-        case 'vertical_social':
-            return (
-                `Already in portrait mode — perfect for Reels, TikTok, and YouTube Shorts.\n\n` +
-                `Here's what I can do:\n` +
-                `• "make it more dynamic" — add zoom rhythm for a polished, multi-camera feel\n` +
-                `• "clean this clip" — remove silences and hesitations\n` +
-                `• "add captions" — subtitles dramatically boost mobile watch time`
-            );
-        case 'short_clip':
-            return (
-                `Short clip ready! Here's what I can do:\n` +
-                `• "make it more dynamic" — zoom rhythm to boost engagement\n` +
-                `• "add captions" — subtitles improve watch-through rate\n` +
-                `• "make it vertical" — convert to 9:16 for Reels / TikTok`
-            );
-        case 'talking_head':
-        default:
-            if (duration > 300) {
-                return (
-                    `Your ${durLabel} recording is ready.\n\n` +
-                    `Here's what I can do:\n` +
-                    `• "clean this clip" — remove silences and filler words across the whole recording\n` +
-                    `• "add captions" — auto-generate subtitles\n` +
-                    `• "extract highlights" — pull the best moments for Reels or Shorts\n` +
-                    `• "make it more dynamic" — zoom rhythm to keep viewers watching`
-                );
-            }
-            return (
-                `Your ${durLabel} clip is ready.\n\n` +
-                `Here's what I can do:\n` +
-                `• "make it more dynamic" — simulate multi-camera with zoom rhythm\n` +
-                `• "clean this clip" — remove silences and filler words\n` +
-                `• "add captions" — auto-generate subtitles\n` +
-                `• "make it vertical" — reformat for TikTok / Reels`
-            );
-    }
-}
+// buildProxyReadyMessage() used to build a hardcoded "here's what I can do"
+// greeting posted as its own ROKA chat bubble on upload. Removed — it was a
+// second, independent voice competing with BrainPanel's asset_added analysis
+// (see ReasoningPanel.jsx), which reasons over real project state via GPT-4o
+// instead of a fixed duration/aspect-ratio heuristic. ROKA now speaks once,
+// through the Brain. detectVideoType() below is kept only to drive the
+// input placeholder hint (CONTEXTUAL_SUGGESTION) — that's a passive UI
+// affordance, not a competing answer.
 
 const CONTEXTUAL_SUGGESTION = {
     screen_recording:  'add captions',
@@ -789,11 +734,15 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                             const dur = assetEntry.sourceDuration || assetEntry.duration || 0;
 
-                            // ── Immediate contextual greeting ─────────────────────
+                            // ── Contextual placeholder hint ───────────────────────
                             // Fires ~800ms after proxy so the timeline has rendered.
-                            // Tells the user what we understand about their clip and
-                            // what we can do — no analysis needed, just context-aware
-                            // suggestions based on duration / content type.
+                            // Sets the input placeholder ("Try: ...") based on
+                            // duration/content type — a passive UI hint only. This
+                            // used to ALSO post its own "here's what I can do" ROKA
+                            // chat bubble here, which duplicated (and could disagree
+                            // with) BrainPanel's asset_added analysis below — ROKA
+                            // now speaks once, through the Brain. See
+                            // ReasoningPanel.jsx's asset_added advisory trigger.
                             if (processedAssets.length === 1) {
                                 setTimeout(() => {
                                     const aiStore = useAIStore.getState();
@@ -803,15 +752,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         dur,
                                         assetEntry.fps,
                                     );
-                                    const msg = buildProxyReadyMessage(videoType, dur);
-
-                                    aiStore.addLog({
-                                        id:        `proxy-ready-${Date.now()}`,
-                                        type:      'assistant',
-                                        message:   msg,
-                                        timestamp: new Date().toLocaleTimeString(),
-                                    });
-
                                     aiStore.setContextualSuggestion(
                                         CONTEXTUAL_SUGGESTION[videoType] ?? 'make it more dynamic'
                                     );
@@ -849,11 +789,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             if (dur > 90 && processedAssets.length === 1 && rawFilePath) {
                                 setTimeout(async () => {
                                     const aiStore = useAIStore.getState();
-                                    const fmtDur = (s) => {
-                                        const m = Math.floor(s / 60);
-                                        const sec = Math.floor(s % 60);
-                                        return `${m}:${sec.toString().padStart(2, '0')}`;
-                                    };
                                     try {
                                         // Lazy-import so the initial bundle stays light.
                                         const { authFetch }     = await import('../utils/authFetch.js');
@@ -890,22 +825,24 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         if (thinkingCount > 0) killers.push(`${thinkingCount} thinking pauses`);
 
                                         if (killers.length > 0) {
-                                            const topAction = (fillerCount > 0 || deadAirCount > 0)
-                                                ? '"make it more dynamic"'
-                                                : '"make it feel multi-camera"';
-                                            aiStore.addLog({
-                                                id:        `camvid-result-${Date.now()}`,
-                                                type:      'assistant',
-                                                message:   `Scan complete — I found: ${killers.join(', ')}.\n\nMost impactful next step: ${topAction}`,
-                                                timestamp: new Date().toLocaleTimeString(),
-                                            });
+                                            // NOTE: this used to also post its own "Scan complete —
+                                            // I found: ..." ROKA chat bubble, ~3s after upload — a
+                                            // third independent voice arriving after (and possibly
+                                            // contradicting) BrainPanel's asset_added analysis. Removed
+                                            // per the "one ROKA voice" requirement — the Brain doesn't
+                                            // currently see filler/dead-air counts from this scan, so
+                                            // that specific insight is silently dropped for now rather
+                                            // than shown out of sync. Feeding this data into
+                                            // server/brain/ContextEngine.js so the Brain's own message
+                                            // can mention it is the correct long-term fix.
                                             aiStore.setContextualSuggestion(
                                                 (fillerCount > 0 || deadAirCount > 0)
                                                     ? 'make it more dynamic'
                                                     : 'make it feel multi-camera'
                                             );
                                         }
-                                        // If nothing found: stay quiet — the initial suggestion message is enough.
+                                        // If nothing found: stay quiet — the Brain's asset_added
+                                        // analysis is the single source of guidance now.
 
                                     } catch (err) {
                                         // Best-effort: if this fails the user just misses
