@@ -2,6 +2,7 @@ import { useShallow } from 'zustand/react/shallow';
 import React, { useState, useRef, useEffect } from 'react';
 import useTimelineStore from '../store/useTimelineStore';
 import { AlignLeft, AlignCenter, AlignRight, Plus, Bold, Italic, Underline, RotateCcw, Type } from 'lucide-react';
+import SaveAsPresetButton from './SaveAsPresetButton.jsx';
 
 const FONT_GROUPS = [
     { group: 'Talking Head',       fonts: ['Anton', 'Bebas Neue', 'Montserrat', 'Inter', 'Barlow Condensed'] },
@@ -540,6 +541,24 @@ const TextPanel = () => {
         ? { x: liveOverride.x, y: liveOverride.y }
         : null;
 
+    // Capture just the caption-style-relevant fields (not `content`, `start`,
+    // `duration`, etc.) so "Save as preset" produces a reusable CAPTION_STYLE
+    // preset rather than snapshotting one specific clip's transcript text.
+    const buildCaptionPresetSettings = () => ({
+        fontFamily:     displayClip.fontFamily     || 'Inter',
+        fontSize:       displayClip.fontSize       || 48,
+        fontWeight:     displayClip.fontWeight     || 'normal',
+        fontStyle:      displayClip.fontStyle      || 'normal',
+        textDecoration: displayClip.textDecoration || 'none',
+        color:          displayClip.color          || '#ffffff',
+        textAlign:      displayClip.textAlign      || 'center',
+        stroke:         displayClip.stroke         || null,
+        textShadow:     displayClip.textShadow     || null,
+        animation:      displayClip.animation      || null,
+        x:              displayClip.x,
+        y:              displayClip.y,
+    });
+
     return (
         <div>
             <Header />
@@ -549,6 +568,11 @@ const TextPanel = () => {
                 onLiveUpdate={handleLiveUpdate}
                 livePos={livePos}
                 showContent={activeClip && isTextClip}
+            />
+            <SaveAsPresetButton
+                presetType="CAPTION_STYLE"
+                defaultName="My Caption Style"
+                buildSettings={buildCaptionPresetSettings}
             />
         </div>
     );

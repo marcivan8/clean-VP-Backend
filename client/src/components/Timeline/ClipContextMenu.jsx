@@ -2,9 +2,10 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import {
     Scissors, Copy, Trash2, Zap, Volume2, VolumeX,
-    FastForward, ChevronRight, Sparkles, Wind
+    FastForward, ChevronRight, Sparkles, Wind, Heart
 } from 'lucide-react';
 import useTimelineStore from '../../store/useTimelineStore';
+import { audioEngineAPI } from '../../audio-engine/AudioEngineAPI.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -12,7 +13,7 @@ const Separator = () => (
     <div className="my-1 border-t" style={{ borderColor: 'var(--line-soft)' }} />
 );
 
-const Item = ({ icon: Icon, label, hint, danger, disabled, onClick, children }) => (
+const Item = ({ icon: Icon, label, hint, danger, disabled, onClick, children, trailing }) => (
     <button
         className={[
             'w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-[12px] rounded transition-colors',
@@ -28,7 +29,30 @@ const Item = ({ icon: Icon, label, hint, danger, disabled, onClick, children }) 
         {Icon && <Icon className="w-3.5 h-3.5 shrink-0 opacity-70" />}
         <span className="flex-1">{label}</span>
         {hint && <span className="text-[10px] opacity-40 font-mono">{hint}</span>}
+        {trailing && (
+            <span onClick={e => e.stopPropagation()} className="flex items-center shrink-0">
+                {trailing}
+            </span>
+        )}
         {children}
+    </button>
+);
+
+// Small heart toggle used to favorite a transition type — bookmarks the type
+// itself (not a custom preset) via routes/favoritesRoutes.js. Manages its own
+// membership check against the favoritedTransitionTypes set passed down from
+// the menu root so repeated opens reflect the latest state.
+const FavoriteTransitionToggle = ({ transitionType, favorited, onToggle }) => (
+    <button
+        title={favorited ? 'Remove from favorites' : 'Favorite this transition'}
+        onClick={e => { e.stopPropagation(); onToggle(transitionType, favorited); }}
+        className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/10 transition-colors"
+    >
+        <Heart
+            className="w-3 h-3"
+            style={{ color: favorited ? '#ff3a6e' : 'rgba(255,255,255,0.35)' }}
+            fill={favorited ? '#ff3a6e' : 'none'}
+        />
     </button>
 );
 
@@ -68,6 +92,39 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
     const menuRef = React.useRef(null);
     const [pos, setPos] = React.useState(position);
     const copiedAttributes = useTimelineStore(s => s.copiedAttributes);
+    const [favoritedTransitions, setFavoritedTransitions] = React.useState(() => new Set());
+
+    // Load favorited transition types once per menu open — cheap, and keeps the
+    // heart icons accurate even if favorited elsewhere in the session.
+    React.useEffect(() => {
+        let cancelled = false;
+        audioEngineAPI.getFavorites()
+            .then(({ transitionTypes }) => { if (!cancelled) setFavoritedTransitions(new Set(transitionTypes || [])); })
+            .catch(err => console.error('[ClipContextMenu] getFavorites failed:', err.message));
+        return () => { cancelled = true; };
+    }, []);
+
+    const toggleTransitionFavorite = React.useCallback(async (transitionType, wasFavorited) => {
+        setFavoritedTransitions(prev => {
+            const next = new Set(prev);
+            if (wasFavorited) next.delete(transitionType); else next.add(transitionType);
+            return next;
+        });
+        try {
+            if (wasFavorited) {
+                await audioEngineAPI.removeFavorite({ transitionType });
+            } else {
+                await audioEngineAPI.addFavorite({ transitionType });
+            }
+        } catch (err) {
+            console.error('[ClipContextMenu] toggleTransitionFavorite failed:', err.message);
+            setFavoritedTransitions(prev => {
+                const next = new Set(prev);
+                if (wasFavorited) next.add(transitionType); else next.delete(transitionType);
+                return next;
+            });
+        }
+    }, []);
 
     // Adjust position to keep menu inside viewport
     React.useLayoutEffect(() => {
@@ -177,11 +234,25 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
                 icon={Wind}
                 label="Fade Out"
                 onClick={() => run(() => store().addTransition(clip.id, 'fade', 1.0))}
+                trailing={
+                    <FavoriteTransitionToggle
+                        transitionType="fade"
+                        favorited={favoritedTransitions.has('fade')}
+                        onToggle={toggleTransitionFavorite}
+                    />
+                }
             />
             <Item
                 icon={Wind}
                 label="Crossfade"
                 onClick={() => run(() => store().addTransition(clip.id, 'crossfade', 1.0))}
+                trailing={
+                    <FavoriteTransitionToggle
+                        transitionType="crossfade"
+                        favorited={favoritedTransitions.has('crossfade')}
+                        onToggle={toggleTransitionFavorite}
+                    />
+                }
             />
             {hasTransition && (
                 <Item

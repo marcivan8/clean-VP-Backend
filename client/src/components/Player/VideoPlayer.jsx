@@ -7,6 +7,64 @@ import FatigueAlert from './FatigueAlert';
 import DebugOverlay from './DebugOverlay';
 import PlaybackEngine from '../../engine/PlaybackEngine';
 
+/**
+ * Interpolates a keyframe track at `localTime` (clip-local seconds).
+ * Shared by the CSS-transform block (plain zoom-rhythm, no multicam) and the
+ * crop-composition effect (zoom-rhythm ON TOP of a virtual-multicam crop) so
+ * both use identical easing — see the "compose, don't stack" note on
+ * computeComposedCrop below.
+ */
+function interpolateKeyframes(propKeyframes, defaultVal, localTime) {
+    if (!propKeyframes || propKeyframes.length === 0) return defaultVal;
+    if (propKeyframes.length === 1) return propKeyframes[0].value;
+
+    let k1 = propKeyframes[0];
+    let k2 = propKeyframes[propKeyframes.length - 1];
+    for (let i = 0; i < propKeyframes.length - 1; i++) {
+        if (localTime >= propKeyframes[i].time && localTime <= propKeyframes[i + 1].time) {
+            k1 = propKeyframes[i];
+            k2 = propKeyframes[i + 1];
+            break;
+        }
+    }
+    if (localTime <= k1.time) return k1.value;
+    if (localTime >= k2.time) return k2.value;
+
+    const progress = (localTime - k1.time) / (k2.time - k1.time);
+    const eased = k2.easing === 'easeOutCubic' ? 1 - Math.pow(1 - progress, 3) : progress;
+    return k1.value + (k2.value - k1.value) * eased;
+}
+
+/**
+ * Composes a virtual-multicam crop with a zoom-rhythm scale keyframe track
+ * into ONE effective crop rectangle, instead of stacking the multicam crop
+ * (WebGL UV sub-region) and the rhythm zoom (CSS transform scale) as two
+ * independent transforms — which is what used to happen, and which silently
+ * over-zoomed/cropped-out faces whenever both effects landed on the same clip
+ * (see CLAUDE.md R16).
+ *
+ * The rhythm scale is applied WITHIN the multicam window, re-centered on the
+ * SAME point the multicam angle detected (not frame-center) — so a punch-in
+ * on a close-up shot zooms further into that same close-up.
+ *
+ * @param {{cropX:number,cropY:number,cropW:number,cropH:number}} baseCrop
+ * @param {number} extraScale  — interpolated keyframe scale (1.0 = no extra zoom)
+ * @returns {{cropX:number,cropY:number,cropW:number,cropH:number}}
+ */
+function composeCropWithZoom(baseCrop, extraScale) {
+    if (!extraScale || extraScale <= 1.0001) return baseCrop;
+    const cx = baseCrop.cropX + baseCrop.cropW / 2;
+    const cy = baseCrop.cropY + baseCrop.cropH / 2;
+    const w  = baseCrop.cropW / extraScale;
+    const h  = baseCrop.cropH / extraScale;
+    return {
+        cropX: Math.max(0, Math.min(1 - w, cx - w / 2)),
+        cropY: Math.max(0, Math.min(1 - h, cy - h / 2)),
+        cropW: w,
+        cropH: h,
+    };
+}
+
 const VideoPlayer = () => {
     const canvasRef = useRef(null);
     const containerRef = useRef(null); // Added containerRef
@@ -197,13 +255,9 @@ const VideoPlayer = () => {
             if (activeClip) {
                 engineRef.current.setMasterVolume(activeClip.volume !== undefined ? activeClip.volume : 1.0);
             }
-            // Sync virtual multicam crop in real-time (handles clip changes while paused)
-            if (activeClip?.virtualCam) {
-                const { cropX = 0, cropY = 0, cropW = 1, cropH = 1 } = activeClip.virtualCam;
-                engineRef.current.setCrop(cropX, cropY, cropW, cropH);
-            } else if (engineRef.current.setCrop) {
-                engineRef.current.setCrop(0, 0, 1, 1);
-            }
+            // Virtual multicam crop is now handled by the dedicated composed-crop
+            // effect below (keyed on currentTime), which also folds in any
+            // zoom-rhythm scale keyframes — see composeCropWithZoom().
 
                 // When paused the RAF loop stops — renderOnce() alone isn't enough because
             // _wantOneRender is only consumed when a NEW_FRAME arrives from the worker.
@@ -220,6 +274,36 @@ const VideoPlayer = () => {
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isPlaying, avTracks, assets, activeClipForEngine]);
+
+    // --- Composed crop effect (virtual multicam + zoom rhythm) ---
+    // Runs on every currentTime tick (both playing and paused) so a rhythm
+    // punch-in/push-in animates smoothly even when it's layered on top of a
+    // multicam angle. This is the SINGLE place crop is set — see
+    // composeCropWithZoom() above for why multicam crop + rhythm scale must be
+    // combined into one rectangle rather than applied as two independent
+    // transforms (R16 in CLAUDE.md). Ordered BEFORE the paused-scrub effect so
+    // the crop is applied before any render is triggered in the same commit.
+    useEffect(() => {
+        if (!engineRef.current || typeof engineRef.current.setCrop !== 'function') return;
+
+        if (!activeClip?.virtualCam) {
+            engineRef.current.setCrop(0, 0, 1, 1);
+            return;
+        }
+
+        const { cropX = 0, cropY = 0, cropW = 1, cropH = 1 } = activeClip.virtualCam;
+        const baseCrop = { cropX, cropY, cropW, cropH };
+
+        const scaleKfs = activeClip.keyframes?.scale;
+        if (scaleKfs?.length) {
+            const localTime   = currentTime - activeClip.start;
+            const extraScale  = interpolateKeyframes(scaleKfs, 1.0, localTime);
+            const composed    = composeCropWithZoom(baseCrop, extraScale);
+            engineRef.current.setCrop(composed.cropX, composed.cropY, composed.cropW, composed.cropH);
+        } else {
+            engineRef.current.setCrop(cropX, cropY, cropW, cropH);
+        }
+    }, [currentTime, activeClip?.id, activeClip?.start, activeClip?.virtualCam, activeClip?.keyframes]);
 
     // --- Paused-scrub seek effect ---
     // Runs only when currentTime changes while paused so the preview frame stays in sync
@@ -375,49 +459,25 @@ const VideoPlayer = () => {
     const isTalkingHead = ['long_form_raw', 'podcast', 'interview', 'youtube_long'].includes(contentType);
     const transformOrigin = isTalkingHead ? '50% 28%' : 'center center';
 
+    // When activeClip.virtualCam is present, any zoom-rhythm scale keyframes are
+    // baked into the composed crop rectangle by the effect above instead — CSS
+    // transform scale must stay neutral here or the zoom gets applied TWICE
+    // (once via crop, once via this transform). x/y/rotation still apply as
+    // normal since virtualCam only ever controls the crop, never these.
     if (activeClip && activeClip.keyframes) {
         const localTime = currentTime - activeClip.start;
         const kf = activeClip.keyframes;
+        const hasVirtualCam = !!activeClip.virtualCam;
 
-        const interpolate = (propKeyframes, defaultVal) => {
-            if (!propKeyframes || propKeyframes.length === 0) return defaultVal;
-            if (propKeyframes.length === 1) return propKeyframes[0].value;
-
-            // Find surrounding keyframes
-            let k1 = propKeyframes[0];
-            let k2 = propKeyframes[propKeyframes.length - 1];
-
-            for (let i = 0; i < propKeyframes.length - 1; i++) {
-                if (localTime >= propKeyframes[i].time && localTime <= propKeyframes[i+1].time) {
-                    k1 = propKeyframes[i];
-                    k2 = propKeyframes[i+1];
-                    break;
-                }
-            }
-
-            if (localTime <= k1.time) return k1.value;
-            if (localTime >= k2.time) return k2.value;
-
-            const progress = (localTime - k1.time) / (k2.time - k1.time);
-
-            // Simple easeOutCubic approximation if requested
-            let eased = progress;
-            if (k2.easing === 'easeOutCubic') {
-                eased = 1 - Math.pow(1 - progress, 3);
-            }
-
-            return k1.value + (k2.value - k1.value) * eased;
-        };
-
-        const scale = interpolate(kf.scale, 1.0);
-        const x = interpolate(kf.x, 0);
-        const y = interpolate(kf.y, 0);
-        const rotation = interpolate(kf.rotation, 0);
+        const scale = hasVirtualCam ? 1.0 : interpolateKeyframes(kf.scale, 1.0, localTime);
+        const x = interpolateKeyframes(kf.x, 0, localTime);
+        const y = interpolateKeyframes(kf.y, 0, localTime);
+        const rotation = interpolateKeyframes(kf.rotation, 0, localTime);
 
         if (scale !== 1.0 || x !== 0 || y !== 0 || rotation !== 0) {
             transformStyle = `translate(${x}px, ${y}px) scale(${scale}) rotate(${rotation}deg)`;
         }
-    } else if (activeClip) {
+    } else if (activeClip && !activeClip.virtualCam) {
         // No keyframes — read direct clip properties set by the Transform tab
         const scale = activeClip.scale ?? 1.0;
         const x = activeClip.x ?? 0;
