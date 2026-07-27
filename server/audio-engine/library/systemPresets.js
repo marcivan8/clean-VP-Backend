@@ -20,7 +20,7 @@ const SYSTEM_PRESETS = [
         name: 'preset-cinematic-grade',
         displayName: 'Cinematic Grade',
         description: 'Apply the Teal & Orange cinematic look — one tap',
-        type: AssetType.LUT,
+        type: AssetType.TEMPLATE,
         presetType: PresetType.COLOR_GRADE,
         settings: {
             lutId: 'cinematic-teal-orange',
@@ -48,7 +48,7 @@ const SYSTEM_PRESETS = [
         name: 'preset-social-pop-grade',
         displayName: 'Social Pop Grade',
         description: 'High-saturation punchy grade optimised for social platforms',
-        type: AssetType.LUT,
+        type: AssetType.TEMPLATE,
         presetType: PresetType.COLOR_GRADE,
         settings: {
             lutId: 'vivid-social-pop',
@@ -77,7 +77,7 @@ const SYSTEM_PRESETS = [
         name: 'preset-bold-viral-captions',
         displayName: 'Bold Viral Captions',
         description: 'Large white bold captions with black stroke — TikTok viral style',
-        type: AssetType.LUT,
+        type: AssetType.TEMPLATE,
         presetType: PresetType.CAPTION_STYLE,
         settings: {
             fontFamily: 'Montserrat',
@@ -110,7 +110,7 @@ const SYSTEM_PRESETS = [
         name: 'preset-minimal-subtitles',
         displayName: 'Minimal Subtitles',
         description: 'Clean minimal subtitle style for interviews and documentaries',
-        type: AssetType.LUT,
+        type: AssetType.TEMPLATE,
         presetType: PresetType.CAPTION_STYLE,
         settings: {
             fontFamily: 'Inter',
@@ -144,7 +144,7 @@ const SYSTEM_PRESETS = [
         name: 'preset-podcast-audio',
         displayName: 'Podcast Audio',
         description: 'Normalized dialogue-focused audio — reduce noise, boost voice, lower music',
-        type: AssetType.LUT,
+        type: AssetType.TEMPLATE,
         presetType: PresetType.SOUND_SETTINGS,
         settings: {
             musicVolume: 0.15,
@@ -170,7 +170,7 @@ const SYSTEM_PRESETS = [
         name: 'preset-music-video-audio',
         displayName: 'Music Video Audio',
         description: 'High-energy mix — boost music, SFX punchy, voice ducked',
-        type: AssetType.LUT,
+        type: AssetType.TEMPLATE,
         presetType: PresetType.SOUND_SETTINGS,
         settings: {
             musicVolume: 0.9,
@@ -197,7 +197,7 @@ const SYSTEM_PRESETS = [
         name: 'preset-youtube-1080p',
         displayName: 'YouTube 1080p',
         description: 'Optimal settings for YouTube — 1080p, 30fps, high bitrate, AAC audio',
-        type: AssetType.LUT,
+        type: AssetType.TEMPLATE,
         presetType: PresetType.EXPORT_SETTINGS,
         settings: {
             resolution: '1080p',
@@ -225,7 +225,7 @@ const SYSTEM_PRESETS = [
         name: 'preset-interview-one-tap',
         displayName: 'Interview in One Tap',
         description: 'Full interview edit: remove silences, normalize audio, clean captions, grade',
-        type: AssetType.LUT,
+        type: AssetType.TEMPLATE,
         presetType: PresetType.FULL_EDIT,
         settings: {
             removeSilences: true,

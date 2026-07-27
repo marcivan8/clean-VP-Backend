@@ -189,7 +189,12 @@ async function seed() {
     console.log(`[seeder] LUTs done — ${Object.keys(lutNameToId).length} rows`);
 
     // ── Presets
-    const presetAssetRows = PRESET_LIBRARY.map(p => ({ ...p, type: AssetType.LUT }));
+    // NOTE: previously mislabeled as AssetType.LUT (copy-paste from the LUT
+    // block above). Presets have their own asset type — leaving them as LUT
+    // meant they'd show up as phantom rows in LUT-intent searches (they have
+    // no `luts` child row, so TaxonomyService.getLUTsByIntents's join returned
+    // them with blank LUT fields whenever editing_intents overlapped).
+    const presetAssetRows = PRESET_LIBRARY.map(p => ({ ...p, type: AssetType.TEMPLATE }));
     console.log(`[seeder] Upserting ${presetAssetRows.length} Preset assets…`);
     const presetNameToId = await upsertAssets(presetAssetRows);
     await seedPresets(PRESET_LIBRARY, presetNameToId);
