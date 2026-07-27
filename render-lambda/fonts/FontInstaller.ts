@@ -93,9 +93,18 @@ export class FontInstaller {
     /**
      * Resolves a font file to a local disk path, downloading if necessary.
      * Returns null if the font cannot be obtained.
+     *
+     * @param backendUrl — the Vibed backend's public URL. When provided, the
+     *   committed TTFs served at ${backendUrl}/fonts/<file> (client/public/fonts/,
+     *   the same files the FFmpeg export path uses) act as the download source.
+     *   This is the RELIABLE fallback when the font Layer isn't attached — the
+     *   jsDelivr pattern below is kept last but is dead in practice (@fontsource
+     *   v4 never shipped TTFs at that path; it was the root cause of the FFmpeg
+     *   pipeline's original font bug).
      */
     private async resolveFontPath(
-        spec: { file: string; slug: string; weight: number; subset: string }
+        spec: { file: string; slug: string; weight: number; subset: string },
+        backendUrl: string | null = null
     ): Promise<string | null> {
         // 1. Lambda Layer (zero cost, always present when layer is attached)
         const layerPath = path.join(LAYER_FONT_DIR, spec.file);
@@ -109,7 +118,23 @@ export class FontInstaller {
             return tmpPath;
         }
 
-        // 3. Download from jsDelivr and cache in /tmp
+        // 3. Download from the Vibed backend's own committed font files
+        if (backendUrl) {
+            const beUrl = `${backendUrl.replace(/\/$/, '')}/fonts/${encodeURIComponent(spec.file)}`;
+            console.log(`[FontInstaller] Downloading ${spec.file} from backend: ${beUrl}`);
+            try {
+                await downloadFile(beUrl, tmpPath);
+                if (fileOk(tmpPath)) {
+                    console.log(`[FontInstaller] ✅ Downloaded ${spec.file} from backend (${Math.round(fs.statSync(tmpPath).size / 1024)}KB)`);
+                    return tmpPath;
+                }
+                console.warn(`[FontInstaller] ⚠️  Backend download too small: ${tmpPath}`);
+            } catch (err: any) {
+                console.warn(`[FontInstaller] ⚠️  Backend font download failed (${err.message}) — trying jsDelivr`);
+            }
+        }
+
+        // 4. Download from jsDelivr and cache in /tmp (last resort — dead in practice)
         const url = `${JSDELIVR_BASE}/${spec.slug}@4/files/${spec.slug}-${spec.subset}-${spec.weight}-normal.ttf`;
         console.log(`[FontInstaller] Downloading ${spec.file} from ${url}`);
         try {
@@ -134,7 +159,7 @@ export class FontInstaller {
      *
      * Never throws. Unknown or unavailable fonts are skipped with a console warning.
      */
-    async ensureFonts(fontNames: string[]): Promise<string> {
+    async ensureFonts(fontNames: string[], backendUrl: string | null = null): Promise<string> {
         if (fontNames.length === 0) return '';
 
         const unique = [...new Set(fontNames)];
@@ -151,7 +176,7 @@ export class FontInstaller {
 
             let fontPath: string | null = null;
             try {
-                fontPath = await this.resolveFontPath(entry);
+                fontPath = await this.resolveFontPath(entry, backendUrl);
             } catch (err: any) {
                 console.warn(`[FontInstaller] Error resolving "${entry.name}": ${err.message}`);
             }

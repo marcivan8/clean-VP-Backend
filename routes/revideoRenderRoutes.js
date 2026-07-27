@@ -7,8 +7,17 @@ const { LambdaClient, InvokeCommand } = require("@aws-sdk/client-lambda");
 const lambdaClient = new LambdaClient({ region: process.env.AWS_REGION || 'us-east-1' });
 const { v4: uuidv4 } = require('uuid');
 
-// In-memory cache for render jobs
+// In-memory cache for render jobs.
+// Janitor below evicts entries older than 60 min so recovered/abandoned jobs
+// (including bogus jobIds polled by mistake) can't grow the Map unboundedly.
 const renderJobs = new Map();
+const RENDER_JOB_TTL_MS = 60 * 60 * 1000;
+setInterval(() => {
+    const cutoff = Date.now() - RENDER_JOB_TTL_MS;
+    for (const [id, job] of renderJobs) {
+        if ((job.createdAt || 0) < cutoff) renderJobs.delete(id);
+    }
+}, 10 * 60 * 1000).unref();
 const storageConfig = require('../config/storage');
 const gcsBucket = storageConfig.bucket;
 
@@ -160,20 +169,38 @@ router.post('/render', authenticateUser, renderLimiter, async (req, res) => {
 
         console.log(`📡 Triggering AWS Lambda render for video`);
 
-        const backendUrl = process.env.FRONTEND_URL || process.env.PUBLIC_URL || 'https://your-railway-app.railway.app';
-        
-        const jobId = uuidv4();
-        renderJobs.set(jobId, { status: 'rendering', progress: 0 });
+        // backendUrl serves two purposes: the completion webhook target AND the
+        // font-download fallback source for the Lambda (it fetches committed TTFs
+        // from ${backendUrl}/fonts/<file> — same files the FFmpeg path uses).
+        // The old hardcoded fallback ('https://your-railway-app.railway.app') was
+        // a placeholder that silently sent every webhook to a dead domain — the #1
+        // cause of renders stuck at 'rendering' until the client timed out.
+        const backendUrl = process.env.FRONTEND_URL || process.env.PUBLIC_URL || null;
+        if (!backendUrl) {
+            console.warn(
+                '⚠️  [render] FRONTEND_URL / PUBLIC_URL not set — Lambda webhook + font fallback disabled. ' +
+                'Completion will be detected via GCS polling only (slower). Set PUBLIC_URL to this backend\'s public URL.'
+            );
+        }
 
-        // Setup payload for Lambda
+        const jobId = uuidv4();
+        renderJobs.set(jobId, { status: 'rendering', progress: 0, createdAt: Date.now() });
+
+        // Setup payload for Lambda.
+        // renderId = jobId is CRITICAL: it makes the Lambda's GCS output path
+        // deterministic (renders/{jobId}.mp4), which lets GET /status/:jobId
+        // detect completion directly from GCS even if the webhook never arrives
+        // (bad/missing backendUrl, Railway restart wiping renderJobs, transient
+        // network failure — all previously fatal, see R10-style ephemerality).
         const payload = {
             tracks: signedTracks,
             duration,
             fps,
             aspectRatio,
-            backendUrl,
+            backendUrl: backendUrl || '',
             captionStyle,   // ← font family + style so Lambda can pre-load the right font
-            webhookUrl: `${backendUrl}/api/revideo/webhook?jobId=${jobId}`
+            renderId: jobId,
+            ...(backendUrl ? { webhookUrl: `${backendUrl}/api/revideo/webhook?jobId=${jobId}` } : {}),
         };
 
         // Forward the request to the Lambda asynchronously
@@ -209,11 +236,12 @@ router.post('/webhook', express.json(), async (req, res) => {
     const { jobId } = req.query;
     
     if (jobId) {
+        const createdAt = renderJobs.get(jobId)?.createdAt || Date.now();
         if (status === 'success') {
-            renderJobs.set(jobId, { status: 'success', url, renderId });
+            renderJobs.set(jobId, { status: 'success', url, renderId, createdAt });
             console.log(`✅ Webhook: Job ${jobId} succeeded. Video at ${url}`);
         } else {
-            renderJobs.set(jobId, { status: 'error', error });
+            renderJobs.set(jobId, { status: 'error', error, createdAt });
             console.log(`❌ Webhook: Job ${jobId} failed. Error: ${error}`);
         }
     }
@@ -222,13 +250,68 @@ router.post('/webhook', express.json(), async (req, res) => {
 });
 
 // GET /api/revideo/status/:jobId
-// Frontend polling endpoint
-router.get('/status/:jobId', (req, res) => {
-    const job = renderJobs.get(req.params.jobId);
-    if (!job) {
-        return res.status(404).json({ error: 'Job not found' });
+// Frontend polling endpoint.
+//
+// Completion detection is TWO-SOURCE:
+//   1. The Lambda webhook (fast path) — updates renderJobs when it arrives.
+//   2. Direct GCS check for renders/{jobId}.mp4 (recovery path) — because the
+//      webhook can be lost forever (backendUrl unset/wrong, Railway restart
+//      wiping the in-memory Map, transient network failure between AWS and
+//      Railway). The Lambda writes its output to a jobId-deterministic path
+//      precisely so this check is possible.
+// GCS checks are throttled to ≥5s apart per job and only start after a 15s
+// grace period (a render can never finish faster than that).
+const GCS_CHECK_GRACE_MS    = 15_000;
+const GCS_CHECK_INTERVAL_MS = 5_000;
+
+router.get('/status/:jobId', async (req, res) => {
+    const { jobId } = req.params;
+    // UUID-shape guard — jobId feeds a GCS object path below
+    if (!/^[0-9a-f-]{36}$/i.test(jobId)) {
+        return res.status(400).json({ error: 'Invalid job id' });
     }
-    res.json(job);
+
+    let job = renderJobs.get(jobId);
+
+    // Unknown job (e.g. server restarted since render started): treat it as a
+    // possibly-in-flight render and rely on the GCS check below. createdAt is
+    // backdated past the grace period so the GCS check fires immediately.
+    if (!job) {
+        job = { status: 'rendering', progress: 0, createdAt: Date.now() - GCS_CHECK_GRACE_MS - 1, _recovered: true };
+        renderJobs.set(jobId, job);
+    }
+
+    if (job.status === 'rendering' && gcsBucket) {
+        const now      = Date.now();
+        const oldEnough = (now - (job.createdAt || 0)) > GCS_CHECK_GRACE_MS;
+        const throttled = job._lastGcsCheck && (now - job._lastGcsCheck) < GCS_CHECK_INTERVAL_MS;
+        if (oldEnough && !throttled) {
+            job._lastGcsCheck = now;
+            try {
+                const file = gcsBucket.file(`renders/${jobId}.mp4`);
+                const [exists] = await file.exists();
+                if (exists) {
+                    const bucketName = process.env.GOOGLE_CLOUD_BUCKET_NAME || process.env.GCS_BUCKET_NAME || 'viral-pilot_bucket';
+                    job = { status: 'success', url: `https://storage.googleapis.com/${bucketName}/renders/${jobId}.mp4`, renderId: jobId };
+                    renderJobs.set(jobId, job);
+                    console.log(`✅ [status] Job ${jobId} detected complete via GCS check (webhook missed or pending)`);
+                }
+            } catch (gcsErr) {
+                console.warn(`[status] GCS check failed for job ${jobId}:`, gcsErr.message);
+            }
+        }
+    }
+
+    // Sign the download URL on success reads — the raw storage.googleapis.com
+    // URL only works if the bucket is public (it usually isn't). toSignedUrl
+    // is a no-op passthrough for non-GCS URLs and on any signing failure.
+    if (job.status === 'success' && job.url && !job._signedUrl) {
+        job._signedUrl = await toSignedUrl(job.url);
+        renderJobs.set(jobId, job);
+    }
+
+    const { _lastGcsCheck, _signedUrl, _recovered, ...publicJob } = job;
+    res.json({ ...publicJob, url: _signedUrl || job.url });
 });
 
 // GET /api/revideo/health
