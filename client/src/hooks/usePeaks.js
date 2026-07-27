@@ -21,6 +21,9 @@ const _cache = new Map();
 /** In-flight promises to deduplicate concurrent requests for the same asset */
 const _inflight = new Map();
 
+/** Keys that already used their one automatic retry (prevents retry storms) */
+const _retriedOnce = new Set();
+
 export function usePeaks(assetId, gcsPath, proxyUrl) {
     const [state, setState] = useState(() => {
         if (!assetId) return { peaks: null, duration: null, loading: false, error: null };
@@ -92,6 +95,7 @@ export function usePeaks(assetId, gcsPath, proxyUrl) {
             _inflight.set(inflightKey, promise);
         }
 
+        let retryTimer = null;
         promise
             .then(({ peaks, duration }) => {
                 if (!cancelled) setState({ peaks, duration, loading: false, error: null });
@@ -102,10 +106,53 @@ export function usePeaks(assetId, gcsPath, proxyUrl) {
                 // permanently-broken waveform pipeline indistinguishable from
                 // "still loading" for anyone not actively inspecting Network.
                 console.warn(`[usePeaks] extraction failed for asset ${assetId}:`, err.message);
-                if (!cancelled) setState({ peaks: null, duration: null, loading: false, error: err.message });
+                if (cancelled) return;
+                setState({ peaks: null, duration: null, loading: false, error: err.message });
+
+                // One automatic retry after 5s. A transient failure (proxy still
+                // finalizing, GCS hiccup, server restart) used to leave the clip
+                // waveform-less for the whole session because nothing ever
+                // re-triggered the effect. The retry runs the same pipeline; if
+                // it fails again the error state stands (no retry storm).
+                if (!_retriedOnce.has(inflightKey)) {
+                    _retriedOnce.add(inflightKey);
+                    retryTimer = setTimeout(() => {
+                        if (cancelled) return;
+                        console.log(`[usePeaks] retrying extraction for asset ${assetId}…`);
+                        setState(s => ({ ...s, loading: true, error: null }));
+                        // Re-run by bumping the effect via state: simplest reliable
+                        // mechanism is to clear the inflight slot and re-invoke the
+                        // same promise factory inline.
+                        (async () => {
+                            try {
+                                const extractRes = await fetch('/api/waveform/extract', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ assetId, gcsPath, proxyUrl }),
+                                });
+                                if (!extractRes.ok) throw new Error(`Waveform extract failed: ${extractRes.status}`);
+                                const { peaksUrl, peaks: inlinePeaks, duration: inlineDuration } = await extractRes.json();
+                                let data;
+                                if (!peaksUrl) {
+                                    if (!inlinePeaks) throw new Error('No peaks data in server response');
+                                    data = { peaks: inlinePeaks, duration: inlineDuration };
+                                } else {
+                                    const peaksRes = await fetch(peaksUrl);
+                                    if (!peaksRes.ok) throw new Error(`Peaks fetch failed: ${peaksRes.status}`);
+                                    data = await peaksRes.json();
+                                }
+                                _cache.set(assetId, data);
+                                if (!cancelled) setState({ peaks: data.peaks, duration: data.duration, loading: false, error: null });
+                            } catch (retryErr) {
+                                console.warn(`[usePeaks] retry failed for asset ${assetId}:`, retryErr.message);
+                                if (!cancelled) setState({ peaks: null, duration: null, loading: false, error: retryErr.message });
+                            }
+                        })();
+                    }, 5000);
+                }
             });
 
-        return () => { cancelled = true; };
+        return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); };
     // proxyUrl is in deps so the hook retries once the proxy job completes and
     // the asset's proxyUrl is set (clip is placed before proxy is ready → first
     // call fires with proxyUrl=null → 400 → never retried without this dep).

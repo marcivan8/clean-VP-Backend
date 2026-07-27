@@ -1604,6 +1604,20 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
             speakerCam[guest]  = 'speakerA';   reactionCam[guest]  = 'reactionB';
         }
 
+        // Speakers beyond host/guest: diarization frequently emits a spurious third
+        // label (crosstalk, a cough, a brief interjection). Those turns used to fall
+        // through `speakerCam[seg.speaker] || 'wide'` and render WIDE every time —
+        // on a noisy diarization that alone could wash a whole video wide. Alternate
+        // them across the two physical cameras instead so framing stays plausible.
+        orderedSpeakers.slice(2).forEach((spk, i) => {
+            const useA = i % 2 === 0;
+            speakerCam[spk]  = useA ? 'speakerA'  : 'speakerB';
+            reactionCam[spk] = useA ? 'reactionB' : 'reactionA';
+        });
+        if (orderedSpeakers.length > 2) {
+            console.log(`[virtual-multicam] ${orderedSpeakers.length - 2} extra speaker label(s) mapped onto the two cameras`);
+        }
+
         // ── 3. Group words into diarization segments ─────────────────────────
         // Merge consecutive words from the same speaker (gap ≤ 0.5s = same segment)
         const MERGE_GAP = 0.5;
@@ -1710,6 +1724,95 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
 
     } catch (err) {
         console.error('[interviewRoutes] /virtual-multicam error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/interview/classify-pauses
+//
+// The editorial intelligence behind silence removal. A raw gap-length rule
+// can't tell a thinking pause before an answer, a dramatic beat after a key
+// statement, or a mid-sentence hesitation apart from dead air — it cuts them
+// all, which makes cleaned videos feel rough and robotic ("too aggressive").
+//
+// Body: {
+//   pauses: [{ i, dur, before, after }]  — i: caller's index, dur: seconds,
+//            before/after: ~10 words of transcript on each side of the pause
+// }
+// Returns: { decisions: [{ i, action: 'cut'|'keep'|'shorten' }] }
+//   cut     — dead air / rambling gap: remove entirely
+//   keep    — intentional beat (dramatic pause, emphasis): leave untouched
+//   shorten — thinking pause with editorial value: keep a short natural beat
+//
+// Falls back are the CALLER's job (heuristics in MediaExecutionEngine) — this
+// endpoint returns 503 rather than guessing when GPT is unavailable.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/classify-pauses', ...authAndGate, async (req, res) => {
+    const { pauses = [] } = req.body || {};
+    if (!Array.isArray(pauses) || pauses.length === 0) {
+        return res.status(400).json({ error: 'pauses array is required' });
+    }
+    if (!process.env.OPENAI_API_KEY) {
+        return res.status(503).json({ error: 'OPENAI_API_KEY not configured' });
+    }
+
+    try {
+        const OpenAI = require('openai');
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 20_000 });
+
+        // Compact per-pause objects — cap context length to keep the prompt small
+        const compact = pauses.slice(0, 120).map(p => ({
+            i:      p.i,
+            dur:    parseFloat(Number(p.dur || 0).toFixed(2)),
+            before: String(p.before || '').slice(-140),
+            after:  String(p.after  || '').slice(0, 140),
+        }));
+
+        const completion = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [{
+                role: 'user',
+                content:
+`You are a professional video editor reviewing pauses detected in a talking-head/interview video.
+For each pause decide:
+  "cut"     – dead air, rambling gap, false start, or filler silence: removing it tightens the video
+  "keep"    – intentional beat: dramatic pause after a key statement, comedic timing, emphasis before a punchline
+  "shorten" – a thinking pause before answering a question, or a natural breath mid-thought: has emotional value but is too long as-is
+
+Guidelines:
+- A pause right after a question (before the answer) is usually "shorten" — the hesitation is human and engaging, but 3s of it is not.
+- A pause mid-sentence (the text before ends WITHOUT sentence-final punctuation) is usually "keep" or "shorten" — cutting it risks clipping speech.
+- A pause after a completed sentence with low-content text around it is usually "cut".
+- Pauses > 4s are almost always "cut" or "shorten", never "keep".
+
+Return ONLY valid JSON: {"d":[{"i":N,"a":"cut"|"keep"|"shorten"}]}
+
+Pauses: ${JSON.stringify(compact)}`,
+            }],
+            response_format: { type: 'json_object' },
+            temperature: 0.1,
+            max_tokens: 1500,
+        });
+
+        let decisions = [];
+        try {
+            const parsed = JSON.parse(completion.choices[0].message.content);
+            decisions = (parsed.d || []).map(d => ({
+                i:      d.i,
+                action: ['cut', 'keep', 'shorten'].includes(d.a) ? d.a : 'cut',
+            }));
+        } catch (parseErr) {
+            return res.status(502).json({ error: 'Could not parse pause classification' });
+        }
+
+        const counts = { cut: 0, keep: 0, shorten: 0 };
+        decisions.forEach(d => { counts[d.action]++; });
+        console.log(`[interviewRoutes] classify-pauses: ${pauses.length} pauses → ${counts.cut} cut / ${counts.keep} keep / ${counts.shorten} shorten`);
+
+        res.json({ decisions });
+    } catch (err) {
+        console.error('[interviewRoutes] /classify-pauses error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });

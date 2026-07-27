@@ -182,6 +182,26 @@ export default makeScene2D('timeline', function* (view) {
                     const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || canvasHeight;
                     const fitted = fitSize(srcW, srcH);
 
+                    // ── Virtual multicam crop (clip.virtualCam) ────────────────
+                    // {cropX, cropY, cropW, cropH} are UV fractions of the source
+                    // frame (see R14). Revideo has no UV-crop primitive, so the
+                    // crop is simulated by zooming the video node by 1/cropW and
+                    // offsetting it so the crop's CENTER lands at canvas center.
+                    // Composed multiplicatively with any scale keyframes per R16:
+                    // a rhythm punch-in zooms further INTO the same angle, and the
+                    // position offset tracks the total scale so the anchor holds.
+                    // Without this the cinematic export silently rendered every
+                    // multicam project 100% wide (the exact "stayed on one angle"
+                    // symptom) while preview + FFmpeg export showed the crops.
+                    const vc = clip.virtualCam;
+                    const hasVc = vc && typeof vc.cropW === 'number' && vc.cropW > 0 && vc.cropW < 0.999;
+                    const vcZoom = hasVc ? 1 / vc.cropW : 1;
+                    const vcCx = hasVc ? (vc.cropX + vc.cropW / 2) - 0.5 : 0; // crop center, -0.5..0.5 rel frame center
+                    const vcCy = hasVc ? (vc.cropY + vc.cropH / 2) - 0.5 : 0;
+
+                    const kfScale = () => evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1);
+                    const totalScale = () => kfScale() * vcZoom;
+
                     const g = clip.grading;
                     const videoFilters = g ? [
                         brightness((g.brightness ?? 100) / 100),
@@ -200,10 +220,10 @@ export default makeScene2D('timeline', function* (view) {
                             time={() => playback.time - clip.start + (clip.offset || 0)}
                             play={true}
                             volume={(clip.volume ?? 1) * (clip.globalVolume ?? 1)}
-                            x={() => evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0)}
-                            y={() => evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0)}
-                            scaleX={() => evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
-                            scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
+                            x={() => evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0) - vcCx * fitted.w * totalScale()}
+                            y={() => evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0) - vcCy * fitted.h * totalScale()}
+                            scaleX={() => totalScale()}
+                            scaleY={() => (evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)) * vcZoom}
                             rotation={() => evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
                             opacity={() => evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
                             filters={videoFilters}
