@@ -32,6 +32,17 @@ const QUALITY_PROFILES = [
     { id: 'low',    label: 'Draft',  bitrate: '2 Mbps',  sub: 'Fast render'  },
 ];
 
+// Two render pipelines live side by side (see CLAUDE.md NODE 1 · SYSTEM ARCHITECTURE):
+//   ffmpeg  → jobs/exportProcessor.js via BullMQ — the default, fast and battle-tested.
+//   revideo → render-lambda/ (AWS Lambda + Chromium) — renders through a real browser
+//             engine instead of FFmpeg's drawtext filter, so fonts/effects are more
+//             faithful, but it depends on backend env vars that may not be configured
+//             on every deployment (see routes/revideoRenderRoutes.js).
+const RENDER_ENGINES = [
+    { id: 'ffmpeg',  label: 'Standard',  sub: 'Fast · stable' },
+    { id: 'revideo', label: 'Cinematic', sub: 'Chromium render', beta: true },
+];
+
 const AUDIO_FORMATS = [
     { value: 'mp3', label: 'MP3', hintKey: 'audioFormatHintMp3' },
     { value: 'wav', label: 'WAV', hintKey: 'audioFormatHintWav' },
@@ -90,7 +101,7 @@ const Sep = () => (
 const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exportError }) => {
     const { t } = useTranslation('editor');
     const [activeTab, setActiveTab] = useState('video');
-    const [settings, setSettings]   = useState({ platform: null, resolution: '1080p', fps: 30, format: 'mp4', quality: 'high' });
+    const [settings, setSettings]   = useState({ platform: null, resolution: '1080p', fps: 30, format: 'mp4', quality: 'high', engine: 'ffmpeg' });
     const [step, setStep]           = useState('configure');
     const [progress, setProgress]   = useState(0);
     const [nleStatus, setNleStatus] = useState(null);
@@ -366,6 +377,48 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                             );
                                         })}
                                     </div>
+                                </div>
+
+                                {/* Render Engine */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                    <Label>Render Engine</Label>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                                        {RENDER_ENGINES.map(eng => {
+                                            const active = settings.engine === eng.id;
+                                            return (
+                                                <button
+                                                    key={eng.id}
+                                                    onClick={() => setSettings(s => ({ ...s, engine: eng.id }))}
+                                                    style={selCard(active)}
+                                                >
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                        <span style={{ fontSize: 13, fontWeight: 600, color: active ? 'var(--fg)' : 'var(--fg-2)', letterSpacing: '-0.005em' }}>
+                                                            {eng.label}
+                                                        </span>
+                                                        {eng.beta && (
+                                                            <span style={{
+                                                                fontFamily: 'var(--f-mono)', fontSize: 9, fontWeight: 700,
+                                                                letterSpacing: '0.06em', padding: '1px 5px', borderRadius: 4,
+                                                                background: 'color-mix(in oklch, var(--accent) 14%, transparent)',
+                                                                border: '0.5px solid color-mix(in oklch, var(--accent) 28%, transparent)',
+                                                                color: 'var(--accent)',
+                                                            }}>
+                                                                BETA
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <p style={{ margin: 0, fontFamily: 'var(--f-mono)', fontSize: 10, color: active ? 'var(--fg-3)' : 'var(--fg-4)', letterSpacing: '0.04em' }}>
+                                                        {eng.sub}
+                                                    </p>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    {settings.engine === 'revideo' && (
+                                        <p style={{ margin: 0, fontSize: 10.5, color: 'var(--fg-4)', fontFamily: 'var(--f-mono)', lineHeight: 1.5 }}>
+                                            Renders through a real browser engine for more accurate fonts/effects. Requires the Lambda render worker to be configured on this deployment — if it isn't, you'll see an error and can fall back to Standard.
+                                        </p>
+                                    )}
                                 </div>
 
                                 {/* FPS / Format — compact row */}
