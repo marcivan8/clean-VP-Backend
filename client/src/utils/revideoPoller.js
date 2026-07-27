@@ -24,7 +24,11 @@ import { authFetch } from './authFetch.js';
 const MIN_POLL_INTERVAL_MS = 2000;   // Lambda cold starts + Chromium boot are slow
 const MAX_POLL_INTERVAL_MS = 6000;
 const BACKOFF_FACTOR       = 1.3;
-const DEFAULT_TIMEOUT_MS   = 300_000; // 5 minutes — matches jobPoller.js's export budget
+// 16 minutes: the render Lambda's own ceiling is 15 minutes (deploy.sh), so
+// giving up any earlier abandons renders that are still legitimately running.
+// (The old 300s budget — borrowed from the FFmpeg jobPoller — caused "Render
+// timed out after 300s" while the Lambda was still working.)
+const DEFAULT_TIMEOUT_MS   = 960_000;
 
 /**
  * Poll /api/revideo/status/:jobId until status is 'success' or 'error'.
