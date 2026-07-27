@@ -107,6 +107,19 @@ class ContextEngine {
             completionScore,
             platformViolations,
 
+            // ── Applied-effect coverage ──────────────────────────────────────
+            // Sent by the client (useBrain.buildProjectState). Coverage ratios let
+            // the Brain distinguish "multicam on 3 of 40 clips" from "fully
+            // applied" — without this it only saw booleans and kept recommending
+            // work that was already done.
+            effects:          state.effects || null,
+            multicamCoverage: state.effects?.totalVideoClips
+                ? Math.round((state.effects.multicamClips / state.effects.totalVideoClips) * 100) / 100
+                : 0,
+            rhythmCoverage:   state.effects?.totalVideoClips
+                ? Math.round((state.effects.zoomRhythmClips / state.effects.totalVideoClips) * 100) / 100
+                : 0,
+
             // Asset Engine context (Creative Asset Intelligence System)
             projectLUTId:     projectState.projectLUTId  || null,
             hasColorGrade:    !!(projectState.projectLUTId),

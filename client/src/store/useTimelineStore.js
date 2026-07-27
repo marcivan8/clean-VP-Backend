@@ -167,6 +167,15 @@ const useTimelineStore = create(
             // Speaker diarization map — populated after split_speakers completes.
             // Shape: { SPEAKER_00: { role: 'interviewer'|'guest'|null, label: string|null, words: [{word, start, end}] } }
             speakerMap: {},
+            diarizationByAsset: {},   // assetId → { words, speakers } (see setAssetDiarization)
+
+            // Ledger of operations actually applied to this project, newest last.
+            // ContextEngine.build() reads projectState.editHistory and feeds it to
+            // the Editorial Brain prompt ("Edits applied: …"); before this existed
+            // the field was ALWAYS empty, so the Brain could never tell what had
+            // already been done and kept repeating the same suggestions.
+            // Entry: { op, at, summary, params }
+            editHistory: [],
 
             // Preview
             previewQuality: 'high',
@@ -401,6 +410,29 @@ const useTimelineStore = create(
 
             // Speaker diarization
             setSpeakerMap: (speakerMap) => set({ speakerMap }),
+
+            // Per-asset diarization cache: { [assetId]: { words, speakers } }.
+            // Diarization runs on ONE file at a time, so a timeline built from
+            // several uploads needs one result per asset. Cached here so a second
+            // "interview angles" run doesn't re-pay for jobs already completed
+            // (each diarization is a 1–5 min queued job).
+            setAssetDiarization: (assetId, data) => set(state => ({
+                diarizationByAsset: { ...state.diarizationByAsset, [assetId]: data },
+            })),
+
+            /**
+             * Append an applied operation to the edit ledger.
+             * Called from WorkflowController when a job completes successfully.
+             * Capped at 60 entries — enough for the Brain's context window while
+             * keeping the saved project payload small.
+             */
+            recordEdit: (op, { summary = null, params = null } = {}) => set(state => {
+                if (!op) return {};
+                const entry = { op, at: Date.now(), summary, params };
+                const next  = [...state.editHistory, entry];
+                return { editHistory: next.length > 60 ? next.slice(-60) : next };
+            }),
+            clearEditHistory: () => set({ editHistory: [] }),
             setSpeakerRole: (speakerId, role, label = null) => set(state => ({
                 speakerMap: {
                     ...state.speakerMap,

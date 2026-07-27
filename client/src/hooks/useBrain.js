@@ -80,6 +80,27 @@ function buildProjectState() {
         analysis_status:  a.analysis_status || null,
     }));
 
+    // ── What has actually been done to this project ──────────────────────────
+    // ContextEngine.build() reads `projectState.editHistory` and renders it into
+    // the Editorial Brain prompt as "Edits applied: …". It was never sent, so the
+    // Brain always reasoned as if the project were untouched and kept proposing
+    // work the user had already completed. Send the real ledger, newest last.
+    const editHistory = (state.editHistory || []).map(e => e.op).filter(Boolean);
+
+    // Effect COVERAGE, not just booleans: "multicam on 3 of 40 clips" is a very
+    // different situation from "multicam on all of them", and the Brain should be
+    // able to tell the difference when deciding what to recommend next.
+    const videoClips = tracks.filter(t => t.type === 'video').flatMap(t => t.clips || []);
+    const effects = {
+        totalVideoClips:  videoClips.length,
+        multicamClips:    videoClips.filter(c => c.virtualCam).length,
+        zoomRhythmClips:  videoClips.filter(c => c.keyframes?.scale?.length > 0).length,
+        videoTrackCount:  tracks.filter(t => t.type === 'video').length,
+        speakerCount:     Object.keys(speakerMap).length,
+        analysedAssets:   Object.keys(state.diarizationByAsset || {}).length,
+        hasColorGrade:    !!state.projectLUTId,
+    };
+
     return {
         projectId:        state.projectId    || null,
         platform:         state.platform     || null,
@@ -90,6 +111,9 @@ function buildProjectState() {
         hasMusicTrack,
         mediaBin,
         captions,
+        editHistory,
+        effects,
+        projectLUTId:     state.projectLUTId || null,
         // Lightweight track summary for the brain's context engine
         tracks: tracks.map(t => ({
             id:        t.id,

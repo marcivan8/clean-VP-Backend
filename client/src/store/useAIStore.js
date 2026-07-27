@@ -1,5 +1,13 @@
 import { create } from 'zustand';
 
+// Monotonic counter stamped onto every log AND suggestion as they are created.
+// ReasoningPanel merges the two collections into ONE chronological stream, and
+// it can't sort on `timestamp` because that field is a locale-formatted
+// 12-hour string ("3:45:12 PM") — not reliably comparable. A plain incrementing
+// integer is unambiguous and never ties.
+let _seqCounter = 0;
+const nextSeq = () => ++_seqCounter;
+
 const useAIStore = create((set) => ({
     isAnalyzing: false,
     logs: [],
@@ -10,6 +18,12 @@ const useAIStore = create((set) => ({
 
     // Actions
     setActiveTab: (tab) => set({ activeTab: tab }),
+    // Quick chips are refreshed from SuggestionEngine after every applied edit,
+    // so they track the real project state instead of staying the fixed four
+    // strings this store was initialised with.
+    setQuickChips: (chips) => set(state =>
+        Array.isArray(chips) && chips.length ? { quickChips: chips } : state
+    ),
     setIsAnalyzing: (status) => set((state) => ({
         isAnalyzing: status,
         // When a job finishes, mark pending step logs as done so they switch from
@@ -22,11 +36,11 @@ const useAIStore = create((set) => ({
     setContextualSuggestion: (suggestion) => set({ contextualSuggestion: suggestion }),
 
     addLog: (log) => set((state) => ({
-        logs: [...state.logs, log]
+        logs: [...state.logs, { ...log, _seq: log._seq ?? nextSeq(), _at: log._at ?? Date.now() }]
     })),
 
     addSuggestion: (suggestion) => set((state) => ({
-        suggestions: [...state.suggestions, suggestion]
+        suggestions: [...state.suggestions, { ...suggestion, _seq: suggestion._seq ?? nextSeq(), _at: suggestion._at ?? Date.now() }]
     })),
 
     clearSession: () => set({ logs: [], suggestions: [], isAnalyzing: false, contextualSuggestion: null }),
