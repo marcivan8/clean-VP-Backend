@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { Sparkles, Brain, Check, X, ArrowRight, Activity, MessageSquare, Loader2, XCircle, Shield, Type } from 'lucide-react';
 import useAIStore from '../../store/useAIStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -722,12 +722,27 @@ const ReasoningPanel = () => {
     const { recordDecision } = useUserPreferences();
     const scrollRef = useRef(null);
 
-    // Auto-scroll to bottom whenever logs change (so new cards like caption_styles are always visible)
+    // Single chronological feed: logs and suggestions interleaved by the `_seq`
+    // counter stamped in useAIStore when each was created. Rendering them as two
+    // separate blocks (the previous behaviour) pinned every suggestion card below
+    // the entire conversation regardless of when it appeared.
+    // Items predating the counter (or added by other means) fall back to the old
+    // ordering: logs first, then suggestions, both stable within their group.
+    const feedItems = useMemo(() => {
+        const tagged = [
+            ...logs.map((l, i)        => ({ ...l, _kind: 'log',        _seq: l._seq ?? i })),
+            ...suggestions.map((s, i) => ({ ...s, _kind: 'suggestion', _seq: s._seq ?? (logs.length + i) })),
+        ];
+        return tagged.sort((a, b) => (a._seq - b._seq));
+    }, [logs, suggestions]);
+
+    // Auto-scroll to bottom whenever the feed changes (so new cards like
+    // caption_styles — and suggestion cards — are always visible)
     useEffect(() => {
         const el = scrollRef.current;
         if (!el) return;
         el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-    }, [logs]);
+    }, [feedItems.length]);
 
     const proxying = assets.filter(a => a.isProxying);
     const isEmpty = logs.length === 0 && suggestions.length === 0 && !isAnalyzing;
@@ -968,31 +983,34 @@ const ReasoningPanel = () => {
                     </div>
                 )}
 
-                {/* Logs Stream */}
-                {logs.map(log => (
-                    <LogItem key={log.id} log={log} />
-                ))}
-
-                {/* Active Suggestions */}
-                {suggestions.map(suggestion => (
-                    suggestion.type === 'agent_plan' ? (
+                {/* Unified chronological stream.
+                    Logs and suggestions used to be rendered as two sequential
+                    blocks, so EVERY suggestion/brain card appeared below the whole
+                    conversation no matter when it was actually produced — a card
+                    generated before three later messages still sat under them.
+                    Both collections are stamped with a monotonic `_seq` in
+                    useAIStore, so interleaving them restores real chronology. */}
+                {feedItems.map(item => (
+                    item._kind === 'log' ? (
+                        <LogItem key={item.id} log={item} />
+                    ) : item.type === 'agent_plan' ? (
                         <AgentPlanCard
-                            key={suggestion.id}
-                            suggestion={suggestion}
+                            key={item.id}
+                            suggestion={item}
                             onAccept={handleAccept}
                             onReject={removeSuggestion}
                         />
-                    ) : suggestion.type === 'next_actions' ? (
+                    ) : item.type === 'next_actions' ? (
                         <NextActionsCard
-                            key={suggestion.id}
-                            suggestion={suggestion}
+                            key={item.id}
+                            suggestion={item}
                             onAccept={handleAccept}
                             onReject={removeSuggestion}
                         />
                     ) : (
                         <SuggestionCard
-                            key={suggestion.id}
-                            suggestion={suggestion}
+                            key={item.id}
+                            suggestion={item}
                             onAccept={handleAccept}
                             onReject={removeSuggestion}
                         />

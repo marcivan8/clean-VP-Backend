@@ -38,12 +38,46 @@ function deriveGcsPath(rawGcsPath, proxyUrl) {
     const localMarker = '/uploads/';
 
     let idx = proxyUrl.indexOf(gcsMarker);
-    if (idx !== -1) return proxyUrl.slice(idx + gcsMarker.length);
+    if (idx !== -1) return stripQuery(proxyUrl.slice(idx + gcsMarker.length));
 
     idx = proxyUrl.indexOf(localMarker);
-    if (idx !== -1) return proxyUrl.slice(idx + localMarker.length);
+    if (idx !== -1) return stripQuery(proxyUrl.slice(idx + localMarker.length));
+
+    // Shape 3: a raw/signed GCS https URL
+    //   https://storage.googleapis.com/<bucket>/<path>[?X-Goog-Signature=…]
+    // Assets that were never proxied (or whose proxy job hasn't finished) carry
+    // this shape instead of the two above. Returning null for them meant the
+    // route answered 400 "gcsPath is required" and the clip showed NO waveform
+    // — the reason that on a multi-clip timeline only the first (already
+    // proxied) clip rendered one.
+    if (/^https?:\/\//i.test(proxyUrl)) {
+        try {
+            const u = new URL(proxyUrl);
+            if (/(^|\.)storage\.googleapis\.com$/i.test(u.hostname)) {
+                // /<bucket>/<objectPath> → drop the leading bucket segment
+                const segs = u.pathname.replace(/^\/+/, '').split('/');
+                if (segs.length > 1) {
+                    return decodeURIComponent(segs.slice(1).join('/'));
+                }
+            }
+        } catch { /* not a parseable URL — fall through */ }
+        // Any other absolute URL (blob:, CDN, unknown host) is not resolvable
+        // to a storage object — the caller must wait for the proxy job.
+        return null;
+    }
+
+    // Shape 4: an already storage-relative path ("raw/…", "proxies/…").
+    // Some code paths hand the asset's bare storage key straight through.
+    if (/^(raw|proxies|uploads|waveforms)\//.test(proxyUrl)) {
+        return stripQuery(proxyUrl);
+    }
 
     return null;
+}
+
+/** Remove any query string / fragment from a derived object path. */
+function stripQuery(p) {
+    return p.split('?')[0].split('#')[0];
 }
 
 module.exports = { deriveGcsPath };

@@ -5,6 +5,7 @@ import useJobStore, { JOB_STATES, TERMINAL_STATES } from '../store/useJobStore.j
 import { EventBus, EVENT_TYPES } from './EventBus.js';
 import useTimelineStore from '../store/useTimelineStore.js';
 import { trackEvent } from '../utils/trackEvent.js';
+import { getNextAction, getQuickChips } from './SuggestionEngine.js';
 
 // Per-operation editorial descriptions and next-step suggestions.
 // Keys must match the `operation` field returned by IntentParser / EditJobManager.
@@ -170,6 +171,33 @@ const workflowMachine = createMachine({
                                     const stepsApplied = useTimelineStore.getState().past.length - context.initialHistoryLen;
                                     const opMeta = getOperationMeta(result.operation);
 
+                                    // Record what just happened BEFORE resolving the next
+                                    // step, so the suggestion engine (and the Editorial
+                                    // Brain, which reads editHistory via buildProjectState)
+                                    // both reason over a timeline that includes this edit.
+                                    useTimelineStore.getState().recordEdit?.(result.operation, {
+                                        summary: result.message || null,
+                                        params:  result.details || null,
+                                    });
+
+                                    // Next step is resolved from the LIVE timeline — coverage
+                                    // of each effect, transcript presence, what's already in
+                                    // the ledger — instead of OPERATION_META's fixed
+                                    // per-operation string, which could not react to anything
+                                    // the user had already done.
+                                    let nextAction = null;
+                                    try {
+                                        nextAction = getNextAction({ justCompleted: result.operation });
+                                    } catch (sugErr) {
+                                        console.warn('[WorkflowController] suggestion resolution failed:', sugErr.message);
+                                    }
+
+                                    // Keep the prompt-bar chips in step with the same state.
+                                    try {
+                                        const chips = getQuickChips({ justCompleted: result.operation });
+                                        if (chips.length > 0) useAIStore.getState().setQuickChips?.(chips);
+                                    } catch { /* chips are cosmetic — never block completion */ }
+
                                     // Font style picker appears BEFORE the completion card so it's
                                     // visible above the Keep/Undo buttons when the panel auto-scrolls.
                                     if (result.operation === 'auto_captions') {
@@ -192,9 +220,12 @@ const workflowMachine = createMachine({
                                             stepsApplied,
                                             preTaskHistoryLen: context.initialHistoryLen,
                                             editDescription: opMeta.description,
-                                            nextSuggestion: opMeta.suggestion,
-                                            nextSuggestionPrompt: opMeta.suggestionPrompt,
-                                            nextSuggestionTab: opMeta.suggestionTab,
+                                            // Live suggestion, with the static map as a last
+                                            // resort only if the engine returned nothing.
+                                            nextSuggestion:       nextAction?.label  ?? opMeta.suggestion,
+                                            nextSuggestionPrompt: nextAction ? nextAction.prompt : opMeta.suggestionPrompt,
+                                            nextSuggestionTab:    nextAction ? nextAction.tab    : opMeta.suggestionTab,
+                                            nextSuggestionReason: nextAction?.reason ?? null,
                                         },
                                         timestamp: new Date().toLocaleTimeString()
                                     });

@@ -120,6 +120,33 @@ function buildActiveSegmentsFromWords(words, minSilenceDuration = 0.5, padding =
 }
 
 /**
+ * Resolve the server-side storage path ("raw/<user>/<file>") for an asset from
+ * whichever URL shape it happens to carry. Diarization and frame-extraction
+ * routes need this path; assets store it inconsistently depending on whether
+ * the proxy job has finished. Returns null when nothing usable is present.
+ */
+function resolveAssetServerPath(asset) {
+    if (!asset) return null;
+    const fromUrl = (url) => {
+        if (!url || typeof url !== 'string') return null;
+        if (url.startsWith('raw/') || url.startsWith('temp/')) return url;
+        const m = url.match(/\/(raw\/[^?#]+)/);
+        if (m) return decodeURIComponent(m[1]);
+        // Proxy path → recover the raw counterpart: proxies/<user>/<file>
+        const p = url.match(/\/api\/proxy\/gcs-media\/proxies\/([^/]+)\/([^/?#]+)/);
+        if (p) return `raw/${p[1]}/${decodeURIComponent(p[2])}`;
+        const g = url.match(/storage\.googleapis\.com\/[^/]+\/(raw\/[^?#]+)/);
+        if (g) return decodeURIComponent(g[1]);
+        return null;
+    };
+    return fromUrl(asset.gcsPath)
+        || fromUrl(asset.sourceUrl)
+        || fromUrl(asset.proxyUrl)
+        || fromUrl(asset.url)
+        || null;
+}
+
+/**
  * Group word-level timestamps into caption lines.
  * Splits on natural pauses (gap > 0.4 s) or every MAX_WORDS words.
  */
@@ -1041,9 +1068,18 @@ export class MediaExecutionEngine {
             // applies one static scale keyframe at t=0 per clip.
             // Requires: ≥2 clips on the video track + captions in the store.
             case 'rhythm_zoom': {
-                const rzStore      = useTimelineStore.getState();
-                const rzVideoTrack = rzStore.tracks?.find(t => t.type === 'video');
-                const rzClips      = rzVideoTrack?.clips ?? [];
+                const rzStore = useTimelineStore.getState();
+                // MULTI-TRACK: after split_speakers there is one video track per
+                // speaker. This used to read only the FIRST video track, so the
+                // second speaker's clips silently got no zoom rhythm at all.
+                // Clips carry _trackId so keyframes are written back to the right
+                // track, and shot assignment sees the whole conversation in
+                // timeline order rather than one speaker's half of it.
+                const rzVideoTracks = (rzStore.tracks ?? []).filter(t => t.type === 'video');
+                const rzVideoTrack  = rzVideoTracks[0]; // legacy anchor
+                const rzClips = rzVideoTracks
+                    .flatMap(t => (t.clips ?? []).map(c => ({ ...c, _trackId: t.id })))
+                    .sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
                 const rzWords      = rzStore.captions ?? [];
                 const rzStyle      = args.style || 'dynamic';
 
@@ -1093,9 +1129,13 @@ export class MediaExecutionEngine {
                 //   push_in  → slow zoom across the clip (2 keyframes, easeOutCubic)
                 //   punch_in → hold, then snap to target ON the emphasized word
                 //              (keyframe pair 80ms before / 60ms after the word start)
+                // Clear on each clip's OWN track — using the first track's id for
+                // every clip silently no-oped for clips on other video tracks.
+                // (addTransformKeyframe below resolves the track from the clip id
+                // itself, so it was already multi-track safe.)
                 rzClips.forEach(clip => {
                     if (clip.keyframes?.scale?.length) {
-                        rzStore.updateClip(rzVideoTrack.id, clip.id, {
+                        rzStore.updateClip(clip._trackId || rzVideoTrack.id, clip.id, {
                             keyframes: { ...(clip.keyframes || {}), scale: [] },
                         });
                     }
@@ -1310,87 +1350,24 @@ export class MediaExecutionEngine {
                     (t.clips ?? []).map(c => ({ ...c, _trackId: t.id }))
                 );
 
-                // ── Word source selection — TIME BASE MATTERS ────────────────
-                // The backend's segments inherit the time base of the words we
-                // send, and the split/tag step below matches segments against
-                // clip SOURCE ranges (clip.offset). store.captions is overwritten
-                // with TIMELINE-space words by setTimelineTranscript() after any
-                // cleanup — using those post-cleanup meant segments matched the
-                // wrong clips (or none), and multicam silently "didn't apply".
-                // Priority: always-source-space stores first, captions last
-                // (with an explicit timeline→source remap when we must use them).
-                const vmSpeakerMapWords = Object.entries(vmStore.speakerMap || {})
-                    .flatMap(([spk, info]) => (info?.words || []).map(w => ({ ...w, speaker: w.speaker || spk })))
-                    .sort((a, b) => a.start - b.start);
-                const vmTranscriptWords = Object.values(vmStore.transcripts || {})
-                    .flat().filter(w => w.speaker);
-
-                let vmWords, vmWordsSpace;
-                if (vmSpeakerMapWords.length > 0) {
-                    vmWords = vmSpeakerMapWords;      vmWordsSpace = 'source(speakerMap)';
-                } else if (vmTranscriptWords.length > 0) {
-                    vmWords = vmTranscriptWords;      vmWordsSpace = 'source(transcripts)';
-                } else {
-                    vmWords = (vmStore.captions ?? []).filter(w => w.speaker);
-                    vmWordsSpace = 'captions';
-                }
-
-                // captions are timeline-space after cleanup — remap each word back
-                // into source time via the clips' own layout (timeline t → the clip
-                // under t → t - clip.start + clip.offset). Identity on an unedited
-                // single clip, so it's always safe to apply.
-                if (vmWordsSpace === 'captions' && vmWords.length > 0) {
-                    const layoutClips = [...vmAllClips].sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
-                    const toSource = (t) => {
-                        for (const c of layoutClips) {
-                            const s = c.start ?? 0, d = c.duration ?? 0;
-                            if (t >= s - 0.001 && t <= s + d + 0.001) return (t - s) + (c.offset ?? 0);
-                        }
-                        return null;
-                    };
-                    const remapped = [];
-                    for (const w of vmWords) {
-                        const ns = toSource(w.start), ne = toSource(w.end);
-                        if (ns !== null && ne !== null && ne > ns) remapped.push({ ...w, start: ns, end: ne });
-                    }
-                    if (remapped.length > 0) {
-                        console.log(`[virtual_multicam] remapped ${remapped.length}/${vmWords.length} caption words timeline→source`);
-                        vmWords = remapped;
-                        vmWordsSpace = 'captions→source';
-                    }
-                }
-                console.log(`[virtual_multicam] word source: ${vmWordsSpace} (${vmWords.length} words)`);
+                // NOTE: word sourcing now happens PER ASSET in
+                // _getDiarizationForAsset() — speakerMap for the asset
+                // split_speakers ran on, a queued diarize job for the others.
+                // The old single-source block that lived here only ever produced
+                // words for ONE file, which is why clips from other uploads went
+                // untagged. Its timeline→source caption remap is preserved there
+                // for the primary asset via the speakerMap path (always source
+                // space), so no remap is needed here anymore.
 
                 if (vmAllClips.length === 0) {
                     throw new Error('No clips on the timeline. Add your interview video first.');
                 }
 
-                if (vmWords.length === 0) {
-                    return {
-                        action,
-                        success: false,
-                        message:
-                            'Virtual multicam needs speaker diarization data to know who is talking when.\n\n' +
-                            'Run "split speakers" first (or "add captions" which includes speaker detection), ' +
-                            'then try "interview angles" again.',
-                    };
-                }
-
-                // Collect unique speakers from the words
-                const vmSpeakers = [...new Set(vmWords.map(w => w.speaker).filter(Boolean))].sort();
-
-                // 1 speaker is fine — the backend switches to SOLO mode (centered
-                // wide/mid/close zoom angles) instead of the 2-person left/right
-                // crops. This is the primary use case: a single-camera talking-head
-                // interview turned into a simulated 3-camera edit.
-                if (vmSpeakers.length === 1) {
-                    console.log('[virtual_multicam] 1 speaker — requesting SOLO wide/mid/close mode');
-                }
-
-                // ── Call backend to get segments with angle + crop region ─────
+                // Speaker COUNT is resolved per asset below — a single speaker is
+                // fine, the backend switches that asset to SOLO mode (centered
+                // wide/mid/close) instead of the 2-person left/right crops.
                 console.log(
-                    `[virtual_multicam] ${vmWords.length} words, ${vmSpeakers.length} speakers, ` +
-                    `${vmAllClips.length} clips across ${vmVideoTracks.length} track(s) → POST /api/interview/virtual-multicam`
+                    `[virtual_multicam] ${vmAllClips.length} clips across ${vmVideoTracks.length} track(s)`
                 );
 
                 // Send the GCS server-side path so the backend can extract frames
@@ -1405,24 +1382,109 @@ export class MediaExecutionEngine {
                     if (info?.role) vmRoles[spk] = info.role;
                 }
 
-                const vmRes  = await authFetch('/api/interview/virtual-multicam', {
-                    method: 'POST',
-                    body:   JSON.stringify({
-                        words:    vmWords,
-                        speakers: vmSpeakers,
-                        roles:    vmRoles,
-                        frames:   [],
-                        filename: vmUploadedPath,   // GCS path for server-side frame extraction
-                    }),
-                });
-                const vmData = await vmRes.json();
-                if (!vmRes.ok) throw new Error(vmData.error || `virtual-multicam returned ${vmRes.status}`);
+                // ── Per-asset analysis ────────────────────────────────────────
+                // Diarization and the camera-angle plan are BOTH per-source-file:
+                // their timestamps only mean anything within the file they came
+                // from. A timeline assembled from several uploads therefore needs
+                // one analysis per asset, and each clip must be tagged from its
+                // OWN asset's segments — otherwise one video's speaker turns get
+                // painted onto another's footage.
+                const vmBasename     = p => (p || '').split(/[\\/]/).pop();
+                const vmUploadedBase = vmBasename(vmStore.uploadedFilePath || '');
+                const vmStrippedBase = vmUploadedBase.replace(/^\d+-/, '');
+                const vmAssetIds     = [...new Set(vmAllClips.map(c => c.assetId).filter(Boolean))];
 
-                const { segments = [], hostSide, host, guest, mode: vmMode = 'duo' } = vmData;
+                // Which asset did split_speakers/captions already run on? Its
+                // diarization is free to reuse; the others must be queued.
+                const vmPrimaryAssetId = (() => {
+                    if (!vmUploadedBase) return vmAssetIds[0] ?? null;
+                    const match = (vmStore.assets || []).find(a => {
+                        const an = vmBasename(a.name || '');
+                        if (!an) return false;
+                        return an === vmUploadedBase
+                            || an.replace(/^\d+-/, '') === vmStrippedBase
+                            || vmUploadedBase.endsWith(an);
+                    });
+                    return match?.id ?? (vmAssetIds.length === 1 ? vmAssetIds[0] : null);
+                })();
 
-                if (!segments.length) {
-                    return { action, success: false, message: 'No segments returned from virtual-multicam analysis.' };
+                if (vmAssetIds.length === 0) {
+                    return { action, success: false, message: 'Timeline clips have no linked media — re-add your video and try again.' };
                 }
+                if (vmAssetIds.length > 1) {
+                    console.log(`[virtual_multicam] ${vmAssetIds.length} assets on the timeline — analysing each separately`);
+                }
+
+                // assetId → { segments, mode, hostSide, host, guest }
+                const vmAnalysisByAsset = {};
+                const vmFailedAssets    = [];
+
+                for (const assetId of vmAssetIds) {
+                    const assetObj  = (vmStore.assets || []).find(a => a.id === assetId);
+                    const assetName = assetObj?.name || assetId;
+
+                    let diar = null;
+                    try {
+                        diar = await this._getDiarizationForAsset(assetId, {
+                            isPrimary: assetId === vmPrimaryAssetId,
+                            signal:    job?.signal ?? null,
+                        });
+                    } catch (diarErr) {
+                        console.warn(`[virtual_multicam] diarization failed for "${assetName}":`, diarErr.message);
+                    }
+                    if (!diar?.words?.length) {
+                        vmFailedAssets.push({ name: assetName, reason: 'no speaker data' });
+                        continue;
+                    }
+
+                    // Roles only apply to the asset split_speakers ran on.
+                    const rolesForAsset = assetId === vmPrimaryAssetId ? vmRoles : {};
+                    const filenameForAsset = assetId === vmPrimaryAssetId
+                        ? (vmUploadedPath || resolveAssetServerPath(assetObj))
+                        : resolveAssetServerPath(assetObj);
+
+                    const res = await authFetch('/api/interview/virtual-multicam', {
+                        method: 'POST',
+                        body:   JSON.stringify({
+                            words:    diar.words,
+                            speakers: diar.speakers,
+                            roles:    rolesForAsset,
+                            frames:   [],
+                            filename: filenameForAsset,  // per-asset path for Vision frame extraction
+                        }),
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                        console.warn(`[virtual_multicam] analysis failed for "${assetName}": ${data.error || res.status}`);
+                        vmFailedAssets.push({ name: assetName, reason: data.error || `HTTP ${res.status}` });
+                        continue;
+                    }
+                    if (!data.segments?.length) {
+                        vmFailedAssets.push({ name: assetName, reason: 'no segments returned' });
+                        continue;
+                    }
+                    vmAnalysisByAsset[assetId] = data;
+                    console.log(`[virtual_multicam] "${assetName}": ${data.segments.length} segments (${data.mode || 'duo'} mode)`);
+                }
+
+                if (Object.keys(vmAnalysisByAsset).length === 0) {
+                    return {
+                        action,
+                        success: false,
+                        message:
+                            `Multicam couldn't analyse any of your clips.\n\n` +
+                            vmFailedAssets.map(f => `• ${f.name}: ${f.reason}`).join('\n') +
+                            `\n\nSpeaker detection needs the video's audio on the server — if you just uploaded, ` +
+                            `wait for processing to finish and try again.`,
+                    };
+                }
+
+                // Headline numbers come from the primary asset (or the first analysed one)
+                const vmHeadline = vmAnalysisByAsset[vmPrimaryAssetId] || Object.values(vmAnalysisByAsset)[0];
+                const { hostSide, host, guest } = vmHeadline;
+                const vmMode = vmHeadline.mode || 'duo';
+                const vmTotalSegments = Object.values(vmAnalysisByAsset)
+                    .reduce((n, d) => n + (d.segments?.length || 0), 0);
 
                 // ── Build new track structure: split long clips + tag each piece ─────
                 //
@@ -1449,10 +1511,15 @@ export class MediaExecutionEngine {
 
                 freshStore._saveHistory?.();
 
-                const sortedSegs = [...segments].sort((a, b) => a.start - b.start);
+                // Per-asset segment lookup, each pre-sorted by source time.
+                const sortedSegsByAsset = {};
+                for (const [aid, data] of Object.entries(vmAnalysisByAsset)) {
+                    sortedSegsByAsset[aid] = [...data.segments].sort((a, b) => a.start - b.start);
+                }
 
                 let vmSplitPieces = 0;   // clips that were split into ≥2 angle pieces
                 let vmNoOverlap   = 0;   // clips no segment matched (left untouched)
+                let vmOtherAsset  = 0;   // clips whose asset had no usable analysis
 
                 const newTracks = freshStore.tracks.map(track => {
                     if (track.type !== 'video') return track;
@@ -1460,11 +1527,22 @@ export class MediaExecutionEngine {
                     const expandedClips = [];
 
                     for (const clip of (track.clips ?? [])) {
+                        // Use the segments computed for THIS clip's own asset. A
+                        // clip whose asset couldn't be analysed is left untouched
+                        // rather than tagged with another video's speaker turns.
+                        const clipSegs = sortedSegsByAsset[clip.assetId]
+                            || (vmAssetIds.length === 1 ? Object.values(sortedSegsByAsset)[0] : null);
+                        if (!clipSegs) {
+                            vmOtherAsset++;
+                            expandedClips.push(clip);
+                            continue;
+                        }
+
                         const srcStart = clip.offset ?? 0;
                         const srcEnd   = srcStart + (clip.duration ?? 0);
 
                         // Segments that overlap this clip's source range
-                        const overlapping = sortedSegs.filter(s => s.end > srcStart && s.start < srcEnd);
+                        const overlapping = clipSegs.filter(s => s.end > srcStart && s.start < srcEnd);
 
                         if (overlapping.length === 0) {
                             vmNoOverlap++;
@@ -1570,7 +1648,9 @@ export class MediaExecutionEngine {
                 console.log(
                     `[virtual_multicam] Applied to ${totalTagged} clips (split from ${vmAllClips.length}) ` +
                     `[${vmMode}]: ${JSON.stringify(angleCounts)} | host=${host} on ${hostSide} | ` +
-                    `words=${vmWordsSpace}, segments=${segments.length}, splitClips=${vmSplitPieces}, noOverlap=${vmNoOverlap}`
+                    `assets=${Object.keys(vmAnalysisByAsset).length}/${vmAssetIds.length}, ` +
+                    `segments=${vmTotalSegments}, splitClips=${vmSplitPieces}, ` +
+                    `noOverlap=${vmNoOverlap}, otherAsset=${vmOtherAsset}`
                 );
 
                 // ── Honest outcome reporting ──────────────────────────────────
@@ -1584,7 +1664,7 @@ export class MediaExecutionEngine {
                         success: false,
                         message:
                             `Multicam couldn't match any camera angles to your clips.\n\n` +
-                            `The analysis returned ${segments.length} speaker segment(s), but none lined up with ` +
+                            `The analysis returned ${vmTotalSegments} speaker segment(s), but none lined up with ` +
                             `the ${vmAllClips.length} clip(s) on the timeline (their source ranges don't overlap). ` +
                             `This usually means the transcript and the clips are out of sync — try re-running ` +
                             `"add captions" on the current timeline, then "interview angles" again.`,
@@ -1598,7 +1678,7 @@ export class MediaExecutionEngine {
                         success: false,
                         message:
                             `Multicam ran but every shot came back wide — no close-ups were created.\n\n` +
-                            `${segments.length} segment(s) across ${vmSpeakers.length} speaker(s) were analysed in ` +
+                            `${vmTotalSegments} segment(s) across ${vmAssetIds.length} video(s) were analysed in ` +
                             `${vmMode} mode. This happens when the speaking turns are too short to hold a close-up, ` +
                             `or when face detection couldn't locate the speakers. Check that the video shows the ` +
                             `speakers on camera, and that the transcript covers the whole conversation.`,
@@ -1637,6 +1717,16 @@ export class MediaExecutionEngine {
                     ? `\n\nNote: ${droppedZoomKfCount} clip(s) had an existing zoom rhythm that no longer matched the new camera cuts, so it was cleared — run "make it more dynamic" again to re-add it on top of these angles.`
                     : '';
 
+                // Multi-upload timelines: report what was analysed and what wasn't.
+                const analysedCount = Object.keys(vmAnalysisByAsset).length;
+                const multiAssetNote = vmAssetIds.length > 1
+                    ? `\n\nAnalysed ${analysedCount} of ${vmAssetIds.length} videos on the timeline — each got its own speaker detection and camera plan.`
+                    : '';
+                const otherAssetNote = vmFailedAssets.length > 0
+                    ? `\n\nSkipped (left untouched): ` +
+                      vmFailedAssets.map(f => `${f.name} (${f.reason})`).join(', ') + '.'
+                    : '';
+
                 return {
                     action,
                     success: true,
@@ -1644,7 +1734,7 @@ export class MediaExecutionEngine {
                         `Virtual multicam applied — ${totalTagged} angle-tagged segments.\n\n` +
                         vmSummary +
                         `Jumped to the first close-up — scrub the timeline to review all angle cuts.` +
-                        droppedZoomNote,
+                        multiAssetNote + droppedZoomNote + otherAssetNote,
                 };
             }
 
@@ -2043,6 +2133,75 @@ export class MediaExecutionEngine {
     }
 
     /**
+     * _getDiarizationForAsset
+     *
+     * Returns { words, speakers } for ONE asset, in that asset's own source
+     * time base. Resolution order (cheapest first):
+     *   1. store.diarizationByAsset[assetId]      — already computed this session
+     *   2. store.speakerMap                        — split_speakers ran on THIS asset
+     *   3. queue a diarize job for the asset's file and poll it
+     *
+     * Diarization is inherently per-file, so a timeline assembled from several
+     * uploads needs one of these per asset — otherwise one video's speaker turns
+     * get applied to another's footage.
+     *
+     * @returns {Promise<{words:Array, speakers:string[]}|null>} null if unavailable
+     */
+    async _getDiarizationForAsset(assetId, { isPrimary = false, signal = null } = {}) {
+        const store = useTimelineStore.getState();
+
+        const cached = store.diarizationByAsset?.[assetId];
+        if (cached?.words?.length) return cached;
+
+        // The asset split_speakers already ran on — reuse those words for free.
+        if (isPrimary) {
+            const spWords = Object.entries(store.speakerMap || {})
+                .flatMap(([spk, info]) => (info?.words || []).map(w => ({ ...w, speaker: w.speaker || spk })))
+                .sort((a, b) => a.start - b.start);
+            if (spWords.length > 0) {
+                const speakers = [...new Set(spWords.map(w => w.speaker).filter(Boolean))].sort();
+                const data = { words: spWords, speakers };
+                store.setAssetDiarization?.(assetId, data);
+                return data;
+            }
+        }
+
+        const asset = (store.assets || []).find(a => a.id === assetId);
+        const serverPath = resolveAssetServerPath(asset);
+        if (!serverPath) {
+            console.warn(`[virtual_multicam] no server path for asset "${asset?.name || assetId}" — cannot diarize it`);
+            return null;
+        }
+
+        console.log(`[virtual_multicam] diarizing "${asset?.name || assetId}" (${serverPath})…`);
+        const res = await authFetch('/api/interview/split-speakers', {
+            method: 'POST',
+            body: JSON.stringify({ filename: serverPath }),
+        });
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            console.warn(`[virtual_multicam] diarize request failed for "${asset?.name}": ${body.error || res.status}`);
+            return null;
+        }
+        const { jobId } = await res.json();
+        if (!jobId) return null;
+
+        const result = await pollJobResult(jobId, signal);
+        if (!result?.words?.length) {
+            console.warn(`[virtual_multicam] diarization returned no words for "${asset?.name}"`);
+            return null;
+        }
+
+        const speakers = result.speakers?.length
+            ? result.speakers
+            : [...new Set(result.words.map(w => w.speaker).filter(Boolean))].sort();
+        const data = { words: result.words, speakers };
+        useTimelineStore.getState().setAssetDiarization?.(assetId, data);
+        console.log(`[virtual_multicam] "${asset?.name}": ${result.words.length} words, ${speakers.length} speaker(s)`);
+        return data;
+    }
+
+    /**
      * _refineCutsWithIntelligence
      *
      * Post-filter on silence-removal segments: the gaps BETWEEN consecutive
@@ -2158,13 +2317,25 @@ export class MediaExecutionEngine {
      */
     _applySegmentsToTimeline(segments, prefix = 'seg', targetClipId = null, targetAssetId = null) {
         const timelineStore = useTimelineStore.getState();
-        const videoTrack    = timelineStore.tracks?.find(t => t.type === 'video');
 
-        if (!videoTrack) {
+        // MULTI-TRACK: after split_speakers there is one video track per speaker.
+        // This used to grab only `.find(t => t.type === 'video')`, so cleanup
+        // silently skipped every clip on the second speaker's track. All video
+        // tracks are considered now, and each clip is rebuilt on its OWN track
+        // (`_trackId`) using a SHARED source→timeline map so the tracks stay in
+        // sync after time is removed.
+        const videoTracks = (timelineStore.tracks ?? []).filter(t => t.type === 'video');
+        const videoTrack  = videoTracks[0]; // legacy anchor for single-track paths
+
+        if (videoTracks.length === 0) {
             console.warn(`[MediaExecutionEngine] _applySegmentsToTimeline: no video track found`);
             return;
         }
-        if (videoTrack.clips.length === 0) {
+
+        const allVideoClips = videoTracks.flatMap(t =>
+            (t.clips ?? []).map(c => ({ ...c, _trackId: t.id }))
+        );
+        if (allVideoClips.length === 0) {
             console.warn(`[MediaExecutionEngine] _applySegmentsToTimeline: video track has no clips`);
             return;
         }
@@ -2182,7 +2353,7 @@ export class MediaExecutionEngine {
             // Per-asset mode: replace ALL clips that share this assetId.
             // This correctly handles timelines where a previous silence removal
             // already exploded one original clip into N small segments.
-            baseClips = videoTrack.clips
+            baseClips = allVideoClips
                 .filter(c => c.assetId === targetAssetId)
                 .sort((a, b) => a.start - b.start);
             if (baseClips.length === 0) {
@@ -2191,19 +2362,19 @@ export class MediaExecutionEngine {
             }
             baseClip = baseClips[0];
         } else if (targetClipId) {
-            baseClip = videoTrack.clips.find(c => c.id === targetClipId);
+            baseClip = allVideoClips.find(c => c.id === targetClipId);
             if (!baseClip) {
                 console.warn(`[MediaExecutionEngine] _applySegmentsToTimeline: clip "${targetClipId}" not found — skipping`);
                 return;
             }
             baseClips = [baseClip];
-        } else if (videoTrack.clips.length === 1) {
-            baseClip  = videoTrack.clips[0];
+        } else if (allVideoClips.length === 1) {
+            baseClip  = allVideoClips[0];
             baseClips = [baseClip];
         } else {
             // Filename fallback: check both the timestamped GCS name and the stripped
             // original name (e.g. "1780602619818-IMG_7362.mov" → "IMG_7362.mov").
-            const sortedByStart = [...videoTrack.clips].sort((a, b) => a.start - b.start);
+            const sortedByStart = [...allVideoClips].sort((a, b) => a.start - b.start);
             if (processedBase) {
                 baseClip = sortedByStart.find(c => {
                     const assetName    = basename(timelineStore.assets?.find(a => a.id === c.assetId)?.name || '');
@@ -2226,20 +2397,20 @@ export class MediaExecutionEngine {
                 // This handles the common case where silence_removal is run on a
                 // track that already has N clips from one asset.
                 const assetCounts = {};
-                for (const c of videoTrack.clips) {
+                for (const c of allVideoClips) {
                     if (c.assetId) assetCounts[c.assetId] = (assetCounts[c.assetId] || 0) + 1;
                 }
                 const primaryAssetId = Object.entries(assetCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
                 if (primaryAssetId) {
                     console.log(`[MediaExecutionEngine] _applySegmentsToTimeline: no filename match — applying to all clips for asset "${primaryAssetId}"`);
-                    baseClips = videoTrack.clips
+                    baseClips = allVideoClips
                         .filter(c => c.assetId === primaryAssetId)
                         .sort((a, b) => a.start - b.start);
                     baseClip = baseClips[0];
                 } else {
                     // Ultimate fallback: all clips sorted by start time
-                    console.log(`[MediaExecutionEngine] _applySegmentsToTimeline: no assetId found — applying to all ${videoTrack.clips.length} clips`);
-                    baseClips = [...videoTrack.clips].sort((a, b) => a.start - b.start);
+                    console.log(`[MediaExecutionEngine] _applySegmentsToTimeline: no assetId found — applying to all ${allVideoClips.length} clips`);
+                    baseClips = [...allVideoClips].sort((a, b) => a.start - b.start);
                     baseClip  = baseClips[0];
                 }
             } else {
@@ -2258,7 +2429,7 @@ export class MediaExecutionEngine {
                 // inherits the correct angle from the right diarization segment.
                 const foundAssetId = baseClip.assetId;
                 if (foundAssetId) {
-                    baseClips = videoTrack.clips
+                    baseClips = allVideoClips
                         .filter(c => c.assetId === foundAssetId)
                         .sort((a, b) => a.start - b.start);
                     baseClip = baseClips[0]; // re-anchor to sorted first
@@ -2335,78 +2506,110 @@ export class MediaExecutionEngine {
                 virtualCam: c.virtualCam,
             }));
 
-        // Remove all clips in the range — skipHistory because we already saved
-        // one snapshot above (prevents N intermediate empty-timeline states).
+        // Remove all clips in the range from THEIR OWN tracks — skipHistory
+        // because we already saved one snapshot above (prevents N intermediate
+        // empty-timeline states).
         for (const clip of baseClips) {
-            timelineStore.removeClip(videoTrack.id, clip.id, { skipHistory: true });
+            timelineStore.removeClip(clip._trackId || videoTrack.id, clip.id, { skipHistory: true });
         }
 
-        // Insert replacement clips starting at rangeStart
-        let currentStartTime = rangeStart;
-        const persistentUrl  = baseClip.sourceUrl || baseClip.url || '';
-        let droppedZoomKfCount = 0; // clips whose stale zoom-rhythm keyframes had to be cleared (see below)
+        // ── Shared source→timeline map ───────────────────────────────────────
+        // Every kept segment gets ONE output position, computed once and reused
+        // by every track. This is what keeps multiple video tracks in sync after
+        // time is removed: previously each track was packed independently from
+        // its own cursor, so two speaker tracks drifted apart (or stacked).
+        const orderedSegs = [...validSegs].sort((a, b) => a.start - b.start);
+        let acc = rangeStart;
+        const segOut = orderedSegs.map(seg => {
+            const out = acc;
+            acc += seg.duration;
+            return { ...seg, outStart: out, srcEnd: seg.start + seg.duration };
+        });
+        const timelineEnd = acc;
 
-        validSegs.forEach((seg, i) => {
-            // Inherit the correct virtualCam angle from the pre-cleanup clips by
-            // matching on source-time overlap. Falls back to baseClip.virtualCam
-            // (or null) when no per-clip data exists (i.e. VM hasn't run yet).
-            let inheritedVirtualCam = baseClip.virtualCam ?? null;
-            if (srcVirtualCamRanges.length > 0) {
-                const segEnd = seg.start + (seg.duration ?? 0);
-                let bestOverlap = 0;
-                for (const vc of srcVirtualCamRanges) {
-                    const overlap = Math.max(0, Math.min(vc.end, segEnd) - Math.max(vc.start, seg.start));
-                    if (overlap > bestOverlap) {
-                        bestOverlap   = overlap;
-                        inheritedVirtualCam = vc.virtualCam;
+        let droppedZoomKfCount = 0; // clips whose stale zoom-rhythm keyframes had to be cleared (see below)
+        let inserted = 0;
+
+        // Rebuild each base clip by intersecting it with the kept segments.
+        // A clip only yields pieces for the parts of ITS OWN source range that
+        // survive, and each piece lands at the shared output position — so a
+        // clip on track 2 stays aligned with the matching moment on track 1.
+        baseClips.forEach((srcClip, clipIdx) => {
+            const trackId     = srcClip._trackId || videoTrack.id;
+            const clipSrcFrom = srcClip.offset ?? 0;
+            const clipSrcTo   = clipSrcFrom + (srcClip.duration ?? 0);
+            const persistentUrl = srcClip.sourceUrl || srcClip.url || '';
+
+            if (srcClip.keyframes?.scale?.length) droppedZoomKfCount++;
+
+            segOut.forEach((seg, segIdx) => {
+                const from = Math.max(seg.start, clipSrcFrom);
+                const to   = Math.min(seg.srcEnd, clipSrcTo);
+                const dur  = to - from;
+                if (dur < 0.05) return; // no meaningful overlap with this clip
+
+                // Inherit the correct virtualCam angle from the pre-cleanup clips
+                // by matching on source-time overlap. Falls back to this clip's own
+                // virtualCam when no per-clip map exists (i.e. VM hasn't run yet).
+                let inheritedVirtualCam = srcClip.virtualCam ?? null;
+                if (srcVirtualCamRanges.length > 0) {
+                    let bestOverlap = 0;
+                    for (const vc of srcVirtualCamRanges) {
+                        const overlap = Math.max(0, Math.min(vc.end, to) - Math.max(vc.start, from));
+                        if (overlap > bestOverlap) {
+                            bestOverlap = overlap;
+                            inheritedVirtualCam = vc.virtualCam;
+                        }
                     }
                 }
-            }
 
-            // Same staleness problem as virtualCam used to have (see comment above
-            // srcVirtualCamRanges): baseClip.keyframes.scale was authored against
-            // the OLD clip's duration/offset. Blindly spreading it onto every new
-            // segment would apply the wrong zoom at the wrong time (or none at
-            // all, if the timestamps land outside the new segment's range).
-            // Unlike virtualCam there's no meaningful overlap-based remap for an
-            // animation curve, so we drop it — same tradeoff MediaExecutionEngine's
-            // virtual_multicam split branch makes.
-            if (baseClip.keyframes?.scale?.length) droppedZoomKfCount++;
-
-            const newClip = {
-                ...baseClip,
-                id:           `clip_${prefix}_${ts}_${i}`,
-                start:        currentStartTime,
-                duration:     seg.duration,
-                offset:       seg.start,
-                name:         `Segment ${i + 1}`,
-                originalName: baseClip.originalName || baseClip.name,
-                url:          persistentUrl,
-                sourceUrl:    baseClip.sourceUrl || persistentUrl,
-                virtualCam:   inheritedVirtualCam,
-                keyframes:    baseClip.keyframes ? { ...baseClip.keyframes, scale: [] } : baseClip.keyframes,
-            };
-            timelineStore.addClip(videoTrack.id, newClip, { skipHistory: true });
-            currentStartTime += seg.duration;
-            console.log(`[MediaExecutionEngine]   clip_${prefix}_${i}: timeline ${newClip.start.toFixed(2)}s–${currentStartTime.toFixed(2)}s  source ${seg.start.toFixed(2)}s–${seg.end.toFixed(2)}s  angle=${inheritedVirtualCam?.angle ?? 'none'}`);
+                const newClip = {
+                    ...srcClip,
+                    id:           `clip_${prefix}_${ts}_${clipIdx}_${segIdx}`,
+                    start:        seg.outStart + (from - seg.start),
+                    duration:     dur,
+                    offset:       from,
+                    name:         `Segment ${inserted + 1}`,
+                    originalName: srcClip.originalName || srcClip.name,
+                    url:          persistentUrl,
+                    sourceUrl:    srcClip.sourceUrl || persistentUrl,
+                    virtualCam:   inheritedVirtualCam,
+                    // Same staleness problem virtualCam used to have: keyframes.scale
+                    // was authored against the OLD clip duration/offset, so it would
+                    // apply the wrong zoom at the wrong time on a re-cut fragment.
+                    // No meaningful remap exists for an animation curve — drop it.
+                    keyframes:    srcClip.keyframes ? { ...srcClip.keyframes, scale: [] } : srcClip.keyframes,
+                };
+                delete newClip._trackId;
+                timelineStore.addClip(trackId, newClip, { skipHistory: true });
+                inserted++;
+            });
         });
 
-        // Shift clips that came AFTER the replaced range
-        const durationDiff = currentStartTime - rangeEnd;
+        console.log(
+            `[MediaExecutionEngine] _applySegmentsToTimeline: inserted ${inserted} clip(s) across ` +
+            `${new Set(baseClips.map(c => c._trackId || videoTrack.id)).size} track(s) from ${baseClips.length} source clip(s)`
+        );
+
+        // Shift clips that came AFTER the replaced range — on EVERY video track,
+        // by the same delta, so tracks that weren't re-cut stay aligned too.
+        const durationDiff = timelineEnd - rangeEnd;
         if (Math.abs(durationDiff) > 0.01) {
-            const freshTrack = useTimelineStore.getState().tracks?.find(t => t.id === videoTrack.id);
-            (freshTrack?.clips || [])
-                .filter(c => c.start >= rangeEnd - 0.01 && !c.id.startsWith(`clip_${prefix}_${ts}_`))
-                .sort((a, b) => a.start - b.start)
-                .forEach(c => {
-                    timelineStore.updateClip(videoTrack.id, c.id, { start: c.start + durationDiff }, { skipHistory: true });
-                });
+            const freshTracks = (useTimelineStore.getState().tracks || []).filter(t => t.type === 'video');
+            for (const ft of freshTracks) {
+                (ft.clips || [])
+                    .filter(c => c.start >= rangeEnd - 0.01 && !c.id.startsWith(`clip_${prefix}_${ts}_`))
+                    .sort((a, b) => a.start - b.start)
+                    .forEach(c => {
+                        timelineStore.updateClip(ft.id, c.id, { start: c.start + durationDiff }, { skipHistory: true });
+                    });
+            }
         }
 
         const label = baseClips.length > 1
             ? `${baseClips.length} clips (asset ${targetAssetId})`
             : `"${baseClip.name}"`;
-        console.log(`[MediaExecutionEngine] ✅ Applied ${validSegs.length} segments to ${label}, total active ${currentStartTime.toFixed(2)}s`);
+        console.log(`[MediaExecutionEngine] ✅ Applied ${validSegs.length} segments to ${label}, total active ${timelineEnd.toFixed(2)}s`);
         if (droppedZoomKfCount > 0) {
             console.warn(
                 `[MediaExecutionEngine] ⚠️ Cleared stale zoom-rhythm keyframes on ${droppedZoomKfCount} ` +

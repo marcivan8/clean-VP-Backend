@@ -141,6 +141,8 @@ Aspect ratio:   ${ctx.aspectRatio || 'unknown'}
 Platform:       ${platform} ${loudnessNote}
 Completion:     ${ctx.completionScore || 0}/100
 Edits applied:  ${(ctx.editsDone || []).join(', ') || 'none'}
+Effect coverage: camera angles on ${ctx.effects?.multicamClips ?? 0}/${ctx.effects?.totalVideoClips ?? 0} clips (${Math.round((ctx.multicamCoverage || 0) * 100)}%), zoom rhythm on ${ctx.effects?.zoomRhythmClips ?? 0}/${ctx.effects?.totalVideoClips ?? 0} clips (${Math.round((ctx.rhythmCoverage || 0) * 100)}%), ${ctx.effects?.speakerCount ?? 0} speaker(s) diarized across ${ctx.effects?.videoTrackCount ?? 0} video track(s)
+NEVER recommend an edit that "Edits applied" or "Effect coverage" shows is already done — recommend the next thing that genuinely improves THIS project, or a refinement of what's there.
 
 Edits run this session:
 ${summary.commandsRun.length ? summary.commandsRun.map(c => `  - ${c}`).join('\n') : '  - (none yet)'}

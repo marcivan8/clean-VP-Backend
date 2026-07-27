@@ -1,10 +1,26 @@
 const express = require('express');
 const router = express.Router();
 const rateLimit = require('express-rate-limit');
-const axios = require('axios');
 const { authenticateUser } = require('../middleware/auth');
-const { LambdaClient, InvokeCommand } = require("@aws-sdk/client-lambda");
-const lambdaClient = new LambdaClient({ region: process.env.AWS_REGION || 'us-east-1' });
+const { LambdaClient, InvokeCommand, GetFunctionConfigurationCommand } = require("@aws-sdk/client-lambda");
+
+// The render function must be invoked in the region it actually lives in.
+// AWS_REGION defaulting to 'us-east-1' silently pointed every invoke at the
+// wrong region for accounts whose function is elsewhere (e.g. eu-north-1) —
+// AWS then answers ResourceNotFoundException, which looked like "the Lambda
+// isn't connected". Set AWS_REGION (or AWS_LAMBDA_REGION) on the backend to the
+// region shown in the Lambda console URL.
+const LAMBDA_REGION = process.env.AWS_LAMBDA_REGION || process.env.AWS_REGION || 'us-east-1';
+const LAMBDA_FUNCTION_NAME = process.env.AWS_LAMBDA_FUNCTION_NAME || 'revideo-render-lambda';
+const lambdaClient = new LambdaClient({ region: LAMBDA_REGION });
+
+if (!process.env.AWS_LAMBDA_REGION && !process.env.AWS_REGION) {
+    console.warn(
+        `⚠️  [render] AWS_REGION not set — defaulting to "${LAMBDA_REGION}". ` +
+        `If "${LAMBDA_FUNCTION_NAME}" lives in another region, cinematic renders will fail ` +
+        `with ResourceNotFoundException.`
+    );
+}
 const { v4: uuidv4 } = require('uuid');
 
 // In-memory cache for render jobs.
@@ -88,11 +104,18 @@ router.post('/render', authenticateUser, renderLimiter, async (req, res) => {
         null, 2
     ));
     try {
-        const { RENDER_WORKER_URL, WORKER_SECRET } = process.env;
-
-        if (!RENDER_WORKER_URL || !WORKER_SECRET) {
-            console.error('❌ Missing RENDER_WORKER_URL or WORKER_SECRET environment variables');
-            return res.status(500).json({ error: 'Render proxy not configured' });
+        // NOTE: RENDER_WORKER_URL / WORKER_SECRET are leftovers from the retired
+        // Fly.io render worker. The AWS Lambda path below does not use them, but
+        // this route used to hard-require both and return 500 "Render proxy not
+        // configured" BEFORE ever contacting Lambda — so a perfectly working
+        // Lambda setup still failed unless two irrelevant variables were set.
+        // The real requirement is AWS credentials + region, checked below.
+        if (!process.env.AWS_ACCESS_KEY_ID && !process.env.AWS_SECRET_ACCESS_KEY && !process.env.AWS_PROFILE) {
+            console.error('❌ [render] No AWS credentials in the environment — cannot invoke the render Lambda');
+            return res.status(500).json({
+                error: 'Render not configured',
+                detail: 'AWS credentials are missing on the server. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (and AWS_REGION) so the backend can invoke the render Lambda.',
+            });
         }
 
         const { tracks = [], duration = 10, fps = 30, sourceVideoUrl } = req.body.timeline || req.body;
@@ -205,12 +228,32 @@ router.post('/render', authenticateUser, renderLimiter, async (req, res) => {
 
         // Forward the request to the Lambda asynchronously
         const command = new InvokeCommand({
-            FunctionName: process.env.AWS_LAMBDA_FUNCTION_NAME || 'revideo-render-lambda',
+            FunctionName: LAMBDA_FUNCTION_NAME,
             InvocationType: 'Event', // Asynchronous execution
             Payload: Buffer.from(JSON.stringify(payload)),
         });
 
-        await lambdaClient.send(command);
+        try {
+            await lambdaClient.send(command);
+            console.log(`✅ [render] Invoked "${LAMBDA_FUNCTION_NAME}" in ${LAMBDA_REGION} (job ${jobId})`);
+        } catch (invokeErr) {
+            // Turn AWS's terse errors into something actionable instead of a
+            // generic 500 — these are the failures that read as "not connected".
+            renderJobs.delete(jobId);
+            const name = invokeErr.name || '';
+            let detail;
+            if (name === 'ResourceNotFoundException') {
+                detail = `Lambda "${LAMBDA_FUNCTION_NAME}" was not found in region "${LAMBDA_REGION}". ` +
+                         `Check AWS_REGION matches the region in your Lambda console URL, and that AWS_LAMBDA_FUNCTION_NAME is correct.`;
+            } else if (name === 'AccessDeniedException' || name === 'UnrecognizedClientException' || /credential|signature/i.test(invokeErr.message || '')) {
+                detail = `AWS rejected the credentials or denied lambda:InvokeFunction on "${LAMBDA_FUNCTION_NAME}". ` +
+                         `Check AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY and that the IAM user is allowed to invoke this function.`;
+            } else {
+                detail = invokeErr.message;
+            }
+            console.error(`❌ [render] Lambda invoke failed (${name || 'error'}): ${detail}`);
+            return res.status(502).json({ error: 'Render could not be started', detail, awsError: name || null });
+        }
 
         res.status(202).json({
             message: 'Rendering started successfully. A webhook will be sent upon completion.',
@@ -315,17 +358,64 @@ router.get('/status/:jobId', async (req, res) => {
 });
 
 // GET /api/revideo/health
+//
+// Real end-to-end config check for the cinematic (Lambda) export path. The old
+// version pinged RENDER_WORKER_URL — the retired Fly.io worker — so it reported
+// "ok" while the Lambda path was completely unreachable, and could never tell
+// you WHY a render failed to start. This probes the actual function with
+// GetFunctionConfiguration and reports every prerequisite individually.
 router.get('/health', async (req, res) => {
+    const checks = {
+        awsCredentials: !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) || !!process.env.AWS_PROFILE,
+        awsRegionSet:   !!(process.env.AWS_LAMBDA_REGION || process.env.AWS_REGION),
+        region:         LAMBDA_REGION,
+        functionName:   LAMBDA_FUNCTION_NAME,
+        publicUrlSet:   !!(process.env.PUBLIC_URL || process.env.FRONTEND_URL),
+        gcsBucket:      process.env.GOOGLE_CLOUD_BUCKET_NAME || process.env.GCS_BUCKET_NAME || null,
+    };
+
+    const problems = [];
+    if (!checks.awsCredentials) problems.push('AWS credentials missing (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)');
+    if (!checks.awsRegionSet)   problems.push(`AWS_REGION not set — defaulting to "${LAMBDA_REGION}"; must match the region your Lambda lives in`);
+    if (!checks.publicUrlSet)   problems.push('PUBLIC_URL / FRONTEND_URL not set — completion webhook and Lambda font fallback are disabled (renders still finish via GCS polling)');
+    if (!checks.gcsBucket)      problems.push('No GCS bucket configured — the backend cannot detect finished renders');
+
+    if (!checks.awsCredentials) {
+        return res.json({ status: 'unconfigured', renderer: 'lambda', checks, problems });
+    }
+
     try {
-        const { RENDER_WORKER_URL } = process.env;
-        if (!RENDER_WORKER_URL) {
-            return res.json({ status: 'ok', renderer: 'proxy-unconfigured' });
+        const cfg = await lambdaClient.send(new GetFunctionConfigurationCommand({
+            FunctionName: LAMBDA_FUNCTION_NAME,
+        }));
+        checks.lambdaReachable = true;
+        checks.lambdaState     = cfg.State || null;         // Active | Pending | Failed | Inactive
+        checks.lambdaTimeout   = cfg.Timeout || null;       // seconds — needs ~900 for long renders
+        checks.lambdaMemoryMB  = cfg.MemorySize || null;    // needs ≥3008 for Chromium
+        checks.lastUpdateStatus = cfg.LastUpdateStatus || null;
+
+        if (cfg.State && cfg.State !== 'Active') problems.push(`Lambda state is "${cfg.State}" (expected "Active")`);
+        if (cfg.Timeout && cfg.Timeout < 600)    problems.push(`Lambda timeout is ${cfg.Timeout}s — renders need up to 900s`);
+        if (cfg.MemorySize && cfg.MemorySize < 3008) problems.push(`Lambda memory is ${cfg.MemorySize}MB — Chromium needs ≥3008MB`);
+
+        return res.json({
+            status: problems.length ? 'degraded' : 'ok',
+            renderer: 'lambda',
+            checks,
+            problems,
+        });
+    } catch (err) {
+        const name = err.name || '';
+        let detail = err.message;
+        if (name === 'ResourceNotFoundException') {
+            detail = `Function "${LAMBDA_FUNCTION_NAME}" does not exist in region "${LAMBDA_REGION}". ` +
+                     `Set AWS_REGION to the region shown in your Lambda console URL.`;
+        } else if (name === 'AccessDeniedException' || name === 'UnrecognizedClientException') {
+            detail = `AWS rejected the credentials or denied lambda:GetFunctionConfiguration on "${LAMBDA_FUNCTION_NAME}".`;
         }
-        
-        const response = await axios.get(`${RENDER_WORKER_URL}/health`, { timeout: 5000 });
-        res.json({ status: 'ok', renderer: 'proxy', worker: response.data });
-    } catch (error) {
-        res.json({ status: 'degraded', renderer: 'proxy', workerError: error.message });
+        checks.lambdaReachable = false;
+        problems.push(detail);
+        return res.json({ status: 'error', renderer: 'lambda', checks, problems, awsError: name || null });
     }
 });
 
