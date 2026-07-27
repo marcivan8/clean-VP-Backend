@@ -735,10 +735,24 @@ export class MediaExecutionEngine {
                 console.log(`[MediaExecutionEngine] split_speakers: ${words.length} words, ${speakers.length} speaker(s): ${speakers.join(', ')}`);
 
                 if (speakers.length < 2) {
+                    // Persist the diarization result even though there's nothing to
+                    // split. virtual_multicam reads speakerMap as its primary word
+                    // source — returning early without storing it left the compound
+                    // "split speakers + multicam" flow with no diarization data, so
+                    // multicam bailed with "needs speaker diarization" and silently
+                    // changed nothing. Solo mode works fine off a single speaker.
+                    const soloMap = {};
+                    for (const spk of speakers) {
+                        soloMap[spk] = { role: null, label: null, words: words.filter(w => w.speaker === spk) };
+                    }
+                    if (Object.keys(soloMap).length > 0) {
+                        useTimelineStore.getState().setSpeakerMap(soloMap);
+                        console.log(`[MediaExecutionEngine] split_speakers: 1 speaker — speakerMap stored for downstream commands`);
+                    }
                     return {
                         action,
                         success: true,
-                        message: `Only one speaker detected in this video (${words.length} words). Nothing to split — try "make it more dynamic" instead.`,
+                        message: `Only one speaker detected in this video (${words.length} words). Nothing to split — "interview angles" will use single-speaker wide/mid/close framing, or try "make it more dynamic".`,
                     };
                 }
 
@@ -1296,23 +1310,56 @@ export class MediaExecutionEngine {
                     (t.clips ?? []).map(c => ({ ...c, _trackId: t.id }))
                 );
 
-                // store.captions may have been overwritten by setTimelineTranscript() after
-                // silence removal — that call strips the .speaker field (timeline-space words
-                // only carry word/start/end, not speaker).  If so, fall back to the per-file
-                // transcript index (store.transcripts) which always preserves the original
-                // Whisper/diarization data including speaker labels and source-space timestamps.
-                let vmWords = (vmStore.captions ?? []).filter(w => w.speaker);
-                if (vmWords.length === 0 && vmStore.transcripts) {
-                    const allSrcWords = Object.values(vmStore.transcripts).flat();
-                    const speakerSrcWords = allSrcWords.filter(w => w.speaker);
-                    if (speakerSrcWords.length > 0) {
-                        vmWords = speakerSrcWords;
-                        console.log(
-                            `[virtual_multicam] store.captions had no speaker data; ` +
-                            `using ${vmWords.length} words from transcript index instead`
-                        );
+                // ── Word source selection — TIME BASE MATTERS ────────────────
+                // The backend's segments inherit the time base of the words we
+                // send, and the split/tag step below matches segments against
+                // clip SOURCE ranges (clip.offset). store.captions is overwritten
+                // with TIMELINE-space words by setTimelineTranscript() after any
+                // cleanup — using those post-cleanup meant segments matched the
+                // wrong clips (or none), and multicam silently "didn't apply".
+                // Priority: always-source-space stores first, captions last
+                // (with an explicit timeline→source remap when we must use them).
+                const vmSpeakerMapWords = Object.entries(vmStore.speakerMap || {})
+                    .flatMap(([spk, info]) => (info?.words || []).map(w => ({ ...w, speaker: w.speaker || spk })))
+                    .sort((a, b) => a.start - b.start);
+                const vmTranscriptWords = Object.values(vmStore.transcripts || {})
+                    .flat().filter(w => w.speaker);
+
+                let vmWords, vmWordsSpace;
+                if (vmSpeakerMapWords.length > 0) {
+                    vmWords = vmSpeakerMapWords;      vmWordsSpace = 'source(speakerMap)';
+                } else if (vmTranscriptWords.length > 0) {
+                    vmWords = vmTranscriptWords;      vmWordsSpace = 'source(transcripts)';
+                } else {
+                    vmWords = (vmStore.captions ?? []).filter(w => w.speaker);
+                    vmWordsSpace = 'captions';
+                }
+
+                // captions are timeline-space after cleanup — remap each word back
+                // into source time via the clips' own layout (timeline t → the clip
+                // under t → t - clip.start + clip.offset). Identity on an unedited
+                // single clip, so it's always safe to apply.
+                if (vmWordsSpace === 'captions' && vmWords.length > 0) {
+                    const layoutClips = [...vmAllClips].sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
+                    const toSource = (t) => {
+                        for (const c of layoutClips) {
+                            const s = c.start ?? 0, d = c.duration ?? 0;
+                            if (t >= s - 0.001 && t <= s + d + 0.001) return (t - s) + (c.offset ?? 0);
+                        }
+                        return null;
+                    };
+                    const remapped = [];
+                    for (const w of vmWords) {
+                        const ns = toSource(w.start), ne = toSource(w.end);
+                        if (ns !== null && ne !== null && ne > ns) remapped.push({ ...w, start: ns, end: ne });
+                    }
+                    if (remapped.length > 0) {
+                        console.log(`[virtual_multicam] remapped ${remapped.length}/${vmWords.length} caption words timeline→source`);
+                        vmWords = remapped;
+                        vmWordsSpace = 'captions→source';
                     }
                 }
+                console.log(`[virtual_multicam] word source: ${vmWordsSpace} (${vmWords.length} words)`);
 
                 if (vmAllClips.length === 0) {
                     throw new Error('No clips on the timeline. Add your interview video first.');
@@ -1404,6 +1451,9 @@ export class MediaExecutionEngine {
 
                 const sortedSegs = [...segments].sort((a, b) => a.start - b.start);
 
+                let vmSplitPieces = 0;   // clips that were split into ≥2 angle pieces
+                let vmNoOverlap   = 0;   // clips no segment matched (left untouched)
+
                 const newTracks = freshStore.tracks.map(track => {
                     if (track.type !== 'video') return track;
 
@@ -1417,6 +1467,7 @@ export class MediaExecutionEngine {
                         const overlapping = sortedSegs.filter(s => s.end > srcStart && s.start < srcEnd);
 
                         if (overlapping.length === 0) {
+                            vmNoOverlap++;
                             expandedClips.push(clip);
                             continue;
                         }
@@ -1442,7 +1493,12 @@ export class MediaExecutionEngine {
                             continue;
                         }
 
-                        // Multiple segments — split the clip at diarization boundaries
+                        // Multiple segments — split the clip at diarization boundaries.
+                        // Pieces are laid out INSIDE the original clip's timeline span
+                        // (see the `pieceCursor` below): their durations sum to the
+                        // original duration, so the surrounding timeline is untouched.
+                        vmSplitPieces++;
+                        let pieceCursor = clip.start ?? 0;
                         for (const seg of overlapping) {
                             const pSrcStart = Math.max(seg.start, srcStart);
                             const pSrcEnd   = Math.min(seg.end,   srcEnd);
@@ -1450,11 +1506,18 @@ export class MediaExecutionEngine {
                             if (pDur < 0.05) continue; // skip hairline slivers
 
                             countAngle(seg.angle);
+                            const pieceStart = pieceCursor;
+                            pieceCursor += pDur;
                             expandedClips.push({
                                 ...clip,
-                                id:       `${clip.id}_vm${Math.round(pSrcStart * 10)}`,
+                                // Millisecond-resolution id: Math.round(x*10) collided
+                                // for segments starting <0.1s apart, and duplicate ids
+                                // overwrite each other when the entity graph is rebuilt.
+                                id:       `${clip.id}_vm${Math.round(pSrcStart * 1000)}`,
                                 offset:   pSrcStart,
                                 duration: pDur,
+                                start:    pieceStart,
+                                end:      pieceStart + pDur,
                                 // Any existing zoom-rhythm keyframes were authored against
                                 // clip's OLD (longer) duration — their timestamps no longer
                                 // correspond to anything meaningful on this new, shorter
@@ -1480,14 +1543,21 @@ export class MediaExecutionEngine {
                         }
                     }
 
-                    // Re-layout: pack all pieces at consecutive timeline positions
-                    let cursor = 0;
+                    // Each clip's pieces were already laid out inside that clip's own
+                    // timeline span above, so track positions are preserved as-is.
+                    //
+                    // This REPLACED a global "pack every clip from cursor=0" re-layout,
+                    // which was destructive after split_speakers: with one video track
+                    // per speaker, packing each track independently from 0 stacked both
+                    // tracks on top of each other at t=0. VideoPlayer picks the FIRST
+                    // matching clip across video tracks, so the second speaker's angles
+                    // became unreachable and the timeline duration collapsed — the
+                    // "multicam isn't applying" symptom.
                     return {
                         ...track,
-                        clips: expandedClips.map(c => {
-                            const laid = { ...c, start: cursor, end: cursor + c.duration };
-                            cursor += c.duration;
-                            return laid;
+                        clips: [...expandedClips].sort((a, b) => (a.start ?? 0) - (b.start ?? 0)).map(c => {
+                            const start = c.start ?? 0;
+                            return { ...c, start, end: start + (c.duration ?? 0) };
                         }),
                     };
                 });
@@ -1499,8 +1569,41 @@ export class MediaExecutionEngine {
                 const totalTagged = Object.values(angleCounts).reduce((s, n) => s + n, 0);
                 console.log(
                     `[virtual_multicam] Applied to ${totalTagged} clips (split from ${vmAllClips.length}) ` +
-                    `[${vmMode}]: ${JSON.stringify(angleCounts)} | host=${host} on ${hostSide}`
+                    `[${vmMode}]: ${JSON.stringify(angleCounts)} | host=${host} on ${hostSide} | ` +
+                    `words=${vmWordsSpace}, segments=${segments.length}, splitClips=${vmSplitPieces}, noOverlap=${vmNoOverlap}`
                 );
+
+                // ── Honest outcome reporting ──────────────────────────────────
+                // These two states used to return a cheerful success message while
+                // the video looked completely unchanged, which is what "it's not
+                // applying" felt like from the outside. Report them as failures
+                // with the actual diagnostic instead.
+                if (totalTagged === 0) {
+                    return {
+                        action,
+                        success: false,
+                        message:
+                            `Multicam couldn't match any camera angles to your clips.\n\n` +
+                            `The analysis returned ${segments.length} speaker segment(s), but none lined up with ` +
+                            `the ${vmAllClips.length} clip(s) on the timeline (their source ranges don't overlap). ` +
+                            `This usually means the transcript and the clips are out of sync — try re-running ` +
+                            `"add captions" on the current timeline, then "interview angles" again.`,
+                    };
+                }
+
+                const nonWideCount = totalTagged - (angleCounts.wide || 0);
+                if (nonWideCount === 0) {
+                    return {
+                        action,
+                        success: false,
+                        message:
+                            `Multicam ran but every shot came back wide — no close-ups were created.\n\n` +
+                            `${segments.length} segment(s) across ${vmSpeakers.length} speaker(s) were analysed in ` +
+                            `${vmMode} mode. This happens when the speaking turns are too short to hold a close-up, ` +
+                            `or when face detection couldn't locate the speakers. Check that the video shows the ` +
+                            `speakers on camera, and that the transcript covers the whole conversation.`,
+                    };
+                }
 
                 // Seek to the first non-wide clip so the user immediately sees a close-up.
                 // The VideoPlayer main effect fires when `tracks` changes above — it calls
@@ -1887,12 +1990,23 @@ export class MediaExecutionEngine {
                 let activeSegments = result.activeSegments;
 
                 // Fallback: derive from word timestamps if backend sent words[]
+                // Defaults raised from 0.5/0.1 — ASR word timestamps routinely
+                // clip trailing phonemes, so 100ms padding literally cut word
+                // endings, and a 0.5s threshold treated ordinary speech cadence
+                // as removable silence ("too rough and aggressive").
                 if (!activeSegments && result.words?.length > 0) {
                     const p        = (command.args || {}).payload || {};
-                    const minSil   = parseFloat(p.min_duration) || 0.5;
-                    const pad      = parseFloat(p.padding)      || 0.1;
+                    const minSil   = parseFloat(p.min_duration) || 0.8;
+                    const pad      = parseFloat(p.padding)      || 0.2;
                     activeSegments = buildActiveSegmentsFromWords(result.words, minSil, pad);
                     console.log(`[MediaExecutionEngine] Derived ${activeSegments.length} segments from ${result.words.length} words`);
+                }
+
+                // Editorial pass: reprieve pauses that carry meaning (thinking
+                // before an answer, dramatic beat) instead of cutting every gap.
+                if (activeSegments?.length > 1) {
+                    const refineWords = result.words?.length > 0 ? result.words : (useTimelineStore.getState().captions || []);
+                    activeSegments = await this._refineCutsWithIntelligence(activeSegments, refineWords);
                 }
 
                 if (!activeSegments || activeSegments.length === 0) {
@@ -1925,6 +2039,107 @@ export class MediaExecutionEngine {
             }
             console.error(`[MediaExecutionEngine] ❌ executeApiCall(${endpoint}):`, err.message);
             throw err;
+        }
+    }
+
+    /**
+     * _refineCutsWithIntelligence
+     *
+     * Post-filter on silence-removal segments: the gaps BETWEEN consecutive
+     * active segments are the pauses about to be cut. Instead of cutting all
+     * of them blindly, ask /api/interview/classify-pauses (GPT-4o-mini with
+     * transcript context) which are dead air ('cut'), which are intentional
+     * beats ('keep' — dramatic pause, comedic timing), and which are thinking
+     * pauses worth preserving in shortened form ('shorten' → a 0.45s beat).
+     *
+     * Works regardless of where the segments came from (backend VAD or
+     * client word-gap derivation). Degrades gracefully:
+     *   - API unavailable → local heuristics (mid-sentence pause < 1.5s kept
+     *     as a beat, everything > 2.5s cut, rest cut as before)
+     *   - Any error → returns the original segments unchanged
+     */
+    async _refineCutsWithIntelligence(segments, words) {
+        try {
+            const sorted = [...segments].sort((a, b) => a.start - b.start);
+            const SHORTEN_BEAT = 0.45; // seconds of pause retained for 'shorten'
+            const MAX_KEEP_DUR = 4.0;  // never keep a pause longer than this outright
+
+            // Build the pause list (gap between consecutive segments)
+            const pauses = [];
+            for (let i = 0; i < sorted.length - 1; i++) {
+                const gapStart = sorted[i].end;
+                const gapEnd   = sorted[i + 1].start;
+                const dur      = gapEnd - gapStart;
+                if (dur < 0.15) continue; // hairline — not worth classifying
+                const before = (words || [])
+                    .filter(w => w.end <= gapStart && w.end > gapStart - 6)
+                    .map(w => w.word).join(' ');
+                const after = (words || [])
+                    .filter(w => w.start >= gapEnd && w.start < gapEnd + 6)
+                    .map(w => w.word).join(' ');
+                pauses.push({ i, dur, before, after, gapStart, gapEnd });
+            }
+            if (pauses.length === 0) return segments;
+
+            // ── Get decisions: GPT endpoint first, heuristics as fallback ──────
+            let decisionByIdx = {};
+            try {
+                const resp = await authFetch('/api/interview/classify-pauses', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        pauses: pauses.map(({ i, dur, before, after }) => ({ i, dur, before, after })),
+                    }),
+                });
+                if (!resp.ok) throw new Error(`classify-pauses ${resp.status}`);
+                const { decisions = [] } = await resp.json();
+                decisions.forEach(d => { decisionByIdx[d.i] = d.action; });
+                console.log(`[MediaExecutionEngine] pause intelligence: ${decisions.length} decisions from GPT`);
+            } catch (apiErr) {
+                console.warn(`[MediaExecutionEngine] classify-pauses unavailable (${apiErr.message}) — using heuristics`);
+                for (const p of pauses) {
+                    const endsMidSentence = p.before && !/[.!?…]\s*$/.test(p.before.trim());
+                    if (p.dur > 2.5)            decisionByIdx[p.i] = 'cut';
+                    else if (endsMidSentence && p.dur < 1.5) decisionByIdx[p.i] = 'shorten';
+                    else                        decisionByIdx[p.i] = 'cut';
+                }
+            }
+
+            // ── Apply decisions: merge segments across kept pauses ─────────────
+            const refined = [sorted[0]];
+            let keptCount = 0, shortenedCount = 0;
+            for (const p of pauses) {
+                const nextSeg = sorted[p.i + 1];
+                const action  = decisionByIdx[p.i] || 'cut';
+                const last    = refined[refined.length - 1];
+
+                if (action === 'keep' && p.dur <= MAX_KEEP_DUR) {
+                    // Absorb the whole pause: extend the previous segment through it
+                    last.end      = nextSeg.end;
+                    last.duration = last.end - last.start;
+                    keptCount++;
+                } else if (action === 'shorten' || (action === 'keep' && p.dur > MAX_KEEP_DUR)) {
+                    // Keep a short natural beat at the start of the pause, cut the rest
+                    const beat    = Math.min(SHORTEN_BEAT, p.dur);
+                    last.end      = last.end + beat;
+                    last.duration = last.end - last.start;
+                    refined.push({ ...nextSeg });
+                    shortenedCount++;
+                } else {
+                    refined.push({ ...nextSeg });
+                }
+            }
+
+            if (keptCount || shortenedCount) {
+                console.log(
+                    `[MediaExecutionEngine] pause intelligence: kept ${keptCount} intentional beat(s), ` +
+                    `shortened ${shortenedCount} thinking pause(s), cut the rest ` +
+                    `(${segments.length} → ${refined.length} segments)`
+                );
+            }
+            return refined;
+        } catch (err) {
+            console.warn('[MediaExecutionEngine] _refineCutsWithIntelligence failed — using raw segments:', err.message);
+            return segments;
         }
     }
 

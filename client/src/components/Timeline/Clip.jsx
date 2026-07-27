@@ -100,6 +100,26 @@ const Clip = ({ clip, trackId }) => {
         asset?.gcsPath,
         asset?.proxyUrl || wsAudioUrl,   // fallback to clip URL when asset not hydrated
     );
+
+    // Slice the full-asset peaks down to THIS clip's source window.
+    // The server extracts peaks for the whole file; a trimmed clip (offset=30,
+    // duration=5) must show seconds 30–35 of the waveform, not the entire file
+    // squeezed into the clip. Without this, every post-cleanup/multicam segment
+    // rendered the same meaningless full-file waveform (or visually nothing at
+    // narrow widths) — the recurring "waveform is missing" complaint.
+    const clipPeaks = React.useMemo(() => {
+        if (!wsPeaks?.length || !wsDuration) return wsPeaks;
+        const clipOffset = clip.offset ?? 0;
+        const clipDur    = clip.duration ?? 0;
+        if (clipDur <= 0) return wsPeaks;
+        // Untrimmed clip covering the whole source → no slicing needed
+        if (clipOffset < 0.01 && Math.abs(clipDur - wsDuration) < 0.5) return wsPeaks;
+        const rate  = wsPeaks.length / wsDuration; // samples per second
+        const from  = Math.max(0, Math.floor(clipOffset * rate));
+        const to    = Math.min(wsPeaks.length, Math.ceil((clipOffset + clipDur) * rate));
+        const slice = wsPeaks.slice(from, to);
+        return slice.length >= 2 ? slice : wsPeaks;
+    }, [wsPeaks, wsDuration, clip.offset, clip.duration]);
     const wsColor = clip.type === 'audio'
         ? 'rgba(251,146,60,0.6)'
         : 'rgba(52,211,153,0.6)';
@@ -320,8 +340,8 @@ const Clip = ({ clip, trackId }) => {
                 }}>
                     <ClipWaveform
                         audioUrl={wsAudioUrl}
-                        peaks={wsPeaks}
-                        duration={wsDuration}
+                        peaks={clipPeaks}
+                        duration={clip.duration ?? wsDuration}
                         height={32}
                         color={wsColor}
                         loading={wsLoading}
