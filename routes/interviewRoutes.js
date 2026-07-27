@@ -265,6 +265,121 @@ async function detectSpeakerSides(words, speakers, filename, diarizeServiceUrl) 
     }
 }
 
+/**
+ * detectSceneLayout — the primary vision pass for virtual multicam.
+ *
+ * One GPT-4o-mini call that returns REAL spatial data instead of just
+ * "left or right": for each sampled frame, the number of people visible
+ * on screen and the face anchor (center x/y + face height, all normalized
+ * 0–1) of the active/main subject. This lets the camera builders place
+ * crops where faces actually are, instead of at fixed offsets, and lets
+ * the mode selector catch the "2 diarized speakers but only 1 person on
+ * camera" case (voice-off interviewer → solo framing, not left/right pans).
+ *
+ * Frame sampling:
+ *   duo  (2+ speakers): midpoint of each speaker's longest solo turn
+ *   solo (1 speaker):   ~25% and ~65% through the speech span
+ *
+ * Returns null on any failure (caller falls back to fixed geometry):
+ * {
+ *   onScreenCount: number,          — max people visible across frames
+ *   frames: [{ speaker, people, anchor: { cx, cy, h } | null }]
+ * }
+ */
+async function detectSceneLayout(words, speakers, filename) {
+    if (!process.env.OPENAI_API_KEY || !filename) return null;
+
+    try {
+        const OpenAI = require('openai');
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 25_000 });
+
+        // ── Pick sample timestamps ──────────────────────────────────────────
+        const samples = []; // { speaker, t }
+        if (speakers.length >= 2) {
+            for (const speaker of speakers.slice(0, 2)) {
+                const turn = findLongestTurn(words, speaker);
+                if (!turn || (turn.end - turn.start) < 1.0) return null;
+                samples.push({ speaker, t: (turn.start + turn.end) / 2 });
+            }
+        } else {
+            const spoken = words.filter(w => typeof w.start === 'number');
+            if (!spoken.length) return null;
+            const t0 = spoken[0].start;
+            const t1 = spoken[spoken.length - 1].end;
+            const span = Math.max(1, t1 - t0);
+            samples.push({ speaker: speakers[0], t: t0 + span * 0.25 });
+            samples.push({ speaker: speakers[0], t: t0 + span * 0.65 });
+        }
+
+        const frames = [];
+        for (const s of samples) {
+            const b64 = await extractVideoFrame(filename, s.t);
+            if (!b64) return null;
+            frames.push({ ...s, b64 });
+        }
+
+        const content = [
+            {
+                type: 'text',
+                text:
+                    `These are ${frames.length} frames from the same single-camera video.\n` +
+                    'For EACH frame report:\n' +
+                    '  - "people": how many distinct people are visible\n' +
+                    '  - "anchor": the face of the person who appears to be actively speaking ' +
+                    '(most frontal / mouth open / animated). If unsure, use the most prominent face. ' +
+                    'Give its center as normalized coordinates: cx (0=left edge, 1=right edge), ' +
+                    'cy (0=top, 1=bottom), and h = face height as a fraction of frame height.\n' +
+                    '  - If NO face is visible, use "anchor": null\n' +
+                    `Reply with ONLY valid JSON: {"frames":[{"people":N,"anchor":{"cx":0.5,"cy":0.4,"h":0.2}}${frames.length > 1 ? ',…' : ''}]}`,
+            },
+            ...frames.map(f => ({
+                type: 'image_url',
+                image_url: { url: `data:image/jpeg;base64,${f.b64}`, detail: 'low' },
+            })),
+        ];
+
+        const resp = await openai.chat.completions.create({
+            model:       'gpt-4o-mini',
+            messages:    [{ role: 'user', content }],
+            max_tokens:  200,
+            temperature: 0,
+        });
+
+        const raw  = resp.choices[0]?.message?.content?.trim() || '';
+        const json = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+        const ans  = JSON.parse(json);
+
+        if (!Array.isArray(ans.frames) || ans.frames.length !== frames.length) {
+            console.warn('[virtual-multicam] layout: unexpected Vision answer shape:', raw.slice(0, 200));
+            return null;
+        }
+
+        const clamp01 = v => Math.max(0, Math.min(1, Number(v)));
+        const out = ans.frames.map((f, i) => {
+            let anchor = null;
+            if (f.anchor && typeof f.anchor.cx === 'number' && typeof f.anchor.cy === 'number') {
+                anchor = {
+                    cx: clamp01(f.anchor.cx),
+                    cy: clamp01(f.anchor.cy),
+                    h:  Math.max(0.02, Math.min(1, Number(f.anchor.h) || 0.2)),
+                };
+            }
+            return { speaker: frames[i].speaker, people: Math.max(0, Number(f.people) || 0), anchor };
+        });
+
+        const onScreenCount = Math.max(...out.map(f => f.people), 0);
+        console.log(
+            `[virtual-multicam] layout: onScreen=${onScreenCount}, anchors=` +
+            out.map(f => f.anchor ? `${f.speaker}@(${f.anchor.cx.toFixed(2)},${f.anchor.cy.toFixed(2)})` : `${f.speaker}@none`).join(' ')
+        );
+
+        return { onScreenCount, frames: out };
+    } catch (err) {
+        console.warn('[virtual-multicam] detectSceneLayout failed:', err.message);
+        return null;
+    }
+}
+
 // Non-production: skip hard auth so staging/local works without valid Supabase JWTs.
 // Route handlers already fall back to 'dev-user' when req.user is absent.
 const isProd = process.env.NODE_ENV === 'production';
@@ -378,13 +493,16 @@ router.post('/rhythm-zoom', ...authAndGate, async (req, res) => {
         const cfg = STYLES[style] || STYLES.dynamic;
 
         // ── Per-clip word extraction ────────────────────────────────────────────
-        const clipTexts = clips.map(clip => {
+        // clipWordArrs keeps the timestamped words per clip so emphasis words can
+        // be located precisely for punch-in placement (see buildMotion below).
+        const clipWordArrs = clips.map(clip => {
             const ofs = clip.offset ?? 0;
             const end = ofs + (clip.duration ?? 0);
-            return words
-                .filter(w => w.start >= ofs - 0.05 && w.end <= end + 0.05)
-                .map(w => w.word).join(' ').trim() || '[silence]';
+            return words.filter(w => w.start >= ofs - 0.05 && w.end <= end + 0.05);
         });
+        const clipTexts = clipWordArrs.map(ws =>
+            ws.map(w => w.word).join(' ').trim() || '[silence]'
+        );
 
         // ── ML frame classification (CLIP + MediaPipe) ────────────────────────
         // Optional — fires only when:
@@ -498,18 +616,22 @@ Extra rules when ML data is present:
             messages: [{
                 role: 'user',
                 content:
-`You are a professional video editor assigning shot types to create a multi-camera zoom rhythm for a talking-head video.
+`You are a short-form social video editor (TikTok/Reels/Shorts retention style) assigning shot types to create a multi-camera zoom rhythm for a talking-head video.
 Each clip is already edited and cut. Assign each a shot type:
   "wide"   – neutral, low energy, transition, breather
   "medium" – conversational tone, background explanation
   "close"  – key statement, emotion, emphasis, surprise, strong assertion
 ${mlInstructions}
 Rhythm rules (always apply):
-- Vary shots — no more than 3 in a row of the same type
+- RETENTION HOOK: clip 0 is the hook — assign "medium" or "close", NEVER "wide". Viewers decide to stay in the first 3 seconds.
+- Vary shots aggressively — no more than 2 in a row of the same type
 - Never jump directly wide → close (bridge with medium)
 - Clips with dur < 0.8 s must match the previous clip's type
+- Use "wide" sparingly (breathers only) — social pacing favors medium/close
 
-Return ONLY valid JSON: {"c":[{"i":N,"type":"wide"|"medium"|"close"}]}
+EMPHASIS: for each clip, also identify "ew" — the single most emphasized word in that clip's text (a number, superlative, emotional word, name, or key claim — the word a great editor would punch in on). It MUST be copied verbatim from the clip text. If nothing stands out, use null. Mark at most ~1 in 3 clips.
+
+Return ONLY valid JSON: {"c":[{"i":N,"type":"wide"|"medium"|"close","ew":"word"|null}]}
 
 Clips: ${JSON.stringify(compact)}`,
             }],
@@ -523,8 +645,12 @@ Clips: ${JSON.stringify(compact)}`,
             gptAssignments = JSON.parse(completion.choices[0].message.content).c || [];
         } catch (_) { /* fallback to cycle below */ }
 
-        const gptMap = {};
-        gptAssignments.forEach(a => { gptMap[a.i] = a.type; });
+        const gptMap      = {};
+        const emphasisMap = {};  // index → emphasis word (verbatim) or undefined
+        gptAssignments.forEach(a => {
+            gptMap[a.i] = a.type;
+            if (a.ew && typeof a.ew === 'string') emphasisMap[a.i] = a.ew;
+        });
 
         // ── ML-aware scale resolver ────────────────────────────────────────────
         // Maps (narrative_type, face_size, clip_type) → actual zoom scale.
@@ -563,8 +689,56 @@ Clips: ${JSON.stringify(compact)}`,
             return cfg.mid;
         }
 
+        // ── Motion plan builder ─────────────────────────────────────────────────
+        // Turns a (type, scale, emphasis word) triple into an animation spec the
+        // client renders as scale keyframes and the export renders via zoompan:
+        //   static   – one scale for the whole clip (wide shots, very short clips)
+        //   push_in  – slow zoom from ~95% of target to target over the clip
+        //              (sustained statements — adds motion without a cut)
+        //   punch_in – hold slightly under target, then snap to target exactly on
+        //              the emphasized word (the social-editing emphasis beat)
+        // `at` is CLIP-LOCAL seconds. from/to are absolute scale values.
+        function buildMotion(type, clip, clipWords, emphasisWord, scale) {
+            const dur = clip.duration ?? 0;
+            if (type === 'wide' || dur < 1.2) {
+                return { kind: 'static', from: scale, to: scale, at: null };
+            }
+
+            if (emphasisWord) {
+                // Locate the emphasis word inside this clip (case/punct-insensitive)
+                const norm = s => String(s).toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+                const target = norm(emphasisWord);
+                const hit = target
+                    ? clipWords.find(w => norm(w.word) === target)
+                    : null;
+                if (hit) {
+                    const ofs = clip.offset ?? 0;
+                    // Keep the punch inside the clip with margins for the snap
+                    const at = Math.max(0.15, Math.min(dur - 0.25, hit.start - ofs));
+                    return {
+                        kind: 'punch_in',
+                        from: Math.max(1.0, parseFloat((scale * 0.93).toFixed(3))),
+                        to:   scale,
+                        at:   parseFloat(at.toFixed(3)),
+                        word: emphasisWord,
+                    };
+                }
+            }
+
+            if (dur >= 2.5) {
+                return {
+                    kind: 'push_in',
+                    from: Math.max(1.0, parseFloat((scale * 0.95).toFixed(3))),
+                    to:   scale,
+                    at:   null,
+                };
+            }
+
+            return { kind: 'static', from: scale, to: scale, at: null };
+        }
+
         // ── Build final clipZooms list ──────────────────────────────────────────
-        const FALLBACK_CYCLE = ['wide', 'medium', 'close', 'medium'];
+        const FALLBACK_CYCLE = ['medium', 'close', 'medium', 'wide'];
         let prevType  = 'wide';
         let sameCount = 0;
 
@@ -574,11 +748,14 @@ Clips: ${JSON.stringify(compact)}`,
             if (!type && (clip.duration ?? 0) < 0.8) type = prevType;
             if (!type) type = FALLBACK_CYCLE[i % FALLBACK_CYCLE.length];
 
-            // Enforce rhythm constraints
+            // Retention hook: never open on a wide — the first shot must engage.
+            if (i === 0 && type === 'wide') type = 'medium';
+
+            // Enforce rhythm constraints (max 2 consecutive — social pacing)
             if (type === 'close' && prevType === 'wide')  type = 'medium';
             if (type === 'wide'  && prevType === 'close') type = 'medium';
             if (type === prevType) {
-                if (++sameCount >= 3) {
+                if (++sameCount >= 2) {
                     type      = type === 'wide' ? 'medium' : (type === 'close' ? 'medium' : 'wide');
                     sameCount = 0;
                 }
@@ -587,22 +764,28 @@ Clips: ${JSON.stringify(compact)}`,
             }
 
             prevType = type;
-            const scale = getScale(type, mlMeta[i]);
-            return { clipId: clip.id, scale, type };
+            const scale  = getScale(type, mlMeta[i]);
+            const motion = buildMotion(type, clip, clipWordArrs[i], emphasisMap[i], scale);
+            return { clipId: clip.id, scale, type, motion };
         });
 
         // ── Summary ─────────────────────────────────────────────────────────────
-        const counts = { wide: 0, medium: 0, close: 0 };
-        clipZooms.forEach(c => { counts[c.type] = (counts[c.type] || 0) + 1; });
+        const counts  = { wide: 0, medium: 0, close: 0 };
+        const motions = { static: 0, push_in: 0, punch_in: 0 };
+        clipZooms.forEach(c => {
+            counts[c.type] = (counts[c.type] || 0) + 1;
+            motions[c.motion?.kind || 'static'] = (motions[c.motion?.kind || 'static'] || 0) + 1;
+        });
 
         console.log(
             `[interviewRoutes] rhythm-zoom: ${clips.length} clips → ` +
-            `${counts.wide}W ${counts.medium}M ${counts.close}C  style=${style}`
+            `${counts.wide}W ${counts.medium}M ${counts.close}C | ` +
+            `${motions.push_in} push-ins, ${motions.punch_in} punch-ins  style=${style}`
         );
 
         res.json({
             clipZooms,
-            summary: { clipCount: clips.length, style, counts, maxScale: cfg.close },
+            summary: { clipCount: clips.length, style, counts, motions, maxScale: cfg.close },
         });
 
     } catch (err) {
@@ -1123,6 +1306,7 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
             speakers = [],
             frames   = [],          // legacy: client-sent base64 frames (kept for compat)
             filename = null,        // GCS path (e.g. "raw/1234-video.mp4") for server-side frame extraction
+            roles    = {},          // { SPEAKER_00: 'interviewer'|'guest' } from identify-speakers (optional)
             hostSide: forcedHostSide,
         } = req.body;
 
@@ -1132,6 +1316,46 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
         if (!speakers.length) {
             return res.status(400).json({ error: 'speakers array is required.' });
         }
+
+        // ── 0. Host ordering + scene layout ──────────────────────────────────
+        // If identify-speakers assigned roles, make the interviewer speakers[0]
+        // (the "host") instead of blindly trusting diarization label order.
+        const orderedSpeakers = [...speakers];
+        const interviewerId = Object.keys(roles).find(k => roles[k] === 'interviewer');
+        if (interviewerId && orderedSpeakers.includes(interviewerId) && orderedSpeakers[0] !== interviewerId) {
+            orderedSpeakers.splice(orderedSpeakers.indexOf(interviewerId), 1);
+            orderedSpeakers.unshift(interviewerId);
+            console.log(`[virtual-multicam] host reordered to ${interviewerId} (role=interviewer)`);
+        }
+
+        // Primary vision pass: real face anchors + on-screen person count.
+        // Everything downstream degrades gracefully when this returns null.
+        const layout = await detectSceneLayout(words, orderedSpeakers, filename);
+
+        // Voice-off interviewer: diarization hears 2 speakers but only 1 person
+        // is ever on camera → left/right duo crops would frame empty space.
+        // Frame the single visible person solo instead (cuts still follow the
+        // conversation rhythm since chunking happens on the full word stream).
+        const effectiveSolo =
+            speakers.length === 1 ||
+            (layout !== null && layout.onScreenCount === 1);
+
+        if (effectiveSolo && speakers.length > 1) {
+            console.log('[virtual-multicam] 2+ diarized speakers but 1 person on screen — using SOLO framing');
+        }
+
+        // Face-anchored camera builder: centers the crop on the detected face,
+        // placing it at ~40% of crop height (headroom) and clamping in-bounds.
+        // Falls back to centered/fixed cameras when no anchor is available.
+        const anchorCam = (scale, anchor) => {
+            if (!anchor) return null;
+            const h = 1.0 / scale;
+            return {
+                scale,
+                x: anchor.cx - 0.5,
+                y: (anchor.cy + 0.10 * h) - 0.5, // face at upper 40% of the crop
+            };
+        };
 
         // ── 1. Determine host side ───────────────────────────────────────────
         // Priority:
@@ -1147,12 +1371,27 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
 
         const diarizeServiceUrl = process.env.DIARIZE_SERVICE_URL;
 
+        // ── Path a2: derive hostSide from scene-layout anchors (best) ──────────
+        // If the layout pass returned an anchor for each speaker's frame, the
+        // host's horizontal position tells us the side directly — no second
+        // Vision call needed.
+        if (!hostSide && !effectiveSolo && layout) {
+            const hostFrame  = layout.frames.find(f => f.speaker === orderedSpeakers[0]);
+            const guestFrame = layout.frames.find(f => f.speaker === orderedSpeakers[1]);
+            if (hostFrame?.anchor && guestFrame?.anchor
+                && Math.abs(hostFrame.anchor.cx - guestFrame.anchor.cx) > 0.08) {
+                hostSide     = hostFrame.anchor.cx < guestFrame.anchor.cx ? 'left' : 'right';
+                faceDetected = true;
+                console.log(`[virtual-multicam] hostSide="${hostSide}" via scene-layout anchors`);
+            }
+        }
+
         // ── Path b: GPT-4o-mini Vision (primary — no extra service needed) ──────
         // Extracts one frame per speaker at their longest solo turn, sends both
         // to GPT-4o-mini in a single call, and asks which side each active speaker
         // is on. Requires OPENAI_API_KEY and a resolvable filename (GCS or local).
-        if (!hostSide && filename) {
-            const visionSide = await detectHostSideViaVision(words, speakers, filename);
+        if (!hostSide && filename && speakers.length >= 2 && !effectiveSolo) {
+            const visionSide = await detectHostSideViaVision(words, orderedSpeakers, filename);
             if (visionSide) {
                 hostSide     = visionSide;
                 faceDetected = true;
@@ -1163,10 +1402,10 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
         // ── Path c: pyannote MediaPipe (secondary — if DIARIZE_SERVICE_URL set) ─
         // Cross-checks the Vision result. If both agree, confidence is high.
         // If only pyannote is available (no OpenAI key), it acts as primary.
-        if (!hostSide && filename && diarizeServiceUrl) {
-            const speakerSides = await detectSpeakerSides(words, speakers, filename, diarizeServiceUrl);
-            if (speakerSides?.[speakers[0]]) {
-                hostSide     = speakerSides[speakers[0]];
+        if (!hostSide && filename && diarizeServiceUrl && speakers.length >= 2 && !effectiveSolo) {
+            const speakerSides = await detectSpeakerSides(words, orderedSpeakers, filename, diarizeServiceUrl);
+            if (speakerSides?.[orderedSpeakers[0]]) {
+                hostSide     = speakerSides[orderedSpeakers[0]];
                 faceDetected = true;
                 console.log(`[virtual-multicam] hostSide="${hostSide}" via pyannote MediaPipe`);
             }
@@ -1200,12 +1439,29 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
         //
         // Y offset -0.10 for close-ups: shifts crop window up so faces sit in
         // the upper third rather than dead-centre (better for seated interviews).
+        // Duo cameras: prefer REAL face anchors from the layout pass — the crop
+        // centers on where each person actually sits rather than assuming they
+        // are at exactly ±28% from center. Fixed offsets remain as fallback.
+        let duoLeftAnchor = null, duoRightAnchor = null;
+        if (!effectiveSolo && layout) {
+            const duoAnchors = layout.frames.map(f => f.anchor).filter(Boolean);
+            if (duoAnchors.length === 2 && Math.abs(duoAnchors[0].cx - duoAnchors[1].cx) > 0.08) {
+                const sorted   = [...duoAnchors].sort((a, b) => a.cx - b.cx);
+                duoLeftAnchor  = sorted[0];
+                duoRightAnchor = sorted[1];
+                console.log(
+                    `[virtual-multicam] duo cameras anchored: left@(${duoLeftAnchor.cx.toFixed(2)},${duoLeftAnchor.cy.toFixed(2)}) ` +
+                    `right@(${duoRightAnchor.cx.toFixed(2)},${duoRightAnchor.cy.toFixed(2)})`
+                );
+            }
+        }
+
         const VIRTUAL_CAMERAS = {
             wide:      { scale: 1.00, x:  0.00, y:  0.00 },
-            speakerA:  { scale: 2.50, x: -0.28, y: -0.10 },  // left speaker, standard single
-            speakerB:  { scale: 2.50, x: +0.28, y: -0.10 },  // right speaker, standard single
-            reactionA: { scale: 1.60, x: -0.15, y: -0.05 },  // left speaker listening (OTS)
-            reactionB: { scale: 1.60, x: +0.15, y: -0.05 },  // right speaker listening (OTS)
+            speakerA:  anchorCam(2.50, duoLeftAnchor)  || { scale: 2.50, x: -0.28, y: -0.10 },  // left speaker, standard single
+            speakerB:  anchorCam(2.50, duoRightAnchor) || { scale: 2.50, x: +0.28, y: -0.10 },  // right speaker, standard single
+            reactionA: anchorCam(1.60, duoLeftAnchor)  || { scale: 1.60, x: -0.15, y: -0.05 },  // left speaker listening (OTS)
+            reactionB: anchorCam(1.60, duoRightAnchor) || { scale: 1.60, x: +0.15, y: -0.05 },  // right speaker listening (OTS)
         };
 
         function scaleToCrop({ scale, x, y }) {
@@ -1221,11 +1477,121 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
             };
         }
 
+        // ── SOLO MODE: one person on camera → wide / mid / close angles ─────
+        // Entered when diarization found 1 speaker OR when the layout pass saw
+        // only 1 person on screen (voice-off interviewer). Simulates a 3-camera
+        // shoot pointed at the same person: wide (full frame), mid (1.30x),
+        // close (1.75x), cutting at natural speech pauses. Cameras center on
+        // the DETECTED face anchor when available — an off-center subject gets
+        // correctly framed crops instead of blind center zooms.
+        if (effectiveSolo) {
+            // Average all detected anchors (subject may shift slightly between frames)
+            const soloAnchors = (layout?.frames || []).map(f => f.anchor).filter(Boolean);
+            const soloAnchor  = soloAnchors.length
+                ? {
+                    cx: soloAnchors.reduce((s, a) => s + a.cx, 0) / soloAnchors.length,
+                    cy: soloAnchors.reduce((s, a) => s + a.cy, 0) / soloAnchors.length,
+                    h:  soloAnchors.reduce((s, a) => s + a.h,  0) / soloAnchors.length,
+                }
+                : null;
+
+            const SOLO_CAMERAS = {
+                wide:  { scale: 1.00, x: 0, y: 0.00 },
+                mid:   anchorCam(1.30, soloAnchor) || { scale: 1.30, x: 0, y: -0.05 },
+                close: anchorCam(1.75, soloAnchor) || { scale: 1.75, x: 0, y: -0.10 },
+            };
+            if (soloAnchor) {
+                console.log(
+                    `[virtual-multicam] SOLO cameras anchored on face @(${soloAnchor.cx.toFixed(2)},${soloAnchor.cy.toFixed(2)})`
+                );
+            }
+
+            // Chunk continuous speech into shot-length pieces, cutting
+            // preferentially at pauses so angle changes feel motivated.
+            const TARGET_SHOT = 7;    // ideal shot length (s)
+            const MAX_SHOT    = 12;   // force a cut beyond this
+            const PAUSE_GAP   = 0.35; // a gap this long is a natural cut point
+
+            const chunks = [];
+            let cs = null;
+            for (const w of words) {
+                if (!w.speaker || typeof w.start !== 'number' || typeof w.end !== 'number') continue;
+                if (!cs) { cs = { start: w.start, end: w.end }; continue; }
+                const gap = w.start - cs.end;
+                const len = cs.end - cs.start;
+                if ((gap >= PAUSE_GAP && len >= TARGET_SHOT * 0.6) || len >= MAX_SHOT) {
+                    chunks.push(cs);
+                    cs = { start: w.start, end: w.end };
+                } else {
+                    cs.end = w.end;
+                }
+            }
+            if (cs) chunks.push(cs);
+
+            if (!chunks.length) {
+                return res.status(400).json({ error: 'No usable speech segments found in words array.' });
+            }
+
+            // Angle cycle: mid → close → mid → wide … — never jumps directly
+            // between wide and close (always bridged by mid), and the video
+            // opens and closes on the wide to establish/settle the scene.
+            const SOLO_CYCLE = ['mid', 'close', 'mid', 'wide'];
+            const soloSegments = [];
+            let cycleIdx = 0;
+
+            for (let i = 0; i < chunks.length; i++) {
+                const isFirst = i === 0;
+                const isLast  = i === chunks.length - 1;
+                let angle;
+                if (isFirst || isLast) {
+                    angle = 'wide';
+                } else {
+                    angle = SOLO_CYCLE[cycleIdx++ % SOLO_CYCLE.length];
+                    // The final segment is forced wide — if the cycle put a close
+                    // right before it, bridge with a mid to keep the "never jump
+                    // wide↔close directly" rule intact.
+                    if (i === chunks.length - 2 && angle === 'close') angle = 'mid';
+                }
+                const cam     = SOLO_CAMERAS[angle];
+                const crop    = scaleToCrop(cam);
+                soloSegments.push({
+                    start:   parseFloat(chunks[i].start.toFixed(3)),
+                    end:     parseFloat(chunks[i].end.toFixed(3)),
+                    angle,
+                    speaker: speakers[0],
+                    scale:   cam.scale,
+                    x:       cam.x,
+                    y:       cam.y,
+                    cropX:   crop.cropX,
+                    cropY:   crop.cropY,
+                    cropW:   crop.cropW,
+                    cropH:   crop.cropH,
+                });
+            }
+
+            const soloCounts = { wide: 0, mid: 0, close: 0 };
+            soloSegments.forEach(s => { soloCounts[s.angle]++; });
+            console.log(
+                `[virtual-multicam] SOLO mode: ${soloSegments.length} segments — ` +
+                `${soloCounts.wide}W / ${soloCounts.mid}M / ${soloCounts.close}C`
+            );
+
+            return res.json({
+                segments:     soloSegments,
+                mode:         'solo',
+                hostSide:     'center',
+                faceDetected: !!soloAnchor,
+                host:         orderedSpeakers[0],
+                guest:        null,
+            });
+        }
+
         // Map speaker IDs to camera labels based on detected host side.
         //   hostSide='left' → host is speaker A (left), guest is speaker B (right)
         //   hostSide='right' → host is speaker B (right), guest is speaker A (left)
-        const host  = speakers[0] || 'SPEAKER_00';
-        const guest = speakers[1] || 'SPEAKER_01';
+        // orderedSpeakers puts the identified interviewer first (see section 0).
+        const host  = orderedSpeakers[0] || 'SPEAKER_00';
+        const guest = orderedSpeakers[1] || 'SPEAKER_01';
 
         const speakerCam   = {};  // speaker → close-up camera name
         const reactionCam  = {};  // speaker → reaction camera (other side listening)
@@ -1340,7 +1706,7 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
             `host=${host} on ${hostSide} | face=${faceDetected}`
         );
 
-        res.json({ segments, hostSide, faceDetected, host, guest });
+        res.json({ segments, mode: 'duo', hostSide, faceDetected, host, guest });
 
     } catch (err) {
         console.error('[interviewRoutes] /virtual-multicam error:', err);
