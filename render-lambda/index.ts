@@ -28,6 +28,9 @@ export const handler: Handler = async (event) => {
             backendUrl   = '',
             webhookUrl,
             captionStyle = null,   // ← font family + style from the UI caption panel
+            renderId: providedRenderId = null, // ← backend's jobId: makes the GCS output
+                                               //   path deterministic so the backend can
+                                               //   detect completion WITHOUT the webhook
         } = payload;
 
         // Compute dimensions
@@ -42,7 +45,7 @@ export const handler: Handler = async (event) => {
             fs.mkdirSync(outDir, { recursive: true });
         }
 
-        const renderId = uuidv4();
+        const renderId = providedRenderId || uuidv4();
         const outFile = `render_${renderId}.mp4` as `${string}.mp4`;
         const outputPath = path.join(outDir, outFile);
 
@@ -58,7 +61,11 @@ export const handler: Handler = async (event) => {
             const usedFonts = fontInstaller.extractUsedFonts(tracks, captionStyle);
             if (usedFonts.length > 0) {
                 console.log(`🔤 Fonts needed: ${usedFonts.join(', ')}`);
-                fontFaceCSS = await fontInstaller.ensureFonts(usedFonts);
+                // backendUrl enables the backend-font fallback: the same committed
+                // TTFs the FFmpeg path uses, served at ${backendUrl}/fonts/<file>.
+                // This is the reliable path when the font Layer isn't attached —
+                // the jsDelivr fallback URL pattern is dead (see CLAUDE.md 3E-2).
+                fontFaceCSS = await fontInstaller.ensureFonts(usedFonts, backendUrl || null);
                 console.log(`✅ Font CSS ready (${Math.round(fontFaceCSS.length / 1024)}KB)`);
             } else {
                 console.log('ℹ️  No text/caption clips — skipping font resolution');
