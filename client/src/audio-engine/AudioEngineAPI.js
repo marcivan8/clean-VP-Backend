@@ -121,6 +121,29 @@ class AudioEngineAPI {
     }
 
     /**
+     * Save the current settings (caption style, color grade, sound mix, export
+     * settings, etc.) as a NAMED, reusable preset on the user's account.
+     * Distinct from favoriting — this captures the exact settings values, not
+     * just a bookmark of an existing library item. See routes/favoritesRoutes.js
+     * for the simpler "favorite an existing asset" path (SFX/transitions).
+     *
+     * @param {{ name: string, presetType: string, settings: object, commandSequence?: object|null, isPublic?: boolean }} opts
+     * @returns {Promise<{ preset: object }>}
+     */
+    async createUserPreset({ name, presetType, settings, commandSequence = null, isPublic = false }) {
+        const resp = await authFetch('/api/presets/user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, presetType, settings, commandSequence, isPublic }),
+        });
+        if (!resp.ok) {
+            const body = await resp.json().catch(() => ({}));
+            throw new Error(body.error || `Save preset failed: ${resp.status}`);
+        }
+        return resp.json();
+    }
+
+    /**
      * Apply a preset to a project.
      * FULL_EDIT presets require approved=true — server returns 403 otherwise.
      *
@@ -138,6 +161,61 @@ class AudioEngineAPI {
         if (!resp.ok) {
             const body = await resp.json().catch(() => ({}));
             throw new Error(body.error || `Apply preset failed: ${resp.status}`);
+        }
+        return resp.json();
+    }
+
+    // ── Favorites ─────────────────────────────────────────────────────────────
+    // Lightweight bookmarking for SFX/LUT assets and transition types — see
+    // routes/favoritesRoutes.js. Distinct from createUserPreset() above, which
+    // saves a named, custom set of settings rather than just marking an
+    // existing item.
+
+    /**
+     * List the current user's favorites.
+     *
+     * @returns {Promise<{ favorites: object[], assetIds: string[], transitionTypes: string[] }>}
+     */
+    async getFavorites() {
+        const resp = await authFetch('/api/favorites');
+        if (!resp.ok) throw new Error(`Get favorites failed: ${resp.status}`);
+        return resp.json();
+    }
+
+    /**
+     * Favorite an asset (SFX/LUT) or a transition type. Pass exactly one.
+     *
+     * @param {{ assetId?: string, transitionType?: string }} target
+     * @returns {Promise<{ favorite: object|null, alreadyFavorited?: boolean }>}
+     */
+    async addFavorite(target) {
+        const resp = await authFetch('/api/favorites', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(target),
+        });
+        if (!resp.ok) {
+            const body = await resp.json().catch(() => ({}));
+            throw new Error(body.error || `Add favorite failed: ${resp.status}`);
+        }
+        return resp.json();
+    }
+
+    /**
+     * Remove a favorite. Pass exactly one of assetId/transitionType.
+     *
+     * @param {{ assetId?: string, transitionType?: string }} target
+     * @returns {Promise<{ success: boolean }>}
+     */
+    async removeFavorite(target) {
+        const resp = await authFetch('/api/favorites', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(target),
+        });
+        if (!resp.ok) {
+            const body = await resp.json().catch(() => ({}));
+            throw new Error(body.error || `Remove favorite failed: ${resp.status}`);
         }
         return resp.json();
     }

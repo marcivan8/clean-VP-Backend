@@ -14,6 +14,7 @@
 
 import React, { useState } from 'react';
 import { Check, X } from 'lucide-react';
+import SaveAsPresetButton from './SaveAsPresetButton.jsx';
 
 const SWATCH_GRADIENT = 'linear-gradient(135deg, #e8c97a 0%, #4a7fc1 40%, #2d4a2d 70%, #c44b4b 100%)';
 
@@ -22,6 +23,24 @@ export default function LUTCard({ lut, onApply, applied = false }) {
 
     // cssFilterPreview is NEVER null — guaranteed by LUTService.getPreviewFilter()
     const cssFilter = lut.cssFilterPreview || lut.css_filter_preview || 'none';
+
+    // Maps this LUT's grading values onto the same COLOR_GRADE settings shape
+    // used by system presets (see server/audio-engine/library/systemPresets.js's
+    // preset-cinematic-grade). brightness/hueRotate/temperature/tint aren't
+    // columns on the `luts` table itself (see supabase/migrations/
+    // 20240002_asset_engine.sql) so they default to neutral — warmth/contrast/
+    // saturation/highlights/shadows come straight from this LUT.
+    const buildColorPresetSettings = () => ({
+        lutId:       lut.name,
+        brightness:  1,
+        contrast:    1 + (lut.contrast ?? 0) / 10,
+        saturation:  1 + (lut.saturation ?? 0) / 10,
+        hueRotate:   0,
+        highlights:  lut.highlights ?? 0,
+        shadows:     lut.shadows ?? 0,
+        temperature: (lut.warmth ?? 0) * 40,
+        tint:        0,
+    });
 
     return (
         <div
@@ -95,6 +114,15 @@ export default function LUTCard({ lut, onApply, applied = false }) {
                 >
                     {applied ? <><X size={9} /> Remove</> : 'Apply'}
                 </button>
+
+                {/* Stop propagation so clicks inside the save form don't trigger onApply on the outer card */}
+                <div onClick={e => e.stopPropagation()}>
+                    <SaveAsPresetButton
+                        presetType="COLOR_GRADE"
+                        defaultName={`${lut.display_name || lut.name} (mine)`}
+                        buildSettings={buildColorPresetSettings}
+                    />
+                </div>
             </div>
         </div>
     );

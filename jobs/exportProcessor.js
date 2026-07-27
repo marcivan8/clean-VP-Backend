@@ -76,6 +76,50 @@ function buildScaleFilter(width, height) {
 }
 
 /**
+ * Build a piecewise-linear zoompan `z` expression from clip.keyframes.scale.
+ *
+ * The editor preview animates scale keyframes via CSS transform interpolation
+ * (VideoPlayer.jsx); the export must mirror that motion or zoom-rhythm push-ins
+ * and punch-ins silently disappear from the rendered MP4 (same preview-vs-export
+ * trap as R14's multicam crop — check BOTH paths for any render-time effect).
+ *
+ * `it` is zoompan's input-timestamp variable (seconds). The filter is placed
+ * AFTER the setpts speed filter, so `it` runs on the same clip-local time axis
+ * the keyframes use. easeOutCubic segments are approximated linearly — over the
+ * ≤0.15s punch-in snap the difference is imperceptible.
+ *
+ * Returns null when there is nothing to animate (no keyframes, or all ≈1.0).
+ */
+function buildZoomKeyframeExpr(kfs, { multiplier = 1, minZoom = 1.0, maxZoom = 2.0 } = {}) {
+    const pts = (kfs || [])
+        .filter(k => typeof k.time === 'number' && typeof k.value === 'number')
+        .map(k => ({ t: Math.max(0, k.time), v: Math.min(maxZoom, Math.max(minZoom, k.value * multiplier)) }))
+        .sort((a, b) => a.t - b.t);
+
+    if (!pts.length) return null;
+    if (!pts.some(p => p.v > minZoom + 0.001)) return null; // nothing visible to animate beyond the base zoom
+
+    if (pts.length === 1) return pts[0].v.toFixed(4);
+
+    // Innermost value: hold the last keyframe after its time
+    let expr = pts[pts.length - 1].v.toFixed(4);
+
+    // Wrap segments back-to-front: if(lt(it,t_{i+1}), lerp_i, rest)
+    for (let i = pts.length - 2; i >= 0; i--) {
+        const a = pts[i], b = pts[i + 1];
+        const span = b.t - a.t;
+        const seg  = span > 0.001
+            ? `${a.v.toFixed(4)}+(${(b.v - a.v).toFixed(4)})*(it-${a.t.toFixed(3)})/${span.toFixed(3)}`
+            : b.v.toFixed(4);
+        expr = `if(lt(it,${b.t.toFixed(3)}),${seg},${expr})`;
+    }
+
+    // Before the first keyframe: hold its value (avoids extrapolation)
+    expr = `if(lt(it,${pts[0].t.toFixed(3)}),${pts[0].v.toFixed(4)},${expr})`;
+    return expr;
+}
+
+/**
  * Probe a video file and return its stored rotation in degrees (0, 90, 180, 270).
  * Phone-recorded portrait videos are often stored as landscape with a rotate=90
  * metadata tag. We need to correct for this before applying the scale filter,
@@ -100,6 +144,25 @@ function getVideoRotation(filePath) {
             } else {
                 resolve(0);
             }
+        });
+    });
+}
+
+/**
+ * Probe a video file's coded width/height (pre-rotation-correction). Used only
+ * when a clip needs a COMBINED multicam-crop + zoom-rhythm zoompan filter
+ * (see the "composed" branch in the per-clip loop below) — zoompan needs an
+ * explicit `s=WxH` output size, and giving it the source's own resolution
+ * keeps quality high through to the later scale/pad filter that follows it.
+ * Returns null on any probe failure (caller falls back to separate filters).
+ */
+function getVideoDimensions(filePath) {
+    return new Promise((resolve) => {
+        ffmpeg.ffprobe(filePath, (err, metadata) => {
+            if (err) { resolve(null); return; }
+            const vStream = (metadata?.streams || []).find(s => s.codec_type === 'video');
+            if (!vStream?.width || !vStream?.height) { resolve(null); return; }
+            resolve({ width: vStream.width, height: vStream.height });
         });
     });
 }
@@ -509,6 +572,32 @@ module.exports = async function processExportJob(job) {
         // can be suppressed, so we detect and correct it explicitly.
         const rotation = isImage ? 0 : await getVideoRotation(src);
 
+        // Does this clip need the COMPOSED multicam-crop + zoom-rhythm path?
+        // (See R16 in CLAUDE.md — the two effects must combine into one
+        // dynamic crop, not stack as independent filters, or faces end up
+        // over-zoomed/cropped out.) Only probe dimensions when actually needed.
+        const vcForComposition = clip.virtualCam;
+        const scaleKfsForComposition = !isImage && clip.keyframes && Array.isArray(clip.keyframes.scale)
+            ? clip.keyframes.scale
+            : null;
+        const needsComposedZoom = !isImage
+            && vcForComposition && typeof vcForComposition.cropW === 'number' && typeof vcForComposition.cropH === 'number'
+            && (vcForComposition.cropW < 0.999 || vcForComposition.cropH < 0.999)
+            && scaleKfsForComposition && scaleKfsForComposition.length > 0;
+
+        let composedDims = null;
+        if (needsComposedZoom) {
+            const raw = await getVideoDimensions(src);
+            if (raw) {
+                // correctionFilters below swap width/height for 90°/270° rotation —
+                // zoompan runs AFTER that correction, so its `s=` must use the
+                // POST-rotation dimensions.
+                composedDims = (rotation === 90 || rotation === 270 || rotation === -90)
+                    ? { width: raw.height, height: raw.width }
+                    : raw;
+            }
+        }
+
         await new Promise((resolve, reject) => {
             let cmd;
             if (isImage) {
@@ -531,8 +620,62 @@ module.exports = async function processExportJob(job) {
             else if (rotation === 270 || rotation === -90) correctionFilters = ['transpose=2'];
             else if (rotation === 180)                 correctionFilters = ['hflip', 'vflip'];
 
-            const vFilters = [...correctionFilters, scaleFilter];
+            // Virtual multicam crop (clip.virtualCam) — the editor preview applies
+            // this via PlaybackEngine's UV sub-region sampling (u_cropOffset /
+            // u_cropSize); the export must mirror it or multicam projects come out
+            // 100% wide. Placement matters: AFTER rotation correction (coords are
+            // in the upright frame the user saw in preview) and BEFORE scaling
+            // (coords are fractions of the source frame, not the output frame).
+            const vc = clip.virtualCam;
+            const hasCrop = vc && typeof vc.cropW === 'number' && typeof vc.cropH === 'number'
+                && (vc.cropW < 0.999 || vc.cropH < 0.999);
+            const scaleKfs = !isImage && clip.keyframes && Array.isArray(clip.keyframes.scale)
+                ? clip.keyframes.scale
+                : null;
+
+            const vFilters = [...correctionFilters];
             const aFilters = [];
+
+            if (hasCrop && scaleKfs && composedDims) {
+                // ── COMPOSED: multicam crop + zoom-rhythm on the SAME clip ──────
+                // Instead of a static crop filter followed by an independent
+                // zoompan (which stacks two zooms and re-centers on a generic
+                // anchor, over-cropping faces — see R16), render ONE zoompan
+                // whose zoom level is vc.scale * the rhythm scale, anchored on
+                // the SAME point the multicam angle detected. Runs on the raw
+                // (rotation-corrected) source frame — the ordinary scale/pad
+                // filter still follows it to fit the target output aspect ratio.
+                const cx0 = Math.max(0, Math.min(1, (vc.cropX ?? 0) + (vc.cropW ?? 1) / 2));
+                const cy0 = Math.max(0, Math.min(1, (vc.cropY ?? 0) + (vc.cropH ?? 1) / 2));
+                const combinedExpr = buildZoomKeyframeExpr(scaleKfs, {
+                    multiplier: vc.scale || (1 / Math.min(vc.cropW, vc.cropH)),
+                    minZoom: 1.0,
+                    maxZoom: 8.0,
+                });
+                const baseZoom = vc.scale || (1 / Math.min(vc.cropW, vc.cropH));
+                const zExprComposed = combinedExpr || baseZoom.toFixed(4);
+                vFilters.push(
+                    `zoompan=z='${zExprComposed}'` +
+                    `:x='iw*${cx0.toFixed(4)}-(iw/zoom/2)'` +
+                    `:y='ih*${cy0.toFixed(4)}-(ih/zoom/2)'` +
+                    `:d=1:s=${composedDims.width}x${composedDims.height}:fps=${targetFps}`
+                );
+                vFilters.push(scaleFilter);
+                console.log(
+                    `  [multicam+rhythm] clip "${clip.name}" angle=${vc.angle || '?'}: composed zoom ` +
+                    `anchored @(${cx0.toFixed(2)},${cy0.toFixed(2)}), base=${baseZoom.toFixed(2)}x`
+                );
+            } else {
+                if (hasCrop) {
+                    const cx = Math.max(0, Math.min(1, vc.cropX ?? 0));
+                    const cy = Math.max(0, Math.min(1, vc.cropY ?? 0));
+                    const cw = Math.max(0.05, Math.min(1 - cx, vc.cropW));
+                    const ch = Math.max(0.05, Math.min(1 - cy, vc.cropH));
+                    vFilters.push(`crop=iw*${cw.toFixed(4)}:ih*${ch.toFixed(4)}:iw*${cx.toFixed(4)}:ih*${cy.toFixed(4)}`);
+                    console.log(`  [multicam] clip "${clip.name}" angle=${vc.angle || '?'} crop=${cw.toFixed(2)}x${ch.toFixed(2)}@(${cx.toFixed(2)},${cy.toFixed(2)})`);
+                }
+                vFilters.push(scaleFilter);
+            }
 
             if (speed !== 1.0) {
                 vFilters.push(`setpts=${(1 / speed).toFixed(4)}*PTS`);
@@ -542,6 +685,26 @@ module.exports = async function processExportJob(job) {
                 }
             }
             if (!isImage && vol !== 1.0) aFilters.push(`volume=${vol.toFixed(4)}`);
+
+            // Zoom-rhythm scale keyframes, NO multicam crop on this clip → animated
+            // zoompan alone (push-ins / punch-ins). Placed AFTER setpts so `it`
+            // matches clip-local timeline time. Anchor: horizontally centered,
+            // focus at 28% from the top — matches VideoPlayer's talking-head
+            // transform-origin so the export frames the speaker the same way
+            // the preview does. Skipped when the composed branch above already
+            // folded the rhythm scale into its own zoompan.
+            if (!hasCrop && scaleKfs) {
+                const zExpr = buildZoomKeyframeExpr(scaleKfs);
+                if (zExpr) {
+                    vFilters.push(
+                        `zoompan=z='${zExpr}'` +
+                        `:x='iw/2-(iw/zoom/2)'` +
+                        `:y='(ih-ih/zoom)*0.28'` +
+                        `:d=1:s=${targetWidth}x${targetHeight}:fps=${targetFps}`
+                    );
+                    console.log(`  [rhythm] clip "${clip.name}": animated zoom (${scaleKfs.length} scale keyframes)`);
+                }
+            }
 
             cmd.videoFilters(vFilters.join(','));
 

@@ -14,6 +14,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Search, Music2, Palette, Layers, Loader2, RefreshCw } from 'lucide-react';
 import { useAudioEngine }        from '../hooks/useAudioEngine.js';
 import useTimelineStore          from '../store/useTimelineStore.js';
+import { audioEngineAPI }        from '../audio-engine/AudioEngineAPI.js';
 import SoundCard                 from './SoundCard.jsx';
 import LUTCard                   from './LUTCard.jsx';
 import PresetCard                from './PresetCard.jsx';
@@ -42,8 +43,47 @@ export default function AssetPanel({ onClose }) {
     const [query,        setQuery]        = useState('');
     const [approvalPreset, setApprovalPreset] = useState(null);
     const [applyResult,  setApplyResult]  = useState(null); // { success, executed }
+    const [favoriteAssetIds, setFavoriteAssetIds] = useState(() => new Set());
 
     const projectLUTId = useTimelineStore(s => s.projectLUTId);
+
+    // Load favorited SFX/asset ids once — used to render the heart toggle on SoundCard
+    useEffect(() => {
+        let cancelled = false;
+        audioEngineAPI.getFavorites()
+            .then(({ assetIds }) => { if (!cancelled) setFavoriteAssetIds(new Set(assetIds || [])); })
+            .catch(err => console.error('[AssetPanel] getFavorites failed:', err.message));
+        return () => { cancelled = true; };
+    }, []);
+
+    // Toggle favorite for an SFX asset — optimistic update, rolls back on failure
+    const handleToggleSFXFavorite = useCallback(async sfx => {
+        const assetId = sfx.id;
+        if (!assetId) return;
+        const wasFavorited = favoriteAssetIds.has(assetId);
+
+        setFavoriteAssetIds(prev => {
+            const next = new Set(prev);
+            if (wasFavorited) next.delete(assetId); else next.add(assetId);
+            return next;
+        });
+
+        try {
+            if (wasFavorited) {
+                await audioEngineAPI.removeFavorite({ assetId });
+            } else {
+                await audioEngineAPI.addFavorite({ assetId });
+            }
+        } catch (err) {
+            console.error('[AssetPanel] toggleFavorite failed:', err.message);
+            // Roll back on failure
+            setFavoriteAssetIds(prev => {
+                const next = new Set(prev);
+                if (wasFavorited) next.add(assetId); else next.delete(assetId);
+                return next;
+            });
+        }
+    }, [favoriteAssetIds]);
 
     const {
         sfxResults, lutResults, presetResults,
@@ -229,13 +269,18 @@ export default function AssetPanel({ onClose }) {
                                     {sfxResults.length === 0 && !loading && (
                                         <Empty label={query ? 'No results found — try a different keyword' : 'Search for a sound effect above'} />
                                     )}
-                                    {sfxResults.map((r, i) => (
-                                        <SoundCard
-                                            key={r.asset?.id || i}
-                                            sfx={r.asset || r}
-                                            onSelect={handleAddSFX}
-                                        />
-                                    ))}
+                                    {sfxResults.map((r, i) => {
+                                        const sfx = r.asset || r;
+                                        return (
+                                            <SoundCard
+                                                key={sfx.id || i}
+                                                sfx={sfx}
+                                                onSelect={handleAddSFX}
+                                                favorited={favoriteAssetIds.has(sfx.id)}
+                                                onToggleFavorite={handleToggleSFXFavorite}
+                                            />
+                                        );
+                                    })}
                                 </div>
                             )}
 

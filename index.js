@@ -257,6 +257,7 @@ app.use('/api/checkout', require('./routes/polarWebhook'));  // alias: /api/chec
 app.use('/api/projects',   require('./routes/projectRoutes'));   // Project thumbnail upload
 app.use('/api/interview', require('./routes/interviewRoutes')); // Interview/podcast smart editing
 app.use('/api/waveform',  require('./routes/waveformRoutes'));  // Waveform peak data extraction
+app.use('/api/favorites', require('./routes/favoritesRoutes')); // User favorites: SFX/LUT assets + transition types
 
 // ── Creative Asset Intelligence System ────────────────────────────────────────
 app.use('/api/luts',   require('./server/routes/lutRoutes'));          // LUT library + CSS preview

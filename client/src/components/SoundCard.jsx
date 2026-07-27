@@ -7,7 +7,7 @@
  */
 
 import React, { useRef, useState, useCallback } from 'react';
-import { Play, Pause, Plus, Zap } from 'lucide-react';
+import { Play, Pause, Plus, Zap, Heart } from 'lucide-react';
 
 const glassCard = {
     background:    'rgba(255,255,255,0.04)',
@@ -26,9 +26,15 @@ const glassCard = {
 const energyColors = ['#555', '#4a9eff', '#00e5ff', '#8a2be2', '#ff3a6e'];
 
 /**
- * @param {{ sfx: object, onSelect: (sfx: object) => void, compact?: boolean }} props
+ * @param {{
+ *   sfx: object,
+ *   onSelect: (sfx: object) => void,
+ *   compact?: boolean,
+ *   favorited?: boolean,
+ *   onToggleFavorite?: (sfx: object) => void,
+ * }} props
  */
-export default function SoundCard({ sfx, onSelect, compact = false }) {
+export default function SoundCard({ sfx, onSelect, compact = false, favorited = false, onToggleFavorite }) {
     const audioRef = useRef(null);
     const [playing, setPlaying] = useState(false);
     const [hovered, setHovered] = useState(false);
@@ -102,6 +108,23 @@ export default function SoundCard({ sfx, onSelect, compact = false }) {
                 <Zap size={10} color={energyColors[energy]} />
                 <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>{energy + 1}</span>
             </div>
+
+            {/* Favorite toggle */}
+            {onToggleFavorite && (
+                <button
+                    onClick={e => { e.stopPropagation(); onToggleFavorite(sfx); }}
+                    title={favorited ? 'Remove from favorites' : 'Add to favorites'}
+                    style={{
+                        width: 24, height: 24, borderRadius: 5, border: 'none',
+                        background: favorited ? 'rgba(255,58,110,0.14)' : 'rgba(255,255,255,0.06)',
+                        color: favorited ? '#ff3a6e' : 'var(--fg-3)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: 'pointer', flexShrink: 0, transition: 'background 0.15s, color 0.15s',
+                    }}
+                >
+                    <Heart size={12} fill={favorited ? '#ff3a6e' : 'none'} />
+                </button>
+            )}
 
             {/* Add button */}
             <button

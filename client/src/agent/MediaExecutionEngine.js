@@ -202,6 +202,9 @@ export class MediaExecutionEngine {
         this.activeJob   = null;
         this.isProcessing = false;
         this.listeners   = new Map();
+        // "Ask once, then allow" guard for split_speakers — see the case body
+        // for why. Cleared after use or after DESTRUCTIVE_CONFIRM_WINDOW_MS.
+        this._pendingSplitSpeakersConfirm = null;
     }
 
     on(event, callback) {
@@ -669,6 +672,40 @@ export class MediaExecutionEngine {
                     return { action, success: false, message: 'No video asset in timeline.' };
                 }
 
+                // ── Destructive-work guard ──────────────────────────────────────
+                // split_speakers removes ALL clips on the video track(s) and rebuilds
+                // them from scratch with no metadata carried over — unlike silence/
+                // filler removal and re-running virtual_multicam, there's no sensible
+                // way to remap a per-speaker-track rebuild onto existing per-clip
+                // virtualCam angles / zoom-rhythm keyframes, so it just wipes them
+                // (see R16 in CLAUDE.md). Warn once and require the user to re-issue
+                // the command before actually destroying that work.
+                const DESTRUCTIVE_CONFIRM_WINDOW_MS = 2 * 60 * 1000;
+                const spVideoTracks = (spStore.tracks || []).filter(t => t.type === 'video');
+                const spExistingClips = spVideoTracks.flatMap(t => t.clips || []);
+                const spVmCount = spExistingClips.filter(c => c.virtualCam).length;
+                const spZoomCount = spExistingClips.filter(c => c.keyframes?.scale?.length).length;
+                const spHasPriorWork = spVmCount > 0 || spZoomCount > 0;
+
+                const pending = this._pendingSplitSpeakersConfirm;
+                const confirmedRecently = pending && (Date.now() - pending.ts) < DESTRUCTIVE_CONFIRM_WINDOW_MS;
+
+                if (spHasPriorWork && !confirmedRecently && !args.confirmed) {
+                    this._pendingSplitSpeakersConfirm = { ts: Date.now() };
+                    const parts = [];
+                    if (spVmCount > 0)   parts.push(`${spVmCount} multicam-tagged clip${spVmCount > 1 ? 's' : ''}`);
+                    if (spZoomCount > 0) parts.push(`${spZoomCount} zoom-rhythm clip${spZoomCount > 1 ? 's' : ''}`);
+                    return {
+                        action,
+                        success: false,
+                        message:
+                            `Splitting speakers will remove ${parts.join(' and ')} already applied to this video — ` +
+                            `it rebuilds the video track from scratch with no way to carry that work over.\n\n` +
+                            `Run "split speakers" again if you want to proceed anyway — it won't ask twice within the next couple of minutes.`,
+                    };
+                }
+                this._pendingSplitSpeakersConfirm = null; // consumed
+
                 const spLanguage = args.language || null;
 
                 // ── 1. Queue the diarize job ──────────────────────────────────
@@ -1036,7 +1073,12 @@ export class MediaExecutionEngine {
 
                 const { clipZooms, summary } = rzData;
 
-                // Clear existing scale keyframes, then apply one per clip at t=0
+                // Clear existing scale keyframes, then apply the motion plan.
+                // Three motion kinds (see /rhythm-zoom's buildMotion):
+                //   static   → one keyframe at t=0
+                //   push_in  → slow zoom across the clip (2 keyframes, easeOutCubic)
+                //   punch_in → hold, then snap to target ON the emphasized word
+                //              (keyframe pair 80ms before / 60ms after the word start)
                 rzClips.forEach(clip => {
                     if (clip.keyframes?.scale?.length) {
                         rzStore.updateClip(rzVideoTrack.id, clip.id, {
@@ -1044,15 +1086,36 @@ export class MediaExecutionEngine {
                         });
                     }
                 });
-                clipZooms.forEach(({ clipId, scale }) => {
-                    rzStore.addTransformKeyframe(clipId, 'scale', 0, scale, 'linear');
+
+                const rzDurById = {};
+                rzClips.forEach(c => { rzDurById[c.id] = c.duration ?? 0; });
+
+                clipZooms.forEach(({ clipId, scale, motion }) => {
+                    const m   = motion || { kind: 'static', from: scale, to: scale };
+                    const dur = rzDurById[clipId] ?? 0;
+
+                    if (m.kind === 'push_in' && dur > 0.5) {
+                        rzStore.addTransformKeyframe(clipId, 'scale', 0, m.from, 'linear');
+                        rzStore.addTransformKeyframe(clipId, 'scale', dur, m.to, 'easeOutCubic');
+                    } else if (m.kind === 'punch_in' && typeof m.at === 'number') {
+                        rzStore.addTransformKeyframe(clipId, 'scale', 0, m.from, 'linear');
+                        rzStore.addTransformKeyframe(clipId, 'scale', Math.max(0.01, m.at - 0.08), m.from, 'linear');
+                        rzStore.addTransformKeyframe(clipId, 'scale', Math.min(dur, m.at + 0.06), m.to, 'easeOutCubic');
+                    } else {
+                        rzStore.addTransformKeyframe(clipId, 'scale', 0, m.to ?? scale, 'linear');
+                    }
                 });
 
-                const { counts = {} } = summary || {};
+                const { counts = {}, motions = {} } = summary || {};
+                const punchNote = (motions.punch_in || 0) > 0
+                    ? ` ${motions.punch_in} punch-in${motions.punch_in > 1 ? 's land' : ' lands'} right on emphasized words.`
+                    : '';
                 return {
                     action,
                     success: true,
-                    message: `Zoom rhythm applied — ${counts.wide ?? 0}W / ${counts.medium ?? 0}M / ${counts.close ?? 0}C across ${rzClips.length} shots`,
+                    message:
+                        `Zoom rhythm applied — ${counts.wide ?? 0}W / ${counts.medium ?? 0}M / ${counts.close ?? 0}C ` +
+                        `across ${rzClips.length} shots, with ${motions.push_in ?? 0} slow push-ins.${punchNote}`,
                 };
             }
 
@@ -1269,14 +1332,12 @@ export class MediaExecutionEngine {
                 // Collect unique speakers from the words
                 const vmSpeakers = [...new Set(vmWords.map(w => w.speaker).filter(Boolean))].sort();
 
-                if (vmSpeakers.length < 2) {
-                    return {
-                        action,
-                        success: false,
-                        message:
-                            'Virtual multicam works best with at least 2 speakers detected. ' +
-                            'Only one speaker found in the diarization data.',
-                    };
+                // 1 speaker is fine — the backend switches to SOLO mode (centered
+                // wide/mid/close zoom angles) instead of the 2-person left/right
+                // crops. This is the primary use case: a single-camera talking-head
+                // interview turned into a simulated 3-camera edit.
+                if (vmSpeakers.length === 1) {
+                    console.log('[virtual_multicam] 1 speaker — requesting SOLO wide/mid/close mode');
                 }
 
                 // ── Call backend to get segments with angle + crop region ─────
@@ -1286,14 +1347,23 @@ export class MediaExecutionEngine {
                 );
 
                 // Send the GCS server-side path so the backend can extract frames
-                // for host-side detection via diarization + MediaPipe face analysis.
+                // for face-anchor detection (detectSceneLayout — GPT-4o-mini Vision).
                 const vmUploadedPath = vmStore.uploadedFilePath || null;
+
+                // Speaker roles from identify-speakers (stored in speakerMap after
+                // split_speakers) — lets the backend make the interviewer the host
+                // instead of assuming diarization label order.
+                const vmRoles = {};
+                for (const [spk, info] of Object.entries(vmStore.speakerMap || {})) {
+                    if (info?.role) vmRoles[spk] = info.role;
+                }
 
                 const vmRes  = await authFetch('/api/interview/virtual-multicam', {
                     method: 'POST',
                     body:   JSON.stringify({
                         words:    vmWords,
                         speakers: vmSpeakers,
+                        roles:    vmRoles,
                         frames:   [],
                         filename: vmUploadedPath,   // GCS path for server-side frame extraction
                     }),
@@ -1301,7 +1371,7 @@ export class MediaExecutionEngine {
                 const vmData = await vmRes.json();
                 if (!vmRes.ok) throw new Error(vmData.error || `virtual-multicam returned ${vmRes.status}`);
 
-                const { segments = [], hostSide, host, guest } = vmData;
+                const { segments = [], hostSide, host, guest, mode: vmMode = 'duo' } = vmData;
 
                 if (!segments.length) {
                     return { action, success: false, message: 'No segments returned from virtual-multicam analysis.' };
@@ -1323,9 +1393,12 @@ export class MediaExecutionEngine {
                 const freshStore = useTimelineStore.getState();
                 const tm         = freshStore.manager;
 
-                // Angle counters (new names: speakerA/speakerB/wide/reactionA/reactionB)
-                const angleCounts = { wide: 0, speakerA: 0, speakerB: 0, reactionA: 0, reactionB: 0 };
-                const countAngle  = (a) => { if (angleCounts[a] !== undefined) angleCounts[a]++; };
+                // Angle counters — dynamic: duo mode returns speakerA/speakerB/
+                // reactionA/reactionB, solo mode returns mid/close. A fixed key
+                // set would silently drop solo angles from the count.
+                const angleCounts = {};
+                const countAngle  = (a) => { if (a) angleCounts[a] = (angleCounts[a] || 0) + 1; };
+                let droppedZoomKfCount = 0; // clips whose stale zoom-rhythm keyframes had to be cleared (see split branch below)
 
                 freshStore._saveHistory?.();
 
@@ -1382,6 +1455,16 @@ export class MediaExecutionEngine {
                                 id:       `${clip.id}_vm${Math.round(pSrcStart * 10)}`,
                                 offset:   pSrcStart,
                                 duration: pDur,
+                                // Any existing zoom-rhythm keyframes were authored against
+                                // clip's OLD (longer) duration — their timestamps no longer
+                                // correspond to anything meaningful on this new, shorter
+                                // fragment. Drop them rather than silently apply a stale/
+                                // wrong zoom; re-run "make it dynamic" after multicam to
+                                // regenerate a rhythm that matches the new segments.
+                                keyframes: (() => {
+                                    if (clip.keyframes?.scale?.length) droppedZoomKfCount++;
+                                    return clip.keyframes ? { ...clip.keyframes, scale: [] } : clip.keyframes;
+                                })(),
                                 virtualCam: {
                                     angle:   seg.angle,
                                     scale:   seg.scale  ?? 1,
@@ -1415,10 +1498,8 @@ export class MediaExecutionEngine {
 
                 const totalTagged = Object.values(angleCounts).reduce((s, n) => s + n, 0);
                 console.log(
-                    `[virtual_multicam] Applied to ${totalTagged} clips (split from ${vmAllClips.length}): ` +
-                    `${angleCounts.wide}W / ${angleCounts.speakerA}A / ${angleCounts.speakerB}B / ` +
-                    `${angleCounts.reactionA}rA / ${angleCounts.reactionB}rB | ` +
-                    `host=${host} on ${hostSide}`
+                    `[virtual_multicam] Applied to ${totalTagged} clips (split from ${vmAllClips.length}) ` +
+                    `[${vmMode}]: ${JSON.stringify(angleCounts)} | host=${host} on ${hostSide}`
                 );
 
                 // Seek to the first non-wide clip so the user immediately sees a close-up.
@@ -1438,17 +1519,29 @@ export class MediaExecutionEngine {
                     console.log(`[virtual_multicam] Seeking to first close-up at t=${previewTime.toFixed(2)} (clip: ${firstCloseUp.virtualCam.angle})`);
                 }
 
-                const rxTotal = angleCounts.reactionA + angleCounts.reactionB;
+                const wideN  = angleCounts.wide || 0;
+                const closeN = (angleCounts.speakerA || 0) + (angleCounts.speakerB || 0) + (angleCounts.close || 0);
+                const midN   = angleCounts.mid || 0;
+                const rxTotal = (angleCounts.reactionA || 0) + (angleCounts.reactionB || 0);
+
+                const vmSummary = vmMode === 'solo'
+                    ? `${wideN} wide  ·  ${midN} mid  ·  ${closeN} close-ups\n\n` +
+                      `Single speaker detected — simulated 3-camera edit (wide/mid/close on the same subject). `
+                    : `${wideN} wide  ·  ${closeN} close-ups  ·  ${rxTotal} reaction shots\n\n` +
+                      `Host (${host}) detected on the ${hostSide}. `;
+
+                const droppedZoomNote = droppedZoomKfCount > 0
+                    ? `\n\nNote: ${droppedZoomKfCount} clip(s) had an existing zoom rhythm that no longer matched the new camera cuts, so it was cleared — run "make it more dynamic" again to re-add it on top of these angles.`
+                    : '';
+
                 return {
                     action,
                     success: true,
                     message:
                         `Virtual multicam applied — ${totalTagged} angle-tagged segments.\n\n` +
-                        `${angleCounts.wide} wide  ·  ` +
-                        `${angleCounts.speakerA + angleCounts.speakerB} close-ups  ·  ` +
-                        `${rxTotal} reaction shots\n\n` +
-                        `Host (${host}) detected on the ${hostSide}. ` +
-                        `Jumped to the first close-up — scrub the timeline to review all angle cuts.`,
+                        vmSummary +
+                        `Jumped to the first close-up — scrub the timeline to review all angle cuts.` +
+                        droppedZoomNote,
                 };
             }
 
@@ -2036,6 +2129,7 @@ export class MediaExecutionEngine {
         // Insert replacement clips starting at rangeStart
         let currentStartTime = rangeStart;
         const persistentUrl  = baseClip.sourceUrl || baseClip.url || '';
+        let droppedZoomKfCount = 0; // clips whose stale zoom-rhythm keyframes had to be cleared (see below)
 
         validSegs.forEach((seg, i) => {
             // Inherit the correct virtualCam angle from the pre-cleanup clips by
@@ -2054,6 +2148,16 @@ export class MediaExecutionEngine {
                 }
             }
 
+            // Same staleness problem as virtualCam used to have (see comment above
+            // srcVirtualCamRanges): baseClip.keyframes.scale was authored against
+            // the OLD clip's duration/offset. Blindly spreading it onto every new
+            // segment would apply the wrong zoom at the wrong time (or none at
+            // all, if the timestamps land outside the new segment's range).
+            // Unlike virtualCam there's no meaningful overlap-based remap for an
+            // animation curve, so we drop it — same tradeoff MediaExecutionEngine's
+            // virtual_multicam split branch makes.
+            if (baseClip.keyframes?.scale?.length) droppedZoomKfCount++;
+
             const newClip = {
                 ...baseClip,
                 id:           `clip_${prefix}_${ts}_${i}`,
@@ -2065,6 +2169,7 @@ export class MediaExecutionEngine {
                 url:          persistentUrl,
                 sourceUrl:    baseClip.sourceUrl || persistentUrl,
                 virtualCam:   inheritedVirtualCam,
+                keyframes:    baseClip.keyframes ? { ...baseClip.keyframes, scale: [] } : baseClip.keyframes,
             };
             timelineStore.addClip(videoTrack.id, newClip, { skipHistory: true });
             currentStartTime += seg.duration;
@@ -2087,6 +2192,13 @@ export class MediaExecutionEngine {
             ? `${baseClips.length} clips (asset ${targetAssetId})`
             : `"${baseClip.name}"`;
         console.log(`[MediaExecutionEngine] ✅ Applied ${validSegs.length} segments to ${label}, total active ${currentStartTime.toFixed(2)}s`);
+        if (droppedZoomKfCount > 0) {
+            console.warn(
+                `[MediaExecutionEngine] ⚠️ Cleared stale zoom-rhythm keyframes on ${droppedZoomKfCount} ` +
+                `re-segmented clip(s) — re-run "make it more dynamic" after this to reapply the rhythm ` +
+                `to the new segments (see R16 in CLAUDE.md).`
+            );
+        }
 
         // Auto-preview: seek to start and briefly play
         const freshStore = useTimelineStore.getState();
