@@ -35,6 +35,16 @@ if aws lambda get-function --function-name $FUNCTION_NAME --region $AWS_REGION >
         --function-name $FUNCTION_NAME \
         --image-uri $IMAGE_URI \
         --region $AWS_REGION
+
+    echo "5b. Disabling async invoke retries..."
+    # The backend invokes this function with InvocationType=Event (async). AWS's
+    # default for async invokes is 2 automatic retries — a crashed render (OOM,
+    # timeout) would re-run up to 2 more times, each burning up to 15 minutes
+    # and firing stale webhooks long after the client gave up. One attempt only.
+    aws lambda put-function-event-invoke-config \
+        --function-name $FUNCTION_NAME \
+        --maximum-retry-attempts 0 \
+        --region $AWS_REGION
 else
     echo "Creating new Lambda function..."
     # Note: Requires an execution role. Please ensure you have created a basic Lambda execution role that also has S3 PutObject access to your GCS/S3 bucket.
