@@ -162,35 +162,34 @@ const FONT_SPECS = {
 
 /**
  * Download a font TTF to `destPath` if not already present.
- * Primary:  jsDelivr CDN (@fontsource v4) — reliable, no rate limits, no UA tricks.
- *           Tries latin subset first, falls back to 'all' subset.
- * Fallback: Google Fonts CSS1 API with legacy UA (returns TTF for old browsers).
- *           Does NOT use encodeURIComponent on the full name — encodes the space
- *           as '+' and passes weight as ':700' (not '%3A700') so the API parses it.
+ *
+ * All 36 fonts in FONT_SPECS are now committed as real .ttf files directly in
+ * client/public/fonts/ (see CLAUDE.md EXT2 + the Dockerfile's font-presence
+ * check), so in practice this function's existsSync guard below returns
+ * immediately and nothing past it ever runs. It only matters as a defensive
+ * fallback if someone adds a new font to FONT_SPECS without committing its
+ * file first.
+ *
+ * HISTORY: this used to try jsDelivr's @fontsource npm package path
+ * (`/npm/@fontsource/{slug}@4/files/{slug}-{subset}-{weight}-normal.ttf`)
+ * first. That path is fundamentally broken and was removed — @fontsource v4
+ * packages only ever published .woff/.woff2, never .ttf, so that request
+ * 404'd on literally every call, silently wasting up to ~40s (two attempts:
+ * declared subset + 'all', 20s timeout each) before falling through to the
+ * fallback below. This was the actual root cause of captions "always falling
+ * back to the presaved font" — the primary path could never succeed for any
+ * font, in any environment. See utils/waveformPath.js-style lesson: verify a
+ * dependency's file layout before writing a URL against it.
+ *
+ * Remaining fallback: Google Fonts CSS1 API with legacy UA (returns TTF for
+ * old browsers). Undocumented and fragile, but it's the only remaining path
+ * that has actually been observed to return a real TTF. Does NOT use
+ * encodeURIComponent on the full name — encodes the space as '+' and passes
+ * weight as ':700' (not '%3A700') so the API parses it.
  */
 async function downloadFont(destPath, spec) {
     if (fs.existsSync(destPath) && fs.statSync(destPath).size > 5_000) return;
-    const { slug, weight, subset = 'latin' } = spec;
-
-    // ── Primary: jsDelivr ────────────────────────────────────────────────────
-    for (const sub of [subset, 'all']) {
-        const url = `https://cdn.jsdelivr.net/npm/@fontsource/${slug}@4/files/${slug}-${sub}-${weight}-normal.ttf`;
-        try {
-            const response = await axios({ url, method: 'GET', responseType: 'stream', timeout: 20_000,
-                validateStatus: s => s === 200 });
-            await new Promise((resolve, reject) => {
-                const writer = fs.createWriteStream(destPath);
-                response.data.pipe(writer);
-                writer.on('finish', resolve);
-                writer.on('error', reject);
-            });
-            if (fs.existsSync(destPath) && fs.statSync(destPath).size > 5_000) {
-                console.log(`[fonts] ✓ ${path.basename(destPath)} (jsDelivr ${sub})`);
-                return;
-            }
-            fs.existsSync(destPath) && fs.unlinkSync(destPath);
-        } catch { /* try next */ }
-    }
+    const { weight } = spec;
 
     // ── Fallback: Google Fonts CSS1 API (legacy TTF endpoint) ────────────────
     // Encode space as '+', weight as ':700' (NOT %3A700 — that breaks the API).
