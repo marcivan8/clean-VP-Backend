@@ -112,6 +112,12 @@ class ContextEngine {
             // the Brain distinguish "multicam on 3 of 40 clips" from "fully
             // applied" — without this it only saw booleans and kept recommending
             // work that was already done.
+            // Per-asset media intelligence (media_assets rows, attached by
+            // brainRoutes /analyze). This is what the footage actually contains,
+            // as opposed to timeline shape — without it the Brain can only give
+            // generic advice regardless of what was uploaded.
+            assetIntelligence: Array.isArray(state.assetIntelligence) ? state.assetIntelligence : [],
+
             effects:          state.effects || null,
             multicamCoverage: state.effects?.totalVideoClips
                 ? Math.round((state.effects.multicamClips / state.effects.totalVideoClips) * 100) / 100

@@ -144,6 +144,36 @@ Edits applied:  ${(ctx.editsDone || []).join(', ') || 'none'}
 Effect coverage: camera angles on ${ctx.effects?.multicamClips ?? 0}/${ctx.effects?.totalVideoClips ?? 0} clips (${Math.round((ctx.multicamCoverage || 0) * 100)}%), zoom rhythm on ${ctx.effects?.zoomRhythmClips ?? 0}/${ctx.effects?.totalVideoClips ?? 0} clips (${Math.round((ctx.rhythmCoverage || 0) * 100)}%), ${ctx.effects?.speakerCount ?? 0} speaker(s) diarized across ${ctx.effects?.videoTrackCount ?? 0} video track(s)
 NEVER recommend an edit that "Edits applied" or "Effect coverage" shows is already done — recommend the next thing that genuinely improves THIS project, or a refinement of what's there.
 
+═══════════════════════════════════════════════
+FOOTAGE IN THE BIN (what the clips actually contain)
+═══════════════════════════════════════════════
+${(ctx.assetIntelligence || []).length === 0
+    ? '(not analysed yet — base your advice on the transcript and timeline only, and do NOT speculate about what the footage looks like)'
+    : (ctx.assetIntelligence || []).map(a => {
+        if (a.analysis_status && a.analysis_status !== 'done') {
+            return `  - ${a.name || a.id}: analysis ${a.analysis_status}`;
+        }
+        const bits = [
+            a.scene_type && `scene: ${a.scene_type}`,
+            a.camera_angle && `framing: ${a.camera_angle}`,
+            typeof a.subject_count === 'number' && `${a.subject_count} person(s) on camera`,
+            a.is_broll && 'B-ROLL (no primary speaker)',
+            a.is_screen_recording && 'screen recording',
+            a.location_type && `location: ${a.location_type}`,
+            a.lighting_quality && `lighting: ${a.lighting_quality}`,
+            a.stability && `stability: ${a.stability}`,
+            a.emotional_tone && `tone: ${a.emotional_tone}`,
+            a.has_spoken_word === false && 'no speech',
+        ].filter(Boolean).join(', ');
+        return `  - ${a.name || a.id}: ${a.content_description || '(no description)'}${bits ? `\n      [${bits}]` : ''}`;
+    }).join('\n')}
+
+Use the footage list above to tailor your advice to THIS material — reference what
+the clips actually show (B-roll vs talking head, one subject vs two, screen
+recording, shaky or poorly lit shots) instead of giving generic pacing tips. If a
+bin holds several videos, reason about them TOGETHER (e.g. which is the main
+talking head and which are cutaways) rather than one at a time.
+
 Edits run this session:
 ${summary.commandsRun.length ? summary.commandsRun.map(c => `  - ${c}`).join('\n') : '  - (none yet)'}
 
