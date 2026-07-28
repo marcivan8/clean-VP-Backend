@@ -97,7 +97,12 @@ class ContextEngine {
             detectedSpeakers:     captionContext.detectedSpeakers,
             inferredContentType:  captionContext.inferredContentType,
 
-            // Media bin
+            // Media bin — binItems carries the actual clip names/durations so the
+            // Brain can acknowledge footage by name (it only had counts before,
+            // which is why a 4-clip bin could be described as "a monologue").
+            binItems: mediaBin.map(a => ({
+                id: a.id, name: a.name, type: a.type, duration: a.duration || a.originalDuration || 0,
+            })).slice(0, 25),
             totalAssets:    binContext.totalAssets,
             unusedAssets:   binContext.unusedAssets,
             assetTypes:     binContext.assetTypes,

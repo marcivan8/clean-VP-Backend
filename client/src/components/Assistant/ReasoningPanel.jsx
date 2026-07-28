@@ -836,10 +836,33 @@ const ReasoningPanel = () => {
 
         // Reset the window on each arrival; don't analyse while uploads are in flight.
         if (assetSettleTimerRef.current) clearTimeout(assetSettleTimerRef.current);
-        assetSettleTimerRef.current = setTimeout(() => {
+        assetSettleTimerRef.current = setTimeout(async () => {
             assetSettleTimerRef.current = null;
-            if (useTimelineStore.getState().assets?.some(a => a.isProxying)) return; // still busy — a later arrival will re-arm
-            analyzeProject('asset_added');
+            const st = useTimelineStore.getState();
+            if (st.assets?.some(a => a.isProxying)) return; // still busy — a later arrival will re-arm
+
+            const out = await analyzeProject('asset_added');
+
+            // SINGLE VOICE: the Brain is the assistant. IDELayout no longer posts
+            // its own "I've got your N clips ready" message, so this is the only
+            // safety net — a minimal factual note if the Brain returned nothing
+            // (no API key, network failure). It deliberately doesn't give advice,
+            // so it can never contradict the Brain.
+            const r = out?.response || {};
+            const spoke = !!(r.message || r.insight || (r.suggestions || []).length || (r.warnings || []).length);
+            if (!spoke) {
+                const vids = (st.assets || []).filter(a => (a.type || '').toLowerCase().includes('video'));
+                if (vids.length > 1) {
+                    const fmt = s => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
+                    addLog({
+                        id: 'bin-ready-' + Date.now(),
+                        type: 'info',
+                        message: `${vids.length} clips ready:\n` +
+                            vids.map(a => `  — ${a.name} (${fmt(a.duration || a.sourceDuration || 0)})`).join('\n'),
+                        timestamp: new Date().toLocaleTimeString(),
+                    });
+                }
+            }
         }, stillProxying ? 4000 : 1200);
 
         return () => {
