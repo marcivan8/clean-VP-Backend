@@ -1287,18 +1287,44 @@ export class MediaExecutionEngine {
                         if (alreadySorted) {
                             orderMsg = `Clips are already in the recommended order. ${rationale}`;
                         } else {
-                            // Reorder: place each clip consecutively with no gaps
+                            // Reorder: place each clip consecutively with no gaps.
+                            //
+                            // Three things this has to get right, all of which used to
+                            // leave the player on a blank dark frame:
+                            //  1. Pack PER TRACK. A single global cursor spread clips of
+                            //     different tracks along one shared ruler, so tracks
+                            //     overlapped and the player (which takes the first
+                            //     matching clip across video tracks) showed the wrong one.
+                            //  2. Include clips the API DIDN'T return. Anything missing
+                            //     from orderedIds kept its old start while everything else
+                            //     moved to 0..N — leaving gaps the playhead could sit in.
+                            //  3. Move the playhead. After repacking, currentTime often
+                            //     pointed past the new end or into a gap, so no clip was
+                            //     active and the canvas cleared to black.
                             const clipById  = {};
                             allClips.forEach(c => { clipById[c.id] = c; });
                             const freshStore = useTimelineStore.getState();
-                            let cursor = 0;
 
-                            for (const clipId of orderedIds) {
+                            // Ordered first, then any clip the API omitted (stable order)
+                            const orderedSet = new Set(orderedIds);
+                            const finalOrder = [
+                                ...orderedIds.filter(id => clipById[id]),
+                                ...allClips.filter(c => !orderedSet.has(c.id)).map(c => c.id),
+                            ];
+
+                            const cursorByTrack = {};
+                            for (const clipId of finalOrder) {
                                 const clip = clipById[clipId];
                                 if (!clip) continue;
-                                freshStore.updateClip(clip._trackId, clipId, { start: cursor });
-                                cursor += clip.duration ?? 0;
+                                const tId = clip._trackId;
+                                const at  = cursorByTrack[tId] ?? 0;
+                                freshStore.updateClip(tId, clipId, { start: at });
+                                cursorByTrack[tId] = at + (clip.duration ?? 0);
                             }
+
+                            // Park the playhead on the first clip so a frame is always
+                            // available immediately after the reorder.
+                            useTimelineStore.getState().seek(0);
 
                             const metaById = {};
                             clipMeta.forEach(m => { metaById[m.id] = m; });
