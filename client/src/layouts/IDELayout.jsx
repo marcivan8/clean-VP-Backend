@@ -633,6 +633,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     // Track whether early transcription already started (via onUploadComplete).
                     // This prevents a duplicate job when the proxy .then() resolves.
                     let earlyTranscriptionPath = null;
+                    // Set once the parallel (pre-proxy) analysis request succeeds, so the
+                    // post-proxy path below doesn't queue the same asset twice.
+                    let assetAnalysisQueued = false;
 
                     ProxyService.uploadAndGenerateProxy(
                         file,
@@ -660,6 +663,31 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     targetDuration: null,
                                 });
                                 console.log(`[IDELayout] ⚡ Early transcription started: ${gcsPath}`);
+
+                                // Media intelligence runs here — the moment the file is on
+                                // GCS — so scene/content analysis happens IN PARALLEL with
+                                // proxy encoding rather than waiting for it. Both read the
+                                // same raw upload, so there's no ordering dependency, and
+                                // the Brain gets footage-aware context far sooner.
+                                (async () => {
+                                    try {
+                                        const { authFetch } = await import('../utils/authFetch.js');
+                                        const resp = await authFetch('/api/brain/analyze-asset', {
+                                            method: 'POST',
+                                            body: JSON.stringify({
+                                                assetId,
+                                                gcsPath,
+                                                projectId: useTimelineStore.getState().projectId || null,
+                                            }),
+                                        });
+                                        assetAnalysisQueued = resp.ok;
+                                        console.log(resp.ok
+                                            ? `[IDELayout] 🧠 media intelligence queued (parallel with proxy) for "${file.name}"`
+                                            : `[IDELayout] asset analysis not queued (${resp.status}) — Brain advice stays generic for "${file.name}"`);
+                                    } catch (e) {
+                                        console.warn('[IDELayout] asset analysis request failed (non-critical):', e.message);
+                                    }
+                                })();
                             }
                         },
                     )
@@ -756,13 +784,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 console.log(`[IDELayout] uploadedFile path set: ${rawFilePath}`);
                                 trackEvent('video_uploaded');
 
-                                // Queue MEDIA INTELLIGENCE for this asset (audio class +
-                                // GPT-4o Vision scene analysis → media_assets row). Nothing
-                                // used to call this endpoint, so the Editorial Brain never
-                                // knew what any clip actually contained and could only give
-                                // generic advice. Fire-and-forget: the worker writes the
-                                // result and the Brain picks it up on its next analysis.
-                                (async () => {
+                                // FALLBACK ONLY: the analysis is normally queued earlier, in
+                                // parallel with proxy encoding (see the onUploadComplete
+                                // callback above). This covers the legacy upload path where
+                                // that callback never fired with a gcsPath.
+                                if (!assetAnalysisQueued) (async () => {
                                     try {
                                         const { authFetch } = await import('../utils/authFetch.js');
                                         const resp = await authFetch('/api/brain/analyze-asset', {
