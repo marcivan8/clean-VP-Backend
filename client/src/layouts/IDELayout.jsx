@@ -949,20 +949,16 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 useTimelineStore.getState().addAssetToTimeline(processedAssets[0]);
                 // Always start preview from the beginning of the newly placed clip
                 useTimelineStore.getState().seek(0);
-            } else {
-                // Multiple files: populate the media panel and let the AI suggest order.
-                const formatDur = (s) => {
-                    const m = Math.floor(s / 60), sec = Math.floor(s % 60);
-                    return `${m}:${sec.toString().padStart(2, '0')}`;
-                };
-                const list = processedAssets.map(a => `  — ${a.name} (${formatDur(a.duration || 0)})`).join('\n');
-                useAIStore.getState().addLog({
-                    id:        'multi-upload-' + Date.now(),
-                    type:      'assistant',
-                    message:   `I've got your ${processedAssets.length} clips ready:\n${list}\n\nWant me to arrange them on the timeline in order, or would you prefer to do it yourself?`,
-                    timestamp: new Date().toLocaleTimeString(),
-                });
             }
+            // NOTE: multi-file uploads used to post their own hardcoded "I've got
+            // your N clips ready…" assistant message here. That was a SECOND ROKA
+            // voice with its own understanding — it knew the clip list while the
+            // Editorial Brain, speaking right below it, still described the project
+            // as "a monologue". There is now exactly one voice: the Brain's
+            // debounced asset_added analysis (ReasoningPanel) speaks once the bin
+            // has settled, and it receives the media bin + per-asset intelligence
+            // so it can name the clips itself. ReasoningPanel emits a minimal
+            // factual fallback only if the Brain produces nothing.
 
             console.log("✅ Store updated with assets and metadata", processedAssets);
         }

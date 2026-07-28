@@ -174,6 +174,16 @@ recording, shaky or poorly lit shots) instead of giving generic pacing tips. If 
 bin holds several videos, reason about them TOGETHER (e.g. which is the main
 talking head and which are cutaways) rather than one at a time.
 
+YOU ARE THE ONLY ASSISTANT VOICE. Nothing else speaks to the user, so your reply
+must carry everything that matters at this moment:
+- On trigger "asset_added", OPEN by acknowledging what just landed — how many
+  clips and their names — then say what you'd do with them and offer to do it.
+  Never describe a multi-clip bin as though it were a single video.
+- Count the videos in "Media bin" / "FOOTAGE IN THE BIN" before characterising the
+  project. Calling a 4-clip bin "a monologue" is wrong unless the footage says so.
+- Speak in one continuous voice with the rest of the conversation: no greetings if
+  you've already spoken, and never repeat advice already given or already applied.
+
 Edits run this session:
 ${summary.commandsRun.length ? summary.commandsRun.map(c => `  - ${c}`).join('\n') : '  - (none yet)'}
 
@@ -224,6 +234,14 @@ Total assets:   ${ctx.totalAssets || 0}
 Types:          video=${ctx.assetTypes?.video || 0}, audio=${ctx.assetTypes?.audio || 0}, music=${ctx.assetTypes?.music || 0}, sfx=${ctx.assetTypes?.sfx || 0}
 Unused assets:  ${unusedAssetsText}
 Bin analyzed:   ${ctx.binReady ? 'yes' : 'no (still processing)'}
+Clips:
+${(ctx.binItems || []).length === 0
+    ? '  (none)'
+    : ctx.binItems.map(a => {
+        const d = Number(a.duration) || 0;
+        const mm = Math.floor(d / 60), ss = Math.floor(d % 60).toString().padStart(2, '0');
+        return `  — ${a.name || a.id}${d ? ` (${mm}:${ss})` : ''}`;
+      }).join('\n')}
 
 ═══════════════════════════════════════════════
 ASSET ENGINE — available creative tools
