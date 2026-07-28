@@ -708,7 +708,7 @@ const CaptionStylesCard = ({ log }) => {
 };
 
 const ReasoningPanel = () => {
-    const { logs, suggestions, isAnalyzing, setIsAnalyzing, addLog, removeSuggestion, contextualSuggestion, quickChips, setActiveTab } = useAIStore();
+    const { logs, suggestions, isAnalyzing, setIsAnalyzing, addLog, addSuggestion, removeSuggestion, contextualSuggestion, quickChips, setActiveTab } = useAIStore();
     const { uploadedFile, performAction, assets, tracks, projectId } = useTimelineStore(useShallow(state => ({
         uploadedFile:  state.uploadedFile,
         performAction: state.performAction,
@@ -828,6 +828,50 @@ const ReasoningPanel = () => {
         }
     }, [assets, projectId, analyzeProject]);
 
+    // Advisory trigger: re-analyze after every applied edit ("edit_applied").
+    // Previously the Brain only ran on project_opened / asset_added, so its
+    // guidance was generated once at upload and then never changed — it kept
+    // advising "start by removing repetitive content" long after the user had
+    // moved past that. editHistory grows on every successful operation (see
+    // useTimelineStore.recordEdit), which makes it the natural trigger, and the
+    // Brain now receives that same ledger so its answer actually differs.
+    const editCount = useTimelineStore(s => (s.editHistory || []).length);
+    const lastAnalyzedEditCountRef = useRef(editCount);
+    useEffect(() => {
+        if (editCount <= lastAnalyzedEditCountRef.current) {
+            lastAnalyzedEditCountRef.current = editCount;
+            return;
+        }
+        lastAnalyzedEditCountRef.current = editCount;
+        if (projectId) analyzeProject('edit_applied');
+    }, [editCount, projectId, analyzeProject]);
+
+    // Push each NEW Brain advisory into the chronological feed.
+    // BrainPanel used to be a fixed element rendered after the feed, so its card
+    // always appeared below everything regardless of when the advice was
+    // produced. Emitting it as a feed item timestamps it in place.
+    const lastBrainKeyRef = useRef(null);
+    useEffect(() => {
+        if (!brainLastResponse) return;
+        const r = brainLastResponse.response || {};
+        const hasContent = !!(r.message || r.insight || (r.suggestions || []).length || (r.warnings || []).length);
+        if (!hasContent) return;
+
+        // De-dupe: the hook keeps the same object across unrelated re-renders,
+        // and an identical re-analysis shouldn't stack a duplicate card.
+        const key = brainLastResponse.sessionId
+            ? `${brainLastResponse.sessionId}:${r.message || ''}`
+            : `${r.message || ''}|${(r.suggestions || []).map(s => s.type || s.text || s.label).join(',')}`;
+        if (lastBrainKeyRef.current === key) return;
+        lastBrainKeyRef.current = key;
+
+        addSuggestion({
+            id:   'brain-' + Date.now(),
+            type: 'brain_advisory',
+            data: brainLastResponse,
+        });
+    }, [brainLastResponse, addSuggestion]);
+
     // --- Command Handling Logic ---
     const inputRef = useRef(null);
     const lastSubmitRef = useRef(0);
@@ -888,6 +932,15 @@ const ReasoningPanel = () => {
                 message: `ROKA error: ${err.message}`
             });
         }
+    };
+
+    // Shared by every BrainPanel instance (the in-feed advisories and the
+    // processing-state one). Tapping a suggestion chip is a one-click "accept"
+    // gesture — it must run the command through the real pipeline, not just
+    // fill the input box and wait for Enter.
+    const handleBrainCommand = (text) => {
+        if (inputRef.current) inputRef.current.value = text;
+        processCommand();
     };
 
     const handleKeyDown = (e) => {
@@ -993,6 +1046,14 @@ const ReasoningPanel = () => {
                 {feedItems.map(item => (
                     item._kind === 'log' ? (
                         <LogItem key={item.id} log={item} />
+                    ) : item.type === 'brain_advisory' ? (
+                        <BrainPanel
+                            key={item.id}
+                            brainOutput={item.data}
+                            isProcessing={false}
+                            onSendCommand={handleBrainCommand}
+                            onSendFeedback={brainSendFeedback}
+                        />
                     ) : item.type === 'agent_plan' ? (
                         <AgentPlanCard
                             key={item.id}
@@ -1051,22 +1112,17 @@ const ReasoningPanel = () => {
                     </div>
                 )}
 
-                {/* Editorial Brain — rendered inside the scroll container so it
-                    flows naturally as part of the conversation, not as a fixed
-                    section below the input. */}
+                {/* Editorial Brain — CONTENT is no longer rendered here.
+                    Each advisory is pushed into the chronological feed above the
+                    moment it arrives (see the brainLastResponse effect), so it sits
+                    where it actually happened instead of always below the whole
+                    conversation. This instance now only shows the "thinking"
+                    state — BrainPanel returns null when it has no content and
+                    isn't processing. */}
                 <BrainPanel
-                    brainOutput={brainLastResponse}
+                    brainOutput={null}
                     isProcessing={brainIsProcessing}
-                    onSendCommand={(text) => {
-                        // Tapping a suggestion chip is a one-click "accept" gesture
-                        // (the chip dismisses itself immediately) — it must actually
-                        // run the command through the real pipeline, not just fill
-                        // the input box and wait for Enter.
-                        if (inputRef.current) {
-                            inputRef.current.value = text;
-                        }
-                        processCommand();
-                    }}
+                    onSendCommand={handleBrainCommand}
                     onSendFeedback={brainSendFeedback}
                 />
             </div>
