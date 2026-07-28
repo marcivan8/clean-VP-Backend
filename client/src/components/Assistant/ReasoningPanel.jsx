@@ -818,14 +818,33 @@ const ReasoningPanel = () => {
     // not on every proxy-progress re-render. Seeded with the CURRENT count (not 0)
     // so re-opening a project that already has clips doesn't immediately double-fire
     // this right after the project_opened effect above.
+    // DEBOUNCED: uploading several files completed one proxy at a time, and each
+    // completion fired its own analyzeProject('asset_added') — so the Brain ran
+    // N times and, because it was looking at a bin that was still filling up,
+    // returned essentially the same generic answer each time instead of reading
+    // the whole bin together. Now the timer resets on every new arrival and only
+    // fires once the uploads have settled, so one analysis sees ALL the footage.
     const lastReadyAssetCountRef = useRef(assets.filter(a => !a.isProxying).length);
+    const assetSettleTimerRef = useRef(null);
     useEffect(() => {
         const readyCount = assets.filter(a => !a.isProxying).length;
+        const stillProxying = assets.some(a => a.isProxying);
         const isNewAsset = readyCount > lastReadyAssetCountRef.current;
         lastReadyAssetCountRef.current = readyCount;
-        if (isNewAsset && projectId && analyzedProjectRef.current === projectId) {
+
+        if (!isNewAsset || !projectId || analyzedProjectRef.current !== projectId) return;
+
+        // Reset the window on each arrival; don't analyse while uploads are in flight.
+        if (assetSettleTimerRef.current) clearTimeout(assetSettleTimerRef.current);
+        assetSettleTimerRef.current = setTimeout(() => {
+            assetSettleTimerRef.current = null;
+            if (useTimelineStore.getState().assets?.some(a => a.isProxying)) return; // still busy — a later arrival will re-arm
             analyzeProject('asset_added');
-        }
+        }, stillProxying ? 4000 : 1200);
+
+        return () => {
+            if (assetSettleTimerRef.current) clearTimeout(assetSettleTimerRef.current);
+        };
     }, [assets, projectId, analyzeProject]);
 
     // Advisory trigger: re-analyze after every applied edit ("edit_applied").
