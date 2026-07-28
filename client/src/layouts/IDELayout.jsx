@@ -645,7 +645,16 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             // with proxy encoding. Whisper and FFmpeg proxy run simultaneously.
                             if (gcsPath) {
                                 earlyTranscriptionPath = gcsPath;
-                                useTimelineStore.getState().setUploadedFilePath(gcsPath);
+                                // Record the per-asset storage path. uploadedFilePath is a
+                                // SINGLE global field, so with several uploads each one
+                                // overwrote the last and every command then targeted
+                                // whichever file happened to finish last. Keep the global
+                                // for the first upload only (back-compat for single-file
+                                // flows) and always store the per-asset path alongside it.
+                                useTimelineStore.getState().updateAsset(assetId, { gcsPath });
+                                if (!useTimelineStore.getState().uploadedFilePath) {
+                                    useTimelineStore.getState().setUploadedFilePath(gcsPath);
+                                }
                                 transcriptionManager.startBackgroundTranscription(gcsPath, {
                                     platform: null,
                                     targetDuration: null,
@@ -658,7 +667,24 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             clearTimeout(processingTimer);
                             if (!data) {
                                 console.warn('[IDELayout] Proxy job resolved with null result — job may have completed before SSE could read returnvalue');
-                                useTimelineStore.getState().updateAsset(assetId, { isProxying: false, uploadPhase: 'ready' });
+                                // Marking the asset "ready" with NO playable URL left the
+                                // player with nothing to load — a blank dark canvas — and
+                                // the waveform with no source. When the raw upload path is
+                                // known we can still play the original through the GCS
+                                // media proxy: heavier than the proxy encode, but working.
+                                const fallbackRaw = earlyTranscriptionPath || null;
+                                if (fallbackRaw) {
+                                    const GCS_BUCKET_FB = import.meta.env.VITE_GCS_BUCKET_NAME || 'viral-pilot_bucket';
+                                    useTimelineStore.getState().updateAsset(assetId, {
+                                        proxyUrl:    `/api/proxy/gcs-media/${fallbackRaw}`,
+                                        sourceUrl:   `https://storage.googleapis.com/${GCS_BUCKET_FB}/${fallbackRaw}`,
+                                        isProxying:  false,
+                                        uploadPhase: 'ready',
+                                    });
+                                    console.warn(`[IDELayout] Falling back to the raw upload for playback: ${fallbackRaw}`);
+                                } else {
+                                    useTimelineStore.getState().updateAsset(assetId, { isProxying: false, uploadPhase: 'ready' });
+                                }
                                 return;
                             }
                             console.log(`[IDELayout] Proxy Ready: ${data.proxyUrl}`);
@@ -726,8 +752,36 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             if (rawFilePath) {
                                 useTimelineStore.getState().setUploadedFile({ name: rawFilePath });
                                 useTimelineStore.getState().setUploadedFilePath(rawFilePath);
+                                useTimelineStore.getState().updateAsset(assetId, { gcsPath: data.rawGcsPath || rawFilePath });
                                 console.log(`[IDELayout] uploadedFile path set: ${rawFilePath}`);
                                 trackEvent('video_uploaded');
+
+                                // Queue MEDIA INTELLIGENCE for this asset (audio class +
+                                // GPT-4o Vision scene analysis → media_assets row). Nothing
+                                // used to call this endpoint, so the Editorial Brain never
+                                // knew what any clip actually contained and could only give
+                                // generic advice. Fire-and-forget: the worker writes the
+                                // result and the Brain picks it up on its next analysis.
+                                (async () => {
+                                    try {
+                                        const { authFetch } = await import('../utils/authFetch.js');
+                                        const resp = await authFetch('/api/brain/analyze-asset', {
+                                            method: 'POST',
+                                            body: JSON.stringify({
+                                                assetId,
+                                                gcsPath:   data.rawGcsPath || rawFilePath,
+                                                projectId: useTimelineStore.getState().projectId || null,
+                                            }),
+                                        });
+                                        if (!resp.ok) {
+                                            console.warn(`[IDELayout] asset analysis not queued (${resp.status}) — Brain advice will stay generic for "${file.name}"`);
+                                        } else {
+                                            console.log(`[IDELayout] 🧠 media intelligence queued for "${file.name}"`);
+                                        }
+                                    } catch (e) {
+                                        console.warn('[IDELayout] asset analysis request failed (non-critical):', e.message);
+                                    }
+                                })();
                             } else {
                                 console.warn('[IDELayout] Proxy job result missing proxyPath and originalPath — AI API calls will not work');
                             }
@@ -855,6 +909,21 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         .catch(err => {
                             clearTimeout(processingTimer);
                             console.error(`[IDELayout] Proxy generation failed for ${file.name}`, err);
+                            // Same reasoning as the null-result branch above: without a
+                            // URL the asset renders as a blank dark player. If the raw
+                            // file reached storage before the encode failed, play that.
+                            const fallbackRaw = earlyTranscriptionPath || null;
+                            if (fallbackRaw) {
+                                const GCS_BUCKET_FB = import.meta.env.VITE_GCS_BUCKET_NAME || 'viral-pilot_bucket';
+                                useTimelineStore.getState().updateAsset(assetId, {
+                                    proxyUrl:    `/api/proxy/gcs-media/${fallbackRaw}`,
+                                    sourceUrl:   `https://storage.googleapis.com/${GCS_BUCKET_FB}/${fallbackRaw}`,
+                                    isProxying:  false,
+                                    uploadPhase: 'ready',
+                                });
+                                console.warn(`[IDELayout] Proxy failed — playing the raw upload instead: ${fallbackRaw}`);
+                                return;
+                            }
                             useTimelineStore.getState().updateAsset(assetId, { isProxying: false, uploadPhase: 'ready' });
                         });
                 }

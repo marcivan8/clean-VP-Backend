@@ -84,6 +84,28 @@ router.post('/analyze', authenticateUser, async (req, res) => {
     try {
         const { projectState = {}, trigger = 'project_opened' } = req.body || {};
 
+        // ── Enrich with MEDIA INTELLIGENCE ────────────────────────────────────
+        // The client can only describe the timeline (durations, counts). What the
+        // footage actually CONTAINS — scene type, people on camera, framing,
+        // content description — lives in media_assets, written by the
+        // asset-analysis worker. Reading it here is what lets the Brain give
+        // advice tailored to the material instead of generic pacing tips.
+        // Best-effort: any failure leaves the Brain with timeline-only context.
+        let assetIntelligence = [];
+        try {
+            const ids = (projectState.mediaBin || []).map(a => a.id).filter(Boolean);
+            if (ids.length > 0) {
+                const { data, error } = await supabaseAdmin
+                    .from('media_assets')
+                    .select('id, name, scene_type, camera_angle, subject_count, has_main_speaker, has_faces, is_broll, is_screen_recording, location_type, lighting_quality, stability, emotional_tone, content_description, suggested_label, audio_type, has_spoken_word, analysis_status')
+                    .in('id', ids);
+                if (error) throw error;
+                assetIntelligence = data || [];
+            }
+        } catch (miErr) {
+            console.warn('[brainRoutes] /analyze: media intelligence lookup failed (continuing without it):', miErr.message);
+        }
+
         /** @type {import('../brain/types').BrainInput} */
         const input = {
             userId:   req.user.id,
@@ -94,6 +116,7 @@ router.post('/analyze', authenticateUser, async (req, res) => {
             adviceOnly: true,
             context: {
                 ...projectState,
+                assetIntelligence,
                 projectId: projectState.projectId || null,
             },
         };
