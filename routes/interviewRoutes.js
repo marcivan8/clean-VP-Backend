@@ -391,6 +391,9 @@ async function detectSceneLayout(words, speakers, filename) {
 // Route handlers already fall back to 'dev-user' when req.user is absent.
 const isProd = process.env.NODE_ENV === 'production';
 const authAndGate = isProd ? [authenticateUser, aiGate] : [optionalAuth];
+// refine-cut-frames does local motion/blur scoring only — no OpenAI call — so it
+// shouldn't burn a user's monthly AI-ops quota (aiGate) or block on it.
+const authOnly = isProd ? [authenticateUser] : [optionalAuth];
 
 // ── Shared path-resolution helper ─────────────────────────────────────────────
 // Mirrors the same guard used in silenceRoutes and audioRoutes so every route
@@ -1899,7 +1902,7 @@ function frameSharpnessScore(buf) {
     return n ? (sum / n / 255) : 0; // 0..1
 }
 
-router.post('/refine-cut-frames', ...authAndGate, async (req, res) => {
+router.post('/refine-cut-frames', ...authOnly, async (req, res) => {
     const { filename, points = [] } = req.body || {};
     if (!filename) return res.status(400).json({ error: 'filename is required' });
     if (!Array.isArray(points) || points.length === 0) {
@@ -1932,10 +1935,15 @@ router.post('/refine-cut-frames', ...authAndGate, async (req, res) => {
                 '-pix_fmt', 'gray',
                 'pipe:1',
             ];
-            const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'ignore'] });
+            // stderr IS captured (unlike the write-only pipe below) — this endpoint
+            // was shipping blind (stdio: [..., 'ignore']) and every production
+            // failure came back as a bare 500 with no way to tell a missing binary
+            // from a bad seek from a source that doesn't support HTTP range reads.
+            const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
             const chunks = [];
             let total = 0;
             let settled = false;
+            let stderrTail = '';
 
             const finish = (err, buf) => {
                 if (settled) return;
@@ -1944,10 +1952,18 @@ router.post('/refine-cut-frames', ...authAndGate, async (req, res) => {
                 if (err) reject(err); else resolve(buf);
             };
 
+            // Raw phone .MOV uploads routinely put the moov atom at the END of the
+            // file, which makes an -ss seek over a signed HTTP URL slow or outright
+            // unsupported (server-side Range support varies). A single-frame grab
+            // (extractVideoFrame) tolerates that; a multi-second window read here
+            // doesn't always. Failing fast (8s, not 25s) matters because this runs
+            // once per asset inside a job with a shared time budget (see
+            // useJobStore's EXECUTING timeout) — a slow failure here shouldn't eat
+            // a big chunk of it for what's a best-effort polish pass.
             const killTimer = setTimeout(() => {
                 proc.kill('SIGKILL');
-                finish(new Error('refine-cut-frames: ffmpeg decode timed out'));
-            }, 25_000);
+                finish(new Error(`refine-cut-frames: ffmpeg decode timed out. stderr: ${stderrTail.slice(-400)}`));
+            }, 8_000);
 
             proc.stdout.on('data', chunk => {
                 total += chunk.length;
@@ -1958,10 +1974,11 @@ router.post('/refine-cut-frames', ...authAndGate, async (req, res) => {
                 }
                 chunks.push(chunk);
             });
-            proc.on('error', err => finish(err));
+            proc.stderr.on('data', chunk => { stderrTail = (stderrTail + chunk.toString()).slice(-2000); });
+            proc.on('error', err => finish(new Error(`ffmpeg spawn failed: ${err.message}`)));
             proc.on('close', code => {
                 if (code !== 0 && chunks.length === 0) {
-                    finish(new Error(`ffmpeg exited ${code} with no frame data`));
+                    finish(new Error(`ffmpeg exited ${code} with no frame data. stderr: ${stderrTail.slice(-400)}`));
                 } else {
                     finish(null, Buffer.concat(chunks));
                 }

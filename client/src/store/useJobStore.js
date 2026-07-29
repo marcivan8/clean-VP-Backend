@@ -23,7 +23,24 @@ export const TERMINAL_STATES = [JOB_STATES.DONE, JOB_STATES.FAILED, JOB_STATES.T
 // + GPT-4o filler analysis on a 30-minute raw iPhone video (~2–3 min total).
 // The previous 30s value caused valid long-running jobs to fire TIMEOUT → invalid
 // transition spam as execution completed after the timer.
-const DEFAULT_TIMEOUT_MS = 180_000; // 3 minutes
+//
+// Raised 180s → 420s: this store is a UI-facing status mirror, separate from the
+// actual execution engine's own timeout budgets — JobStateMachine.js's
+// EXECUTION_TIMEOUT_MS (420s) and ExecutionSupervisor's PHASE_TIMEOUTS.executing
+// (600s) are what actually govern whether a job gets cut off. At 180s this mirror
+// fired FIRST and marked the job TIMEOUT in the UI while the real engine kept
+// working underneath it — the job would go on to finish successfully seconds or
+// minutes later, but every progress update in between logged
+// "[Job] Invalid transition: TIMEOUT → EXECUTING" and the user saw a false
+// "timed out" status on a job that was actually still running.
+// This became reliably reachable once per-asset silence/filler cleanup started
+// running N sequential steps per job (Whisper + GPT pause classification + the
+// frame-check pass, once per asset — see R25) — a 5-asset batch's total
+// EXECUTING time is the SUM across all 5, not one asset's worst case, so a
+// budget sized for a single 30-min video is too tight for a multi-asset job.
+// 420s matches JobStateMachine's own ceiling so this mirror can't fire before
+// the system whose state it's mirroring would.
+const DEFAULT_TIMEOUT_MS = 420_000; // 7 minutes
 
 /**
  * Job Store

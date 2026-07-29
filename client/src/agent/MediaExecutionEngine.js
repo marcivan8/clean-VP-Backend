@@ -2313,7 +2313,7 @@ export class MediaExecutionEngine {
                 if (fillerSegments.length > 1) {
                     const fillerWords = result.words?.length > 0 ? result.words : (useTimelineStore.getState().captions || []);
                     fillerSegments = await this._refineCutsWithIntelligence(fillerSegments, fillerWords);
-                    fillerSegments = await this._refineCutPointFrames(fillerSegments, resolvedPayload?.filename || null);
+                    fillerSegments = await this._refineCutPointFrames(fillerSegments, resolvedPayload?.filename || null, fillerAssetId);
                 }
 
                 this._applySegmentsToTimeline(fillerSegments, 'filler', fillerClipId, fillerAssetId);
@@ -2410,7 +2410,11 @@ export class MediaExecutionEngine {
                 if (activeSegments?.length > 1) {
                     const refineWords = result.words?.length > 0 ? result.words : (useTimelineStore.getState().captions || []);
                     activeSegments = await this._refineCutsWithIntelligence(activeSegments, refineWords);
-                    activeSegments = await this._refineCutPointFrames(activeSegments, resolvedPayload?.filename || null);
+                    activeSegments = await this._refineCutPointFrames(
+                        activeSegments,
+                        resolvedPayload?.filename || null,
+                        command.args?.asset_id || null
+                    );
                 }
 
                 if (!activeSegments || activeSegments.length === 0) {
@@ -2637,9 +2641,30 @@ export class MediaExecutionEngine {
      * (network, no source file, ffmpeg unavailable) returns the segments
      * unchanged rather than blocking the edit.
      */
-    async _refineCutPointFrames(segments, filename) {
+    /**
+     * Raw phone uploads (.MOV) routinely have their moov atom at the end of the
+     * file, which makes ffmpeg's -ss seek over a signed HTTP URL slow or prone
+     * to failing outright for anything beyond a single-frame grab. The proxy
+     * (`videoProcessor.js` always encodes it with `-movflags +faststart`, see
+     * R7) is built specifically to be cheaply seekable, is already downscaled,
+     * and — since proxy generation never trims — shares the exact same time
+     * base as the raw file, so segment timestamps carry over unchanged.
+     * Returns a GCS-relative path (e.g. "proxies/{userId}/{file}/proxy.mp4")
+     * or null if the asset has no proxy yet.
+     */
+    _proxyGcsPathForAsset(assetId) {
+        if (!assetId) return null;
+        const asset = useTimelineStore.getState().assets?.find(a => a.id === assetId);
+        const m = asset?.proxyUrl?.match(/\/api\/proxy\/gcs-media\/(.+)$/);
+        return m ? m[1] : null;
+    }
+
+    async _refineCutPointFrames(segments, filename, assetId = null) {
         try {
-            if (!filename || !segments || segments.length < 2) return segments;
+            if (!segments || segments.length < 2) return segments;
+            const proxyPath = this._proxyGcsPathForAsset(assetId);
+            const sourcePath = proxyPath || filename;
+            if (!sourcePath) return segments;
             const sorted = [...segments].sort((a, b) => a.start - b.start);
 
             const points = [];
@@ -2653,7 +2678,7 @@ export class MediaExecutionEngine {
 
             const resp = await authFetch('/api/interview/refine-cut-frames', {
                 method: 'POST',
-                body: JSON.stringify({ filename, points: capped.map(p => ({ id: p.id, t: p.t })) }),
+                body: JSON.stringify({ filename: sourcePath, points: capped.map(p => ({ id: p.id, t: p.t })) }),
             });
             if (!resp.ok) throw new Error(`refine-cut-frames ${resp.status}`);
             const { picks = [] } = await resp.json();
@@ -2836,6 +2861,36 @@ export class MediaExecutionEngine {
         const rangeEnd        = lastBaseClip.start + (lastBaseClip.duration || 0);
         const totalOriginalDuration = rangeEnd - rangeStart;
 
+        // ── Close any gap that already exists BEFORE this range ────────────────
+        // The "shift clips after" logic further down only ever accounts for
+        // clips AFTER rangeEnd — nothing in this function has ever looked left.
+        // In a per-asset batch (silence/filler cleanup run once per asset on the
+        // timeline — see R25), that means a gap sitting between asset N's clip
+        // and asset N+1's clip survives this pass untouched no matter how many
+        // times cleanup runs, because each step only ever tidies its OWN clip's
+        // neighborhood on the right. Across a 5-asset batch that reads as "the
+        // cleanup scattered the timeline" even though every individual step
+        // behaved correctly in isolation.
+        // Scoped to the single-source-clip case only — after split_speakers,
+        // multiple video tracks must stay in lockstep (R18) and a per-track
+        // leading-gap close could desync them, so that case is left alone.
+        // Capped at GAP_CLOSE_LIMIT so an intentionally large gap (title card,
+        // deliberate spacing) isn't silently eaten by an automated cleanup pass.
+        const GAP_CLOSE_LIMIT = 30; // seconds
+        let leadingGapClosed = 0;
+        if (baseClips.length === 1) {
+            const anchorTrackId = baseClip._trackId || videoTrack.id;
+            const precedingEnd = allVideoClips
+                .filter(c => c._trackId === anchorTrackId && c.id !== baseClip.id && (c.start + (c.duration || 0)) <= rangeStart + 0.01)
+                .reduce((max, c) => Math.max(max, c.start + (c.duration || 0)), 0);
+            const leadingGap = rangeStart - precedingEnd;
+            if (leadingGap > 0.05 && leadingGap <= GAP_CLOSE_LIMIT) {
+                leadingGapClosed = leadingGap;
+                console.log(`[MediaExecutionEngine] _applySegmentsToTimeline: closing ${leadingGap.toFixed(2)}s pre-existing gap before "${baseClip.name}"`);
+            }
+        }
+        const effectiveRangeStart = rangeStart - leadingGapClosed;
+
         // Filter out degenerate segments
         const validSegs = segments.filter(s => s.duration > 0.05);
         if (validSegs.length === 0) {
@@ -2901,7 +2956,7 @@ export class MediaExecutionEngine {
         // time is removed: previously each track was packed independently from
         // its own cursor, so two speaker tracks drifted apart (or stacked).
         const orderedSegs = [...validSegs].sort((a, b) => a.start - b.start);
-        let acc = rangeStart;
+        let acc = effectiveRangeStart;
         const segOut = orderedSegs.map(seg => {
             const out = acc;
             acc += seg.duration;
@@ -3002,7 +3057,7 @@ export class MediaExecutionEngine {
 
         // Auto-preview: seek to start and briefly play
         const freshStore = useTimelineStore.getState();
-        freshStore.seek(rangeStart);
+        freshStore.seek(effectiveRangeStart);
         freshStore.setIsPlaying(true);
         setTimeout(() => {
             useTimelineStore.getState().setIsPlaying(false);
