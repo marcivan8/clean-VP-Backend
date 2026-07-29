@@ -32,6 +32,42 @@ const SAMPLE_RATE     = 22050;
 const PEAKS_PER_SEC   = 50;
 const SAMPLES_PER_WIN = Math.floor(SAMPLE_RATE / PEAKS_PER_SEC); // 441
 
+// ── Concurrency gate ──────────────────────────────────────────────────────────
+// Unlike every ffmpeg-heavy job in this codebase (all run through BullMQ workers
+// with explicit concurrency caps — see CLAUDE.md R24), this route spawns ffmpeg
+// directly inside the Express request handler with NO limit. A multi-asset
+// cleanup job (silence/filler removal) touches every asset's proxy, and the
+// client's usePeaks hook re-requests waveforms for all of them at once — each
+// request streams a full audio decode of a multi-minute source into memory.
+// Concurrent, unbounded waveform extractions during a batch job are exactly the
+// kind of spike R24 already identified as OOM-crashing the shared process; this
+// route just wasn't covered by that fix since it isn't a BullMQ worker. A
+// simple in-process queue caps it the same way videoWorker/assetAnalysisWorker
+// are capped, without requiring the client to change how it calls this route
+// (callers just wait slightly longer under load instead of getting a 502).
+const WAVEFORM_MAX_CONCURRENT = 2;
+let _waveformActive = 0;
+const _waveformQueue = [];
+
+function withWaveformSlot(fn) {
+    return new Promise((resolve, reject) => {
+        const run = async () => {
+            _waveformActive++;
+            try {
+                resolve(await fn());
+            } catch (err) {
+                reject(err);
+            } finally {
+                _waveformActive--;
+                const next = _waveformQueue.shift();
+                if (next) next();
+            }
+        };
+        if (_waveformActive < WAVEFORM_MAX_CONCURRENT) run();
+        else _waveformQueue.push(run);
+    });
+}
+
 /**
  * Run ffmpeg on inputPath (file) or inputStream (GCS read stream).
  * Returns { peaks: number[], duration: number }.
@@ -149,8 +185,8 @@ router.post('/extract', optionalAuth, async (req, res) => {
             });
         }
 
-        // ── 3. Extract peaks ──────────────────────────────────────────────────
-        const peaksData = await extractPeaks(inputPath, inputStream);
+        // ── 3. Extract peaks (queued — see WAVEFORM_MAX_CONCURRENT above) ─────
+        const peaksData = await withWaveformSlot(() => extractPeaks(inputPath, inputStream));
         const jsonStr   = JSON.stringify(peaksData);
 
         // ── 4. Store result ───────────────────────────────────────────────────
