@@ -22,11 +22,15 @@ const DEFAULT_TIMEOUT_MS    = 300_000; // give up after 5 minutes
  * don't hammer the API for long-running jobs (transcription, silence detect).
  *
  * @param {string}      jobId
- * @param {AbortSignal} [signal]   – optional cancellation token
+ * @param {AbortSignal} [signal]     – optional cancellation token
+ * @param {number}      [timeoutMs] – override the default 300s budget. Callers whose
+ *   job type can legitimately queue behind others (e.g. proxy generation during a
+ *   multi-file upload, now competing with the parallel asset-analysis pass — see
+ *   CLAUDE.md R24) should pass a larger value instead of the default.
  * @returns {Promise<any>}         – resolves with the job's returnValue
  */
-export async function pollJobResult(jobId, signal = null) {
-    const deadline    = Date.now() + DEFAULT_TIMEOUT_MS;
+export async function pollJobResult(jobId, signal = null, timeoutMs = DEFAULT_TIMEOUT_MS) {
+    const deadline    = Date.now() + timeoutMs;
     let   intervalMs  = MIN_POLL_INTERVAL_MS;
 
     while (true) {
@@ -36,7 +40,7 @@ export async function pollJobResult(jobId, signal = null) {
         }
 
         if (Date.now() > deadline) {
-            throw new Error(`Job ${jobId} timed out after ${DEFAULT_TIMEOUT_MS / 1000}s`);
+            throw new Error(`Job ${jobId} timed out after ${timeoutMs / 1000}s`);
         }
 
         // Fetch current job state

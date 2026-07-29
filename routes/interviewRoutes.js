@@ -26,7 +26,7 @@ const express        = require('express');
 const router         = express.Router();
 const path           = require('path');
 const fs             = require('fs');
-const { execSync }   = require('child_process');
+const { execSync, spawn } = require('child_process');
 const { authenticateUser, optionalAuth } = require('../middleware/auth');
 const { aiGate }     = require('../middleware/usageGate');
 const { audioQueue } = require('../queue/queues');
@@ -68,28 +68,35 @@ function findLongestTurn(words, targetSpeaker) {
 }
 
 /**
+ * Resolve a GCS-relative path (or bare filename) to something ffmpeg can read
+ * directly as an -i argument: a short-lived signed URL when GCS is configured,
+ * or a local file path in local-storage/dev mode. Returns null if the file
+ * can't be located. Shared by extractVideoFrame() and refine-cut-frames below
+ * so both use the exact same resolution rules.
+ */
+async function resolveFfmpegInputArg(gcsPath) {
+    if (storageConfig.bucket && !storageConfig.useLocalStorage) {
+        const [signedUrl] = await storageConfig.bucket.file(gcsPath).getSignedUrl({
+            version: 'v4',
+            action:  'read',
+            expires: Date.now() + 5 * 60 * 1000,
+        });
+        return signedUrl;
+    }
+    const uploadsDir = path.resolve(__dirname, '../uploads');
+    const localPath  = path.resolve(uploadsDir, gcsPath.replace(/^raw\//, ''));
+    if (!fs.existsSync(localPath)) return null;
+    return localPath;
+}
+
+/**
  * Extract one video frame at `timestampSec` from a GCS file or local file.
  * Returns a base64 JPEG string, or null on failure.
  */
 async function extractVideoFrame(gcsPath, timestampSec) {
     try {
-        let inputArg;
-
-        if (storageConfig.bucket && !storageConfig.useLocalStorage) {
-            // GCS: generate a short-lived signed URL
-            const [signedUrl] = await storageConfig.bucket.file(gcsPath).getSignedUrl({
-                version: 'v4',
-                action:  'read',
-                expires: Date.now() + 5 * 60 * 1000,
-            });
-            inputArg = signedUrl;
-        } else {
-            // Local fallback
-            const uploadsDir = path.resolve(__dirname, '../uploads');
-            const localPath  = path.resolve(uploadsDir, gcsPath.replace(/^raw\//, ''));
-            if (!fs.existsSync(localPath)) return null;
-            inputArg = localPath;
-        }
+        const inputArg = await resolveFfmpegInputArg(gcsPath);
+        if (!inputArg) return null;
 
         // -ss before -i = fast seek; -vframes 1 = single frame; pipe: = stdout
         const cmd = `ffmpeg -ss ${timestampSec.toFixed(2)} -i "${inputArg}" -vframes 1 -f image2pipe -vcodec mjpeg -q:v 5 pipe:1`;
@@ -1829,6 +1836,206 @@ Pauses: ${JSON.stringify(compact)}`,
         res.json({ decisions });
     } catch (err) {
         console.error('[interviewRoutes] /classify-pauses error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/interview/refine-cut-frames
+//
+// classify-pauses decides WHICH pauses to cut using transcript context alone —
+// it has no idea what's on screen at the exact millisecond the cut lands.
+// A cut chosen purely from word timing can land mid-blink, mid-gesture, or on
+// a motion-blurred frame, which reads as a jump-cut glitch even though the
+// audio edit was correct. This endpoint nudges each candidate cut point (up to
+// ~130ms either way, always within the pause/silence being removed — never
+// into kept speech) onto a nearby frame with low motion and reasonable
+// sharpness.
+//
+// Deliberately NOT a GPT Vision call: sending 2-3 frames per cut point through
+// gpt-4o-mini for a batch of 20-40 cuts would mean dozens of blocking ffmpeg
+// extractions (see extractVideoFrame's execSync) PLUS real added latency and
+// token cost, for a judgment ("is this frame mid-blink") that plain motion +
+// edge-energy scoring answers just as well. Instead this does ONE streamed
+// ffmpeg decode (spawn, not execSync — does not block the event loop) covering
+// the whole span of requested points at a small size/fps, then scores every
+// sampled frame in memory. Local, fast, free, and — importantly, given R24 —
+// doesn't add another blocking/heavy call into the same process that's already
+// tight on memory during multi-file uploads.
+//
+// Body: { filename, points: [{ id, t }] }  — t: candidate cut timestamp (sec)
+//   in the SOURCE file's time base (same base as the segments being cut).
+// Returns: { picks: [{ id, offsetSec, reason }] }
+//   offsetSec — signed adjustment to apply to t, 0 if the original frame was
+//   already fine. reason — 'clean' | 'motion' | 'blur' | 'motion+blur' | 'no_data'
+// ─────────────────────────────────────────────────────────────────────────────
+const CUT_FRAME_FPS       = 15;   // ~66ms between samples — enough to dodge a blink
+const CUT_FRAME_W         = 64;
+const CUT_FRAME_H         = 36;
+const CUT_FRAME_BYTES     = CUT_FRAME_W * CUT_FRAME_H; // gray8
+const CUT_FRAME_MAX_BUF   = 30 * 1024 * 1024; // 30MB raw-frame safety cap
+const CUT_FRAME_MAX_POINTS = 80;
+const CUT_FRAME_MAX_OFFSET = 0.15; // never move a cut more than this
+
+function frameMotionScore(buf, prevBuf) {
+    if (!prevBuf) return 0;
+    let sum = 0;
+    for (let i = 0; i < CUT_FRAME_BYTES; i++) sum += Math.abs(buf[i] - prevBuf[i]);
+    return sum / CUT_FRAME_BYTES / 255; // 0..1
+}
+
+function frameSharpnessScore(buf) {
+    // Cheap edge-energy proxy: mean absolute difference between horizontally
+    // adjacent pixels. Blur flattens local contrast, so this drops on blurry
+    // frames without needing a real Laplacian/convolution pass.
+    let sum = 0, n = 0;
+    for (let y = 0; y < CUT_FRAME_H; y++) {
+        const row = y * CUT_FRAME_W;
+        for (let x = 1; x < CUT_FRAME_W; x++) {
+            sum += Math.abs(buf[row + x] - buf[row + x - 1]);
+            n++;
+        }
+    }
+    return n ? (sum / n / 255) : 0; // 0..1
+}
+
+router.post('/refine-cut-frames', ...authAndGate, async (req, res) => {
+    const { filename, points = [] } = req.body || {};
+    if (!filename) return res.status(400).json({ error: 'filename is required' });
+    if (!Array.isArray(points) || points.length === 0) {
+        return res.status(400).json({ error: 'points array is required' });
+    }
+
+    const capped = points.slice(0, CUT_FRAME_MAX_POINTS).filter(p => p && typeof p.t === 'number' && p.t >= 0);
+    if (capped.length === 0) return res.json({ picks: [] });
+
+    try {
+        const inputArg = await resolveFfmpegInputArg(filename);
+        if (!inputArg) {
+            return res.status(404).json({ error: `Could not locate source video: ${filename}` });
+        }
+
+        // Decode only the span the points actually cover, with headroom for the
+        // ±0.15s search window on each end.
+        const minT = Math.min(...capped.map(p => p.t));
+        const maxT = Math.max(...capped.map(p => p.t));
+        const windowStart = Math.max(0, minT - CUT_FRAME_MAX_OFFSET - 0.1);
+        const windowDur   = Math.min(20 * 60, (maxT - minT) + 2 * (CUT_FRAME_MAX_OFFSET + 0.1)); // 20-min safety cap
+
+        const rawBuf = await new Promise((resolve, reject) => {
+            const args = [
+                '-ss', windowStart.toFixed(3),
+                '-i', inputArg,
+                '-t', windowDur.toFixed(3),
+                '-vf', `fps=${CUT_FRAME_FPS},scale=${CUT_FRAME_W}:${CUT_FRAME_H},format=gray`,
+                '-f', 'rawvideo',
+                '-pix_fmt', 'gray',
+                'pipe:1',
+            ];
+            const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'ignore'] });
+            const chunks = [];
+            let total = 0;
+            let settled = false;
+
+            const finish = (err, buf) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(killTimer);
+                if (err) reject(err); else resolve(buf);
+            };
+
+            const killTimer = setTimeout(() => {
+                proc.kill('SIGKILL');
+                finish(new Error('refine-cut-frames: ffmpeg decode timed out'));
+            }, 25_000);
+
+            proc.stdout.on('data', chunk => {
+                total += chunk.length;
+                if (total > CUT_FRAME_MAX_BUF) {
+                    proc.kill('SIGKILL');
+                    finish(new Error('refine-cut-frames: decoded frame buffer exceeded safety cap'));
+                    return;
+                }
+                chunks.push(chunk);
+            });
+            proc.on('error', err => finish(err));
+            proc.on('close', code => {
+                if (code !== 0 && chunks.length === 0) {
+                    finish(new Error(`ffmpeg exited ${code} with no frame data`));
+                } else {
+                    finish(null, Buffer.concat(chunks));
+                }
+            });
+        });
+
+        const frameCount = Math.floor(rawBuf.length / CUT_FRAME_BYTES);
+        if (frameCount === 0) {
+            return res.json({ picks: capped.map(p => ({ id: p.id, offsetSec: 0, reason: 'no_data' })) });
+        }
+
+        const frames = new Array(frameCount);
+        for (let i = 0; i < frameCount; i++) {
+            frames[i] = rawBuf.subarray(i * CUT_FRAME_BYTES, (i + 1) * CUT_FRAME_BYTES);
+        }
+        const motion    = frames.map((f, i) => frameMotionScore(f, i > 0 ? frames[i - 1] : null));
+        const sharpness = frames.map(f => frameSharpnessScore(f));
+        const sharpSorted = [...sharpness].sort((a, b) => a - b);
+        const blurThreshold = sharpSorted[Math.floor(sharpSorted.length * 0.2)] ?? 0; // bottom 20% = blurry
+
+        const frameTimeAt = (idx) => windowStart + idx / CUT_FRAME_FPS;
+        const idxAt = (t) => Math.min(frameCount - 1, Math.max(0, Math.round((t - windowStart) * CUT_FRAME_FPS)));
+
+        const STEP = 1 / CUT_FRAME_FPS;
+        const picks = capped.map(p => {
+            const baseIdx = idxAt(p.t);
+            // Candidate offsets in frame-steps, clamped so the total shift never
+            // exceeds CUT_FRAME_MAX_OFFSET.
+            const maxSteps = Math.max(1, Math.floor(CUT_FRAME_MAX_OFFSET / STEP));
+            const candidates = [];
+            for (let d = -maxSteps; d <= maxSteps; d++) {
+                const idx = baseIdx + d;
+                if (idx < 0 || idx >= frameCount) continue;
+                candidates.push({ idx, offsetSec: frameTimeAt(idx) - p.t });
+            }
+            if (candidates.length === 0) return { id: p.id, offsetSec: 0, reason: 'no_data' };
+
+            let best = null;
+            for (const c of candidates) {
+                const m = motion[c.idx];
+                const s = sharpness[c.idx];
+                const blurry = s < blurThreshold;
+                // Motion weighted higher than blur — a gesture mid-cut reads
+                // worse than mild softness. Small bias toward offset 0 so we
+                // don't drift the cut for a marginal improvement.
+                const badness = m * 1.5 + (blurry ? 0.35 : 0) + Math.abs(c.offsetSec) * 0.1;
+                if (!best || badness < best.badness) best = { ...c, badness, blurry, motion: m };
+            }
+
+            const originalBadness = (() => {
+                const c = candidates.find(c => c.idx === baseIdx) || candidates[0];
+                const blurry = sharpness[c.idx] < blurThreshold;
+                return motion[c.idx] * 1.5 + (blurry ? 0.35 : 0);
+            })();
+
+            // Only move the cut if the best alternative is meaningfully better
+            // than staying put — avoids churn on already-clean cuts.
+            if (!best || best.idx === baseIdx || best.badness >= originalBadness - 0.05) {
+                return { id: p.id, offsetSec: 0, reason: 'clean' };
+            }
+            const reason = best.motion > 0.12 && best.blurry ? 'motion+blur' : (best.motion > 0.12 ? 'motion' : 'blur');
+            return {
+                id: p.id,
+                offsetSec: parseFloat(best.offsetSec.toFixed(3)),
+                reason,
+            };
+        });
+
+        const moved = picks.filter(p => p.offsetSec !== 0).length;
+        console.log(`[interviewRoutes] refine-cut-frames: ${capped.length} point(s), ${frameCount} frames sampled, ${moved} nudged`);
+
+        res.json({ picks });
+    } catch (err) {
+        console.error('[interviewRoutes] /refine-cut-frames error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });

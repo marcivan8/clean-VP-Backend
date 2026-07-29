@@ -2304,7 +2304,19 @@ export class MediaExecutionEngine {
                 console.log(`[MediaExecutionEngine] ✂️  fillerDetect: ${result.fillerCount} fillers removed, ${result.activeSegments.length} active segments`);
                 const fillerClipId  = command.args?.clip_id  || null;
                 const fillerAssetId = command.args?.asset_id || null;
-                this._applySegmentsToTimeline(result.activeSegments, 'filler', fillerClipId, fillerAssetId);
+
+                // Same editorial + frame-check refinement silence-removal gets
+                // (R17 / R25) — filler cleanup used to apply the backend's cut
+                // spans raw, with no transcript-aware pause reprieve and no
+                // on-screen check at the resulting cut points.
+                let fillerSegments = result.activeSegments;
+                if (fillerSegments.length > 1) {
+                    const fillerWords = result.words?.length > 0 ? result.words : (useTimelineStore.getState().captions || []);
+                    fillerSegments = await this._refineCutsWithIntelligence(fillerSegments, fillerWords);
+                    fillerSegments = await this._refineCutPointFrames(fillerSegments, resolvedPayload?.filename || null);
+                }
+
+                this._applySegmentsToTimeline(fillerSegments, 'filler', fillerClipId, fillerAssetId);
 
                 // Re-derive timeline transcript — keep original in transcripts index,
                 // push derived words to store.captions via setTimelineTranscript.
@@ -2398,6 +2410,7 @@ export class MediaExecutionEngine {
                 if (activeSegments?.length > 1) {
                     const refineWords = result.words?.length > 0 ? result.words : (useTimelineStore.getState().captions || []);
                     activeSegments = await this._refineCutsWithIntelligence(activeSegments, refineWords);
+                    activeSegments = await this._refineCutPointFrames(activeSegments, resolvedPayload?.filename || null);
                 }
 
                 if (!activeSegments || activeSegments.length === 0) {
@@ -2599,6 +2612,74 @@ export class MediaExecutionEngine {
             return refined;
         } catch (err) {
             console.warn('[MediaExecutionEngine] _refineCutsWithIntelligence failed — using raw segments:', err.message);
+            return segments;
+        }
+    }
+
+    /**
+     * _refineCutPointFrames
+     *
+     * Frame-check pass on top of _refineCutsWithIntelligence: classify-pauses
+     * decides WHICH gaps to cut using transcript timing alone, with no idea
+     * what's actually on screen at the exact millisecond the cut lands. A cut
+     * chosen purely from word timing can land mid-blink, mid-gesture, or on a
+     * motion-blurred frame — reads as a jump-cut glitch even when the audio
+     * edit itself was correct.
+     *
+     * For every internal cut boundary in `segments` (the tail of one kept
+     * segment and the head of the next — both are hard cuts in the exported
+     * video), asks /api/interview/refine-cut-frames to nudge the timestamp
+     * onto a nearby clean frame (low motion, not blurred), always within the
+     * pause being removed and never more than ~150ms — small enough it can't
+     * reintroduce audible dead air or clip into kept speech.
+     *
+     * Degrades the same way _refineCutsWithIntelligence does: any failure
+     * (network, no source file, ffmpeg unavailable) returns the segments
+     * unchanged rather than blocking the edit.
+     */
+    async _refineCutPointFrames(segments, filename) {
+        try {
+            if (!filename || !segments || segments.length < 2) return segments;
+            const sorted = [...segments].sort((a, b) => a.start - b.start);
+
+            const points = [];
+            for (let i = 0; i < sorted.length - 1; i++) {
+                points.push({ id: `tail_${i}`, t: sorted[i].end,       seg: i,     edge: 'end'   });
+                points.push({ id: `head_${i}`, t: sorted[i + 1].start, seg: i + 1, edge: 'start' });
+            }
+            if (points.length === 0) return sorted;
+
+            const capped = points.slice(0, 80); // matches the endpoint's own cap
+
+            const resp = await authFetch('/api/interview/refine-cut-frames', {
+                method: 'POST',
+                body: JSON.stringify({ filename, points: capped.map(p => ({ id: p.id, t: p.t })) }),
+            });
+            if (!resp.ok) throw new Error(`refine-cut-frames ${resp.status}`);
+            const { picks = [] } = await resp.json();
+            const pickById = new Map(picks.map(p => [p.id, p]));
+
+            const refined = sorted.map(s => ({ ...s }));
+            let adjusted = 0;
+            for (const p of capped) {
+                const pick = pickById.get(p.id);
+                if (!pick || !pick.offsetSec) continue;
+                const target = refined[p.seg];
+                if (!target) continue;
+                if (p.edge === 'end') {
+                    target.end = Math.max(target.start + 0.05, target.end + pick.offsetSec);
+                } else {
+                    target.start = Math.min(target.end - 0.05, target.start + pick.offsetSec);
+                }
+                target.duration = target.end - target.start;
+                adjusted++;
+            }
+            if (adjusted > 0) {
+                console.log(`[MediaExecutionEngine] frame check: nudged ${adjusted} cut point(s) off motion/blur frames`);
+            }
+            return refined;
+        } catch (err) {
+            console.warn('[MediaExecutionEngine] _refineCutPointFrames failed — using original cut points:', err.message);
             return segments;
         }
     }

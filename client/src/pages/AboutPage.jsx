@@ -72,13 +72,13 @@ const AboutPage = () => {
                         fontFamily: 'var(--f-display)', fontSize: 'clamp(32px, 5vw, 48px)',
                         fontWeight: 800, lineHeight: 1.15, color: 'var(--fg)', marginBottom: 20,
                     }}>
-                        Built by a creator who got tired of editing the hard way.
+                        Built by a creator who got tired of editing the hard way. Not another timeline tool. An AI collaborator that understands what you're trying to make.
                     </h1>
                     <p style={{
                         fontFamily: 'var(--f-sans)', fontSize: 17, color: 'var(--fg-3)',
                         lineHeight: 1.75, maxWidth: 560,
                     }}>
-                        VIBED started with a frustration. Not a business plan but a frustration. The kind that comes from spending hours in a timeline doing the same mechanical work over and over: cutting silences, trimming pauses, cleaning up speech, exporting to yet another format. Work that has nothing to do with the story you're trying to tell.
+                        VIBED is the AI that edits your videos so you don't have to.
                     </p>
                     <p style={{
                         fontFamily: 'var(--f-sans)', fontSize: 17, color: 'var(--fg-3)',
@@ -97,7 +97,7 @@ const AboutPage = () => {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 40 }}>
 
                     <Section title="The Journey">
-                        
+
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 24, marginTop: 8 }}>
                             {/* Timeline Item 1 */}
                             <div style={{ display: 'flex', gap: 16 }}>
@@ -109,7 +109,11 @@ const AboutPage = () => {
                                     <div style={{ fontFamily: 'var(--f-mono)', fontSize: 12, color: 'var(--fg-4)', textTransform: 'uppercase', marginBottom: 4 }}>2024 · Istanbul, Turkey</div>
                                     <div style={{ fontWeight: 600, color: 'var(--fg)', fontSize: 16, marginBottom: 6 }}>The origin</div>
                                     <div style={{ color: 'var(--fg-2)', fontSize: 15, lineHeight: 1.6 }}>
-                                        The idea for a smarter video editing workflow starts here — before there was a line of code, before there was a company name. Just an observation about how much time creators lose to mechanical editing.
+                                        The principles it's built on:
+                                        — AI-first: every edit starts with a conversation
+                                        - Fast: from raw footage to exported video in minutes
+                                        - Platform-aware: knows what works on YouTube vs TikTok
+                                        - Non-destructive: nothing is permanent, everything undoable
                                     </div>
                                 </div>
                             </div>
@@ -181,7 +185,7 @@ const AboutPage = () => {
                                 <Play className="w-5 h-5 text-accent flex-shrink-0 mt-0.5" />
                                 <div>
                                     <strong style={{ color: 'var(--fg)', display: 'block', marginBottom: 4 }}>Editing is creative work</strong>
-                                    The mechanical parts — silence removal, cleanup, formatting — shouldn't take your attention. The story should. 
+                                    The mechanical parts — silence removal, cleanup, formatting — shouldn't take your attention. The story should.
                                 </div>
                             </li>
                             <li style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
@@ -204,12 +208,12 @@ const AboutPage = () => {
                     </Section>
 
                     <Section title="The Founder">
-                        <div style={{ 
+                        <div style={{
                             padding: 24, background: 'var(--bg-2)', border: '0.5px solid var(--line-soft)',
-                            borderRadius: 16, display: 'flex', flexDirection: 'column', gap: 16 
+                            borderRadius: 16, display: 'flex', flexDirection: 'column', gap: 16
                         }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                                <div style={{ 
+                                <div style={{
                                     width: 64, height: 64, borderRadius: '50%', background: 'var(--accent-soft)',
                                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                                     border: '2px solid color-mix(in oklch, var(--accent) 30%, transparent)',
