@@ -14,3 +14,6 @@ venv/
 __pycache__/
 *.pyc
 .DS_Storeclient/dist
+
+# Raw SFX source pack (converted output lives in client/public/sfx-library/)
+Social SFX Pack - Collection 1/

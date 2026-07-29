@@ -733,6 +733,35 @@ function compileOrganizeClips(step, ctx) {
     ]);
 }
 
+// ── Atomic store-op factory ───────────────────────────────────────────────────
+// Atomic commands (R23) compile to exactly one STORE command, so they share a
+// factory instead of each getting a near-identical compiler function.
+function compileAtomicStore(action, description) {
+    return (step, ctx) => [
+        cmd(ENGINE.STORE, action, { ...(step.args || {}) },
+            { source_step_id: step.step_id, description }),
+    ];
+}
+
+// ── Atomic spatial crop ───────────────────────────────────────────────────────
+// Pure STORE op: sets clip.virtualCam. Kept separate from virtual_multicam so a
+// user can reframe without triggering diarization, splitting or angle logic.
+function compileCropClip(step, ctx) {
+    return [
+        cmd(ENGINE.STORE, 'crop_clip',
+            { amount: step.amount ?? 1.5, speaker: step.speaker ?? null },
+            { source_step_id: step.step_id,
+              description: `Crop to ${Math.round((step.amount ?? 1.5) * 100)}%${step.speaker ? ` on ${step.speaker}` : ''}` }),
+    ];
+}
+
+function compileResetCrop(step, ctx) {
+    return [
+        cmd(ENGINE.STORE, 'reset_crop', {},
+            { source_step_id: step.step_id, description: 'Reset framing to full frame' }),
+    ];
+}
+
 // ── Virtual multicam — "interview close shots / cut between speakers" ──────────
 // Uses diarization data already in the store (from split-speakers or AssemblyAI)
 // to assign camera angle metadata (wide / close_host / close_guest) to each
@@ -939,6 +968,11 @@ const COMMAND_REGISTRY = new Map([
 
     // Interview / talking-head / clip organization
     ['rhythm_zoom',      { compiler: compileRhythmZoom }],
+    ['crop_clip',        { compiler: compileCropClip }],
+    ['detect_speakers',  { compiler: compileAtomicStore('detect_speakers', 'Detect speakers (analysis only)') }],
+    ['detect_scene',     { compiler: compileAtomicStore('detect_scene', 'Analyse framing (analysis only)') }],
+    ['apply_angle',      { compiler: compileAtomicStore('apply_angle', 'Apply planned camera angles') }],
+    ['reset_crop',       { compiler: compileResetCrop }],
     ['split_speakers',   { compiler: compileSplitSpeakers }],
     ['remove_speaker',   { compiler: compileRemoveSpeaker }],
     ['semantic_cut',     { compiler: compileSemanticCut }],

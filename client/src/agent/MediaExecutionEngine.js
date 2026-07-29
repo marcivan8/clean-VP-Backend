@@ -735,30 +735,47 @@ export class MediaExecutionEngine {
 
                 const spLanguage = args.language || null;
 
-                // ── 1. Queue the diarize job ──────────────────────────────────
-                console.log('[MediaExecutionEngine] split_speakers: queuing diarize job…');
-                const diarizeRes = await authFetch('/api/interview/split-speakers', {
-                    method: 'POST',
-                    body:   JSON.stringify({
-                        filename: uploadedPath,
-                        ...(spLanguage ? { language: spLanguage } : {}),
-                    }),
+                // ── 1. Diarization — CACHE FIRST ──────────────────────────────
+                // This used to unconditionally queue a fresh diarize job (1–5 min)
+                // even when `detect_speakers` had just produced exactly this data.
+                // Running the atomic chain therefore paid for diarization twice.
+                // `_getDiarizationForAsset` resolves cache → speakerMap → new job,
+                // so the chain is now free and `split_by_speaker` on its own still
+                // works standalone (it falls through to queuing the job).
+                let words, speakers;
+                const spCached = await this._getDiarizationForAsset(videoAsset.id, {
+                    isPrimary: true,
+                    signal: job?.signal ?? null,
                 });
-                if (!diarizeRes.ok) {
-                    const errBody = await diarizeRes.json().catch(() => ({}));
-                    throw new Error(errBody.error || `split-speakers returned ${diarizeRes.status}`);
-                }
-                const { jobId: diarizeJobId } = await diarizeRes.json();
-                if (!diarizeJobId) throw new Error('split-speakers did not return a jobId');
 
-                // ── 2. Poll — this can take 1–5 minutes ───────────────────────
-                console.log(`[MediaExecutionEngine] split_speakers: polling job ${diarizeJobId}…`);
-                const diarizeResult = await pollJobResult(diarizeJobId, job.signal);
-                if (!diarizeResult?.words?.length) {
-                    return { action, success: false, message: 'Diarization returned no words — check that DIARIZE_SERVICE_URL is configured and the Python service is running.' };
-                }
+                if (spCached?.words?.length) {
+                    ({ words, speakers } = spCached);
+                    console.log(`[MediaExecutionEngine] split_speakers: reusing cached diarization (${words.length} words, ${speakers.length} speaker(s)) — no job queued`);
+                } else {
+                    console.log('[MediaExecutionEngine] split_speakers: no cached diarization — queuing job…');
+                    const diarizeRes = await authFetch('/api/interview/split-speakers', {
+                        method: 'POST',
+                        body:   JSON.stringify({
+                            filename: uploadedPath,
+                            ...(spLanguage ? { language: spLanguage } : {}),
+                        }),
+                    });
+                    if (!diarizeRes.ok) {
+                        const errBody = await diarizeRes.json().catch(() => ({}));
+                        throw new Error(errBody.error || `split-speakers returned ${diarizeRes.status}`);
+                    }
+                    const { jobId: diarizeJobId } = await diarizeRes.json();
+                    if (!diarizeJobId) throw new Error('split-speakers did not return a jobId');
 
-                const { words, speakers } = diarizeResult;
+                    console.log(`[MediaExecutionEngine] split_speakers: polling job ${diarizeJobId}…`);
+                    const diarizeResult = await pollJobResult(diarizeJobId, job.signal);
+                    if (!diarizeResult?.words?.length) {
+                        return { action, success: false, message: 'Diarization returned no words — check that ASSEMBLYAI_API_KEY or DIARIZE_SERVICE_URL is configured.' };
+                    }
+                    ({ words, speakers } = diarizeResult);
+                    // Cache so a later multicam/angle step doesn't re-pay for it
+                    useTimelineStore.getState().setAssetDiarization?.(videoAsset.id, { words, speakers });
+                }
                 console.log(`[MediaExecutionEngine] split_speakers: ${words.length} words, ${speakers.length} speaker(s): ${speakers.join(', ')}`);
 
                 if (speakers.length < 2) {
@@ -1449,6 +1466,16 @@ export class MediaExecutionEngine {
                     const assetObj  = (vmStore.assets || []).find(a => a.id === assetId);
                     const assetName = assetObj?.name || assetId;
 
+                    // Reuse a cached analysis from a prior `detect_scene` run. This is
+                    // what makes `apply_angle` an instant, re-runnable step instead of
+                    // repeating diarization + Vision every time (R23).
+                    const cachedScene = vmStore.sceneAnalysisByAsset?.[assetId];
+                    if (cachedScene?.segments?.length && !args.forceReanalyze) {
+                        vmAnalysisByAsset[assetId] = cachedScene;
+                        console.log(`[virtual_multicam] "${assetName}": reusing cached scene analysis (${cachedScene.segments.length} segments)`);
+                        continue;
+                    }
+
                     let diar = null;
                     try {
                         diar = await this._getDiarizationForAsset(assetId, {
@@ -1490,6 +1517,8 @@ export class MediaExecutionEngine {
                         continue;
                     }
                     vmAnalysisByAsset[assetId] = data;
+                    // Cache so a later apply_angle / re-run is instant
+                    useTimelineStore.getState().setSceneAnalysis?.(assetId, data);
                     console.log(`[virtual_multicam] "${assetName}": ${data.segments.length} segments (${data.mode || 'duo'} mode)`);
                 }
 
@@ -1761,6 +1790,252 @@ export class MediaExecutionEngine {
                         vmSummary +
                         `Jumped to the first close-up — scrub the timeline to review all angle cuts.` +
                         multiAssetNote + droppedZoomNote + otherAssetNote,
+                };
+            }
+
+            // ── Atomic stage 1: detect speakers ──────────────────────────────
+            // Diarization ONLY. Touches no clips, so it's safe to run at any
+            // point and re-run freely. Previously this was buried inside
+            // split_speakers (which also rebuilt the whole video track) and
+            // inside virtual_multicam — you couldn't ask "who's talking?"
+            // without also restructuring your timeline.
+            case 'detect_speakers': {
+                const dsStore  = useTimelineStore.getState();
+                const dsClips  = (dsStore.tracks || []).filter(t => t.type === 'video')
+                                    .flatMap(t => t.clips || []);
+                const dsAssets = [...new Set(dsClips.map(c => c.assetId).filter(Boolean))];
+                if (dsAssets.length === 0) {
+                    return { action, success: false, message: 'No video clips on the timeline to analyse.' };
+                }
+
+                const done = [], failed = [];
+                for (const assetId of dsAssets) {
+                    const name = (dsStore.assets || []).find(a => a.id === assetId)?.name || assetId;
+                    try {
+                        const diar = await this._getDiarizationForAsset(assetId, {
+                            isPrimary: assetId === dsAssets[0],
+                            signal: job?.signal ?? null,
+                        });
+                        if (diar?.speakers?.length) done.push({ name, speakers: diar.speakers.length, words: diar.words.length });
+                        else failed.push(name);
+                    } catch (e) {
+                        console.warn(`[detect_speakers] "${name}" failed:`, e.message);
+                        failed.push(name);
+                    }
+                }
+
+                if (done.length === 0) {
+                    return {
+                        action, success: false,
+                        message: `Couldn't detect speakers on ${failed.join(', ')}.\n\nSpeaker detection needs the audio on the server — if you just uploaded, wait for processing to finish.`,
+                    };
+                }
+                const total = done.reduce((n, d) => n + d.speakers, 0);
+                return {
+                    action, success: true,
+                    message:
+                        `Analysed ${done.length} video(s):\n` +
+                        done.map(d => `  • ${d.name} — ${d.speakers} speaker(s), ${d.words} words`).join('\n') +
+                        (failed.length ? `\n\nCouldn't analyse: ${failed.join(', ')}` : '') +
+                        `\n\nNothing on your timeline changed. Next: "analyse the shot" or "apply camera angles".`,
+                };
+            }
+
+            // ── Atomic stage 2: analyse framing ──────────────────────────────
+            // Vision pass + angle PLAN, cached per asset. Still touches no clips —
+            // it answers "what would the angles be?" so the plan can be inspected
+            // (and reused) before anything is applied.
+            case 'detect_scene': {
+                const scStore  = useTimelineStore.getState();
+                const scClips  = (scStore.tracks || []).filter(t => t.type === 'video')
+                                    .flatMap(t => t.clips || []);
+                const scAssets = [...new Set(scClips.map(c => c.assetId).filter(Boolean))];
+                if (scAssets.length === 0) {
+                    return { action, success: false, message: 'No video clips on the timeline to analyse.' };
+                }
+
+                const analysed = [], skipped = [];
+                for (const assetId of scAssets) {
+                    const assetObj = (scStore.assets || []).find(a => a.id === assetId);
+                    const name = assetObj?.name || assetId;
+                    try {
+                        const diar = await this._getDiarizationForAsset(assetId, {
+                            isPrimary: assetId === scAssets[0],
+                            signal: job?.signal ?? null,
+                        });
+                        if (!diar?.words?.length) { skipped.push(`${name} (no speaker data)`); continue; }
+
+                        const roles = {};
+                        for (const [spk, info] of Object.entries(scStore.speakerMap || {})) {
+                            if (info?.role) roles[spk] = info.role;
+                        }
+                        const res = await authFetch('/api/interview/virtual-multicam', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                words: diar.words, speakers: diar.speakers, roles, frames: [],
+                                filename: resolveAssetServerPath(assetObj),
+                            }),
+                        });
+                        const data = await res.json();
+                        if (!res.ok || !data.segments?.length) { skipped.push(`${name} (${data.error || 'no plan returned'})`); continue; }
+
+                        useTimelineStore.getState().setSceneAnalysis?.(assetId, data);
+                        const counts = {};
+                        data.segments.forEach(s => { counts[s.angle] = (counts[s.angle] || 0) + 1; });
+                        analysed.push({
+                            name,
+                            mode: data.mode || 'duo',
+                            segments: data.segments.length,
+                            counts,
+                            layout: data.layout || null,
+                            speakers: diar.speakers.length,
+                        });
+                    } catch (e) {
+                        console.warn(`[detect_scene] "${name}" failed:`, e.message);
+                        skipped.push(`${name} (${e.message})`);
+                    }
+                }
+
+                if (analysed.length === 0) {
+                    return { action, success: false, message: `Couldn't analyse framing.\n\n${skipped.join('\n')}` };
+                }
+                // Report what's actually IN the shot, not just how many angles were
+                // planned — that's the point of having this as its own command.
+                const describe = (a) => {
+                    const L = a.layout;
+                    const people = L?.onScreenCount;
+                    const who = people === 0 ? 'no one visible on camera'
+                              : people === 1 ? '1 person on camera'
+                              : typeof people === 'number' ? `${people} people on camera`
+                              : 'framing not detected';
+                    const heard = `${a.speakers} voice${a.speakers === 1 ? '' : 's'} heard`;
+                    // The interesting disagreement: more voices than faces = someone off-camera
+                    const note = (typeof people === 'number' && people === 1 && a.speakers > 1)
+                        ? ' — interviewer is off-camera, so it will frame the visible person'
+                        : '';
+                    const shots = Object.entries(a.counts).map(([k, v]) => `${v} ${k}`).join(', ');
+                    return `  • ${a.name}\n      ${who}, ${heard}${note}\n      Plan: ${a.mode} mode, ${a.segments} shots (${shots})`;
+                };
+
+                return {
+                    action, success: true,
+                    message:
+                        `Here's what's in the shot — nothing applied yet:\n\n` +
+                        analysed.map(describe).join('\n\n') +
+                        (skipped.length ? `\n\nSkipped: ${skipped.join(', ')}` : '') +
+                        `\n\nRun "apply camera angles" to use this plan, or re-shoot the analysis after editing.`,
+                };
+            }
+
+            // ── Atomic spatial crop ──────────────────────────────────────────
+            // The command that didn't exist: "crop the parts where speaker 00 is
+            // speaking to 200%". Because nothing could express it, the parser fell
+            // through to the nearest keyword match and ran silence removal. This
+            // does ONE thing — set clip.virtualCam — so it composes with angles,
+            // rhythm zoom and cleanup instead of bundling them (R16 composition
+            // rules still apply: preview and both export paths read virtualCam).
+            case 'crop_clip': {
+                const ccStore  = useTimelineStore.getState();
+                const ccTracks = (ccStore.tracks || []).filter(t => t.type === 'video');
+                const ccClips  = ccTracks.flatMap(t => (t.clips || []).map(c => ({ ...c, _trackId: t.id })));
+                if (ccClips.length === 0) {
+                    return { action, success: false, message: 'No clips on the timeline to crop.' };
+                }
+
+                // amount: 2.0 = 200% = punch in 2×. Clamp to something renderable.
+                const amount = Math.max(1.0, Math.min(4.0, Number(args.amount) || 1.5));
+                if (amount <= 1.001) {
+                    return { action, success: false, message: 'That crop amount is 100% — nothing would change. Try "crop to 150%".' };
+                }
+
+                // Optional speaker filter — only crop clips where this speaker talks.
+                const wantSpeaker = args.speaker ? String(args.speaker).toLowerCase() : null;
+                const normSpk = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                const wantNorm = wantSpeaker ? normSpk(wantSpeaker) : null;
+
+                // Resolve which clips the speaker is talking over, using the same
+                // per-asset diarization the multicam path uses.
+                let speakerRanges = [];
+                if (wantNorm) {
+                    const diar = ccStore.diarizationByAsset || {};
+                    const spWords = Object.entries(ccStore.speakerMap || {})
+                        .flatMap(([spk, info]) => (info?.words || []).map(w => ({ ...w, speaker: w.speaker || spk })));
+                    const allWords = spWords.length
+                        ? spWords
+                        : Object.values(diar).flatMap(d => d?.words || []);
+                    speakerRanges = allWords
+                        .filter(w => normSpk(w.speaker).includes(wantNorm) || wantNorm.includes(normSpk(w.speaker)))
+                        .map(w => ({ start: w.start, end: w.end }));
+                    if (speakerRanges.length === 0) {
+                        return {
+                            action, success: false,
+                            message: `I couldn't find "${args.speaker}" in the speaker data.\n\nRun "detect speakers" first, then try again.`,
+                        };
+                    }
+                }
+
+                const overlapsSpeaker = (clip) => {
+                    if (!wantNorm) return true;
+                    const s = clip.offset ?? 0, e = s + (clip.duration ?? 0);
+                    return speakerRanges.some(r => r.end > s && r.start < e);
+                };
+
+                // Centre the crop on the detected face when we have one, else frame centre.
+                const anchors = Object.values(ccStore.diarizationByAsset || {})
+                    .map(d => d?.anchor).filter(Boolean);
+                const cx = anchors.length ? anchors.reduce((a, x) => a + x.cx, 0) / anchors.length : 0.5;
+                const cy = anchors.length ? anchors.reduce((a, x) => a + x.cy, 0) / anchors.length : 0.42;
+
+                const w = 1 / amount, h = 1 / amount;
+                const crop = {
+                    cropX: Math.max(0, Math.min(1 - w, cx - w / 2)),
+                    cropY: Math.max(0, Math.min(1 - h, cy - h / 2)),
+                    cropW: w,
+                    cropH: h,
+                };
+
+                ccStore._saveHistory?.();
+                let cropped = 0;
+                for (const clip of ccClips) {
+                    if (!overlapsSpeaker(clip)) continue;
+                    ccStore.updateClip(clip._trackId, clip.id, {
+                        virtualCam: { angle: 'custom', scale: amount, x: cx - 0.5, y: cy - 0.5, ...crop, speaker: args.speaker || null },
+                    });
+                    cropped++;
+                }
+
+                if (cropped === 0) {
+                    return { action, success: false, message: `No clips matched${args.speaker ? ` speaker "${args.speaker}"` : ''} — nothing was cropped.` };
+                }
+                return {
+                    action, success: true,
+                    message: `Cropped ${cropped} clip(s) to ${Math.round(amount * 100)}%` +
+                             `${args.speaker ? ` where ${args.speaker} is speaking` : ''}.`,
+                };
+            }
+
+            // ── Atomic stage 4: apply the angles ─────────────────────────────
+            // Pure application. Delegates to the virtual_multicam tagging path,
+            // which now prefers the cached plan from detect_scene — so running
+            // these as separate steps costs nothing extra, and re-running this
+            // one is instant. Kept as a thin delegation rather than a copy so
+            // the split/layout rules (R14/R18) live in exactly one place.
+            case 'apply_angle':
+                return this.executeStoreAction({ ...command, action: 'virtual_multicam' }, job);
+
+            case 'reset_crop': {
+                const rcStore = useTimelineStore.getState();
+                const rcTracks = (rcStore.tracks || []).filter(t => t.type === 'video');
+                let cleared = 0;
+                rcStore._saveHistory?.();
+                for (const t of rcTracks) {
+                    for (const c of (t.clips || [])) {
+                        if (c.virtualCam) { rcStore.updateClip(t.id, c.id, { virtualCam: null }); cleared++; }
+                    }
+                }
+                return {
+                    action, success: cleared > 0,
+                    message: cleared > 0 ? `Framing reset on ${cleared} clip(s).` : 'No crops to reset.',
                 };
             }
 

@@ -1,6 +1,6 @@
-node_modules
-npm-debug.log
-Dockerfile
-.dockerignore
+# Source SFX pack: 303MB of raw WAV/MP3 originals.
+# Only the converted, web-ready mp3s in client/public/sfx-library/ ship.
+# Keeping this out of the build context (there is no .dockerignore otherwise,
+# so COPY . . would bake all 303MB into the image).
+Social SFX Pack - Collection 1/
 .git
-.gitignore
