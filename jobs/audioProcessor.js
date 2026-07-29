@@ -292,6 +292,11 @@ async function detectFillerWords(inputPath, language = 'en', tempDir = null, pre
             removedSegments:  cutSpans.map(s => ({ ...s, duration: s.end - s.start })),
             activeSegments:   paddedSegments,
             transcript:       transcriptText,
+            // Word-level timestamps — was computed above (Whisper or provided
+            // transcript) but never returned, so the client had no transcript
+            // context to run pause intelligence (_refineCutsWithIntelligence)
+            // on filler cuts the way silence-removal already does. See CLAUDE.md.
+            words,
             totalDuration,
             method: usedGPT ? 'gpt4o-semantic' : 'keyword-fallback',
         };

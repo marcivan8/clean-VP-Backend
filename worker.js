@@ -11,9 +11,19 @@ const processExportJob   = require('./jobs/exportProcessor');
 console.log('👷 Worker service starting...');
 
 // 1. Video Processing Worker (HLS proxy, waveform)
+// concurrency: 1 (was 2) — libx264 proxy encoding of raw 4K/1080p phone
+// footage is the single heaviest job this process runs, and this worker
+// shares a process/memory ceiling with the Express server (see index.js's
+// inline `require('./worker')` boot) and with asset-analysis below, which
+// now fires in PARALLEL with proxy encoding (not after it — see R21/R24).
+// A multi-file upload used to be able to run 2 encodes + 2 vision/audio
+// analyses at once; that combination reliably OOMs a small Railway
+// instance and takes the whole process down mid-request, which is what
+// produced a 502 on an unrelated clip's proxy.mp4 while a batch of 5
+// uploads was in flight. See R24.
 const videoWorker = new Worker('video-processing', processVideoJob, {
     connection,
-    concurrency: 2, // limit concurrency for heavy FFmpeg tasks
+    concurrency: 1,
     limiter: { max: 10, duration: 60000 }
 });
 
@@ -89,6 +99,15 @@ try {
     console.error('⚠️  [AssetAnalysisQueue] MediaIntelligencePipeline not available — asset analysis jobs will fail gracefully:', err.message);
 }
 
+// concurrency: 1 (was 2) — these jobs now fire the instant a raw upload
+// lands on GCS, running CONCURRENTLY with video-processing's proxy encode
+// for the same asset (and with every other asset in a multi-file upload).
+// Each job downloads the raw file and runs local ffmpeg frame/audio
+// extraction before the (I/O-bound) Vision/classification calls, so it
+// competes directly with videoWorker for the same memory pool during an
+// upload burst. See R24 — this and the videoWorker concurrency drop above
+// are the fix for the OOM-driven 502 that surfaced under 5 simultaneous
+// uploads.
 const assetAnalysisWorker = new Worker('asset-analysis', async (job) => {
     if (!_MediaIntelligencePipeline) {
         throw new Error('MediaIntelligencePipeline not loaded — redeploy with server/brain/ committed');
@@ -96,7 +115,7 @@ const assetAnalysisWorker = new Worker('asset-analysis', async (job) => {
     const { assetId, filePath, projectId, userId } = job.data;
     const pipeline = new _MediaIntelligencePipeline();
     await pipeline.analyzeAsset(assetId, filePath, projectId, userId);
-}, { connection, concurrency: 2 });
+}, { connection, concurrency: 1 });
 
 assetAnalysisWorker.on('completed', job => {
     console.log(`✅ [AssetAnalysisQueue] Job ${job.id} completed`);

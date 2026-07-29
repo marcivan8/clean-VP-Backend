@@ -2,6 +2,14 @@ import { API_URL } from '../config';
 import { pollJobResult } from '../utils/jobPoller.js';
 import { supabase } from '../lib/supabaseClient';
 
+// Proxy generation now runs at videoWorker concurrency:1 (see worker.js / CLAUDE.md
+// R24) so a multi-file upload legitimately queues jobs behind each other — the
+// generic 300s job-poller default is too tight for e.g. the 4th/5th clip in a
+// 5-file batch. IDELayout already falls back to the raw upload on timeout, so
+// extending this budget only reduces false "proxy failed" fallbacks; it doesn't
+// change what happens once a job genuinely never finishes.
+const PROXY_POLL_TIMEOUT_MS = 900_000; // 15 min
+
 /**
  * Build fetch headers, injecting Authorization if a valid session exists.
  * Uses supabase.auth.getSession() so expired tokens are auto-refreshed.
@@ -125,7 +133,7 @@ class ProxyService {
 
         if (data.jobId) {
             console.log(`[ProxyService] Polling proxy job ${data.jobId}...`);
-            const result = await pollJobResult(data.jobId);
+            const result = await pollJobResult(data.jobId, null, PROXY_POLL_TIMEOUT_MS);
             // Attach the raw GCS path so callers can store it in clip.sourceUrl
             return { ...(result ?? data), rawGcsPath: destPath };
         }
@@ -182,7 +190,7 @@ class ProxyService {
             // If the backend queued a job, poll until it completes.
             if (data.jobId) {
                 console.log(`[ProxyService] Polling proxy job ${data.jobId}...`);
-                const result = await pollJobResult(data.jobId);
+                const result = await pollJobResult(data.jobId, null, PROXY_POLL_TIMEOUT_MS);
                 // Attach the raw GCS path (returned by the upload endpoint) so
                 // callers can store it in clip.sourceUrl for reliable export later.
                 return { ...(result ?? data), rawGcsPath: data.gcsPath ?? null };
