@@ -168,6 +168,7 @@ const useTimelineStore = create(
             // Shape: { SPEAKER_00: { role: 'interviewer'|'guest'|null, label: string|null, words: [{word, start, end}] } }
             speakerMap: {},
             diarizationByAsset: {},   // assetId → { words, speakers } (see setAssetDiarization)
+            sceneAnalysisByAsset: {}, // assetId → { segments, mode, hostSide, … } (see setSceneAnalysis)
 
             // Ledger of operations actually applied to this project, newest last.
             // ContextEngine.build() reads projectState.editHistory and feeds it to
@@ -419,6 +420,17 @@ const useTimelineStore = create(
             setAssetDiarization: (assetId, data) => set(state => ({
                 diarizationByAsset: { ...state.diarizationByAsset, [assetId]: data },
             })),
+
+            // Per-asset camera-angle analysis: { segments, mode, hostSide, host, guest }.
+            // Written by the `detect_scene` command and consumed by `apply_angle`.
+            // This split is what makes multicam ATOMIC (R23): the expensive part
+            // (diarization + GPT-4o Vision) runs once as its own inspectable step,
+            // and applying angles afterwards is instant and re-runnable — instead
+            // of one opaque command that redid everything on every attempt.
+            setSceneAnalysis: (assetId, data) => set(state => ({
+                sceneAnalysisByAsset: { ...state.sceneAnalysisByAsset, [assetId]: data },
+            })),
+            clearSceneAnalysis: () => set({ sceneAnalysisByAsset: {} }),
 
             /**
              * Append an applied operation to the edit ledger.

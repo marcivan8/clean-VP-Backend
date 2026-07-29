@@ -1477,6 +1477,21 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
             };
         }
 
+        // Raw scene facts for the client. `detect_scene` surfaces these so a user
+        // can ask "what's in the shot?" and get an actual answer (people on
+        // camera, where faces sit, whether framing was detected) instead of only
+        // an angle-count summary. Null when the Vision pass was unavailable.
+        const layoutSummary = layout ? {
+            onScreenCount: layout.onScreenCount,
+            facesDetected: layout.frames.filter(f => f.anchor).length,
+            framesSampled: layout.frames.length,
+            anchors: layout.frames.map(f => ({
+                speaker: f.speaker,
+                people:  f.people,
+                anchor:  f.anchor ? { cx: +f.anchor.cx.toFixed(3), cy: +f.anchor.cy.toFixed(3), h: +f.anchor.h.toFixed(3) } : null,
+            })),
+        } : null;
+
         // ── SOLO MODE: one person on camera → wide / mid / close angles ─────
         // Entered when diarization found 1 speaker OR when the layout pass saw
         // only 1 person on screen (voice-off interviewer). Simulates a 3-camera
@@ -1583,6 +1598,7 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
                 faceDetected: !!soloAnchor,
                 host:         orderedSpeakers[0],
                 guest:        null,
+                layout:       layoutSummary,
             });
         }
 
@@ -1720,7 +1736,7 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
             `host=${host} on ${hostSide} | face=${faceDetected}`
         );
 
-        res.json({ segments, mode: 'duo', hostSide, faceDetected, host, guest });
+        res.json({ segments, mode: 'duo', hostSide, faceDetected, host, guest, layout: layoutSummary });
 
     } catch (err) {
         console.error('[interviewRoutes] /virtual-multicam error:', err);

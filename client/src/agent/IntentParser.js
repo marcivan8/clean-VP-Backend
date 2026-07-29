@@ -12,6 +12,7 @@
 
 import { authFetch } from '../utils/authFetch.js';
 import { ContextGenerator } from './ContextGenerator.js';
+import { resolveCommand, expandMacro, extractParams, COMMAND_BY_ID } from './CommandRegistry.js';
 import { FallbackParser } from './FallbackParser.js';
 import { EventBus, EVENT_TYPES } from './EventBus.js';
 import { IntentValidator } from './IntentValidator.js';
@@ -41,8 +42,15 @@ const NLP_MAP = {
         'remove this clip', 'delete this clip', 'remove the clip',
     ],
     trim: [
+        // 'crop' was REMOVED from this list. It read as "shorten in time" here,
+        // so "crop all the parts where speaker 00 is speaking to 200%" matched
+        // trim/cleanup vocabulary and ran SILENCE REMOVAL — reporting success
+        // while doing something the user never asked for. 'crop' now belongs
+        // exclusively to the spatial crop_clip command in CommandRegistry.js,
+        // which also lists 'crop' as a negative on the cutting commands so the
+        // two can never be confused again. Do not re-add it here.
         'trim', 'shorten', 'cut to', 'make it shorter', 'shrink',
-        'tighten', 'tighten up', 'crop', 'truncate', 'clip it to',
+        'tighten', 'tighten up', 'truncate', 'clip it to',
         'reduce the length', 'make shorter', 'shorter',
         'trim the start', 'trim the end', 'trim the beginning',
         'trim from the start', 'trim from the end',
@@ -363,6 +371,20 @@ export class IntentParser {
         // conversation-history pollution that can misclassify clear commands
         // (e.g. "add captions" being returned as "remove_filler_words" when the
         // prior turn involved filler detection).
+        // ── Registry resolution (highest authority) ──────────────────────────
+        // CommandRegistry is the single source of truth for vocabulary. It runs
+        // BEFORE the legacy keyword lists and before the API because it is the
+        // only layer that understands NEGATIVE terms — "crop"/"zoom"/"angle"
+        // veto every cutting command, which is what stops a framing request from
+        // silently executing silence removal (see R23). It also refuses to guess:
+        // a close call on a destructive command becomes a question, not an edit.
+        const reg = this.tryRegistry(prompt);
+        if (reg) {
+            if (reg.needs_clarification) return reg;
+            console.log('[IntentParser] Registry match:', reg.operation, `(confidence: ${reg._confidence})`);
+            return this.validateAndNormalize(reg);
+        }
+
         const localFirst = this.tryLocalFirst(prompt);
         if (localFirst) {
             console.log('[IntentParser] Local-first match (skipped API):', localFirst.operation);
@@ -441,6 +463,67 @@ export class IntentParser {
             return 'I\'d need a transcript to answer that. Run "add captions" first and I can analyse the content.';
         }
         return `Here's the transcript so far:\n\n"${(transcriptSummary ?? '').slice(0, 400)}"`;
+    }
+
+    /**
+     * Resolve a prompt against CommandRegistry.
+     *
+     * Returns:
+     *   null                       — no registry command matched; fall through
+     *   { needs_clarification }    — matched, but too close to call on a
+     *                                destructive command: ASK instead of acting
+     *   { operation, constraints } — confident match, params extracted
+     */
+    static tryRegistry(prompt) {
+        let resolved;
+        try {
+            resolved = resolveCommand(prompt);
+        } catch (err) {
+            console.warn('[IntentParser] registry resolve failed:', err.message);
+            return null;
+        }
+        if (!resolved?.match) return null;
+
+        // Declared but not yet executable — fall through to the legacy path
+        // rather than routing to a handler that doesn't exist.
+        if (resolved.match.unimplemented) {
+            console.log(`[IntentParser] registry matched "${resolved.match.id}" but it has no executor yet — falling through`);
+            return null;
+        }
+
+        // Ambiguity guard. Previously a near-tie silently executed the winner —
+        // which is how a crop request became an irreversible 29-segment cut that
+        // then reported "complete". Destructive + unclear now always asks.
+        if (resolved.ambiguous) {
+            const options = [resolved.match, ...resolved.alternatives].slice(0, 3);
+            return {
+                ...this.needsClarification(
+                    `That could mean a few different things:\n` +
+                    options.map(o => `  • ${o.label} — ${o.summary}`).join('\n') +
+                    `\n\nWhich did you mean?`
+                ),
+                _registryOptions: options.map(o => ({ id: o.id, label: o.label })),
+            };
+        }
+
+        const cmd = resolved.match;
+
+        // `executes` is the operation the pipeline actually runs. It lets a
+        // registry id differ from the legacy operation name (e.g. split_by_speaker
+        // → split_speakers) so the vocabulary can be reorganised without
+        // rewriting the planner/compiler in the same change.
+        const operation = cmd.executes || cmd.id;
+
+        return {
+            intent: 'edit',
+            operation,
+            targets: [],
+            constraints: extractParams(cmd, prompt),
+            confidence: resolved.confidence,
+            _confidence: resolved.confidence,
+            _registry: true,
+            _macro: cmd.macro ? expandMacro(cmd.id) : null,
+        };
     }
 
     static tryLocalFirst(prompt) {

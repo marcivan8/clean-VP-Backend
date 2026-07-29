@@ -203,6 +203,11 @@ export class EditPlanner {
             case 'reorder_clips': return this.planReorderClips(planId, constraints);
             case 'organize_clips': return this.planOrganizeClips(planId, state, constraints);
             case 'rhythm_zoom': return this.planRhythmZoom(planId, constraints);
+            case 'crop_clip':   return this.planCropClip(planId, constraints);
+            case 'detect_speakers': return this.planSingleStep(planId, 'detect_speakers', 'Detect who is speaking (no timeline changes)');
+            case 'detect_scene':    return this.planSingleStep(planId, 'detect_scene', 'Analyse framing and plan camera angles (no timeline changes)');
+            case 'apply_angle':     return this.planSingleStep(planId, 'apply_angle', 'Apply the planned camera angles to the clips');
+            case 'reset_crop':  return this.planResetCrop(planId);
             case 'split_speakers': return this.planSplitSpeakers(planId);
             case 'compound_clean_dynamic': return this.planCompoundCleanDynamic(planId, constraints);
             case 'compound_clean_virtual_multicam': return this.planCompoundCleanVirtualMulticam(planId);
@@ -610,6 +615,43 @@ export class EditPlanner {
             plan_id: planId, operation: 'reorder_segment', step_count: 1, requiresApproval: true,
             steps: [{ step_id: 'step_1', action: 'reorder_segment', clip_id: constraints.clipId, track_id: constraints.trackId, target_position: constraints.targetPosition ?? 0, reason: constraints.reason || 'Reorder segment for narrative structure' }]
         };
+    }
+
+    /**
+     * Atomic spatial crop. One step, no bundled behaviour — it composes with
+     * angles and zoom rhythm rather than replacing them (see R23).
+     */
+    /**
+     * Generic one-step plan. Atomic commands (R23) are all shaped the same way —
+     * a single action with no bundled stages — so they don't each need a bespoke
+     * planner function.
+     */
+    static planSingleStep(planId, action, reason) {
+        return this.buildPlan(planId, action, [
+            { step_id: 'step_1', action, reason }
+        ]);
+    }
+
+    static planCropClip(planId, constraints) {
+        const amount  = constraints?.amount  ?? 1.5;
+        const speaker = constraints?.speaker ?? null;
+        return this.buildPlan(planId, 'crop_clip', [
+            {
+                step_id: 'step_1',
+                action:  'crop_clip',
+                amount,
+                speaker,
+                reason: speaker
+                    ? `Crop to ${Math.round(amount * 100)}% where ${speaker} is speaking`
+                    : `Crop to ${Math.round(amount * 100)}%`,
+            }
+        ]);
+    }
+
+    static planResetCrop(planId) {
+        return this.buildPlan(planId, 'reset_crop', [
+            { step_id: 'step_1', action: 'reset_crop', reason: 'Clear crop back to the full frame' }
+        ]);
     }
 
     static planRhythmZoom(planId, constraints) {
