@@ -46,6 +46,16 @@ jobs:
           SUPABASE_ANON_KEY: stub-anon-key
           OPENAI_API_KEY: stub-openai-key
 
+      # ── Run regression scripts (gate) ─────────────────────────────────────
+      # Standalone pins referenced throughout CLAUDE.md's R-rules (R11, R23, ...)
+      # that jest doesn't cover: CommandRegistry vocabulary collisions,
+      # waveformPath.js's proxyUrl-shape handling, and the AI-command →
+      # timeline-mutation pipeline. Pure logic / local-storage-mode checks —
+      # no network or real credentials needed, verified to pass cleanly
+      # standalone before being added here.
+      - name: Run regression scripts
+        run: npm run test:regression
+
       # ── Install + build client ────────────────────────────────────────────
       - uses: actions/setup-node@v4
         with:

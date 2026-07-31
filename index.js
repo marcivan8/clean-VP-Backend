@@ -151,6 +151,30 @@ const authLimiter = rateLimit({
   message: { error: 'Too many authentication attempts. Please try again in 15 minutes.' },
 });
 
+// Interview/podcast smart-editing routes: same class of heavy compute as
+// renderLimiter above (ffmpeg frame extraction/decode, GPT-4o Vision calls —
+// virtual-multicam, organize-clips, refine-cut-frames, split-speakers, etc.)
+// but previously ran on only the generic 120/min global limiter, unlike
+// /api/render and /api/audio. One authenticated user hammering these could
+// reproduce the exact memory pressure this session's OOM fixes (see CLAUDE.md
+// R24) just addressed.
+const interviewLimiter = rateLimit({
+  windowMs: 60_000, max: 5,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Rate limit reached for interview/editing actions. Please wait before trying again.' }
+});
+
+// Waveform extraction: more generous than interviewLimiter on purpose — unlike
+// the routes above, this fires AUTOMATICALLY (client's usePeaks hook) once per
+// asset whenever a proxy loads, and again on retry after a failure. A 5-asset
+// upload can legitimately trigger this several times in quick succession; a
+// tight limiter here would 429 normal multi-file uploads, not just abuse.
+const waveformLimiter = rateLimit({
+  windowMs: 60_000, max: 30,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Waveform extraction rate limit reached. Please wait a moment.' }
+});
+
 // Body parsing middleware
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -255,8 +279,8 @@ app.use('/api/admin',   require('./routes/adminRoutes'));   // Temp admin ops (r
 app.use('/api/polar',    require('./routes/polarWebhook'));   // Polar subscription webhooks
 app.use('/api/checkout', require('./routes/polarWebhook'));  // alias: /api/checkout/create
 app.use('/api/projects',   require('./routes/projectRoutes'));   // Project thumbnail upload
-app.use('/api/interview', require('./routes/interviewRoutes')); // Interview/podcast smart editing
-app.use('/api/waveform',  require('./routes/waveformRoutes'));  // Waveform peak data extraction
+app.use('/api/interview', interviewLimiter, require('./routes/interviewRoutes')); // Interview/podcast smart editing
+app.use('/api/waveform',  waveformLimiter,  require('./routes/waveformRoutes'));  // Waveform peak data extraction
 app.use('/api/favorites', require('./routes/favoritesRoutes')); // User favorites: SFX/LUT assets + transition types
 
 // ── Creative Asset Intelligence System ────────────────────────────────────────
