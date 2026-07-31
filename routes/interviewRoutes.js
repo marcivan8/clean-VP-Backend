@@ -68,13 +68,66 @@ function findLongestTurn(words, targetSpeaker) {
 }
 
 /**
+ * Resolve the calling user's id the same way proxyRoutes.js does: real user
+ * in production, a stable 'dev-user' fallback outside it (this file's routes
+ * already run on `optionalAuth` in non-production, so req.user can be absent
+ * there by design — see isProd/authAndGate below).
+ */
+function resolveRequestUserId(req) {
+    if (req.user?.id) return req.user.id;
+    if (process.env.NODE_ENV !== 'production') return 'dev-user';
+    return null;
+}
+
+/**
+ * IDOR guard: every uploaded asset's storage path embeds the owning user's id
+ * — raw/{userId}/{file} or proxies/{userId}/{file}/... (see proxyRoutes.js,
+ * videoProcessor.js). Extracts that segment so callers can check it against
+ * the requesting user before handing the path to ffmpeg or a signed URL.
+ * Returns null when the path doesn't match either shape (caller decides how
+ * to treat an unrecognized path — see pathOwnedBy below).
+ */
+function pathOwnerUserId(gcsPath) {
+    const m = String(gcsPath || '').match(/^(?:raw|proxies)\/([^/]+)\//);
+    return m ? m[1] : null;
+}
+
+/**
+ * True if `requestUserId` is allowed to access `gcsPath`.
+ * - Path has no recognizable owner segment (e.g. a bare temp/ filename from
+ *   the legacy local-upload flow) → allowed; there's nothing to check against,
+ *   and resolveUploadPath's uploads/-boundary check still applies separately.
+ * - Path has an owner segment but we don't know who's asking (requestUserId
+ *   null — shouldn't happen once authOnly/authAndGate require auth in prod,
+ *   but fails closed rather than open if it ever does) → denied.
+ * - Otherwise: owner segment must match the requester.
+ */
+function pathOwnedBy(gcsPath, requestUserId) {
+    const owner = pathOwnerUserId(gcsPath);
+    if (!owner) return true;
+    if (!requestUserId) return false;
+    return owner === requestUserId;
+}
+
+/**
  * Resolve a GCS-relative path (or bare filename) to something ffmpeg can read
  * directly as an -i argument: a short-lived signed URL when GCS is configured,
  * or a local file path in local-storage/dev mode. Returns null if the file
  * can't be located. Shared by extractVideoFrame() and refine-cut-frames below
  * so both use the exact same resolution rules.
+ *
+ * `requestUserId` (resolveRequestUserId(req)) is REQUIRED for every caller
+ * that received gcsPath from client input — this is the IDOR fix: without it,
+ * any authenticated user could pass another user's raw/{userId}/... path and
+ * this function would happily sign a URL / return a local path for it. Pass
+ * `null` explicitly (not omit the arg) only for paths the server derived
+ * itself, never from a request body.
  */
-async function resolveFfmpegInputArg(gcsPath) {
+async function resolveFfmpegInputArg(gcsPath, requestUserId) {
+    if (!pathOwnedBy(gcsPath, requestUserId)) {
+        console.warn(`[interviewRoutes] resolveFfmpegInputArg: user "${requestUserId}" is not the owner of "${gcsPath}" — denied`);
+        return null;
+    }
     if (storageConfig.bucket && !storageConfig.useLocalStorage) {
         const [signedUrl] = await storageConfig.bucket.file(gcsPath).getSignedUrl({
             version: 'v4',
@@ -85,6 +138,18 @@ async function resolveFfmpegInputArg(gcsPath) {
     }
     const uploadsDir = path.resolve(__dirname, '../uploads');
     const localPath  = path.resolve(uploadsDir, gcsPath.replace(/^raw\//, ''));
+    // SECURITY: gcsPath is client-supplied (request body) on every caller of
+    // this helper (refine-cut-frames, extractVideoFrame's callers, etc.).
+    // path.resolve() happily walks ".." segments out of uploadsDir, and
+    // nothing downstream re-checked that before this fix — a filename like
+    // "../../../../etc/passwd" would resolve outside uploads/ and get handed
+    // straight to ffmpeg. Only reachable in local-storage/dev mode (the GCS
+    // branch above uses the GCS SDK's object-key semantics, not a filesystem
+    // path, so it isn't affected the same way).
+    if (!localPath.startsWith(uploadsDir + path.sep) && localPath !== uploadsDir) {
+        console.warn(`[interviewRoutes] resolveFfmpegInputArg: rejected out-of-bounds path "${gcsPath}"`);
+        return null;
+    }
     if (!fs.existsSync(localPath)) return null;
     return localPath;
 }
@@ -92,10 +157,13 @@ async function resolveFfmpegInputArg(gcsPath) {
 /**
  * Extract one video frame at `timestampSec` from a GCS file or local file.
  * Returns a base64 JPEG string, or null on failure.
+ * `requestUserId` — see resolveFfmpegInputArg's doc; propagated so the IDOR
+ * guard applies here too, since every caller ultimately traces back to a
+ * client-supplied filename.
  */
-async function extractVideoFrame(gcsPath, timestampSec) {
+async function extractVideoFrame(gcsPath, timestampSec, requestUserId) {
     try {
-        const inputArg = await resolveFfmpegInputArg(gcsPath);
+        const inputArg = await resolveFfmpegInputArg(gcsPath, requestUserId);
         if (!inputArg) return null;
 
         // -ss before -i = fast seek; -vframes 1 = single frame; pipe: = stdout
@@ -126,7 +194,7 @@ async function extractVideoFrame(gcsPath, timestampSec) {
  *
  * Returns 'left' | 'right' | null on failure.
  */
-async function detectHostSideViaVision(words, speakers, filename) {
+async function detectHostSideViaVision(words, speakers, filename, requestUserId) {
     if (!process.env.OPENAI_API_KEY) return null;
     if (!filename || speakers.length < 2) return null;
 
@@ -144,7 +212,7 @@ async function detectHostSideViaVision(words, speakers, filename) {
                 return null;
             }
             const mid   = (turn.start + turn.end) / 2;
-            const frame = await extractVideoFrame(filename, mid);
+            const frame = await extractVideoFrame(filename, mid, requestUserId);
             if (!frame) return null;
             frames.push({ speaker, mid, frame });
         }
@@ -234,7 +302,7 @@ async function detectFacesInFrame(base64Frame, diarizeServiceUrl) {
  * MediaPipe face detection, and returns { [speaker]: 'left'|'right' }.
  * Returns null on any failure.
  */
-async function detectSpeakerSides(words, speakers, filename, diarizeServiceUrl) {
+async function detectSpeakerSides(words, speakers, filename, diarizeServiceUrl, requestUserId) {
     if (!diarizeServiceUrl || !filename) return null;
     if (speakers.length < 2) return null;
 
@@ -249,7 +317,7 @@ async function detectSpeakerSides(words, speakers, filename, diarizeServiceUrl) 
             }
 
             const midpoint = (turn.start + turn.end) / 2;
-            const frameB64 = await extractVideoFrame(filename, midpoint);
+            const frameB64 = await extractVideoFrame(filename, midpoint, requestUserId);
             if (!frameB64) continue;
 
             const faces = await detectFacesInFrame(frameB64, diarizeServiceUrl);
@@ -293,7 +361,7 @@ async function detectSpeakerSides(words, speakers, filename, diarizeServiceUrl) 
  *   frames: [{ speaker, people, anchor: { cx, cy, h } | null }]
  * }
  */
-async function detectSceneLayout(words, speakers, filename) {
+async function detectSceneLayout(words, speakers, filename, requestUserId) {
     if (!process.env.OPENAI_API_KEY || !filename) return null;
 
     try {
@@ -320,7 +388,7 @@ async function detectSceneLayout(words, speakers, filename) {
 
         const frames = [];
         for (const s of samples) {
-            const b64 = await extractVideoFrame(filename, s.t);
+            const b64 = await extractVideoFrame(filename, s.t, requestUserId);
             if (!b64) return null;
             frames.push({ ...s, b64 });
         }
@@ -398,12 +466,21 @@ const authOnly = isProd ? [authenticateUser] : [optionalAuth];
 // ── Shared path-resolution helper ─────────────────────────────────────────────
 // Mirrors the same guard used in silenceRoutes and audioRoutes so every route
 // enforces the same uploads/ boundary.
-function resolveUploadPath(filename, filePath) {
+// `requestUserId` (resolveRequestUserId(req)) — REQUIRED whenever filename came
+// from client input. Same IDOR fix as resolveFfmpegInputArg above: without
+// this, any authenticated user could pass another user's raw/{userId}/...
+// filename and get a valid local path back.
+function resolveUploadPath(filename, filePath, requestUserId) {
     const uploadsDir = path.resolve(__dirname, '../uploads');
 
     const normalized = (filename || '')
         .replace(/\\/g, '/')
         .replace(/^\/|\.\.\/|\.\.$/g, '');
+
+    if (!pathOwnedBy(normalized, requestUserId)) {
+        console.warn(`[interviewRoutes] resolveUploadPath: user "${requestUserId}" is not the owner of "${normalized}" — denied`);
+        return { error: 'Access denied: invalid file path', inputPath: null, uploadsDir };
+    }
 
     let inputPath = filePath
         ? path.resolve(filePath)
@@ -481,6 +558,7 @@ async function _extractClipFrames(filePath, offset, duration) {
 router.post('/rhythm-zoom', ...authAndGate, async (req, res) => {
     try {
         const { clips = [], words = [], style = 'dynamic' } = req.body;
+        const requestUserId = resolveRequestUserId(req);
 
         if (!clips.length) {
             return res.status(400).json({ error: 'No clips provided. Add video clips to the timeline first.' });
@@ -540,7 +618,7 @@ router.post('/rhythm-zoom', ...authAndGate, async (req, res) => {
                     const key = clip.assetName || String(clip.id);
                     if (assetPaths[key] !== undefined) continue;
                     if (!clip.assetName) { assetPaths[key] = null; continue; }
-                    const { error, inputPath } = resolveUploadPath(clip.assetName, null);
+                    const { error, inputPath } = resolveUploadPath(clip.assetName, null, requestUserId);
                     assetPaths[key] = (!error && inputPath && fs.existsSync(inputPath)) ? inputPath : null;
                 }
 
@@ -825,7 +903,8 @@ router.post('/analyze', ...authAndGate, async (req, res) => {
             return res.status(400).json({ error: 'Provide filename or filePath' });
         }
 
-        const { error, inputPath, uploadsDir, normalized } = resolveUploadPath(filename, filePath);
+        const requestUserId = resolveRequestUserId(req);
+        const { error, inputPath, uploadsDir, normalized } = resolveUploadPath(filename, filePath, requestUserId);
         if (error) return res.status(403).json({ error });
 
         const userId    = req.user?.id || (process.env.NODE_ENV !== 'production' ? 'dev-user' : null);
@@ -888,7 +967,8 @@ router.post('/split-speakers', ...authAndGate, async (req, res) => {
             return res.status(400).json({ error: 'Provide filename or filePath' });
         }
 
-        const { error, inputPath, normalized } = resolveUploadPath(filename, filePath);
+        const requestUserId = resolveRequestUserId(req);
+        const { error, inputPath, normalized } = resolveUploadPath(filename, filePath, requestUserId);
         if (error) return res.status(403).json({ error });
 
         const userId   = req.user?.id || (process.env.NODE_ENV !== 'production' ? 'dev-user' : null);
@@ -1027,6 +1107,7 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
 
     try {
         const { clips = [] } = req.body;
+        const requestUserId = resolveRequestUserId(req);
 
         if (!clips.length) {
             return res.status(400).json({ error: 'No clips provided.' });
@@ -1051,6 +1132,14 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
             if (assetPaths[key] !== undefined) continue;
 
             if (clip.filePath) {
+                // Same IDOR check as resolveUploadPath below — clip.filePath is
+                // client-supplied and previously only got the uploads/-boundary
+                // check, not an ownership check against the requesting user.
+                if (!pathOwnedBy(clip.filePath, requestUserId)) {
+                    console.warn(`[interviewRoutes] organize-clips: user "${requestUserId}" is not the owner of "${clip.filePath}" — denied`);
+                    assetPaths[key] = null;
+                    continue;
+                }
                 const abs = path.resolve(clip.filePath);
                 assetPaths[key] = abs.startsWith(uploadsDir) && fs.existsSync(abs) ? abs : null;
                 continue;
@@ -1058,7 +1147,7 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
 
             if (!clip.assetName) { assetPaths[key] = null; continue; }
 
-            const { error, inputPath } = resolveUploadPath(clip.assetName, null);
+            const { error, inputPath } = resolveUploadPath(clip.assetName, null, requestUserId);
             assetPaths[key] = (!error && inputPath && fs.existsSync(inputPath)) ? inputPath : null;
         }
 
@@ -1319,6 +1408,7 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
             roles    = {},          // { SPEAKER_00: 'interviewer'|'guest' } from identify-speakers (optional)
             hostSide: forcedHostSide,
         } = req.body;
+        const requestUserId = resolveRequestUserId(req);
 
         if (!words.length) {
             return res.status(400).json({ error: 'words array is required. Run speaker diarization first.' });
@@ -1340,7 +1430,7 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
 
         // Primary vision pass: real face anchors + on-screen person count.
         // Everything downstream degrades gracefully when this returns null.
-        const layout = await detectSceneLayout(words, orderedSpeakers, filename);
+        const layout = await detectSceneLayout(words, orderedSpeakers, filename, requestUserId);
 
         // Voice-off interviewer: diarization hears 2 speakers but only 1 person
         // is ever on camera → left/right duo crops would frame empty space.
@@ -1401,7 +1491,7 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
         // to GPT-4o-mini in a single call, and asks which side each active speaker
         // is on. Requires OPENAI_API_KEY and a resolvable filename (GCS or local).
         if (!hostSide && filename && speakers.length >= 2 && !effectiveSolo) {
-            const visionSide = await detectHostSideViaVision(words, orderedSpeakers, filename);
+            const visionSide = await detectHostSideViaVision(words, orderedSpeakers, filename, requestUserId);
             if (visionSide) {
                 hostSide     = visionSide;
                 faceDetected = true;
@@ -1413,7 +1503,7 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
         // Cross-checks the Vision result. If both agree, confidence is high.
         // If only pyannote is available (no OpenAI key), it acts as primary.
         if (!hostSide && filename && diarizeServiceUrl && speakers.length >= 2 && !effectiveSolo) {
-            const speakerSides = await detectSpeakerSides(words, orderedSpeakers, filename, diarizeServiceUrl);
+            const speakerSides = await detectSpeakerSides(words, orderedSpeakers, filename, diarizeServiceUrl, requestUserId);
             if (speakerSides?.[orderedSpeakers[0]]) {
                 hostSide     = speakerSides[orderedSpeakers[0]];
                 faceDetected = true;
@@ -1908,12 +1998,13 @@ router.post('/refine-cut-frames', ...authOnly, async (req, res) => {
     if (!Array.isArray(points) || points.length === 0) {
         return res.status(400).json({ error: 'points array is required' });
     }
+    const requestUserId = resolveRequestUserId(req);
 
     const capped = points.slice(0, CUT_FRAME_MAX_POINTS).filter(p => p && typeof p.t === 'number' && p.t >= 0);
     if (capped.length === 0) return res.json({ picks: [] });
 
     try {
-        const inputArg = await resolveFfmpegInputArg(filename);
+        const inputArg = await resolveFfmpegInputArg(filename, requestUserId);
         if (!inputArg) {
             return res.status(404).json({ error: `Could not locate source video: ${filename}` });
         }
