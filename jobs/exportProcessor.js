@@ -1130,3 +1130,8 @@ module.exports = async function processExportJob(job) {
         },
     };
 };
+
+module.exports.FONT_SPECS = FONT_SPECS;
+
+
+
