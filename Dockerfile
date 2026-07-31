@@ -59,30 +59,22 @@ COPY --from=frontend-build /app/client/dist ./client/dist
 # converted from .woff2 to .ttf with fonttools, then committed directly into
 # client/public/fonts/. Zero network dependency at build time or export time.
 #
-# This step just verifies the build actually contains what jobs/
-# exportProcessor.js's FONT_SPECS expects — if a font file is ever
-# accidentally deleted or renamed, the build fails loudly here instead of
-# silently producing wrong-font captions again. See CLAUDE.md EXT2: any new
-# font added to FONT_SPECS / TextPanel.jsx / CaptionStylesCard must have its
-# .ttf committed to client/public/fonts/ AND a line added below.
-RUN set -e && F=/usr/src/app/client/public/fonts && \
-    for name in Anton-Regular BebasNeue-Regular Montserrat-Bold Inter-Regular \
-        BarlowCondensed-Bold PlayfairDisplay-Regular Lora-Regular Merriweather-Regular \
-        DMSerifDisplay-Regular CormorantGaramond-Regular Nunito-Regular Poppins-Regular \
-        Quicksand-Regular JosefinSans-Regular Raleway-Regular Rajdhani-Regular Exo2-Regular \
-        Orbitron-Regular Oxanium-Regular RobotoCondensed-Regular Oswald-Regular Teko-Regular \
-        BlackHanSans-Regular SairaCondensed-Regular Cabin-Regular Caveat-Regular Pacifico-Regular \
-        Kalam-Regular Satisfy-Regular DancingScript-Regular Boogaloo-Regular Righteous-Regular \
-        PressStart2P-Regular Audiowide-Regular DMSans-Regular Unbounded-Regular; do \
-        if [ ! -s "${F}/${name}.ttf" ]; then \
-            echo "✗ Missing caption font: ${F}/${name}.ttf — commit it to client/public/fonts/ (see CLAUDE.md EXT2)"; \
-            exit 1; \
-        fi; \
-    done; \
-    echo "✓ All 36 caption fonts present"
+# ---- font gate ---------------------------------------------------------
+# Fonts are committed under client/public/fonts/. Nothing is downloaded
+# at build time. This check fails the build if any FONT_SPECS entry is
+# missing, truncated, or is an invalid font binary.
+RUN node scripts/verify-fonts.js
+
+# Make the vendored fonts visible to fontconfig too, so anything that resolves
+# by family name rather than absolute path finds them.
+RUN mkdir -p /usr/share/fonts/truetype \
+ && ln -sf /usr/src/app/client/public/fonts /usr/share/fonts/truetype/vibed \
+ && fc-cache -f \
+ && fc-list | grep -c . | xargs -I{} echo "[fonts] fontconfig sees {} faces"
 
 RUN chown -R node:node /usr/src/app
 USER node
+
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
