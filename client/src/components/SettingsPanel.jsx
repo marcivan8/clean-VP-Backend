@@ -5,9 +5,11 @@ import useTimelineStore from '../store/useTimelineStore';
 
 const SettingsPanel = () => {
     const { t } = useTranslation('editor');
-    const { aspectRatio, setAspectRatio } = useTimelineStore(useShallow(state => ({
-        aspectRatio:    state.aspectRatio,
-        setAspectRatio: state.setAspectRatio,
+    const { aspectRatio, setAspectRatio, previewQuality, setPreviewQuality } = useTimelineStore(useShallow(state => ({
+        aspectRatio:       state.aspectRatio,
+        setAspectRatio:    state.setAspectRatio,
+        previewQuality:    state.previewQuality,
+        setPreviewQuality: state.setPreviewQuality,
     })));
 
     return (
@@ -37,8 +39,8 @@ const SettingsPanel = () => {
                 <div className="space-y-1">
                     <label className="text-xs text-muted-foreground">{t('settings.previewQuality')}</label>
                     <select
-                        value={useTimelineStore.getState().previewQuality ?? 'high'}
-                        onChange={(e) => useTimelineStore.getState().setPreviewQuality(e.target.value)}
+                        value={previewQuality ?? 'high'}
+                        onChange={(e) => setPreviewQuality(e.target.value)}
                         className="w-full bg-secondary text-foreground text-xs p-2 rounded-md border border-border focus:outline-none focus:ring-1 focus:ring-primary"
                     >
                         <option value="high">{t('settings.qualityHigh')}</option>

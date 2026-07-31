@@ -1,0 +1,91 @@
+name: DAST (OWASP ZAP baseline)
+
+# Scheduled, non-blocking security scan against staging.
+# This workflow NEVER fails the run and NEVER blocks a deploy — it is purely
+# informational (see CLAUDE.md R28). Findings live in the uploaded HTML report
+# artifact; nothing here gates CI or deploy.yml.
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'   # every Monday, 03:00 UTC
+  workflow_dispatch: {}   # allow manual "run now" from the Actions tab
+
+jobs:
+  zap-baseline:
+    name: ZAP baseline scan (staging)
+    runs-on: ubuntu-latest
+    environment: staging   # reuses the same GitHub environment/secrets as deploy.yml's staging deploy
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Authenticate as the dedicated DAST test account ────────────────────
+      # Gets a real Supabase JWT so ZAP scans authenticated routes, not just
+      # /health and public endpoints. If this fails for any reason, the scan
+      # still runs unauthenticated rather than failing the job.
+      - name: Obtain test-account JWT
+        id: auth
+        env:
+          SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.STAGING_SUPABASE_ANON_KEY }}
+          DAST_TEST_EMAIL: ${{ secrets.DAST_TEST_EMAIL }}
+          DAST_TEST_PASSWORD: ${{ secrets.DAST_TEST_PASSWORD }}
+        run: |
+          set +e
+          if [ -z "$SUPABASE_URL" ] || [ -z "$DAST_TEST_EMAIL" ]; then
+            echo "::warning::DAST test-account secrets are not configured — scanning unauthenticated only."
+            echo "token=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          RESPONSE=$(curl -s -X POST "${SUPABASE_URL}/auth/v1/token?grant_type=password" \
+            -H "apikey: ${SUPABASE_ANON_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\"email\":\"${DAST_TEST_EMAIL}\",\"password\":\"${DAST_TEST_PASSWORD}\"}")
+
+          TOKEN=$(node -e "
+            let d='';
+            process.stdin.on('data', c => d += c);
+            process.stdin.on('end', () => {
+              try { console.log(JSON.parse(d).access_token || ''); }
+              catch (e) { console.log(''); }
+            });
+          " <<< "$RESPONSE")
+
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::Login did not return an access_token — scanning unauthenticated only."
+          fi
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      # ── Baseline scan ───────────────────────────────────────────────────────
+      # "Baseline" = passive scan only (no active attack payloads fired at
+      # staging) — spiders the app, inspects traffic, checks headers/cookies/
+      # TLS/known passive-detectable issues. Safe to run against a real
+      # environment on a schedule.
+      - name: ZAP baseline scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ secrets.STAGING_URL }}
+          cmd_options: >-
+            -config replacer.full_list(0).description=auth
+            -config replacer.full_list(0).enabled=true
+            -config replacer.full_list(0).matchtype=REQ_HEADER
+            -config replacer.full_list(0).matchstr=Authorization
+            -config replacer.full_list(0).regex=false
+            -config replacer.full_list(0).replacement="Bearer ${{ steps.auth.outputs.token }}"
+          artifact_name: zap-baseline-report
+          # Never fail the workflow or open a GitHub issue automatically —
+          # this is a scheduled informational scan, not a gate.
+          fail_action: false
+          allow_issue_writing: false
+
+      - name: Upload ZAP report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-baseline-report
+          path: |
+            report_html.html
+            report_json.json
+          retention-days: 30
+          if-no-files-found: warn

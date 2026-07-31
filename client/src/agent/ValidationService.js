@@ -1,4 +1,5 @@
 import useTimelineStore from '../store/useTimelineStore.js';
+import { authFetch } from '../utils/authFetch';
 
 /**
  * Validator Agent for Viral Pilot
@@ -574,7 +575,7 @@ export class ValidationService {
 
             try {
                 // Call API to verify file exists and get metadata
-                const response = await fetch('/api/media/verify', {
+                const response = await authFetch('/api/media/verify', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ file: result.output })

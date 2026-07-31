@@ -4,3 +4,5 @@
 # so COPY . . would bake all 303MB into the image).
 Social SFX Pack - Collection 1/
 .git
+ML_Dataset/
+ML_Models/
