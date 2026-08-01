@@ -125,13 +125,13 @@ jobs:
 
       - name: Deploy to staging
         if: github.ref_name == 'staging'
-        run: railway up --detach
+        run: railway up --detach --service clean-VP-Backend
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_STAGING }}
 
       - name: Deploy to production
         if: github.ref_name == 'main'
-        run: railway up --detach
+        run: railway up --detach --service clean-VP-Backend
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
 
