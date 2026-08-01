@@ -46,13 +46,40 @@ const SAMPLES_PER_WIN = Math.floor(SAMPLE_RATE / PEAKS_PER_SEC); // 441
 // are capped, without requiring the client to change how it calls this route
 // (callers just wait slightly longer under load instead of getting a 502).
 const WAVEFORM_MAX_CONCURRENT = 2;
+
+// How long a request may sit in the queue before we give up and tell the client
+// to retry. Without this, a queued request waits FOREVER — and "forever" in
+// practice means until Railway's edge gives up on the request and returns a
+// bare 502 with nothing in the app logs. That 502 is indistinguishable from a
+// crash, which is exactly how this presented: waveform extraction returning
+// 502 with no server-side error to point at. A queue that can't drain must
+// fail fast and say so, not hold the socket open.
+const WAVEFORM_QUEUE_WAIT_MS = 20_000;
+
+// Hard ceiling on a single ffmpeg decode. The GCS read stream feeding ffmpeg
+// can stall indefinitely (flaky object read, socket hang) — and because
+// extractPeaks only settles on ffmpeg's 'close' event, a stalled stream meant
+// that slot was held for the life of the process. Two stalls = the queue never
+// drains again and EVERY subsequent waveform request 502s until a redeploy.
+const WAVEFORM_FFMPEG_TIMEOUT_MS = 45_000;
+
 let _waveformActive = 0;
 const _waveformQueue = [];
 
 function withWaveformSlot(fn) {
     return new Promise((resolve, reject) => {
+        let timedOut = false;
+
         const run = async () => {
-            _waveformActive++;
+            if (timedOut) {
+                // Queue slot freed up after we already gave up — release it
+                // immediately so the next waiter isn't blocked by a no-op.
+                _waveformActive--;
+                const next = _waveformQueue.shift();
+                if (next) next();
+                return;
+            }
+            clearTimeout(waitTimer);
             try {
                 resolve(await fn());
             } catch (err) {
@@ -63,8 +90,20 @@ function withWaveformSlot(fn) {
                 if (next) next();
             }
         };
-        if (_waveformActive < WAVEFORM_MAX_CONCURRENT) run();
-        else _waveformQueue.push(run);
+
+        const waitTimer = setTimeout(() => {
+            timedOut = true;
+            const idx = _waveformQueue.indexOf(queuedRun);
+            if (idx !== -1) _waveformQueue.splice(idx, 1);
+            const err = new Error('Waveform extraction is busy — try again shortly.');
+            err.statusCode = 503;
+            reject(err);
+        }, WAVEFORM_QUEUE_WAIT_MS);
+
+        const queuedRun = () => { _waveformActive++; run(); };
+
+        if (_waveformActive < WAVEFORM_MAX_CONCURRENT) queuedRun();
+        else _waveformQueue.push(queuedRun);
     });
 }
 
@@ -84,24 +123,71 @@ function extractPeaks(inputPath, inputStream) {
             'pipe:1',
         ];
 
-        const ff = spawn(ffmpegPath, args, { stdio: ['pipe', 'pipe', 'ignore'] });
+        if (!ffmpegPath) {
+            return reject(new Error('ffmpeg-static binary not resolved — check the Docker image build'));
+        }
+
+        // stderr was 'ignore' — every failure here came back as a bare message
+        // with no way to tell a bad seek from an unreadable source. Capture the
+        // tail so the 500 body actually says something useful.
+        const ff = spawn(ffmpegPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+
+        let settled = false;
+        let stderrTail = '';
+        const finish = (err, val) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(killTimer);
+            if (err) reject(err); else resolve(val);
+        };
+
+        // A stalled GCS read stream used to hold this promise (and its
+        // concurrency slot) open indefinitely — see WAVEFORM_FFMPEG_TIMEOUT_MS.
+        const killTimer = setTimeout(() => {
+            try { ff.kill('SIGKILL'); } catch { /* already gone */ }
+            finish(new Error(`ffmpeg decode timed out after ${WAVEFORM_FFMPEG_TIMEOUT_MS / 1000}s. stderr: ${stderrTail.slice(-300)}`));
+        }, WAVEFORM_FFMPEG_TIMEOUT_MS);
 
         if (inputStream) {
             inputStream.pipe(ff.stdin);
-            inputStream.on('error', () => ff.stdin.destroy());
+            // Propagate the stream error instead of only destroying stdin and
+            // hoping ffmpeg notices. If ffmpeg didn't exit on its own, nothing
+            // ever settled this promise.
+            inputStream.on('error', (err) => {
+                try { ff.stdin.destroy(); } catch { /* noop */ }
+                try { ff.kill('SIGKILL'); } catch { /* noop */ }
+                finish(new Error(`source read failed: ${err.message}`));
+            });
             ff.stdin.on('error', () => {}); // suppress EPIPE when stream closes early
         }
 
         const chunks = [];
-        ff.stdout.on('data', chunk => chunks.push(chunk));
+        let pcmBytes = 0;
+        // Raw PCM at 22 050 Hz mono s16le is ~44 KB/s, so 200 MB ≈ 75 min of
+        // audio. Past that we're buffering a pathological input into the same
+        // heap the Express server runs in (R24) — refuse rather than OOM the
+        // process, which is itself a 502 generator.
+        const MAX_PCM_BYTES = 200 * 1024 * 1024;
 
-        ff.on('error', reject);
+        ff.stdout.on('data', chunk => {
+            pcmBytes += chunk.length;
+            if (pcmBytes > MAX_PCM_BYTES) {
+                try { ff.kill('SIGKILL'); } catch { /* noop */ }
+                finish(new Error('audio stream exceeded the peak-extraction size cap'));
+                return;
+            }
+            chunks.push(chunk);
+        });
+        ff.stderr.on('data', chunk => { stderrTail = (stderrTail + chunk.toString()).slice(-2000); });
+
+        ff.on('error', err => finish(new Error(`ffmpeg spawn failed: ${err.message}`)));
 
         ff.on('close', code => {
+            if (settled) return;
             const pcm = Buffer.concat(chunks);
 
             if (code !== 0 && pcm.length === 0) {
-                return reject(new Error(`ffmpeg exited with code ${code} and no output`));
+                return finish(new Error(`ffmpeg exited with code ${code} and no output. stderr: ${stderrTail.slice(-300)}`));
             }
 
             const sampleCount = Math.floor(pcm.length / 2); // s16le = 2 bytes/sample
@@ -120,7 +206,7 @@ function extractPeaks(inputPath, inputStream) {
                 peaks[i] = max / 32767;
             }
 
-            resolve({ peaks, duration: sampleCount / SAMPLE_RATE });
+            finish(null, { peaks, duration: sampleCount / SAMPLE_RATE });
         });
     });
 }
@@ -232,8 +318,18 @@ router.post('/extract', optionalAuth, async (req, res) => {
         return res.json({ peaksUrl, cached: false });
 
     } catch (err) {
-        console.error('[waveformRoutes] extract error:', err.message);
-        return res.status(500).json({ error: err.message });
+        // A queue-wait timeout is "busy, come back", not "broken" — the client's
+        // usePeaks retry handles it. Distinguishing it matters because the
+        // symptom it replaced (holding the socket until Railway's edge 502s)
+        // was unattributable from either side.
+        const status = err.statusCode || 500;
+        if (status === 503) {
+            console.warn(`[waveformRoutes] extract busy (queue depth ${_waveformQueue.length}, active ${_waveformActive}) for asset ${assetId}`);
+            res.set('Retry-After', '5');
+        } else {
+            console.error(`[waveformRoutes] extract error for asset ${assetId} (gcsPath=${gcsPath}):`, err.message);
+        }
+        return res.status(status).json({ error: err.message });
     }
 });
 

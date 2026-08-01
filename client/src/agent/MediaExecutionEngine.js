@@ -2239,7 +2239,18 @@ export class MediaExecutionEngine {
                 delete resolvedPayload.filename;
                 console.log(`[MediaExecutionEngine] Injected ${resolvedPayload.words.length} words for detect-repeated-takes`);
             } else {
-                console.warn('[MediaExecutionEngine] detect-repeated-takes: no transcript in store — endpoint will return no cuts');
+                // Bail with an actionable message rather than POSTing a payload
+                // the endpoint is guaranteed to reject (it 400s without `words`).
+                // Repeated-take detection is purely transcript-driven — there is
+                // no audio fallback — so "no transcript" is a precondition
+                // failure the user can actually fix, not a server error.
+                console.warn('[MediaExecutionEngine] detect-repeated-takes: no transcript in store — aborting');
+                return {
+                    engine: 'api',
+                    success: false,
+                    endpoint,
+                    error: 'Repetition removal needs a transcript. Run "Generate captions" first, then try again.',
+                };
             }
         }
 
@@ -2352,9 +2363,23 @@ export class MediaExecutionEngine {
             }
 
             // ── 6. Repeated-takes detection ───────────────────────────────
-            if (command.action === 'detectRepeatedTakes' && result?.activeSegments?.length > 0) {
-                console.log(`[MediaExecutionEngine] ✂️  detectRepeatedTakes: ${result.activeSegments.length} segments`);
-                this._applySegmentsToTimeline(result.activeSegments, 'take');
+            if (command.action === 'detectRepeatedTakes') {
+                const takeSegs = result?.activeSegments || [];
+                // removedCount === 0 means the backend scanned and found nothing
+                // to cut. Report that honestly instead of letting the generic
+                // API-success path claim the edit was applied — a command that
+                // says "done" over a visually identical timeline is the exact
+                // failure mode this whole path was rewired to eliminate.
+                if (takeSegs.length === 0 || result?.removedCount === 0) {
+                    return {
+                        engine: 'api',
+                        success: false,
+                        endpoint,
+                        error: 'No repeated takes found — nothing was changed. The transcript had no segments similar enough to be a re-take.',
+                    };
+                }
+                console.log(`[MediaExecutionEngine] ✂️  detectRepeatedTakes: ${takeSegs.length} segments, ${result?.removedCount ?? '?'} take(s) cut`);
+                this._applySegmentsToTimeline(takeSegs, 'take');
             }
 
             // ── 7. Auto captions ─────────────────────────────────────────
