@@ -97,6 +97,16 @@ jobs:
 
       - name: Apply migrations
         run: |
+          # psql silently falls back to a local Unix-socket connection when
+          # given an empty string instead of erroring — that's what produces
+          # the confusing "connection to server on socket ... failed" message
+          # when SUPABASE_DB_URL simply isn't set. Fail fast with a clear
+          # message instead of letting psql guess at a connection.
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "::error::SUPABASE_DB_URL is not set for this environment (${{ github.ref_name == 'main' && 'production' || 'staging' }})."
+            echo "::error::Add it under Settings → Environments → ${{ github.ref_name == 'main' && 'production' || 'staging' }} → Secrets."
+            exit 1
+          fi
           for f in $(ls migrations/*.sql | sort); do
             echo "Applying $f …"
             psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "$f"
