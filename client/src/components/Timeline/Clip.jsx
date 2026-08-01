@@ -2,6 +2,7 @@ import React from 'react';
 import { useDraggable, useDroppable, useDndContext } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { useShallow } from 'zustand/react/shallow';
+import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../../store/useTimelineStore';
 import useAIStore from '../../store/useAIStore';
 import classNames from 'classnames';
@@ -32,6 +33,7 @@ const getTabForClip = (clip, trackId) => {
 };
 
 const Clip = ({ clip, trackId }) => {
+    const { t } = useTranslation('editor');
     const { zoomLevel, removeClip, activeClipId, selectedClipIds, setActiveClip, toggleClipSelection, waveforms, assets, addWaveform } = useTimelineStore(useShallow(state => ({
         zoomLevel:            state.zoomLevel,
         removeClip:           state.removeClip,
@@ -370,7 +372,7 @@ const Clip = ({ clip, trackId }) => {
                     style={{ right: `${clip.transition.duration * zoomLevel - 4}px` }}
                     onMouseDown={handleTransitionResize}
                     onTouchStart={handleTransitionResize}
-                    title="Drag to change transition duration"
+                    title={t('timeline.dragTransitionDuration')}
                 >
                     <div className="h-4 w-0.5 bg-primary shadow-sm rounded-full"></div>
                 </div>

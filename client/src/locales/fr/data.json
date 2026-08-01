@@ -1,1 +1,40 @@
-{}
+{
+  "eyebrow": "Vos données",
+  "title": "Vos données, vos vidéos.",
+  "subtitle": "Nous avons conçu VIBED pour monter votre contenu — pas pour le collecter. Voici exactement ce qui arrive à vos fichiers, en langage simple.",
+  "cards": [
+    { "title": "Stockage", "value": "Google Cloud", "detail": "Chiffré au repos et en transit" },
+    { "title": "Suppression automatique", "value": "30 jours", "detail": "Offre gratuite · Pro conserve plus longtemps" },
+    { "title": "Entraînement IA", "value": "Jamais", "detail": "Votre contenu reste le vôtre" },
+    { "title": "Données vendues", "value": "Jamais", "detail": "Aucun partage avec des tiers" }
+  ],
+  "upload": {
+    "title": "Quand vous importez une vidéo",
+    "p1": "Votre fichier est importé directement sur Google Cloud Storage — la même infrastructure utilisée par des millions d'applications dans le monde. Il est chiffré en transit (TLS) et au repos (AES-256). Nous créons une version proxy allégée pour une lecture fluide dans l'éditeur. Votre fichier original n'est jamais modifié.",
+    "p2": "Vous seul pouvez accéder à vos fichiers. L'équipe VIBED ne peut pas parcourir vos projets. Personne d'autre ne voit vos rushs."
+  },
+  "aiProcessing": {
+    "title": "Quand l'IA traite votre vidéo",
+    "p1": "Lorsque vous tapez une commande — comme « supprimer les silences » ou « nettoyer les mots de remplissage » — votre vidéo est traitée sur nos serveurs à l'aide de FFmpeg, un outil audio et vidéo standard du secteur. L'IA interprète votre instruction et indique à FFmpeg quoi faire. C'est tout.",
+    "p2": "Votre vidéo n'est jamais envoyée à un quelconque pipeline d'entraînement IA. Elle n'est jamais utilisée pour améliorer un modèle. L'IA lit votre commande — pas vos rushs."
+  },
+  "deletion": {
+    "title": "Quand vos fichiers sont supprimés",
+    "p1": "Sur l'offre gratuite, vos fichiers de projet sont automatiquement supprimés après 7 jours d'inactivité. Nous vous envoyons un rappel par e-mail 24 heures avant la suppression afin que vous ayez toujours le temps d'exporter d'abord.",
+    "p2": "Sur Creator (15 €/mois), les fichiers sont conservés 30 jours. Sur Pro (35 €/mois), les fichiers sont conservés 90 jours et vos projets persistent tant que votre abonnement est actif.",
+    "p3": "Vous pouvez supprimer n'importe quel projet ou l'intégralité de votre compte à tout moment depuis votre tableau de bord. La suppression est définitive et immédiate."
+  },
+  "faq": {
+    "title": "Questions fréquentes",
+    "items": [
+      { "q": "Qui « possède » techniquement mes données ?", "a": "Vous. VIBED (le responsable du traitement) stocke vos fichiers sur Google Cloud Storage (le sous-traitant). Google ne peut pas accéder à votre contenu — ils fournissent uniquement l'infrastructure. Vos fichiers sont associés à votre compte et inaccessibles à quiconque d'autre." },
+      { "q": "Mon compte persiste-t-il si j'arrête de payer ?", "a": "Oui. Votre compte reste actif. Vos fichiers de projet suivent les règles de conservation de l'offre gratuite (suppression après 7 jours d'inactivité) jusqu'à ce que vous vous réabonniez ou exportiez votre travail. Vous ne perdrez jamais l'accès à votre compte lui-même." },
+      { "q": "Puis-je exporter mes données avant de supprimer mon compte ?", "a": "Oui. Vous pouvez exporter n'importe quel projet sous forme de fichier vidéo ou de fichier de projet pour Premiere Pro, Final Cut Pro ou DaVinci Resolve à tout moment depuis l'éditeur. Votre historique de montage est toujours disponible tant que votre projet existe." },
+      { "q": "VIBED est-il conforme au RGPD ?", "aPre": "Oui. VIBED opère sous le droit français et européen. Vous avez le droit d'accéder à vos données personnelles, de les corriger et de les supprimer à tout moment. Pour exercer ces droits, contactez-nous à l'adresse ci-dessous. Notre politique de confidentialité complète est disponible ", "aLinkText": "ici", "aPost": "." },
+      { "q": "Quelles données collectez-vous au-delà de mes vidéos ?", "a": "Votre adresse e-mail et vos identifiants d'authentification (stockés de manière sécurisée via Supabase), les métadonnées de vos projets (noms de fichiers, durées, historique de montage), et des analyses d'usage basiques (quelles fonctionnalités vous utilisez, à quelle fréquence). Nous ne collectons pas les détails de carte bancaire — ceux-ci sont entièrement gérés par Paddle, notre prestataire de paiement." }
+    ]
+  },
+  "cta": {
+    "prompt": "Des questions sur vos données ? Nous répondons sous 48 heures."
+  }
+}

@@ -11,6 +11,7 @@
  */
 
 import React, { useState, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search, Music2, Palette, Layers, Loader2, RefreshCw } from 'lucide-react';
 import { useAudioEngine }        from '../hooks/useAudioEngine.js';
 import useTimelineStore          from '../store/useTimelineStore.js';
@@ -21,9 +22,9 @@ import PresetCard                from './PresetCard.jsx';
 import PresetApprovalModal       from './PresetApprovalModal.jsx';
 
 const TABS = [
-    { key: 'sfx',     label: 'SFX',    icon: Music2  },
-    { key: 'luts',    label: 'Color',  icon: Palette },
-    { key: 'presets', label: 'Presets',icon: Layers  },
+    { key: 'sfx',     labelKey: 'assetPanel.tabSfx',     icon: Music2  },
+    { key: 'luts',    labelKey: 'assetPanel.tabColor',   icon: Palette },
+    { key: 'presets', labelKey: 'assetPanel.tabPresets', icon: Layers  },
 ];
 
 const PANEL = {
@@ -39,6 +40,7 @@ const PANEL = {
 };
 
 export default function AssetPanel({ onClose }) {
+    const { t } = useTranslation('editor');
     const [tab,          setTab]          = useState('sfx');
     const [query,        setQuery]        = useState('');
     const [approvalPreset, setApprovalPreset] = useState(null);
@@ -162,18 +164,18 @@ export default function AssetPanel({ onClose }) {
 
                 {/* Header */}
                 <div style={{ padding: '10px 14px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg)', letterSpacing: '-0.01em' }}>Assets</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg)', letterSpacing: '-0.01em' }}>{t('assetPanel.assets')}</span>
                 </div>
 
                 {/* Tabs */}
                 <div style={{ display: 'flex', gap: 2, padding: '8px 14px 0', borderBottom: '0.5px solid rgba(255,255,255,0.07)' }}>
-                    {TABS.map(t => {
-                        const Icon    = t.icon;
-                        const active  = tab === t.key;
+                    {TABS.map(tabItem => {
+                        const Icon    = tabItem.icon;
+                        const active  = tab === tabItem.key;
                         return (
                             <button
-                                key={t.key}
-                                onClick={() => setTab(t.key)}
+                                key={tabItem.key}
+                                onClick={() => setTab(tabItem.key)}
                                 style={{
                                     flex:         1,
                                     padding:      '5px 0 7px',
@@ -192,7 +194,7 @@ export default function AssetPanel({ onClose }) {
                                     transition:   'color 0.15s',
                                 }}
                             >
-                                <Icon size={11} /> {t.label}
+                                <Icon size={11} /> {t(tabItem.labelKey)}
                             </button>
                         );
                     })}
@@ -206,9 +208,9 @@ export default function AssetPanel({ onClose }) {
                             value={query}
                             onChange={e => setQuery(e.target.value)}
                             placeholder={
-                                tab === 'sfx'     ? 'whoosh, impact, comedy beat…'  :
-                                tab === 'luts'    ? 'cinematic, warm, vintage…'      :
-                                                   'color grade, captions, full edit…'
+                                tab === 'sfx'     ? t('assetPanel.searchPlaceholderSfx')  :
+                                tab === 'luts'    ? t('assetPanel.searchPlaceholderLuts')  :
+                                                   t('assetPanel.searchPlaceholderPresets')
                             }
                             style={{
                                 width:        '100%',
@@ -245,8 +247,8 @@ export default function AssetPanel({ onClose }) {
                         borderRadius: 6,
                         fontSize: 11, color: 'var(--accent)',
                     }}>
-                        Applied: {applyResult.executed?.join(', ')}
-                        {applyResult.skipped?.length > 0 && ` · skipped: ${applyResult.skipped.join(', ')}`}
+                        {t('assetPanel.applied')}: {applyResult.executed?.join(', ')}
+                        {applyResult.skipped?.length > 0 && ` · ${t('assetPanel.skipped')}: ${applyResult.skipped.join(', ')}`}
                     </div>
                 )}
 
@@ -267,7 +269,7 @@ export default function AssetPanel({ onClose }) {
                             {tab === 'sfx' && (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 4 }}>
                                     {sfxResults.length === 0 && !loading && (
-                                        <Empty label={query ? 'No results found — try a different keyword' : 'Search for a sound effect above'} />
+                                        <Empty label={query ? t('assetPanel.noResultsFoundTryDifferentKeyword') : t('assetPanel.searchForSoundEffectAbove')} />
                                     )}
                                     {sfxResults.map((r, i) => {
                                         const sfx = r.asset || r;
@@ -288,7 +290,7 @@ export default function AssetPanel({ onClose }) {
                             {tab === 'luts' && (
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, paddingTop: 4 }}>
                                     {lutResults.length === 0 && (
-                                        <div style={{ gridColumn: '1/-1' }}><Empty label="Search for a color style above" /></div>
+                                        <div style={{ gridColumn: '1/-1' }}><Empty label={t('assetPanel.searchForColorStyleAbove')} /></div>
                                     )}
                                     {lutResults.map((r, i) => {
                                         const lut = r.asset || r;
@@ -308,7 +310,7 @@ export default function AssetPanel({ onClose }) {
                             {tab === 'presets' && (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 4 }}>
                                     {presetResults.length === 0 && (
-                                        <Empty label="No presets found" />
+                                        <Empty label={t('assetPanel.noPresetsFound')} />
                                     )}
                                     {presetResults.map((r, i) => {
                                         const preset = r.asset || r;

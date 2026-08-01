@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft, ShieldCheck, Mail, Database, UserCheck, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 import { Logo } from '../components/Logo.jsx';
 
@@ -20,6 +21,11 @@ const Section = ({ title, children }) => (
 
 const GdprPage = () => {
     const navigate = useNavigate();
+    const { t } = useTranslation(['gdpr', 'common']);
+
+    const cards       = t('cards', { returnObjects: true });
+    const rightsIcons = [Database, Trash2, UserCheck, ShieldCheck];
+    const rightsItems = t('rights.items', { returnObjects: true });
 
     return (
         <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)' }}>
@@ -43,7 +49,7 @@ const GdprPage = () => {
                         onMouseEnter={e => e.currentTarget.style.color = 'var(--fg)'}
                         onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-3)'}
                     >
-                        <ArrowLeft size={14} /> Back to Vibed
+                        <ArrowLeft size={14} /> {t('common:nav.backToVibed')}
                     </button>
                     <Logo size={22} />
                 </div>
@@ -54,18 +60,18 @@ const GdprPage = () => {
                     <div style={{
                         fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)',
                         textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 16,
-                    }}>Compliance</div>
+                    }}>{t('eyebrow')}</div>
                     <h1 style={{
                         fontFamily: 'var(--f-display)', fontSize: 'clamp(32px, 5vw, 48px)',
                         fontWeight: 800, lineHeight: 1.15, color: 'var(--fg)', marginBottom: 20,
                     }}>
-                        GDPR & EU Rights
+                        {t('title')}
                     </h1>
                     <p style={{
                         fontFamily: 'var(--f-sans)', fontSize: 17, color: 'var(--fg-3)',
                         lineHeight: 1.75, maxWidth: 560,
                     }}>
-                        VIBED respects your privacy and complies strictly with the General Data Protection Regulation (GDPR). Here is how you can exercise your EU data rights.
+                        {t('subtitle')}
                     </p>
                 </div>
 
@@ -73,11 +79,7 @@ const GdprPage = () => {
                     display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16,
                     marginBottom: 56
                 }}>
-                    {[
-                        { title: 'Data Controller', value: 'Vibed SAS', detail: 'Determines the purposes of processing' },
-                        { title: 'Data Processor', value: 'Google Cloud Storage', detail: 'Provides secure hosting infrastructure' },
-                        { title: 'Data Location', value: 'us-central1', detail: 'With valid transfer mechanisms (SCCs)' },
-                    ].map(card => (
+                    {cards.map(card => (
                         <div key={card.title} style={{
                             padding: 20, background: 'var(--bg-2)', border: '0.5px solid var(--line-soft)',
                             borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 6
@@ -90,50 +92,34 @@ const GdprPage = () => {
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 40 }}>
-                    <Section title="Your Rights Under GDPR">
-                        <p>Under the General Data Protection Regulation (GDPR), you possess specific fundamental rights regarding your personal data:</p>
-                        
+                    <Section title={t('rights.sectionTitle')}>
+                        <p>{t('rights.intro')}</p>
+
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 12 }}>
-                            <div style={{ display: 'flex', gap: 14 }}>
-                                <Database className="w-5 h-5 text-accent mt-1 flex-shrink-0" />
-                                <div>
-                                    <div style={{ fontWeight: 600, color: 'var(--fg)' }}>Right to Access</div>
-                                    <div style={{ fontSize: 14, color: 'var(--fg-3)', lineHeight: 1.6 }}>You can request a complete copy of the personal data we hold about you.</div>
-                                </div>
-                            </div>
-                            <div style={{ display: 'flex', gap: 14 }}>
-                                <Trash2 className="w-5 h-5 text-accent mt-1 flex-shrink-0" />
-                                <div>
-                                    <div style={{ fontWeight: 600, color: 'var(--fg)' }}>Right to Erasure (Right to be Forgotten)</div>
-                                    <div style={{ fontSize: 14, color: 'var(--fg-3)', lineHeight: 1.6 }}>You can ask us to delete all your personal data, project files, and account information permanently.</div>
-                                </div>
-                            </div>
-                            <div style={{ display: 'flex', gap: 14 }}>
-                                <UserCheck className="w-5 h-5 text-accent mt-1 flex-shrink-0" />
-                                <div>
-                                    <div style={{ fontWeight: 600, color: 'var(--fg)' }}>Right to Rectification</div>
-                                    <div style={{ fontSize: 14, color: 'var(--fg-3)', lineHeight: 1.6 }}>You have the right to request that we correct any inaccurate or incomplete personal data.</div>
-                                </div>
-                            </div>
-                            <div style={{ display: 'flex', gap: 14 }}>
-                                <ShieldCheck className="w-5 h-5 text-accent mt-1 flex-shrink-0" />
-                                <div>
-                                    <div style={{ fontWeight: 600, color: 'var(--fg)' }}>Right to Object & Restrict Processing</div>
-                                    <div style={{ fontSize: 14, color: 'var(--fg-3)', lineHeight: 1.6 }}>You can object to our processing of your data, including processing for direct marketing or analytics.</div>
-                                </div>
-                            </div>
+                            {rightsItems.map((item, idx) => {
+                                const Icon = rightsIcons[idx];
+                                return (
+                                    <div key={idx} style={{ display: 'flex', gap: 14 }}>
+                                        {Icon && <Icon className="w-5 h-5 text-accent mt-1 flex-shrink-0" />}
+                                        <div>
+                                            <div style={{ fontWeight: 600, color: 'var(--fg)' }}>{item.title}</div>
+                                            <div style={{ fontSize: 14, color: 'var(--fg-3)', lineHeight: 1.6 }}>{item.text}</div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
                     </Section>
 
-                    <Section title="How to Exercise Your Rights">
-                        <p>To exercise any of these rights, simply email us from the address associated with your VIBED account. We process all Data Subject Access Requests (DSARs) within 30 days, entirely free of charge.</p>
+                    <Section title={t('exercise.sectionTitle')}>
+                        <p>{t('exercise.p1')}</p>
                         <div style={{
                             marginTop: 16, padding: 24, background: 'color-mix(in oklch, var(--accent) 8%, transparent)',
                             border: '0.5px solid color-mix(in oklch, var(--accent) 20%, transparent)',
                             borderRadius: 12, textAlign: 'center'
                         }}>
                             <p style={{ fontFamily: 'var(--f-sans)', fontSize: 15, color: 'var(--fg)', marginBottom: 8, fontWeight: 500 }}>
-                                Submit a GDPR Data Request
+                                {t('exercise.ctaPrompt')}
                             </p>
                             <a href="mailto:marc@vibedstudio.com" style={{ fontFamily: 'var(--f-mono)', fontSize: 14, color: 'var(--accent)', textDecoration: 'none' }}>
                                 marc@vibedstudio.com

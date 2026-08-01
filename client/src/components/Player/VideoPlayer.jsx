@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../../store/useTimelineStore';
 import CaptionOverlay from './CaptionOverlay';
 import TextOverlay from './TextOverlay';
@@ -66,6 +67,7 @@ function composeCropWithZoom(baseCrop, extraScale) {
 }
 
 const VideoPlayer = () => {
+    const { t } = useTranslation('editor');
     const canvasRef = useRef(null);
     const containerRef = useRef(null); // Added containerRef
     const engineRef = useRef(null); // Persist engine instance
@@ -536,7 +538,7 @@ const VideoPlayer = () => {
                         xmlns="http://www.w3.org/2000/svg">
                         <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
                     </svg>
-                    Generating preview…
+                    {t('player.generatingPreview')}
                 </div>
             )}
         </div>

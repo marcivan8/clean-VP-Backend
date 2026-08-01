@@ -1,1 +1,29 @@
-{}
+{
+  "eyebrow": "LÉGAL",
+  "title": "Politique relative aux cookies",
+  "lastUpdated": "Dernière mise à jour : juin 2026 · Vibed Studio",
+  "section1": {
+    "title": "Que sont les cookies ?",
+    "body": "Les cookies sont de petits fichiers texte déposés sur votre appareil lorsque vous visitez un site web. Ils sont largement utilisés pour faire fonctionner les sites web, ou les faire fonctionner plus efficacement, et pour fournir des informations à leurs propriétaires."
+  },
+  "section2": {
+    "title": "Les cookies que nous utilisons",
+    "durationLabel": "Durée :",
+    "items": [
+      { "name": "Authentification (Supabase)", "type": "Strictement nécessaire", "purpose": "Vous maintient connecté pendant votre session. Sans ce cookie, vous seriez déconnecté à chaque page.", "duration": "Session / 1 an" },
+      { "name": "Consentement aux cookies (Iubenda)", "type": "Strictement nécessaire", "purpose": "Enregistre vos préférences de consentement aux cookies afin de ne pas afficher la bannière à chaque visite.", "duration": "1 an" },
+      { "name": "Analyses", "type": "Optionnel", "purpose": "Nous n'utilisons actuellement aucun cookie d'analyse tiers. Si cela change, nous mettrons à jour cette politique et solliciterons un nouveau consentement.", "duration": "N/A" }
+    ]
+  },
+  "section3": {
+    "title": "Gérer vos préférences",
+    "p1": "Vous pouvez consulter et modifier vos préférences de cookies à tout moment en cliquant sur le lien des paramètres de cookies dans le pied de page. Vous pouvez également supprimer les cookies via les paramètres de votre navigateur — notez que cela peut affecter le fonctionnement du site.",
+    "p2Pre": "Pour plus de détails sur la façon dont nous traitons vos données personnelles, consultez notre ",
+    "p2LinkText": "Politique de confidentialité",
+    "p2Post": "."
+  },
+  "section4": {
+    "title": "Contact",
+    "p1Pre": "Des questions sur cette politique ? "
+  }
+}

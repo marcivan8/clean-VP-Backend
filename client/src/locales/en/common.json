@@ -5,7 +5,9 @@
     "about": "About",
     "logIn": "Log in",
     "startFree": "Start free",
-    "account": "Dashboard"
+    "account": "Dashboard",
+    "backToVibed": "Back to Vibed",
+    "back": "Back"
   },
   "actions": {
     "export": "Export",

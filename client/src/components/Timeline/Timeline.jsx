@@ -1,5 +1,6 @@
 import { useShallow } from 'zustand/react/shallow';
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import Track from './Track';
 import useTimelineStore from '../../store/useTimelineStore';
 import { Scissors, ZoomIn, ZoomOut, Copy, Type, Palette, Undo2, Redo2, ChevronsRight } from 'lucide-react';
@@ -10,6 +11,7 @@ const EDGE_ZONE  = 60;   // px from edge that triggers auto-scroll
 const SCROLL_SPD = 10;   // base px/frame; scales with proximity to edge
 
 const Timeline = () => {
+    const { t } = useTranslation('editor');
     const { tracks, duration, zoomLevel, seek, setZoomLevel, undo, redo, past, future } = useTimelineStore(useShallow(state => ({
         tracks:      state.tracks,
         duration:    state.duration,
@@ -352,7 +354,7 @@ const Timeline = () => {
                     {/* Undo / Redo */}
                     <button
                         className="p-1 rounded group transition-colors hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed"
-                        title="Undo (Cmd+Z)"
+                        title={t('timeline.undo')}
                         disabled={!past?.length}
                         onClick={() => undo()}
                     >
@@ -360,7 +362,7 @@ const Timeline = () => {
                     </button>
                     <button
                         className="p-1 rounded group transition-colors hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed"
-                        title="Redo (Cmd+Shift+Z)"
+                        title={t('timeline.redo')}
                         disabled={!future?.length}
                         onClick={() => redo()}
                     >
@@ -369,7 +371,7 @@ const Timeline = () => {
                     <div className="h-4 w-px mx-2" style={{ background: "var(--line-soft)" }}></div>
                     <button
                         className="p-1 rounded relative group transition-colors hover:bg-white/5"
-                        title="Split Clip (Cmd+B)"
+                        title={t('timeline.splitClipShortcut')}
                         onClick={() => {
                             const { activeClipId, tracks, splitClip, currentTime } = useTimelineStore.getState();
                             if (activeClipId) {
@@ -383,7 +385,7 @@ const Timeline = () => {
 
                     <button
                         className="p-1 rounded relative group transition-colors hover:bg-white/5"
-                        title="Duplicate Clip (Cmd+D)"
+                        title={t('timeline.duplicateClipShortcut')}
                         onClick={() => {
                             const { activeClipId, tracks, duplicateClip } = useTimelineStore.getState();
                             if (activeClipId) {
@@ -399,9 +401,9 @@ const Timeline = () => {
 
                     <button
                         className="p-1 rounded relative group transition-colors hover:bg-white/5"
-                        title="Add Text Overlay"
+                        title={t('timeline.addTextOverlay')}
                         onClick={() => {
-                            useTimelineStore.getState().addTextOverlay('New Text', 'center', 5, 'default');
+                            useTimelineStore.getState().addTextOverlay(t('timeline.newTextDefault'), 'center', 5, 'default');
                         }}
                     >
                         <Type className="w-3 h-3 text-muted-foreground group-hover:text-primary" />
@@ -410,7 +412,7 @@ const Timeline = () => {
                     <select
                         className="text-[10px] text-muted-foreground rounded px-1 py-0.5 border-none outline-none cursor-pointer hover:bg-white/10"
                         style={{ background: "var(--glass-2)", fontFamily: "var(--f-mono)" }}
-                        title="Add Transition"
+                        title={t('timeline.addTransition')}
                         value=""
                         onChange={(e) => {
                             const type = e.target.value;
@@ -420,16 +422,16 @@ const Timeline = () => {
                             e.target.value = "";
                         }}
                     >
-                        <option value="">+ Transition</option>
-                        <option value="fade">Fade Out</option>
-                        <option value="crossfade">Crossfade</option>
-                        <option value="slide">Slide Left</option>
-                        <option value="zoom">Zoom Out</option>
+                        <option value="">+ {t('timeline.transition')}</option>
+                        <option value="fade">{t('timeline.fadeOut')}</option>
+                        <option value="crossfade">{t('timeline.crossfade')}</option>
+                        <option value="slide">{t('timeline.slideLeft')}</option>
+                        <option value="zoom">{t('timeline.zoomOut')}</option>
                     </select>
 
                     <button
                         className="p-1 rounded relative group transition-colors hover:bg-white/5"
-                        title="Add Filter (Cinematic)"
+                        title={t('timeline.addFilterCinematic')}
                         onClick={() => {
                             const { activeClipId, addFilter } = useTimelineStore.getState();
                             if (activeClipId) addFilter(activeClipId, 'cinematic', 0.8);
@@ -443,7 +445,7 @@ const Timeline = () => {
                     <select
                         className="text-[10px] text-muted-foreground rounded px-1 py-0.5 border-none outline-none cursor-pointer hover:bg-white/10"
                         style={{ background: "var(--glass-2)", fontFamily: "var(--f-mono)" }}
-                        title="Aspect Ratio"
+                        title={t('timeline.aspectRatio')}
                         value={useTimelineStore(state => state.aspectRatio)}
                         onChange={(e) => useTimelineStore.getState().setAspectRatio(e.target.value)}
                     >
@@ -460,7 +462,7 @@ const Timeline = () => {
                     <select
                         className="text-[10px] text-muted-foreground rounded px-1 py-0.5 border-none outline-none cursor-pointer hover:bg-white/10"
                         style={{ background: "var(--glass-2)", fontFamily: "var(--f-mono)" }}
-                        title="Playback Speed"
+                        title={t('timeline.playbackSpeed')}
                         value={(() => {
                             const { activeClipId, tracks } = useTimelineStore.getState();
                             const track = tracks.find(t => t.clips.find(c => c.id === activeClipId));
@@ -536,7 +538,7 @@ const Timeline = () => {
                                 key={`beat-${idx}`}
                                 className="absolute bottom-0 h-2 w-px bg-purple-500/80 pointer-events-none"
                                 style={{ left: `${beatTime * zoomLevel}px` }}
-                                title={`Beat ${idx + 1}`}
+                                title={t('timeline.beatN', { n: idx + 1 })}
                             />
                         ))}
                     </div>

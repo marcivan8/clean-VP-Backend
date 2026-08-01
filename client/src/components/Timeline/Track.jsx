@@ -1,6 +1,7 @@
 import React from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { useShallow } from 'zustand/react/shallow';
+import { useTranslation } from 'react-i18next';
 import Clip from './Clip';
 import { Video, Music, Type, Volume2, VolumeX, Headphones, X } from 'lucide-react';
 import classNames from 'classnames';
@@ -16,6 +17,7 @@ const TrackIcon = ({ type }) => {
 };
 
 const Track = ({ track }) => {
+    const { t } = useTranslation('editor');
     const { zoomLevel, duration } = useTimelineStore(useShallow(state => ({
         zoomLevel: state.zoomLevel,
         duration:  state.duration,
@@ -45,7 +47,7 @@ const Track = ({ track }) => {
                     <button
                         onClick={() => useTimelineStore.getState().removeTrack(track.id)}
                         className="opacity-0 group-hover/header:opacity-100 transition-opacity shrink-0 w-4 h-4 rounded flex items-center justify-center hover:bg-red-500/20 hover:text-red-400 text-muted-foreground"
-                        title="Delete track"
+                        title={t('timeline.deleteTrack')}
                     >
                         <X className="w-2.5 h-2.5" />
                     </button>
@@ -60,7 +62,7 @@ const Track = ({ track }) => {
                                 "w-5 h-5 rounded flex items-center justify-center transition-colors",
                                 track.muted ? "bg-red-500/20 text-red-500" : "bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white"
                             )}
-                            title="Mute Track"
+                            title={t('timeline.muteTrack')}
                         >
                             {track.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
                         </button>
@@ -70,7 +72,7 @@ const Track = ({ track }) => {
                                 "w-5 h-5 rounded flex items-center justify-center transition-colors",
                                 track.solo ? "bg-yellow-500/20 text-yellow-500" : "bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white"
                             )}
-                            title="Solo Track"
+                            title={t('timeline.soloTrack')}
                         >
                             <Headphones className="w-3 h-3" />
                         </button>

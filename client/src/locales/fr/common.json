@@ -5,7 +5,9 @@
     "about": "À propos",
     "logIn": "Connexion",
     "startFree": "Commencer",
-    "account": "Tableau de bord"
+    "account": "Tableau de bord",
+    "backToVibed": "Retour à Vibed",
+    "back": "Retour"
   },
   "actions": {
     "export": "Exporter",

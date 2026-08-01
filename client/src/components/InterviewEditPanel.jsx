@@ -20,6 +20,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../store/useTimelineStore';
 import { authFetch }    from '../utils/authFetch.js';
 
@@ -28,24 +29,24 @@ import { authFetch }    from '../utils/authFetch.js';
 const STYLES = [
     {
         id:    'subtle',
-        label: 'Subtle',
+        labelKey: 'interviewPanel.styleSubtle',
         desc:  'Wide ×1.00 · Med ×1.06 · Close ×1.12',
         icon:  '🟢',
-        note:  'Calm interviews, corporate talking-head',
+        noteKey: 'interviewPanel.styleSubtleNote',
     },
     {
         id:    'dynamic',
-        label: 'Dynamic',
+        labelKey: 'interviewPanel.styleDynamic',
         desc:  'Wide ×1.00 · Med ×1.10 · Close ×1.20',
         icon:  '🟡',
-        note:  'YouTube, podcasts, reels',
+        noteKey: 'interviewPanel.styleDynamicNote',
     },
     {
         id:    'cinematic',
-        label: 'Cinematic',
+        labelKey: 'interviewPanel.styleCinematic',
         desc:  'Wide ×1.00 · Med ×1.12 · Close ×1.26',
         icon:  '🔴',
-        note:  'Documentary, film-style drama',
+        noteKey: 'interviewPanel.styleCinematicNote',
     },
 ];
 
@@ -60,6 +61,7 @@ const TYPE_LABEL = { wide: 'W', medium: 'M', close: 'C' };
 // Shows each clip as a coloured block — W/M/C — so the user can see the
 // camera-angle rhythm before applying.
 function ShotStrip({ clipZooms, clips }) {
+    const { t } = useTranslation('editor');
     if (!clipZooms?.length) return null;
 
     // Total timeline duration for proportional widths
@@ -68,7 +70,7 @@ function ShotStrip({ clipZooms, clips }) {
     return (
         <div>
             <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">
-                Shot sequence preview
+                {t('interviewPanel.shotSequencePreview')}
             </div>
             <div className="flex w-full h-7 rounded overflow-hidden gap-px" style={{ background: 'var(--secondary)' }}>
                 {clipZooms.map((cz, i) => {
@@ -84,7 +86,7 @@ function ShotStrip({ clipZooms, clips }) {
                                 background: color,
                                 opacity:    cz.type === 'wide' ? 0.5 : 1,
                             }}
-                            title={`Clip ${i + 1} · ${cz.type} · ×${cz.scale} · ${dur.toFixed(1)}s`}
+                            title={t('interviewPanel.clipTitle', { n: i + 1, type: cz.type, scale: cz.scale, duration: dur.toFixed(1) })}
                         >
                             {pct > 2 ? TYPE_LABEL[cz.type] : ''}
                         </div>
@@ -95,7 +97,7 @@ function ShotStrip({ clipZooms, clips }) {
                 {Object.entries(TYPE_COLOR).map(([type, color]) => (
                     <div key={type} className="flex items-center gap-1 text-[9px] text-muted-foreground">
                         <div className="w-2 h-2 rounded-sm" style={{ background: color }} />
-                        {type}
+                        {t(`interviewPanel.shotType.${type}`, type)}
                     </div>
                 ))}
             </div>
@@ -105,6 +107,7 @@ function ShotStrip({ clipZooms, clips }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function InterviewEditPanel() {
+    const { t } = useTranslation('editor');
     const [style,   setStyle]   = useState('dynamic');
     const [phase,   setPhase]   = useState('idle');   // idle | loading | done | error | applying
     const [msg,     setMsg]     = useState('');
@@ -134,7 +137,7 @@ export default function InterviewEditPanel() {
     // ── Generate ──────────────────────────────────────────────────────────────
     const handleGenerate = async () => {
         setPhase('loading');
-        setMsg('Scoring clips…');
+        setMsg(t('interviewPanel.scoringClips'));
         setResult(null);
         setApplied(false);
 
@@ -159,7 +162,7 @@ export default function InterviewEditPanel() {
             setMsg('');
         } catch (err) {
             setPhase('error');
-            setMsg(err.message || 'Analysis failed');
+            setMsg(err.message || t('interviewPanel.analysisFailed'));
         }
     };
 
@@ -191,7 +194,7 @@ export default function InterviewEditPanel() {
                 setPhase('done');
             } catch (e) {
                 setPhase('error');
-                setMsg(`Failed to apply: ${e.message}`);
+                setMsg(t('interviewPanel.failedToApply', { message: e.message }));
             }
         }, 40);
     };
@@ -218,10 +221,9 @@ export default function InterviewEditPanel() {
 
             {/* Header */}
             <div>
-                <div className="studio-mono-label mb-1">SMART ZOOM RHYTHM</div>
+                <div className="studio-mono-label mb-1">{t('interviewPanel.smartZoomRhythm')}</div>
                 <p className="text-[11px] text-muted-foreground leading-snug">
-                    Each cut is treated as a camera switch. GPT reads only the words
-                    that survived the edit and assigns Wide / Medium / Close to each shot.
+                    {t('interviewPanel.smartZoomRhythmDesc')}
                 </p>
             </div>
 
@@ -229,10 +231,9 @@ export default function InterviewEditPanel() {
             {noClips && (
                 <div className="text-[11px] rounded-md px-3 py-2.5 leading-snug"
                      style={{ background: 'rgb(239 68 68 / 0.1)', color: '#f87171', border: '1px solid rgb(239 68 68 / 0.3)' }}>
-                    <strong>No segments found.</strong> Run <em>Silence Removal</em> first — each
-                    cut it creates becomes a camera shot.
+                    <strong>{t('interviewPanel.noSegmentsFound')}</strong> {t('interviewPanel.runSilenceRemovalHint')}
                     <div className="mt-1 text-[10px] opacity-70">
-                        {clipDescriptors.length === 1 ? '1 clip found (need ≥ 2)' : 'No video clips on timeline.'}
+                        {clipDescriptors.length === 1 ? t('interviewPanel.oneClipFoundNeedTwo') : t('interviewPanel.noVideoClipsOnTimeline')}
                     </div>
                 </div>
             )}
@@ -240,22 +241,21 @@ export default function InterviewEditPanel() {
             {!noClips && noCaptions && (
                 <div className="text-[11px] rounded-md px-3 py-2.5 leading-snug"
                      style={{ background: 'rgb(245 158 11 / 0.1)', color: '#fbbf24', border: '1px solid rgb(245 158 11 / 0.3)' }}>
-                    <strong>No transcript found.</strong> Run <em>Auto-Captions</em> so GPT can
-                    read what's being said in each shot.
+                    <strong>{t('interviewPanel.noTranscriptFound')}</strong> {t('interviewPanel.runAutoCaptionsHint2')}
                 </div>
             )}
 
             {/* Clips summary */}
             {!noClips && !noCaptions && (
                 <div className="flex gap-3 text-[11px] text-muted-foreground">
-                    <span>🎬 <strong className="text-foreground">{clipDescriptors.length}</strong> shots</span>
-                    <span>📝 <strong className="text-foreground">{captions.length}</strong> words</span>
+                    <span>🎬 <strong className="text-foreground">{clipDescriptors.length}</strong> {t('interviewPanel.shots')}</span>
+                    <span>📝 <strong className="text-foreground">{captions.length}</strong> {t('interviewPanel.words')}</span>
                 </div>
             )}
 
             {/* Style selector */}
             <div className="space-y-1.5">
-                <div className="studio-mono-label">CAMERA STYLE</div>
+                <div className="studio-mono-label">{t('interviewPanel.cameraStyle')}</div>
                 {STYLES.map(s => (
                     <button
                         key={s.id}
@@ -273,9 +273,9 @@ export default function InterviewEditPanel() {
                     >
                         <span className="mt-0.5 text-sm">{s.icon}</span>
                         <div>
-                            <div className="text-xs font-semibold leading-tight">{s.label}</div>
+                            <div className="text-xs font-semibold leading-tight">{t(s.labelKey)}</div>
                             <div className="text-[10px] text-muted-foreground font-mono mt-0.5">{s.desc}</div>
-                            <div className="text-[10px] text-muted-foreground/70 mt-0.5">{s.note}</div>
+                            <div className="text-[10px] text-muted-foreground/70 mt-0.5">{t(s.noteKey)}</div>
                         </div>
                     </button>
                 ))}
@@ -289,20 +289,20 @@ export default function InterviewEditPanel() {
                     className="w-full py-2.5 rounded-md text-sm font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
                 >
-                    🎥 Assign Camera Shots
+                    🎥 {t('interviewPanel.assignCameraShots')}
                 </button>
             )}
 
             {phase === 'loading' && (
                 <div className="flex items-center gap-2 text-[11px] text-muted-foreground py-1">
                     <span className="animate-spin">⏳</span>
-                    <span>{msg || 'GPT scoring each shot…'}</span>
+                    <span>{msg || t('interviewPanel.gptScoringEachShot')}</span>
                 </div>
             )}
 
             {phase === 'applying' && (
                 <div className="text-center text-[11px] text-muted-foreground py-2">
-                    Applying zoom keyframes…
+                    {t('interviewPanel.applyingZoomKeyframes')}
                 </div>
             )}
 
@@ -320,9 +320,9 @@ export default function InterviewEditPanel() {
                     {summary && (
                         <div className="grid grid-cols-3 gap-2 text-center">
                             {[
-                                { label: 'Wide', val: summary.counts?.wide  ?? 0, color: TYPE_COLOR.wide },
-                                { label: 'Med',  val: summary.counts?.medium ?? 0, color: TYPE_COLOR.medium },
-                                { label: 'Close',val: summary.counts?.close  ?? 0, color: TYPE_COLOR.close },
+                                { label: t('interviewPanel.wide'), val: summary.counts?.wide  ?? 0, color: TYPE_COLOR.wide },
+                                { label: t('interviewPanel.med'),  val: summary.counts?.medium ?? 0, color: TYPE_COLOR.medium },
+                                { label: t('interviewPanel.close'),val: summary.counts?.close  ?? 0, color: TYPE_COLOR.close },
                             ].map(({ label, val, color }) => (
                                 <div key={label} className="rounded-lg px-2 py-1.5"
                                      style={{ background: `${color}18`, border: `1px solid ${color}40` }}>
@@ -340,18 +340,18 @@ export default function InterviewEditPanel() {
                     {applied ? (
                         <div className="space-y-2">
                             <div className="text-center text-xs text-green-400 font-semibold py-1">
-                                ✅ Applied — play the video to preview zoom rhythm
+                                ✅ {t('interviewPanel.appliedPreviewHint')}
                             </div>
                             <div className="flex gap-2">
                                 <button onClick={handleClear}
                                     className="flex-1 py-2 rounded-md text-xs font-medium"
                                     style={{ background: 'var(--secondary)' }}>
-                                    🗑 Clear Zoom
+                                    🗑 {t('interviewPanel.clearZoom')}
                                 </button>
                                 <button onClick={() => { setPhase('idle'); setResult(null); setApplied(false); }}
                                     className="flex-1 py-2 rounded-md text-xs font-medium"
                                     style={{ background: 'var(--secondary)' }}>
-                                    Re-generate
+                                    {t('interviewPanel.regenerate')}
                                 </button>
                             </div>
                         </div>
@@ -360,12 +360,12 @@ export default function InterviewEditPanel() {
                             <button onClick={handleApply}
                                 className="w-full py-2.5 rounded-md text-sm font-semibold"
                                 style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}>
-                                ✨ Apply to Timeline
+                                ✨ {t('interviewPanel.applyToTimeline')}
                             </button>
                             <button onClick={() => { setPhase('idle'); setResult(null); }}
                                 className="w-full py-1.5 rounded-md text-xs text-muted-foreground hover:text-foreground"
                                 style={{ background: 'var(--secondary)' }}>
-                                Re-generate
+                                {t('interviewPanel.regenerate')}
                             </button>
                         </div>
                     )}
@@ -375,13 +375,13 @@ export default function InterviewEditPanel() {
             {/* How it works (idle only) */}
             {phase === 'idle' && (
                 <div className="border-t border-border/40 pt-3 space-y-1.5">
-                    <div className="studio-mono-label">HOW IT WORKS</div>
+                    <div className="studio-mono-label">{t('interviewPanel.howItWorks')}</div>
                     {[
-                        ['✂️', 'Each existing cut = one camera shot'],
-                        ['📝', 'GPT reads only the surviving words per shot'],
-                        ['🎯', 'Wide / Medium / Close assigned per shot'],
-                        ['⚡', 'One static scale applied at t=0 — no mid-clip animation'],
-                        ['🎬', 'Face stays centered (50% 28% anchor) on all zoom levels'],
+                        ['✂️', t('interviewPanel.howItWorks1')],
+                        ['📝', t('interviewPanel.howItWorks2')],
+                        ['🎯', t('interviewPanel.howItWorks3')],
+                        ['⚡', t('interviewPanel.howItWorks4')],
+                        ['🎬', t('interviewPanel.howItWorks5')],
                     ].map(([icon, text]) => (
                         <div key={text} className="flex gap-2 text-[10px] text-muted-foreground">
                             <span>{icon}</span><span>{text}</span>

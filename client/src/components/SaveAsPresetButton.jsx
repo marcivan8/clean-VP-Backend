@@ -17,10 +17,12 @@
  */
 
 import React, { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Bookmark, Check, Loader2, X } from 'lucide-react';
 import { audioEngineAPI } from '../audio-engine/AudioEngineAPI.js';
 
 export default function SaveAsPresetButton({ presetType, defaultName, buildSettings, disabled = false }) {
+    const { t } = useTranslation('editor');
     const [open, setOpen] = useState(false);
     const [name, setName] = useState(defaultName || '');
     const [status, setStatus] = useState('idle'); // idle | saving | done | error
@@ -35,7 +37,7 @@ export default function SaveAsPresetButton({ presetType, defaultName, buildSetti
 
     const handleSave = useCallback(async () => {
         const trimmed = name.trim();
-        if (!trimmed) { setError('Give it a name first'); return; }
+        if (!trimmed) { setError(t('saveAsPreset.giveItAName')); return; }
 
         setStatus('saving');
         setError('');
@@ -51,7 +53,7 @@ export default function SaveAsPresetButton({ presetType, defaultName, buildSetti
             setTimeout(reset, 1600);
         } catch (err) {
             setStatus('error');
-            setError(err.message || 'Could not save preset');
+            setError(err.message || t('saveAsPreset.couldNotSavePreset'));
         }
     }, [name, presetType, buildSettings, reset]);
 
@@ -72,7 +74,7 @@ export default function SaveAsPresetButton({ presetType, defaultName, buildSetti
                 onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
                 onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
             >
-                <Bookmark size={11} /> Save as preset
+                <Bookmark size={11} /> {t('saveAsPreset.saveAsPreset')}
             </button>
         );
     }
@@ -85,7 +87,7 @@ export default function SaveAsPresetButton({ presetType, defaultName, buildSetti
         }}>
             {status === 'done' ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#00c97a', fontSize: 11, fontFamily: 'var(--f-mono)', justifyContent: 'center', padding: '4px 0' }}>
-                    <Check size={12} /> Saved to My Presets
+                    <Check size={12} /> {t('saveAsPreset.savedToMyPresets')}
                 </div>
             ) : (
                 <>
@@ -94,7 +96,7 @@ export default function SaveAsPresetButton({ presetType, defaultName, buildSetti
                         value={name}
                         onChange={e => setName(e.target.value)}
                         onKeyDown={e => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') reset(); }}
-                        placeholder="Preset name…"
+                        placeholder={t('saveAsPreset.presetNamePlaceholder')}
                         disabled={status === 'saving'}
                         style={{
                             width: '100%', boxSizing: 'border-box', padding: '6px 8px',
@@ -118,7 +120,7 @@ export default function SaveAsPresetButton({ presetType, defaultName, buildSetti
                             }}
                         >
                             {status === 'saving' ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Bookmark size={11} />}
-                            Save
+                            {t('saveAsPreset.save')}
                         </button>
                         <button
                             onClick={reset}

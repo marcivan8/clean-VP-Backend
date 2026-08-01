@@ -27,9 +27,9 @@ const RESOLUTIONS = [
 ];
 
 const QUALITY_PROFILES = [
-    { id: 'high',   label: 'Pro',    bitrate: '8 Mbps',  sub: 'Max bitrate'  },
-    { id: 'medium', label: 'Social', bitrate: '5 Mbps',  sub: 'Balanced'     },
-    { id: 'low',    label: 'Draft',  bitrate: '2 Mbps',  sub: 'Fast render'  },
+    { id: 'high',   labelKey: 'exportModal.qualityPro',    bitrate: '8 Mbps',  subKey: 'exportModal.qualityMaxBitrate'  },
+    { id: 'medium', labelKey: 'exportModal.qualitySocial', bitrate: '5 Mbps',  subKey: 'exportModal.qualityBalanced'     },
+    { id: 'low',    labelKey: 'exportModal.qualityDraft',  bitrate: '2 Mbps',  subKey: 'exportModal.qualityFastRender'  },
 ];
 
 // Two render pipelines live side by side (see CLAUDE.md NODE 1 · SYSTEM ARCHITECTURE):
@@ -39,8 +39,8 @@ const QUALITY_PROFILES = [
 //             faithful, but it depends on backend env vars that may not be configured
 //             on every deployment (see routes/revideoRenderRoutes.js).
 const RENDER_ENGINES = [
-    { id: 'ffmpeg',  label: 'Standard',  sub: 'Fast · stable' },
-    { id: 'revideo', label: 'Cinematic', sub: 'Chromium render', beta: true },
+    { id: 'ffmpeg',  labelKey: 'exportModal.engineStandard',  subKey: 'exportModal.engineFastStable' },
+    { id: 'revideo', labelKey: 'exportModal.engineCinematic', subKey: 'exportModal.engineChromiumRender', beta: true },
 ];
 
 const AUDIO_FORMATS = [
@@ -368,7 +368,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                                     style={selCard(active)}
                                                 >
                                                     <span style={{ fontSize: 13, fontWeight: 600, color: active ? 'var(--fg)' : 'var(--fg-2)' }}>
-                                                        {q.label}
+                                                        {t(q.labelKey)}
                                                     </span>
                                                     <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: active ? 'color-mix(in oklch, var(--accent) 80%, var(--fg-3))' : 'var(--fg-4)', letterSpacing: '0.02em' }}>
                                                         {q.bitrate}
@@ -381,7 +381,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
 
                                 {/* Render Engine */}
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                    <Label>Render Engine</Label>
+                                    <Label>{t('exportModal.renderEngine')}</Label>
                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                                         {RENDER_ENGINES.map(eng => {
                                             const active = settings.engine === eng.id;
@@ -393,7 +393,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                                 >
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                                         <span style={{ fontSize: 13, fontWeight: 600, color: active ? 'var(--fg)' : 'var(--fg-2)', letterSpacing: '-0.005em' }}>
-                                                            {eng.label}
+                                                            {t(eng.labelKey)}
                                                         </span>
                                                         {eng.beta && (
                                                             <span style={{
@@ -403,12 +403,12 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                                                 border: '0.5px solid color-mix(in oklch, var(--accent) 28%, transparent)',
                                                                 color: 'var(--accent)',
                                                             }}>
-                                                                BETA
+                                                                {t('exportModal.beta')}
                                                             </span>
                                                         )}
                                                     </div>
                                                     <p style={{ margin: 0, fontFamily: 'var(--f-mono)', fontSize: 10, color: active ? 'var(--fg-3)' : 'var(--fg-4)', letterSpacing: '0.04em' }}>
-                                                        {eng.sub}
+                                                        {t(eng.subKey)}
                                                     </p>
                                                 </button>
                                             );
@@ -416,7 +416,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                     </div>
                                     {settings.engine === 'revideo' && (
                                         <p style={{ margin: 0, fontSize: 10.5, color: 'var(--fg-4)', fontFamily: 'var(--f-mono)', lineHeight: 1.5 }}>
-                                            Renders through a real browser engine for more accurate fonts/effects. Requires the Lambda render worker to be configured on this deployment — if it isn't, you'll see an error and can fall back to Standard.
+                                            {t('exportModal.revideoWarning')}
                                         </p>
                                     )}
                                 </div>
@@ -840,10 +840,10 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
 
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                                 {[
-                                    ['Premiere Pro',    'File → Import → .xml'],
-                                    ['Final Cut Pro',   'File → Import → XML'],
-                                    ['DaVinci Resolve', '.xml + .otio (Resolve 18+)'],
-                                    ['OpenTimelineIO',  'Universal — Resolve, Premiere (beta), Kdenlive 20+'],
+                                    ['Premiere Pro',    t('exportModal.nleHintPremiere')],
+                                    ['Final Cut Pro',   t('exportModal.nleHintFcpx')],
+                                    ['DaVinci Resolve', t('exportModal.nleHintResolve')],
+                                    ['OpenTimelineIO',  t('exportModal.nleHintOtio')],
                                 ].map(([app, hint]) => (
                                     <div key={app} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
                                         <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)', minWidth: 110 }}>{app}</span>

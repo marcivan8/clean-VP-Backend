@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
     Key,
     Plus,
@@ -16,11 +17,11 @@ import {
 
 // Easing curves
 const EASING_OPTIONS = [
-    { value: 'linear', label: 'Linear', path: 'M0,1 L1,0' },
-    { value: 'ease-in', label: 'Ease In', path: 'M0,1 C0.42,1 1,0 1,0' },
-    { value: 'ease-out', label: 'Ease Out', path: 'M0,1 C0,1 0.58,0 1,0' },
-    { value: 'ease-in-out', label: 'Ease In Out', path: 'M0,1 C0.42,1 0.58,0 1,0' },
-    { value: 'bounce', label: 'Bounce', path: 'M0,1 C0.33,1 0.66,0.5 0.7,0 S1,0 1,0' }
+    { value: 'linear', labelKey: 'effects.easingLinear', path: 'M0,1 L1,0' },
+    { value: 'ease-in', labelKey: 'effects.easingEaseIn', path: 'M0,1 C0.42,1 1,0 1,0' },
+    { value: 'ease-out', labelKey: 'effects.easingEaseOut', path: 'M0,1 C0,1 0.58,0 1,0' },
+    { value: 'ease-in-out', labelKey: 'effects.easingEaseInOut', path: 'M0,1 C0.42,1 0.58,0 1,0' },
+    { value: 'bounce', labelKey: 'effects.easingBounce', path: 'M0,1 C0.33,1 0.66,0.5 0.7,0 S1,0 1,0' }
 ];
 
 /**
@@ -101,6 +102,7 @@ const KeyframeTrack = ({
     selectedKeyframe,
     onSelectKeyframe
 }) => {
+    const { t } = useTranslation('editor');
     const [isExpanded, setIsExpanded] = useState(false);
     const trackRef = useRef(null);
     const [trackWidth, setTrackWidth] = useState(0);
@@ -146,7 +148,7 @@ const KeyframeTrack = ({
                 }
                 <span className="text-xs flex-1">{paramDef.label || paramName}</span>
                 <span className="text-[10px] text-muted-foreground">
-                    {keyframes.length} keyframe{keyframes.length !== 1 ? 's' : ''}
+                    {t('effects.keyframeCount', { count: keyframes.length })}
                 </span>
             </div>
 
@@ -206,11 +208,11 @@ const KeyframeTrack = ({
             {isExpanded && selectedKf && (
                 <div className="px-3 pb-3 space-y-2">
                     <div className="flex items-center gap-2 text-xs">
-                        <span className="text-muted-foreground w-16">Time:</span>
+                        <span className="text-muted-foreground w-16">{t('effects.time')}:</span>
                         <span className="font-mono">{selectedKf.time.toFixed(2)}s</span>
                     </div>
                     <div className="flex items-center gap-2 text-xs">
-                        <span className="text-muted-foreground w-16">Value:</span>
+                        <span className="text-muted-foreground w-16">{t('effects.value')}:</span>
                         <input
                             type="number"
                             value={selectedKf.value}
@@ -220,14 +222,14 @@ const KeyframeTrack = ({
                         />
                     </div>
                     <div className="flex items-center gap-2 text-xs">
-                        <span className="text-muted-foreground w-16">Easing:</span>
+                        <span className="text-muted-foreground w-16">{t('effects.easing')}:</span>
                         <select
                             value={selectedKf.easing || 'linear'}
                             onChange={(e) => onUpdateKeyframe(paramName, selectedKf.time, selectedKf.time, selectedKf.value, e.target.value)}
                             className="flex-1 px-2 py-1 bg-secondary border border-border rounded text-xs"
                         >
                             {EASING_OPTIONS.map(opt => (
-                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                <option key={opt.value} value={opt.value}>{t(opt.labelKey)}</option>
                             ))}
                         </select>
                     </div>
@@ -236,7 +238,7 @@ const KeyframeTrack = ({
                         className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300"
                     >
                         <Trash2 className="w-3 h-3" />
-                        Remove keyframe
+                        {t('effects.removeKeyframe')}
                     </button>
                 </div>
             )}
@@ -256,6 +258,7 @@ const KeyframeEditor = ({
     onUpdateKeyframe,
     onRemoveKeyframe
 }) => {
+    const { t } = useTranslation('editor');
     const [selectedKeyframe, setSelectedKeyframe] = useState(null);
 
     const handleSelectKeyframe = useCallback((time, paramName) => {
@@ -279,7 +282,7 @@ const KeyframeEditor = ({
     if (!effect || !definition) {
         return (
             <div className="text-xs text-muted-foreground text-center py-4">
-                Select an effect to edit keyframes
+                {t('effects.selectEffectToEditKeyframes')}
             </div>
         );
     }
@@ -296,7 +299,7 @@ const KeyframeEditor = ({
         return (
             <div className="text-xs text-muted-foreground text-center py-4">
                 <Key className="w-6 h-6 mx-auto mb-2 opacity-30" />
-                No animatable parameters
+                {t('effects.noAnimatableParameters')}
             </div>
         );
     }
@@ -307,7 +310,7 @@ const KeyframeEditor = ({
             <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-black/20">
                 <div className="flex items-center gap-2">
                     <Key className="w-4 h-4 text-primary" />
-                    <span className="text-sm font-medium">Keyframe Editor</span>
+                    <span className="text-sm font-medium">{t('effects.keyframeEditor')}</span>
                 </div>
                 <span className="text-xs text-muted-foreground font-mono">
                     {playhead.toFixed(2)}s / {duration.toFixed(2)}s

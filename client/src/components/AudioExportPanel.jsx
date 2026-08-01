@@ -9,19 +9,21 @@
  */
 
 import React, { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Download, Music2, Loader2, CheckCircle, X } from 'lucide-react';
 import { useAudioEngine } from '../hooks/useAudioEngine.js';
 
 const FORMATS = [
-    { value: 'mp3',  label: 'MP3',  hint: 'Smallest file. Universal compatibility.' },
-    { value: 'wav',  label: 'WAV',  hint: 'Lossless. Best for further editing.' },
-    { value: 'm4a',  label: 'M4A',  hint: 'AAC in MPEG-4. Great for mobile.' },
-    { value: 'aac',  label: 'AAC',  hint: 'Raw AAC stream.' },
+    { value: 'mp3',  label: 'MP3',  hintKey: 'exportModal.audioFormatHintMp3' },
+    { value: 'wav',  label: 'WAV',  hintKey: 'exportModal.audioFormatHintWav' },
+    { value: 'm4a',  label: 'M4A',  hintKey: 'exportModal.audioFormatHintM4a' },
+    { value: 'aac',  label: 'AAC',  hintKey: 'exportModal.audioFormatHintAac' },
 ];
 
 const BITRATES = ['128k', '192k', '256k', '320k'];
 
 export default function AudioExportPanel({ onClose }) {
+    const { t } = useTranslation('editor');
     const { exportAudio } = useAudioEngine();
 
     const [format,    setFormat]    = useState('mp3');
@@ -51,7 +53,8 @@ export default function AudioExportPanel({ onClose }) {
         }
     }, [exportAudio, format, bitrate, normalize, trimStart, trimEnd]);
 
-    const selectedFormatHint = FORMATS.find(f => f.value === format)?.hint || '';
+    const selectedFormatHintKey = FORMATS.find(f => f.value === format)?.hintKey;
+    const selectedFormatHint = selectedFormatHintKey ? t(selectedFormatHintKey) : '';
 
     return (
         <div style={{
@@ -66,7 +69,7 @@ export default function AudioExportPanel({ onClose }) {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Music2 size={14} color="var(--accent)" />
-                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg)' }}>Export Audio</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--fg)' }}>{t('audioExportPanel.title')}</span>
                 </div>
                 <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--fg-3)', cursor: 'pointer' }}>
                     <X size={14} />
@@ -74,7 +77,7 @@ export default function AudioExportPanel({ onClose }) {
             </div>
 
             {/* Format */}
-            <label style={labelStyle}>Format</label>
+            <label style={labelStyle}>{t('exportModal.labelAudioFormat')}</label>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 5, marginBottom: 4 }}>
                 {FORMATS.map(f => (
                     <button
@@ -102,7 +105,7 @@ export default function AudioExportPanel({ onClose }) {
             {/* Bitrate (hidden for wav) */}
             {format !== 'wav' && (
                 <>
-                    <label style={labelStyle}>Bitrate</label>
+                    <label style={labelStyle}>{t('exportModal.labelAudioBitrate')}</label>
                     <div style={{ display: 'flex', gap: 5, marginBottom: 12 }}>
                         {BITRATES.map(b => (
                             <button
@@ -126,7 +129,7 @@ export default function AudioExportPanel({ onClose }) {
 
             {/* Normalize */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                <span style={{ fontSize: 11, color: 'var(--fg-2)' }}>Normalize loudness (EBU R128)</span>
+                <span style={{ fontSize: 11, color: 'var(--fg-2)' }}>{t('exportModal.audioNormalize')}</span>
                 <button
                     onClick={() => setNormalize(n => !n)}
                     style={{
@@ -151,7 +154,7 @@ export default function AudioExportPanel({ onClose }) {
             {/* Trim (optional) */}
             <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
                 <div style={{ flex: 1 }}>
-                    <label style={labelStyle}>Trim start (s)</label>
+                    <label style={labelStyle}>{t('exportModal.audioTrimStart')}</label>
                     <input
                         type="number" min="0" step="0.1" placeholder="0"
                         value={trimStart}
@@ -160,7 +163,7 @@ export default function AudioExportPanel({ onClose }) {
                     />
                 </div>
                 <div style={{ flex: 1 }}>
-                    <label style={labelStyle}>Trim end (s)</label>
+                    <label style={labelStyle}>{t('exportModal.audioTrimEnd')}</label>
                     <input
                         type="number" min="0" step="0.1" placeholder="end"
                         value={trimEnd}
@@ -200,11 +203,11 @@ export default function AudioExportPanel({ onClose }) {
                 }}
             >
                 {status === 'exporting' ? (
-                    <><Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> Exporting…</>
+                    <><Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> {t('exportModal.audioExporting')}</>
                 ) : status === 'done' ? (
-                    <><CheckCircle size={12} /> Downloaded — Close</>
+                    <><CheckCircle size={12} /> {t('audioExportPanel.downloadedClose')}</>
                 ) : (
-                    <><Download size={12} /> Export {format.toUpperCase()}</>
+                    <><Download size={12} /> {t('exportModal.exportAudioBtn', { format: format.toUpperCase() })}</>
                 )}
             </button>
         </div>

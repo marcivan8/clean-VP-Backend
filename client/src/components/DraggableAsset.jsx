@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useDraggable } from '@dnd-kit/core';
+import { useTranslation } from 'react-i18next';
 import { Video, Music, Image as ImageIcon, Trash2, Loader2, Plus } from 'lucide-react';
 import useTimelineStore from '../store/useTimelineStore';
 import useDeviceType from '../hooks/useDeviceType';
 
 const PHASES = ['uploading', 'processing', 'ready'];
-const PHASE_LABELS = { uploading: 'Uploading', processing: 'Processing', ready: 'Ready' };
 
 const ProxyingOverlay = ({ asset }) => {
+    const { t } = useTranslation('editor');
+    const PHASE_LABELS = { uploading: t('assistant.uploadUploading'), processing: t('assistant.uploadProcessing'), ready: t('assistant.uploadReady') };
     const [showLargeFileMsg, setShowLargeFileMsg] = useState(false);
 
     useEffect(() => {
@@ -48,7 +50,7 @@ const ProxyingOverlay = ({ asset }) => {
                 </span>
                 {showLargeFileMsg && (
                     <span className="text-[7px] text-center leading-tight mt-0.5 px-1" style={{ color: 'var(--fg-4)', maxWidth: 90 }}>
-                        Creating a lightweight preview so editing stays fast
+                        {t('draggableAsset.creatingLightweightPreview')}
                     </span>
                 )}
             </div>
@@ -65,6 +67,7 @@ const formatTime = (seconds) => {
 };
 
 const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","#5B3BE4"], isActive = false }) => {
+    const { t } = useTranslation('editor');
     const { isTouch } = useDeviceType();
     const [addedOverlay, setAddedOverlay] = useState(false);
     const { attributes, listeners, setNodeRef, transform } = useDraggable({
@@ -131,7 +134,7 @@ const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","
                 onPointerDown={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
-                    if (confirm("Delete this asset?")) {
+                    if (confirm(t('draggableAsset.deleteThisAsset'))) {
                         removeAsset(asset.id);
                     }
                 }}
@@ -139,7 +142,7 @@ const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","
                     e.stopPropagation();
                     e.preventDefault();
                 }}
-                title="Delete Asset"
+                title={t('draggableAsset.deleteAsset')}
             >
                 <Trash2 className="w-3 h-3 text-white" />
             </button>
@@ -179,7 +182,7 @@ const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","
             {/* Hint Overlay (Desktop) / Add Button (Mobile) */}
             {!isTouch && (
                 <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center pointer-events-none">
-                    <span className="text-[10px] text-white font-medium">Drag to Timeline</span>
+                    <span className="text-[10px] text-white font-medium">{t('draggableAsset.dragToTimeline')}</span>
                 </div>
             )}
             
@@ -191,7 +194,7 @@ const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","
             
             {addedOverlay && (
                 <div className="absolute inset-0 bg-green-500/80 flex items-center justify-center z-20 transition-all">
-                    <span className="text-white text-xs font-bold shadow-sm">Added!</span>
+                    <span className="text-white text-xs font-bold shadow-sm">{t('draggableAsset.added')}</span>
                 </div>
             )}
         </div>

@@ -1,25 +1,26 @@
 import { useShallow } from 'zustand/react/shallow';
 import React, { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../store/useTimelineStore';
 import { AlignLeft, AlignCenter, AlignRight, Plus, Bold, Italic, Underline, RotateCcw, Type } from 'lucide-react';
 import SaveAsPresetButton from './SaveAsPresetButton.jsx';
 
 const FONT_GROUPS = [
-    { group: 'Talking Head',       fonts: ['Anton', 'Bebas Neue', 'Montserrat', 'Inter', 'Barlow Condensed'] },
-    { group: 'Podcast / Doc',      fonts: ['Playfair Display', 'Lora', 'Merriweather', 'DM Serif Display', 'Cormorant Garamond'] },
-    { group: 'Lifestyle / Vlog',   fonts: ['Nunito', 'Poppins', 'Quicksand', 'Josefin Sans', 'Raleway'] },
-    { group: 'Gaming / Tech',      fonts: ['Rajdhani', 'Exo 2', 'Orbitron', 'Oxanium', 'Roboto Condensed'] },
-    { group: 'Motivational',       fonts: ['Oswald', 'Teko', 'Black Han Sans', 'Saira Condensed', 'Cabin'] },
-    { group: 'Handwritten',        fonts: ['Caveat', 'Pacifico', 'Kalam', 'Satisfy', 'Dancing Script'] },
-    { group: 'Neon / Glow',        fonts: ['Boogaloo', 'Righteous', 'Press Start 2P', 'Audiowide'] },
+    { group: 'Talking Head',       groupKey: 'textPanel.fontGroupTalkingHead',    fonts: ['Anton', 'Bebas Neue', 'Montserrat', 'Inter', 'Barlow Condensed'] },
+    { group: 'Podcast / Doc',      groupKey: 'textPanel.fontGroupPodcastDoc',     fonts: ['Playfair Display', 'Lora', 'Merriweather', 'DM Serif Display', 'Cormorant Garamond'] },
+    { group: 'Lifestyle / Vlog',   groupKey: 'textPanel.fontGroupLifestyleVlog',  fonts: ['Nunito', 'Poppins', 'Quicksand', 'Josefin Sans', 'Raleway'] },
+    { group: 'Gaming / Tech',      groupKey: 'textPanel.fontGroupGamingTech',     fonts: ['Rajdhani', 'Exo 2', 'Orbitron', 'Oxanium', 'Roboto Condensed'] },
+    { group: 'Motivational',       groupKey: 'textPanel.fontGroupMotivational',   fonts: ['Oswald', 'Teko', 'Black Han Sans', 'Saira Condensed', 'Cabin'] },
+    { group: 'Handwritten',        groupKey: 'textPanel.fontGroupHandwritten',    fonts: ['Caveat', 'Pacifico', 'Kalam', 'Satisfy', 'Dancing Script'] },
+    { group: 'Neon / Glow',        groupKey: 'textPanel.fontGroupNeonGlow',       fonts: ['Boogaloo', 'Righteous', 'Press Start 2P', 'Audiowide'] },
 ];
 
 const ANIMATION_PRESETS = [
-    { id: 'none',         label: 'None' },
-    { id: 'fade-in',      label: 'Fade in' },
-    { id: 'slide-up',     label: 'Slide up' },
-    { id: 'pop',          label: 'Pop' },
-    { id: 'word-by-word', label: 'Word by word' },
+    { id: 'none',         labelKey: 'textPanel.animNone' },
+    { id: 'fade-in',      labelKey: 'textPanel.animFadeIn' },
+    { id: 'slide-up',     labelKey: 'textPanel.animSlideUp' },
+    { id: 'pop',          labelKey: 'textPanel.animPop' },
+    { id: 'word-by-word', labelKey: 'textPanel.animWordByWord' },
 ];
 
 // ── Shared style tokens ────────────────────────────────────────────────────────
@@ -50,6 +51,7 @@ const S = {
 // onLiveUpdate   — skipHistory drag preview; onUpdate fires on pointerUp to commit
 // livePos        — { x, y } override from parent's drag state (avoids reading stale clip)
 const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true, showReset = false, onReset }) => {
+    const { t } = useTranslation('editor');
     // Fall back to onUpdate if no live variant provided
     const live = onLiveUpdate || onUpdate;
 
@@ -85,7 +87,7 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
             {showContent && (
                 <div style={{ marginBottom: 12 }}>
-                    <div style={{ ...S.label, marginBottom: 4 }}>Content</div>
+                    <div style={{ ...S.label, marginBottom: 4 }}>{t('textPanel.content')}</div>
                     <textarea
                         value={clip.content || ''}
                         onChange={(e) => onUpdate({ content: e.target.value })}
@@ -97,7 +99,7 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true
 
             <div style={{ ...S.row, marginBottom: 12 }}>
                 <div style={{ flex: 1 }}>
-                    <div style={{ ...S.label, marginBottom: 4 }}>Size</div>
+                    <div style={{ ...S.label, marginBottom: 4 }}>{t('textPanel.size')}</div>
                     <input
                         type="number"
                         value={localFontSize ?? (clip.fontSize || 48)}
@@ -107,7 +109,7 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true
                         style={S.input} />
                 </div>
                 <div style={{ flex: 1 }}>
-                    <div style={{ ...S.label, marginBottom: 4 }}>Scale</div>
+                    <div style={{ ...S.label, marginBottom: 4 }}>{t('textPanel.scale')}</div>
                     <input
                         type="number" step="0.1" min="0.1" max="5.0"
                         value={localScale ?? (clip.scale || 1.0)}
@@ -119,12 +121,12 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true
             </div>
 
             <div style={{ marginBottom: 12 }}>
-                <div style={{ ...S.label, marginBottom: 4 }}>Font</div>
+                <div style={{ ...S.label, marginBottom: 4 }}>{t('textPanel.font')}</div>
                 <select value={clip.fontFamily || 'Inter'}
                     onChange={(e) => onUpdate({ fontFamily: e.target.value })}
                     style={S.select}>
                     {FONT_GROUPS.map(g => (
-                        <optgroup key={g.group} label={g.group}>
+                        <optgroup key={g.group} label={t(g.groupKey)}>
                             {g.fonts.map(f => <option key={f} value={f}>{f}</option>)}
                         </optgroup>
                     ))}
@@ -149,18 +151,18 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true
                 <button
                     style={{ ...S.iconBtn(!!clip.textShadow), padding: '4px 8px', fontSize: 10, fontFamily: 'var(--f-mono)' }}
                     onClick={() => onUpdate({ textShadow: clip.textShadow ? null : '2px 2px 4px rgba(0,0,0,0.8)' })}>
-                    Shadow
+                    {t('textPanel.shadow')}
                 </button>
                 <button
                     style={{ ...S.iconBtn(!!clip.stroke), padding: '4px 8px', fontSize: 10, fontFamily: 'var(--f-mono)' }}
                     onClick={() => onUpdate({ stroke: clip.stroke ? null : { width: 1, color: '#000000' } })}>
-                    Stroke
+                    {t('textPanel.stroke')}
                 </button>
             </div>
 
             {/* Color */}
             <div style={{ marginBottom: 12 }}>
-                <div style={{ ...S.label, marginBottom: 6 }}>Color</div>
+                <div style={{ ...S.label, marginBottom: 6 }}>{t('textPanel.color')}</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <input type="color" value={clip.color || '#ffffff'}
                         onChange={(e) => onUpdate({ color: e.target.value })}
@@ -171,7 +173,7 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true
 
             {/* Alignment */}
             <div style={{ marginBottom: 12 }}>
-                <div style={{ ...S.label, marginBottom: 6 }}>Alignment</div>
+                <div style={{ ...S.label, marginBottom: 6 }}>{t('textPanel.alignment')}</div>
                 <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', borderRadius: 6, border: '0.5px solid var(--line)', padding: 3, gap: 2 }}>
                     {[
                         { align: 'left',   Icon: AlignLeft },
@@ -190,8 +192,8 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true
 
             {/* Position */}
             <div style={S.section}>
-                <div style={{ ...S.label, marginBottom: 10 }}>Position</div>
-                {[{ key: 'x', label: 'X Axis', display: displayX }, { key: 'y', label: 'Y Axis', display: displayY }].map(({ key, label, display }) => (
+                <div style={{ ...S.label, marginBottom: 10 }}>{t('textPanel.position')}</div>
+                {[{ key: 'x', label: t('textPanel.xAxis'), display: displayX }, { key: 'y', label: t('textPanel.yAxis'), display: displayY }].map(({ key, label, display }) => (
                     <div key={key} style={{ marginBottom: 10 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                             <span style={{ fontFamily: 'var(--f-sans)', fontSize: 11, color: 'var(--fg-3)' }}>{label}</span>
@@ -207,13 +209,13 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true
 
             {/* Animation */}
             <div style={S.section}>
-                <div style={{ ...S.label, marginBottom: 8 }}>Animation</div>
+                <div style={{ ...S.label, marginBottom: 8 }}>{t('textPanel.animation')}</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                     {ANIMATION_PRESETS.map(preset => (
                         <button key={preset.id}
                             onClick={() => onUpdate({ animation: preset.id === 'none' ? null : preset.id })}
                             style={S.pill(activeAnim === preset.id)}>
-                            {preset.label}
+                            {t(preset.labelKey)}
                         </button>
                     ))}
                 </div>
@@ -226,7 +228,7 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true
                         border: '0.5px solid var(--line)', color: 'var(--fg-4)',
                         fontFamily: 'var(--f-mono)', fontSize: 9, textTransform: 'uppercase',
                         letterSpacing: '0.06em', cursor: 'pointer', width: '100%' }}>
-                    <RotateCcw size={10} /> Reset to global style
+                    <RotateCcw size={10} /> {t('textPanel.resetToGlobalStyle')}
                 </button>
             )}
         </div>
@@ -235,6 +237,7 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true
 
 // ── Per-segment row ────────────────────────────────────────────────────────────
 const SegmentRow = ({ clip, trackId, globalStyle, onActivate, isActive }) => {
+    const { t } = useTranslation('editor');
     const [expanded, setExpanded] = useState(false);
 
     const handleToggle = () => { onActivate(clip.id); setExpanded(p => !p); };
@@ -271,7 +274,7 @@ const SegmentRow = ({ clip, trackId, globalStyle, onActivate, isActive }) => {
             <button onClick={handleToggle} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
                 <span style={{ fontFamily: 'var(--f-mono)', fontSize: 8, color: 'var(--fg-4)', flexShrink: 0, letterSpacing: '0.02em' }}>{fmt(clip.start)}</span>
                 <span style={{ flex: 1, fontSize: 10, color: 'var(--fg-2)', fontFamily: 'var(--f-sans)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }}>{clip.content || '—'}</span>
-                {hasOverrides && <span style={{ fontFamily: 'var(--f-mono)', fontSize: 7, color: 'var(--accent)', flexShrink: 0, letterSpacing: '0.04em' }}>custom</span>}
+                {hasOverrides && <span style={{ fontFamily: 'var(--f-mono)', fontSize: 7, color: 'var(--accent)', flexShrink: 0, letterSpacing: '0.04em' }}>{t('textPanel.custom')}</span>}
                 <span style={{ color: 'var(--fg-4)', fontSize: 8 }}>{expanded ? '▲' : '▼'}</span>
             </button>
             {expanded && (
@@ -284,26 +287,30 @@ const SegmentRow = ({ clip, trackId, globalStyle, onActivate, isActive }) => {
 };
 
 // ── Mode toggle ────────────────────────────────────────────────────────────────
-const ModeToggle = ({ mode, onChange }) => (
-    <div style={{ display: 'flex', borderRadius: 7, overflow: 'hidden', border: '0.5px solid var(--line)', flexShrink: 0 }}>
-        {['global', 'individual'].map((m) => (
-            <button key={m} onClick={() => onChange(m)}
-                style={{
-                    padding: '4px 10px', border: 'none', cursor: 'pointer',
-                    fontFamily: 'var(--f-mono)', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em',
-                    background: mode === m ? 'color-mix(in oklch, var(--accent) 14%, transparent)' : 'transparent',
-                    color: mode === m ? 'var(--accent)' : 'var(--fg-4)',
-                    borderLeft: m === 'individual' ? '0.5px solid var(--line)' : 'none',
-                    transition: 'all 0.15s',
-                }}>
-                {m === 'global' ? 'Global' : 'Per segment'}
-            </button>
-        ))}
-    </div>
-);
+const ModeToggle = ({ mode, onChange }) => {
+    const { t } = useTranslation('editor');
+    return (
+        <div style={{ display: 'flex', borderRadius: 7, overflow: 'hidden', border: '0.5px solid var(--line)', flexShrink: 0 }}>
+            {['global', 'individual'].map((m) => (
+                <button key={m} onClick={() => onChange(m)}
+                    style={{
+                        padding: '4px 10px', border: 'none', cursor: 'pointer',
+                        fontFamily: 'var(--f-mono)', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em',
+                        background: mode === m ? 'color-mix(in oklch, var(--accent) 14%, transparent)' : 'transparent',
+                        color: mode === m ? 'var(--accent)' : 'var(--fg-4)',
+                        borderLeft: m === 'individual' ? '0.5px solid var(--line)' : 'none',
+                        transition: 'all 0.15s',
+                    }}>
+                    {m === 'global' ? t('textPanel.global') : t('textPanel.perSegment')}
+                </button>
+            ))}
+        </div>
+    );
+};
 
 // ── Main TextPanel ─────────────────────────────────────────────────────────────
 const TextPanel = () => {
+    const { t } = useTranslation('editor');
     const { activeClipId, tracks, addClip, setActiveClip } = useTimelineStore(useShallow(state => ({
         activeClipId:  state.activeClipId,
         tracks:        state.tracks,
@@ -407,7 +414,7 @@ const TextPanel = () => {
         const id = `clip-text-${Date.now()}`;
         addClip(track.id, {
             id, start: useTimelineStore.getState().currentTime, duration: 5,
-            name: preset.name, content: preset.content || 'New Text',
+            name: preset.name, content: preset.content || t('timeline.newTextDefault'),
             fontFamily: preset.fontFamily || 'Inter',
             fontSize: preset.fontSize || 48,
             color: preset.color || '#ffffff',
@@ -422,14 +429,14 @@ const TextPanel = () => {
             <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16 }}>
                     <Type size={13} style={{ color: 'var(--fg-4)' }} />
-                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Add Text</span>
+                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{t('textPanel.addText')}</span>
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
                     {[
-                        { name: 'Heading',    content: 'Big Headline',                fontSize: 72, fontWeight: 'bold',   preview: { fontSize: 20, fontWeight: 700 }, sub: 'Large, bold title text.' },
-                        { name: 'Subheading', content: 'Subtitle Text',                fontSize: 48, fontWeight: 'medium', preview: { fontSize: 14, fontWeight: 500 }, sub: 'Secondary text for context.' },
-                        { name: 'Body Text',  content: 'Body text content goes here.', fontSize: 24,                      preview: { fontSize: 11, fontWeight: 400 }, sub: 'Small text for descriptions.' },
+                        { name: t('textPanel.presetHeading'),    content: t('textPanel.presetHeadingContent'),    fontSize: 72, fontWeight: 'bold',   preview: { fontSize: 20, fontWeight: 700 }, sub: t('textPanel.presetHeadingSub') },
+                        { name: t('textPanel.presetSubheading'), content: t('textPanel.presetSubheadingContent'), fontSize: 48, fontWeight: 'medium', preview: { fontSize: 14, fontWeight: 500 }, sub: t('textPanel.presetSubheadingSub') },
+                        { name: t('textPanel.presetBodyText'),   content: t('textPanel.presetBodyTextContent'),   fontSize: 24,                      preview: { fontSize: 11, fontWeight: 400 }, sub: t('textPanel.presetBodyTextSub') },
                     ].map(preset => (
                         <button key={preset.name} onClick={() => handleAddText(preset)}
                             style={{ padding: 14, background: 'rgba(255,255,255,0.03)', border: '0.5px solid var(--line)', borderRadius: 8, textAlign: 'left', cursor: 'pointer', transition: 'background 0.15s' }}
@@ -442,14 +449,14 @@ const TextPanel = () => {
                 </div>
 
                 <div style={{ borderTop: '0.5px solid var(--line)', paddingTop: 12 }}>
-                    <button onClick={() => handleAddText({ name: 'Text', content: 'Enter text here', fontSize: 48 })}
+                    <button onClick={() => handleAddText({ name: t('textPanel.textDefaultName'), content: t('textPanel.enterTextHere'), fontSize: 48 })}
                         style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                             padding: '8px 0', borderRadius: 7, cursor: 'pointer',
                             background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
                             border: '0.5px solid color-mix(in oklch, var(--accent) 30%, transparent)',
                             color: 'var(--accent)', fontFamily: 'var(--f-mono)', fontSize: 10,
                             textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                        <Plus size={12} /> Add Text Layer
+                        <Plus size={12} /> {t('textPanel.addTextLayer')}
                     </button>
                 </div>
             </div>
@@ -461,7 +468,7 @@ const TextPanel = () => {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, minWidth: 0 }}>
                 <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                    {editMode === 'global' ? 'Caption Style' : 'Segments'}
+                    {editMode === 'global' ? t('textPanel.captionStyle') : t('textPanel.segments')}
                 </span>
                 {editMode === 'global' && captionClips.length > 0 && (
                     <span style={{
@@ -473,7 +480,7 @@ const TextPanel = () => {
                         border: `0.5px solid color-mix(in oklch, var(--accent) ${globalFlash ? 70 : 30}%, transparent)`,
                         transition: 'all 0.3s ease',
                     }}>
-                        {captionClips.length} captions
+                        {t('textPanel.captionsCount', { count: captionClips.length })}
                     </span>
                 )}
             </div>
@@ -498,7 +505,7 @@ const TextPanel = () => {
                     borderRadius: 5, border: '0.5px solid var(--line-soft)',
                 }}>
                     <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)' }}>
-                        ↓ Expand a caption to edit its style
+                        ↓ {t('textPanel.expandCaptionHint')}
                     </span>
                     {customCount > 0 && (
                         <span style={{
@@ -507,7 +514,7 @@ const TextPanel = () => {
                             background: 'color-mix(in oklch, var(--accent) 10%, transparent)',
                             borderRadius: 99, border: '0.5px solid color-mix(in oklch, var(--accent) 25%, transparent)',
                         }}>
-                            {customCount} custom
+                            {t('textPanel.customCount', { count: customCount })}
                         </span>
                     )}
                 </div>
@@ -571,7 +578,7 @@ const TextPanel = () => {
             />
             <SaveAsPresetButton
                 presetType="CAPTION_STYLE"
-                defaultName="My Caption Style"
+                defaultName={t('textPanel.myCaptionStyle')}
                 buildSettings={buildCaptionPresetSettings}
             />
         </div>

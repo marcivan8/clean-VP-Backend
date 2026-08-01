@@ -1,5 +1,6 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../../store/useTimelineStore';
 
 // Map preset names to actual font families
@@ -97,6 +98,7 @@ const pointerDist = (a, b) =>
     Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
 
 const TextOverlay = () => {
+    const { t } = useTranslation('editor');
     const containerRef = React.useRef(null);
 
     // Per-clip gesture state: { pointerId→{clientX,clientY}, initialScale, initialDist }
@@ -313,8 +315,8 @@ const TextOverlay = () => {
                         }}
                     >
                         {clip.animation === 'word-by-word'
-                            ? <WordByWord content={clip.content || 'New Text'} progress={clipProgress} />
-                            : (clip.content || 'New Text')
+                            ? <WordByWord content={clip.content || t('timeline.newTextDefault')} progress={clipProgress} />
+                            : (clip.content || t('timeline.newTextDefault'))
                         }
 
                         {/* Active selection ring hint (mobile: always show when active) */}
@@ -376,7 +378,7 @@ const TextOverlay = () => {
                                     textTransform: 'uppercase',
                                 }}
                             >
-                                drag · pinch to scale
+                                {t('player.dragPinchToScale')}
                             </div>
                         )}
                     </div>

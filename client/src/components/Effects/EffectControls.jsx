@@ -5,6 +5,7 @@
  */
 
 import React, { useState, useCallback, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
     Key,
     Circle,
@@ -33,6 +34,7 @@ const SliderControl = ({
     hasKeyframe = false,
     canAnimate = true
 }) => {
+    const { t } = useTranslation('editor');
     const percentage = ((value - min) / (max - min)) * 100;
 
     return (
@@ -44,7 +46,7 @@ const SliderControl = ({
                         <button
                             onClick={() => onAddKeyframe(name, value)}
                             className={`p-1 rounded hover:bg-white/10 ${hasKeyframe ? 'text-yellow-400' : 'text-muted-foreground'}`}
-                            title={hasKeyframe ? 'Keyframe at current time' : 'Add keyframe'}
+                            title={hasKeyframe ? t('effects.keyframeAtCurrentTime') : t('effects.addKeyframe')}
                         >
                             {hasKeyframe ? <CircleDot className="w-3 h-3" /> : <Circle className="w-3 h-3" />}
                         </button>
@@ -226,10 +228,11 @@ const EffectControls = ({
     onAddKeyframe,
     playhead = 0
 }) => {
+    const { t } = useTranslation('editor');
     if (!effect || !definition) {
         return (
             <div className="text-xs text-muted-foreground text-center py-2">
-                No parameters available
+                {t('effects.noParametersAvailable')}
             </div>
         );
     }
@@ -361,7 +364,7 @@ const EffectControls = ({
             {Object.keys(keyframes).length > 0 && (
                 <div className="flex items-center gap-2 text-xs text-yellow-400 bg-yellow-500/10 px-2 py-1 rounded">
                     <Key className="w-3 h-3" />
-                    <span>{Object.keys(keyframes).length} animated parameter(s)</span>
+                    <span>{t('effects.animatedParams', { count: Object.keys(keyframes).length })}</span>
                 </div>
             )}
 
@@ -374,7 +377,7 @@ const EffectControls = ({
                 className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
                 <RotateCcw className="w-3 h-3" />
-                Reset to defaults
+                {t('effects.resetToDefaults')}
             </button>
         </div>
     );

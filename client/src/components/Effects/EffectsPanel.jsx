@@ -5,6 +5,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
     Sparkles,
     Plus,
@@ -134,6 +135,7 @@ const EffectItem = ({
  * Add effect dropdown/modal
  */
 const AddEffectMenu = ({ onAdd, onClose }) => {
+    const { t } = useTranslation('editor');
     const [search, setSearch] = useState('');
     const { categories, getByCategory, search: searchEffects } = useEffectRegistry();
 
@@ -162,7 +164,7 @@ const AddEffectMenu = ({ onAdd, onClose }) => {
                         type="text"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Search effects..."
+                        placeholder={t('effects.searchEffects')}
                         className="w-full bg-secondary border border-border rounded-lg pl-9 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                         autoFocus
                     />
@@ -184,7 +186,7 @@ const AddEffectMenu = ({ onAdd, onClose }) => {
                         <div key={category} className="mb-3">
                             <div className="flex items-center gap-2 px-2 py-1 text-xs text-muted-foreground uppercase tracking-wider">
                                 <Icon className="w-3 h-3" />
-                                {category}
+                                {t(`effects.categories.${category}`, category)}
                             </div>
                             <div className="grid grid-cols-2 gap-1">
                                 {(Array.isArray(effects) ? effects : Object.entries(effects)).map(([type, def]) => (
@@ -222,6 +224,7 @@ const EffectsPanel = ({
     playhead = 0,
     className = ''
 }) => {
+    const { t } = useTranslation('editor');
     const [expandedEffects, setExpandedEffects] = useState(new Set());
     const [showAddMenu, setShowAddMenu] = useState(false);
     const [showPresets, setShowPresets] = useState(false);
@@ -261,7 +264,7 @@ const EffectsPanel = ({
         return (
             <div className={`flex flex-col items-center justify-center h-full text-muted-foreground ${className}`}>
                 <Sparkles className="w-10 h-10 mb-3 opacity-30" />
-                <p className="text-sm">Select a clip to add effects</p>
+                <p className="text-sm">{t('effects.selectClipToAddEffects')}</p>
             </div>
         );
     }
@@ -272,7 +275,7 @@ const EffectsPanel = ({
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                 <div className="flex items-center gap-2">
                     <Sparkles className="w-5 h-5 text-primary" />
-                    <h3 className="font-semibold text-sm">Effects</h3>
+                    <h3 className="font-semibold text-sm">{t('effects.title')}</h3>
                     {effects.length > 0 && (
                         <span className="text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded-full font-mono">
                             {effects.length}
@@ -285,7 +288,7 @@ const EffectsPanel = ({
                     <button
                         onClick={() => setShowPresets(!showPresets)}
                         className={`p-2 rounded-lg transition-colors ${showPresets ? 'bg-primary/20 text-primary' : 'hover:bg-white/5'}`}
-                        title="Browse Presets"
+                        title={t('effects.browsePresets')}
                     >
                         <Wand2 className="w-4 h-4" />
                     </button>
@@ -295,7 +298,7 @@ const EffectsPanel = ({
                         <button
                             onClick={clearEffects}
                             className="p-2 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-colors"
-                            title="Clear All Effects"
+                            title={t('effects.clearAllEffects')}
                         >
                             <Trash2 className="w-4 h-4" />
                         </button>
@@ -317,8 +320,8 @@ const EffectsPanel = ({
                         {effects.length === 0 ? (
                             <div className="text-center py-8 text-muted-foreground">
                                 <Grid3X3 className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                                <p className="text-sm">No effects applied</p>
-                                <p className="text-xs opacity-60 mt-1">Click + to add an effect</p>
+                                <p className="text-sm">{t('effects.noEffectsApplied')}</p>
+                                <p className="text-xs opacity-60 mt-1">{t('effects.clickToAddEffect')}</p>
                             </div>
                         ) : (
                             effects.map(effect => (
@@ -343,7 +346,7 @@ const EffectsPanel = ({
                                 className="w-full flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-border rounded-lg hover:border-primary/50 hover:bg-primary/5 transition-all text-muted-foreground hover:text-primary"
                             >
                                 <Plus className="w-5 h-5" />
-                                <span className="text-sm font-medium">Add Effect</span>
+                                <span className="text-sm font-medium">{t('effects.addEffect')}</span>
                             </button>
 
                             {showAddMenu && (
@@ -360,7 +363,7 @@ const EffectsPanel = ({
             {/* Footer info */}
             <div className="px-4 py-2 border-t border-border bg-black/20">
                 <p className="text-[10px] text-muted-foreground">
-                    💡 Tip: GPU effects render in real-time. AI effects may take a moment to analyze.
+                    💡 {t('effects.tip')}
                 </p>
             </div>
         </div>

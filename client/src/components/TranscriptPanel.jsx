@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../store/useTimelineStore';
 import { Scissors } from 'lucide-react';
 import classNames from 'classnames';
@@ -21,6 +22,7 @@ const SPEAKER_PALETTE = [
 ];
 
 const TranscriptPanel = () => {
+    const { t } = useTranslation('editor');
     const { captions, tracks, assets, transcripts, currentTime, seek, cutSourceRange } =
         useTimelineStore(useShallow(s => ({
             captions:       s.captions,
@@ -142,9 +144,9 @@ const TranscriptPanel = () => {
     if (!displayWords || displayWords.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center h-full gap-2 p-6 text-center">
-                <p className="text-xs text-muted-foreground">No transcript yet.</p>
+                <p className="text-xs text-muted-foreground">{t('transcriptPanel.noTranscriptYet')}</p>
                 <p className="text-[10px] text-muted-foreground/60">
-                    Run auto-captions or ask the AI to transcribe your clip.
+                    {t('transcriptPanel.runAutoCaptionsHint')}
                 </p>
             </div>
         );
@@ -158,7 +160,7 @@ const TranscriptPanel = () => {
                  style={{ borderColor: 'var(--line-soft)' }}>
                 <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground"
                       style={{ fontFamily: 'var(--f-mono)' }}>
-                    TRANSCRIPT · {displayWords.length} words
+                    {t('transcriptPanel.transcriptWordCount', { count: displayWords.length })}
                 </span>
                 {selRange && (
                     <button
@@ -166,7 +168,7 @@ const TranscriptPanel = () => {
                         className="flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-red-500/20 hover:bg-red-500/30 text-red-400 transition-colors"
                     >
                         <Scissors className="w-3 h-3" />
-                        Cut {selRange[1] - selRange[0] + 1} word{selRange[1] > selRange[0] ? 's' : ''}
+                        {t('transcriptPanel.cutWords', { count: selRange[1] - selRange[0] + 1 })}
                     </button>
                 )}
             </div>

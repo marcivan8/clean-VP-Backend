@@ -1,0 +1,25 @@
+{
+  "eyebrow": "Conformité",
+  "title": "RGPD et droits européens",
+  "subtitle": "VIBED respecte votre vie privée et se conforme strictement au Règlement Général sur la Protection des Données (RGPD). Voici comment exercer vos droits européens sur vos données.",
+  "cards": [
+    { "title": "Responsable du traitement", "value": "Vibed SAS", "detail": "Détermine les finalités du traitement" },
+    { "title": "Sous-traitant", "value": "Google Cloud Storage", "detail": "Fournit l'infrastructure d'hébergement sécurisée" },
+    { "title": "Localisation des données", "value": "us-central1", "detail": "Avec des mécanismes de transfert valides (CCT)" }
+  ],
+  "rights": {
+    "sectionTitle": "Vos droits en vertu du RGPD",
+    "intro": "En vertu du Règlement Général sur la Protection des Données (RGPD), vous disposez de droits fondamentaux spécifiques concernant vos données personnelles :",
+    "items": [
+      { "title": "Droit d'accès", "text": "Vous pouvez demander une copie complète des données personnelles que nous détenons à votre sujet." },
+      { "title": "Droit à l'effacement (droit à l'oubli)", "text": "Vous pouvez nous demander de supprimer définitivement toutes vos données personnelles, fichiers de projet et informations de compte." },
+      { "title": "Droit de rectification", "text": "Vous avez le droit de nous demander de corriger toute donnée personnelle inexacte ou incomplète." },
+      { "title": "Droit d'opposition et de limitation du traitement", "text": "Vous pouvez vous opposer à notre traitement de vos données, y compris pour le marketing direct ou les analyses." }
+    ]
+  },
+  "exercise": {
+    "sectionTitle": "Comment exercer vos droits",
+    "p1": "Pour exercer l'un de ces droits, envoyez-nous simplement un e-mail depuis l'adresse associée à votre compte VIBED. Nous traitons toutes les demandes d'accès (DSAR) sous 30 jours, entièrement gratuitement.",
+    "ctaPrompt": "Soumettre une demande RGPD"
+  }
+}
