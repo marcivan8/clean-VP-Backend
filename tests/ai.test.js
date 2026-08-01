@@ -5,7 +5,18 @@
  * (openai is mocked in setup.js).
  */
 const request = require('supertest');
-const app     = require('../index');
+
+// Mock auth and usage gates so AI endpoints can be reached
+jest.mock('../middleware/auth', () => ({
+    authenticateUser: (req, res, next) => { req.user = { id: 'test-user', plan: 'pro' }; next(); },
+    optionalAuth: (req, res, next) => { req.user = { id: 'test-user', plan: 'pro' }; next(); }
+}));
+jest.mock('../middleware/usageGate', () => ({
+    aiGate: (req, res, next) => next(),
+    nleGate: (req, res, next) => next()
+}));
+
+const app = require('../index');
 
 describe('POST /api/ai/chat', () => {
     it('200 with actions array when command is provided', async () => {

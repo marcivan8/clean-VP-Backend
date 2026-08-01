@@ -86,12 +86,13 @@ async function sessionMigrate(id, userId) {
 }
 
 // Purge expired in-memory sessions once per hour
-setInterval(() => {
+const purgeInterval = setInterval(() => {
     const now = Date.now();
     for (const [id, s] of memSessions) {
         if (s.expiresAt.getTime() < now) memSessions.delete(id);
     }
 }, 3_600_000);
+purgeInterval.unref();
 
 // ── Rate limits ───────────────────────────────────────────────────────────────
 const createLimiter = rateLimit({ windowMs: 60_000, max: 5, message: { error: 'Too many session creation requests.' } });

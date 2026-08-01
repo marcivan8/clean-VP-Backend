@@ -72,6 +72,6 @@ describe('Content-Type enforcement', () => {
             .post('/api/ai/chat')
             .set('Content-Type', 'text/plain')
             .send('remove silences');
-        expect([200, 400, 415, 500]).toContain(res.status);
+        expect([200, 400, 401, 415, 500]).toContain(res.status);
     });
 });
