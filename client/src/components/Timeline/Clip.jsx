@@ -96,7 +96,21 @@ const Clip = ({ clip, trackId }) => {
     // fully hydrated (no asset.proxyUrl) still trigger peak extraction via their
     // clip-level URL (sourceUrl / url).  Without this fallback, usePeaks returns
     // early (no gcsPath and no proxyUrl) and the waveform never appears.
-    const wsAudioUrl = asset?.proxyUrl || clip.url || clip.sourceUrl || null;
+    //
+    // BUT clip.url/clip.sourceUrl are frequently local object URLs (blob:) —
+    // PlaybackEngine hands those out for immediate local preview before a
+    // proxy job has finished, and post-cleanup/multicam split pieces often
+    // inherit the parent clip's URL before their own asset re-hydrates.
+    // deriveGcsPath() on the server has no way to resolve blob:/data: back to
+    // a storage object — it always returns null for them — so passing one
+    // through as "proxyUrl" made usePeaks POST /api/waveform/extract with an
+    // unresolvable path every time, permanently 400ing (and burning the
+    // hook's one auto-retry) instead of waiting for the real proxyUrl to
+    // hydrate. Only forward URLs the server can actually fetch.
+    const isServerResolvableUrl = (url) => !!url && !/^(blob|data):/i.test(url);
+    const wsAudioUrl = asset?.proxyUrl
+        || (isServerResolvableUrl(clip.url) ? clip.url : null)
+        || (isServerResolvableUrl(clip.sourceUrl) ? clip.sourceUrl : null);
     const { peaks: wsPeaks, duration: wsDuration, loading: wsLoading, error: wsError } = usePeaks(
         isTextClip ? null : clip.assetId,
         asset?.gcsPath,
