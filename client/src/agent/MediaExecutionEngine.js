@@ -1161,9 +1161,21 @@ export class MediaExecutionEngine {
                 const rzDurById = {};
                 rzClips.forEach(c => { rzDurById[c.id] = c.duration ?? 0; });
 
+                // Count the clips that actually receive keyframes. A clipZooms
+                // entry whose clipId isn't on the timeline (stale plan, clip
+                // deleted or re-segmented between detect and apply) silently
+                // applies to nothing — and the summary counts below come from
+                // the SERVER's response, not from what landed, so the old
+                // unconditional `success: true` could report a full
+                // "3W / 2M / 4C" breakdown over a timeline where zero keyframes
+                // were written.
+                let rzApplied = 0;
+
                 clipZooms.forEach(({ clipId, scale, motion }) => {
                     const m   = motion || { kind: 'static', from: scale, to: scale };
                     const dur = rzDurById[clipId] ?? 0;
+                    if (!(clipId in rzDurById)) return; // not on the timeline — skip
+                    rzApplied++;
 
                     if (m.kind === 'push_in' && dur > 0.5) {
                         rzStore.addTransformKeyframe(clipId, 'scale', 0, m.from, 'linear');
@@ -1177,6 +1189,14 @@ export class MediaExecutionEngine {
                     }
                 });
 
+                if (rzApplied === 0) {
+                    return {
+                        action,
+                        success: false,
+                        message: "The zoom plan didn't match any clips currently on the timeline — nothing was changed. Try re-running it.",
+                    };
+                }
+
                 const { counts = {}, motions = {} } = summary || {};
                 const punchNote = (motions.punch_in || 0) > 0
                     ? ` ${motions.punch_in} punch-in${motions.punch_in > 1 ? 's land' : ' lands'} right on emphasized words.`
@@ -1186,7 +1206,7 @@ export class MediaExecutionEngine {
                     success: true,
                     message:
                         `Zoom rhythm applied — ${counts.wide ?? 0}W / ${counts.medium ?? 0}M / ${counts.close ?? 0}C ` +
-                        `across ${rzClips.length} shots, with ${motions.push_in ?? 0} slow push-ins.${punchNote}`,
+                        `across ${rzApplied} shots, with ${motions.push_in ?? 0} slow push-ins.${punchNote}`,
                 };
             }
 

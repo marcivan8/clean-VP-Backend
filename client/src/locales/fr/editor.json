@@ -148,10 +148,22 @@
       "title": "Extensions",
       "installed": "Installé",
       "install": "Installer",
-      "autoCaptions": { "name": "Sous-titres automatiques", "desc": "Génère des sous-titres avec l'IA" },
-      "motionGraphics": { "name": "Motion Graphics", "desc": "Modèles d'animation prêts à l'emploi" },
-      "soundFxLibrary": { "name": "Bibliothèque d'effets sonores", "desc": "Plus de 10 000 sons libres de droits" },
-      "socialTemplates": { "name": "Modèles pour réseaux sociaux", "desc": "Modèles pour TikTok, Reels" }
+      "autoCaptions": {
+        "name": "Sous-titres automatiques",
+        "desc": "Génère des sous-titres avec l'IA"
+      },
+      "motionGraphics": {
+        "name": "Motion Graphics",
+        "desc": "Modèles d'animation prêts à l'emploi"
+      },
+      "soundFxLibrary": {
+        "name": "Bibliothèque d'effets sonores",
+        "desc": "Plus de 10 000 sons libres de droits"
+      },
+      "socialTemplates": {
+        "name": "Modèles pour réseaux sociaux",
+        "desc": "Modèles pour TikTok, Reels"
+      }
     }
   },
   "assistant": {
@@ -332,7 +344,9 @@
     "searchForSoundEffectAbove": "Recherchez un effet sonore ci-dessus",
     "searchForColorStyleAbove": "Recherchez un style de couleur ci-dessus",
     "noPresetsFound": "Aucun préréglage trouvé",
-    "addToFavorites": "Ajouter aux favoris"
+    "addToFavorites": "Ajouter aux favoris",
+    "lutImport": "Importer un LUT .cube",
+    "lutUploading": "Envoi en cours…"
   },
   "saveAsPreset": {
     "giveItAName": "Donnez-lui d'abord un nom",

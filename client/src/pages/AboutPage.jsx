@@ -1,7 +1,11 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Play, CheckCircle2, Link as LinkIcon, Heart, User, MapPin } from 'lucide-react';
+import {
+    ArrowLeft, Play, CheckCircle2, Link as LinkIcon, Heart, User, MapPin,
+    Scissors, FileText, FolderTree, Clapperboard,
+    LayoutTemplate, Sparkles, Brain, Eye,
+} from 'lucide-react';
 import { Logo } from '../components/Logo.jsx';
 
 const Section = ({ title, children }) => (
@@ -23,10 +27,37 @@ const AboutPage = () => {
     const navigate = useNavigate();
     const { t } = useTranslation(['about', 'common']);
 
-    const journeyItems = t('journey.items', { ns: 'about', returnObjects: true });
-    const believeIcons = [CheckCircle2, LinkIcon, Play, Heart];
-    const believeItems = t('believe.items', { ns: 'about', returnObjects: true });
-    const founderTags  = t('founder.tags', { ns: 'about', returnObjects: true });
+    // Page order is deliberately platform-first: problem → solution → vision,
+    // with the founder demoted to a single card at the bottom. It previously
+    // opened on the founder's personal timeline (Istanbul → Paris → Epitech),
+    // which answers "who built this" before a first-time visitor has been told
+    // what the product is or why it exists.
+    const problemItems  = t('problem.items',  { ns: 'about', returnObjects: true });
+    const solutionItems = t('solution.items', { ns: 'about', returnObjects: true });
+    const believeItems  = t('believe.items',  { ns: 'about', returnObjects: true });
+    const founderTags   = t('founder.tags',   { ns: 'about', returnObjects: true });
+
+    const problemIcons  = [Scissors, FileText, FolderTree, Clapperboard];
+    // The four pillars map 1:1 to the systems that actually exist in the app.
+    const solutionIcons = [LayoutTemplate, Sparkles, Brain, Eye];
+    const believeIcons  = [CheckCircle2, LinkIcon, Play, Heart];
+
+    const IconList = ({ items, icons }) => (
+        <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {items.map((item, idx) => {
+                const Icon = icons[idx];
+                return (
+                    <li key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                        {Icon && <Icon size={18} style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 3 }} />}
+                        <div>
+                            <strong style={{ color: 'var(--fg)', display: 'block', marginBottom: 4 }}>{item.title}</strong>
+                            {item.body}
+                        </div>
+                    </li>
+                );
+            })}
+        </ul>
+    );
 
     return (
         <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)' }}>
@@ -84,55 +115,38 @@ const AboutPage = () => {
                     }}>
                         {t('hero.p2')}
                     </p>
-                    <p style={{
-                        fontFamily: 'var(--f-sans)', fontSize: 17, color: 'var(--fg)', fontWeight: 500,
-                        lineHeight: 1.75, maxWidth: 560, marginTop: 16,
-                    }}>
-                        {t('hero.p3')}
-                    </p>
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 40 }}>
 
-                    <Section title={t('journey.sectionTitle')}>
+                    <Section title={t('problem.sectionTitle')}>
+                        <p>{t('problem.p1')}</p>
+                        <IconList items={problemItems} icons={problemIcons} />
+                        <p style={{ marginTop: 4 }}>{t('problem.p2')}</p>
+                    </Section>
 
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 24, marginTop: 8 }}>
-                            {journeyItems.map((item, idx) => (
-                                <div key={idx} style={{ display: 'flex', gap: 16 }}>
-                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                                        <div style={{ width: 12, height: 12, borderRadius: '50%', background: 'var(--accent)', marginTop: 4 }}></div>
-                                        {idx < journeyItems.length - 1 && (
-                                            <div style={{ flex: 1, width: 2, background: 'var(--line-soft)', marginTop: 8, marginBottom: 8 }}></div>
-                                        )}
-                                    </div>
-                                    <div>
-                                        <div style={{ fontFamily: 'var(--f-mono)', fontSize: 12, color: 'var(--fg-4)', textTransform: 'uppercase', marginBottom: 4 }}>{item.date}</div>
-                                        <div style={{ fontWeight: 600, color: 'var(--fg)', fontSize: 16, marginBottom: 6 }}>{item.title}</div>
-                                        <div style={{ color: 'var(--fg-2)', fontSize: 15, lineHeight: 1.6 }}>
-                                            {item.body}
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+                    <Section title={t('solution.sectionTitle')}>
+                        <p>{t('solution.p1')}</p>
+                        <IconList items={solutionItems} icons={solutionIcons} />
+                        <p style={{ marginTop: 4 }}>{t('solution.p2')}</p>
+                    </Section>
 
+                    <Section title={t('vision.sectionTitle')}>
+                        {/* The one line the page is built around — given display
+                            weight rather than being buried in a paragraph. */}
+                        <p style={{
+                            fontFamily: 'var(--f-display)', fontSize: 'clamp(22px, 3.2vw, 30px)',
+                            fontWeight: 700, lineHeight: 1.3, color: 'var(--fg)',
+                            margin: '4px 0 8px',
+                        }}>
+                            {t('vision.statement')}
+                        </p>
+                        <p>{t('vision.p1')}</p>
+                        <p>{t('vision.p2')}</p>
                     </Section>
 
                     <Section title={t('believe.sectionTitle')}>
-                        <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 16 }}>
-                            {believeItems.map((item, idx) => {
-                                const Icon = believeIcons[idx];
-                                return (
-                                    <li key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                                        {Icon && <Icon className="w-5 h-5 text-accent flex-shrink-0 mt-0.5" />}
-                                        <div>
-                                            <strong style={{ color: 'var(--fg)', display: 'block', marginBottom: 4 }}>{item.title}</strong>
-                                            {item.body}
-                                        </div>
-                                    </li>
-                                );
-                            })}
-                        </ul>
+                        <IconList items={believeItems} icons={believeIcons} />
                     </Section>
 
                     <Section title={t('audience.sectionTitle')}>

@@ -152,23 +152,23 @@ const useTimelineStore = create(
             assets: _preRestoredProject?.assets || [],
             uploadedFile: _preRestoredProject?.uploadedFilePath ? { name: _preRestoredProject.uploadedFilePath } : null,
             uploadedFilePath: _preRestoredProject?.uploadedFilePath || null,
-            pacingSegments: [],
-            beatMarkers: [],
-            captions: [],
-            captionsFilePath: null,
-            transcriptionAttempted: false,
+            pacingSegments: _preRestoredProject?.pacingSegments || [],
+            beatMarkers: _preRestoredProject?.beatMarkers || [],
+            captions: _preRestoredProject?.captions || [],
+            captionsFilePath: _preRestoredProject?.captionsFilePath || null,
+            transcriptionAttempted: _preRestoredProject?.transcriptionAttempted || false,
             // Per-file transcript map: { [basename]: Word[] }
             // Accumulates across all uploaded clips so the AI can understand the full timeline.
-            transcripts: {},
+            transcripts: _preRestoredProject?.transcripts || {},
 
             // Long-Form Intelligence Engine — stores ContentAnalyzer result
-            contentAnalysis: null,
+            contentAnalysis: _preRestoredProject?.contentAnalysis || null,
 
             // Speaker diarization map — populated after split_speakers completes.
             // Shape: { SPEAKER_00: { role: 'interviewer'|'guest'|null, label: string|null, words: [{word, start, end}] } }
-            speakerMap: {},
-            diarizationByAsset: {},   // assetId → { words, speakers } (see setAssetDiarization)
-            sceneAnalysisByAsset: {}, // assetId → { segments, mode, hostSide, … } (see setSceneAnalysis)
+            speakerMap: _preRestoredProject?.speakerMap || {},
+            diarizationByAsset: _preRestoredProject?.diarizationByAsset || {},   // assetId → { words, speakers } (see setAssetDiarization)
+            sceneAnalysisByAsset: _preRestoredProject?.sceneAnalysisByAsset || {}, // assetId → { segments, mode, hostSide, … } (see setSceneAnalysis)
 
             // Ledger of operations actually applied to this project, newest last.
             // ContextEngine.build() reads projectState.editHistory and feeds it to
@@ -176,7 +176,7 @@ const useTimelineStore = create(
             // the field was ALWAYS empty, so the Brain could never tell what had
             // already been done and kept repeating the same suggestions.
             // Entry: { op, at, summary, params }
-            editHistory: [],
+            editHistory: _preRestoredProject?.editHistory || [],
 
             // Preview
             previewQuality: 'high',
@@ -187,7 +187,15 @@ const useTimelineStore = create(
 
             // Audio
             audioLevels: {},
-            waveforms: {},
+            // Track-keyed peaks (canvas waveform, written by addWaveform).
+            waveforms: _preRestoredProject?.waveforms || {},
+            // Asset-keyed peaks, owned by services/WaveformEngine.js.
+            // Separate from `waveforms` above because peaks belong to a SOURCE
+            // FILE, not to a track: one asset re-segmented into 20 clips across
+            // 2 tracks has exactly one waveform, and keying it by track meant
+            // re-deriving it per track. Persisted (R29) so a reload is a cache
+            // hit instead of an ffmpeg round-trip.
+            waveformsByAsset: _preRestoredProject?.waveformsByAsset || {},
 
             // History (expose for UI disabled-state)
             past: [],
@@ -389,6 +397,107 @@ const useTimelineStore = create(
             addWaveform: (id, peaks, duration) => set((state) => ({
                 waveforms: { ...state.waveforms, [id]: { peaks, duration } }
             })),
+
+            // ── Caption edit scope ────────────────────────────────────────────
+            // 'global'     — a style/position change applies to EVERY caption
+            // 'individual' — it applies only to the caption being edited
+            //
+            // This lives in the store, not in TextPanel's local useState, because
+            // captions are editable from two places: the Text panel AND directly
+            // on the playback canvas (drag / pinch / resize in TextOverlay).
+            // While the toggle was component state, the canvas had no way to read
+            // it, so canvas edits were ALWAYS single-segment — the user would set
+            // "Global", drag a caption, and watch one segment move while the rest
+            // stayed put. Same control, two different behaviours depending on
+            // where you touched it.
+            captionEditScope: 'global',
+            setCaptionEditScope: (scope) => set({
+                captionEditScope: scope === 'individual' ? 'individual' : 'global',
+            }),
+
+            /**
+             * THE single path for every caption style/position change.
+             *
+             * Both the Text panel and the playback-canvas overlay must call this
+             * rather than updateClip() directly — that is what keeps the scope
+             * toggle meaningful no matter where the edit originates.
+             *
+             * @param {object} updates        Style/position fields. `content` is
+             *                                handled specially — see below.
+             * @param {object} opts
+             * @param {string} opts.clipId    The caption being edited. Required
+             *                                for individual scope; in global
+             *                                scope it only decides which clip
+             *                                receives a `content` change.
+             * @param {string} opts.scope     Override the store scope (rare).
+             * @param {boolean} opts.skipHistory  True during a live drag, so a
+             *                                gesture produces ONE undo entry
+             *                                rather than one per pointer move.
+             * @param {boolean} opts.liveOnly True to touch only the edited clip
+             *                                even in global scope — used mid-drag
+             *                                so a 200-caption project doesn't fan
+             *                                out N writes per pointer event. The
+             *                                caller commits the real fan-out on
+             *                                pointer-up.
+             * @returns {number} how many clips were actually updated
+             */
+            applyCaptionUpdate: (updates, opts = {}) => {
+                const { clipId = null, scope = null, skipHistory = false, liveOnly = false } = opts;
+                const state = get();
+                const effectiveScope = scope || state.captionEditScope || 'global';
+
+                // `content` is the caption's TEXT. It is per-segment by
+                // definition — fanning it out would overwrite every caption in
+                // the project with the same words — so it is always applied to
+                // the edited clip alone, regardless of scope.
+                const { content, ...styleOnly } = updates || {};
+                const hasStyle = Object.keys(styleOnly).length > 0;
+
+                const textTracks = (state.tracks || []).filter(t => t.type === 'text');
+                if (textTracks.length === 0) return 0;
+
+                const ownerTrack = clipId
+                    ? textTracks.find(t => t.clips.some(c => c.id === clipId))
+                    : null;
+
+                if (!skipHistory) get()._saveHistory();
+
+                let updated = 0;
+
+                if (hasStyle) {
+                    if (effectiveScope === 'global' && !liveOnly) {
+                        // Fan out across EVERY text track, not just the edited
+                        // one — a project can have more than one caption track
+                        // and "global" has to mean global.
+                        for (const track of textTracks) {
+                            for (const clip of (track.clips || [])) {
+                                get().updateClip(track.id, clip.id, styleOnly, { skipHistory: true });
+                                updated++;
+                            }
+                        }
+                    } else if (clipId && ownerTrack) {
+                        get().updateClip(ownerTrack.id, clipId, styleOnly, { skipHistory: true });
+                        updated++;
+                    }
+                }
+
+                if (content !== undefined && clipId && ownerTrack) {
+                    get().updateClip(ownerTrack.id, clipId, { content }, { skipHistory: true });
+                    if (!hasStyle) updated++;
+                }
+
+                return updated;
+            },
+
+            // Asset-keyed peak cache — written ONLY by services/WaveformEngine.js.
+            // Do not call this from a component: the engine is the single owner
+            // of extraction so that rendering a clip can never trigger a network
+            // request (see the header comment in WaveformEngine.js).
+            setAssetWaveform: (assetId, data) => set((state) => (
+                assetId && data?.peaks?.length
+                    ? { waveformsByAsset: { ...state.waveformsByAsset, [assetId]: data } }
+                    : {}
+            )),
 
             // Captions / beats / pacing
             setCaptions: (captions, filePath) => {
@@ -1242,12 +1351,72 @@ const useTimelineStore = create(
                     transcriptionAttempted: state.transcriptionAttempted,
                     assets: sanitizedAssets,
                     uploadedFilePath: state.uploadedFilePath || null,
+
+                    // ── Expensive AI results ──────────────────────────────────
+                    // Every field below is the output of a slow and/or paid
+                    // operation. None of them used to be persisted, so each one
+                    // was silently recomputed on every reload:
+                    //   transcripts          — Whisper (paid, slow)
+                    //   diarizationByAsset   — 1–5 min diarize job PER ASSET
+                    //   sceneAnalysisByAsset — GPT-4o Vision call per asset
+                    //   speakerMap           — split_speakers output
+                    //   contentAnalysis      — ContentAnalyzer / GPT-4o
+                    //   editHistory          — the Editorial Brain's memory (R19)
+                    //   waveforms            — ffmpeg peak extraction
+                    // That single omission is what produced "the transcript
+                    // disappeared", "it re-ran diarization", "the Brain forgot
+                    // what I did" and "the waveform vanished after a refresh"
+                    // as four separate-looking bugs. They are one bug.
+                    captionsFilePath:     state.captionsFilePath || null,
+                    transcripts:          state.transcripts || {},
+                    contentAnalysis:      state.contentAnalysis || null,
+                    speakerMap:           state.speakerMap || {},
+                    diarizationByAsset:   state.diarizationByAsset || {},
+                    sceneAnalysisByAsset: state.sceneAnalysisByAsset || {},
+                    editHistory:          state.editHistory || [],
+                    waveforms:            state.waveforms || {},
+                    waveformsByAsset:     state.waveformsByAsset || {},
                 };
-                try {
-                    localStorage.setItem('vp_autosave', JSON.stringify(projectData));
-                } catch (_) {
-                    // localStorage full — silently skip
+
+                // ── Tiered write ──────────────────────────────────────────────
+                // The AI blobs above are large — word-level transcripts and
+                // waveform peak arrays for a long interview can run to several
+                // MB, and localStorage caps at ~5 MB per origin. The previous
+                // `catch (_) {}` swallowed QuotaExceededError silently, which
+                // would now mean a quota overflow loses the TIMELINE too — a
+                // strictly worse failure than the one being fixed.
+                //
+                // So: try the full payload, and on overflow progressively drop
+                // the heaviest recomputable fields rather than the edit itself.
+                // Order is cheapest-to-lose first — waveforms regenerate from a
+                // local ffmpeg call, transcripts cost real money.
+                const DROP_ORDER = ['waveforms', 'waveformsByAsset', 'sceneAnalysisByAsset', 'diarizationByAsset', 'transcripts'];
+                let payload = projectData;
+                for (let attempt = 0; attempt <= DROP_ORDER.length; attempt++) {
+                    try {
+                        localStorage.setItem('vp_autosave', JSON.stringify(payload));
+                        if (attempt > 0) {
+                            console.warn(
+                                `[useTimelineStore] autosave over quota — persisted without: ` +
+                                `${DROP_ORDER.slice(0, attempt).join(', ')}. The timeline itself is saved.`
+                            );
+                        }
+                        break;
+                    } catch (err) {
+                        if (attempt === DROP_ORDER.length) {
+                            // Even the stripped payload doesn't fit. Say so —
+                            // this is the one case where the user genuinely can
+                            // lose work, and it must not fail silently.
+                            console.error('[useTimelineStore] autosave FAILED — localStorage is full:', err?.message);
+                            break;
+                        }
+                        payload = { ...payload, [DROP_ORDER[attempt]]: Array.isArray(payload[DROP_ORDER[attempt]]) ? [] : {} };
+                    }
                 }
+
+                // Always return the COMPLETE payload, not the stripped one — the
+                // Supabase mirror (useSupabasePersistence) has no 5 MB ceiling,
+                // so a localStorage overflow must not degrade the cloud copy.
                 return projectData;
             },
 
@@ -1265,6 +1434,30 @@ const useTimelineStore = create(
                     beatMarkers: projectData.beatMarkers || [],
                     captions: projectData.captions || [],
                     transcriptionAttempted: projectData.transcriptionAttempted || false,
+
+                    // Mirror of the AI-result fields added to saveProject above.
+                    // This is the path Supabase-loaded projects take (EditorPage
+                    // → loadProject), as distinct from the synchronous
+                    // localStorage pre-restore at the top of this file. BOTH
+                    // must carry these fields or a cloud-loaded project silently
+                    // starts with no transcript while a locally-restored one has
+                    // it — the kind of split-brain that reads as "sometimes it
+                    // remembers, sometimes it doesn't".
+                    //
+                    // Each falls back to the CURRENT in-memory value rather than
+                    // a hard empty: an older project saved before this change has
+                    // no such keys, and blanking a transcript the user just
+                    // generated would reintroduce the exact bug being fixed.
+                    captionsFilePath:     projectData.captionsFilePath     ?? get().captionsFilePath,
+                    transcripts:          projectData.transcripts          ?? get().transcripts,
+                    contentAnalysis:      projectData.contentAnalysis      ?? get().contentAnalysis,
+                    speakerMap:           projectData.speakerMap           ?? get().speakerMap,
+                    diarizationByAsset:   projectData.diarizationByAsset   ?? get().diarizationByAsset,
+                    sceneAnalysisByAsset: projectData.sceneAnalysisByAsset ?? get().sceneAnalysisByAsset,
+                    editHistory:          projectData.editHistory          ?? get().editHistory,
+                    waveforms:            projectData.waveforms            ?? get().waveforms,
+                    waveformsByAsset:     projectData.waveformsByAsset     ?? get().waveformsByAsset,
+
                     activeClipId: null,
                     currentTime: 0,
                     past: [],

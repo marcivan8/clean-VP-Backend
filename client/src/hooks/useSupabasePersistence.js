@@ -53,18 +53,30 @@ export function useSupabasePersistence() {
         const unsub = useTimelineStore.subscribe(
             (state) => state.tracks,
             () => {
-                // Grab the latest project data from localStorage (saveProject already wrote it)
-                let projectData = null;
-                try {
-                    const raw = localStorage.getItem('vp_autosave');
-                    if (raw) projectData = JSON.parse(raw);
-                } catch (_) {}
-
-                if (!projectData) return;
-
                 clearTimeout(timerRef.current);
                 timerRef.current = setTimeout(async () => {
-                    const { projectId, projectName, setProjectId } = useTimelineStore.getState();
+                    const { projectId, projectName, setProjectId, saveProject } = useTimelineStore.getState();
+
+                    // Build the payload from LIVE store state rather than reading
+                    // back what saveProject() wrote to localStorage. Two reasons:
+                    //
+                    // 1. CORRECTNESS — saveProject() progressively drops the heavy
+                    //    AI blobs (transcripts, waveforms, diarization) when
+                    //    localStorage is over its ~5 MB quota. Round-tripping
+                    //    through localStorage meant Supabase received that
+                    //    STRIPPED copy, so the one store with no size ceiling was
+                    //    silently capped by the one that has it — and the
+                    //    transcript would be missing from the cloud project too.
+                    // 2. FRESHNESS — the old code snapshotted localStorage at
+                    //    subscribe time but wrote it 3 s later, so any edit made
+                    //    inside that window was omitted from the cloud copy.
+                    //
+                    // saveProject() returns the complete payload and is cheap +
+                    // idempotent; calling it here also guarantees localStorage and
+                    // Supabase are generated from the same instant of state.
+                    const projectData = saveProject();
+                    if (!projectData) return;
+
                     const savedId = await _supabaseSave(projectData, projectId, projectName, (newId) => {
                         setProjectId(newId);
                     });

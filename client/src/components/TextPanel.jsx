@@ -241,10 +241,15 @@ const SegmentRow = ({ clip, trackId, globalStyle, onActivate, isActive }) => {
     const [expanded, setExpanded] = useState(false);
 
     const handleToggle = () => { onActivate(clip.id); setExpanded(p => !p); };
+    // Explicit per-segment scope: this row IS the per-segment editor, so an edit
+    // here must stay local even while the panel-wide toggle says "global".
+    // Passing the scope explicitly (rather than relying on the store's current
+    // value) is what makes that guarantee independent of the toggle's state.
     const handleUpdate = (updates) => {
-        const store = useTimelineStore.getState();
-        store.saveToHistory?.();
-        store.updateClip(trackId, clip.id, updates, { skipHistory: true });
+        useTimelineStore.getState().applyCaptionUpdate(updates, {
+            clipId: clip.id,
+            scope: 'individual',
+        });
     };
 
     const hasOverrides = Object.keys(globalStyle).some(k => {
@@ -252,11 +257,15 @@ const SegmentRow = ({ clip, trackId, globalStyle, onActivate, isActive }) => {
         return clip[k] !== undefined && clip[k] !== globalStyle[k];
     });
 
+    // Reset = re-apply the global style to THIS segment only, clearing its
+    // overrides. Also explicitly individual — resetting one segment must never
+    // fan the global style back out over everything.
     const handleReset = () => {
         const { content, ...styleOnly } = globalStyle;
-        const store = useTimelineStore.getState();
-        store.saveToHistory?.();
-        store.updateClip(trackId, clip.id, styleOnly, { skipHistory: true });
+        useTimelineStore.getState().applyCaptionUpdate(styleOnly, {
+            clipId: clip.id,
+            scope: 'individual',
+        });
     };
 
     const fmt = (s) => { const m = Math.floor(s / 60); return `${m}:${(s % 60).toFixed(1).padStart(4, '0')}`; };
@@ -318,7 +327,13 @@ const TextPanel = () => {
         setActiveClip: state.setActiveClip,
     })));
 
-    const [editMode, setEditMode] = useState('global');
+    // Scope lives in the STORE, not here. It used to be component-local
+    // useState, which meant the playback-canvas overlay (TextOverlay) had no way
+    // to read it — so dragging a caption on the canvas was always single-segment
+    // no matter what this toggle said. Same setting, two behaviours depending on
+    // where the user happened to edit.
+    const editMode    = useTimelineStore(s => s.captionEditScope);
+    const setEditMode = useTimelineStore(s => s.setCaptionEditScope);
     const [globalFlash, setGlobalFlash] = useState(false);
     // Live drag state: holds position/style values being dragged before store commit.
     // Prevents the N-clip fan-out from firing on every drag pixel.
@@ -353,33 +368,31 @@ const TextPanel = () => {
         const freshTracks = store.tracks;
         const freshText   = freshTracks.find(t => t.type === 'text');
         const freshActTrk = freshTracks.find(t => t.clips.some(c => c.id === activeClipId));
-        const freshActClp = freshActTrk?.clips.find(c => c.id === activeClipId);
-        const freshIsText = freshActTrk?.type === 'text';
 
         if (!freshText && !freshActTrk) return;
 
-        if (editMode === 'global') {
-            const { content, ...styleOnly } = updates;
-            if (Object.keys(styleOnly).length > 0 && freshText) {
-                // ONE history entry for the entire batch
-                if (!skipHistory) store.saveToHistory?.();
-                freshText.clips.forEach(clip =>
-                    store.updateClip(freshText.id, clip.id, styleOnly, { skipHistory: true })
-                );
-                // Flash the count badge so the user can see the fan-out happened
-                if (!skipHistory) {
-                    setGlobalFlash(true);
-                    setTimeout(() => setGlobalFlash(false), 900);
-                }
-            }
-            // Content is per-segment — update only the active caption clip
-            if (content !== undefined && freshIsText && freshActTrk && freshActClp) {
-                store.updateClip(freshActTrk.id, freshActClp.id, { content }, { skipHistory: true });
-            }
-        } else {
-            if (!freshActTrk || !freshActClp) return;
-            if (!skipHistory) store.saveToHistory?.();
-            store.updateClip(freshActTrk.id, freshActClp.id, updates, { skipHistory: true });
+        // Route through the shared store action rather than fanning out here.
+        // Both this panel and the canvas overlay call the same function, so the
+        // scope toggle means the same thing from either surface — the scope
+        // rules (global fan-out, content always per-segment) live in exactly one
+        // place instead of being reimplemented per call site.
+        //
+        // Fall back to the first caption clip when nothing is selected: in
+        // global mode the panel edits the caption style as a whole, and the user
+        // has not necessarily clicked a specific segment.
+        const targetClipId = freshActTrk?.type === 'text'
+            ? activeClipId
+            : (freshText?.clips?.[0]?.id ?? null);
+
+        const updatedCount = store.applyCaptionUpdate(updates, {
+            clipId: targetClipId,
+            skipHistory,
+        });
+
+        // Flash the count badge so the fan-out is visible to the user
+        if (!skipHistory && editMode === 'global' && updatedCount > 1) {
+            setGlobalFlash(true);
+            setTimeout(() => setGlobalFlash(false), 900);
         }
     };
 
@@ -394,14 +407,21 @@ const TextPanel = () => {
         // Update panel display via local state (zero React children re-renders)
         setLiveOverride(prev => ({ ...prev, ...styleOnly }));
 
-        // Update the display clip only (1 store write instead of N)
+        // Update the display clip only (1 store write instead of N). liveOnly
+        // keeps this single-clip even in global scope — handleUpdate commits the
+        // real fan-out when the drag ends, which is also what makes the whole
+        // gesture one undo entry.
         const store = useTimelineStore.getState();
         const freshText = store.tracks?.find(t => t.type === 'text');
         if (!freshText) return;
         const displayTarget =
             freshText.clips.find(c => c.id === activeClipId) || freshText.clips[0];
         if (displayTarget) {
-            store.updateClip(freshText.id, displayTarget.id, styleOnly, { skipHistory: true });
+            store.applyCaptionUpdate(styleOnly, {
+                clipId: displayTarget.id,
+                skipHistory: true,
+                liveOnly: true,
+            });
         }
     };
 

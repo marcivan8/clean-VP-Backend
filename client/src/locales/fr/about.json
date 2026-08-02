@@ -1,71 +1,103 @@
 {
   "hero": {
-    "eyebrow": "Notre histoire",
-    "title": "Créé par un créateur de contenu lassé de monter des vidéos à la dure. Pas un énième outil de timeline. Un collaborateur IA qui comprend ce que vous cherchez à créer.",
-    "p1": "VIBED est l'IA qui monte vos vidéos à votre place.",
-    "p2": "L'idée était simple : et si vous pouviez simplement décrire le montage ? Sans cliquer dans des menus. Sans glisser des poignées sur une timeline. Juste dire ce que vous voulez — et que ce soit fait.",
-    "p3": "Cette question est devenue VIBED."
+    "eyebrow": "À propos de Vibed",
+    "title": "Un espace de montage vidéo nativement piloté par l'IA.",
+    "p1": "Vibed est un éditeur vidéo auquel on parle. Décrivez le montage que vous voulez et il se fait — sans fouiller dans les menus, sans faire glisser des poignées sur une timeline.",
+    "p2": "Tout ce dont un créateur a besoin pour passer des rushes au montage final se trouve au même endroit, et l'IA comprend l'ensemble."
   },
-  "journey": {
-    "sectionTitle": "Le parcours",
+  "problem": {
+    "sectionTitle": "Le problème",
+    "p1": "Le montage vidéo est fragmenté. Une seule vidéo impose quatre types de travail différents, chacun dans son propre outil, et aucun ne connaît les autres.",
     "items": [
       {
-        "date": "2024 · Istanbul, Turquie",
-        "title": "L'origine",
-        "body": "Les principes sur lesquels il repose : — IA d'abord : chaque montage commence par une conversation - Rapide : des rushs bruts à la vidéo exportée en quelques minutes - Adapté à la plateforme : sait ce qui fonctionne sur YouTube vs TikTok - Non destructif : rien n'est permanent, tout est réversible"
+        "title": "Le montage",
+        "body": "Couper, rogner, cadrer — un travail mécanique qui consomme l'essentiel du temps et contribue le moins au résultat."
       },
       {
-        "date": "2025 · Paris, France — Epitech",
-        "title": "La construction",
-        "body": "Arrivée en France avec un seul objectif : apprendre à construire ce qui avait été imaginé en Turquie. Les compétences techniques se construisent à Epitech — l'une des grandes écoles d'ingénieurs françaises — où les premières vraies versions du produit sont construites, cassées, puis reconstruites."
+        "title": "L'écriture",
+        "body": "Transcriptions, sous-titres, structure. Le plus souvent dans un document séparé, déconnecté des images qu'il décrit."
       },
       {
-        "date": "La métamorphose",
-        "title": "D'un outil d'analyse à un IDE de montage",
-        "body": "Le projet évolue. Ce qui avait commencé comme un outil d'analyse vidéo — qui notait les rushs pour leur potentiel viral — devient quelque chose de plus intéressant : un environnement de montage conversationnel. Un IDE pour la vidéo, validé par un mentor et enseignant qui a clairement vu le vide sur le marché."
+        "title": "L'organisation",
+        "body": "Nommer, trier et retrouver les clips entre les tournages. L'impôt à payer avant que le vrai travail commence."
       },
       {
-        "date": "2026",
-        "title": "Lancement de VIBED",
-        "body": "La première version est en ligne. Podcasteurs, YouTubeurs et réalisateurs de documentaires peuvent désormais monter en décrivant ce qu'ils veulent — et exporter vers les outils qu'ils utilisent déjà."
+        "title": "La narration",
+        "body": "La seule partie qui compte vraiment — et la première à être sacrifiée quand les trois autres débordent."
       }
-    ]
+    ],
+    "p2": "Les outils sont puissants. C'est dans les écarts entre eux que le temps se perd."
+  },
+  "solution": {
+    "sectionTitle": "Ce que fait Vibed",
+    "p1": "Vibed comble ces écarts en réunissant quatre systèmes dans un même espace de travail, et en leur faisant partager le même contexte.",
+    "items": [
+      {
+        "title": "Timeline",
+        "body": "Un véritable éditeur — multipiste, non destructif, avec annulation complète. Rien de ce que fait l'IA n'est définitif, et rien ne se produit que vous ne puissiez annuler."
+      },
+      {
+        "title": "Assistant IA",
+        "body": "Des commandes en langage naturel. « Enlève les silences. » « Alterne entre les intervenants. » Il planifie le montage, vous montre le plan, et attend votre validation avant de toucher à quoi que ce soit."
+      },
+      {
+        "title": "Brain",
+        "body": "Lit l'état de votre projet et propose la prochaine étape — en fonction de ce que vous avez déjà fait, pas d'une liste figée."
+      },
+      {
+        "title": "Media Intelligence",
+        "body": "Analyse les rushes dès l'import : qui parle, ce qu'il y a dans le cadre, où sont les prises exploitables. C'est cette compréhension qui rend les trois autres systèmes précis plutôt que génériques."
+      }
+    ],
+    "p2": "Parce qu'ils partagent un même contexte, une instruction comme « resserre tout ça » veut dire quelque chose de concret plutôt que de vague."
+  },
+  "vision": {
+    "sectionTitle": "Où cela nous mène",
+    "statement": "Faire du montage vidéo une conversation.",
+    "p1": "L'interface dont la plupart des éditeurs ont hérité a été conçue pour couper de la pellicule. Elle est précise, elle est lente, et elle vous oblige à traduire une intention créative en des centaines de petites opérations mécaniques.",
+    "p2": "Nous pensons que c'est cette étape de traduction qui pose problème, pas le métier. L'objectif n'est pas de supprimer le monteur — c'est de supprimer tout ce qui sépare l'idée de sa mise à l'écran."
   },
   "believe": {
     "sectionTitle": "Ce en quoi nous croyons",
     "items": [
       {
         "title": "Vous gardez le contrôle",
-        "body": "L'IA suggère et exécute. Vous décidez. Chaque action est visible, nommée et réversible. Rien ne se passe dans une boîte noire."
+        "body": "L'IA propose et exécute. Vous décidez. Chaque action est visible, nommée et réversible. Rien ne se passe dans une boîte noire."
       },
       {
-        "title": "Travaillez avec vos outils",
-        "body": "Vous n'avez pas à abandonner Premiere, Final Cut ou DaVinci. VIBED fonctionne avec la suite dans laquelle vous finalisez déjà — pas à sa place."
+        "title": "Travaillez dans vos outils",
+        "body": "Vous n'avez pas à abandonner Premiere, Final Cut ou DaVinci. Vibed fonctionne avec la suite dans laquelle vous finalisez déjà — pas à sa place."
       },
       {
-        "title": "Monter est un travail créatif",
-        "body": "Les tâches mécaniques — suppression des silences, nettoyage, mise en forme — ne devraient pas capter votre attention. L'histoire, si."
+        "title": "Le montage est un travail créatif",
+        "body": "Les parties mécaniques — suppression des silences, nettoyage, mise en forme — ne devraient pas mobiliser votre attention. L'histoire, si."
       },
       {
-        "title": "Vos rushs vous appartiennent",
-        "body": "Nous les stockons, nous les traitons, nous les supprimons selon votre calendrier. Nous ne les utilisons jamais pour l'entraînement, nous ne les partageons jamais, nous ne les monétisons jamais."
+        "title": "Vos rushes vous appartiennent",
+        "body": "Nous les stockons, nous les traitons, nous les supprimons selon votre calendrier. Nous ne les utilisons jamais pour entraîner nos modèles et nous ne les vendons jamais."
       }
     ]
   },
   "audience": {
-    "sectionTitle": "Pour qui nous construisons",
-    "p1": "VIBED est conçu pour les créateurs de contenu long format qui montent eux-mêmes leur contenu — podcasteurs, YouTubeurs, intervieweurs, réalisateurs de documentaires. Des personnes qui ont une histoire à raconter et une timeline pleine de rushs bruts qui les empêche de la raconter.",
-    "p2": "Pas pour les équipes avec des monteurs dédiés. Pas pour les usines à contenu court format. Pour le créateur solo qui filme quelque chose de réel, s'assoit pour le monter lui-même, et veut que le processus ne se mette pas en travers du travail."
+    "sectionTitle": "À qui cela s'adresse",
+    "p1": "Podcasteurs, YouTubeurs, intervieweurs et documentaristes — tous ceux qui travaillent des formats longs où le montage consiste surtout à trouver les bons passages et couper le reste.",
+    "p2": "Si vous passez plus de temps à nettoyer qu'à raconter, Vibed est fait pour vous."
   },
   "founder": {
-    "sectionTitle": "Le fondateur",
-    "name": "Marc NGUIDJOL",
-    "role": "Fondateur et développeur — VIBED Studio",
+    "sectionTitle": "Qui est derrière",
+    "name": "Marc Guidjol",
+    "role": "Fondateur",
     "location": "Paris, France",
-    "bio": "D'Istanbul à Paris. Étudiant en master IA à Epitech. Fondateur solo de VIBED — un IDE de montage vidéo conversationnel pour les créateurs de contenu long format. Précédemment : outils d'analyse vidéo, hackathons, et beaucoup de temps passé à apprendre ce qu'il ne fallait pas construire.",
-    "tags": ["Master IA à Epitech", "Fondateur solo", "Contenu long format", "Construction en public", "Paris, France"]
+    "bio": "Vibed est né d'un créateur fatigué de monter à la dure. L'idée a pris forme à Istanbul en 2024, et la partie technique s'est construite à Epitech Paris — d'abord comme outil d'analyse de rushes, puis, une fois le vrai manque devenu évident, comme environnement de montage conversationnel.",
+    "tags": [
+      "Créateur",
+      "Ingénieur",
+      "Epitech Paris",
+      "Construit en public",
+      "Outils vidéo"
+    ]
   },
   "cta": {
-    "prompt": "Des questions, un retour, ou juste envie de parler du projet ?"
+    "prompt": "Des questions, des retours, ou envie de parler de ce que vous construisez ?"
   }
 }

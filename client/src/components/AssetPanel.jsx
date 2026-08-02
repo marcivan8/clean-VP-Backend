@@ -12,7 +12,7 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Search, Music2, Palette, Layers, Loader2, RefreshCw } from 'lucide-react';
+import { Search, Music2, Palette, Layers, Loader2, RefreshCw, Upload } from 'lucide-react';
 import { useAudioEngine }        from '../hooks/useAudioEngine.js';
 import useTimelineStore          from '../store/useTimelineStore.js';
 import { audioEngineAPI }        from '../audio-engine/AudioEngineAPI.js';
@@ -102,6 +102,32 @@ export default function AssetPanel({ onClose }) {
         if (tab === 'presets' && presetResults.length === 0)  searchPresets();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [tab]);
+
+    // ── Custom .cube LUT import ───────────────────────────────────────────────
+    const [lutUploading,   setLutUploading]   = useState(false);
+    const [lutUploadError, setLutUploadError] = useState(null);
+
+    const handleLutUpload = useCallback(async (e) => {
+        const file = e.target.files?.[0];
+        // Reset the input immediately so re-selecting the SAME file still fires
+        // a change event (the browser suppresses it otherwise, which reads as
+        // "the import silently did nothing" after a failed first attempt).
+        e.target.value = '';
+        if (!file) return;
+
+        setLutUploadError(null);
+        setLutUploading(true);
+        try {
+            await audioEngineAPI.uploadLUT(file);
+            // Refresh so the new LUT appears in the grid straight away.
+            await searchLUTs(query || '');
+        } catch (err) {
+            console.error('[AssetPanel] LUT upload failed:', err.message);
+            setLutUploadError(err.message);
+        } finally {
+            setLutUploading(false);
+        }
+    }, [searchLUTs, query]);
 
     const handleSearch = useCallback(e => {
         e.preventDefault();
@@ -236,6 +262,42 @@ export default function AssetPanel({ onClose }) {
                         <Search size={12} />
                     </button>
                 </form>
+
+                {/* Custom .cube LUT import — Color tab only.
+                    The server route (POST /api/luts/upload) was already built,
+                    mounted and export-integrated; there was simply no way to
+                    reach it from the UI, which is why LUT import read as
+                    "broken" rather than "missing". */}
+                {tab === 'luts' && (
+                    <div style={{ padding: '0 12px 8px' }}>
+                        <label
+                            style={{
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                                padding: '6px 10px', borderRadius: 6,
+                                border: '0.5px dashed rgba(255,255,255,0.18)',
+                                background: 'rgba(255,255,255,0.03)',
+                                color: lutUploading ? 'var(--fg-3)' : 'var(--fg-2)',
+                                fontSize: 11, fontFamily: 'var(--f-sans)',
+                                cursor: lutUploading ? 'default' : 'pointer',
+                            }}
+                        >
+                            {lutUploading
+                                ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} />
+                                : <Upload size={11} />}
+                            {lutUploading ? t('assetPanel.lutUploading') : t('assetPanel.lutImport')}
+                            <input
+                                type="file"
+                                accept=".cube"
+                                disabled={lutUploading}
+                                onChange={handleLutUpload}
+                                style={{ display: 'none' }}
+                            />
+                        </label>
+                        {lutUploadError && (
+                            <div style={{ marginTop: 5, fontSize: 10, color: '#ff8faa' }}>{lutUploadError}</div>
+                        )}
+                    </div>
+                )}
 
                 {/* Apply result toast */}
                 {applyResult && (
