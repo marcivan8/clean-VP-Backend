@@ -22,6 +22,14 @@ jobs:
 
     environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
 
+    # GitHub Actions does not allow the `secrets` context inside an `if:`
+    # condition — `if:` is evaluated before secrets are resolved for the run,
+    # so `secrets.X` there fails with "Unrecognized named-value: 'secrets'".
+    # Route it through a job-level env var instead; env IS available to
+    # step-level `if:` conditions.
+    env:
+      SENTRY_AUTH_TOKEN_SET: ${{ secrets.SENTRY_AUTH_TOKEN }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -89,6 +97,16 @@ jobs:
 
       - name: Apply migrations
         run: |
+          # psql silently falls back to a local Unix-socket connection when
+          # given an empty string instead of erroring — that's what produces
+          # the confusing "connection to server on socket ... failed" message
+          # when SUPABASE_DB_URL simply isn't set. Fail fast with a clear
+          # message instead of letting psql guess at a connection.
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "::error::SUPABASE_DB_URL is not set for this environment (${{ github.ref_name == 'main' && 'production' || 'staging' }})."
+            echo "::error::Add it under Settings → Environments → ${{ github.ref_name == 'main' && 'production' || 'staging' }} → Secrets."
+            exit 1
+          fi
           for f in $(ls migrations/*.sql | sort); do
             echo "Applying $f …"
             psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "$f"
@@ -107,13 +125,13 @@ jobs:
 
       - name: Deploy to staging
         if: github.ref_name == 'staging'
-        run: railway up --detach
+        run: railway up --detach --service clean-VP-Backend
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_STAGING }}
 
       - name: Deploy to production
         if: github.ref_name == 'main'
-        run: railway up --detach
+        run: railway up --detach --service clean-VP-Backend
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
 
@@ -121,7 +139,7 @@ jobs:
       # Associates deployed commits with Sentry issues for better context.
       # Requires SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT secrets.
       - name: Create Sentry release
-        if: ${{ secrets.SENTRY_AUTH_TOKEN != '' }}
+        if: ${{ env.SENTRY_AUTH_TOKEN_SET != '' }}
         uses: getsentry/action-release@v1
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}

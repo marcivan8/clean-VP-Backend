@@ -1,1 +1,103 @@
-{}
+{
+  "hero": {
+    "eyebrow": "About Vibed",
+    "title": "An AI-native video editing workspace.",
+    "p1": "Vibed is a video editor you talk to. Describe the edit you want and it happens — no menu hunting, no dragging handles across a timeline.",
+    "p2": "Everything a creator needs to take raw footage to a finished cut lives in one place, and the AI understands all of it."
+  },
+  "problem": {
+    "sectionTitle": "The problem",
+    "p1": "Video editing is fragmented. A single video pulls a creator across four different kinds of work, each in its own tool, none of which know about the others.",
+    "items": [
+      {
+        "title": "Editing",
+        "body": "Cutting, trimming, framing — mechanical work that eats the majority of the time and contributes the least to the result."
+      },
+      {
+        "title": "Scripting",
+        "body": "Transcripts, captions, structure. Usually a separate document, disconnected from the footage it describes."
+      },
+      {
+        "title": "Organisation",
+        "body": "Naming, sorting and finding clips across shoots. The tax you pay before real work starts."
+      },
+      {
+        "title": "Storytelling",
+        "body": "The part that actually matters — and the first thing to get squeezed when the other three run long."
+      }
+    ],
+    "p2": "The tools are powerful. The gaps between them are where the time goes."
+  },
+  "solution": {
+    "sectionTitle": "What Vibed does",
+    "p1": "Vibed closes those gaps by putting four systems in one workspace and letting them share context.",
+    "items": [
+      {
+        "title": "Timeline",
+        "body": "A real editor — multi-track, non-destructive, with full undo. Nothing the AI does is permanent, and nothing happens you can't reverse."
+      },
+      {
+        "title": "AI Assistant",
+        "body": "Plain-language commands. \"Remove the silences.\" \"Cut between speakers.\" It plans the edit, shows you the plan, and waits for your approval before touching anything."
+      },
+      {
+        "title": "Brain",
+        "body": "Reads the state of your project and suggests what to do next — based on what you've already done, not a fixed checklist."
+      },
+      {
+        "title": "Media Intelligence",
+        "body": "Analyses footage on upload: who's speaking, what's in frame, where the usable takes are. That understanding is what makes the other three specific rather than generic."
+      }
+    ],
+    "p2": "Because they share one context, an instruction like \"tighten this up\" means something concrete instead of something vague."
+  },
+  "vision": {
+    "sectionTitle": "Where this goes",
+    "statement": "Turn video editing into conversation.",
+    "p1": "The interface most editors inherited was designed for cutting physical film. It's precise, and it's slow, and it makes you translate creative intent into hundreds of small mechanical operations.",
+    "p2": "We think that translation step is the problem, not the craft. The goal isn't to remove the editor — it's to remove everything between having an idea and seeing it on screen."
+  },
+  "believe": {
+    "sectionTitle": "What we believe",
+    "items": [
+      {
+        "title": "You stay in control",
+        "body": "The AI suggests and executes. You decide. Every action is visible, named, and reversible. Nothing happens inside a black box."
+      },
+      {
+        "title": "Work in your tools",
+        "body": "You don't have to abandon Premiere, Final Cut, or DaVinci. Vibed works with the suite you already finish in — not instead of it."
+      },
+      {
+        "title": "Editing is creative work",
+        "body": "The mechanical parts — silence removal, cleanup, formatting — shouldn't take your attention. The story should."
+      },
+      {
+        "title": "Your footage is yours",
+        "body": "We store it, we process it, we delete it on your schedule. We never train on it and we never sell it."
+      }
+    ]
+  },
+  "audience": {
+    "sectionTitle": "Who it's for",
+    "p1": "Podcasters, YouTubers, interviewers and documentary makers — anyone working with long-form talking footage where the edit is mostly about finding the good parts and cutting the rest.",
+    "p2": "If you spend more time on cleanup than on story, Vibed is built for you."
+  },
+  "founder": {
+    "sectionTitle": "Who's behind it",
+    "name": "Marc Guidjol",
+    "role": "Founder",
+    "location": "Paris, France",
+    "bio": "Vibed started with a creator who got tired of editing the hard way. The idea took shape in Istanbul in 2024, and the engineering came together at Epitech in Paris — first as a footage analysis tool, then, once the real gap became obvious, as a conversational editing environment.",
+    "tags": [
+      "Creator",
+      "Engineer",
+      "Epitech Paris",
+      "Building in public",
+      "Video tooling"
+    ]
+  },
+  "cta": {
+    "prompt": "Questions, feedback, or want to talk about what you're building?"
+  }
+}

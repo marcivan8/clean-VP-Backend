@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useClarificationDialog } from '../hooks/useClarificationDialog';
 import { HelpCircle, Check, Loader2 } from 'lucide-react';
 
 export function ClarificationDialog() {
+    const { t } = useTranslation('editor');
     const { isOpen, request, submit, cancel, isProcessing } = useClarificationDialog();
     const [answers, setAnswers] = useState({});
 
@@ -48,10 +50,10 @@ export function ClarificationDialog() {
                     </div>
                     <div>
                         <div style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 2 }}>
-                            Clarification needed
+                            {t('clarificationDialog.clarificationNeeded')}
                         </div>
                         <h3 style={{ fontFamily: 'var(--f-sans)', fontSize: 15, fontWeight: 700, color: 'var(--fg)', margin: 0, lineHeight: 1.2 }}>
-                            A few quick questions
+                            {t('clarificationDialog.aFewQuickQuestions')}
                         </h3>
                     </div>
                 </div>
@@ -60,7 +62,7 @@ export function ClarificationDialog() {
                 <div className="p-6 space-y-6 max-h-[60vh] overflow-y-auto">
                     {questions.length === 0 ? (
                         <p style={{ fontFamily: 'var(--f-sans)', fontSize: 13, color: 'var(--fg-3)', textAlign: 'center', fontStyle: 'italic' }}>
-                            No questions needed.
+                            {t('clarificationDialog.noQuestionsNeeded')}
                         </p>
                     ) : (
                         questions.map((q, idx) => (
@@ -121,7 +123,7 @@ export function ClarificationDialog() {
                                         type="text"
                                         value={answers[q.parameter] || ''}
                                         onChange={(e) => handleAnswer(q.parameter, e.target.value)}
-                                        placeholder={q.placeholder || 'Type your answer…'}
+                                        placeholder={q.placeholder || t('clarificationDialog.typeYourAnswer')}
                                         className="w-full outline-none transition-all"
                                         style={{
                                             background: 'rgba(0,0,0,0.35)',
@@ -154,7 +156,7 @@ export function ClarificationDialog() {
                         onMouseEnter={e => { e.currentTarget.style.color = 'var(--fg)'; }}
                         onMouseLeave={e => { e.currentTarget.style.color = 'var(--fg-3)'; }}
                     >
-                        Cancel
+                        {t('clarificationDialog.cancel')}
                     </button>
                     <button
                         onClick={handleSubmit}
@@ -175,12 +177,12 @@ export function ClarificationDialog() {
                         {isProcessing ? (
                             <>
                                 <Loader2 className="w-3 h-3 animate-spin" />
-                                Processing…
+                                {t('clarificationDialog.processing')}
                             </>
                         ) : (
                             <>
                                 <Check className="w-3 h-3" />
-                                Continue
+                                {t('clarificationDialog.continue')}
                             </>
                         )}
                     </button>

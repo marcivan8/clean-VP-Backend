@@ -15,7 +15,7 @@ describe('Security headers', () => {
         const res = await request(app).get('/health');
         const csp = res.headers['content-security-policy'];
         expect(csp).toMatch(/object-src 'none'/);
-        expect(csp).toMatch(/frame-src 'none'/);
+        expect(csp).toMatch(/frame-src 'self' https:\/\/\*\.iubenda\.com/);
     });
 
     it('Referrer-Policy is strict-origin-when-cross-origin', async () => {

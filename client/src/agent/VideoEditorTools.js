@@ -620,18 +620,30 @@ export class VideoEditorTools {
             const events = await ZoomAnalyzer.generateZoomEvents(allClips);
             
             if (!events || events.length === 0) {
-                 return { success: true, message: 'Smart zoom analyzed but no zoom keyframes were necessary.' };
+                 // Was `success: true` — a command that changed nothing reporting
+                 // completion. The user asked for zooms and got none; that is a
+                 // failure to communicate, not a success.
+                 return {
+                     success: false,
+                     message: 'Smart zoom analysed the timeline but found no moments worth zooming on — nothing was changed.',
+                 };
             }
-            
-            // Apply keyframes via the store
+
+            // Apply keyframes via the store. Count the clips that actually
+            // received one: the old message reported `allClips.length` (every
+            // clip on the timeline) regardless of how many the analyzer
+            // targeted, so applying 2 keyframes on a 10-clip timeline claimed
+            // "Applied smart zoom effects to 10 clips".
+            const touchedClipIds = new Set();
             events.forEach(ev => {
                 // ev: { clipId, time, scale, easing }
                 state.addTransformKeyframe(ev.clipId, 'scale', ev.time, ev.scale, ev.easing);
+                if (ev.clipId) touchedClipIds.add(ev.clipId);
             });
-            
+
             return {
                 success: true,
-                message: `Applied smart zoom effects to ${allClips.length} clips.`
+                message: `Applied ${events.length} zoom keyframe(s) across ${touchedClipIds.size} of ${allClips.length} clip(s).`
             };
             
         } catch (error) {
@@ -648,6 +660,27 @@ export class VideoEditorTools {
     async analyzeStructure({ platform = null, targetDuration = null } = {}, signal = null) {
         console.log('[VideoEditorTools] Running ContentAnalyzer...');
         const result = await ContentAnalyzer.analyze({ platform, targetDuration, signal });
+
+        // ContentAnalyzer silently degrades to _localAnalysis() whenever the
+        // backend call fails (401, timeout, no transcript). That fallback does
+        // NOT analyse anything — it emits one placeholder segment per clip with
+        // a hardcoded importance_score of 0.5. Reporting "analysis complete: 3
+        // segments detected" over that is how every downstream consumer
+        // (find_hook, remove_repetition, long_form_edit) inherited false
+        // confidence in data that was never computed. Name it.
+        if (result.success && result.localFallback) {
+            return {
+                success: true,
+                degraded: true,
+                message:
+                    `Content analysis ran in offline fallback mode — the AI service was unreachable, ` +
+                    `so segments are a rough per-clip split, not a semantic analysis. ` +
+                    `Generate captions first, then re-run for a real breakdown.`,
+                analysisResult: result,
+                requiresApproval: true,
+            };
+        }
+
         return {
             success: result.success,
             message: result.success
@@ -764,6 +797,22 @@ export class VideoEditorTools {
 
         const hook = analysis?.structure?.hookCandidate || analysis?.structure?.hook || null;
 
+        // On the offline fallback path, `hookCandidate` is not a hook the model
+        // picked — _localAnalysis() hardcodes it to the first 25 s of clip 0.
+        // Announcing "Hook found at 0s–25s" for that is a confident-sounding
+        // statement about an analysis that never ran.
+        if (hook && analysis?.localFallback) {
+            this.store.seek(hook.start);
+            return {
+                success: false,
+                message:
+                    `Couldn't analyse the content for a hook — the AI service was unreachable. ` +
+                    `Playhead moved to the start of the first clip. ` +
+                    `Generate captions first, then try again.`,
+                hookCandidate: null,
+            };
+        }
+
         if (hook) {
             this.store.seek(hook.start);
             return {
@@ -794,9 +843,40 @@ export class VideoEditorTools {
             return { success: false, message: 'Content analysis failed. Cannot remove repetition.' };
         }
 
+        // LEGACY PATH. EditPlanner.planRemoveRepetition now routes "remove
+        // repetition" to `remove_repeated_takes` (embedding similarity +
+        // GPT-4o arbitration via /api/ai/detect-repeated-takes), which operates
+        // on transcript spans and can re-segment a single clip. This function
+        // remains only for older plans and direct tool calls.
+        //
+        // It cannot work on _localAnalysis() output: that fallback hardcodes
+        // EVERY segment to `importance_score: 0.5, type: VALUE`, so the filter
+        // below matches nothing, 100% of the time. It used to return
+        // `success: true` with "Removed 0 low-value segment(s)" — a command
+        // reporting completion over a completely untouched timeline, which is
+        // exactly how a user concludes the product doesn't work.
+        if (analysis.localFallback) {
+            return {
+                success: false,
+                message:
+                    'Repetition removal needs a real content analysis, but the AI service was unreachable ' +
+                    '(the offline fallback has no importance scores to work from). ' +
+                    'Generate captions first, then try again.',
+                removedCount: 0,
+            };
+        }
+
         const lowValueSegs = analysis.segments.filter(
             s => s.importance_score < importance_threshold || s.type === 'filler'
         );
+
+        if (lowValueSegs.length === 0) {
+            return {
+                success: false,
+                message: `Nothing scored below the ${importance_threshold} importance threshold — no segments were removed.`,
+                removedCount: 0,
+            };
+        }
 
         let removedCount = 0;
         for (const seg of lowValueSegs) {
@@ -806,6 +886,15 @@ export class VideoEditorTools {
             } catch (e) {
                 console.warn(`[VideoEditorTools] Could not cut segment ${seg.start}–${seg.end}:`, e.message);
             }
+        }
+
+        // Every cut threw. The timeline is unchanged — say so.
+        if (removedCount === 0) {
+            return {
+                success: false,
+                message: `Found ${lowValueSegs.length} low-value segment(s) but none could be cut — the timeline is unchanged.`,
+                removedCount: 0,
+            };
         }
 
         return {
@@ -1024,17 +1113,55 @@ export class VideoEditorTools {
         if (!freshTrack) return { success: false, message: 'Video track not found.' };
 
         const clipById = Object.fromEntries(freshTrack.clips.map(c => [c.id, c]));
+
+        // The order the clips are ALREADY in. If the model returns this same
+        // sequence (common when it decides the current cut is fine), applying it
+        // is a no-op — and reporting "✓ Reordered N clips" over an unchanged
+        // timeline is the failure mode that makes users conclude the AI is
+        // broken. Compare before touching anything.
+        const currentOrder = freshTrack.clips
+            .slice()
+            .sort((a, b) => a.start - b.start)
+            .map(c => c.id);
+        const resolvedOrder = newOrder.filter(id => clipById[id]);
+
+        if (resolvedOrder.length === 0) {
+            // Every id the model returned is unknown to this track — previously
+            // the `if (!clip) continue` loop swallowed this entirely and still
+            // claimed success.
+            return {
+                success: false,
+                message: 'The reorder result did not match any clips on the timeline — nothing was changed.',
+            };
+        }
+
+        const isUnchanged =
+            resolvedOrder.length === currentOrder.length &&
+            resolvedOrder.every((id, i) => id === currentOrder[i]);
+
+        if (isUnchanged) {
+            return {
+                success: false,
+                message: `The clips are already in that order — nothing was changed.${result.reasoning ? ` ${result.reasoning}` : ''}`,
+            };
+        }
+
+        let moved = 0;
         let cursor = 0;
-        for (const id of newOrder) {
+        for (const id of resolvedOrder) {
             const clip = clipById[id];
-            if (!clip) continue;
-            freshStore.updateClip(freshTrack.id, id, { start: cursor }, { skipHistory: false });
+            const newStart = cursor;
+            if (Math.abs((clip.start ?? 0) - newStart) > 0.001) moved++;
+            freshStore.updateClip(freshTrack.id, id, { start: newStart }, { skipHistory: false });
             cursor += clip.duration;
         }
 
+        const skipped = newOrder.length - resolvedOrder.length;
         return {
             success: true,
-            message: `✓ Reordered ${newOrder.length} clips. ${result.reasoning || ''}`,
+            message: `✓ Reordered ${resolvedOrder.length} clips (${moved} moved).` +
+                     `${skipped > 0 ? ` ${skipped} unknown clip id(s) ignored.` : ''}` +
+                     `${result.reasoning ? ` ${result.reasoning}` : ''}`,
         };
     }
 

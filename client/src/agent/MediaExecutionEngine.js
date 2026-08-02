@@ -1161,9 +1161,21 @@ export class MediaExecutionEngine {
                 const rzDurById = {};
                 rzClips.forEach(c => { rzDurById[c.id] = c.duration ?? 0; });
 
+                // Count the clips that actually receive keyframes. A clipZooms
+                // entry whose clipId isn't on the timeline (stale plan, clip
+                // deleted or re-segmented between detect and apply) silently
+                // applies to nothing — and the summary counts below come from
+                // the SERVER's response, not from what landed, so the old
+                // unconditional `success: true` could report a full
+                // "3W / 2M / 4C" breakdown over a timeline where zero keyframes
+                // were written.
+                let rzApplied = 0;
+
                 clipZooms.forEach(({ clipId, scale, motion }) => {
                     const m   = motion || { kind: 'static', from: scale, to: scale };
                     const dur = rzDurById[clipId] ?? 0;
+                    if (!(clipId in rzDurById)) return; // not on the timeline — skip
+                    rzApplied++;
 
                     if (m.kind === 'push_in' && dur > 0.5) {
                         rzStore.addTransformKeyframe(clipId, 'scale', 0, m.from, 'linear');
@@ -1177,6 +1189,14 @@ export class MediaExecutionEngine {
                     }
                 });
 
+                if (rzApplied === 0) {
+                    return {
+                        action,
+                        success: false,
+                        message: "The zoom plan didn't match any clips currently on the timeline — nothing was changed. Try re-running it.",
+                    };
+                }
+
                 const { counts = {}, motions = {} } = summary || {};
                 const punchNote = (motions.punch_in || 0) > 0
                     ? ` ${motions.punch_in} punch-in${motions.punch_in > 1 ? 's land' : ' lands'} right on emphasized words.`
@@ -1186,7 +1206,7 @@ export class MediaExecutionEngine {
                     success: true,
                     message:
                         `Zoom rhythm applied — ${counts.wide ?? 0}W / ${counts.medium ?? 0}M / ${counts.close ?? 0}C ` +
-                        `across ${rzClips.length} shots, with ${motions.push_in ?? 0} slow push-ins.${punchNote}`,
+                        `across ${rzApplied} shots, with ${motions.push_in ?? 0} slow push-ins.${punchNote}`,
                 };
             }
 
@@ -2239,7 +2259,18 @@ export class MediaExecutionEngine {
                 delete resolvedPayload.filename;
                 console.log(`[MediaExecutionEngine] Injected ${resolvedPayload.words.length} words for detect-repeated-takes`);
             } else {
-                console.warn('[MediaExecutionEngine] detect-repeated-takes: no transcript in store — endpoint will return no cuts');
+                // Bail with an actionable message rather than POSTing a payload
+                // the endpoint is guaranteed to reject (it 400s without `words`).
+                // Repeated-take detection is purely transcript-driven — there is
+                // no audio fallback — so "no transcript" is a precondition
+                // failure the user can actually fix, not a server error.
+                console.warn('[MediaExecutionEngine] detect-repeated-takes: no transcript in store — aborting');
+                return {
+                    engine: 'api',
+                    success: false,
+                    endpoint,
+                    error: 'Repetition removal needs a transcript. Run "Generate captions" first, then try again.',
+                };
             }
         }
 
@@ -2352,9 +2383,23 @@ export class MediaExecutionEngine {
             }
 
             // ── 6. Repeated-takes detection ───────────────────────────────
-            if (command.action === 'detectRepeatedTakes' && result?.activeSegments?.length > 0) {
-                console.log(`[MediaExecutionEngine] ✂️  detectRepeatedTakes: ${result.activeSegments.length} segments`);
-                this._applySegmentsToTimeline(result.activeSegments, 'take');
+            if (command.action === 'detectRepeatedTakes') {
+                const takeSegs = result?.activeSegments || [];
+                // removedCount === 0 means the backend scanned and found nothing
+                // to cut. Report that honestly instead of letting the generic
+                // API-success path claim the edit was applied — a command that
+                // says "done" over a visually identical timeline is the exact
+                // failure mode this whole path was rewired to eliminate.
+                if (takeSegs.length === 0 || result?.removedCount === 0) {
+                    return {
+                        engine: 'api',
+                        success: false,
+                        endpoint,
+                        error: 'No repeated takes found — nothing was changed. The transcript had no segments similar enough to be a re-take.',
+                    };
+                }
+                console.log(`[MediaExecutionEngine] ✂️  detectRepeatedTakes: ${takeSegs.length} segments, ${result?.removedCount ?? '?'} take(s) cut`);
+                this._applySegmentsToTimeline(takeSegs, 'take');
             }
 
             // ── 7. Auto captions ─────────────────────────────────────────

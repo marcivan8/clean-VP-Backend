@@ -17,15 +17,34 @@ let _refreshPromise = null;
 
 async function buildHeaders(token, options) {
     const method = (options.method || 'GET').toUpperCase();
-    const needsContentType = ['POST', 'PUT', 'PATCH'].includes(method) && options.body;
+
+    // A FormData body MUST NOT get an explicit Content-Type. The browser
+    // generates `multipart/form-data; boundary=…` itself, and the boundary is
+    // the only way the server can parse the parts — hardcoding
+    // 'application/json' (or even 'multipart/form-data' without a boundary)
+    // makes multer reject the body outright. This is why file uploads have to
+    // be special-cased here rather than by passing a header override at the
+    // call site: an override of `undefined` still creates the key, and fetch
+    // stringifies it to the literal "undefined".
+    const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+    const needsContentType = ['POST', 'PUT', 'PATCH'].includes(method) && options.body && !isFormData;
     const anonSessionId = !token ? (localStorage.getItem('vp_session') ?? null) : null;
 
-    return {
+    const headers = {
         ...(needsContentType ? { 'Content-Type': 'application/json' } : {}),
         ...(token           ? { Authorization:  `Bearer ${token}` }   : {}),
         ...(anonSessionId   ? { 'X-Session-Id': anonSessionId }       : {}),
         ...(options.headers || {}),
     };
+
+    // Drop any key an explicit override set to undefined/null so it can't be
+    // serialised as the string "undefined".
+    for (const k of Object.keys(headers)) {
+        if (headers[k] === undefined || headers[k] === null) delete headers[k];
+    }
+    if (isFormData) delete headers['Content-Type'];
+
+    return headers;
 }
 
 export async function authFetch(url, options = {}) {

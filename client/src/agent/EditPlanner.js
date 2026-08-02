@@ -585,10 +585,35 @@ export class EditPlanner {
         };
     }
 
+    // Routes to `remove_repeated_takes`, NOT the legacy `remove_repetition`
+    // action, which was a guaranteed no-op that still reported success:
+    // it delegated to VideoEditorTools.removeRepetition(), which filters
+    // ContentAnalyzer segments by `importance_score < 0.3 || type === 'filler'`.
+    // ContentAnalyzer falls back to _localAnalysis() whenever the backend call
+    // fails OR there's no transcript, and that fallback hardcodes EVERY segment
+    // to `importance_score: 0.5, type: VALUE` — so the filter matched nothing,
+    // 100% of the time, and the tool returned `success: true` with
+    // "Removed 0 low-value segment(s)". That's the "said complete, changed
+    // nothing" symptom. It was also clip-granular (it can only delete whole
+    // clips), so on a single unsplit clip it had nothing it could ever remove.
+    //
+    // `remove_repeated_takes` is the real implementation and was already fully
+    // built but unreachable — nothing routed to it. It hits
+    // POST /api/ai/detect-repeated-takes (embedding similarity scan → GPT-4o
+    // arbitration over which take to keep) and returns `activeSegments`, the
+    // same shape silence/filler removal produce, so it flows through
+    // _applySegmentsToTimeline and re-segments a single source clip into kept
+    // pieces — the pipeline the user's own logs prove works.
     static planRemoveRepetition(planId) {
         return {
             plan_id: planId, operation: 'remove_repetition', step_count: 1, requiresApproval: true,
-            steps: [{ step_id: 'step_1', action: 'remove_repetition', importance_threshold: 0.3, reason: 'Remove segments flagged as low-value or repetitive' }]
+            steps: [{
+                step_id: 'step_1',
+                action: 'remove_repeated_takes',
+                lookback_window: 60,
+                similarity_threshold: 0.72,
+                reason: 'Detect repeated takes / restated points in the transcript and cut the weaker version',
+            }]
         };
     }
 

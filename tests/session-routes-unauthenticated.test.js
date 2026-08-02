@@ -20,16 +20,16 @@ describe('POST /api/silence/detect (optionalAuth)', () => {
     });
 });
 
-describe('POST /api/captions/generate (optionalAuth)', () => {
-    it('reachable without Authorization header', async () => {
+describe('POST /api/captions/generate (now requires auth)', () => {
+    it('returns 401 without Authorization header', async () => {
         const res = await request(app)
             .post('/api/captions/generate')
             .send({ videoUrl: 'https://storage.googleapis.com/bucket/test.mp4' });
-        expect(res.status).not.toBe(401);
+        expect(res.status).toBe(401);
     });
 
-    it('400 or 202 when body is empty', async () => {
+    it('returns 401 when body is empty', async () => {
         const res = await request(app).post('/api/captions/generate').send({});
-        expect([400, 202, 200]).toContain(res.status);
+        expect(res.status).toBe(401);
     });
 });

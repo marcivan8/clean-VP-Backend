@@ -12,18 +12,20 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Layers, Lock, Zap, Palette, Type, Volume2, Settings, CheckCircle } from 'lucide-react';
 
 const TYPE_META = {
-    COLOR_GRADE:     { icon: Palette, color: '#8a2be2', label: 'Color Grade' },
-    CAPTION_STYLE:   { icon: Type,    color: '#00e5ff', label: 'Captions' },
-    SOUND_SETTINGS:  { icon: Volume2, color: '#4a9eff', label: 'Sound' },
-    EXPORT_SETTINGS: { icon: Settings,color: '#aaa',    label: 'Export' },
-    FULL_EDIT:       { icon: Zap,     color: '#ff3a6e', label: 'Full Edit' },
-    TRANSITION:      { icon: Layers,  color: '#00b4d8', label: 'Transition' },
+    COLOR_GRADE:     { icon: Palette, color: '#8a2be2', labelKey: 'presetCard.colorGrade' },
+    CAPTION_STYLE:   { icon: Type,    color: '#00e5ff', labelKey: 'presetCard.captions' },
+    SOUND_SETTINGS:  { icon: Volume2, color: '#4a9eff', labelKey: 'presetCard.sound' },
+    EXPORT_SETTINGS: { icon: Settings,color: '#aaa',    labelKey: 'presetCard.export' },
+    FULL_EDIT:       { icon: Zap,     color: '#ff3a6e', labelKey: 'presetCard.fullEdit' },
+    TRANSITION:      { icon: Layers,  color: '#00b4d8', labelKey: 'presetCard.transition' },
 };
 
 export default function PresetCard({ preset, onApply, onRequestApproval }) {
+    const { t } = useTranslation('editor');
     const [hovered, setHovered] = useState(false);
 
     const presetType = preset.preset_type || preset.presetType || 'TRANSITION';
@@ -84,7 +86,7 @@ export default function PresetCard({ preset, onApply, onRequestApproval }) {
                         borderRadius: 4, padding: '1px 5px',
                         textTransform: 'uppercase',
                     }}>
-                        {meta.label}
+                        {t(meta.labelKey)}
                     </span>
                 </div>
 
@@ -110,7 +112,7 @@ export default function PresetCard({ preset, onApply, onRequestApproval }) {
                     }}
                 >
                     {isFullEdit ? <Lock size={9} /> : <CheckCircle size={9} />}
-                    {isFullEdit ? 'Review' : 'Apply'}
+                    {isFullEdit ? t('presetCard.review') : t('presetCard.apply')}
                 </button>
             </div>
 

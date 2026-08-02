@@ -5,14 +5,14 @@ const request = require('supertest');
 const app     = require('../index');
 
 describe('Presets', () => {
-    it('GET /api/presets/marketplace → 200 with presets list', async () => {
-        const res = await request(app).get('/api/presets/marketplace');
+    it('GET /api/presets → 200 with presets list', async () => {
+        const res = await request(app).get('/api/presets');
         expect(res.status).toBe(200);
     });
 
-    it('POST /api/presets/publish → responds (stub or validation)', async () => {
-        const res = await request(app).post('/api/presets/publish').send({});
-        expect([200, 400, 422, 501]).toContain(res.status);
+    it('GET /api/presets/:id → 200 or 404', async () => {
+        const res = await request(app).get('/api/presets/mkt-viral-punch');
+        expect([200, 404]).toContain(res.status);
     });
 });
 

@@ -149,12 +149,17 @@ function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete, isMobil
                 e.currentTarget.style.boxShadow = 'var(--shadow-card)';
             }}
         >
-            {/* Thumbnail */}
+            {/* Thumbnail — always SQUARE.
+                It used to take the project's own aspect ratio (56.25% for 16:9,
+                177.78% for 9:16), so a mixed library produced cards of wildly
+                different heights and a ragged, gap-filled grid — a portrait card
+                was more than 3× the height of a landscape one. A uniform square
+                tile packs the grid predictably and scales to mobile without a
+                separate ratio rule. The format isn't lost, it moves to a badge
+                below, which is cheaper than paying for it in layout. */}
             <div style={{
                 width: '100%',
-                // Portrait thumbnails: full 9:16 ratio on desktop, square on mobile
-                // (otherwise in a 2-col grid each card would be 300px+ tall)
-                paddingTop: isLandscape ? '56.25%' : (isMobile ? '100%' : '177.78%'),
+                paddingTop: '100%',
                 background: 'var(--bg-3)',
                 position: 'relative',
                 overflow: 'hidden',
@@ -178,6 +183,25 @@ function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete, isMobil
                         <Logo size={32} variant="gradient" />
                     </div>
                 )}
+
+                {/* Format badge — restores the information the square crop drops.
+                    Bottom-left so it clears the 3-dot menu in the body below. */}
+                <span style={{
+                    position: 'absolute', left: 8, bottom: 8,
+                    padding: '2px 6px',
+                    borderRadius: 'var(--r-xs)',
+                    background: 'rgba(0,0,0,0.55)',
+                    backdropFilter: 'blur(6px)',
+                    WebkitBackdropFilter: 'blur(6px)',
+                    border: '0.5px solid rgba(255,255,255,0.14)',
+                    fontFamily: 'var(--f-mono)',
+                    fontSize: 9,
+                    letterSpacing: '0.04em',
+                    color: 'var(--fg-2)',
+                    pointerEvents: 'none',
+                }}>
+                    {isLandscape ? '16:9' : '9:16'}
+                </span>
             </div>
 
             {/* Card body */}
@@ -861,7 +885,7 @@ export default function DashboardPage() {
                 {loading && (
                     <div style={{
                         display: 'grid',
-                        gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fill, minmax(260px, 1fr))',
+                        gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fill, minmax(200px, 1fr))',
                         gap: isMobile ? 12 : 20,
                     }}>
                         {[...Array(4)].map((_, i) => (
@@ -908,7 +932,7 @@ export default function DashboardPage() {
                 {!loading && filtered.length > 0 && (
                     <div style={{
                         display: 'grid',
-                        gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fill, minmax(260px, 1fr))',
+                        gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fill, minmax(200px, 1fr))',
                         gap: isMobile ? 12 : 20,
                     }}>
                         {/* "New project" quick-add card */}

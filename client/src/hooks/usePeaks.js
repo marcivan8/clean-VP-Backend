@@ -1,163 +1,83 @@
 /**
  * hooks/usePeaks.js
  *
- * Fetches pre-computed audio peaks for a given asset from the server.
- * On first call for an assetId it POSTs to /api/waveform/extract, which either
- * returns a cached peaksUrl or runs ffmpeg and stores the result in GCS.
- * The JSON is then fetched and the peaks array is returned.
+ * READ-ONLY view onto WaveformEngine.
  *
- * A module-level Map prevents duplicate in-flight requests across clip instances
- * that share the same asset (e.g. the same file placed on multiple tracks).
+ * This hook deliberately contains no fetch, no cache, no retry and no dedupe
+ * logic. All of that lives in services/WaveformEngine.js, which is the single
+ * owner of extraction — see the header comment there for why that separation
+ * exists (short version: rendering a clip used to trigger a network request,
+ * and that coupling is what made waveforms disappear intermittently).
+ *
+ * The hook's only jobs are: ask the engine for peaks, track the mounted
+ * component's loading/error state, and cancel cleanly on unmount.
  *
  * Usage:
- *   const { peaks, duration, loading, error } = usePeaks(clip.assetId, asset?.gcsPath);
+ *   const { peaks, duration, loading, error } = usePeaks(clip.assetId, asset?.gcsPath, asset?.proxyUrl);
  */
 
 import { useState, useEffect } from 'react';
-
-/** Module-level cache: assetId → { peaks: number[], duration: number } */
-const _cache = new Map();
-
-/** In-flight promises to deduplicate concurrent requests for the same asset */
-const _inflight = new Map();
-
-/** Keys that already used their one automatic retry (prevents retry storms) */
-const _retriedOnce = new Set();
+import WaveformEngine from '../services/WaveformEngine.js';
 
 export function usePeaks(assetId, gcsPath, proxyUrl) {
+    // Seed synchronously from cache so a clip that already has peaks (same
+    // session, or restored from a previous one) renders them on first paint
+    // instead of flashing a skeleton.
     const [state, setState] = useState(() => {
-        if (!assetId) return { peaks: null, duration: null, loading: false, error: null };
-        const hit = _cache.get(assetId);
-        return hit
-            ? { peaks: hit.peaks, duration: hit.duration, loading: false, error: null }
-            : { peaks: null, duration: null, loading: true,  error: null };
+        const hit = assetId ? WaveformEngine.peek(assetId) : null;
+        if (hit) return { peaks: hit.peaks, duration: hit.duration, loading: false, error: null };
+        return { peaks: null, duration: null, loading: !!assetId, error: null };
     });
 
     useEffect(() => {
-        if (!assetId) return;
-
-        // Already in local cache — set state immediately and bail
-        if (_cache.has(assetId)) {
-            const { peaks, duration } = _cache.get(assetId);
-            setState({ peaks, duration, loading: false, error: null });
+        if (!assetId) {
+            setState({ peaks: null, duration: null, loading: false, error: null });
             return;
         }
 
-        // Without a proxyUrl the server has no file to read — skip this run.
-        // The effect will re-fire when proxyUrl becomes available (it's in deps).
-        if (!proxyUrl && !gcsPath) return;
-
-        let cancelled = false;
-        setState(s => ({ ...s, loading: true, error: null }));
-
-        // Key inflight by assetId+proxyUrl so that a null-proxyUrl failure
-        // (fired on clip mount before proxy is ready) doesn't block the valid
-        // retry that fires once proxyUrl is set by the proxy job completion.
-        const inflightKey = `${assetId}|${proxyUrl || ''}`;
-        let promise = _inflight.get(inflightKey);
-
-        if (!promise) {
-            promise = (async () => {
-                // 1. Trigger extraction (backend checks GCS cache before running ffmpeg)
-                const extractRes = await fetch('/api/waveform/extract', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ assetId, gcsPath, proxyUrl }),
-                });
-
-                if (!extractRes.ok) {
-                    throw new Error(`Waveform extract failed: ${extractRes.status}`);
-                }
-
-                const { peaksUrl, peaks: inlinePeaks, duration: inlineDuration } = await extractRes.json();
-
-                // If the GCS upload failed after retries, the server returns peaks inline
-                // rather than a URL (peaksUrl === null).  Use them directly.
-                if (!peaksUrl) {
-                    if (!inlinePeaks) throw new Error('No peaks data in server response');
-                    const data = { peaks: inlinePeaks, duration: inlineDuration };
-                    _cache.set(assetId, data);
-                    return data;
-                }
-
-                // 2. Fetch the peaks JSON from the returned URL
-                const peaksRes = await fetch(peaksUrl);
-                if (!peaksRes.ok) {
-                    throw new Error(`Peaks fetch failed: ${peaksRes.status}`);
-                }
-
-                const data = await peaksRes.json();
-                _cache.set(assetId, data); // populate cache for future callers
-                return data;
-            })()
-            .finally(() => _inflight.delete(inflightKey));
-
-            _inflight.set(inflightKey, promise);
+        const hit = WaveformEngine.peek(assetId);
+        if (hit) {
+            setState({ peaks: hit.peaks, duration: hit.duration, loading: false, error: null });
+            return;
         }
 
-        let retryTimer = null;
-        promise
-            .then(({ peaks, duration }) => {
-                if (!cancelled) setState({ peaks, duration, loading: false, error: null });
+        let cancelled = false;
+        const controller = new AbortController();
+
+        // A proxyUrl arriving (proxy job finished) is new information — clear
+        // any prior "gave up" state for this asset so the engine will try again
+        // rather than staying failed for the rest of the session.
+        if (proxyUrl) WaveformEngine.reset(assetId);
+
+        setState(s => ({ ...s, loading: true, error: null }));
+
+        WaveformEngine.getPeaks(assetId, { gcsPath, proxyUrl, signal: controller.signal })
+            .then(data => {
+                if (cancelled) return;
+                if (data?.peaks?.length) {
+                    setState({ peaks: data.peaks, duration: data.duration, loading: false, error: null });
+                } else {
+                    // null is the engine's "not available" answer — either it has
+                    // nothing fetchable yet (no resolvable URL) or it exhausted
+                    // its attempts. Neither is an exception.
+                    setState({ peaks: null, duration: null, loading: false, error: 'unavailable' });
+                }
             })
             .catch(err => {
-                // Log loudly — this used to fail completely silently (only a bare
-                // "400" in the Network tab, nothing in Console), which made a
-                // permanently-broken waveform pipeline indistinguishable from
-                // "still loading" for anyone not actively inspecting Network.
-                console.warn(`[usePeaks] extraction failed for asset ${assetId}:`, err.message);
-                if (cancelled) return;
+                if (cancelled || err?.name === 'AbortError') return;
                 setState({ peaks: null, duration: null, loading: false, error: err.message });
-
-                // One automatic retry after 5s. A transient failure (proxy still
-                // finalizing, GCS hiccup, server restart) used to leave the clip
-                // waveform-less for the whole session because nothing ever
-                // re-triggered the effect. The retry runs the same pipeline; if
-                // it fails again the error state stands (no retry storm).
-                if (!_retriedOnce.has(inflightKey)) {
-                    _retriedOnce.add(inflightKey);
-                    retryTimer = setTimeout(() => {
-                        if (cancelled) return;
-                        console.log(`[usePeaks] retrying extraction for asset ${assetId}…`);
-                        setState(s => ({ ...s, loading: true, error: null }));
-                        // Re-run by bumping the effect via state: simplest reliable
-                        // mechanism is to clear the inflight slot and re-invoke the
-                        // same promise factory inline.
-                        (async () => {
-                            try {
-                                const extractRes = await fetch('/api/waveform/extract', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ assetId, gcsPath, proxyUrl }),
-                                });
-                                if (!extractRes.ok) throw new Error(`Waveform extract failed: ${extractRes.status}`);
-                                const { peaksUrl, peaks: inlinePeaks, duration: inlineDuration } = await extractRes.json();
-                                let data;
-                                if (!peaksUrl) {
-                                    if (!inlinePeaks) throw new Error('No peaks data in server response');
-                                    data = { peaks: inlinePeaks, duration: inlineDuration };
-                                } else {
-                                    const peaksRes = await fetch(peaksUrl);
-                                    if (!peaksRes.ok) throw new Error(`Peaks fetch failed: ${peaksRes.status}`);
-                                    data = await peaksRes.json();
-                                }
-                                _cache.set(assetId, data);
-                                if (!cancelled) setState({ peaks: data.peaks, duration: data.duration, loading: false, error: null });
-                            } catch (retryErr) {
-                                console.warn(`[usePeaks] retry failed for asset ${assetId}:`, retryErr.message);
-                                if (!cancelled) setState({ peaks: null, duration: null, loading: false, error: retryErr.message });
-                            }
-                        })();
-                    }, 5000);
-                }
             });
 
-        return () => { cancelled = true; if (retryTimer) clearTimeout(retryTimer); };
-    // proxyUrl is in deps so the hook retries once the proxy job completes and
-    // the asset's proxyUrl is set (clip is placed before proxy is ready → first
-    // call fires with proxyUrl=null → 400 → never retried without this dep).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [assetId, proxyUrl]);
+        return () => {
+            cancelled = true;
+            controller.abort();
+        };
+    // proxyUrl is a dependency so the hook re-asks once the proxy job completes
+    // and a server-resolvable URL finally exists — a clip is placed on the
+    // timeline before its proxy is ready, so the first pass has nothing usable.
+    }, [assetId, gcsPath, proxyUrl]);
 
     return state;
 }
+
+export default usePeaks;

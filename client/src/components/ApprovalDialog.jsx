@@ -6,6 +6,7 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { useApprovalDialog } from '../hooks/useApprovalDialog.js';
 import { AlertTriangle, CheckCircle, XCircle, Clock } from 'lucide-react';
 
@@ -14,6 +15,7 @@ import { AlertTriangle, CheckCircle, XCircle, Clock } from 'lucide-react';
  * Displays when user approval is required for a job
  */
 export function ApprovalDialog() {
+    const { t } = useTranslation('editor');
     const {
         isOpen,
         approval,
@@ -46,7 +48,7 @@ export function ApprovalDialog() {
                     {/* Reasons */}
                     {reasons.length > 0 && (
                         <div className="approval-reasons">
-                            <h4>Why this needs approval:</h4>
+                            <h4>{t('approvalDialog.whyNeedsApproval')}</h4>
                             <ul>
                                 {reasons.map((reason, i) => (
                                     <li key={i}>
@@ -60,19 +62,19 @@ export function ApprovalDialog() {
                     {/* Actions being approved */}
                     {actions && (
                         <div className="approval-actions-preview">
-                            <h4>Actions to be performed:</h4>
+                            <h4>{t('approvalDialog.actionsToBePerformed')}</h4>
                             <code>{actions}</code>
                         </div>
                     )}
 
                     {/* Job ID */}
-                    <p className="approval-job-id">Job: {jobId}</p>
+                    <p className="approval-job-id">{t('approvalDialog.job')}: {jobId}</p>
 
                     {/* Queue indicator */}
                     {queueLength > 0 && (
                         <p className="approval-queue">
                             <Clock size={14} />
-                            {queueLength} more approval{queueLength > 1 ? 's' : ''} pending
+                            {t('approvalDialog.morePending', { count: queueLength })}
                         </p>
                     )}
                 </div>
@@ -85,7 +87,7 @@ export function ApprovalDialog() {
                         disabled={isProcessing}
                     >
                         <XCircle size={18} />
-                        Deny
+                        {t('approvalDialog.deny')}
                     </button>
                     <button
                         className="approval-btn approve"
@@ -93,7 +95,7 @@ export function ApprovalDialog() {
                         disabled={isProcessing}
                     >
                         <CheckCircle size={18} />
-                        Approve
+                        {t('approvalDialog.approve')}
                     </button>
                 </div>
             </div>

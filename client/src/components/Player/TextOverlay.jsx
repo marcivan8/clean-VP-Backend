@@ -1,5 +1,6 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../../store/useTimelineStore';
 
 // Map preset names to actual font families
@@ -97,18 +98,24 @@ const pointerDist = (a, b) =>
     Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
 
 const TextOverlay = () => {
+    const { t } = useTranslation('editor');
     const containerRef = React.useRef(null);
 
     // Per-clip gesture state: { pointerId→{clientX,clientY}, initialScale, initialDist }
     const gestureRef = React.useRef({});
 
-    const { currentTime, tracks, activeClipId, updateClip, setActiveClip, saveToHistory } = useTimelineStore(useShallow(state => ({
-        currentTime:   state.currentTime,
-        tracks:        state.tracks,
-        activeClipId:  state.activeClipId,
-        updateClip:    state.updateClip,
-        setActiveClip: state.setActiveClip,
-        saveToHistory: state.saveToHistory,
+    // applyCaptionUpdate is THE path for caption style/position changes — see its
+    // definition in useTimelineStore. This component used to call updateClip()
+    // directly, which is always single-clip, so a drag here ignored the Text
+    // panel's global/individual toggle entirely: the user set "Global", dragged a
+    // caption on the canvas, and only that one segment moved.
+    const { currentTime, tracks, activeClipId, applyCaptionUpdate, setActiveClip, saveToHistory } = useTimelineStore(useShallow(state => ({
+        currentTime:        state.currentTime,
+        tracks:             state.tracks,
+        activeClipId:       state.activeClipId,
+        applyCaptionUpdate: state.applyCaptionUpdate,
+        setActiveClip:      state.setActiveClip,
+        saveToHistory:      state.saveToHistory,
     })));
 
     const textTracks = tracks.filter(t => t.type === 'text');
@@ -182,20 +189,27 @@ const TextOverlay = () => {
         const rect = containerRef.current?.getBoundingClientRect();
         if (!rect) return;
 
+        // liveOnly: mid-gesture we touch ONLY the dragged clip, even in global
+        // scope. Fanning out to every caption on each pointermove would mean N
+        // store writes per pixel of travel. The real fan-out is committed once,
+        // on pointer-up (see handlePointerUp), which is also what makes the
+        // whole gesture a single undo entry.
         if (state.mode === 'pinch' && Object.keys(state.pointers).length === 2) {
             // Pinch-to-scale: adjust clip.scale
             const pts = Object.values(state.pointers);
             const currentDist = pointerDist(pts[0], pts[1]);
             const ratio = currentDist / (state.initialDist || 1);
             const newScale = Math.max(0.1, Math.min(5, state.initialScale * ratio));
-            updateClip(track.id, clip.id, { scale: newScale }, { skipHistory: true });
+            state.pendingUpdate = { scale: newScale };
+            applyCaptionUpdate({ scale: newScale }, { clipId: clip.id, skipHistory: true, liveOnly: true });
         } else if (state.mode === 'drag') {
             // Single-finger drag: reposition
             const deltaX = e.clientX - state.dragStartX;
             const deltaY = e.clientY - state.dragStartY;
             const newX = state.initialClipX + (deltaX / rect.width)  * 100;
             const newY = state.initialClipY + (deltaY / rect.height) * 100;
-            updateClip(track.id, clip.id, { x: newX, y: newY }, { skipHistory: true });
+            state.pendingUpdate = { x: newX, y: newY };
+            applyCaptionUpdate({ x: newX, y: newY }, { clipId: clip.id, skipHistory: true, liveOnly: true });
         }
     };
 
@@ -210,6 +224,14 @@ const TextOverlay = () => {
 
         const remaining = Object.keys(state.pointers).length;
         if (remaining === 0) {
+            // Gesture finished — NOW commit at the real scope. In global scope
+            // this is what propagates the final position/scale to every other
+            // caption; mid-gesture only the dragged clip was moving (liveOnly).
+            // Without this commit the canvas would still behave as if the
+            // toggle were always "individual".
+            if (state.pendingUpdate) {
+                applyCaptionUpdate(state.pendingUpdate, { clipId: clip.id, skipHistory: true });
+            }
             // All fingers lifted — clean up
             delete gs[clip.id];
         } else if (remaining === 1 && state.mode === 'pinch') {
@@ -235,16 +257,22 @@ const TextOverlay = () => {
         const startX      = e.clientX;
         const initialScale = clip.scale || 1;
 
+        let lastScale = initialScale;
+
         const onMove = (moveE) => {
             // Diagonal drag: both axes contribute to scale
             const delta = ((moveE.clientX - startX) + (moveE.clientY - startY)) / 2;
             const sensitivity = 0.008;
             const newScale = Math.max(0.1, Math.min(5, initialScale + delta * sensitivity));
-            const track = getTrackForClip(clip.id);
-            if (track) updateClip(track.id, clip.id, { scale: newScale }, { skipHistory: true });
+            lastScale = newScale;
+            // liveOnly mid-drag (one write per move), real scope on release —
+            // same two-phase commit as the pointer drag/pinch above.
+            applyCaptionUpdate({ scale: newScale }, { clipId: clip.id, skipHistory: true, liveOnly: true });
         };
 
         const onUp = () => {
+            // Commit at the real scope so a global-mode resize reaches every caption.
+            applyCaptionUpdate({ scale: lastScale }, { clipId: clip.id, skipHistory: true });
             e.currentTarget?.removeEventListener('pointermove', onMove);
             e.currentTarget?.removeEventListener('pointerup', onUp);
             window.removeEventListener('pointermove', onMove);
@@ -313,8 +341,8 @@ const TextOverlay = () => {
                         }}
                     >
                         {clip.animation === 'word-by-word'
-                            ? <WordByWord content={clip.content || 'New Text'} progress={clipProgress} />
-                            : (clip.content || 'New Text')
+                            ? <WordByWord content={clip.content || t('timeline.newTextDefault')} progress={clipProgress} />
+                            : (clip.content || t('timeline.newTextDefault'))
                         }
 
                         {/* Active selection ring hint (mobile: always show when active) */}
@@ -376,7 +404,7 @@ const TextOverlay = () => {
                                     textTransform: 'uppercase',
                                 }}
                             >
-                                drag · pinch to scale
+                                {t('player.dragPinchToScale')}
                             </div>
                         )}
                     </div>

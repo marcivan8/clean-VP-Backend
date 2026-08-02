@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
     Search,
     X,
@@ -47,6 +48,7 @@ const PresetCard = ({
     isFavorite = false,
     isApplied = false
 }) => {
+    const { t } = useTranslation('editor');
     const [isHovered, setIsHovered] = useState(false);
     const Icon = CATEGORY_ICONS[preset.category] || CATEGORY_ICONS.default;
 
@@ -130,7 +132,7 @@ const PresetCard = ({
             <div className="p-3 bg-card">
                 <h4 className="text-sm font-medium truncate">{preset.name}</h4>
                 <p className="text-xs text-muted-foreground truncate mt-0.5">
-                    {preset.description || `${preset.effects?.length || 0} effects`}
+                    {preset.description || t('effects.effectsCount', { count: preset.effects?.length || 0 })}
                 </p>
 
                 {/* Tags */}
@@ -159,6 +161,7 @@ const CategorySection = ({
     favorites = [],
     appliedPresetIds = []
 }) => {
+    const { t } = useTranslation('editor');
     const [isExpanded, setIsExpanded] = useState(true);
     const Icon = CATEGORY_ICONS[category] || CATEGORY_ICONS.default;
 
@@ -171,7 +174,7 @@ const CategorySection = ({
                 className="flex items-center gap-2 w-full px-2 py-1.5 hover:bg-white/5 rounded-lg transition-colors"
             >
                 <Icon className="w-4 h-4 text-primary" />
-                <span className="text-sm font-medium flex-1 text-left">{category}</span>
+                <span className="text-sm font-medium flex-1 text-left">{t(`effects.presetCategories.${category}`, category)}</span>
                 <span className="text-xs text-muted-foreground">{presets.length}</span>
             </button>
 
@@ -201,6 +204,7 @@ const PresetBrowser = ({
     playbackEngine,
     onClose
 }) => {
+    const { t } = useTranslation('editor');
     const [searchQuery, setSearchQuery] = useState('');
     const [activeTab, setActiveTab] = useState('all'); // 'all', 'favorites', 'user'
     const [favorites, setFavorites] = useState(() => {
@@ -269,7 +273,7 @@ const PresetBrowser = ({
         if (activeTab === 'user') {
             // Filter user-created presets
             const userPresets = presets.filter(p => p.id.startsWith('user-'));
-            return { 'My Presets': userPresets };
+            return { MyPresets: userPresets };
         }
 
         return categories;
@@ -286,7 +290,7 @@ const PresetBrowser = ({
             {/* Header */}
             <div className="px-4 py-3 border-b border-border">
                 <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-semibold">Effect Presets</h3>
+                    <h3 className="text-sm font-semibold">{t('effects.effectPresets')}</h3>
                     <button
                         onClick={onClose}
                         className="p-1 hover:bg-white/10 rounded"
@@ -302,7 +306,7 @@ const PresetBrowser = ({
                         type="text"
                         value={searchQuery}
                         onChange={(e) => handleSearch(e.target.value)}
-                        placeholder="Search presets..."
+                        placeholder={t('effects.searchPresets')}
                         className="w-full bg-secondary border border-border rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                     />
                 </div>
@@ -310,9 +314,9 @@ const PresetBrowser = ({
                 {/* Tabs */}
                 <div className="flex gap-1 mt-3">
                     {[
-                        { key: 'all', label: 'All' },
-                        { key: 'favorites', label: 'Favorites', icon: Star },
-                        { key: 'user', label: 'My Presets', icon: Bookmark }
+                        { key: 'all', label: t('effects.tabAll') },
+                        { key: 'favorites', label: t('effects.tabFavorites'), icon: Star },
+                        { key: 'user', label: t('effects.tabMyPresets'), icon: Bookmark }
                     ].map(tab => (
                         <button
                             key={tab.key}
@@ -336,7 +340,7 @@ const PresetBrowser = ({
                 {Object.keys(displayedCategories).length === 0 ? (
                     <div className="text-center py-8 text-muted-foreground">
                         <Sparkles className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                        <p className="text-sm">No presets found</p>
+                        <p className="text-sm">{t('effects.noPresetsFound')}</p>
                     </div>
                 ) : (
                     Object.entries(displayedCategories).map(([category, categoryPresets]) => (
@@ -357,11 +361,11 @@ const PresetBrowser = ({
             <div className="px-4 py-3 border-t border-border flex gap-2">
                 <button className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-secondary rounded-lg hover:bg-white/10 transition-colors text-sm">
                     <Download className="w-4 h-4" />
-                    Import
+                    {t('effects.import')}
                 </button>
                 <button className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-secondary rounded-lg hover:bg-white/10 transition-colors text-sm">
                     <Upload className="w-4 h-4" />
-                    Export
+                    {t('effects.export')}
                 </button>
             </div>
         </div>

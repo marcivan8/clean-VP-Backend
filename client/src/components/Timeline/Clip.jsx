@@ -2,6 +2,7 @@ import React from 'react';
 import { useDraggable, useDroppable, useDndContext } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { useShallow } from 'zustand/react/shallow';
+import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../../store/useTimelineStore';
 import useAIStore from '../../store/useAIStore';
 import classNames from 'classnames';
@@ -32,73 +33,42 @@ const getTabForClip = (clip, trackId) => {
 };
 
 const Clip = ({ clip, trackId }) => {
-    const { zoomLevel, removeClip, activeClipId, selectedClipIds, setActiveClip, toggleClipSelection, waveforms, assets, addWaveform } = useTimelineStore(useShallow(state => ({
+    const { t } = useTranslation('editor');
+    const { zoomLevel, removeClip, activeClipId, selectedClipIds, setActiveClip, toggleClipSelection, assets } = useTimelineStore(useShallow(state => ({
         zoomLevel:            state.zoomLevel,
         removeClip:           state.removeClip,
         activeClipId:         state.activeClipId,
         selectedClipIds:      state.selectedClipIds,
         setActiveClip:        state.setActiveClip,
         toggleClipSelection:  state.toggleClipSelection,
-        waveforms:            state.waveforms,
         assets:               state.assets,
-        addWaveform:          state.addWaveform,
     })));
     const isActive = activeClipId === clip.id;
     const isSelected = selectedClipIds && selectedClipIds.includes(clip.id);
     const [ctxMenu, setCtxMenu] = React.useState(null); // null | { x, y }
 
-    // Waveform Data — PlaybackEngine emits under 'video_main' (the embedded
-    // audio stream). Fall back to that key so audio track clips get the waveform
-    // even though their trackId doesn't match 'video_main'.
-    // Text/caption clips never have audio — skip the fallback so they don't
-    // accidentally display the video's waveform on the caption track.
+    // Text/caption clips never have audio — never render a waveform on them.
     const isTextClip = clip.type === 'text' || clip.type === 'caption';
-    const waveformData = isTextClip ? null
-        : waveforms ? (waveforms[trackId] ?? waveforms['video_main'] ?? null) : null;
-
-    // Resolve waveform URL — prefer explicit waveformUrl on the asset, fall back
-    // to deriving it from proxyUrl for assets uploaded before waveformUrl was stored.
-    // proxyUrl pattern: .../proxies/{userId}/{videoFile}/proxy.mp4
-    // waveformUrl:      .../proxies/{userId}/{videoFile}/waveform.json
     const asset = assets?.find(a => a.id === clip.assetId);
-    const resolvedWaveformUrl = asset?.waveformUrl ||
-        (asset?.proxyUrl ? asset.proxyUrl.replace(/\/proxy\.[^/]+$/, '/waveform.json') : null);
 
-    // Fetch waveform peaks whenever the URL is available and not yet in store.
-    // Adding resolvedWaveformUrl to deps means the effect re-runs as soon as
-    // the proxy job sets the URL (without it the effect fires once on mount,
-    // sees no URL, and never retries even after the asset is updated).
-    React.useEffect(() => {
-        if (waveformData) return; // already loaded
-        if (!resolvedWaveformUrl) return;
-
-        let cancelled = false;
-        fetch(resolvedWaveformUrl)
-            .then(r => r.ok ? r.json() : null)
-            .then(wf => {
-                if (!cancelled && wf?.peaks?.length) {
-                    addWaveform(trackId, wf.peaks, wf.duration);
-                    // Also store under 'video_main' so audio-track clips sharing the
-                    // same asset pick it up via the fallback lookup in Clip.jsx.
-                    addWaveform('video_main', wf.peaks, wf.duration);
-                }
-            })
-            .catch(err => console.warn('[Clip] Waveform fetch failed:', err.message));
-
-        return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [resolvedWaveformUrl, !!waveformData]);
-
-    // WaveSurfer peaks — fetched from server (independent of canvas waveform above)
-    // Pass wsAudioUrl as the proxyUrl fallback so that clips whose asset isn't
-    // fully hydrated (no asset.proxyUrl) still trigger peak extraction via their
-    // clip-level URL (sourceUrl / url).  Without this fallback, usePeaks returns
-    // early (no gcsPath and no proxyUrl) and the waveform never appears.
+    // NOTE — a SECOND waveform pipeline used to live here: it derived a
+    // `waveform.json` URL next to the proxy, fetched it on mount, and wrote the
+    // result into the track-keyed `waveforms` store field via addWaveform().
+    // Nothing ever rendered that data. Its only consumer was the effect's own
+    // "already loaded?" guard, so it was a self-referential loop that issued one
+    // network request per clip per mount and displayed nothing. Removed: peaks
+    // now come from exactly one place (WaveformEngine, via usePeaks below).
+    //
+    // usePeaks is READ-ONLY — it does not fetch. WaveformEngine owns extraction,
+    // caching, dedupe, concurrency and retry, so rendering a clip can no longer
+    // trigger network work. Pass the raw URLs straight through; the engine
+    // decides what's usable (it rejects blob:/data:, which the server cannot
+    // resolve to a storage object, and waits for a real proxyUrl instead).
     const wsAudioUrl = asset?.proxyUrl || clip.url || clip.sourceUrl || null;
     const { peaks: wsPeaks, duration: wsDuration, loading: wsLoading, error: wsError } = usePeaks(
         isTextClip ? null : clip.assetId,
         asset?.gcsPath,
-        asset?.proxyUrl || wsAudioUrl,   // fallback to clip URL when asset not hydrated
+        asset?.proxyUrl || clip.sourceUrl || clip.url || null,
     );
 
     // Slice the full-asset peaks down to THIS clip's source window.
@@ -370,7 +340,7 @@ const Clip = ({ clip, trackId }) => {
                     style={{ right: `${clip.transition.duration * zoomLevel - 4}px` }}
                     onMouseDown={handleTransitionResize}
                     onTouchStart={handleTransitionResize}
-                    title="Drag to change transition duration"
+                    title={t('timeline.dragTransitionDuration')}
                 >
                     <div className="h-4 w-0.5 bg-primary shadow-sm rounded-full"></div>
                 </div>

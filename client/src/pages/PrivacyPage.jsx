@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Scale, Mail, FileText, Database, Settings } from 'lucide-react';
 import { Logo } from '../components/Logo.jsx';
 
@@ -23,6 +24,15 @@ const Section = ({ title, icon: Icon, children }) => (
 
 const PrivacyPage = () => {
     const navigate = useNavigate();
+    const { t, i18n } = useTranslation(['privacy', 'common']);
+
+    const localeTag  = i18n.language?.startsWith('fr') ? 'fr-FR' : 'en-US';
+    const lastUpdated = new Date().toLocaleDateString(localeTag, { month: 'long', day: 'numeric', year: 'numeric' });
+
+    const s1Address    = t('section1.addressLines', { returnObjects: true });
+    const s2Items      = t('section2.items', { returnObjects: true });
+    const s3Items      = t('section3.items', { returnObjects: true });
+    const s4Items      = t('section4.items', { returnObjects: true });
 
     return (
         <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)' }}>
@@ -46,7 +56,7 @@ const PrivacyPage = () => {
                         onMouseEnter={e => e.currentTarget.style.color = 'var(--fg)'}
                         onMouseLeave={e => e.currentTarget.style.color = 'var(--fg-3)'}
                     >
-                        <ArrowLeft size={14} /> Back to Vibed
+                        <ArrowLeft size={14} /> {t('common:nav.backToVibed')}
                     </button>
                     <Logo size={22} />
                 </div>
@@ -57,36 +67,37 @@ const PrivacyPage = () => {
                     <div style={{
                         fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)',
                         textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 16,
-                    }}>Legal Document</div>
+                    }}>{t('eyebrow')}</div>
                     <h1 style={{
                         fontFamily: 'var(--f-display)', fontSize: 'clamp(32px, 5vw, 48px)',
                         fontWeight: 800, lineHeight: 1.15, color: 'var(--fg)', marginBottom: 20,
                     }}>
-                        Privacy Policy
+                        {t('title')}
                     </h1>
                     <p style={{
                         fontFamily: 'var(--f-sans)', fontSize: 17, color: 'var(--fg-3)',
                         lineHeight: 1.75, maxWidth: 560,
                     }}>
-                        Last Updated: {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                        {t('lastUpdated', { date: lastUpdated })}
                     </p>
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 40 }}>
-                    
-                    <Section title="1. Identity of the Data Controller" icon={Scale}>
-                        <p>
-                            For the purposes of the General Data Protection Regulation (GDPR) and other applicable data protection laws, the Data Controller responsible for your personal information is:
-                        </p>
+
+                    <Section title={t('section1.title')} icon={Scale}>
+                        <p>{t('section1.p1')}</p>
                         <div style={{
                             padding: 20, background: 'var(--bg-2)', border: '0.5px solid var(--line-soft)',
                             borderRadius: 12, marginTop: 8
                         }}>
-                            <div style={{ fontFamily: 'var(--f-sans)', fontSize: 16, fontWeight: 600, color: 'var(--fg)', marginBottom: 4 }}>VIBED (Vibed studio)</div>
+                            <div style={{ fontFamily: 'var(--f-sans)', fontSize: 16, fontWeight: 600, color: 'var(--fg)', marginBottom: 4 }}>{t('section1.companyName')}</div>
                             <div style={{ fontFamily: 'var(--f-sans)', fontSize: 14, color: 'var(--fg-2)', lineHeight: 1.6 }}>
-                                47 avenue du President Franklin Roosevelt<br/>
-                                94320, THIAIS<br/>
-                                France
+                                {s1Address.map((line, idx) => (
+                                    <React.Fragment key={idx}>
+                                        {line}
+                                        {idx < s1Address.length - 1 && <br />}
+                                    </React.Fragment>
+                                ))}
                             </div>
                             <div style={{ fontFamily: 'var(--f-sans)', fontSize: 14, color: 'var(--accent)', marginTop: 8 }}>
                                 <a href="mailto:marc@vibedstudio.com" style={{ color: 'inherit', textDecoration: 'none' }}>marc@vibedstudio.com</a>
@@ -94,52 +105,35 @@ const PrivacyPage = () => {
                         </div>
                     </Section>
 
-                    <Section title="2. Legal Basis for Processing" icon={FileText}>
-                        <p>
-                            We only process your personal data when we have a valid legal basis to do so. Our primary legal bases are:
-                        </p>
+                    <Section title={t('section2.title')} icon={FileText}>
+                        <p>{t('section2.p1')}</p>
                         <ul style={{ paddingLeft: 20, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            <li>
-                                <strong style={{ color: 'var(--fg)' }}>Contractual Necessity:</strong> We process your email, authentication credentials, and video files to provide you with the Vibed editing service, manage your account, and process payments. Without this processing, we cannot provide our core service.
-                            </li>
-                            <li>
-                                <strong style={{ color: 'var(--fg)' }}>Legitimate Interest:</strong> We process basic usage analytics (e.g., which features are used) to improve our product, ensure the security of our platform, and troubleshoot issues. This processing does not override your fundamental rights and freedoms.
-                            </li>
-                            <li>
-                                <strong style={{ color: 'var(--fg)' }}>Consent:</strong> Where required by law, we will obtain your explicit consent before processing data for certain marketing activities or deploying non-essential cookies.
-                            </li>
+                            {s2Items.map((item, idx) => (
+                                <li key={idx}>
+                                    <strong style={{ color: 'var(--fg)' }}>{item.label}</strong> {item.text}
+                                </li>
+                            ))}
                         </ul>
                     </Section>
 
-                    <Section title="3. Data Retention and Storage" icon={Database}>
-                        <p>
-                            We retain your personal data only for as long as necessary to fulfill the purposes outlined in this policy.
-                        </p>
+                    <Section title={t('section3.title')} icon={Database}>
+                        <p>{t('section3.p1')}</p>
                         <ul style={{ paddingLeft: 20, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            <li><strong>Account Data:</strong> Retained for as long as your account is active. If you delete your account, this data is immediately and permanently removed.</li>
-                            <li><strong>Project Files (Free Tier):</strong> Automatically deleted after 7 days of inactivity.</li>
-                            <li><strong>Project Files (Creator Tier):</strong> Retained for 30 days.</li>
-                            <li><strong>Project Files (Pro Tier):</strong> Retained for 90 days and persist as long as your subscription remains active.</li>
+                            {s3Items.map((item, idx) => (
+                                <li key={idx}><strong>{item.label}</strong> {item.text}</li>
+                            ))}
                         </ul>
-                        <p style={{ marginTop: 8 }}>
-                            Your data is stored securely using Google Cloud Storage (our Data Processor) in encrypted data centers.
-                        </p>
+                        <p style={{ marginTop: 8 }}>{t('section3.p2')}</p>
                     </Section>
 
-                    <Section title="4. Your Rights as a Data Subject" icon={Settings}>
-                        <p>
-                            Under the GDPR, you possess specific rights regarding your personal data:
-                        </p>
+                    <Section title={t('section4.title')} icon={Settings}>
+                        <p>{t('section4.p1')}</p>
                         <ul style={{ paddingLeft: 20, margin: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            <li><strong style={{ color: 'var(--fg)' }}>Right to Access:</strong> You can request a copy of the personal data we hold about you.</li>
-                            <li><strong style={{ color: 'var(--fg)' }}>Right to Erasure (Deletion):</strong> You can request that we delete all your personal data, project files, and account information permanently. You can also self-serve this directly from your account dashboard.</li>
-                            <li><strong style={{ color: 'var(--fg)' }}>Right to Data Portability:</strong> You can request your data in a structured, commonly used, and machine-readable format. You may also export your video projects directly from the editor at any time.</li>
-                            <li><strong style={{ color: 'var(--fg)' }}>Right to Rectification:</strong> You can ask us to correct inaccurate or incomplete data.</li>
-                            <li><strong style={{ color: 'var(--fg)' }}>Right to Object / Restrict:</strong> You may object to or request the restriction of our processing of your data, particularly regarding analytics or direct marketing.</li>
+                            {s4Items.map((item, idx) => (
+                                <li key={idx}><strong style={{ color: 'var(--fg)' }}>{item.label}</strong> {item.text}</li>
+                            ))}
                         </ul>
-                        <p style={{ marginTop: 12 }}>
-                            To exercise any of these rights, please contact us at the email address provided below. We process all requests within 30 days, free of charge.
-                        </p>
+                        <p style={{ marginTop: 12 }}>{t('section4.p2')}</p>
                     </Section>
 
                     <div style={{
@@ -151,7 +145,7 @@ const PrivacyPage = () => {
                             fontFamily: 'var(--f-sans)', fontSize: 15, color: 'var(--fg)',
                             marginBottom: 8, fontWeight: 500,
                         }}>
-                            To exercise your data rights, contact us at:
+                            {t('cta.prompt')}
                         </p>
                         <a
                             href="mailto:marc@vibedstudio.com"

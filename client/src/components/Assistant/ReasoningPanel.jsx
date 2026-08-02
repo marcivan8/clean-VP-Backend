@@ -11,6 +11,7 @@ import useUserPreferences from '../../store/useUserPreferences';
 import { workflowController } from '../../agent/WorkflowController.js';
 import { useBrain } from '../../hooks/useBrain.js';
 import BrainPanel from '../BrainPanel.jsx';
+import { useTranslation } from 'react-i18next';
 
 
 // --- Sub-components ---
@@ -63,6 +64,7 @@ const AssistantLogItem = ({ log }) => (
 );
 
 const TaskCompletionCard = ({ log }) => {
+    const { t } = useTranslation('editor');
     const [dismissed, setDismissed] = useState(false);
     const [rejecting, setRejecting] = useState(false);
     const stepsApplied   = log.data?.stepsApplied   ?? 0;
@@ -77,10 +79,18 @@ const TaskCompletionCard = ({ log }) => {
     const handleAccept = () => setDismissed(true);
     const handleReject = () => {
         setRejecting(true);
-        const store = useTimelineStore.getState();
-        while (store.past.length > preTaskHistoryLen) {
+        // Re-read state on every iteration — `undo()` returns a NEW store state
+        // object (Zustand's `set` is immutable), so a `store` reference captured
+        // once before the loop never reflects the shrinking `past` array. That
+        // stale read made the while condition permanently true whenever there
+        // were steps to reject, hanging the tab in an infinite undo loop and
+        // making the Reject button appear completely broken.
+        let guard = 0;
+        while (useTimelineStore.getState().past.length > preTaskHistoryLen && guard < 1000) {
             useTimelineStore.getState().undo();
+            guard++;
         }
+        setRejecting(false);
         setDismissed(true);
     };
 
@@ -106,7 +116,7 @@ const TaskCompletionCard = ({ log }) => {
                 </span>
                 {stepsApplied > 0 && (
                     <span className="ml-auto shrink-0" style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)' }}>
-                        {stepsApplied} edit{stepsApplied !== 1 ? 's' : ''}
+                        {t('assistant.editsCount', { count: stepsApplied })}
                     </span>
                 )}
             </div>
@@ -139,14 +149,14 @@ const TaskCompletionCard = ({ log }) => {
                     <div className="mb-3 rounded-md px-2.5 py-2 flex items-center justify-between"
                          style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.1)' }}>
                         <span style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg-2)' }}>
-                            Next: <strong style={{ color: 'var(--fg)' }}>{nextSuggestion}</strong>
+                            {t('assistant.next')} <strong style={{ color: 'var(--fg)' }}>{nextSuggestion}</strong>
                         </span>
                         <button
                             onClick={handleSuggestion}
                             className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-colors hover:opacity-80 shrink-0 ml-2"
                             style={{ background: 'color-mix(in oklch, var(--accent) 18%, transparent)', border: '0.5px solid color-mix(in oklch, var(--accent) 35%, transparent)', color: 'var(--accent)', fontFamily: 'var(--f-mono)' }}
                         >
-                            <ArrowRight className="w-2.5 h-2.5" /> Go
+                            <ArrowRight className="w-2.5 h-2.5" /> {t('assistant.go')}
                         </button>
                     </div>
                 )}
@@ -157,18 +167,18 @@ const TaskCompletionCard = ({ log }) => {
                         <button onClick={handleAccept}
                             className="flex-1 text-xs py-1.5 rounded-md transition-all font-medium flex items-center justify-center gap-1.5"
                             style={{ background: 'color-mix(in oklch, var(--accent) 18%, transparent)', border: '0.5px solid color-mix(in oklch, var(--accent) 35%, transparent)', color: 'var(--accent)' }}>
-                            <Check className="w-3 h-3" /> Keep
+                            <Check className="w-3 h-3" /> {t('assistant.keep')}
                         </button>
                         <button onClick={handleReject} disabled={rejecting}
                             className="flex-1 text-xs py-1.5 rounded-md transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
                             style={{ background: 'rgba(255,255,255,0.04)', border: '0.5px solid var(--line)', color: 'var(--fg-3)' }}>
-                            <X className="w-3 h-3" /> {rejecting ? 'Undoing…' : 'Undo'}
+                            <X className="w-3 h-3" /> {rejecting ? t('assistant.undoing') : t('assistant.undo')}
                         </button>
                     </div>
                 ) : (
                     <button onClick={handleAccept} className="text-xs px-3 py-1 rounded-md"
                         style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--fg-3)', border: '0.5px solid var(--line)' }}>
-                        OK
+                        {t('assistant.ok')}
                     </button>
                 )}
             </div>
@@ -177,6 +187,7 @@ const TaskCompletionCard = ({ log }) => {
 };
 
 const LogItem = ({ log }) => {
+    const { t } = useTranslation('editor');
     if (log.type === 'step')            return <StepLogItem log={log} />;
     if (log.type === 'assistant')       return <AssistantLogItem log={log} />;
     if (log.type === 'task_complete')   return <TaskCompletionCard log={log} />;
@@ -201,8 +212,8 @@ const LogItem = ({ log }) => {
             <div className="pb-3 w-full min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                     <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)' }}>{log.timestamp}</span>
-                    {isSuccess && <span style={{ fontSize: 10, color: '#34d399', fontWeight: 600 }}>DETECTED</span>}
-                    {isAgent && log.data?.thought && <span style={{ fontSize: 10, color: '#a78bfa', fontWeight: 700 }}>AI PLAN</span>}
+                    {isSuccess && <span style={{ fontSize: 10, color: '#34d399', fontWeight: 600 }}>{t('assistant.detected')}</span>}
+                    {isAgent && log.data?.thought && <span style={{ fontSize: 10, color: '#a78bfa', fontWeight: 700 }}>{t('assistant.aiPlan')}</span>}
                 </div>
                 <p style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.55, whiteSpace: 'pre-wrap', margin: 0 }}>
                     {log.message}
@@ -249,6 +260,7 @@ const LogItem = ({ log }) => {
 
 
 const AgentPlanCard = ({ suggestion, onAccept, onReject }) => {
+    const { t } = useTranslation('editor');
     const { thought, actions } = suggestion.data;
 
     return (
@@ -272,7 +284,7 @@ const AgentPlanCard = ({ suggestion, onAccept, onReject }) => {
                         <Brain className="w-3 h-3" style={{ color: 'var(--violet)' }} />
                     </div>
                     <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--violet)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
-                        ROKA Plan
+                        {t('assistant.rokaPlan')}
                     </span>
                 </div>
 
@@ -306,7 +318,7 @@ const AgentPlanCard = ({ suggestion, onAccept, onReject }) => {
                             boxShadow: '0 2px 12px color-mix(in oklch, var(--accent) 15%, transparent)',
                         }}
                     >
-                        <Check className="w-3 h-3" /> Approve Plan
+                        <Check className="w-3 h-3" /> {t('assistant.approvePlan')}
                     </button>
                     <button
                         onClick={() => onReject(suggestion.id)}
@@ -315,7 +327,7 @@ const AgentPlanCard = ({ suggestion, onAccept, onReject }) => {
                         onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.09)'; e.currentTarget.style.color = 'var(--fg)'; }}
                         onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.color = 'var(--fg-3)'; }}
                     >
-                        <X className="w-3 h-3" /> Revise
+                        <X className="w-3 h-3" /> {t('assistant.revise')}
                     </button>
                 </div>
             </div>
@@ -325,6 +337,7 @@ const AgentPlanCard = ({ suggestion, onAccept, onReject }) => {
 
 
 const SuggestionCard = ({ suggestion, onAccept, onReject }) => {
+    const { t } = useTranslation('editor');
     return (
         <div
             className="rounded-xl p-3 mb-3 animate-in fade-in zoom-in-95 duration-500"
@@ -338,12 +351,12 @@ const SuggestionCard = ({ suggestion, onAccept, onReject }) => {
                     <Sparkles className="w-3 h-3" style={{ color: 'var(--accent)' }} />
                 </div>
                 <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
-                    {suggestion.type || 'Suggestion'}
+                    {suggestion.type || t('assistant.suggestion')}
                 </span>
             </div>
 
             <p className="leading-relaxed mb-3" style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg-2)' }}>
-                {suggestion.message || suggestion.label || 'Apply this suggestion?'}
+                {suggestion.message || suggestion.label || t('assistant.applyThisSuggestion')}
             </p>
 
             <div className="flex gap-2">
@@ -358,7 +371,7 @@ const SuggestionCard = ({ suggestion, onAccept, onReject }) => {
                     onMouseEnter={e => { e.currentTarget.style.background = 'color-mix(in oklch, var(--accent) 26%, transparent)'; }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'color-mix(in oklch, var(--accent) 18%, transparent)'; }}
                 >
-                    <Check className="w-3 h-3" /> Apply
+                    <Check className="w-3 h-3" /> {t('assistant.apply')}
                 </button>
                 <button
                     onClick={() => onReject(suggestion.id)}
@@ -367,7 +380,7 @@ const SuggestionCard = ({ suggestion, onAccept, onReject }) => {
                     onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.09)'; e.currentTarget.style.color = 'var(--fg)'; }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = 'var(--fg-3)'; }}
                 >
-                    <X className="w-3 h-3" /> Dismiss
+                    <X className="w-3 h-3" /> {t('assistant.dismiss')}
                 </button>
             </div>
         </div>
@@ -377,6 +390,7 @@ const SuggestionCard = ({ suggestion, onAccept, onReject }) => {
 // Next-action chips shown after a command completes.
 // Each suggestion is a standalone button that submits itself as a command.
 const NextActionsCard = ({ suggestion, onAccept, onReject }) => {
+    const { t } = useTranslation('editor');
     const items = suggestion.data?.suggestions || [];
     if (items.length === 0) return null;
     return (
@@ -387,7 +401,7 @@ const NextActionsCard = ({ suggestion, onAccept, onReject }) => {
             <div className="flex items-center gap-1.5 mb-2.5">
                 <Sparkles className="w-3 h-3" style={{ color: 'var(--accent)' }} />
                 <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
-                    What's next?
+                    {t('assistant.whatsNext')}
                 </span>
                 <button
                     onClick={() => onReject(suggestion.id)}
@@ -426,9 +440,14 @@ const NextActionsCard = ({ suggestion, onAccept, onReject }) => {
 // --- Main Panel ---
 
 const UPLOAD_STEPS = ['uploading', 'processing', 'ready'];
-const UPLOAD_STEP_LABELS = { uploading: 'Uploading', processing: 'Processing', ready: 'Ready' };
 
 const UploadStatusCard = ({ asset }) => {
+    const { t } = useTranslation('editor');
+    const UPLOAD_STEP_LABELS = {
+        uploading: t('assistant.uploadUploading'),
+        processing: t('assistant.uploadProcessing'),
+        ready: t('assistant.uploadReady'),
+    };
     const phase = asset.uploadPhase || 'uploading';
     const phaseIdx = UPLOAD_STEPS.indexOf(phase);
 
@@ -471,7 +490,7 @@ const UploadStatusCard = ({ asset }) => {
             <div className="flex items-center gap-1.5 mt-2">
                 <Shield className="w-2.5 h-2.5 shrink-0" style={{ color: 'var(--fg-4)' }} />
                 <span style={{ fontFamily: 'var(--f-sans)', fontSize: 9, color: 'var(--fg-4)' }}>
-                    Securely uploaded to Google Cloud Storage
+                    {t('assistant.securelyUploaded')}
                 </span>
             </div>
         </div>
@@ -549,6 +568,7 @@ const FONT_STACK = (font) =>
     : `"${font}", sans-serif`;
 
 const CaptionStylesCard = ({ log }) => {
+    const { t } = useTranslation('editor');
     const [applied, setApplied] = useState(null);
     const applyStyle = (style) => {
         const { tracks, updateClip } = useTimelineStore.getState();
@@ -590,7 +610,7 @@ const CaptionStylesCard = ({ log }) => {
                     <Type style={{ color: '#fff', width: 9, height: 9 }} />
                 </div>
                 <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
-                    Caption Style
+                    {t('assistant.captionStyle')}
                 </span>
             </div>
 
@@ -708,6 +728,7 @@ const CaptionStylesCard = ({ log }) => {
 };
 
 const ReasoningPanel = () => {
+    const { t } = useTranslation('editor');
     const { logs, suggestions, isAnalyzing, setIsAnalyzing, addLog, addSuggestion, removeSuggestion, contextualSuggestion, quickChips, setActiveTab } = useAIStore();
     const { uploadedFile, performAction, assets, tracks, projectId } = useTimelineStore(useShallow(state => ({
         uploadedFile:  state.uploadedFile,
@@ -857,7 +878,7 @@ const ReasoningPanel = () => {
                     addLog({
                         id: 'bin-ready-' + Date.now(),
                         type: 'info',
-                        message: `${vids.length} clips ready:\n` +
+                        message: t('assistant.clipsReadyHeader', { count: vids.length }) + '\n' +
                             vids.map(a => `  — ${a.name} (${fmt(a.duration || a.sourceDuration || 0)})`).join('\n'),
                         timestamp: new Date().toLocaleTimeString(),
                     });
@@ -956,7 +977,7 @@ const ReasoningPanel = () => {
                 id: 'agent-err-' + now,
                 timestamp: new Date().toLocaleTimeString(),
                 type: 'warning',
-                message: `ROKA: No file selected. Please import a file first.`
+                message: t('assistant.noFileSelected')
             });
             setIsAnalyzing(false);
             return;
@@ -971,7 +992,7 @@ const ReasoningPanel = () => {
                 id: 'agent-crash-' + now,
                 timestamp: new Date().toLocaleTimeString(),
                 type: 'warning',
-                message: `ROKA error: ${err.message}`
+                message: t('assistant.rokaError', { message: err.message })
             });
         }
     };
@@ -1013,7 +1034,7 @@ const ReasoningPanel = () => {
                         isAnalyzing ? "bg-purple-500/20 text-purple-300 border-purple-500/30" : "border-white/10"
                     )}
                     style={isAnalyzing ? {} : { background: 'rgba(255,255,255,0.06)', color: 'var(--fg-2)' }}>
-                        {isAnalyzing ? "ROKA is working…" : "Ready"}
+                        {isAnalyzing ? t('assistant.rokaWorking') : t('assistant.ready')}
                     </div>
                 </div>
             </div>
@@ -1032,7 +1053,7 @@ const ReasoningPanel = () => {
                             <div className="rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.1)' }}>
                                 <div className="flex items-center gap-1.5 mb-2">
                                     <Sparkles className="w-3 h-3" style={{ color: 'var(--accent)' }} />
-                                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Try this</span>
+                                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>{t('assistant.tryThis')}</span>
                                 </div>
                                 <button
                                     onClick={() => { if (inputRef.current) { inputRef.current.value = contextualSuggestion; inputRef.current.focus(); } }}
@@ -1045,12 +1066,12 @@ const ReasoningPanel = () => {
                         ) : (
                             <div className="flex flex-col items-center gap-2 py-6 opacity-50">
                                 <Brain className="w-8 h-8" style={{ color: 'var(--fg-3)' }} />
-                                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Ready</span>
+                                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{t('assistant.ready')}</span>
                             </div>
                         )}
                         {/* Quick chips */}
                         <div>
-                            <span className="block mb-2" style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-2)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Quick actions</span>
+                            <span className="block mb-2" style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-2)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{t('assistant.quickActions')}</span>
                             <div className="flex flex-wrap gap-1.5">
                                 {quickChips.map(chip => (
                                     <button
@@ -1070,7 +1091,7 @@ const ReasoningPanel = () => {
                                         className="px-2.5 py-1 rounded-full text-[10px] transition-colors flex items-center gap-1"
                                         style={{ background: 'color-mix(in oklch, var(--accent) 12%, transparent)', border: '0.5px solid color-mix(in oklch, var(--accent) 35%, transparent)', color: 'var(--accent)', fontFamily: 'var(--f-sans)' }}
                                     >
-                                        <Type className="w-2.5 h-2.5" /> Edit captions
+                                        <Type className="w-2.5 h-2.5" /> {t('assistant.editCaptions')}
                                     </button>
                                 )}
                             </div>
@@ -1127,7 +1148,7 @@ const ReasoningPanel = () => {
                                 <Loader2 className="w-4 h-4 animate-spin absolute inset-0" style={{ color: 'var(--accent)' }} />
                             </div>
                             <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-2)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                                ROKA is working
+                                {t('assistant.rokaWorkingNoEllipsis')}
                             </span>
                             <button
                                 onClick={() => {
@@ -1136,20 +1157,20 @@ const ReasoningPanel = () => {
                                     addLog({
                                         id: 'cancelled-' + Date.now(),
                                         type: 'info',
-                                        message: 'Operation cancelled.',
+                                        message: t('assistant.operationCancelled'),
                                         timestamp: new Date().toLocaleTimeString()
                                     });
                                 }}
                                 className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-colors hover:opacity-80"
                                 style={{ background: 'rgba(255,255,255,0.07)', color: 'var(--fg-3)', fontFamily: 'var(--f-mono)', border: '0.5px solid var(--line)' }}
-                                title="Cancel this operation"
+                                title={t('assistant.cancelOperation')}
                             >
                                 <XCircle className="w-3 h-3" />
-                                Cancel
+                                {t('assistant.cancel')}
                             </button>
                         </div>
                         <p className="text-[10px] leading-relaxed" style={{ color: 'var(--fg-3)', fontFamily: 'var(--f-sans)' }}>
-                            Steps appear above as they complete. This can take 10–30 s for longer videos.
+                            {t('assistant.stepsHint')}
                         </p>
                     </div>
                 )}
@@ -1177,7 +1198,7 @@ const ReasoningPanel = () => {
                         className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] transition-colors"
                         style={{ background: 'color-mix(in oklch, var(--accent) 12%, transparent)', border: '0.5px solid color-mix(in oklch, var(--accent) 35%, transparent)', color: 'var(--accent)', fontFamily: 'var(--f-sans)' }}
                     >
-                        <Type className="w-2.5 h-2.5" /> Edit captions
+                        <Type className="w-2.5 h-2.5" /> {t('assistant.editCaptions')}
                     </button>
                 </div>
             )}
@@ -1195,12 +1216,12 @@ const ReasoningPanel = () => {
                         disabled={isAnalyzing}
                         onKeyDown={handleKeyDown}
                         onInput={handleInput}
-                        placeholder={isAnalyzing ? "ROKA is working…" : contextualSuggestion ? `Try: ${contextualSuggestion}` : "Tell ROKA what to do…"}
+                        placeholder={isAnalyzing ? t('assistant.rokaWorking') : contextualSuggestion ? t('assistant.tryPlaceholder', { suggestion: contextualSuggestion }) : t('assistant.tellRokaPlaceholder')}
                         className="w-full resize-none px-4 pt-3 pb-10 text-sm focus:outline-none transition-all disabled:opacity-50 placeholder:opacity-40"
                         style={{ background: 'transparent', color: 'var(--fg)', fontFamily: 'var(--f-sans)', lineHeight: '1.5', minHeight: '88px', maxHeight: '160px' }}
                     />
                     <div className="absolute bottom-2.5 right-2.5 flex items-center gap-2">
-                        <span className="text-[10px] opacity-30" style={{ color: 'var(--fg)', fontFamily: 'var(--f-mono)' }}>⇧↵ newline</span>
+                        <span className="text-[10px] opacity-30" style={{ color: 'var(--fg)', fontFamily: 'var(--f-mono)' }}>{t('assistant.newlineHint')}</span>
                         <button
                             onClick={processCommand}
                             disabled={isAnalyzing}

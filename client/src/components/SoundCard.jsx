@@ -7,6 +7,7 @@
  */
 
 import React, { useRef, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Play, Pause, Plus, Zap, Heart } from 'lucide-react';
 
 const glassCard = {
@@ -35,6 +36,7 @@ const energyColors = ['#555', '#4a9eff', '#00e5ff', '#8a2be2', '#ff3a6e'];
  * }} props
  */
 export default function SoundCard({ sfx, onSelect, compact = false, favorited = false, onToggleFavorite }) {
+    const { t } = useTranslation('editor');
     const audioRef = useRef(null);
     const [playing, setPlaying] = useState(false);
     const [hovered, setHovered] = useState(false);
@@ -113,7 +115,7 @@ export default function SoundCard({ sfx, onSelect, compact = false, favorited = 
             {onToggleFavorite && (
                 <button
                     onClick={e => { e.stopPropagation(); onToggleFavorite(sfx); }}
-                    title={favorited ? 'Remove from favorites' : 'Add to favorites'}
+                    title={favorited ? t('timeline.removeFromFavorites') : t('assetPanel.addToFavorites')}
                     style={{
                         width: 24, height: 24, borderRadius: 5, border: 'none',
                         background: favorited ? 'rgba(255,58,110,0.14)' : 'rgba(255,255,255,0.06)',

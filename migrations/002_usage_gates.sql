@@ -21,6 +21,7 @@ create index if not exists usage_events_user_month_idx
 -- 3. RLS — users can read their own events; the service role inserts
 alter table public.usage_events enable row level security;
 
+drop policy if exists "usage_events: own rows read" on public.usage_events;
 create policy "usage_events: own rows read"
     on public.usage_events for select
     using (auth.uid() = user_id);

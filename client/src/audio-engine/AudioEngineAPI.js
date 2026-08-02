@@ -91,6 +91,46 @@ class AudioEngineAPI {
         return resp.json();
     }
 
+    /**
+     * Upload a custom .cube LUT.
+     *
+     * The server side of this (POST /api/luts/upload — auth, .cube validation,
+     * user-scoped storage at luts/{userId}/custom/{assetId}.cube, assets-table
+     * insert, and export-pipeline integration via LUTExportIntegration.js) was
+     * fully built and mounted, but NOTHING on the client ever called it. That
+     * is why "LUT import" read as broken: the backend worked, the entry point
+     * to reach it did not exist.
+     *
+     * Content-Type is handled by authFetch, which detects a FormData body and
+     * omits the header so the browser can generate the multipart boundary
+     * itself (multer cannot parse the body without it).
+     *
+     * @param {File}   file   a .cube file from an <input type="file">
+     * @param {string} [name] display name (defaults to the filename)
+     * @returns {Promise<{ assetId: string, gcsPath: string }>}
+     */
+    async uploadLUT(file, name = null) {
+        if (!file) throw new Error('A .cube file is required');
+        if (!/\.cube$/i.test(file.name)) {
+            throw new Error('Only .cube LUT files are supported');
+        }
+
+        const form = new FormData();
+        form.append('lut', file);
+        if (name) form.append('name', name);
+
+        const resp = await authFetch('/api/luts/upload', {
+            method: 'POST',
+            body: form,
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.error || `LUT upload failed: ${resp.status}`);
+        }
+        return resp.json();
+    }
+
     // ── Presets ───────────────────────────────────────────────────────────────
 
     /**

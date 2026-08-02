@@ -6,8 +6,8 @@ ML_Dataset/
 *.json
 !package.json
 !package-lock.json
-!ML_Models/**/*.json
 !client/src/locales/**/*.json
+ML_Models/
 
 # Python
 venv/

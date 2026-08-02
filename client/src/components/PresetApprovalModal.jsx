@@ -12,6 +12,7 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Zap, CheckCircle, XCircle, AlertTriangle, ChevronRight } from 'lucide-react';
 
 const OVERLAY = {
@@ -39,9 +40,10 @@ const MODAL = {
 };
 
 export default function PresetApprovalModal({ preset, onApply, onCancel }) {
+    const { t } = useTranslation('editor');
     if (!preset) return null;
 
-    const name     = preset.display_name || preset.name || 'Preset';
+    const name     = preset.display_name || preset.name || t('presetApproval.preset');
     const commands = preset.command_sequence || preset.commandSequence || [];
     const sorted   = [...commands].sort((a, b) => (a.order || 0) - (b.order || 0));
 
@@ -59,8 +61,8 @@ export default function PresetApprovalModal({ preset, onApply, onCancel }) {
                         <Zap size={15} color="#ff3a6e" />
                     </div>
                     <div>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--fg)' }}>Full Edit — {name}</div>
-                        <div style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 1 }}>Review the steps before applying</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--fg)' }}>{t('presetApproval.fullEdit')} — {name}</div>
+                        <div style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 1 }}>{t('presetApproval.reviewStepsBeforeApplying')}</div>
                     </div>
                 </div>
 
@@ -77,7 +79,7 @@ export default function PresetApprovalModal({ preset, onApply, onCancel }) {
                 }}>
                     <AlertTriangle size={13} color="#ff3a6e" style={{ marginTop: 1, flexShrink: 0 }} />
                     <span style={{ fontSize: 11, color: '#ff8faa', lineHeight: 1.55 }}>
-                        This preset applies multiple edits to your project. These actions can be undone individually using Ctrl+Z.
+                        {t('presetApproval.warningText')}
                     </span>
                 </div>
 
@@ -85,7 +87,7 @@ export default function PresetApprovalModal({ preset, onApply, onCancel }) {
                 {sorted.length > 0 && (
                     <div style={{ marginBottom: 16 }}>
                         <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--fg-3)', letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 6 }}>
-                            Steps ({sorted.length})
+                            {t('presetApproval.steps', { count: sorted.length })}
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                             {sorted.map((cmd, i) => (
@@ -102,7 +104,7 @@ export default function PresetApprovalModal({ preset, onApply, onCancel }) {
                                         {cmd.label || cmd.action}
                                     </span>
                                     {cmd.skipIfFailed && (
-                                        <span style={{ fontSize: 9, color: 'var(--fg-3)' }}>optional</span>
+                                        <span style={{ fontSize: 9, color: 'var(--fg-3)' }}>{t('presetApproval.optional')}</span>
                                     )}
                                 </div>
                             ))}
@@ -121,7 +123,7 @@ export default function PresetApprovalModal({ preset, onApply, onCancel }) {
                             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
                         }}
                     >
-                        <XCircle size={12} /> Cancel
+                        <XCircle size={12} /> {t('presetApproval.cancel')}
                     </button>
                     <button
                         onClick={onApply}
@@ -134,7 +136,7 @@ export default function PresetApprovalModal({ preset, onApply, onCancel }) {
                             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
                         }}
                     >
-                        <CheckCircle size={12} /> Apply Full Edit
+                        <CheckCircle size={12} /> {t('presetApproval.applyFullEdit')}
                     </button>
                 </div>
             </div>

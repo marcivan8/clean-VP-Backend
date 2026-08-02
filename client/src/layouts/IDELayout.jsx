@@ -1,5 +1,6 @@
 import { useShallow } from 'zustand/react/shallow';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Menu, Upload, Palette, Move, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import classNames from 'classnames';
 import { Player } from '@revideo/player-react';
@@ -130,6 +131,8 @@ const CONTEXTUAL_SUGGESTION = {
 };
 
 const IDELayout = ({ children, mode = 'editor' }) => {
+    const { t } = useTranslation('editor');
+
     // Keeps Supabase in sync with localStorage autosaves (debounced 3 s after each change).
     // Without this call the hook was defined but never mounted — Supabase never updated.
     useSupabasePersistence();
@@ -234,13 +237,13 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const nameInputRef = useRef(null);
 
     const startRename = useCallback(() => {
-        setNameInput(projectName || 'Untitled Project');
+        setNameInput(projectName || t('ideLayout.untitledProject'));
         setEditingName(true);
         setTimeout(() => nameInputRef.current?.select(), 0);
-    }, [projectName]);
+    }, [projectName, t]);
 
     const commitRename = useCallback(async () => {
-        const trimmed = nameInput.trim() || 'Untitled Project';
+        const trimmed = nameInput.trim() || t('ideLayout.untitledProject');
         setEditingName(false);
         if (trimmed === projectName) return;
         setProjectName(trimmed);
@@ -1284,7 +1287,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             />
                         ) : (
                             <span
-                                title="Click to rename"
+                                title={t('ideLayout.clickToRename')}
                                 onClick={startRename}
                                 style={{
                                     color: 'var(--fg-2)',
@@ -1296,7 +1299,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 onMouseEnter={e => e.currentTarget.style.background = 'var(--glass-2)'}
                                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                             >
-                                {projectName || 'Untitled Project'}
+                                {projectName || t('ideLayout.untitledProject')}
                             </span>
                         )}
                         <span style={{ color: "var(--fg-4)" }}>·</span>
@@ -1318,19 +1321,19 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     openMenu === 'file' ? "bg-secondary text-foreground" : "hover:bg-secondary text-muted-foreground hover:text-foreground"
                                 )}
                             >
-                                File
+                                {t('ideLayout.menu.file')}
                             </button>
                             {openMenu === 'file' && (
                                 <>
                                     <div className="fixed inset-0 z-40" onClick={() => setOpenMenu(null)} />
                                     <div className="absolute top-full left-0 mt-1 w-48 bg-card border border-border shadow-xl rounded-md py-1 z-50 flex flex-col">
-                                        <button onClick={() => { if (confirm("New project? Current timeline will be cleared.")) { useTimelineStore.getState().loadProject({ tracks: [], duration: 60 }); } setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">New Project</button>
-                                        <button onClick={() => { projectLoaderRef.current.click(); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">Open Project...</button>
+                                        <button onClick={() => { if (confirm(t('ideLayout.menu.confirmNewProject'))) { useTimelineStore.getState().loadProject({ tracks: [], duration: 60 }); } setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.newProject')}</button>
+                                        <button onClick={() => { projectLoaderRef.current.click(); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.openProject')}</button>
                                         <div className="h-px bg-border my-1" />
-                                        <button onClick={() => { const data = useTimelineStore.getState().saveProject(); const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `project-${Date.now()}.json`; a.click(); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">Save Project</button>
+                                        <button onClick={() => { const data = useTimelineStore.getState().saveProject(); const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `project-${Date.now()}.json`; a.click(); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.saveProject')}</button>
                                         <div className="h-px bg-border my-1" />
-                                        <button onClick={() => { triggerImport(); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">Import Media...</button>
-                                        <button onClick={() => { setShowExportModal(true); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">Export Video</button>
+                                        <button onClick={() => { triggerImport(); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.importMedia')}</button>
+                                        <button onClick={() => { setShowExportModal(true); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.exportVideo')}</button>
                                     </div>
                                 </>
                             )}
@@ -1344,18 +1347,18 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     openMenu === 'edit' ? "bg-secondary text-foreground" : "hover:bg-secondary text-muted-foreground hover:text-foreground"
                                 )}
                             >
-                                Edit
+                                {t('ideLayout.menu.edit')}
                             </button>
                             {openMenu === 'edit' && (
                                 <>
                                     <div className="fixed inset-0 z-40" onClick={() => setOpenMenu(null)} />
                                     <div className="absolute top-full left-0 mt-1 w-48 bg-card border border-border shadow-xl rounded-md py-1 z-50 flex flex-col">
-                                        <button onClick={() => { useTimelineStore.getState().undo(); setOpenMenu(null); }} disabled={past.length === 0} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors disabled:opacity-50">Undo (Ctrl+Z)</button>
-                                        <button onClick={() => { useTimelineStore.getState().redo(); setOpenMenu(null); }} disabled={future.length === 0} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors disabled:opacity-50">Redo (Ctrl+Y)</button>
+                                        <button onClick={() => { useTimelineStore.getState().undo(); setOpenMenu(null); }} disabled={past.length === 0} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors disabled:opacity-50">{t('ideLayout.menu.undo')}</button>
+                                        <button onClick={() => { useTimelineStore.getState().redo(); setOpenMenu(null); }} disabled={future.length === 0} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors disabled:opacity-50">{t('ideLayout.menu.redo')}</button>
                                         <div className="h-px bg-border my-1" />
-                                        <button onClick={() => { useTimelineStore.getState().copyClip(activeClipId); setOpenMenu(null); }} disabled={!activeClip} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors disabled:opacity-50">Copy</button>
-                                        <button onClick={() => { useTimelineStore.getState().pasteClip(useTimelineStore.getState().currentTime); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">Paste</button>
-                                        <button onClick={() => { if (activeClip && activeTrackId) { useTimelineStore.getState().removeClip(activeTrackId, activeClip.id); } setOpenMenu(null); }} disabled={!activeClip} className="px-4 py-2 text-xs text-left hover:bg-red-500/10 text-red-400 transition-colors disabled:opacity-50">Delete</button>
+                                        <button onClick={() => { useTimelineStore.getState().copyClip(activeClipId); setOpenMenu(null); }} disabled={!activeClip} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors disabled:opacity-50">{t('ideLayout.menu.copy')}</button>
+                                        <button onClick={() => { useTimelineStore.getState().pasteClip(useTimelineStore.getState().currentTime); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.paste')}</button>
+                                        <button onClick={() => { if (activeClip && activeTrackId) { useTimelineStore.getState().removeClip(activeTrackId, activeClip.id); } setOpenMenu(null); }} disabled={!activeClip} className="px-4 py-2 text-xs text-left hover:bg-red-500/10 text-red-400 transition-colors disabled:opacity-50">{t('ideLayout.menu.delete')}</button>
                                     </div>
                                 </>
                             )}
@@ -1367,7 +1370,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             const reader = new FileReader();
                             reader.onload = (ev) => {
                                 try { useTimelineStore.getState().loadProject(JSON.parse(ev.target.result)); }
-                                catch { alert("Invalid Project File"); }
+                                catch { alert(t('ideLayout.menu.invalidProjectFile')); }
                             };
                             reader.readAsText(file);
                         }} />
@@ -1387,7 +1390,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             className="glass-button-pro px-4 py-1.5 md:px-5 rounded-md text-[10px] flex items-center gap-2 disabled:opacity-50"
                         >
                             {isExporting ? <span className="animate-spin">⏳</span> : <Share className="w-3 h-3" />}
-                            {isExporting ? "Rendering..." : "Export"}
+                            {isExporting ? t('ideLayout.rendering') : t('ideLayout.export')}
                         </button>
                     </div>
                 </header>
@@ -1410,7 +1413,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         style={{ background: "linear-gradient(180deg, var(--glass), transparent)" }}
                     >
                         <div className="md:hidden p-3 border-b border-[var(--line-soft)] flex justify-between items-center shrink-0" style={{ background: "var(--glass)" }}>
-                            <span className="font-bold text-sm" style={{ color: "var(--fg)" }}>Media & Assets</span>
+                            <span className="font-bold text-sm" style={{ color: "var(--fg)" }}>{t('ideLayout.mediaAndAssets')}</span>
                             <button
                                 onClick={() => setMobileSheet(null)}
                                 className="p-1 rounded-full transition-colors hover:bg-white/10"
@@ -1438,7 +1441,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         {tab === 'audio'      && <span style={{ fontSize: 9 }}>🎤</span>}
                                         {tab === 'transform'  && <Move     className="w-2.5 h-2.5" />}
                                         {tab === 'settings'   && <Settings className="w-2.5 h-2.5" />}
-                                        {tab}
+                                        {t(`ideLayout.tabs.${tab}`)}
                                     </button>
                                 ))}
                             </div>
@@ -1454,7 +1457,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         onClick={() => scrollTabBar(-1)}
                                         className="absolute left-0 top-0 bottom-0 flex items-center justify-center w-5"
                                         style={{ color: "var(--fg-3)" }}
-                                        aria-label="Scroll tabs left"
+                                        aria-label={t('ideLayout.scrollTabsLeft')}
                                     >
                                         <ChevronLeft className="w-3 h-3" />
                                     </button>
@@ -1472,7 +1475,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         onClick={() => scrollTabBar(1)}
                                         className="absolute right-0 top-0 bottom-0 flex items-center justify-center w-5"
                                         style={{ color: "var(--fg-3)" }}
-                                        aria-label="Scroll tabs right"
+                                        aria-label={t('ideLayout.scrollTabsRight')}
                                     >
                                         <ChevronRight className="w-3 h-3" />
                                     </button>
@@ -1498,10 +1501,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             {activeTab === 'media' && (
                                 <section className="p-4 border-b" style={{ borderColor: "var(--line-soft)" }}>
                                     <div className="flex items-center justify-between mb-4">
-                                        <div className="studio-mono-label" style={{ color: 'var(--fg-2)' }}>BIN · {assets.length} CLIPS</div>
+                                        <div className="studio-mono-label" style={{ color: 'var(--fg-2)' }}>{t('ideLayout.bin', { count: assets.length })}</div>
                                         {/* Import button — input overlaid directly so Android taps hit the input itself */}
                                         <div className="relative text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-colors flex items-center gap-1" style={{ fontFamily: "var(--f-mono)" }}>
-                                            <Upload className="w-3 h-3" /> Import
+                                            <Upload className="w-3 h-3" /> {t('ideLayout.import')}
                                             <input
                                                 type="file"
                                                 onChange={handleFileImport}
@@ -1517,8 +1520,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                             /* Dropzone — same overlay trick: invisible input fills the entire card */
                                             <div className="relative aspect-video border border-dashed border-border rounded-md flex flex-col items-center justify-center text-muted-foreground hover:bg-secondary/30 transition-colors p-4 text-center col-span-2">
                                                 <Upload className="w-6 h-6 mb-2 opacity-50" />
-                                                <span className="text-xs">Tap or drop media</span>
-                                                <span className="text-[10px] opacity-50 mt-1">video · audio · image</span>
+                                                <span className="text-xs">{t('ideLayout.tapOrDropMedia')}</span>
+                                                <span className="text-[10px] opacity-50 mt-1">{t('ideLayout.mediaTypes')}</span>
                                                 <input
                                                     type="file"
                                                     onChange={handleFileImport}
@@ -1546,20 +1549,20 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 <section className="p-4 border-b border-border/50">
                                     <div className="space-y-6">
                                         <div className="flex items-center justify-between mb-2">
-                                            <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold">Color Grading</div>
-                                            {activeClip && <div className="text-[10px] text-green-400 font-mono">ACTIVE</div>}
+                                            <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold">{t('ideLayout.colorGrading.title')}</div>
+                                            {activeClip && <div className="text-[10px] text-green-400 font-mono">{t('ideLayout.active')}</div>}
                                         </div>
                                         {!activeClip ? (
                                             <div className="p-4 rounded-md border border-dashed border-border text-center">
-                                                <p className="text-xs text-muted-foreground">Select a clip to adjust color.</p>
+                                                <p className="text-xs text-muted-foreground">{t('ideLayout.colorGrading.selectClip')}</p>
                                             </div>
                                         ) : (
                                             <>
                                                 {[
-                                                    { key: 'brightness', label: 'Brightness', min: 0, max: 200, unit: '%' },
-                                                    { key: 'contrast', label: 'Contrast', min: 0, max: 200, unit: '%' },
-                                                    { key: 'saturate', label: 'Saturation', min: 0, max: 200, unit: '%' },
-                                                    { key: 'hueRotate', label: 'Hue Rotate', min: 0, max: 360, unit: '°' },
+                                                    { key: 'brightness', label: t('ideLayout.colorGrading.brightness'), min: 0, max: 200, unit: '%' },
+                                                    { key: 'contrast', label: t('ideLayout.colorGrading.contrast'), min: 0, max: 200, unit: '%' },
+                                                    { key: 'saturate', label: t('ideLayout.colorGrading.saturation'), min: 0, max: 200, unit: '%' },
+                                                    { key: 'hueRotate', label: t('ideLayout.colorGrading.hueRotate'), min: 0, max: 360, unit: '°' },
                                                 ].map(({ key, label, min, max, unit }) => (
                                                     <div key={key} className="space-y-2">
                                                         <div className="flex justify-between text-xs">
@@ -1570,7 +1573,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                                     </div>
                                                 ))}
                                                 <div className="pt-4 border-t border-border">
-                                                    <button onClick={() => updateClip(activeTrackId, activeClip.id, { grading: { brightness: 100, contrast: 100, saturate: 100, hueRotate: 0 }, filter: 'none' })} className="w-full py-1.5 text-xs bg-secondary hover:bg-white/10 rounded text-muted-foreground transition-colors">Reset Color</button>
+                                                    <button onClick={() => updateClip(activeTrackId, activeClip.id, { grading: { brightness: 100, contrast: 100, saturate: 100, hueRotate: 0 }, filter: 'none' })} className="w-full py-1.5 text-xs bg-secondary hover:bg-white/10 rounded text-muted-foreground transition-colors">{t('ideLayout.colorGrading.reset')}</button>
                                                 </div>
                                             </>
                                         )}
@@ -1586,27 +1589,27 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 <section className="p-4 border-b border-border/50">
                                     <div className="space-y-6">
                                         <div className="flex items-center justify-between mb-2">
-                                            <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold">Transform</div>
-                                            {activeClip && <div className="text-[10px] text-green-400 font-mono">ACTIVE</div>}
+                                            <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold">{t('ideLayout.transform.title')}</div>
+                                            {activeClip && <div className="text-[10px] text-green-400 font-mono">{t('ideLayout.active')}</div>}
                                         </div>
                                         {!activeClip ? (
-                                            <div className="p-4 rounded-md border border-dashed border-border text-center"><p className="text-xs text-muted-foreground">Select a clip to transform.</p></div>
+                                            <div className="p-4 rounded-md border border-dashed border-border text-center"><p className="text-xs text-muted-foreground">{t('ideLayout.transform.selectClip')}</p></div>
                                         ) : (
                                             <>
                                                 {[
-                                                    { key: 'scale', label: 'Scale', min: 10, max: 300, toDisplay: v => Math.round((v || 1) * 100), unit: '%', fromDisplay: v => v / 100 },
-                                                    { key: 'x', label: 'Position X', min: -1920, max: 1920, toDisplay: v => v || 0, unit: 'px', fromDisplay: v => v },
-                                                    { key: 'y', label: 'Position Y', min: -1080, max: 1080, toDisplay: v => v || 0, unit: 'px', fromDisplay: v => v },
-                                                    { key: 'rotation', label: 'Rotation', min: -180, max: 180, toDisplay: v => v || 0, unit: '°', fromDisplay: v => v },
+                                                    { key: 'scale', label: t('ideLayout.transform.scale'), min: 10, max: 300, toDisplay: v => Math.round((v || 1) * 100), unit: '%', fromDisplay: v => v / 100 },
+                                                    { key: 'x', label: t('ideLayout.transform.positionX'), min: -1920, max: 1920, toDisplay: v => v || 0, unit: 'px', fromDisplay: v => v },
+                                                    { key: 'y', label: t('ideLayout.transform.positionY'), min: -1080, max: 1080, toDisplay: v => v || 0, unit: 'px', fromDisplay: v => v },
+                                                    { key: 'rotation', label: t('ideLayout.transform.rotation'), min: -180, max: 180, toDisplay: v => v || 0, unit: '°', fromDisplay: v => v },
                                                 ].map(({ key, label, min, max, toDisplay, unit, fromDisplay }) => {
                                                     const displayVal = toDisplay(activeClip[key]);
                                                     // Canvas renders at native video resolution (e.g. 1920px).
                                                     // CSS scale() only degrades quality if the visual display
                                                     // exceeds native res — unlikely below 300% on typical screens.
                                                     const scaleQuality = key === 'scale'
-                                                        ? (displayVal <= 150 ? { color: '#34d399', label: 'Sharp' }
-                                                        : displayVal <= 250 ? { color: '#fbbf24', label: 'Zoomed in' }
-                                                        : { color: '#f87171', label: 'Extreme zoom' })
+                                                        ? (displayVal <= 150 ? { color: '#34d399', label: t('ideLayout.transform.qualitySharp') }
+                                                        : displayVal <= 250 ? { color: '#fbbf24', label: t('ideLayout.transform.qualityZoomedIn') }
+                                                        : { color: '#f87171', label: t('ideLayout.transform.qualityExtremeZoom') })
                                                         : null;
                                                     return (
                                                     <div key={key} className="space-y-2">
@@ -1630,10 +1633,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                                     );
                                                 })}
                                                 <p className="text-[10px] leading-relaxed pt-1" style={{ color: 'var(--fg-3)', fontFamily: 'var(--f-sans)' }}>
-                                                    Preview renders at native video resolution — quality stays sharp at most zoom levels. Export always uses the original source file.
+                                                    {t('ideLayout.transform.qualityNote')}
                                                 </p>
                                                 <div className="pt-3 border-t border-border">
-                                                    <button onClick={() => updateClip(activeTrackId, activeClip.id, { scale: 1, x: 0, y: 0, rotation: 0 })} className="w-full py-1.5 text-xs bg-secondary hover:bg-white/10 rounded text-muted-foreground transition-colors">Reset Transform</button>
+                                                    <button onClick={() => updateClip(activeTrackId, activeClip.id, { scale: 1, x: 0, y: 0, rotation: 0 })} className="w-full py-1.5 text-xs bg-secondary hover:bg-white/10 rounded text-muted-foreground transition-colors">{t('ideLayout.transform.reset')}</button>
                                                 </div>
                                             </>
                                         )}
@@ -1643,12 +1646,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                             {activeTab === 'marketplace' && (
                                 <section className="p-4 border-b border-border/50">
-                                    <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold mb-3">Extensions</div>
+                                    <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold mb-3">{t('ideLayout.extensions.title')}</div>
                                     {[
-                                        { id: 'ext-1', name: 'Auto Captions', desc: 'Generate captions with AI', icon: '💬', installed: true },
-                                        { id: 'ext-2', name: 'Motion Graphics', desc: 'Pre-built motion templates', icon: '✨', installed: false },
-                                        { id: 'ext-3', name: 'Sound FX Library', desc: '10,000+ royalty-free sounds', icon: '🔊', installed: false },
-                                        { id: 'ext-4', name: 'Social Templates', desc: 'Templates for TikTok, Reels', icon: '📱', installed: true },
+                                        { id: 'ext-1', name: t('ideLayout.extensions.autoCaptions.name'), desc: t('ideLayout.extensions.autoCaptions.desc'), icon: '💬', installed: true },
+                                        { id: 'ext-2', name: t('ideLayout.extensions.motionGraphics.name'), desc: t('ideLayout.extensions.motionGraphics.desc'), icon: '✨', installed: false },
+                                        { id: 'ext-3', name: t('ideLayout.extensions.soundFxLibrary.name'), desc: t('ideLayout.extensions.soundFxLibrary.desc'), icon: '🔊', installed: false },
+                                        { id: 'ext-4', name: t('ideLayout.extensions.socialTemplates.name'), desc: t('ideLayout.extensions.socialTemplates.desc'), icon: '📱', installed: true },
                                     ].map(ext => (
                                         <div key={ext.id} className="flex items-center justify-between p-3 rounded-lg border border-border/50 hover:border-primary/30 hover:bg-secondary/20 transition-all cursor-pointer group mb-2">
                                             <div className="flex items-center gap-3">
@@ -1659,7 +1662,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                                 </div>
                                             </div>
                                             <button className={classNames("px-3 py-1 text-[10px] rounded-full font-medium transition-colors", ext.installed ? "bg-green-500/20 text-green-400" : "bg-primary/10 text-primary hover:bg-primary/20")}>
-                                                {ext.installed ? 'Installed' : 'Install'}
+                                                {ext.installed ? t('ideLayout.extensions.installed') : t('ideLayout.extensions.install')}
                                             </button>
                                         </div>
                                     ))}

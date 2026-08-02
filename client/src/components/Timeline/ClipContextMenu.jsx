@@ -4,6 +4,7 @@ import {
     Scissors, Copy, Trash2, Zap, Volume2, VolumeX,
     FastForward, ChevronRight, Sparkles, Wind, Heart
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../../store/useTimelineStore';
 import { audioEngineAPI } from '../../audio-engine/AudioEngineAPI.js';
 
@@ -42,9 +43,11 @@ const Item = ({ icon: Icon, label, hint, danger, disabled, onClick, children, tr
 // itself (not a custom preset) via routes/favoritesRoutes.js. Manages its own
 // membership check against the favoritedTransitionTypes set passed down from
 // the menu root so repeated opens reflect the latest state.
-const FavoriteTransitionToggle = ({ transitionType, favorited, onToggle }) => (
+const FavoriteTransitionToggle = ({ transitionType, favorited, onToggle }) => {
+    const { t } = useTranslation('editor');
+    return (
     <button
-        title={favorited ? 'Remove from favorites' : 'Favorite this transition'}
+        title={favorited ? t('timeline.removeFromFavorites') : t('timeline.favoriteThisTransition')}
         onClick={e => { e.stopPropagation(); onToggle(transitionType, favorited); }}
         className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/10 transition-colors"
     >
@@ -54,15 +57,17 @@ const FavoriteTransitionToggle = ({ transitionType, favorited, onToggle }) => (
             fill={favorited ? '#ff3a6e' : 'none'}
         />
     </button>
-);
+    );
+};
 
 const SpeedRow = ({ clip, trackId, onClose }) => {
+    const { t } = useTranslation('editor');
     const speeds = [0.25, 0.5, 1, 1.5, 2];
     const current = clip.speed ?? 1;
     return (
         <div className="px-3 py-1.5 flex items-center gap-1.5">
             <FastForward className="w-3.5 h-3.5 shrink-0 opacity-70" />
-            <span className="text-[12px] flex-1">Speed</span>
+            <span className="text-[12px] flex-1">{t('timeline.speed')}</span>
             <div className="flex gap-1">
                 {speeds.map(s => (
                     <button
@@ -89,6 +94,7 @@ const SpeedRow = ({ clip, trackId, onClose }) => {
 // ── Main component ────────────────────────────────────────────────────────────
 
 const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
+    const { t } = useTranslation('editor');
     const menuRef = React.useRef(null);
     const [pos, setPos] = React.useState(position);
     const copiedAttributes = useTimelineStore(s => s.copiedAttributes);
@@ -186,26 +192,26 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
             {/* Edit group */}
             <Item
                 icon={Scissors}
-                label="Split at Playhead"
+                label={t('timeline.splitAtPlayhead')}
                 hint="⌘B"
                 disabled={!canSplit}
                 onClick={() => run(() => store().splitClip(trackId, clip.id, currentTime))}
             />
             <Item
                 icon={Copy}
-                label="Duplicate"
+                label={t('timeline.duplicate')}
                 hint="⌘D"
                 onClick={() => run(() => store().duplicateClip(trackId, clip.id))}
             />
             <Item
                 icon={Copy}
-                label="Copy Attributes"
+                label={t('timeline.copyAttributes')}
                 onClick={() => run(() => store().copyAttributes(clip.id))}
             />
             {copiedAttributes && (
                 <Item
                     icon={Copy}
-                    label="Paste Attributes"
+                    label={t('timeline.pasteAttributes')}
                     onClick={() => run(() => store().pasteAttributes(trackId, clip.id))}
                 />
             )}
@@ -215,13 +221,13 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
             {/* Delete group */}
             <Item
                 icon={Zap}
-                label="Ripple Delete"
+                label={t('timeline.rippleDelete')}
                 danger
                 onClick={() => run(() => store().rippleDeleteClip(trackId, clip.id))}
             />
             <Item
                 icon={Trash2}
-                label="Delete"
+                label={t('timeline.delete')}
                 hint="⌫"
                 danger
                 onClick={() => run(() => store().removeClip(trackId, clip.id))}
@@ -232,7 +238,7 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
             {/* Transitions */}
             <Item
                 icon={Wind}
-                label="Fade Out"
+                label={t('timeline.fadeOut')}
                 onClick={() => run(() => store().addTransition(clip.id, 'fade', 1.0))}
                 trailing={
                     <FavoriteTransitionToggle
@@ -244,7 +250,7 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
             />
             <Item
                 icon={Wind}
-                label="Crossfade"
+                label={t('timeline.crossfade')}
                 onClick={() => run(() => store().addTransition(clip.id, 'crossfade', 1.0))}
                 trailing={
                     <FavoriteTransitionToggle
@@ -257,7 +263,7 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
             {hasTransition && (
                 <Item
                     icon={Wind}
-                    label="Remove Transition"
+                    label={t('timeline.removeTransition')}
                     onClick={() => run(() => store().updateClip(trackId, clip.id, { transition: null }))}
                 />
             )}
@@ -270,7 +276,7 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
             {/* Mute toggle */}
             <Item
                 icon={isMuted ? Volume2 : VolumeX}
-                label={isMuted ? 'Unmute Clip' : 'Mute Clip'}
+                label={isMuted ? t('timeline.unmuteClip') : t('timeline.muteClip')}
                 onClick={() => run(() =>
                     store().updateClip(trackId, clip.id, { volume: isMuted ? 1 : 0 })
                 )}
@@ -281,7 +287,7 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
             {/* Add filter */}
             <Item
                 icon={Sparkles}
-                label="Cinematic Filter"
+                label={t('timeline.cinematicFilter')}
                 onClick={() => run(() => store().addFilter(clip.id, 'cinematic', 0.8))}
             />
         </div>

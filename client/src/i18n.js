@@ -13,6 +13,7 @@ import enData      from './locales/en/data.json';
 import enCookies   from './locales/en/cookies.json';
 import enAuth      from './locales/en/auth.json';
 import enDashboard from './locales/en/dashboard.json';
+import enGdpr      from './locales/en/gdpr.json';
 
 // FR
 import frCommon    from './locales/fr/common.json';
@@ -25,6 +26,7 @@ import frData      from './locales/fr/data.json';
 import frCookies   from './locales/fr/cookies.json';
 import frAuth      from './locales/fr/auth.json';
 import frDashboard from './locales/fr/dashboard.json';
+import frGdpr      from './locales/fr/gdpr.json';
 
 i18n
     .use(LanguageDetector)
@@ -42,6 +44,7 @@ i18n
                 cookies:   enCookies,
                 auth:      enAuth,
                 dashboard: enDashboard,
+                gdpr:      enGdpr,
             },
             fr: {
                 common:    frCommon,
@@ -54,6 +57,7 @@ i18n
                 cookies:   frCookies,
                 auth:      frAuth,
                 dashboard: frDashboard,
+                gdpr:      frGdpr,
             },
         },
         fallbackLng: 'en',

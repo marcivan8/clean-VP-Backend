@@ -1,1 +1,46 @@
-{}
+{
+  "eyebrow": "Document juridique",
+  "title": "Politique de confidentialité",
+  "lastUpdated": "Dernière mise à jour : {{date}}",
+  "section1": {
+    "title": "1. Identité du responsable du traitement",
+    "p1": "Aux fins du Règlement Général sur la Protection des Données (RGPD) et des autres lois applicables en matière de protection des données, le responsable du traitement de vos informations personnelles est :",
+    "companyName": "VIBED (Vibed studio)",
+    "addressLines": ["47 avenue du President Franklin Roosevelt", "94320, THIAIS", "France"]
+  },
+  "section2": {
+    "title": "2. Base juridique du traitement",
+    "p1": "Nous ne traitons vos données personnelles que lorsque nous disposons d'une base juridique valable pour le faire. Nos bases juridiques principales sont :",
+    "items": [
+      { "label": "Nécessité contractuelle :", "text": "Nous traitons votre e-mail, vos identifiants d'authentification et vos fichiers vidéo afin de vous fournir le service de montage Vibed, de gérer votre compte et de traiter les paiements. Sans ce traitement, nous ne pouvons pas fournir notre service principal." },
+      { "label": "Intérêt légitime :", "text": "Nous traitons des données d'usage basiques (par exemple, quelles fonctionnalités sont utilisées) afin d'améliorer notre produit, d'assurer la sécurité de notre plateforme et de résoudre les problèmes. Ce traitement ne porte pas atteinte à vos droits et libertés fondamentaux." },
+      { "label": "Consentement :", "text": "Lorsque la loi l'exige, nous obtiendrons votre consentement explicite avant de traiter des données pour certaines activités marketing ou de déployer des cookies non essentiels." }
+    ]
+  },
+  "section3": {
+    "title": "3. Conservation et stockage des données",
+    "p1": "Nous ne conservons vos données personnelles que le temps nécessaire pour répondre aux finalités décrites dans cette politique.",
+    "items": [
+      { "label": "Données de compte :", "text": "Conservées tant que votre compte est actif. Si vous supprimez votre compte, ces données sont immédiatement et définitivement supprimées." },
+      { "label": "Fichiers de projet (offre gratuite) :", "text": "Supprimés automatiquement après 7 jours d'inactivité." },
+      { "label": "Fichiers de projet (offre Creator) :", "text": "Conservés pendant 30 jours." },
+      { "label": "Fichiers de projet (offre Pro) :", "text": "Conservés pendant 90 jours et maintenus tant que votre abonnement reste actif." }
+    ],
+    "p2": "Vos données sont stockées de manière sécurisée sur Google Cloud Storage (notre sous-traitant) dans des centres de données chiffrés."
+  },
+  "section4": {
+    "title": "4. Vos droits en tant que personne concernée",
+    "p1": "En vertu du RGPD, vous disposez de droits spécifiques concernant vos données personnelles :",
+    "items": [
+      { "label": "Droit d'accès :", "text": "Vous pouvez demander une copie des données personnelles que nous détenons à votre sujet." },
+      { "label": "Droit à l'effacement (suppression) :", "text": "Vous pouvez demander la suppression définitive de toutes vos données personnelles, fichiers de projet et informations de compte. Vous pouvez également le faire vous-même directement depuis le tableau de bord de votre compte." },
+      { "label": "Droit à la portabilité des données :", "text": "Vous pouvez demander vos données dans un format structuré, couramment utilisé et lisible par machine. Vous pouvez également exporter vos projets vidéo directement depuis l'éditeur à tout moment." },
+      { "label": "Droit de rectification :", "text": "Vous pouvez nous demander de corriger des données inexactes ou incomplètes." },
+      { "label": "Droit d'opposition / de limitation :", "text": "Vous pouvez vous opposer ou demander la limitation du traitement de vos données, notamment concernant les analyses ou le marketing direct." }
+    ],
+    "p2": "Pour exercer l'un de ces droits, veuillez nous contacter à l'adresse e-mail indiquée ci-dessous. Nous traitons toutes les demandes sous 30 jours, gratuitement."
+  },
+  "cta": {
+    "prompt": "Pour exercer vos droits sur vos données, contactez-nous à :"
+  }
+}
