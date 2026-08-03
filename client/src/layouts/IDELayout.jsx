@@ -681,6 +681,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                             body: JSON.stringify({
                                                 assetId,
                                                 gcsPath,
+                                                name: file.name,
                                                 projectId: useTimelineStore.getState().projectId || null,
                                             }),
                                         });
@@ -840,6 +841,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                             body: JSON.stringify({
                                                 assetId,
                                                 gcsPath:   data.rawGcsPath || rawFilePath,
+                                                name:      file.name,
                                                 projectId: useTimelineStore.getState().projectId || null,
                                             }),
                                         });

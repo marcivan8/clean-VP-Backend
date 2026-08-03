@@ -3,6 +3,8 @@
   "search": "Rechercher des projets…",
   "newProject": "Nouveau projet",
   "newProjectShort": "Nouveau",
+  "yourStyle": "Votre style",
+  "yourStyleShort": "Style",
   "signout": "Se déconnecter",
   "formatDate": {
     "justNow": "À l'instant",

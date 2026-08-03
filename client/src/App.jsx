@@ -11,6 +11,7 @@ import PrivacyPage from './pages/PrivacyPage';
 import AboutPage from './pages/AboutPage';
 import SuccessPage from './pages/SuccessPage';
 import CookiePolicyPage from './pages/CookiePolicyPage';
+import UserStylePage from './pages/UserStylePage';
 import { supabase } from './lib/supabaseClient';
 import useSessionStore from './store/useSessionStore';
 
@@ -45,6 +46,13 @@ function App() {
                 <Route path="/editor/:projectId" element={<EditorPage />} />
 
                 <Route path="/analyzer" element={<AnalyzerPage />} />
+
+                {/* "Your Style" — what the Editorial Brain has learned about this
+                    user, plus the GDPR reset/export controls for that data. The
+                    page was fully built but had no <Route> for it, so none of it
+                    was reachable (see CLAUDE.md R37). */}
+                <Route path="/style"    element={<UserStylePage />} />
+
                 <Route path="/data"     element={<DataPage />} />
                 <Route path="/gdpr"     element={<GdprPage />} />
                 <Route path="/privacy"  element={<PrivacyPage />} />

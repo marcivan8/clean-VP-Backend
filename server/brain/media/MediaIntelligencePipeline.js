@@ -15,6 +15,10 @@
 
 'use strict';
 
+const fs   = require('fs');
+const os   = require('os');
+const path = require('path');
+
 const { supabaseAdmin } = require('../../../config/database');
 const { AudioClassifier } = require('./AudioClassifier');
 const { VisualAnalyzer } = require('./VisualAnalyzer');
@@ -40,18 +44,41 @@ class MediaIntelligencePipeline {
      * @param {string} projectId
      * @param {string} userId
      */
-    async analyzeAsset(assetId, filePath, projectId, userId) {
-        // Mark as processing
+    async analyzeAsset(assetId, filePath, projectId, userId, name = null) {
+        // Create the row FIRST, then mark it processing.
+        //
+        // Everything in this file writes with `.update()`, which in PostgREST
+        // matches zero rows and reports NO error when the row doesn't exist. And
+        // nothing in the entire codebase ever INSERTed into media_assets — so
+        // every analysis wrote into the void, logged "✓ analyzed", and left the
+        // table permanently empty (verified: 0 rows in prod). See CLAUDE.md R38.
+        await this._ensureAssetRow(assetId, projectId, userId, name);
         await this._updateAssetStatus(assetId, 'processing');
 
+        // The analyzers take a LOCAL path (both do fs.existsSync and bail),
+        // but the caller hands us a GCS key like `raw/{userId}/{file}`. Resolve
+        // to a real local file first, and clean it up afterwards.
+        let localPath = null;
+        let cleanupPath = null;
+
         try {
+            ({ localPath, cleanupPath } = await this._resolveToLocalFile(filePath, assetId));
+
+            if (!localPath) {
+                // Nothing to analyse — record the failure rather than writing a
+                // row full of 'unknown' that looks like a real (bad) result.
+                console.error(`[MediaPipeline] Could not resolve a readable file for ${assetId} (${filePath})`);
+                await this._updateAssetStatus(assetId, 'failed');
+                return;
+            }
+
             // Run audio and visual analysis in parallel (they are independent)
             const [audioAnalysis, visualAnalysis] = await Promise.all([
-                this.audioClassifier.classify(filePath).catch(err => {
+                this.audioClassifier.classify(localPath).catch(err => {
                     console.error(`[MediaPipeline] Audio classify error for ${assetId}:`, err.message);
                     return { audioType: 'unknown', hasAudio: false, hasSpokenWord: false, error: true };
                 }),
-                this.visualAnalyzer.analyze(filePath, null).catch(err => {
+                this.visualAnalyzer.analyze(localPath, null).catch(err => {
                     console.error(`[MediaPipeline] Visual analyze error for ${assetId}:`, err.message);
                     return { error: true, sceneType: 'unknown' };
                 }),
@@ -60,7 +87,7 @@ class MediaIntelligencePipeline {
             // Transcribe only if spoken word detected
             let transcriptText = null;
             if (audioAnalysis.hasSpokenWord === true) {
-                transcriptText = await this._transcribe(filePath, assetId).catch(err => {
+                transcriptText = await this._transcribe(localPath, assetId).catch(err => {
                     console.warn(`[MediaPipeline] Transcription failed for ${assetId}:`, err.message);
                     return null;
                 });
@@ -116,6 +143,94 @@ class MediaIntelligencePipeline {
             // ALWAYS mark as failed — never leave as 'processing'
             console.error(`[MediaPipeline] analyzeAsset FAILED for ${assetId}:`, err.message);
             await this._updateAssetStatus(assetId, 'failed');
+        } finally {
+            // Only remove a file WE downloaded — never a pre-existing local upload.
+            if (cleanupPath) {
+                try { fs.unlinkSync(cleanupPath); } catch { /* already gone */ }
+            }
+        }
+    }
+
+    /**
+     * Create the media_assets row if it doesn't exist yet.
+     *
+     * This is the row every other write in this file targets. Without it,
+     * `.update(...).eq('id', assetId)` silently affects zero rows — no error, no
+     * warning, and the caller's own success log still prints. That is why the
+     * table sat at 0 rows in production while the pipeline appeared healthy.
+     *
+     * Uses upsert with ignoreDuplicates so a re-analysis of the same asset (or
+     * two jobs racing for it) can't clobber existing results.
+     *
+     * @private
+     */
+    async _ensureAssetRow(assetId, projectId, userId, name) {
+        try {
+            const { error } = await supabaseAdmin
+                .from('media_assets')
+                .upsert(
+                    {
+                        id:         assetId,
+                        user_id:    userId    || null,
+                        project_id: projectId || null,
+                        name:       name      || null,
+                    },
+                    { onConflict: 'id', ignoreDuplicates: true }
+                );
+
+            if (error) {
+                console.error(`[MediaPipeline] _ensureAssetRow failed for ${assetId}:`, error.message);
+            }
+        } catch (err) {
+            console.error('[MediaPipeline] _ensureAssetRow threw:', err.message);
+        }
+    }
+
+    /**
+     * Resolve an input reference to a readable LOCAL file.
+     *
+     * `AudioClassifier.classify()` and `VisualAnalyzer.analyze()` both start with
+     * `fs.existsSync(filePath)` and return an empty/unknown result if it's false.
+     * The asset-analysis job is handed a GCS key (`raw/{userId}/{file}` — the
+     * same value the client passes as `gcsPath`), so that check failed every
+     * time and BOTH analyzers degraded to 'unknown' without raising anything.
+     *
+     * @returns {Promise<{localPath: string|null, cleanupPath: string|null}>}
+     *   cleanupPath is set ONLY when this function downloaded the file, so the
+     *   caller never deletes a real local upload.
+     * @private
+     */
+    async _resolveToLocalFile(filePath, assetId) {
+        if (!filePath) return { localPath: null, cleanupPath: null };
+
+        // Already a readable local file (local-storage mode / legacy upload path).
+        try {
+            if (fs.existsSync(filePath)) return { localPath: filePath, cleanupPath: null };
+        } catch { /* fall through to GCS */ }
+
+        const storageConfig = require('../../../config/storage');
+        if (!storageConfig.bucket) {
+            console.warn(`[MediaPipeline] No local file and no GCS bucket configured for ${assetId}`);
+            return { localPath: null, cleanupPath: null };
+        }
+
+        // Mirrors jobs/audioProcessor.js's GCS fallback. Downloading to the OS
+        // temp dir (not uploads/) keeps these throwaway copies out of the
+        // directory the storage layer treats as real user content.
+        const gcsPath = filePath;
+        const dest = path.join(
+            os.tmpdir(),
+            `mediaintel_${assetId.replace(/[^a-zA-Z0-9._-]/g, '')}_${Date.now()}${path.extname(gcsPath) || '.mp4'}`
+        );
+
+        try {
+            await storageConfig.bucket.file(gcsPath).download({ destination: dest });
+            console.log(`[MediaPipeline] Downloaded ${gcsPath} for analysis`);
+            return { localPath: dest, cleanupPath: dest };
+        } catch (err) {
+            console.error(`[MediaPipeline] GCS download failed for ${gcsPath}:`, err.message);
+            try { fs.unlinkSync(dest); } catch { /* nothing written */ }
+            return { localPath: null, cleanupPath: null };
         }
     }
 
