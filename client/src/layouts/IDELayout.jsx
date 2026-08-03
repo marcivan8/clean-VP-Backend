@@ -614,6 +614,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     type: isVideo ? 'video' : file.type.startsWith('image') ? 'image' : 'audio',
                     url: url,
                     file: file,
+                    fileSize: file.size,
                     proxyUrl: null,
                     isProxying: isVideo,
                     uploadPhase: isVideo ? 'uploading' : 'ready',
