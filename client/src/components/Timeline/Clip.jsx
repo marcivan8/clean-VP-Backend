@@ -64,11 +64,40 @@ const Clip = ({ clip, trackId }) => {
     // trigger network work. Pass the raw URLs straight through; the engine
     // decides what's usable (it rejects blob:/data:, which the server cannot
     // resolve to a storage object, and waits for a real proxyUrl instead).
-    const wsAudioUrl = asset?.proxyUrl || clip.url || clip.sourceUrl || null;
+    //
+    // ONE MORE THING it should NOT be handed: the RAW upload of a video asset
+    // before its proxy exists. Raw phone footage routinely has its moov atom at
+    // the END of the file (R7/R25 document this exact fact for THIS codebase),
+    // which means ffmpeg reading it as a network stream — as the waveform route
+    // does — often has to buffer close to the entire file before it can produce
+    // any output, because the sample table it needs isn't available until the
+    // stream ends. Proxies are always faststart (R7), so decoding one is fast
+    // and predictable; decoding the raw source is a coin flip that gets worse
+    // as the file gets larger. A 4K interview upload hitting this produced
+    // three straight ffmpeg-timeout 500s before the proxy even finished — pure
+    // wasted work, since the proxy was going to make the extraction trivial
+    // moments later anyway.
+    //
+    // So: for a VIDEO asset, wait for asset.proxyUrl. usePeaks re-fires as soon
+    // as it appears (it's a hook dependency), so this costs nothing but a short
+    // wait — no clip is left permanently waveform-less. Non-video assets (plain
+    // audio uploads, or a clip with no asset record at all) have no proxy
+    // pipeline to wait for, so they keep the original clip-URL fallback.
+    // IMPORTANT: `asset.gcsPath` is ALSO the raw path (set in IDELayout the
+    // moment the raw upload lands on GCS, before any proxy exists), and
+    // usePeaks' `gcsPath` argument takes ABSOLUTE priority over `proxyUrl` on
+    // the server (utils/waveformPath.js's deriveGcsPath: `if (rawGcsPath)
+    // return rawGcsPath` — checked FIRST, unconditionally). Nulling out
+    // wsAudioUrl alone would do nothing: the explicit gcsPath would still force
+    // raw-file resolution regardless of what proxyUrl says. Both arguments have
+    // to be suppressed together or this fix is a no-op.
+    const isUnproxiedVideoAsset = asset?.type === 'video' && !asset?.proxyUrl;
+    const rawUrlFallback = isUnproxiedVideoAsset ? null : (clip.sourceUrl || clip.url || null);
+    const wsAudioUrl = asset?.proxyUrl || rawUrlFallback;
     const { peaks: wsPeaks, duration: wsDuration, loading: wsLoading, error: wsError } = usePeaks(
         isTextClip ? null : clip.assetId,
-        asset?.gcsPath,
-        asset?.proxyUrl || clip.sourceUrl || clip.url || null,
+        isUnproxiedVideoAsset ? null : asset?.gcsPath,
+        wsAudioUrl,
     );
 
     // Slice the full-asset peaks down to THIS clip's source window.

@@ -10,7 +10,7 @@
     "dev": "nodemon index.js",
     "test": "jest --forceExit --detectOpenHandles",
     "test:ai": "node scripts/test_agent.js",
-    "test:regression": "node scripts/test_command_registry.js && node scripts/test_waveform_pipeline.js && node scripts/test_timeline_pipeline.js && node scripts/test_project_persistence.js && node scripts/test_no_silent_noop.js && node scripts/test_waveform_engine.js && node scripts/test_caption_scope.js",
+    "test:regression": "node scripts/test_command_registry.js && node scripts/test_waveform_pipeline.js && node scripts/test_timeline_pipeline.js && node scripts/test_project_persistence.js && node scripts/test_no_silent_noop.js && node scripts/test_waveform_engine.js && node scripts/test_caption_scope.js && node scripts/test_clip_waveform_routing.js && node scripts/test_no_duplicate_transcription.js",
     "setup:supabase": "node scripts/setup-database.js",
     "cleanup:expired": "node scripts/cleanup-expired-videos.js"
   },

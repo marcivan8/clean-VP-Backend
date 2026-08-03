@@ -61,7 +61,18 @@ const WAVEFORM_QUEUE_WAIT_MS = 20_000;
 // extractPeaks only settles on ffmpeg's 'close' event, a stalled stream meant
 // that slot was held for the life of the process. Two stalls = the queue never
 // drains again and EVERY subsequent waveform request 502s until a redeploy.
-const WAVEFORM_FFMPEG_TIMEOUT_MS = 45_000;
+//
+// 90s, not the original 45s: raw phone uploads routinely have their moov atom
+// at the END of the file (R7/R25), so ffmpeg reading one as a network stream
+// often can't produce output until it has buffered close to the whole file —
+// unlike a proxy, which is always faststart. The primary fix for that is
+// client-side (Clip.jsx now withholds gcsPath/proxyUrl for an unproxied video
+// asset and waits for the proxy instead of ever hitting this route against the
+// raw file). This timeout is the second line of defense for whatever still
+// reaches here against a large non-faststart source — a legitimate multi-GB
+// 4K interview decoding through a real network stream can genuinely take
+// longer than 45s even once seeking isn't the bottleneck.
+const WAVEFORM_FFMPEG_TIMEOUT_MS = 90_000;
 
 let _waveformActive = 0;
 const _waveformQueue = [];
