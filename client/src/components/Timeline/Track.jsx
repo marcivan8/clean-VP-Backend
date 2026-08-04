@@ -16,7 +16,18 @@ const TrackIcon = ({ type }) => {
     }
 };
 
-const Track = ({ track }) => {
+// Desktop heights (unchanged from before this component became responsive).
+const TRACK_H_VIDEO_AUDIO = 80; // h-20
+const TRACK_H_TEXT        = 32; // h-8
+// Mobile: the timeline container is only 144px tall (h-36) total, minus the
+// 24px ruler — an 80px video/audio track left room for barely one track
+// before scrolling was required, and clips rendered oversized relative to a
+// phone screen. ~35% shorter keeps more tracks visible at once and clips feel
+// proportionate to the rest of the mobile UI.
+const TRACK_H_VIDEO_AUDIO_MOBILE = 52;
+const TRACK_H_TEXT_MOBILE        = 22;
+
+const Track = ({ track, labelWidth = 128, compact = false }) => {
     const { t } = useTranslation('editor');
     const { zoomLevel, duration } = useTimelineStore(useShallow(state => ({
         zoomLevel: state.zoomLevel,
@@ -28,16 +39,25 @@ const Track = ({ track }) => {
     });
 
     const isText = track.type === 'text';
+    const trackHeight = isText
+        ? (compact ? TRACK_H_TEXT_MOBILE        : TRACK_H_TEXT)
+        : (compact ? TRACK_H_VIDEO_AUDIO_MOBILE : TRACK_H_VIDEO_AUDIO);
 
     return (
         <div className="flex w-full mb-1 group">
-            {/* Track Header */}
-            <div className={classNames(
-                "w-32 bg-card border-r border-border flex flex-col justify-center px-2 shrink-0 select-none group/header relative",
-                isText ? "py-0.5 gap-0.5" : "py-1 gap-1",
-                track.type === 'video' && 'border-l-2 border-l-blue-500/50',
-                track.type === 'audio' && 'border-l-2 border-l-orange-500/50'
-            )}>
+            {/* Track Header — width driven by labelWidth (responsive, see
+                Timeline.jsx's labelW) rather than a fixed Tailwind class, so it
+                never desyncs from the ruler/playhead math that assumes the same
+                value. */}
+            <div
+                className={classNames(
+                    "bg-card border-r border-border flex flex-col justify-center px-2 shrink-0 select-none group/header relative",
+                    isText ? "py-0.5 gap-0.5" : "py-1 gap-1",
+                    track.type === 'video' && 'border-l-2 border-l-blue-500/50',
+                    track.type === 'audio' && 'border-l-2 border-l-orange-500/50'
+                )}
+                style={{ width: `${labelWidth}px` }}
+            >
                 <div className="flex items-center gap-2 justify-between w-full">
                     <div className="flex items-center gap-1.5 overflow-hidden">
                         <TrackIcon type={track.type} />
@@ -91,15 +111,18 @@ const Track = ({ track }) => {
                 )}
             </div>
 
-            {/* Track Content Area — text tracks are slimmer (no waveform) */}
+            {/* Track Content Area — text tracks are slimmer (no waveform).
+                Height comes from trackHeight (compact on mobile) rather than a
+                fixed h-8/h-20 class, since Clip.jsx is absolutely positioned to
+                fill this element (top-0 bottom-0) — shrinking it here is what
+                actually makes clips smaller on mobile. */}
             <div
                 ref={setNodeRef}
                 className={classNames(
                     "flex-1 relative border-b border-white/5 transition-colors",
-                    isText ? "h-8" : "h-20",
                     isOver ? "bg-white/5" : "bg-black/20 group-hover:bg-black/30"
                 )}
-                style={{ width: `${duration * zoomLevel}px`, minWidth: '100%' }}
+                style={{ width: `${duration * zoomLevel}px`, minWidth: '100%', height: `${trackHeight}px` }}
             >
                 {/* Grid Lines (Optional) */}
                 <div className="absolute inset-0 pointer-events-none opacity-10 bg-[linear-gradient(90deg,transparent_99%,#fff_100%)] bg-[length:100px_100%]"></div>

@@ -5,6 +5,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../../store/useTimelineStore';
 import useAIStore from '../../store/useAIStore';
+import useDeviceType from '../../hooks/useDeviceType';
 import classNames from 'classnames';
 import Waveform from './Waveform';
 import ClipContextMenu from './ClipContextMenu';
@@ -34,6 +35,7 @@ const getTabForClip = (clip, trackId) => {
 
 const Clip = ({ clip, trackId }) => {
     const { t } = useTranslation('editor');
+    const { isMobile } = useDeviceType();
     const { zoomLevel, removeClip, activeClipId, selectedClipIds, setActiveClip, toggleClipSelection, assets } = useTimelineStore(useShallow(state => ({
         zoomLevel:            state.zoomLevel,
         removeClip:           state.removeClip,
@@ -341,7 +343,7 @@ const Clip = ({ clip, trackId }) => {
                         audioUrl={wsAudioUrl}
                         peaks={clipPeaks}
                         duration={clip.duration ?? wsDuration}
-                        height={32}
+                        height={isMobile ? 20 : 32}
                         color={wsColor}
                         loading={wsLoading}
                         error={wsError}

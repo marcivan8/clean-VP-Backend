@@ -247,10 +247,27 @@ export function createJobActor(jobId, userPrompt, onStateChange) {
         input: { jobId, userPrompt }
     });
 
+    // The FIRST snapshot an actor emits is its initial state ('idle'), pushed on
+    // actor.start(). That is never new information — the store either just
+    // created this job in IDLE, or (on the clarification-resume path, which
+    // builds a SECOND actor for an already-running jobId) the job has advanced
+    // well past IDLE and must not be dragged back. Forwarding it produced
+    // "[Job] Invalid transition: PLANNING → IDLE": a rejected transition, an
+    // error-level log, and a job whose store state briefly disagreed with the
+    // FSM driving it. Skip it; every real transition after this is forwarded.
+    // Crucially this preserves the legitimate waiting_approval --REJECT--> idle
+    // path, which is a genuine later transition rather than an initial state.
+    let seenInitialSnapshot = false;
+
     // Subscribe to state changes
     actor.subscribe((snapshot) => {
         const stateValue = snapshot.value;
         const context = snapshot.context;
+
+        if (!seenInitialSnapshot) {
+            seenInitialSnapshot = true;
+            return;
+        }
 
         console.log(`[JobStateMachine] ${jobId}: State=${stateValue}, Progress=${context.progress}%`);
 
@@ -286,7 +303,20 @@ export function mapStateToJobState(xstateValue) {
         'failed': JOB_STATES.FAILED,
         'timeout': JOB_STATES.TIMEOUT
     };
-    return mapping[xstateValue] || JOB_STATES.IDLE;
+
+    // Returns null (not IDLE) for anything unrecognised. This used to be
+    // `|| JOB_STATES.IDLE`, which silently converted every unmapped value —
+    // a nested/compound state object, a renamed state, a typo — into a request
+    // to send the job back to IDLE. Since IDLE is only reachable from
+    // WAITING_APPROVAL, that surfaced as a confusing "Invalid transition:
+    // X → IDLE" that pointed at the store rather than at the real problem.
+    // Callers MUST skip a null instead of forwarding it.
+    const mapped = mapping[xstateValue];
+    if (!mapped) {
+        console.warn(`[JobStateMachine] Unmapped state "${xstateValue}" — ignoring (not defaulting to IDLE)`);
+        return null;
+    }
+    return mapped;
 }
 
 /**
