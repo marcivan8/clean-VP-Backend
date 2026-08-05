@@ -10,6 +10,9 @@
 'use strict';
 
 const { getPlatform, evaluateAgainstPlatform } = require('./PlatformKnowledge');
+// Dependency-free constant module — safe to import here despite this file being
+// documented as pure/synchronous (no DB, no AI). See analysisStatus.js.
+const { ASSET_ANALYSIS_DONE } = require('./media/analysisStatus');
 
 class ContextEngine {
 
@@ -54,7 +57,11 @@ class ContextEngine {
         const captionContext = this._analyzeCaptions(captions);
 
         // ── Media bin analysis ────────────────────────────────────────────────
-        const binContext = this._analyzeMediaBin(mediaBin, tracks);
+        // assetIntelligence (media_assets rows, fetched server-side by
+        // brainRoutes /analyze) is the ONLY trustworthy source of analysis
+        // status — see _analyzeMediaBin.
+        const assetIntelligence = Array.isArray(state.assetIntelligence) ? state.assetIntelligence : [];
+        const binContext = this._analyzeMediaBin(mediaBin, tracks, assetIntelligence);
 
         // ── Completion score ──────────────────────────────────────────────────
         const completionScore = this._computeCompletionScore({
@@ -122,6 +129,18 @@ class ContextEngine {
             // as opposed to timeline shape — without it the Brain can only give
             // generic advice regardless of what was uploaded.
             assetIntelligence: Array.isArray(state.assetIntelligence) ? state.assetIntelligence : [],
+
+            // Project-level understanding (project_intelligence row, attached by
+            // brainRoutes /analyze). Per-asset intelligence says what each clip
+            // contains; this says what the PROJECT is and what it's missing.
+            // Passed through untouched — deriving it needs a model call and a DB,
+            // neither of which belongs in this pure/synchronous class.
+            projectMap: state.projectMap || null,
+
+            // How much of the bin actually has a completed profile. binReady is
+            // the all-or-nothing version; this is what lets the Brain say
+            // "3 of 5 analysed" instead of just "not ready".
+            analyzedAssets: binContext.analyzedAssets,
 
             effects:          state.effects || null,
             multicamCoverage: state.effects?.totalVideoClips
@@ -265,7 +284,7 @@ class ContextEngine {
         };
     }
 
-    _analyzeMediaBin(mediaBin, tracks) {
+    _analyzeMediaBin(mediaBin, tracks, assetIntelligence = []) {
         const totalAssets = mediaBin.length;
 
         // Collect asset IDs used on the timeline
@@ -292,10 +311,32 @@ class ContextEngine {
         }
 
         // All assets analyzed?
-        const binReady = totalAssets === 0 ? false :
-            mediaBin.every(a => a.analysis_status === 'done' || a.analysisStatus === 'done');
+        //
+        // This used to read `analysis_status` off the mediaBin entries — i.e.
+        // off the CLIENT's timeline-store asset objects, which never carry that
+        // field: nothing in client/src ever writes it (useBrain sends
+        // `a.analysis_status || null`, and the only writer of analysis status is
+        // the server-side asset-analysis worker, straight to Postgres). So
+        // `binReady` was false for every project with at least one asset, in
+        // every request, forever — the Brain's prompt permanently read
+        // "Bin analyzed: no (still processing)" no matter how much analysis had
+        // actually completed. Same family as R12/R21/R37/R38: a comparison that
+        // can never be true is indistinguishable from a feature that works.
+        //
+        // `assetIntelligence` is the media_assets rows fetched SERVER-side by
+        // brainRoutes /analyze, so it carries the real status. Ready means every
+        // bin asset has a corresponding row and every one of those is done.
+        const statusById = new Map(
+            assetIntelligence.filter(a => a && a.id).map(a => [a.id, a.analysis_status])
+        );
+        const binReady = totalAssets === 0
+            ? false
+            : mediaBin.every(a => statusById.get(a.id) === ASSET_ANALYSIS_DONE);
 
-        return { totalAssets, unusedAssets, assetTypes, binReady };
+        const analyzedAssets = mediaBin
+            .filter(a => statusById.get(a.id) === ASSET_ANALYSIS_DONE).length;
+
+        return { totalAssets, unusedAssets, assetTypes, binReady, analyzedAssets };
     }
 
     _computeCompletionScore({ hasCaptions, hasMusic, editHistory, clipCount, duration }) {

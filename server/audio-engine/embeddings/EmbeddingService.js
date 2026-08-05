@@ -15,6 +15,7 @@
  */
 
 const crypto = require('crypto');
+const { getAIClient } = require('../../../services/AIProvider');
 const { OpenAI } = require('openai');
 const { supabaseAdmin } = require('../../../config/database.js');
 
@@ -28,7 +29,7 @@ const MAX_BATCH_SIZE      = 50;
 let _openai = null;
 function getOpenAI() {
     if (!_openai) {
-        _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        _openai = getAIClient();
     }
     return _openai;
 }

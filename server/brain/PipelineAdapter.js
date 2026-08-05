@@ -18,6 +18,7 @@
 
 const OpenAI = require('openai');
 
+const { getAIClient, isAIConfigured } = require('../../services/AIProvider');
 /**
  * Execute a command string via the existing AI pipeline on the backend.
  *
@@ -38,7 +39,7 @@ async function executeAICommand(commandString, projectContext, userId) {
             return { success: false, error: 'No command provided', timelineAfter: null, actionTaken: '' };
         }
 
-        if (!process.env.OPENAI_API_KEY) {
+        if (!isAIConfigured()) {
             // Dev/test fallback — simulate success without real AI
             console.warn('[PipelineAdapter] No OpenAI key — simulating success for:', commandString);
             return {
@@ -53,7 +54,7 @@ async function executeAICommand(commandString, projectContext, userId) {
         // This mirrors exactly what chatAgentHandler does, but returns a typed result
         const { chatAgentHandler: _unused, ...controller } = require('../../controllers/aiAgentController');
 
-        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const openai = getAIClient();
 
         const systemPrompt = `You are an expert AI Video Editor Agent.
 Your goal is to parse user commands into structured JSON actions that the video editor engine can execute.

@@ -12,6 +12,7 @@ import AboutPage from './pages/AboutPage';
 import SuccessPage from './pages/SuccessPage';
 import CookiePolicyPage from './pages/CookiePolicyPage';
 import UserStylePage from './pages/UserStylePage';
+import AccountPage from './pages/AccountPage';
 import { supabase } from './lib/supabaseClient';
 import useSessionStore from './store/useSessionStore';
 
@@ -52,6 +53,7 @@ function App() {
                     page was fully built but had no <Route> for it, so none of it
                     was reachable (see CLAUDE.md R37). */}
                 <Route path="/style"    element={<UserStylePage />} />
+                <Route path="/account"  element={<AccountPage />} />
 
                 <Route path="/data"     element={<DataPage />} />
                 <Route path="/gdpr"     element={<GdprPage />} />

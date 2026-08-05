@@ -16,6 +16,7 @@
 'use strict';
 
 const fs   = require('fs');
+const { getAIClient, isAIConfigured } = require('../../../services/AIProvider');
 const os   = require('os');
 const path = require('path');
 
@@ -23,6 +24,11 @@ const { supabaseAdmin } = require('../../../config/database');
 const { AudioClassifier } = require('./AudioClassifier');
 const { VisualAnalyzer } = require('./VisualAnalyzer');
 const { ContentClassifier } = require('./ContentClassifier');
+const {
+    ASSET_ANALYSIS_DONE,
+    ASSET_ANALYSIS_PROCESSING,
+    ASSET_ANALYSIS_FAILED,
+} = require('./analysisStatus');
 
 class MediaIntelligencePipeline {
 
@@ -53,7 +59,7 @@ class MediaIntelligencePipeline {
         // every analysis wrote into the void, logged "✓ analyzed", and left the
         // table permanently empty (verified: 0 rows in prod). See CLAUDE.md R38.
         await this._ensureAssetRow(assetId, projectId, userId, name);
-        await this._updateAssetStatus(assetId, 'processing');
+        await this._updateAssetStatus(assetId, ASSET_ANALYSIS_PROCESSING);
 
         // The analyzers take a LOCAL path (both do fs.existsSync and bail),
         // but the caller hands us a GCS key like `raw/{userId}/{file}`. Resolve
@@ -68,7 +74,7 @@ class MediaIntelligencePipeline {
                 // Nothing to analyse — record the failure rather than writing a
                 // row full of 'unknown' that looks like a real (bad) result.
                 console.error(`[MediaPipeline] Could not resolve a readable file for ${assetId} (${filePath})`);
-                await this._updateAssetStatus(assetId, 'failed');
+                await this._updateAssetStatus(assetId, ASSET_ANALYSIS_FAILED);
                 return;
             }
 
@@ -125,7 +131,7 @@ class MediaIntelligencePipeline {
                     transcript_text:     transcriptText,
 
                     // Status
-                    analysis_status: 'done',
+                    analysis_status: ASSET_ANALYSIS_DONE,
                     analyzed_at:     new Date().toISOString(),
                 })
                 .eq('id', assetId);
@@ -142,7 +148,7 @@ class MediaIntelligencePipeline {
         } catch (err) {
             // ALWAYS mark as failed — never leave as 'processing'
             console.error(`[MediaPipeline] analyzeAsset FAILED for ${assetId}:`, err.message);
-            await this._updateAssetStatus(assetId, 'failed');
+            await this._updateAssetStatus(assetId, ASSET_ANALYSIS_FAILED);
         } finally {
             // Only remove a file WE downloaded — never a pre-existing local upload.
             if (cleanupPath) {
@@ -247,7 +253,7 @@ class MediaIntelligencePipeline {
 
             if (error || !assets) return;
 
-            const allDone = assets.length > 0 && assets.every(a => a.analysis_status === 'done');
+            const allDone = assets.length > 0 && assets.every(a => a.analysis_status === ASSET_ANALYSIS_DONE);
             if (allDone) {
                 console.log(`[MediaPipeline] All assets done for project ${projectId} — running bin classification`);
                 await this.runBinClassification(userId, projectId);
@@ -269,7 +275,7 @@ class MediaIntelligencePipeline {
                 .from('media_assets')
                 .select('*')
                 .eq('project_id', projectId)
-                .eq('analysis_status', 'done');
+                .eq('analysis_status', ASSET_ANALYSIS_DONE);
 
             if (error || !assets?.length) return;
 
@@ -336,7 +342,7 @@ class MediaIntelligencePipeline {
         const angles       = mediaBin.filter(a => a.content_class === 'interview_b_cam' || a.content_class === 'angle_b');
 
         const allDone = mediaBin.every(a =>
-            a.analysis_status === 'done' || a.analysisStatus === 'done'
+            a.analysis_status === ASSET_ANALYSIS_DONE || a.analysisStatus === ASSET_ANALYSIS_DONE
         );
 
         // Infer project type from asset mix
@@ -415,11 +421,11 @@ class MediaIntelligencePipeline {
     async _transcribe(filePath, assetId) {
         // Pattern: use OpenAI Whisper if available
         // (mirrors the pattern used in captionRoutes.js)
-        if (!process.env.OPENAI_API_KEY) return null;
+        if (!isAIConfigured()) return null;
 
         const OpenAI = require('openai');
         const fs = require('fs');
-        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const openai = getAIClient();
 
         const transcription = await openai.audio.transcriptions.create({
             file:  fs.createReadStream(filePath),

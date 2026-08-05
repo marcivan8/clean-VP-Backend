@@ -91,6 +91,14 @@ const DEPENDENCIES = [
         feature: 'Editing history ledger the profile learns from',
         fix:     'Written by PatternLearner.persistAsync and /api/brain/observe-command (CLAUDE.md R37).',
     },
+    {
+        table:   'project_intelligence',
+        expect:  'accumulating',
+        feature: 'Project map — project type, through-line, asset roles, coverage gaps',
+        fix:     'Derived by ProjectIntelligence.ensureMap from brainRoutes /analyze. Requires at '
+               + 'least one media_assets row with analysis_status=done, so an empty media_assets '
+               + 'table keeps this one empty too — check that first (CLAUDE.md R44).',
+    },
 ];
 
 /**

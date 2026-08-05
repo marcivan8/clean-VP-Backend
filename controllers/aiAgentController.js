@@ -1,9 +1,8 @@
 const OpenAI = require('openai');
+const { getAIClient, isAIConfigured } = require('../services/AIProvider');
 const { analyzeStructure } = require('../viralEngine/structure.js');
 
-const openai = process.env.OPENAI_API_KEY ? new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-}) : null;
+const openai = getAIClient();
 
 const chatAgentHandler = async (req, res) => {
     try {

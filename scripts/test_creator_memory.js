@@ -225,7 +225,10 @@ check('re-analysis cannot clobber existing results',
 check('analyzeAsset creates the row before marking it processing',
     (() => {
         const ensureIdx = pipelineSrc.indexOf('await this._ensureAssetRow(');
-        const statusIdx = pipelineSrc.indexOf("await this._updateAssetStatus(assetId, 'processing')");
+        // The status value is a shared constant, not a literal (see
+        // server/brain/media/analysisStatus.js) — match the call, not the string.
+        const statusIdx = pipelineSrc.search(
+            /await this\._updateAssetStatus\(assetId,\s*ASSET_ANALYSIS_PROCESSING\)/);
         return ensureIdx !== -1 && statusIdx !== -1 && ensureIdx < statusIdx;
     })(),
     'Marking status first would itself be a no-op on a missing row.');
@@ -249,7 +252,7 @@ check('analyzers are called with the resolved local path',
     'Passing the original filePath straight through reintroduces the bug.');
 
 check('an unresolvable file is recorded as failed, not written as "unknown"',
-    /if \(!localPath\)[\s\S]{0,400}_updateAssetStatus\(assetId, 'failed'\)/.test(pipelineSrc),
+    /if \(!localPath\)[\s\S]{0,400}_updateAssetStatus\(assetId, ASSET_ANALYSIS_FAILED\)/.test(pipelineSrc),
     'A row full of "unknown" is indistinguishable from a real (bad) analysis result.');
 
 check('only downloaded temp files are deleted',

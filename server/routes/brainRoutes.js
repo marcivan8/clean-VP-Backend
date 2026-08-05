@@ -30,14 +30,17 @@ const { BrainOrchestrator }     = require('../brain/Orchestrator');
 const { PatternLearner }        = require('../brain/PatternLearner');
 const { UserProfileEngine }     = require('../brain/UserProfileEngine');
 const { MediaIntelligencePipeline } = require('../brain/media/MediaIntelligencePipeline');
+const { ProjectIntelligence }   = require('../brain/ProjectIntelligence');
 const { getOrCreateSession }    = require('../brain/Session');
 const { supabaseAdmin }         = require('../../config/database');
+const { ASSET_ANALYSIS_DONE }   = require('../brain/media/analysisStatus');
 
 // Singleton instances — shared across requests
 const orchestrator   = new BrainOrchestrator();
 const learner        = new PatternLearner();
 const profileEngine  = new UserProfileEngine();
 const mediaIntel     = new MediaIntelligencePipeline();
+const projectIntel   = new ProjectIntelligence();
 
 // ── POST /api/brain/command ───────────────────────────────────────────────────
 // Execute a natural-language command via the Editorial Brain.
@@ -107,6 +110,31 @@ router.post('/analyze', authenticateUser, async (req, res) => {
             console.warn('[brainRoutes] /analyze: media intelligence lookup failed (continuing without it):', miErr.message);
         }
 
+        // ── Enrich with the PROJECT MAP ───────────────────────────────────────
+        // One level up from per-asset intelligence: what this project IS, which
+        // asset plays which role in it, and what it's missing (R44). Derivation
+        // is fingerprint-gated, so this is a cheap read on every request except
+        // the ones where the bin or timeline actually changed.
+        //
+        // Best-effort by design: ensureMap() never throws, and a null map just
+        // means the Brain reasons without project-level context exactly as it
+        // did before this existed. A slow or failed derivation must never take
+        // down the advisory request that triggered it.
+        let projectMap = null;
+        try {
+            if (projectState.projectId) {
+                projectMap = await projectIntel.ensureMap({
+                    projectId: projectState.projectId,
+                    userId:    req.user.id,
+                    assets:    assetIntelligence,
+                    clipCount: projectState.clipCount || 0,
+                    platform:  projectState.platform || null,
+                });
+            }
+        } catch (pmErr) {
+            console.warn('[brainRoutes] /analyze: project map failed (continuing without it):', pmErr.message);
+        }
+
         /** @type {import('../brain/types').BrainInput} */
         const input = {
             userId:   req.user.id,
@@ -118,6 +146,7 @@ router.post('/analyze', authenticateUser, async (req, res) => {
             context: {
                 ...projectState,
                 assetIntelligence,
+                projectMap,
                 projectId: projectState.projectId || null,
             },
         };
@@ -328,7 +357,7 @@ router.post('/organize', authenticateUser, async (req, res) => {
         const bin = assets || [];
 
         // Check if all assets are done
-        const unanalyzed = bin.filter(a => a.analysis_status !== 'done');
+        const unanalyzed = bin.filter(a => a.analysis_status !== ASSET_ANALYSIS_DONE);
         if (unanalyzed.length > 0) {
             return res.json({
                 ready: false,

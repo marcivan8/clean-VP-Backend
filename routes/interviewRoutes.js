@@ -23,6 +23,7 @@
  */
 
 const express        = require('express');
+const { getAIClient, isAIConfigured } = require('../services/AIProvider');
 const router         = express.Router();
 const path           = require('path');
 const fs             = require('fs');
@@ -195,12 +196,12 @@ async function extractVideoFrame(gcsPath, timestampSec, requestUserId) {
  * Returns 'left' | 'right' | null on failure.
  */
 async function detectHostSideViaVision(words, speakers, filename, requestUserId) {
-    if (!process.env.OPENAI_API_KEY) return null;
+    if (!isAIConfigured()) return null;
     if (!filename || speakers.length < 2) return null;
 
     try {
         const OpenAI = require('openai');
-        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 20_000 });
+        const openai = getAIClient({ timeout: 20_000 });
 
         // Extract one frame per speaker at the midpoint of their longest solo turn.
         // Both images go in a single API call to keep latency and cost low.
@@ -362,11 +363,11 @@ async function detectSpeakerSides(words, speakers, filename, diarizeServiceUrl, 
  * }
  */
 async function detectSceneLayout(words, speakers, filename, requestUserId) {
-    if (!process.env.OPENAI_API_KEY || !filename) return null;
+    if (!isAIConfigured() || !filename) return null;
 
     try {
         const OpenAI = require('openai');
-        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 25_000 });
+        const openai = getAIClient({ timeout: 25_000 });
 
         // ── Pick sample timestamps ──────────────────────────────────────────
         const samples = []; // { speaker, t }
@@ -662,10 +663,10 @@ router.post('/rhythm-zoom', ...authAndGate, async (req, res) => {
 
         // ── GPT-4o-mini shot assignment ────────────────────────────────────────
         const OpenAI = require('openai');
-        if (!process.env.OPENAI_API_KEY) {
+        if (!isAIConfigured()) {
             return res.status(503).json({ error: 'OPENAI_API_KEY not configured on server.' });
         }
-        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 30_000 });
+        const openai = getAIClient({ timeout: 30_000 });
 
         // Build compact per-clip objects for the prompt.
         // When ML data is available, include visual ground truth so GPT makes
@@ -1066,40 +1067,284 @@ router.post('/build-tracks', ...authAndGate, async (req, res) => {
     }
 });
 
+// ── Organize v2 · asset-profile helpers ──────────────────────────────────────
+
+/**
+ * Columns of `media_assets` that describe what a piece of footage actually IS.
+ * Written by the asset-analysis worker (server/brain/media/MediaIntelligencePipeline.js).
+ * Keep in sync with that pipeline's update payload — a column added there but
+ * not here is simply invisible to the organizer.
+ */
+const ASSET_PROFILE_COLUMNS = [
+    'id', 'name', 'scene_type', 'camera_angle', 'subject_count',
+    'has_main_speaker', 'has_faces', 'is_broll', 'is_screen_recording',
+    'location_type', 'lighting_quality', 'stability', 'emotional_tone',
+    'content_description', 'suggested_label', 'audio_type', 'has_spoken_word',
+    'analysis_status',
+].join(', ');
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// The success value of `media_assets.analysis_status`. Imported, never inlined:
+// filtering on the wrong literal here rejects every analysed asset silently and
+// leaves the profile path permanently dead. See server/brain/media/analysisStatus.js.
+const { ASSET_ANALYSIS_DONE } = require('../server/brain/media/analysisStatus');
+
+/**
+ * Fetch stored asset profiles for the requesting user, keyed by asset id.
+ * Only rows whose analysis actually COMPLETED are returned — a 'processing' or
+ * 'failed' row carries no usable signal and must not be mistaken for one (see
+ * R38: a row existing is not the same as a row being analysed).
+ *
+ * Scoped by `user_id` as well as id: the ids come from the request body, so
+ * without that filter a caller could read another user's footage description
+ * by guessing asset ids.
+ *
+ * Never throws — the organizer degrades to live frame extraction when this
+ * returns nothing, which is exactly what it did before profiles existed.
+ */
+async function fetchAssetProfiles(assetIds, requestUserId) {
+    const ids = [...new Set((assetIds || []).filter(Boolean))];
+    // 'dev-user' (the non-production fallback from resolveRequestUserId) is not
+    // a uuid — querying a uuid column with it errors. Skip rather than warn on
+    // every dev request.
+    if (!ids.length || !UUID_RE.test(String(requestUserId || ''))) return {};
+
+    try {
+        const { supabaseAdmin } = require('../config/database');
+        if (!supabaseAdmin) return {};
+
+        const { data, error } = await supabaseAdmin
+            .from('media_assets')
+            .select(ASSET_PROFILE_COLUMNS)
+            .eq('user_id', requestUserId)
+            .in('id', ids);
+        if (error) throw error;
+
+        const byId = {};
+        for (const row of data || []) {
+            if (row && row.analysis_status === ASSET_ANALYSIS_DONE) byId[row.id] = row;
+        }
+        return byId;
+    } catch (err) {
+        console.warn(
+            '[interviewRoutes] fetchAssetProfiles failed (falling back to frame extraction):',
+            err.message
+        );
+        return {};
+    }
+}
+
+/**
+ * Render one stored profile as prompt text. Only non-empty fields are emitted —
+ * a wall of "unknown" lines teaches the model to ignore the block entirely.
+ */
+function describeAssetProfile(profile) {
+    const lines = [];
+    const push = (label, value) => {
+        if (value === null || value === undefined || value === '' || value === 'unknown') return;
+        lines.push(`  ${label.padEnd(12)}: ${value}`);
+    };
+
+    push('Scene',     profile.scene_type);
+    push('Framing',   profile.camera_angle);
+    if (typeof profile.subject_count === 'number') {
+        push('People', `${profile.subject_count} on camera`);
+    }
+    if (profile.is_broll)            lines.push('  Role        : B-roll / cutaway (no primary speaker)');
+    if (profile.is_screen_recording) lines.push('  Role        : screen recording / demo');
+    if (profile.has_main_speaker)    lines.push('  Role        : has a main speaker on camera');
+    push('Location',  profile.location_type);
+    push('Lighting',  profile.lighting_quality);
+    push('Stability', profile.stability);
+    push('Tone',      profile.emotional_tone);
+    push('Audio',     profile.audio_type);
+    if (profile.has_spoken_word === false) lines.push('  Audio       : no spoken word');
+    push('Content',   profile.content_description);
+    push('Label',     profile.suggested_label);
+
+    return lines.join('\n');
+}
+
+/**
+ * Build one prompt descriptor per clip, choosing the best available signal.
+ *
+ * PURE and synchronous by design — no I/O, no network, no model call — so the
+ * signal-priority rules and the pipeline label can be executed directly in a
+ * regression test instead of being inferred from the route's source. The two
+ * guarantees worth pinning are: (a) a stored profile always beats live frame
+ * analysis, and (b) a clip with NO signal is labelled as such rather than
+ * silently described, which is what stops the model inventing a role for
+ * footage nobody looked at.
+ *
+ * @returns {{descriptors: Array, imageDescriptors: Array, unanalysedIds: string[], pipeline: string}}
+ */
+function buildOrganizeDescriptors({ clips, profilesById = {}, mlById = {}, clipFrameMap = {} }) {
+    const descriptors = (clips || []).map((clip, i) => {
+        const label      = `Clip ${i + 1} [id: ${clip.id}]`;
+        const durLine    = `  Duration    : ${(clip.duration || 0).toFixed(1)} s`;
+        const transcript = (clip.transcript || '').slice(0, 250).trim();
+        const trLine     = transcript ? `  Transcript  : "${transcript}"` : '';
+
+        // 1. Stored profile — describes the whole asset, costs nothing here.
+        const profile = clip.assetId ? profilesById[clip.assetId] : null;
+        if (profile) {
+            return {
+                id: clip.id, source: 'profile', frame: null,
+                text: [label, '  Source      : analysed at upload',
+                       describeAssetProfile(profile), durLine, trLine]
+                    .filter(Boolean).join('\n'),
+            };
+        }
+
+        // 2. ML classification of sampled frames.
+        const ml = mlById[clip.id];
+        if (ml) {
+            const typeLabel = (ml.clip_type || 'unknown').replace(/_/g, ' ');
+            const topStr    = Object.entries(ml.top_types || {})
+                .map(([k, v]) => `${k.replace(/_/g, ' ')} ${(v * 100).toFixed(0)}%`)
+                .join(', ');
+            const faceStr = ml.has_face
+                ? `face detected (${ml.face_count} person${ml.face_count > 1 ? 's' : ''}, ${ml.face_size} close-up)`
+                : 'no face detected';
+            return {
+                id: clip.id, source: 'ml', frame: null,
+                text: [
+                    label,
+                    '  Source      : visual classification of sampled frames',
+                    `  Visual type : ${typeLabel} (confidence ${((ml.clip_type_confidence || 0) * 100).toFixed(0)}%)`,
+                    `  Alternatives: ${topStr || 'none'}`,
+                    `  Face signal : ${faceStr}`,
+                    `  Energy      : ${ml.energy}`,
+                    `  Topic group : ${ml.topic_cluster}`,
+                    durLine, trLine,
+                ].filter(Boolean).join('\n'),
+            };
+        }
+
+        // 3. A raw frame the model can look at itself.
+        const frames = clipFrameMap[clip.id] || [];
+        const frame  = frames[1] || frames[0] || null;
+        if (frame) {
+            return {
+                id: clip.id, source: 'frame', frame,
+                text: [label, '  Source      : single sampled frame (below)', durLine, trLine]
+                    .filter(Boolean).join('\n'),
+            };
+        }
+
+        // 4. Nothing. Say so explicitly — see the R30 note on the route.
+        return {
+            id: clip.id, source: 'none', frame: null,
+            text: [
+                label,
+                '  Source      : NOT ANALYSED — no profile and no readable frames.',
+                '                Place it by transcript/duration only, or leave it where it is.',
+                durLine, trLine,
+            ].filter(Boolean).join('\n'),
+        };
+    });
+
+    const imageDescriptors = descriptors.filter(d => d.frame);
+    const unanalysedIds    = descriptors.filter(d => d.source === 'none').map(d => d.id);
+
+    const hasProfile = descriptors.some(d => d.source === 'profile');
+    const hasMl      = descriptors.some(d => d.source === 'ml');
+    const hasFrame   = imageDescriptors.length > 0;
+    const pipeline =
+        (hasProfile && hasMl)    ? 'profile+ml'     :
+        (hasProfile && hasFrame) ? 'profile+vision' :
+        hasProfile               ? 'profile'        :
+        hasMl                    ? 'ml'             : 'vision_fallback';
+
+    return { descriptors, imageDescriptors, unanalysedIds, pipeline };
+}
+
+/**
+ * Resolve one clip to something ffmpeg can read, preferring the PER-ASSET path.
+ *
+ * Priority is deliberate:
+ *  1. `gcsPath` — the asset's own storage key. Works in BOTH GCS mode (signed
+ *     URL) and local mode, and is the only per-clip-correct option.
+ *  2. `filePath` — legacy. The client used to send `uploadedFilePath` here,
+ *     which is a single GLOBAL field each upload overwrites (R21), so every
+ *     clip in a batch received the SAME path. Accepted for backward compat but
+ *     never preferred.
+ *  3. `assetName` — legacy bare-filename lookup under uploads/.
+ *
+ * All three run through the same ownership guard as the rest of this file (R27).
+ */
+async function resolveClipSource(clip, requestUserId, uploadsDir) {
+    if (clip.gcsPath) {
+        const arg = await resolveFfmpegInputArg(clip.gcsPath, requestUserId);
+        if (arg) return arg;
+    }
+
+    if (clip.filePath) {
+        if (!pathOwnedBy(clip.filePath, requestUserId)) {
+            console.warn(
+                `[interviewRoutes] organize-clips: user "${requestUserId}" is not the owner of "${clip.filePath}" — denied`
+            );
+            return null;
+        }
+        const abs = path.resolve(clip.filePath);
+        if (abs.startsWith(uploadsDir) && fs.existsSync(abs)) return abs;
+    }
+
+    if (clip.assetName) {
+        const { error, inputPath } = resolveUploadPath(clip.assetName, null, requestUserId);
+        if (!error && inputPath && fs.existsSync(inputPath)) return inputPath;
+    }
+
+    return null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/interview/organize-clips
 //
-// Phase 3 — Semantic clip organizer.
+// Organize v2 — profile-first semantic clip organizer.
 //
-// Pipeline (best path — when DIARIZE_SERVICE_URL is set):
-//   1. Node resolves each clip's server-side file path
-//   2. Node extracts 3 frames per clip via ffmpeg (at 15 %, 45 %, 75 % of the
-//      clip's range inside the source file) — piped directly, no temp files
-//   3. Frames (base64 JPEG) + transcript excerpt → POST /classify-clips on the
-//      Python diarize-service (CLIP + MediaPipe + sentence-transformers)
-//   4. Rich ML metadata → GPT-4o (text-only prompt, no images) for final
-//      narrative ordering + rationale
+// The ordering signal is resolved per clip, cheapest and richest first:
+//   1. STORED PROFILE — the `media_assets` row written at upload time by the
+//      asset-analysis worker (scene type, framing, subject count, B-roll flag,
+//      lighting, stability, tone, description). Free, instant, and already
+//      reflects the whole asset rather than three sampled frames.
+//   2. ML CLASSIFICATION — frames → the Python diarize-service (CLIP +
+//      MediaPipe + sentence-transformers), for clips with no stored profile.
+//   3. RAW FRAME → VISION — for clips with frames but no ML service.
+//   4. NOTHING — clip is named in the response as unanalysed rather than
+//      quietly ordered on duration alone.
 //
-// Fallback path (when Python service is not available):
-//   Sends the single best frame per clip to GPT-4o-mini Vision for combined
-//   classification and ordering — same quality as the original V1 approach.
+// Everything then goes through ONE ordering call: text-only GPT-4o when no
+// clip needed an image, GPT-4o-mini Vision when at least one did.
+//
+// R30: if NO clip produced any signal at all, this returns `orderedIds: []`
+// and `pipeline: 'none'` instead of a confident order. It used to return a
+// full ordering plus a plausible rationale in exactly that case — in GCS
+// production EVERY frame extraction failed (the extractor was local-file only),
+// so the "semantic organizer" was ordering on clip duration and saying so in
+// prose. A wrong order presented as an editorial decision is worse than no
+// order at all.
 //
 // Body:
 //   clips – Array<{
 //     id:          string   (client-side clip/placement ID)
-//     assetName:   string   (filename used to resolve the server path)
-//     filePath?:   string   (absolute server path — preferred when available)
+//     assetId?:    string   (asset id — REQUIRED to hit the stored-profile path)
+//     gcsPath?:    string   (that asset's own storage key — preferred for frames)
+//     assetName?:  string   (legacy filename lookup)
+//     filePath?:   string   (legacy absolute server path — see resolveClipSource)
 //     offset:      number   (seconds into source file where this clip starts)
 //     duration:    number   (clip length in seconds)
-//     transcript?: string   (optional Whisper text for this clip — improves accuracy)
+//     transcript?: string   (optional Whisper text for this clip)
 //   }>
 //
 // Returns:
 //   {
-//     clipMeta:   [{ id, clip_type, energy, face_size, topic_cluster, summary }]
-//     orderedIds: string[]    — clip IDs in recommended order
+//     clipMeta:   [{ id, narrative_role, summary, ... }]
+//     orderedIds: string[]    — clip IDs in recommended order ([] when no signal)
 //     rationale:  string      — human-readable explanation
-//     pipeline:   string      — "ml" | "vision_fallback"
+//     pipeline:   "profile" | "profile+ml" | "profile+vision" | "ml" | "vision_fallback" | "none"
+//     coverage:   { total, profiled, framed, unanalyzed }
 //   }
 // ─────────────────────────────────────────────────────────────────────────────
 router.post('/organize-clips', ...authAndGate, async (req, res) => {
@@ -1115,50 +1360,37 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
         if (clips.length < 2) {
             return res.status(400).json({ error: 'Need at least 2 clips to organize.' });
         }
-        if (!process.env.OPENAI_API_KEY) {
+        if (!isAIConfigured()) {
             return res.status(503).json({ error: 'OPENAI_API_KEY not configured on server.' });
         }
 
         const OpenAI = require('openai');
-        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 60_000 });
+        const openai = getAIClient({ timeout: 60_000 });
 
         const uploadsDir = path.resolve(__dirname, '../uploads');
 
-        // ── 1. Resolve server file path per clip (de-duped by asset key) ────────
-        const assetPaths = {}; // key → absolute path | null
+        // ── 1. Stored asset profiles — the primary signal (Organize v2) ─────────
+        // A clip whose asset was analysed at upload time needs no frames, no
+        // ffmpeg, and no vision call: the profile already describes the whole
+        // asset. This is the Upload → Analyze → Asset Profile → Organize path.
+        const profilesById  = await fetchAssetProfiles(clips.map(c => c.assetId), requestUserId);
+        const profiledClips = clips.filter(c => c.assetId && profilesById[c.assetId]);
+        const needFrames    = clips.filter(c => !(c.assetId && profilesById[c.assetId]));
 
-        for (const clip of clips) {
-            const key = clip.assetName || clip.filePath || String(clip.id);
-            if (assetPaths[key] !== undefined) continue;
-
-            if (clip.filePath) {
-                // Same IDOR check as resolveUploadPath below — clip.filePath is
-                // client-supplied and previously only got the uploads/-boundary
-                // check, not an ownership check against the requesting user.
-                if (!pathOwnedBy(clip.filePath, requestUserId)) {
-                    console.warn(`[interviewRoutes] organize-clips: user "${requestUserId}" is not the owner of "${clip.filePath}" — denied`);
-                    assetPaths[key] = null;
-                    continue;
-                }
-                const abs = path.resolve(clip.filePath);
-                assetPaths[key] = abs.startsWith(uploadsDir) && fs.existsSync(abs) ? abs : null;
-                continue;
-            }
-
-            if (!clip.assetName) { assetPaths[key] = null; continue; }
-
-            const { error, inputPath } = resolveUploadPath(clip.assetName, null, requestUserId);
-            assetPaths[key] = (!error && inputPath && fs.existsSync(inputPath)) ? inputPath : null;
-        }
-
-        // ── 2. ffmpeg frame extraction helper ────────────────────────────────────
+        // ── 2. ffmpeg frame extraction — ONLY for clips with no stored profile ──
         // Pipes JPEG bytes to stdout — no temp files, no race conditions.
-        const extractFrame = (filePath, seekSeconds) => new Promise((resolve) => {
-            if (!filePath || !fs.existsSync(filePath)) { resolve(null); return; }
+        // Accepts a signed https URL as well as a local path: in GCS mode there
+        // is no local copy, and the previous fs.existsSync() precondition made
+        // this return null for EVERY clip in production (see the R30 note above).
+        const extractFrame = (inputArg, seekSeconds) => new Promise((resolve) => {
+            if (!inputArg) { resolve(null); return; }
+            const isRemote = /^https?:\/\//i.test(inputArg);
+            if (!isRemote && !fs.existsSync(inputArg)) { resolve(null); return; }
+
             const chunks = [];
             const ff = spawn('ffmpeg', [
                 '-ss', String(Math.max(0, seekSeconds)),
-                '-i', filePath,
+                '-i', inputArg,
                 '-frames:v', '1',
                 '-q:v', '3',
                 '-vf', 'scale=640:-2',
@@ -1174,87 +1406,133 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
             setTimeout(() => { ff.kill('SIGKILL'); resolve(null); }, 12_000);
         });
 
-        // Extract 3 frames per clip at 15 %, 45 %, 75 % of its timeline range.
-        // Running all concurrently (bounded by OS process limits) is faster than serial.
+        // Resolve sources per clip (de-duped by asset, since N clips can share
+        // one source file and signing/resolving it once is enough).
+        const sourceByAsset = {}; // asset key → ffmpeg input arg | null
+        for (const clip of needFrames) {
+            const key = clip.assetId || clip.gcsPath || clip.assetName || clip.filePath || String(clip.id);
+            if (sourceByAsset[key] !== undefined) continue;
+            sourceByAsset[key] = await resolveClipSource(clip, requestUserId, uploadsDir);
+        }
+
+        // Extract 3 frames per clip at 15 %, 45 %, 75 % of its range in the source.
         const clipFrameMap = {}; // clipId → string[] (base64 or empty)
-        await Promise.all(clips.map(async (clip) => {
-            const key       = clip.assetName || clip.filePath || String(clip.id);
-            const filePath  = assetPaths[key];
+        await Promise.all(needFrames.map(async (clip) => {
+            const key       = clip.assetId || clip.gcsPath || clip.assetName || clip.filePath || String(clip.id);
+            const inputArg  = sourceByAsset[key];
             const offset    = clip.offset   ?? 0;
             const dur       = clip.duration ?? 0;
             const positions = [0.15, 0.45, 0.75].map(p => offset + dur * p);
-            const frames    = await Promise.all(positions.map(t => extractFrame(filePath, t)));
+            const frames    = await Promise.all(positions.map(t => extractFrame(inputArg, t)));
             clipFrameMap[clip.id] = frames.filter(Boolean);
         }));
 
+        const framedClips = needFrames.filter(c => (clipFrameMap[c.id] || []).length > 0);
+        const blindClips  = needFrames.filter(c => (clipFrameMap[c.id] || []).length === 0);
         const totalFrames = Object.values(clipFrameMap).reduce((s, f) => s + f.length, 0);
+
+        const coverage = {
+            total:      clips.length,
+            profiled:   profiledClips.length,
+            framed:     framedClips.length,
+            unanalyzed: blindClips.length,
+        };
+
+        console.log(
+            `[interviewRoutes] organize-clips: ${clips.length} clips — ` +
+            `${coverage.profiled} from stored profile, ${coverage.framed} from frames, ` +
+            `${coverage.unanalyzed} with no signal`
+        );
+
+        // ── 3. R30 guard: no signal at all → do NOT invent an order ─────────────
+        if (profiledClips.length === 0 && totalFrames === 0) {
+            console.warn(
+                '[interviewRoutes] organize-clips: no stored profiles and no extractable frames — ' +
+                'refusing to return an ordering derived from duration alone'
+            );
+            return res.json({
+                clipMeta:   [],
+                orderedIds: [],
+                rationale:  '',
+                pipeline:   'none',
+                coverage,
+                reason:     'No analysed footage and no readable video frames — nothing to order on.',
+            });
+        }
+
         const mlAvailable = (() => {
             try { return require('../services/ClipAnalysisService').isAvailable; }
             catch { return false; }
         })();
 
-        // ── 3. ML path: CLIP + MediaPipe + sentence-transformers ─────────────────
-        if (mlAvailable && totalFrames > 0) {
+        // ── 4. ML classification — ONLY for clips with no stored profile ────────
+        // Running it over profiled clips too would pay for CLIP + MediaPipe on
+        // footage we already have a richer, whole-asset description of.
+        let mlClips = [];
+        let mlResult = {};
+        if (mlAvailable && framedClips.length > 0) {
             console.log(
-                `[interviewRoutes] organize-clips: ML path — ${clips.length} clips, ` +
+                `[interviewRoutes] organize-clips: ML classify — ${framedClips.length} unprofiled clip(s), ` +
                 `${totalFrames} frames → /classify-clips`
             );
 
             const ClipAnalysisService = require('../services/ClipAnalysisService');
 
-            const classifyPayload = clips.map(clip => ({
+            const classifyPayload = framedClips.map(clip => ({
                 id:         clip.id,
                 frames:     clipFrameMap[clip.id] || [],
                 transcript: (clip.transcript || '').slice(0, 400),
                 duration:   clip.duration ?? 0,
             }));
 
-            const mlResult = await ClipAnalysisService.classifyClips(classifyPayload);
-            const mlClips  = mlResult.clips || [];
+            try {
+                mlResult = await ClipAnalysisService.classifyClips(classifyPayload);
+                mlClips  = mlResult.clips || [];
+            } catch (mlErr) {
+                // Not fatal: these clips fall through to the vision path below,
+                // and profiled clips are unaffected either way.
+                console.warn('[interviewRoutes] organize-clips: ML classify failed —', mlErr.message);
+                mlClips = [];
+            }
+        }
 
-            // ── 4. GPT-4o — text-only ordering with rich ML metadata ───────────
-            // No images needed: CLIP already classified the visuals.
-            // GPT reasons about narrative structure from structured metadata.
-            const metadataLines = mlClips.map((m, i) => {
-                const clip        = clips.find(c => c.id === m.id) || {};
-                const typeLabel   = (m.clip_type || 'unknown').replace(/_/g, ' ');
-                const topStr      = Object.entries(m.top_types || {})
-                    .map(([k, v]) => `${k.replace(/_/g, ' ')} ${(v * 100).toFixed(0)}%`)
-                    .join(', ');
-                const faceStr     = m.has_face
-                    ? `face detected (${m.face_count} person${m.face_count > 1 ? 's' : ''}, ${m.face_size} close-up)`
-                    : 'no face detected';
-                const transcriptSnippet = (clip.transcript || '').slice(0, 250).trim();
-                return [
-                    `Clip ${i + 1} [id: ${m.id}]`,
-                    `  Visual type : ${typeLabel} (confidence ${(m.clip_type_confidence * 100).toFixed(0)}%)`,
-                    `  Alternatives: ${topStr || 'none'}`,
-                    `  Face signal : ${faceStr}`,
-                    `  Energy      : ${m.energy}`,
-                    `  Duration    : ${(m.duration || 0).toFixed(1)} s`,
-                    `  Topic group : ${m.topic_cluster}`,
-                    transcriptSnippet ? `  Transcript  : "${transcriptSnippet}"` : '',
-                ].filter(Boolean).join('\n');
-            }).join('\n\n');
+        // ── 5. Build ONE descriptor per clip, best signal first ─────────────────
+        const mlById = {};
+        mlClips.forEach(m => { if (m && m.id) mlById[m.id] = m; });
 
+        const { descriptors, imageDescriptors, unanalysedIds, pipeline } =
+            buildOrganizeDescriptors({ clips, profilesById, mlById, clipFrameMap });
+
+        // ── 6. Single ordering call ────────────────────────────────────────────
+        // Text-only (GPT-4o) when every clip already has a written description;
+        // Vision (GPT-4o-mini) only when at least one clip still needs an image.
+        {
             const numClusters = mlResult.num_topic_clusters ?? 1;
+            const metadataLines = descriptors.map(d => d.text).join('\n\n');
 
-            const gptPrompt = `You are an expert video editor deciding the best narrative order for ${clips.length} clips.
+            const unanalysedNote = unanalysedIds.length
+                ? `\n\n${unanalysedIds.length} of these clips could not be analysed. Do not describe them as if you can see them, and do not invent a role for them — place them conservatively and say so in the rationale.`
+                : '';
 
-The clips have been pre-analyzed by ML models (CLIP + MediaPipe + semantic embeddings).
-There are ${numClusters} distinct topic group(s) across all clips.
+            const promptText = `You are an expert video editor deciding the best narrative order for ${clips.length} clips.
+
+Each clip below carries a "Source" line saying where its description came from:
+analysed at upload (richest — describes the whole asset), visual classification
+of sampled frames, a single sampled frame shown as an image, or NOT ANALYSED.
+Weight your confidence accordingly.
+There are ${numClusters} distinct topic group(s) among the frame-classified clips.
 
 ━━━ CLIP METADATA ━━━
 ${metadataLines}
 
 ━━━ ORDERING RULES ━━━
 • Open with a hook: the highest-energy talking-head close-up or the clearest intro
-• Group clips from the same topic cluster together where possible
+• Group clips covering the same topic together where possible
 • B-roll / cutaways should surround the spoken content they illustrate
 • Demonstrations come after the verbal introduction of the topic
 • End with a clear outro: low-energy summary talking head or call-to-action
 • Avoid placing two establishing shots or two product shots back-to-back
-• Emotional moments are best placed just before or after a key-point clip
+• Emotional moments are best placed just before or after a key-point clip${unanalysedNote}
 
 Return ONLY valid JSON:
 {
@@ -1265,9 +1543,22 @@ Return ONLY valid JSON:
   "rationale": "<3-4 sentences explaining the chosen order>"
 }`;
 
+            // Only pay for a vision model when a clip actually needs an image.
+            const useVision = imageDescriptors.length > 0;
+            const content = [{ type: 'text', text: promptText }];
+            if (useVision) {
+                for (const d of imageDescriptors) {
+                    content.push({ type: 'text', text: `\n[frame for clip id: ${d.id}]` });
+                    content.push({
+                        type: 'image_url',
+                        image_url: { url: `data:image/jpeg;base64,${d.frame}`, detail: 'low' },
+                    });
+                }
+            }
+
             const completion = await openai.chat.completions.create({
-                model:           'gpt-4o',
-                messages:        [{ role: 'user', content: gptPrompt }],
+                model:           useVision ? 'gpt-4o-mini' : 'gpt-4o',
+                messages:        [{ role: 'user', content }],
                 response_format: { type: 'json_object' },
                 temperature:     0.15,
                 max_tokens:      1200,
@@ -1278,86 +1569,42 @@ Return ONLY valid JSON:
             catch { return res.status(500).json({ error: 'GPT returned malformed JSON.' }); }
 
             const orderedIds = (parsed.orderedIds || []).filter(id => clips.some(c => c.id === id));
-            const clipMeta   = (parsed.clipMeta   || []).filter(m => m.id);
+            const clipMeta   = (parsed.clipMeta   || parsed.clips || []).filter(m => m && m.id);
             const rationale  = parsed.rationale || '';
 
             // Append any IDs GPT dropped
             const seen = new Set(orderedIds);
             clips.forEach(c => { if (!seen.has(c.id)) orderedIds.push(c.id); });
 
-            // Merge ML metadata into the clipMeta array
-            const mlById = {};
-            mlClips.forEach(m => { mlById[m.id] = m; });
-            const enrichedMeta = clipMeta.map(m => ({ ...mlById[m.id], ...m }));
+            // Merge whatever structured signal each clip had into the returned meta
+            const enrichedMeta = clipMeta.map(m => {
+                const clip    = clips.find(c => c.id === m.id);
+                const profile = clip && clip.assetId ? profilesById[clip.assetId] : null;
+                return {
+                    ...(mlById[m.id] || {}),
+                    ...(profile ? {
+                        clip_type: profile.scene_type,
+                        energy:    profile.emotional_tone,
+                        summary:   profile.content_description,
+                    } : {}),
+                    ...m,
+                    signal: (descriptors.find(d => d.id === m.id) || {}).source || 'none',
+                };
+            });
 
             console.log(
-                `[interviewRoutes] organize-clips (ML): ${clips.length} clips → order: ${orderedIds.join(' → ')}`
+                `[interviewRoutes] organize-clips (${pipeline}): ${clips.length} clips → order: ${orderedIds.join(' → ')}`
             );
 
-            return res.json({ clipMeta: enrichedMeta, orderedIds, rationale, pipeline: 'ml' });
-        }
-
-        // ── Fallback path: GPT-4o-mini Vision (no Python service) ────────────────
-        // Sends one frame per clip as an image_url block to GPT-4o-mini Vision.
-        // Same approach as the original V1 implementation.
-        console.log(
-            `[interviewRoutes] organize-clips: vision fallback — ${clips.length} clips` +
-            (mlAvailable ? '' : ' (ClipAnalysisService unavailable)')
-        );
-
-        const userContent = [];
-        userContent.push({
-            type: 'text',
-            text: `You are a professional video editor. Analyze these ${clips.length} clips and determine their content type, energy, and best narrative order.
-
-Return ONLY valid JSON:
-{
-  "clips": [{ "id": "<id>", "type": "<shot type>", "energy": "<energy>", "summary": "<one sentence>" }],
-  "orderedIds": ["<id>", ...],
-  "rationale": "<2-3 sentences>"
-}
-
-Shot types: intro_talking_head | mid_explanation | key_point | demo_or_tutorial | emotional_close_up | broll_cutaway | product_shot | outro_talking_head | unknown
-Energy: high | medium | low | neutral
-Ordering: hook first, demos in middle, outro last, B-roll around spoken content it illustrates.`,
-        });
-
-        clips.forEach((clip) => {
-            const frame = (clipFrameMap[clip.id] || [])[1] || (clipFrameMap[clip.id] || [])[0] || null;
-            userContent.push({
-                type: 'text',
-                text: `\n[Clip id:${clip.id} dur:${(clip.duration || 0).toFixed(1)}s${clip.transcript ? ` transcript:"${clip.transcript.slice(0, 180)}"` : ''}]`,
+            return res.json({
+                clipMeta: enrichedMeta,
+                orderedIds,
+                rationale,
+                pipeline,
+                coverage,
+                unanalyzedIds: unanalysedIds,
             });
-            if (frame) {
-                userContent.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frame}`, detail: 'low' } });
-            } else {
-                userContent.push({ type: 'text', text: '[no frame available]' });
-            }
-        });
-
-        const completion = await openai.chat.completions.create({
-            model:           'gpt-4o-mini',
-            messages:        [{ role: 'user', content: userContent }],
-            response_format: { type: 'json_object' },
-            temperature:     0.2,
-            max_tokens:      1024,
-        });
-
-        let parsed;
-        try { parsed = JSON.parse(completion.choices[0].message.content); }
-        catch { return res.status(500).json({ error: 'GPT returned malformed JSON.' }); }
-
-        const orderedIds = (parsed.orderedIds || []).filter(id => clips.some(c => c.id === id));
-        const clipMeta   = (parsed.clips      || []).filter(m => m.id);
-        const rationale  = parsed.rationale || '';
-        const seen       = new Set(orderedIds);
-        clips.forEach(c => { if (!seen.has(c.id)) orderedIds.push(c.id); });
-
-        console.log(
-            `[interviewRoutes] organize-clips (vision): ${clips.length} clips → order: ${orderedIds.join(' → ')}`
-        );
-
-        res.json({ clipMeta, orderedIds, rationale, pipeline: 'vision_fallback' });
+        }
 
     } catch (err) {
         console.error('[interviewRoutes] /organize-clips error:', err);
@@ -1869,13 +2116,13 @@ router.post('/classify-pauses', ...authAndGate, async (req, res) => {
     if (!Array.isArray(pauses) || pauses.length === 0) {
         return res.status(400).json({ error: 'pauses array is required' });
     }
-    if (!process.env.OPENAI_API_KEY) {
+    if (!isAIConfigured()) {
         return res.status(503).json({ error: 'OPENAI_API_KEY not configured' });
     }
 
     try {
         const OpenAI = require('openai');
-        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 20_000 });
+        const openai = getAIClient({ timeout: 20_000 });
 
         // Compact per-pause objects — cap context length to keep the prompt small
         const compact = pauses.slice(0, 120).map(p => ({
@@ -2167,7 +2414,7 @@ router.post('/identify-speakers', ...authAndGate, async (req, res) => {
             return res.status(400).json({ error: 'words and at least 2 speakers are required' });
         }
 
-        if (!process.env.OPENAI_API_KEY) {
+        if (!isAIConfigured()) {
             return res.status(503).json({ error: 'OPENAI_API_KEY not configured' });
         }
 
@@ -2225,7 +2472,7 @@ router.post('/identify-speakers', ...authAndGate, async (req, res) => {
         }).join('\n\n');
 
         const OpenAI = require('openai');
-        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 15_000 });
+        const openai = getAIClient({ timeout: 15_000 });
 
         const completion = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
@@ -2281,3 +2528,10 @@ Rules:
 });
 
 module.exports = router;
+
+// Pure helpers exported for regression testing (scripts/test_organize_v2.js).
+// Attached to the router rather than replacing module.exports so every existing
+// `require('./routes/interviewRoutes')` mount site keeps working unchanged.
+module.exports._buildOrganizeDescriptors = buildOrganizeDescriptors;
+module.exports._describeAssetProfile     = describeAssetProfile;
+module.exports._ASSET_ANALYSIS_DONE      = ASSET_ANALYSIS_DONE;

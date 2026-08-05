@@ -65,9 +65,14 @@ function loadProbeWith(counts, { throwOnAccess = false } = {}) {
     return require(PROBE_PATH);
 }
 
+// Every table in DataHealthProbe's DEPENDENCIES registry must appear here.
+// The "a check is emitted for every declared dependency" assertion below is
+// deliberately keyed off this object's size, so adding a dependency without
+// adding it here fails loudly rather than leaving it silently untested.
 const HEALTHY = {
     assets: 109, sound_effects: 91, luts: 10, presets: 8,
     media_assets: 42, user_editing_profiles: 7, editing_sessions: 96,
+    project_intelligence: 12,
 };
 
 (async () => {

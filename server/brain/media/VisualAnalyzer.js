@@ -10,6 +10,7 @@
 'use strict';
 
 const { execFile } = require('child_process');
+const { getAIClient, isAIConfigured } = require('../../../services/AIProvider');
 const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
@@ -48,9 +49,7 @@ const ERROR_RESULT = {
 class VisualAnalyzer {
 
     constructor() {
-        this.openai = process.env.OPENAI_API_KEY
-            ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-            : null;
+        this.openai = getAIClient();
     }
 
     /**
