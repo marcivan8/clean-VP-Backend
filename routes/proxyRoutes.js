@@ -396,17 +396,60 @@ router.get('/gcs-media/*', async (req, res) => {
             const start = parseInt(startStr);
             const end = endStr ? parseInt(endStr) : fileSize - 1;
             const chunkLen = end - start + 1;
-            res.status(206);
-            res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
-            res.setHeader('Content-Length', chunkLen);
-            const stream = file.createReadStream({ start, end });
-            stream.on('error', (err) => {
-                console.error('[proxy/gcs-media] Range stream error', gcsPath, ':', err.message);
-                if (!res.headersSent) res.status(500).end();
+
+            // Range reads are RETRIED and always terminate the response.
+            //
+            // Railway → GCS occasionally drops a pooled socket mid-read
+            // ("socket hang up"). gcsRetry() covers getMetadata() but never
+            // covered the read stream, so a single hiccup was fatal. Worse, the
+            // old error handler was `if (!res.headersSent) res.status(500).end()`
+            // — on a range response the 206 and its headers are already set, so
+            // headersSent is true and NOTHING ended the response. The socket
+            // dangled until Railway's edge timed it out and synthesised a 502,
+            // which is what made one clip's proxy.mp4 unplayable while another
+            // streamed fine. A response that is never ended is strictly worse
+            // than an error: the client cannot even retry intelligently.
+            const openRangeStream = (attempt = 1) => new Promise((resolve, reject) => {
+                const stream = file.createReadStream({ start, end });
+                let piped = false;
+
+                stream.on('error', (err) => {
+                    stream.destroy();
+                    // Only safe to retry while nothing has been written yet.
+                    if (!piped && !res.headersSent && attempt < 3) {
+                        console.warn(
+                            `[proxy/gcs-media] Range read attempt ${attempt}/3 failed for ${gcsPath}: ` +
+                            `${err.message} — retrying in ${250 * attempt}ms`
+                        );
+                        return setTimeout(
+                            () => openRangeStream(attempt + 1).then(resolve, reject),
+                            250 * attempt
+                        );
+                    }
+                    reject(err);
+                });
+
+                stream.once('data', () => { piped = true; });
+                stream.on('end', resolve);
+
+                res.status(206);
+                res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+                res.setHeader('Content-Length', chunkLen);
+                res.on('close', () => stream.destroy());
+                stream.pipe(res);
             });
-            // Destroy GCS stream if client disconnects to avoid hanging connections
-            res.on('close', () => stream.destroy());
-            return stream.pipe(res);
+
+            try {
+                await openRangeStream();
+            } catch (err) {
+                console.error('[proxy/gcs-media] Range stream error', gcsPath, ':', err.message);
+                // ALWAYS end the response. If headers went out we can only
+                // destroy the socket — the client sees a truncated body and
+                // retries the range, which is recoverable. Leaving it open is not.
+                if (!res.headersSent) res.status(502).end();
+                else res.destroy();
+            }
+            return;
         }
 
         if (CACHEABLE_EXTS.has(ext)) {

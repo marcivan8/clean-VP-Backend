@@ -42,6 +42,28 @@ const profileEngine  = new UserProfileEngine();
 const mediaIntel     = new MediaIntelligencePipeline();
 const projectIntel   = new ProjectIntelligence();
 
+// ── asset-analysis queue (lazy singleton) ────────────────────────────────────
+// Lazy so requiring this router never opens a Redis connection at import time
+// (which would make every route file depend on Redis being up), but created
+// ONCE rather than per request.
+//
+// THE NAME MUST MATCH worker.js's `new Worker('asset-analysis', …)`. Producer
+// and consumer names are two string literals in two files with no compile-time
+// link — the same drift hazard as R44's analysis_status. If they diverge, jobs
+// accumulate in a queue nothing reads: no error, no log, and media_assets stays
+// empty exactly as if the analyser were broken.
+const ASSET_ANALYSIS_QUEUE = 'asset-analysis';
+let _assetAnalysisQueue = null;
+
+function getAssetAnalysisQueue() {
+    if (!_assetAnalysisQueue) {
+        const { Queue } = require('bullmq');
+        const { connection } = require('../../queue/connection');
+        _assetAnalysisQueue = new Queue(ASSET_ANALYSIS_QUEUE, { connection });
+    }
+    return _assetAnalysisQueue;
+}
+
 // ── POST /api/brain/command ───────────────────────────────────────────────────
 // Execute a natural-language command via the Editorial Brain.
 // Returns full BrainOutput including intent, response, and learning.
@@ -276,11 +298,14 @@ router.post('/analyze-asset', authenticateUser, async (req, res) => {
             return res.status(400).json({ error: 'gcsPath is required' });
         }
 
-        // Add to the 'asset-analysis' BullMQ queue
-        const { Queue } = require('bullmq');
-        const { connection } = require('../../queue/connection');
-
-        const assetAnalysisQueue = new Queue('asset-analysis', { connection });
+        // Module-level singleton, NOT a per-request Queue. This used to
+        // construct `new Queue('asset-analysis', ...)` inside the handler and
+        // never close it, so every upload leaked a BullMQ queue wrapper for the
+        // lifetime of the process. The queue name must stay in sync with
+        // worker.js's `new Worker('asset-analysis', …)` — a mismatch here queues
+        // jobs nothing ever consumes, which is silent and looks exactly like a
+        // broken analyser (see CLAUDE.md R48 and GET /api/health/queues).
+        const assetAnalysisQueue = getAssetAnalysisQueue();
 
         const job = await assetAnalysisQueue.add('analyze', {
             assetId,

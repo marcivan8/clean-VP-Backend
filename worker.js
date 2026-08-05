@@ -145,4 +145,50 @@ try {
     console.error('⚠️  [EmbeddingQueue] EmbeddingWorker not available — embedding jobs will be skipped:', err.message);
 }
 
-console.log('👷 Worker service is running and listening to queues.');
+// ── Build heartbeat ──────────────────────────────────────────────────────────
+// Publish which build this worker is running so the API can tell whether the
+// two deploys are in sync. Without this, a worker left on an old build is
+// INVISIBLE: it consumes jobs, completes them, logs success, and quietly does
+// the wrong thing. That is precisely how media_assets stayed at 0 rows while
+// the asset-analysis queue reported waiting=0 / failed=0 / completed=N — see
+// CLAUDE.md R48 and services/buildInfo.js.
+//
+// Written to Redis (already a hard dependency here) rather than Postgres, so a
+// DB outage can't make the worker look dead. TTL is 90s against a 30s refresh:
+// a missing key means "not running", not "never deployed".
+const { getBuildId, WORKER_CAPABILITY_VERSION } = require('./services/buildInfo');
+
+const HEARTBEAT_KEY        = 'vibed:worker:heartbeat';
+const HEARTBEAT_TTL_SEC    = 90;
+const HEARTBEAT_PERIOD_MS  = 30_000;
+const WORKER_STARTED_AT    = new Date().toISOString();
+
+async function publishHeartbeat() {
+    try {
+        await connection.set(
+            HEARTBEAT_KEY,
+            JSON.stringify({
+                buildId:            getBuildId(),
+                capabilityVersion:  WORKER_CAPABILITY_VERSION,
+                startedAt:          WORKER_STARTED_AT,
+                lastSeen:           new Date().toISOString(),
+                pid:                process.pid,
+                nodeEnv:            process.env.NODE_ENV || null,
+            }),
+            'EX', HEARTBEAT_TTL_SEC
+        );
+    } catch (err) {
+        // Never fatal — a worker that can't publish its heartbeat should still
+        // process jobs.
+        console.warn('[worker] heartbeat publish failed:', err.message);
+    }
+}
+
+publishHeartbeat();
+const _heartbeatTimer = setInterval(publishHeartbeat, HEARTBEAT_PERIOD_MS);
+_heartbeatTimer.unref?.(); // don't keep the process alive on its own account
+
+console.log(
+    `👷 Worker service is running and listening to queues. ` +
+    `build=${getBuildId()} capability=v${WORKER_CAPABILITY_VERSION}`
+);

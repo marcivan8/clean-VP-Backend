@@ -77,12 +77,43 @@ console.log('\n=== deriveGcsPath: waveform.json paths (not just proxy.mp4) ===')
     );
 }
 
-console.log('\n=== deriveGcsPath: explicit rawGcsPath always wins ===');
+console.log('\n=== deriveGcsPath: the PROXY wins; raw is the fallback ===');
 {
+    // THIS ASSERTION WAS DELIBERATELY INVERTED.
+    //
+    // It previously read "explicit gcsPath short-circuits proxyUrl derivation
+    // entirely" and pinned `if (rawGcsPath) return rawGcsPath` — which turned
+    // out to BE the bug, not the contract. asset.gcsPath is set from the RAW
+    // upload key and the client sends it for every clip, so preferring it meant
+    // ffmpeg always decoded the original camera file and the proxy was never
+    // used. In production that produced two consecutive
+    // "ffmpeg decode timed out after 90s" failures on raw HEVC .MOV files whose
+    // proxies had already finished encoding.
+    //
+    // R34 requires the proxy be preferred for anything that ffmpeg-decodes.
+    // Proxies are faststart and never trimmed, so peaks are identical.
     ok(
-        'explicit gcsPath short-circuits proxyUrl derivation entirely',
-        deriveGcsPath('raw/explicit/path.mp4', '/uploads/should/be/ignored.mp4'),
-        'raw/explicit/path.mp4'
+        'a usable proxyUrl is preferred over an explicit raw gcsPath',
+        deriveGcsPath('raw/u1/original.MOV', '/api/proxy/gcs-media/proxies/u1/original.MOV/proxy.mp4'),
+        'proxies/u1/original.MOV/proxy.mp4'
+    );
+    ok(
+        'local-mode proxyUrl also wins over raw',
+        deriveGcsPath('raw/u1/original.MOV', '/uploads/proxies/u1/original.MOV/proxy.mp4'),
+        'proxies/u1/original.MOV/proxy.mp4'
+    );
+    // The fallback still matters: audio-only assets have no proxy at all, and a
+    // video whose proxy job hasn't finished yet must still get a waveform
+    // eventually rather than none.
+    ok(
+        'raw gcsPath is still used when there is no proxy',
+        deriveGcsPath('raw/u1/original.MOV', null),
+        'raw/u1/original.MOV'
+    );
+    ok(
+        'raw gcsPath is used when proxyUrl is an unusable blob: URL',
+        deriveGcsPath('raw/u1/original.MOV', 'blob:https://app/abc-123'),
+        'raw/u1/original.MOV'
     );
 }
 
@@ -95,6 +126,62 @@ console.log('\n=== deriveGcsPath: unresolvable inputs return null (not a crash) 
         deriveGcsPath(null, 'blob:http://localhost:5173/8f2c1e40-abcd-1234'),
         null
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A FAILED extraction must never be reported as "this source is silent".
+//
+// extractPeaks used to set `hasAudio: pcm.length > 0 && peaks.length > 0`, which
+// is also false when ffmpeg merely FAILED. Because the client caches a
+// hasAudio:false result as a FINAL answer ("render an empty track, stop
+// asking"), a 90-second decode timeout presented permanently as "this clip has
+// no audio" — observed in production on two clips whose transcripts contained
+// 84 and 168 words. Only a CLEAN ffmpeg exit may declare a source silent.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n=== waveformRoutes: failed extraction ≠ silent source ===');
+{
+    const fs   = require('fs');
+    const path = require('path');
+    const src  = fs.readFileSync(path.resolve(__dirname, '../routes/waveformRoutes.js'), 'utf8');
+
+    const gated = /const cleanExit = code === 0;/.test(src)
+        && /hasAudio:\s*cleanExit\s*\?/.test(src);
+    ok('hasAudio is gated on a clean ffmpeg exit', gated, true);
+
+    ok('the old ungated form is gone',
+        !/hasAudio:\s*pcm\.length > 0 && peaks\.length > 0,/.test(src), true);
+
+    ok('a non-clean exit returns a bounded-retry 500, not a 503',
+        /return res\.status\(500\)\.json\(\{\s*\n\s*error:\s*.Waveform extraction did not complete cleanly/.test(src), true);
+    ok('it is NOT a 503 (503 never consumes a retry attempt)',
+        !/status\(503\)[\s\S]{0,120}extraction did not complete/.test(src), true);
+
+    ok('an unknown result is NOT returned as hasAudio:false',
+        /peaksData\.hasAudio === null \|\| peaksData\.extractionFailed/.test(src), true);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A range read must ALWAYS terminate the response.
+//
+// The old handler was `if (!res.headersSent) res.status(500).end()`. On a range
+// response the 206 headers are already sent, so a mid-stream "socket hang up"
+// from GCS logged and then left the response open forever; Railway's edge timed
+// it out and synthesised a 502, making one clip's proxy.mp4 unplayable.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n=== proxyRoutes: a range-stream error always ends the response ===');
+{
+    const fs   = require('fs');
+    const path = require('path');
+    const src  = fs.readFileSync(path.resolve(__dirname, '../routes/proxyRoutes.js'), 'utf8');
+
+    ok('range reads are retried', /openRangeStream\(attempt \+ 1\)/.test(src), true);
+    ok('the response is destroyed when headers already went out',
+        /else res\.destroy\(\);/.test(src), true);
+    ok('the no-headers case still sends a status',
+        /if \(!res\.headersSent\) res\.status\(502\)\.end\(\);/.test(src), true);
+    ok('the old log-and-hang handler is gone',
+        !/Range stream error[\s\S]{0,120}if \(!res\.headersSent\) res\.status\(500\)\.end\(\);\s*\}\);/.test(src),
+        true);
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);
