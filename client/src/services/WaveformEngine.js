@@ -111,11 +111,11 @@ function _writePersisted(assetId, data) {
  * Perform one extraction round-trip. Returns { peaks, duration }.
  * Throws on failure; the caller decides whether to retry.
  */
-async function _fetchPeaks(assetId, gcsPath, proxyUrl, signal) {
+async function _fetchPeaks(assetId, gcsPath, proxyUrl, signal, force = false) {
     const res = await fetch('/api/waveform/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assetId, gcsPath, proxyUrl }),
+        body: JSON.stringify({ assetId, gcsPath, proxyUrl, force }),
         signal,
     });
 
@@ -131,20 +131,40 @@ async function _fetchPeaks(assetId, gcsPath, proxyUrl, signal) {
         throw err;
     }
 
-    const { peaksUrl, peaks: inlinePeaks, duration: inlineDuration } = await res.json();
+    const {
+        peaksUrl, peaks: inlinePeaks, duration: inlineDuration, hasAudio,
+    } = await res.json();
 
     // When the server's storage upload fails it returns the peaks inline rather
     // than a URL, so the client isn't left empty-handed.
     if (!peaksUrl) {
-        if (!inlinePeaks?.length) throw new Error('No peaks data in server response');
-        return { peaks: inlinePeaks, duration: inlineDuration };
+        if (!inlinePeaks?.length) {
+            // `hasAudio === false` is a DEFINITIVE answer, not a failure: the
+            // source genuinely carries no audio (screen recording, muted export).
+            // Treating it as an error made the engine burn all its attempts and
+            // then mark the asset permanently failed, for a file that will never
+            // have a waveform no matter how many times we ask.
+            if (hasAudio === false) {
+                return { peaks: [], duration: inlineDuration || 0, hasAudio: false };
+            }
+            throw new Error('No peaks data in server response');
+        }
+        return { peaks: inlinePeaks, duration: inlineDuration, hasAudio: true };
     }
 
     const peaksRes = await fetch(peaksUrl, { signal });
     if (!peaksRes.ok) throw new Error(`Peaks fetch failed: ${peaksRes.status}`);
 
     const data = await peaksRes.json();
-    if (!data?.peaks?.length) throw new Error('Peaks JSON contained no data');
+    if (!data?.peaks?.length) {
+        // A cached-but-empty peaks file. The server's cache check is an
+        // exists() test that never inspects content, so this asset would return
+        // the same empty file forever. Signal the caller to retry ONCE with
+        // force=true, which bypasses the cache and re-extracts.
+        const err = new Error('Peaks JSON contained no data');
+        err.poisonedCache = !force;   // only worth forcing if we haven't already
+        throw err;
+    }
     return data;
 }
 
@@ -185,10 +205,24 @@ export const WaveformEngine = {
 
         const promise = _schedule(async () => {
             let lastErr = null;
+            // Set once we've asked the server to bypass its cache, so a
+            // genuinely-empty source can't put us in a force loop.
+            let forceNext = false;
 
             for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
                 try {
-                    const data = await _fetchPeaks(assetId, gcsPath, usableUrl, signal);
+                    const data = await _fetchPeaks(assetId, gcsPath, usableUrl, signal, forceNext);
+
+                    // A source with no audio is a valid, final result. Cache it in
+                    // memory so we stop asking, but do NOT persist it — if the
+                    // asset later resolves to a different (real) file, a stored
+                    // empty result would outlive the reason for it.
+                    if (data.hasAudio === false) {
+                        _memCache.set(assetId, data);
+                        _attempts.delete(assetId);
+                        return data;
+                    }
+
                     _memCache.set(assetId, data);
                     _writePersisted(assetId, data);
                     _attempts.delete(assetId);
@@ -201,6 +235,17 @@ export const WaveformEngine = {
                     if (err.retryAfterMs) {
                         await _sleep(err.retryAfterMs);
                         attempt--; // this round doesn't count
+                        continue;
+                    }
+
+                    // The server handed us a cached-but-empty peaks file. Retrying
+                    // identically would hit the same cache entry, so re-ask with
+                    // force=true to make it re-extract. Costs one attempt, and
+                    // only ever happens once per asset per session.
+                    if (err.poisonedCache && !forceNext) {
+                        console.warn(`[WaveformEngine] empty cached peaks for ${assetId} — forcing re-extraction`);
+                        forceNext = true;
+                        attempt--; // recovery attempt shouldn't count against the budget
                         continue;
                     }
 

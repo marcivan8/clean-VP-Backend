@@ -112,9 +112,9 @@ const assetAnalysisWorker = new Worker('asset-analysis', async (job) => {
     if (!_MediaIntelligencePipeline) {
         throw new Error('MediaIntelligencePipeline not loaded — redeploy with server/brain/ committed');
     }
-    const { assetId, filePath, projectId, userId } = job.data;
+    const { assetId, filePath, projectId, userId, name } = job.data;
     const pipeline = new _MediaIntelligencePipeline();
-    await pipeline.analyzeAsset(assetId, filePath, projectId, userId);
+    await pipeline.analyzeAsset(assetId, filePath, projectId, userId, name || null);
 }, { connection, concurrency: 1 });
 
 assetAnalysisWorker.on('completed', job => {

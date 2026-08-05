@@ -57,12 +57,44 @@ jobs:
           fi
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
 
+      # ── Guard: is there actually a target to scan? ──────────────────────────
+      # zaproxy/action-baseline's `fail_action: false` (below) ONLY suppresses
+      # alert/findings-based failure — its own description scopes it to "if ZAP
+      # identifies any alerts". It does NOT protect against ZAP failing to reach
+      # the target at all, which exits with ZAP's own code 3 ("any other
+      # failure") and DOES fail this step regardless of fail_action. An empty or
+      # unreachable STAGING_URL hits exactly that path — surfaced as
+      # `Error: failed to scan the target: Error: The process '/usr/bin/docker'
+      # failed with exit code 3`. Also note: `${{ secrets.X }}` only reads
+      # Actions *Secrets* — a value saved under the environment's *Variables*
+      # tab instead resolves to an empty string here with no warning at all.
+      # This step turns both failure modes (unset / unreachable) into a graceful
+      # skip, the same pattern already used above for the Supabase auth secrets.
+      - name: Check staging target is configured and reachable
+        id: target
+        env:
+          STAGING_URL: ${{ secrets.STAGING_URL }}
+        run: |
+          set +e
+          if [ -z "$STAGING_URL" ]; then
+            echo "::warning::STAGING_URL secret is not configured (or was set under Variables instead of Secrets — secrets.* cannot read Variables) — skipping ZAP scan this run."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! curl -fsS --max-time 15 -o /dev/null "$STAGING_URL"; then
+            echo "::warning::STAGING_URL ($STAGING_URL) did not respond within 15s — skipping ZAP scan this run rather than letting the scan step hard-fail."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
       # ── Baseline scan ───────────────────────────────────────────────────────
       # "Baseline" = passive scan only (no active attack payloads fired at
       # staging) — spiders the app, inspects traffic, checks headers/cookies/
       # TLS/known passive-detectable issues. Safe to run against a real
       # environment on a schedule.
       - name: ZAP baseline scan
+        if: steps.target.outputs.configured == 'true'
         uses: zaproxy/action-baseline@v0.12.0
         with:
           target: ${{ secrets.STAGING_URL }}

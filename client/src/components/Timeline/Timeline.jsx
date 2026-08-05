@@ -3,15 +3,25 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import Track from './Track';
 import useTimelineStore from '../../store/useTimelineStore';
+import useDeviceType from '../../hooks/useDeviceType';
 import { Scissors, ZoomIn, ZoomOut, Copy, Type, Palette, Undo2, Redo2, ChevronsRight } from 'lucide-react';
 
 const RULER_H    = 24;   // h-6 = 24px (ruler height)
-const LABEL_W    = 128;  // w-32 = 128px (track label column)
+const LABEL_W         = 128; // w-32 = 128px (track label column) — desktop
+// On a 375-430px phone, a 128px label column eats ~30-34% of the width before
+// any clip is even visible. Narrower on mobile gives the actual clips (the
+// thing being edited) most of the screen. This value is threaded through every
+// place that used to assume the fixed 128px (ruler placeholder, playhead math,
+// content width, and Track's own header column via a prop) — changing it here
+// alone is not enough, see the `labelW` usages below and in Track.jsx.
+const LABEL_W_MOBILE  = 80;
 const EDGE_ZONE  = 60;   // px from edge that triggers auto-scroll
 const SCROLL_SPD = 10;   // base px/frame; scales with proximity to edge
 
 const Timeline = () => {
     const { t } = useTranslation('editor');
+    const { isMobile } = useDeviceType();
+    const labelW = isMobile ? LABEL_W_MOBILE : LABEL_W;
     const { tracks, duration, zoomLevel, seek, setZoomLevel, undo, redo, past, future } = useTimelineStore(useShallow(state => ({
         tracks:      state.tracks,
         duration:    state.duration,
@@ -65,7 +75,7 @@ const Timeline = () => {
         if (!area) return;
         const rect = area.getBoundingClientRect();
         const localX = e.clientX - rect.left + area.scrollLeft;
-        if (localX < LABEL_W) return; // in label column
+        if (localX < labelW) return; // in label column
 
         const start = getContentPos(e.clientX, e.clientY);
         selDragRef.current = { ...start, moved: false };
@@ -87,7 +97,7 @@ const Timeline = () => {
                 height: Math.abs(dy),
             });
             const zl = useTimelineStore.getState().zoomLevel;
-            useTimelineStore.getState().seek(Math.max(0, (cur.x - LABEL_W) / zl));
+            useTimelineStore.getState().seek(Math.max(0, (cur.x - labelW) / zl));
         };
 
         // Edge-scroll loop: runs every animation frame while cursor is in the edge zone
@@ -96,9 +106,9 @@ const Timeline = () => {
             const relX     = cursorX - areaRect.left;
             let   delta    = 0;
 
-            if (relX < LABEL_W + EDGE_ZONE) {
+            if (relX < labelW + EDGE_ZONE) {
                 // Left edge — the closer to the label column, the faster
-                const proximity = Math.max(0, relX - LABEL_W) / EDGE_ZONE; // 0 = very left, 1 = edge zone boundary
+                const proximity = Math.max(0, relX - labelW) / EDGE_ZONE; // 0 = very left, 1 = edge zone boundary
                 delta = -SCROLL_SPD * (1 + (1 - proximity) * 2);
             } else if (relX > areaRect.width - EDGE_ZONE) {
                 // Right edge — the closer to the right wall, the faster
@@ -141,8 +151,8 @@ const Timeline = () => {
                 const x1  = Math.min(selDragRef.current.x, cur.x);
                 const x2  = Math.max(selDragRef.current.x, cur.x);
                 const zl  = useTimelineStore.getState().zoomLevel;
-                const tStart = Math.max(0, (x1 - LABEL_W) / zl);
-                const tEnd   = (x2 - LABEL_W) / zl;
+                const tStart = Math.max(0, (x1 - labelW) / zl);
+                const tEnd   = (x2 - labelW) / zl;
 
                 const ids = [];
                 for (const track of useTimelineStore.getState().tracks) {
@@ -167,7 +177,7 @@ const Timeline = () => {
 
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
-    }, [getContentPos]);
+    }, [getContentPos, labelW]);
 
     // ── Mobile pinch-to-zoom ─────────────────────────────────────────────────────
     // Without this, the browser intercepts 2-finger pinches anywhere on the page
@@ -227,6 +237,13 @@ const Timeline = () => {
     }, []);
     // ─────────────────────────────────────────────────────────────────────────────
 
+    // Kept in sync every render so the RAF loop below (which mounts once with an
+    // empty dependency array) always reads the CURRENT label width — without
+    // this, resizing across the mobile/desktop breakpoint after mount would
+    // leave the playhead line offset by a stale value until a full remount.
+    const labelWRef = React.useRef(labelW);
+    React.useEffect(() => { labelWRef.current = labelW; }, [labelW]);
+
     React.useEffect(() => {
         let rafId;
         const updatePlayhead = () => {
@@ -244,7 +261,7 @@ const Timeline = () => {
             const px = time * renderZoom;
 
             if (playheadLineRef.current && !isNaN(px)) {
-                playheadLineRef.current.style.left = `${128 + px}px`;
+                playheadLineRef.current.style.left = `${labelWRef.current + px}px`;
             }
             if (playheadHandleRef.current && !isNaN(px)) {
                 playheadHandleRef.current.style.left = `${px}px`;
@@ -346,10 +363,21 @@ const Timeline = () => {
 
     return (
         <div className="flex-1 bg-transparent flex flex-col relative h-full select-none" onKeyDown={handleKeyDown} tabIndex={0}>
-            {/* Toolbar */}
-            <div className="h-10 border-b flex items-center px-4 justify-between z-20 shrink-0" style={{ background: "var(--glass)", borderColor: "var(--line-soft)" }}>
-                <div className="flex items-center gap-4">
-                    <span ref={timeDisplayRef} className="text-xs w-16 text-center studio-mono-label" style={{ color: "var(--accent)" }}>0.00s</span>
+            {/* Toolbar — horizontally scrollable so nothing is silently clipped.
+                This row (undo/redo, split, duplicate, text overlay, transition/
+                filter/aspect-ratio/speed selects, zoom controls) is rendered
+                identically on mobile and desktop, but on mobile the timeline's
+                parent wrapper has overflow-hidden (IDELayout's h-36 container) —
+                without its own scroll, every control past a phone's ~375-430px
+                width was invisible and unreachable with no indication anything
+                was missing. On desktop this scrolls only if the window is
+                genuinely narrower than the content, so nothing changes there. */}
+            <div
+                className="h-10 border-b flex items-center px-4 justify-between z-20 shrink-0 overflow-x-auto custom-scrollbar"
+                style={{ background: "var(--glass)", borderColor: "var(--line-soft)", WebkitOverflowScrolling: 'touch' }}
+            >
+                <div className="flex items-center gap-4 shrink-0">
+                    <span ref={timeDisplayRef} className="text-xs w-16 text-center studio-mono-label shrink-0" style={{ color: "var(--accent)" }}>0.00s</span>
                     <div className="h-4 w-px mx-2" style={{ background: "var(--line-soft)" }}></div>
                     {/* Undo / Redo */}
                     <button
@@ -486,7 +514,7 @@ const Timeline = () => {
                         <option value="4.0">4.0x</option>
                     </select>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0 ml-4">
                     <button onClick={() => setZoomLevel(zoomLevel * 0.8)} className="group"><ZoomOut className="w-3 h-3 text-muted-foreground group-hover:text-foreground" /></button>
                     <div className="w-20 h-1 rounded-full overflow-hidden relative" style={{ background: "var(--glass-2)" }}>
                         <div className="absolute inset-y-0 left-0 bg-primary/50 w-full" style={{ width: '50%' }}></div>
@@ -517,7 +545,7 @@ const Timeline = () => {
                 )}
                 {/* Ruler */}
                 <div className="flex h-6 border-b border-white/5 bg-black/20 sticky top-0 z-10 shrink-0">
-                    <div className="w-32 border-r shrink-0" style={{ borderColor: "var(--line-soft)", background: "var(--bg-2)" }}></div>
+                    <div className="border-r shrink-0" style={{ width: `${labelW}px`, borderColor: "var(--line-soft)", background: "var(--bg-2)" }}></div>
                     <div
                         className="flex-1 relative cursor-pointer"
                         style={{ width: `${duration * zoomLevel}px`, minWidth: '100%', touchAction: 'none' }}
@@ -544,25 +572,25 @@ const Timeline = () => {
                     </div>
                 </div>
 
-                {/* Vertical Playhead Line — full height, fixed at 128px (w-32) offset */}
+                {/* Vertical Playhead Line — full height, offset by the (responsive) label column width */}
                 <div
                     ref={playheadLineRef}
                     className="absolute top-6 bottom-0 w-px bg-red-500 z-50 pointer-events-none"
-                    style={{ left: '128px' }}
+                    style={{ left: `${labelW}px` }}
                 />
 
-                <div className="relative min-w-full" style={{ width: `calc(128px + ${duration * zoomLevel}px)` }}>
+                <div className="relative min-w-full" style={{ width: `calc(${labelW}px + ${duration * zoomLevel}px)` }}>
                     {/* Playhead handle (diamond) inside track area */}
                     <div
                         ref={playheadHandleRef}
-                        className="absolute top-0 bottom-0 w-px bg-red-500 z-50 pointer-events-none ml-32"
-                        style={{ left: '0px' }}
+                        className="absolute top-0 bottom-0 w-px bg-red-500 z-50 pointer-events-none"
+                        style={{ left: '0px', marginLeft: `${labelW}px` }}
                     >
                         <div className="absolute -top-1 -left-1.5 w-3 h-3 bg-red-500 rotate-45 transform shadow-sm"></div>
                     </div>
 
                     {tracks.map(track => (
-                        <Track key={track.id} track={track} />
+                        <Track key={track.id} track={track} labelWidth={labelW} compact={isMobile} />
                     ))}
 
                     {/* Rubber-band selection box */}

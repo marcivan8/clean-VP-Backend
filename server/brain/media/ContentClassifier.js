@@ -12,12 +12,11 @@
 
 const OpenAI = require('openai');
 
+const { getAIClient, isAIConfigured } = require('../../../services/AIProvider');
 class ContentClassifier {
 
     constructor() {
-        this.openai = process.env.OPENAI_API_KEY
-            ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-            : null;
+        this.openai = getAIClient();
     }
 
     /**

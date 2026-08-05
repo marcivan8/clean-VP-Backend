@@ -6,67 +6,13 @@ const storageConfig = require('../config/storage');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-/**
- * Extracts waveform data from a video file.
- * Returns an array of peak values.
- */
-async function generateWaveform(inputPath) {
-    return new Promise((resolve, reject) => {
-        const peaks = [];
-        let duration = 0;
-        
-        ffmpeg(inputPath)
-            .audioFilters('aresample=8000,astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level')
-            .format('null')
-            .output('-')
-            .on('stderr', (line) => {
-                // Parse duration
-                if (line.includes('Duration:')) {
-                    const match = line.match(/Duration: (\d{2}):(\d{2}):(\d{2}\.\d{2})/);
-                    if (match) {
-                        const hours = parseFloat(match[1]);
-                        const mins = parseFloat(match[2]);
-                        const secs = parseFloat(match[3]);
-                        duration = (hours * 3600) + (mins * 60) + secs;
-                    }
-                }
-                // Parse astats output
-                // Example: [Parsed_ametadata_2 @ 0x...] lavfi.astats.Overall.RMS_level=-25.432
-                if (line.includes('lavfi.astats.Overall.RMS_level')) {
-                    const match = line.match(/RMS_level=([-\d\.]+)/);
-                    if (match) {
-                        const db = parseFloat(match[1]);
-                        // Normalize roughly between -60dB (0) and 0dB (1)
-                        const normalized = Math.max(0, Math.min(1, (db + 60) / 60));
-                        peaks.push(normalized);
-                    }
-                }
-            })
-            .on('end', () => {
-                // Return roughly 1 value per second if there are many peaks
-                // astats with reset=1 outputs per frame. We need to subsample it.
-                // Assuming ~30 fps or frame rate, let's just bucket it to ~1 second bins.
-                const sampledPeaks = [];
-                if (duration > 0 && peaks.length > 0) {
-                    const samplesPerSec = peaks.length / duration;
-                    const step = Math.max(1, Math.floor(samplesPerSec));
-                    for (let i = 0; i < peaks.length; i += step) {
-                        sampledPeaks.push(peaks[i]);
-                    }
-                } else {
-                    sampledPeaks.push(...peaks);
-                }
-                
-                resolve({
-                    peaks: sampledPeaks,
-                    duration,
-                    sampleRate: 8000
-                });
-            })
-            .on('error', reject)
-            .run();
-    });
-}
+// NOTE: this file used to also have a generateWaveform() step that ran a full
+// ffmpeg astats pass over the ENTIRE raw input (no -vn, so it decoded every
+// video frame too) just to produce a waveform.json — for a 48-min 4K source
+// that's a full redundant decode pass before the real proxy encode even
+// starts. Removed: nothing in the client ever read `asset.waveformUrl` (grep
+// confirmed zero consumers under client/src) — peaks are owned exclusively by
+// services/WaveformEngine.js per R31. See CLAUDE.md R36.
 
 /**
  * Uploads a local file to GCS or falls back to local uploads logic
@@ -129,15 +75,7 @@ module.exports = async function processVideoJob(job) {
     try {
         await job.updateProgress(10);
 
-        // 1. Generate Waveform JSON
-        console.log(`[Job ${job.id}] Generating waveform...`);
-        const waveform = await generateWaveform(absoluteInputPath);
-        
-        const waveformPath = path.join(tempDir, 'waveform.json');
-        fs.writeFileSync(waveformPath, JSON.stringify(waveform));
-        await job.updateProgress(30);
-
-        // 2. Generate MP4 Proxy
+        // 1. Generate MP4 Proxy
         console.log(`[Job ${job.id}] Generating MP4 proxy...`);
         const mp4Filename = 'proxy.mp4';
         const mp4Path = path.join(tempDir, mp4Filename);
@@ -153,14 +91,16 @@ module.exports = async function processVideoJob(job) {
                 .outputOptions([
                     '-crf 28',
                     '-preset veryfast',
+                    '-threads 0',           // explicit auto — use every core available to the job
                     '-movflags +faststart', // Crucial for web playback and MP4Demuxer
                     '-pix_fmt yuv420p',     // Ensures compatibility across all browsers
                     '-f mp4'
                 ])
                 .on('progress', (progress) => {
-                    // Update progress between 30 and 80
+                    // Update progress between 10 and 90 (was 30-80 back when a
+                    // separate waveform pass owned 10-30 — see the removal note above)
                     if (progress.percent) {
-                        job.updateProgress(30 + Math.floor(progress.percent * 0.5));
+                        job.updateProgress(10 + Math.floor(Math.min(progress.percent, 100) * 0.8));
                     }
                 })
                 .on('end', resolve)
@@ -168,25 +108,23 @@ module.exports = async function processVideoJob(job) {
                 .run();
         });
 
-        await job.updateProgress(80);
+        await job.updateProgress(90);
 
-        // 3. Upload to GCS / Storage
+        // 2. Upload to GCS / Storage
         console.log(`[Job ${job.id}] Uploading files to storage...`);
         const files = fs.readdirSync(tempDir);
-        
+
         // Base destination path e.g., 'proxies/{userId}/{filename}/'
         const baseDestPath = `proxies/${userId || 'anonymous'}/${filename}`;
-        
+
         let mp4Url = '';
-        let waveformUrl = '';
 
         for (const file of files) {
             const localFile = path.join(tempDir, file);
             const destPath = `${baseDestPath}/${file}`;
             const url = await uploadToStorage(localFile, destPath);
-            
+
             if (file === mp4Filename) mp4Url = url;
-            if (file === 'waveform.json') waveformUrl = url;
         }
 
         await job.updateProgress(100);
@@ -200,7 +138,6 @@ module.exports = async function processVideoJob(job) {
 
         return {
             proxyUrl: mp4Url,
-            waveformUrl: waveformUrl,
             originalPath: inputPath,
             // proxyPath = uploads-relative raw file path; audioRoutes resolves from uploads/ dir
             proxyPath: inputPath,

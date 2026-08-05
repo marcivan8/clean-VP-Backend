@@ -112,8 +112,19 @@ class UserProfileEngine {
             const cmd = String(command).toLowerCase();
             const count = (currentCommands[cmd] || 0) + 1;
 
+            const nextCommands = { ...currentCommands, [cmd]: count };
+
             const updates = {
-                common_commands: { ...currentCommands, [cmd]: count },
+                common_commands: nextCommands,
+                // inferSkillLevel() existed with ZERO callers, so every profile sat
+                // at the default 'beginner' forever no matter how advanced the
+                // user's actual usage was — the field was written once at row
+                // creation and never again. Recomputing it here, from the full
+                // accumulated command vocabulary (not just the one command that
+                // triggered this write), is what makes it mean anything. Derived
+                // rather than stored-incrementally so a corrected/extended keyword
+                // list in inferSkillLevel applies retroactively on the next write.
+                skill_level: this.inferSkillLevel(Object.keys(nextCommands)),
                 updated_at: new Date().toISOString(),
             };
 
@@ -141,16 +152,51 @@ class UserProfileEngine {
     /**
      * Infer skill level from the flat list of commands a user has run.
      *
+     * Accepts EITHER registry operation ids (`silence_removal`, `color_grade` —
+     * what the real pipeline emits via /observe-command) OR human phrasings
+     * ("remove silence"). Both are normalised to space-separated words first.
+     *
+     * THE TRAP THIS AVOIDS: the keyword lists were originally written only in
+     * human phrasing ('color grade', 'remove silence') and compared with
+     * `String.includes` against whatever it was given. Fed the actual command
+     * ids from `client/src/agent/CommandRegistry.js`, almost nothing matched —
+     * `'color_grade'.includes('color grade')` is false on the underscore alone,
+     * so the single most clearly-advanced command scored as not-advanced, and
+     * `silence_removal` matched no beginner keyword either, which made the
+     * `allBeginner` check fail and classified a pure beginner as
+     * 'intermediate'. Normalising separators is what makes both vocabularies
+     * comparable; keep it if you extend these lists.
+     *
      * @param {string[]} commandHistory
      * @returns {'beginner'|'intermediate'|'advanced'}
      */
     inferSkillLevel(commandHistory) {
         if (!Array.isArray(commandHistory) || commandHistory.length === 0) return 'beginner';
 
-        const advanced = ['color grade', 'multicam', 'keyframe', 'lut', 'mask', 'grading'];
-        const beginnerOnly = ['remove silence', 'add captions', 'trim', 'export', 'zoom'];
+        // Underscores/hyphens → spaces, so 'color_grade' and 'color grade' both
+        // reduce to the same comparable string.
+        const normalize = (s) => String(s).toLowerCase().replace(/[_-]+/g, ' ').trim();
 
-        const cmds = commandHistory.map(c => String(c).toLowerCase());
+        // Keywords are matched against the NORMALISED command, and are written
+        // to cover both an operation id and its natural-language equivalent.
+        const advanced = [
+            'color grade', 'grading', 'lut',
+            'multicam', 'angle',
+            'keyframe', 'mask',
+            'split by speaker', 'detect speaker',
+            'rhythm zoom', 'crop clip',
+        ];
+        const beginnerOnly = [
+            'silence removal', 'remove silence',
+            'auto captions', 'add captions', 'caption',
+            'trim', 'split clip', 'remove clip',
+            'export', 'queue export',
+            'zoom', 'undo action', 'set aspect ratio',
+            'adjust volume',
+        ];
+
+        const cmds = commandHistory.map(normalize).filter(Boolean);
+        if (cmds.length === 0) return 'beginner';
 
         if (cmds.some(c => advanced.some(kw => c.includes(kw)))) return 'advanced';
 

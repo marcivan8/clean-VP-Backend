@@ -796,6 +796,52 @@ export default function DashboardPage() {
                     {isMobile ? t('newProjectShort') : t('newProject')}
                 </button>
 
+                {/* "Your Style" — the learned editing profile (and its GDPR
+                    reset/export controls). The page existed with no route and no
+                    entry point, so nothing could reach it; see CLAUDE.md R37. */}
+                <button
+                    title={t('yourStyle')}
+                    onClick={() => navigate('/style')}
+                    style={{
+                        height: isMobile ? 34 : 36,
+                        padding: isMobile ? '0 10px' : '0 14px',
+                        fontSize: 13,
+                        background: 'none',
+                        border: '0.5px solid var(--glass-stroke)',
+                        borderRadius: 8,
+                        color: 'var(--fg-2)',
+                        cursor: 'pointer',
+                        flexShrink: 0,
+                        whiteSpace: 'nowrap',
+                    }}
+                >
+                    {isMobile ? t('yourStyleShort') : t('yourStyle')}
+                </button>
+
+                {/* Billing — /account is where every plan-confirmation email already
+                    pointed (`account_url` in polarWebhook.js), but the route did not
+                    exist, so that link 404'd for paying customers. This is its entry
+                    point in the app itself; a route with no way to reach it is only
+                    marginally better than no route (R37). */}
+                <button
+                    title="Billing & subscription"
+                    onClick={() => navigate('/account')}
+                    style={{
+                        height: isMobile ? 34 : 36,
+                        padding: isMobile ? '0 10px' : '0 14px',
+                        fontSize: 13,
+                        borderRadius: 8,
+                        border: '0.5px solid var(--glass-stroke)',
+                        background: 'transparent',
+                        color: 'var(--fg-3)',
+                        cursor: 'pointer',
+                        flexShrink: 0,
+                        whiteSpace: 'nowrap',
+                    }}
+                >
+                    {isMobile ? 'Billing' : 'Billing'}
+                </button>
+
                 {/* Avatar / sign out */}
                 <button
                     title={t('signout')}

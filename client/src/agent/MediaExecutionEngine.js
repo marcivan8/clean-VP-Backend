@@ -1293,8 +1293,18 @@ export class MediaExecutionEngine {
 
                     return {
                         id:         clip.id,
+                        // assetId unlocks the server's stored media_assets profile
+                        // (Organize v2) — without it every clip falls back to live
+                        // frame extraction even when the footage was analysed at upload.
+                        assetId:    clip.assetId || asset?.id || null,
                         assetName,
-                        filePath:   uploadedFP || null,
+                        // PER-ASSET storage key. `uploadedFilePath` is a single global
+                        // field each upload overwrites (R21), so sending it as the
+                        // primary path made every clip in a batch resolve to the SAME
+                        // source file — frames for clip 2..N came from clip 1's video.
+                        // Kept only as a last-resort fallback for the legacy flow.
+                        gcsPath:    asset?.gcsPath || null,
+                        filePath:   asset?.gcsPath ? null : (uploadedFP || null),
                         offset:     clipOffset,
                         duration:   clip.duration ?? 0,
                         transcript: transcript || undefined,
@@ -1315,14 +1325,42 @@ export class MediaExecutionEngine {
                         throw new Error(ocData.error || `organize-clips returned ${ocRes.status}`);
                     }
 
-                    const { orderedIds = [], clipMeta = [], rationale = '' } = ocData;
+                    const {
+                        orderedIds = [], clipMeta = [], rationale = '',
+                        pipeline = '', coverage = null, reason = '',
+                    } = ocData;
+
+                    // R30: the server returns an EMPTY order when it had no
+                    // profile and no readable frame for any clip. Reordering on
+                    // that would be arbitrary, and calling it "semantically
+                    // organized" is the exact failure this guard exists to stop.
+                    if (pipeline === 'none' || orderedIds.length === 0) {
+                        console.warn(`[organize_clips] no ordering signal — ${reason || 'server returned no order'}`);
+                        return {
+                            action,
+                            success: justPlaced > 0,
+                            message: justPlaced > 0
+                                ? `${placedMsg}\n\nI couldn't order them yet — ${reason || 'your footage is still being analysed'}. Ask me again once analysis finishes.`
+                                : `I couldn't organize these clips — ${reason || 'your footage is still being analysed'}. Ask me again once analysis finishes.`,
+                        };
+                    }
+
+                    // Partial coverage: some clips were placed on real analysis,
+                    // others on nothing. Say which rather than implying all N
+                    // were understood equally.
+                    let coverageNote = '';
+                    if (coverage && coverage.unanalyzed > 0) {
+                        coverageNote =
+                            `\n\nNote: ${coverage.unanalyzed} of ${coverage.total} clip(s) hadn't finished analysing, ` +
+                            `so I placed them conservatively. Re-run this once analysis completes for a better order.`;
+                    }
 
                     if (orderedIds.length > 0) {
                         const currentIds   = allClips.map(c => c.id);
                         const alreadySorted = orderedIds.every((id, i) => id === currentIds[i]);
 
                         if (alreadySorted) {
-                            orderMsg = `Clips are already in the recommended order. ${rationale}`;
+                            orderMsg = `Clips are already in the recommended order. ${rationale}${coverageNote}`;
                         } else {
                             // Reorder: place each clip consecutively with no gaps.
                             //
@@ -1372,8 +1410,8 @@ export class MediaExecutionEngine {
                                 })
                                 .join(' → ');
 
-                            console.log(`[organize_clips] reordered ${orderedIds.length} clips — ${orderDesc}`);
-                            orderMsg = `Semantically organized ${orderedIds.length} clips.\n\n${rationale}\n\nOrder: ${orderDesc}`;
+                            console.log(`[organize_clips] reordered ${orderedIds.length} clips (${pipeline}) — ${orderDesc}`);
+                            orderMsg = `Semantically organized ${orderedIds.length} clips.\n\n${rationale}\n\nOrder: ${orderDesc}${coverageNote}`;
                         }
                     }
                 } catch (apiErr) {

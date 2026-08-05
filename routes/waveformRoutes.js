@@ -61,7 +61,18 @@ const WAVEFORM_QUEUE_WAIT_MS = 20_000;
 // extractPeaks only settles on ffmpeg's 'close' event, a stalled stream meant
 // that slot was held for the life of the process. Two stalls = the queue never
 // drains again and EVERY subsequent waveform request 502s until a redeploy.
-const WAVEFORM_FFMPEG_TIMEOUT_MS = 45_000;
+//
+// 90s, not the original 45s: raw phone uploads routinely have their moov atom
+// at the END of the file (R7/R25), so ffmpeg reading one as a network stream
+// often can't produce output until it has buffered close to the whole file —
+// unlike a proxy, which is always faststart. The primary fix for that is
+// client-side (Clip.jsx now withholds gcsPath/proxyUrl for an unproxied video
+// asset and waits for the proxy instead of ever hitting this route against the
+// raw file). This timeout is the second line of defense for whatever still
+// reaches here against a large non-faststart source — a legitimate multi-GB
+// 4K interview decoding through a real network stream can genuinely take
+// longer than 45s even once seeking isn't the bottleneck.
+const WAVEFORM_FFMPEG_TIMEOUT_MS = 90_000;
 
 let _waveformActive = 0;
 const _waveformQueue = [];
@@ -206,7 +217,17 @@ function extractPeaks(inputPath, inputStream) {
                 peaks[i] = max / 32767;
             }
 
-            finish(null, { peaks, duration: sampleCount / SAMPLE_RATE });
+            // hasAudio distinguishes "this source genuinely carries no audio"
+            // (ffmpeg exits 0 having produced no PCM — e.g. a screen recording or
+            // a muted export) from "extraction broke". Both used to resolve
+            // identically as `peaks: []`, and the caller had no way to tell them
+            // apart — so a legitimately silent file was cached as an empty peaks
+            // JSON forever and every later read failed. See CLAUDE.md R41.
+            finish(null, {
+                peaks,
+                duration: sampleCount / SAMPLE_RATE,
+                hasAudio: pcm.length > 0 && peaks.length > 0,
+            });
         });
     });
 }
@@ -218,7 +239,7 @@ function extractPeaks(inputPath, inputStream) {
  * Body: { assetId: string, gcsPath?: string }
  */
 router.post('/extract', optionalAuth, async (req, res) => {
-    const { assetId, gcsPath: rawGcsPath, proxyUrl } = req.body || {};
+    const { assetId, gcsPath: rawGcsPath, proxyUrl, force = false } = req.body || {};
 
     const gcsPath = deriveGcsPath(rawGcsPath, proxyUrl);
 
@@ -232,22 +253,30 @@ router.post('/extract', optionalAuth, async (req, res) => {
 
     try {
         // ── 1. Return cached result if it already exists ─────────────────────
-        if (useGCS) {
-            const [exists] = await storageConfig.bucket.file(gcsDestPath).exists();
-            if (exists) {
-                return res.json({
-                    peaksUrl: `/api/proxy/gcs-media/${gcsDestPath}`,
-                    cached: true,
-                });
+        // `force` bypasses this read so a client that just received an EMPTY
+        // cached file can recover. Step 3b stops new empty files being written,
+        // but assets poisoned before that fix shipped would otherwise stay dead
+        // forever — the cache hit means extraction never re-runs on its own.
+        if (!force) {
+            if (useGCS) {
+                const [exists] = await storageConfig.bucket.file(gcsDestPath).exists();
+                if (exists) {
+                    return res.json({
+                        peaksUrl: `/api/proxy/gcs-media/${gcsDestPath}`,
+                        cached: true,
+                    });
+                }
+            } else {
+                const localPeaksPath = path.join(__dirname, '../uploads', gcsDestPath);
+                if (fs.existsSync(localPeaksPath)) {
+                    return res.json({
+                        peaksUrl: `/uploads/${gcsDestPath}`,
+                        cached: true,
+                    });
+                }
             }
         } else {
-            const localPeaksPath = path.join(__dirname, '../uploads', gcsDestPath);
-            if (fs.existsSync(localPeaksPath)) {
-                return res.json({
-                    peaksUrl: `/uploads/${gcsDestPath}`,
-                    cached: true,
-                });
-            }
+            console.log(`[waveformRoutes] force=true — bypassing cache for ${assetId}`);
         }
 
         // ── 2. Build ffmpeg source ────────────────────────────────────────────
@@ -273,7 +302,35 @@ router.post('/extract', optionalAuth, async (req, res) => {
 
         // ── 3. Extract peaks (queued — see WAVEFORM_MAX_CONCURRENT above) ─────
         const peaksData = await withWaveformSlot(() => extractPeaks(inputPath, inputStream));
-        const jsonStr   = JSON.stringify(peaksData);
+
+        // ── 3b. NEVER persist an empty result ─────────────────────────────────
+        // The cache check in step 1 is an `exists()` test — it does not inspect
+        // the file's CONTENT. So writing a zero-peak JSON here poisons this asset
+        // permanently: every later request short-circuits to `cached: true` and
+        // hands the client a file it will reject ("Peaks JSON contained no
+        // data"), at which point WaveformEngine marks the asset permanently
+        // failed and stops retrying. One bad extraction = a waveform that can
+        // never come back, even after the underlying cause is fixed.
+        //
+        // Returning inline (never caching) keeps a genuinely silent file cheap to
+        // re-answer while leaving a transient failure recoverable on the next
+        // attempt. `hasAudio` tells the client which case this is, so it can
+        // render an empty track as a FINAL answer instead of retrying forever.
+        if (!peaksData.peaks?.length) {
+            console.warn(
+                `[waveformRoutes] No peaks produced for ${assetId} `
+                + `(hasAudio=${peaksData.hasAudio}) — returning inline, not caching.`
+            );
+            return res.json({
+                peaksUrl: null,
+                cached:   false,
+                peaks:    [],
+                duration: peaksData.duration || 0,
+                hasAudio: false,
+            });
+        }
+
+        const jsonStr = JSON.stringify(peaksData);
 
         // ── 4. Store result ───────────────────────────────────────────────────
         let peaksUrl = null;

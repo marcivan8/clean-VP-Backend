@@ -180,6 +180,41 @@ const workflowMachine = createMachine({
                                         params:  result.details || null,
                                     });
 
+                                    // Tell the SERVER what actually ran, so the user's
+                                    // editing profile learns from real executions.
+                                    //
+                                    // recordEdit() above only writes the client-side
+                                    // `editHistory` ledger. The server-side profile
+                                    // (common_commands / typically_* / skill_level) used to
+                                    // be fed exclusively from Orchestrator PHASE 5, reachable
+                                    // only via POST /api/brain/command — a route the client
+                                    // deliberately stopped calling because it made a SECOND,
+                                    // independent GPT-4o interpretation of text this pipeline
+                                    // had already parsed. Dropping it was right; losing the
+                                    // learning hook with it was not, and left every profile
+                                    // frozen at its defaults. See CLAUDE.md R37.
+                                    //
+                                    // Fire-and-forget by design: this is telemetry for a
+                                    // preference model, not part of the edit. A failure here
+                                    // must never surface to the user or delay completion —
+                                    // the endpoint itself also always answers { ok: true }.
+                                    (async () => {
+                                        try {
+                                            const { authFetch } = await import('../utils/authFetch.js');
+                                            await authFetch('/api/brain/observe-command', {
+                                                method: 'POST',
+                                                body: JSON.stringify({
+                                                    command:   result.operation,
+                                                    success:   true,
+                                                    projectId: useTimelineStore.getState().projectId || null,
+                                                    summary:   result.message || null,
+                                                }),
+                                            });
+                                        } catch (err) {
+                                            console.warn('[WorkflowController] profile learning skipped (non-critical):', err.message);
+                                        }
+                                    })();
+
                                     // Next step is resolved from the LIVE timeline — coverage
                                     // of each effect, transcript presence, what's already in
                                     // the ledger — instead of OPERATION_META's fixed

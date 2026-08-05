@@ -614,6 +614,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     type: isVideo ? 'video' : file.type.startsWith('image') ? 'image' : 'audio',
                     url: url,
                     file: file,
+                    fileSize: file.size,
                     proxyUrl: null,
                     isProxying: isVideo,
                     uploadPhase: isVideo ? 'uploading' : 'ready',
@@ -680,6 +681,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                             body: JSON.stringify({
                                                 assetId,
                                                 gcsPath,
+                                                name: file.name,
                                                 projectId: useTimelineStore.getState().projectId || null,
                                             }),
                                         });
@@ -761,18 +763,58 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             // Start (or retry) transcription — the early parallel attempt
                             // may have failed (e.g. 401 before auth was established, or
                             // GCS path was null on the legacy upload path).
-                            // Only skip if transcription is already running or complete.
+                            //
+                            // BUG THIS GUARD USED TO MISS: `alreadyRunning` only covers the
+                            // states where a call in flight is still active or already
+                            // succeeded (transcribing/analyzing/ready). By the time proxy
+                            // encoding finishes for a large file, the EARLY attempt (kicked
+                            // off the moment the raw upload landed on GCS, in parallel with
+                            // proxy encoding) has often already TIMED OUT — Whisper +
+                            // diarization on a long 4K interview can exceed the 300s budget —
+                            // and TranscriptionManager's `finally` block has already cleared
+                            // its in-flight controller and set status to FAILED. FAILED isn't
+                            // "already running", so this fired a SECOND full pipeline
+                            // (diarize → fallback transcribe, another 300s budget) against the
+                            // exact same file. Two full transcription attempts running back to
+                            // back doubled load on a worker that's already the documented
+                            // bottleneck for exactly this kind of job (R24), which is what
+                            // dragged waveform extraction and background scene analysis down
+                            // with it into their own timeouts in the same session.
+                            //
+                            // The fix: don't blindly retry the IDENTICAL path that already
+                            // failed. A timeout means the underlying job genuinely didn't
+                            // finish in time — re-running the same call immediately is very
+                            // likely to fail the same way, not recover. Only start a fresh
+                            // attempt when this is a genuinely different path (the legacy
+                            // upload path where the early attempt never got a gcsPath at all)
+                            // or the manager is sitting IDLE (no attempt was made yet).
                             {
                                 const tmStatus = transcriptionManager.getStatus().status;
                                 const alreadyRunning = tmStatus === 'transcribing' || tmStatus === 'analyzing' || tmStatus === 'ready';
-                                if (!alreadyRunning) {
-                                    const transcriptPath = data.rawGcsPath || data.originalPath;
-                                    if (transcriptPath) {
-                                        transcriptionManager.startBackgroundTranscription(transcriptPath, {
-                                            platform: null,
-                                            targetDuration: null,
-                                        });
-                                    }
+                                const transcriptPath = data.rawGcsPath || data.originalPath;
+                                const alreadyAttemptedThisFile =
+                                    !!earlyTranscriptionPath && transcriptPath === earlyTranscriptionPath &&
+                                    (tmStatus === 'failed' || alreadyRunning);
+
+                                if (!alreadyRunning && !alreadyAttemptedThisFile && transcriptPath) {
+                                    transcriptionManager.startBackgroundTranscription(transcriptPath, {
+                                        platform: null,
+                                        targetDuration: null,
+                                    });
+                                } else if (alreadyAttemptedThisFile && tmStatus === 'failed') {
+                                    // NOTE: there is currently no UI affordance that re-triggers
+                                    // startBackgroundTranscription() after a failure — nothing
+                                    // subscribes to EVENT_TYPES.TRANSCRIPTION_FAILED to offer a
+                                    // retry. Until one exists, a genuinely failed transcription
+                                    // (as opposed to this now-suppressed duplicate) has no
+                                    // recovery path other than re-importing the clip. Worth a
+                                    // manual retry control in TranscriptPanel.jsx as a follow-up.
+                                    console.warn(
+                                        `[IDELayout] Skipping automatic transcription retry for "${transcriptPath}" — ` +
+                                        `the early parallel attempt already failed for this exact file. ` +
+                                        `Re-running the identical request immediately is unlikely to succeed and would ` +
+                                        `double load on an already-timed-out job.`
+                                    );
                                 }
                             }
                             // Store the GCS raw path so AI API calls (silence, filler, denoise)
@@ -799,6 +841,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                             body: JSON.stringify({
                                                 assetId,
                                                 gcsPath:   data.rawGcsPath || rawFilePath,
+                                                name:      file.name,
                                                 projectId: useTimelineStore.getState().projectId || null,
                                             }),
                                         });

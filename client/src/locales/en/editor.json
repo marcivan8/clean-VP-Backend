@@ -472,6 +472,7 @@
   },
   "draggableAsset": {
     "creatingLightweightPreview": "Creating a lightweight preview so editing stays fast",
+    "largeFileEta": "Large file ({{size}}, {{duration}}) — this can take up to {{minutes}} min. Still working, not stuck.",
     "deleteThisAsset": "Delete this asset?",
     "deleteAsset": "Delete Asset",
     "dragToTimeline": "Drag to Timeline",

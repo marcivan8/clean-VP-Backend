@@ -8,7 +8,30 @@ import { supabase } from '../lib/supabaseClient';
 // 5-file batch. IDELayout already falls back to the raw upload on timeout, so
 // extending this budget only reduces false "proxy failed" fallbacks; it doesn't
 // change what happens once a job genuinely never finishes.
-const PROXY_POLL_TIMEOUT_MS = 900_000; // 15 min
+const BASE_PROXY_POLL_TIMEOUT_MS = 900_000; // 15 min — covers typical 1080p/short clips
+
+// A flat 15-min budget was tuned against everyday clips, not long-form 4K
+// (see CLAUDE.md R36). A 48-min 4K interview is realistically 10-25GB, and the
+// full pipeline for that (client→GCS resumable upload, worker re-downloading
+// the same bytes back down because raw uploads need random-access to handle a
+// trailing moov atom — R7/R25/R34 — then the actual encode) scales with file
+// size, not just duration. Scale the poll budget by size instead of assuming
+// everything fits in 15 minutes: +2 min per GB beyond the first 3GB, capped at
+// 60 min so a genuinely stuck/dead job still gives up and falls back to raw
+// playback (see the .catch() in IDELayout.jsx) in bounded time.
+const PROXY_TIMEOUT_FREE_GB = 3;
+const PROXY_TIMEOUT_PER_GB_MS = 120_000; // 2 min/GB
+const MAX_PROXY_POLL_TIMEOUT_MS = 3_600_000; // 60 min hard cap
+
+// Exported so the upload UI (DraggableAsset.jsx) can show the SAME estimate
+// it's actually going to wait for, instead of a made-up/duplicated number.
+export function computeProxyPollTimeout(fileSizeBytes) {
+    if (!fileSizeBytes || fileSizeBytes <= 0) return BASE_PROXY_POLL_TIMEOUT_MS;
+    const gb = fileSizeBytes / (1024 ** 3);
+    const extraGb = Math.max(0, gb - PROXY_TIMEOUT_FREE_GB);
+    const timeoutMs = BASE_PROXY_POLL_TIMEOUT_MS + extraGb * PROXY_TIMEOUT_PER_GB_MS;
+    return Math.min(Math.round(timeoutMs), MAX_PROXY_POLL_TIMEOUT_MS);
+}
 
 /**
  * Build fetch headers, injecting Authorization if a valid session exists.
@@ -132,8 +155,9 @@ class ProxyService {
         const data = await processResponse.json();
 
         if (data.jobId) {
-            console.log(`[ProxyService] Polling proxy job ${data.jobId}...`);
-            const result = await pollJobResult(data.jobId, null, PROXY_POLL_TIMEOUT_MS);
+            const timeoutMs = computeProxyPollTimeout(file.size);
+            console.log(`[ProxyService] Polling proxy job ${data.jobId}... (timeout ${Math.round(timeoutMs / 60000)} min for a ${(file.size / (1024 ** 3)).toFixed(1)}GB file)`);
+            const result = await pollJobResult(data.jobId, null, timeoutMs);
             // Attach the raw GCS path so callers can store it in clip.sourceUrl
             return { ...(result ?? data), rawGcsPath: destPath };
         }
@@ -189,8 +213,9 @@ class ProxyService {
 
             // If the backend queued a job, poll until it completes.
             if (data.jobId) {
-                console.log(`[ProxyService] Polling proxy job ${data.jobId}...`);
-                const result = await pollJobResult(data.jobId, null, PROXY_POLL_TIMEOUT_MS);
+                const timeoutMs = computeProxyPollTimeout(file.size);
+                console.log(`[ProxyService] Polling proxy job ${data.jobId}... (timeout ${Math.round(timeoutMs / 60000)} min for a ${(file.size / (1024 ** 3)).toFixed(1)}GB file)`);
+                const result = await pollJobResult(data.jobId, null, timeoutMs);
                 // Attach the raw GCS path (returned by the upload endpoint) so
                 // callers can store it in clip.sourceUrl for reliable export later.
                 return { ...(result ?? data), rawGcsPath: data.gcsPath ?? null };

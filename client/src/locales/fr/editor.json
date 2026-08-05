@@ -472,6 +472,7 @@
   },
   "draggableAsset": {
     "creatingLightweightPreview": "Création d'un aperçu léger pour un montage fluide",
+    "largeFileEta": "Fichier volumineux ({{size}}, {{duration}}) — jusqu'à {{minutes}} min. Toujours en cours, pas bloqué.",
     "deleteThisAsset": "Supprimer cet asset ?",
     "deleteAsset": "Supprimer l'asset",
     "dragToTimeline": "Glisser vers la timeline",

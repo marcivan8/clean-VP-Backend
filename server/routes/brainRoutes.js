@@ -11,6 +11,7 @@
  *   POST   /api/brain/command         — Execute a command via the brain
  *   POST   /api/brain/analyze         — Analyze project state (advise only)
  *   POST   /api/brain/feedback        — Record suggestion chip feedback
+ *   POST   /api/brain/observe-command — Learn from an executed command (no GPT)
  *   POST   /api/brain/analyze-asset   — Queue asset analysis (BullMQ job)
  *   GET    /api/brain/bin-summary     — Fast media bin summary (no AI)
  *   POST   /api/brain/organize        — Build a timeline organize plan
@@ -29,14 +30,17 @@ const { BrainOrchestrator }     = require('../brain/Orchestrator');
 const { PatternLearner }        = require('../brain/PatternLearner');
 const { UserProfileEngine }     = require('../brain/UserProfileEngine');
 const { MediaIntelligencePipeline } = require('../brain/media/MediaIntelligencePipeline');
+const { ProjectIntelligence }   = require('../brain/ProjectIntelligence');
 const { getOrCreateSession }    = require('../brain/Session');
 const { supabaseAdmin }         = require('../../config/database');
+const { ASSET_ANALYSIS_DONE }   = require('../brain/media/analysisStatus');
 
 // Singleton instances — shared across requests
 const orchestrator   = new BrainOrchestrator();
 const learner        = new PatternLearner();
 const profileEngine  = new UserProfileEngine();
 const mediaIntel     = new MediaIntelligencePipeline();
+const projectIntel   = new ProjectIntelligence();
 
 // ── POST /api/brain/command ───────────────────────────────────────────────────
 // Execute a natural-language command via the Editorial Brain.
@@ -106,6 +110,31 @@ router.post('/analyze', authenticateUser, async (req, res) => {
             console.warn('[brainRoutes] /analyze: media intelligence lookup failed (continuing without it):', miErr.message);
         }
 
+        // ── Enrich with the PROJECT MAP ───────────────────────────────────────
+        // One level up from per-asset intelligence: what this project IS, which
+        // asset plays which role in it, and what it's missing (R44). Derivation
+        // is fingerprint-gated, so this is a cheap read on every request except
+        // the ones where the bin or timeline actually changed.
+        //
+        // Best-effort by design: ensureMap() never throws, and a null map just
+        // means the Brain reasons without project-level context exactly as it
+        // did before this existed. A slow or failed derivation must never take
+        // down the advisory request that triggered it.
+        let projectMap = null;
+        try {
+            if (projectState.projectId) {
+                projectMap = await projectIntel.ensureMap({
+                    projectId: projectState.projectId,
+                    userId:    req.user.id,
+                    assets:    assetIntelligence,
+                    clipCount: projectState.clipCount || 0,
+                    platform:  projectState.platform || null,
+                });
+            }
+        } catch (pmErr) {
+            console.warn('[brainRoutes] /analyze: project map failed (continuing without it):', pmErr.message);
+        }
+
         /** @type {import('../brain/types').BrainInput} */
         const input = {
             userId:   req.user.id,
@@ -117,6 +146,7 @@ router.post('/analyze', authenticateUser, async (req, res) => {
             context: {
                 ...projectState,
                 assetIntelligence,
+                projectMap,
                 projectId: projectState.projectId || null,
             },
         };
@@ -161,13 +191,83 @@ router.post('/feedback', authenticateUser, async (req, res) => {
     }
 });
 
+// ── POST /api/brain/observe-command ──────────────────────────────────────────
+// Record a command the REAL execution pipeline just ran, and update the user's
+// editing profile from it. Learning only — NO GPT call, no execution, no
+// suggestions returned.
+//
+// WHY THIS EXISTS (see CLAUDE.md R37): profile learning used to happen only in
+// Orchestrator PHASE 5, which is reachable only via POST /api/brain/command.
+// The client deliberately stopped calling that route — the Brain was making a
+// SECOND, independent GPT-4o interpretation of text the real pipeline had
+// already parsed, which could disagree with what actually executed. Removing it
+// was correct, but it silently took the only `updateFromCommand()` hook with
+// it: every `/analyze` path passes executionResult = null, so the condition
+// `engineResult?.success` was never true again. `common_commands`,
+// `typically_removes_silences`, `typically_adds_captions`,
+// `typically_adds_music` and `skill_level` all stopped accumulating, while the
+// client's own `editHistory` ledger (R19/R29) knew exactly what had run and had
+// no way to tell the server.
+//
+// This endpoint is that missing hook, and nothing more. It takes an ALREADY
+// RESOLVED command name from the pipeline that actually executed it, so there
+// is no second interpretation to disagree with. It is called fire-and-forget,
+// so it must never be slow and must never return an error the caller has to
+// handle — a lost learning event is strictly preferable to a broken edit.
+router.post('/observe-command', authenticateUser, async (req, res) => {
+    try {
+        const { command, success = true, projectId = null, sessionId = null, summary = null } = req.body || {};
+
+        if (typeof command !== 'string' || !command.trim()) {
+            return res.status(400).json({ error: 'command must be a non-empty string' });
+        }
+
+        // Only successful commands shape the profile. A failed command says
+        // nothing about what the user PREFERS — it usually says the opposite of
+        // what they got — and letting failures vote would teach the profile
+        // habits the user never actually completed.
+        if (success === true) {
+            // Awaited so skill_level is recomputed from the same write (see
+            // UserProfileEngine.updateFromCommand). Still fast: two Supabase
+            // round-trips, no model call.
+            await profileEngine.updateFromCommand(req.user.id, command.trim(), true);
+        }
+
+        // Best-effort session log — mirrors what PatternLearner.persistAsync
+        // writes for the /command path, so the editing_sessions ledger stays
+        // complete now that real executions no longer flow through there.
+        try {
+            await supabaseAdmin
+                .from('editing_sessions')
+                .insert({
+                    user_id:          req.user.id,
+                    project_id:       projectId || null,
+                    session_id:       sessionId || 'unknown',
+                    trigger:          'command_executed',
+                    raw_input:        summary || null,
+                    resolved_command: command.trim(),
+                    executed:         success === true,
+                });
+        } catch (logErr) {
+            console.error('[brainRoutes] /observe-command session log failed:', logErr.message);
+        }
+
+        return res.json({ ok: true });
+
+    } catch (err) {
+        console.error('[brainRoutes] /observe-command error:', err.message);
+        // Never surface a hard failure to a fire-and-forget caller.
+        return res.json({ ok: true });
+    }
+});
+
 // ── POST /api/brain/analyze-asset ────────────────────────────────────────────
 // Queue asset analysis as a BullMQ job.
 // Returns { jobId, status: 'queued' } immediately — DO NOT run inline.
 // Vision analysis can take 10–30s and must not block the HTTP response.
 router.post('/analyze-asset', authenticateUser, async (req, res) => {
     try {
-        const { assetId, gcsPath, projectId } = req.body || {};
+        const { assetId, gcsPath, projectId, name } = req.body || {};
 
         if (!assetId || typeof assetId !== 'string') {
             return res.status(400).json({ error: 'assetId is required' });
@@ -187,6 +287,12 @@ router.post('/analyze-asset', authenticateUser, async (req, res) => {
             filePath: gcsPath,
             projectId: projectId || null,
             userId: req.user.id,
+            // Stored on the media_assets row so the Brain can refer to footage
+            // BY NAME (R22) rather than as an opaque id. Falls back to the
+            // filename in the GCS key when the client doesn't send one.
+            name: (typeof name === 'string' && name.trim())
+                ? name.trim()
+                : gcsPath.split('/').pop() || null,
         });
 
         return res.json({ jobId: job.id, status: 'queued' });
@@ -251,7 +357,7 @@ router.post('/organize', authenticateUser, async (req, res) => {
         const bin = assets || [];
 
         // Check if all assets are done
-        const unanalyzed = bin.filter(a => a.analysis_status !== 'done');
+        const unanalyzed = bin.filter(a => a.analysis_status !== ASSET_ANALYSIS_DONE);
         if (unanalyzed.length > 0) {
             return res.json({
                 ready: false,

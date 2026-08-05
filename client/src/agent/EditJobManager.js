@@ -49,6 +49,7 @@ export class EditJobManager {
 
         const actor = createJobActor(jobId, userPrompt, (update) => {
             const jobState = mapStateToJobState(update.state.toLowerCase());
+            if (!jobState) return;   // unmapped state — never fall back to IDLE
             store.transitionTo(jobId, jobState, {
                 progress: update.progress,
                 error: update.error,
@@ -214,8 +215,13 @@ export class EditJobManager {
             };
         }
 
+        // Retire the actor from the pre-clarification round before standing up
+        // its replacement, so only one actor ever drives this job's state.
+        this._retireActor(jobId);
+
         const actor = createJobActor(jobId, updatedIntent.intent || 'Resumed Job', (update) => {
             const jobState = mapStateToJobState(update.state.toLowerCase());
+            if (!jobState) return;   // unmapped state — never fall back to IDLE
             store.transitionTo(jobId, jobState, { progress: update.progress, error: update.error });
         });
 
@@ -460,8 +466,36 @@ export class EditJobManager {
     }
 
     cleanup(jobId) {
+        // NOTE: deliberately does NOT stop the actor. Both call sites sit in a
+        // `finally` that guards `return this.runPipeline(...)` — in an async
+        // function that finally executes as soon as the promise is RETURNED, not
+        // when it settles, so the pipeline is typically still running here.
+        // Stopping the actor at this point would silently drop every event the
+        // rest of the pipeline still sends it. Stale actors are retired in
+        // _retireActor(), at the one place a replacement is created.
         this.activeActors.delete(jobId);
         this.abortControllers.delete(jobId);
+    }
+
+    /**
+     * Stop and discard any actor still attached to this jobId.
+     *
+     * An un-stopped actor keeps its store subscription alive. The
+     * clarification-resume path builds a SECOND actor for a jobId that already
+     * has one, so without this both would drive the same job's state — every
+     * transition applied twice, and the stale actor able to contradict the live
+     * one. Called only when we are about to replace the actor, which is the one
+     * moment the old one is provably finished with.
+     */
+    _retireActor(jobId) {
+        const stale = this.activeActors.get(jobId);
+        if (!stale) return;
+        try {
+            stale.stop();
+        } catch (err) {
+            console.warn(`[EditJobManager] could not stop stale actor for ${jobId}:`, err.message);
+        }
+        this.activeActors.delete(jobId);
     }
 
     cancelJob(jobId) {

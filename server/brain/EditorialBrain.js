@@ -14,15 +14,15 @@
 'use strict';
 
 const OpenAI = require('openai');
+const { getAIClient, isAIConfigured } = require('../../services/AIProvider');
 const { ContextEngine } = require('./ContextEngine');
 const { UserProfileEngine } = require('./UserProfileEngine');
+const { ASSET_ANALYSIS_DONE } = require('./media/analysisStatus');
 
 class EditorialBrain {
 
     constructor() {
-        this.openai = process.env.OPENAI_API_KEY
-            ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-            : null;
+        this.openai = getAIClient();
         this.contextEngine = new ContextEngine();
         this.profileEngine = new UserProfileEngine();
     }
@@ -150,7 +150,7 @@ FOOTAGE IN THE BIN (what the clips actually contain)
 ${(ctx.assetIntelligence || []).length === 0
     ? '(not analysed yet — base your advice on the transcript and timeline only, and do NOT speculate about what the footage looks like)'
     : (ctx.assetIntelligence || []).map(a => {
-        if (a.analysis_status && a.analysis_status !== 'done') {
+        if (a.analysis_status && a.analysis_status !== ASSET_ANALYSIS_DONE) {
             return `  - ${a.name || a.id}: analysis ${a.analysis_status}`;
         }
         const bits = [
@@ -167,6 +167,56 @@ ${(ctx.assetIntelligence || []).length === 0
         ].filter(Boolean).join(', ');
         return `  - ${a.name || a.id}: ${a.content_description || '(no description)'}${bits ? `\n      [${bits}]` : ''}`;
     }).join('\n')}
+
+═══════════════════════════════════════════════
+PROJECT MAP (what this project IS, not what each clip is)
+═══════════════════════════════════════════════
+${(() => {
+    const m = ctx.projectMap;
+    if (!m || m.status === 'failed') {
+        return '(not established yet — the bin has not been analysed enough to say what this project is.\n' +
+               'Do NOT assert a project type, an audience, or what is missing. You may ask.)';
+    }
+    const roles = Array.isArray(m.asset_roles) ? m.asset_roles : [];
+    const gaps  = Array.isArray(m.coverage_gaps) ? m.coverage_gaps : [];
+    const lines = [
+        `Type:         ${m.project_type || 'unknown'}`,
+        `Through-line: ${m.through_line || '(not established)'}`,
+        m.target_audience ? `Audience:     ${m.target_audience}` : '',
+        m.tone ? `Tone:         ${m.tone}` : '',
+        `Built from:   ${m.asset_count || 0} analysed asset(s)`,
+        '',
+        'Roles:',
+        roles.length === 0
+            ? '  (none assigned)'
+            : roles.map(r => `  — ${r.name || r.assetId}: ${r.role}${r.serves ? ` (supports ${r.serves})` : ''}`).join('\n'),
+        '',
+        'Missing / thin:',
+        gaps.length === 0
+            ? '  (nothing identified — do NOT invent a gap to fill this space)'
+            : gaps.map(g => `  — [${g.severity}] ${g.gap}${g.suggestion ? ` → ${g.suggestion}` : ''}`).join('\n'),
+    ];
+    return lines.filter(l => l !== '').join('\n');
+})()}
+
+PROJECT MAP RULES — this section is the anchor for everything you say:
+- The through-line is what the video is ABOUT. Every suggestion must serve it.
+  If you propose something that doesn't, say how it serves the through-line or
+  don't propose it.
+- Roles tell you what each clip is FOR. Never suggest cutting or burying the
+  a_roll; never suggest promoting a cutaway to the spine. Reach for footage
+  already labelled b_roll/cutaway when the advice calls for supporting material,
+  instead of telling the user to find something.
+- A listed gap is the most useful thing you can raise, because no per-clip view
+  can see it. Prefer a high-severity gap over another pacing tip. But state it
+  as a gap in COVERAGE, not a flaw in the footage they have.
+- An empty gap list means the project is adequately covered. Say so if it's
+  relevant; do not manufacture a gap because the section exists.
+- The map describes the project AS IT STANDS. If the user's request implies a
+  different project than the map says, believe the user and say the map looks
+  out of date — it is derived from analysis, not from their intent.
+- If the map is "not established yet", you do not know the project type. Advise
+  from the timeline and transcript alone and say what you'd need to know more.
 
 Use the footage list above to tailor your advice to THIS material — reference what
 the clips actually show (B-roll vs talking head, one subject vs two, screen
@@ -200,7 +250,7 @@ Skill level:    ${skillLevel} — ${_skillDescription(skillLevel)}
 Content type:   ${contentType}
 Patterns:       removes silences=${prof.typically_removes_silences ? 'yes' : 'no'}, adds captions=${prof.typically_adds_captions ? 'yes' : 'no'}, adds music=${prof.typically_adds_music ? 'yes' : 'no'}
 Top commands:   ${_topCommands(prof.common_commands)}
-Permanently hidden suggestions (${hiddenNote}):
+Permanently hidden: ${hiddenNote}
 
 ═══════════════════════════════════════════════
 PLATFORM RULES (${platform})
@@ -233,7 +283,7 @@ MEDIA BIN
 Total assets:   ${ctx.totalAssets || 0}
 Types:          video=${ctx.assetTypes?.video || 0}, audio=${ctx.assetTypes?.audio || 0}, music=${ctx.assetTypes?.music || 0}, sfx=${ctx.assetTypes?.sfx || 0}
 Unused assets:  ${unusedAssetsText}
-Bin analyzed:   ${ctx.binReady ? 'yes' : 'no (still processing)'}
+Bin analyzed:   ${ctx.binReady ? 'yes' : `no — ${ctx.analyzedAssets || 0} of ${ctx.totalAssets || 0} analysed so far`}
 Clips:
 ${(ctx.binItems || []).length === 0
     ? '  (none)'
@@ -334,9 +384,31 @@ RESPONSE FORMAT — return ONLY valid JSON matching this exact schema:
 PERSONA RULES
 ═══════════════════════════════════════════════
 - Direct and expert — no filler phrases like "Great question!" or "Absolutely!"
-- Adapt language complexity to skill_level: beginner=simple, advanced=technical
 - NEVER suggest anything in permanently_hidden
 - NEVER suggest something already in commandsRun for this session unless state changed significantly
+
+USER PROFILE RULES (the USER PROFILE block above is learned from this user's real
+edit history — treat it as evidence about THIS person, not a generic persona):
+- skill_level drives HOW MUCH you explain, not just word choice:
+  • beginner: name the outcome in plain language and say why it helps. Assume no
+    familiarity with editing jargon — "tighten the pacing" not "reduce cut rate".
+  • intermediate: skip the rationale for basics, keep it for non-obvious choices.
+  • advanced: assume fluency with cuts, grades, keyframes, LUTs and multicam. Do
+    NOT explain what a command does — state what you'd do and why it's the right
+    call here. Over-explaining to an advanced user reads as condescending.
+- A "yes" in Patterns means the user does this on almost every project. Treat it
+  as an established habit: propose it FIRST when it's still outstanding, and
+  don't pitch it as though it were a new idea. Never explain the basics of a
+  habit they clearly already have.
+- Top commands are this user's routine. Reach for them before proposing an
+  unfamiliar alternative, and never walk through how one works.
+- A habit that is ALREADY satisfied on this timeline must not be suggested again
+  — check the project state before proposing anything from Patterns.
+- The profile describes tendencies, not rules. If the footage calls for something
+  different, say so and explain the exception — do not blindly follow the profile.
+- An empty/default profile (skill_level=beginner, no patterns, no top commands)
+  means this user is NEW, not that they are unskilled. Do not infer habits from
+  the absence of data; give balanced guidance and let the profile fill in.
 - If user prompt is ambiguous or you cannot determine intent: set intent.type = "clarify" and ask ONE specific clarifying question in response.message
 - If request is impossible given current timeline state (e.g. "split clip" when no clips exist): explain why in response.message, set intent.type = "advise"
 - For execute intents: command must be an exact, executable Vibed command string (not a description)

@@ -19,15 +19,41 @@ import { supabase } from '../lib/supabaseClient.js';
 /**
  * Convert an asset entry to a usable <video src> URL.
  *
- * Priority:
- *   1. asset.sourceUrl — the original GCS URL (raw mp4/mov); proxied through gcs-media
- *   2. asset.proxyUrl  — if it's NOT an HLS playlist (.m3u8), use it directly
- *   3. asset.url       — if not a revoked blob
+ * Priority (raw last, deliberately):
+ *   1. asset.proxyUrl  — if it's NOT an HLS playlist (.m3u8), use it directly
+ *   2. asset.url       — if not a revoked blob
+ *   3. asset.sourceUrl — the original raw GCS URL, as a last resort only
+ *
+ * This USED to check sourceUrl (raw) first and proxyUrl second — backwards.
+ * Raw phone/camera uploads routinely have their moov atom at the END of the
+ * file (R7/R25), and seeking a <video> element (`video.currentTime = seekTo`
+ * below) needs that atom to map time to a byte offset. Over HTTP against a
+ * non-faststart file, the browser frequently can't do that seek at all —
+ * `onerror` fires before `onseeked` ever does — which is exactly what showed
+ * up in the wild: "[thumbnail] Video load error for .../raw/.../4K.mp4"
+ * immediately followed, on the NEXT autosave tick once the proxy had finished,
+ * by a successful "[thumbnail] Saved: ...". The raw source wasn't broken, it
+ * was just picked first when it's the one URL shape thumbnail capture is
+ * least likely to work against. A proxy is always faststart (R7), so it
+ * should be tried first whenever one exists.
  */
 function buildVideoUrl(asset) {
     if (!asset) return null;
 
-    // 1. Raw GCS URL → route through the authenticated gcs-media proxy
+    // 1. proxyUrl — skip HLS streams (browser <video> can't seek them for canvas)
+    if (asset.proxyUrl && !asset.proxyUrl.endsWith('.m3u8')) {
+        const p = asset.proxyUrl;
+        if (p.startsWith('/') || p.startsWith('http')) return p;
+        // Relative GCS path like "raw/userId/file.mp4"
+        return `/api/proxy/gcs-media/${p}`;
+    }
+
+    // 2. Direct url (not a revoked blob) — usually mirrors proxyUrl once hydrated
+    if (asset.url && !asset.url.startsWith('blob:')) return asset.url;
+
+    // 3. Raw GCS URL, last resort — no proxy exists yet or ever will for this
+    // asset. Still worth trying (short clips / faststart-friendly sources do
+    // work), just no longer the FIRST thing attempted.
     if (asset.sourceUrl) {
         const src = asset.sourceUrl;
         if (src.startsWith('https://storage.googleapis.com/')) {
@@ -42,17 +68,6 @@ function buildVideoUrl(asset) {
         // Already a relative or absolute server path
         if (!src.startsWith('blob:')) return src;
     }
-
-    // 2. proxyUrl — skip HLS streams (browser <video> can't seek them for canvas)
-    if (asset.proxyUrl && !asset.proxyUrl.endsWith('.m3u8')) {
-        const p = asset.proxyUrl;
-        if (p.startsWith('/') || p.startsWith('http')) return p;
-        // Relative GCS path like "raw/userId/file.mp4"
-        return `/api/proxy/gcs-media/${p}`;
-    }
-
-    // 3. Direct url (not a revoked blob)
-    if (asset.url && !asset.url.startsWith('blob:')) return asset.url;
 
     return null;
 }

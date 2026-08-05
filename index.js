@@ -276,6 +276,7 @@ app.use('/api/jobs', require('./routes/jobRoutes')); // Job Queue SSE monitoring
 app.use('/api/session', require('./routes/sessionRoutes')); // Anonymous sessions
 app.use('/api/captions', require('./routes/captionRoutes')); // Caption generation
 app.use('/api/admin',   require('./routes/adminRoutes'));   // Temp admin ops (remove after use)
+app.use('/api/health',  require('./routes/dataHealthRoutes')); // Dependency-table row counts (admin-secret gated)
 app.use('/api/polar',    require('./routes/polarWebhook'));   // Polar subscription webhooks
 app.use('/api/checkout', require('./routes/polarWebhook'));  // alias: /api/checkout/create
 app.use('/api/projects',   require('./routes/projectRoutes'));   // Project thumbnail upload
@@ -395,6 +396,19 @@ if (require.main === module) {
     const runCleanup = require('./scripts/cleanup');
     runCleanup();
     setInterval(runCleanup, 24 * 60 * 60 * 1000);
+
+    // Report whether the tables our features read from actually contain data.
+    // Four separate CLAUDE.md rules (R12/R21/R37/R38) describe the same bug
+    // class — a silently empty table looking exactly like a working feature —
+    // and every one of them was found by a human reading code rather than by
+    // anything the system reported. This makes the cheap version of that check
+    // automatic. Fire-and-forget: it must never delay or fail startup, so it is
+    // deliberately not awaited and swallows its own errors.
+    try {
+      require('./services/DataHealthProbe').logDataHealth();
+    } catch (err) {
+      console.error('[DataHealth] probe unavailable (non-critical):', err.message);
+    }
 
     // When using local storage (no GCS), web + worker must share a filesystem.
     const storageConfig = require('./config/storage');

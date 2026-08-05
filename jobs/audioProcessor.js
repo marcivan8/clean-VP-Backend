@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { detectBeats } = require('../analysis/beatDetector');
 const { OpenAI } = require('openai');
+const { getAIClient, isAIConfigured } = require('../services/AIProvider');
 const storageConfig = require('../config/storage');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -11,13 +12,16 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 let openaiInstance = null;
 function getOpenAI() {
     if (!openaiInstance) {
-        if (!process.env.OPENAI_API_KEY) {
+        if (!isAIConfigured()) {
             throw new Error('OPENAI_API_KEY environment variable is missing.');
         }
-        openaiInstance = new OpenAI({
-            apiKey: process.env.OPENAI_API_KEY,
-            timeout: 300_000, // 5-min per request — Whisper on long videos can be slow
-            maxRetries: 0,    // BullMQ handles job-level retries; let 429s surface immediately
+        // capability:'audio' — Whisper has no Ollama equivalent, so the factory
+        // keeps this on the real API even when AI_PROVIDER=ollama. Only 'mock'
+        // stubs it out. See services/AIProvider.js.
+        openaiInstance = getAIClient({
+            capability: 'audio',
+            timeout:    300_000, // 5-min per request — Whisper on long videos can be slow
+            maxRetries: 0,       // BullMQ handles job-level retries; let 429s surface immediately
         });
     }
     return openaiInstance;

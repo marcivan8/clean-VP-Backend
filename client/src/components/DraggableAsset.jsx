@@ -4,8 +4,31 @@ import { useTranslation } from 'react-i18next';
 import { Video, Music, Image as ImageIcon, Trash2, Loader2, Plus } from 'lucide-react';
 import useTimelineStore from '../store/useTimelineStore';
 import useDeviceType from '../hooks/useDeviceType';
+import { computeProxyPollTimeout } from '../services/proxyService';
 
 const PHASES = ['uploading', 'processing', 'ready'];
+
+// Large-file threshold for showing an ETA hint instead of the generic
+// "creating a lightweight preview" copy — 3GB is where computeProxyPollTimeout
+// starts adding time beyond its 15-min base, so it's also where the pipeline
+// genuinely starts taking meaningfully longer than a typical short clip.
+// See CLAUDE.md R36: a 48-min 4K interview with NO size-aware messaging read
+// as "stuck" when it was actually just a big file working through a pipeline
+// budgeted for everyday clips.
+const LARGE_FILE_BYTES_THRESHOLD = 3 * 1024 ** 3;
+
+function formatFileSize(bytes) {
+    if (!bytes) return '';
+    const gb = bytes / (1024 ** 3);
+    if (gb >= 1) return `${gb.toFixed(1)}GB`;
+    return `${Math.round(bytes / (1024 ** 2))}MB`;
+}
+
+function formatDuration(seconds) {
+    if (!seconds) return '';
+    const mins = Math.round(seconds / 60);
+    return mins > 0 ? `${mins} min` : `${Math.round(seconds)}s`;
+}
 
 const ProxyingOverlay = ({ asset }) => {
     const { t } = useTranslation('editor');
@@ -22,6 +45,10 @@ const ProxyingOverlay = ({ asset }) => {
     const phase = asset.uploadPhase || 'uploading';
     const phaseIdx = PHASES.indexOf(phase);
     const progress = asset.uploadProgress || 0;
+
+    const fileSize = asset.fileSize || asset.file?.size || 0;
+    const isLargeFile = fileSize >= LARGE_FILE_BYTES_THRESHOLD;
+    const etaMinutes = isLargeFile ? Math.round(computeProxyPollTimeout(fileSize) / 60000) : 0;
 
     return (
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(1px)' }}>
@@ -50,7 +77,13 @@ const ProxyingOverlay = ({ asset }) => {
                 </span>
                 {showLargeFileMsg && (
                     <span className="text-[7px] text-center leading-tight mt-0.5 px-1" style={{ color: 'var(--fg-4)', maxWidth: 90 }}>
-                        {t('draggableAsset.creatingLightweightPreview')}
+                        {isLargeFile
+                            ? t('draggableAsset.largeFileEta', {
+                                size: formatFileSize(fileSize),
+                                duration: formatDuration(asset.sourceDuration),
+                                minutes: etaMinutes,
+                            })
+                            : t('draggableAsset.creatingLightweightPreview')}
                     </span>
                 )}
             </div>
