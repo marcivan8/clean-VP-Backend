@@ -82,6 +82,13 @@ function loadEngine() {
         path.resolve(__dirname, '../client/src/services/WaveformEngine.js'), 'utf8'
     )
         .replace(/^import useTimelineStore from .*$/m, 'const useTimelineStore = { getState: () => storeState };')
+        // authFetch is the real client's authenticated wrapper (it attaches the
+        // Supabase JWT). Here it must resolve to the stubbed global fetch, so
+        // these tests keep exercising the engine's retry/backpressure logic
+        // rather than the auth layer. Added when the engine switched from bare
+        // fetch to authFetch — see the anonymous-waveform-path fix.
+        .replace(/^import \{ authFetch \} from .*$/m,
+            'const authFetch = (url, opts = {}) => fetch(url, { ...opts, headers: { ...(opts.headers || {}), \'Content-Type\': \'application/json\' } });')
         .replace(/^export const WaveformEngine =/m, 'const WaveformEngine =')
         .replace(/^export default WaveformEngine;$/m, 'module.exports = WaveformEngine;');
 

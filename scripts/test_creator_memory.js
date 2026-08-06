@@ -382,6 +382,53 @@ console.log('\n── supabase writes never use .catch() on the builder ──')
         'a count is the only proof the write landed (R38)');
 }
 
+// ── R50 · Whisper's 25 MB limit is enforced before the upload ────────────────
+// _transcribe() streamed the file straight in with no size check, so a long
+// clip failed outright with
+//   "413: Maximum content size limit (26214400) exceeded (26368000 bytes read)"
+// jobs/audioProcessor.js has always had a WHISPER_LIMIT guard; the Brain's own
+// transcription path never did.
+console.log('\n── transcription respects the Whisper size limit ──');
+{
+    const pipe = read('server/brain/media/MediaIntelligencePipeline.js');
+
+    check('a size limit is declared',
+        /WHISPER_LIMIT\s*=\s*25 \* 1024 \* 1024/.test(pipe));
+    check('the file size is measured before upload',
+        /fs\.statSync\(filePath\)/.test(pipe));
+    check('oversized audio is compressed, not blindly uploaded',
+        /_compressForWhisper\(/.test(pipe));
+    check('compression targets mono 16 kHz (what Whisper wants)',
+        /'-ac', '1'/.test(pipe) && /'-ar', '16000'/.test(pipe));
+    check('video is never decoded for a transcript',
+        /'-vn'/.test(pipe),
+        'decoding video to get audio is the R36 waste all over again');
+    check('a still-too-large file is skipped rather than 413ing',
+        /still \$\{\(compressed/.test(pipe));
+    check('the temp file is always cleaned up',
+        /finally \{[\s\S]{0,200}unlinkSync\(tempPath\)/.test(pipe));
+    check('transcription uses the audio capability (stays on the real API)',
+        /getAIClient\(\{ capability: 'audio' \}\)/.test(pipe),
+        'Ollama has no audio API — R45');
+}
+
+// ── R50 · The waveform route is called WITH auth ─────────────────────────────
+// optionalAuth does not fail on a missing header — it just leaves req.user
+// undefined, and the route then wrote every user's peaks to a shared
+// `waveforms/anonymous/` prefix.
+console.log('\n── waveform extraction is called with credentials ──');
+{
+    const engine = read('client/src/services/WaveformEngine.js');
+
+    check('WaveformEngine imports authFetch',
+        /import \{ authFetch \}/.test(engine));
+    check('the extract call uses authFetch, not bare fetch',
+        /authFetch\('\/api\/waveform\/extract'/.test(engine),
+        'bare fetch sends no Authorization header — peaks land under anonymous/');
+    check('it no longer hand-sets Content-Type (authFetch owns that)',
+        !/authFetch\('\/api\/waveform\/extract'[\s\S]{0,200}'Content-Type'/.test(engine));
+}
+
 console.log(
     failures === 0
         ? '\nALL CREATOR MEMORY TESTS PASSED\n'

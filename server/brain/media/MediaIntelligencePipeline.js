@@ -451,16 +451,119 @@ class MediaIntelligencePipeline {
         // (mirrors the pattern used in captionRoutes.js)
         if (!isAIConfigured()) return null;
 
-        const OpenAI = require('openai');
         const fs = require('fs');
-        const openai = getAIClient();
+        // capability:'audio' — Whisper has no local equivalent, so this stays on
+        // the real API even under AI_PROVIDER=ollama (R45).
+        const openai = getAIClient({ capability: 'audio' });
+        if (!openai) return null;
 
-        const transcription = await openai.audio.transcriptions.create({
-            file:  fs.createReadStream(filePath),
-            model: 'whisper-1',
+        // Whisper rejects anything over 25 MB with a 413. This function used to
+        // stream the file straight in with no size check, so a long clip failed
+        // outright:
+        //   "413: Maximum content size limit (26214400) exceeded (26368000 bytes read)"
+        // — 26.3 MB, i.e. barely over. jobs/audioProcessor.js has always had a
+        // WHISPER_LIMIT guard for exactly this; the Brain's own path never did.
+        //
+        // Re-encode to a mono 16 kHz MP3 first, which is what Whisper wants
+        // anyway. That is ~1 MB/minute, so it clears the limit for any clip
+        // short enough to be worth transcribing here, and is far cheaper to
+        // upload than the original.
+        const WHISPER_LIMIT = 25 * 1024 * 1024;
+
+        let uploadPath = filePath;
+        let tempPath   = null;
+
+        try {
+            const { size } = fs.statSync(filePath);
+
+            if (size > WHISPER_LIMIT) {
+                tempPath = await this._compressForWhisper(filePath, assetId);
+                if (!tempPath) {
+                    console.warn(
+                        `[MediaPipeline] ${assetId}: audio is ${(size / 1024 / 1024).toFixed(1)} MB ` +
+                        `(limit ${WHISPER_LIMIT / 1024 / 1024} MB) and could not be compressed — skipping transcription`
+                    );
+                    return null;
+                }
+
+                const compressed = fs.statSync(tempPath).size;
+                if (compressed > WHISPER_LIMIT) {
+                    console.warn(
+                        `[MediaPipeline] ${assetId}: still ${(compressed / 1024 / 1024).toFixed(1)} MB after ` +
+                        'compression — too long for a single Whisper request, skipping transcription'
+                    );
+                    return null;
+                }
+
+                console.log(
+                    `[MediaPipeline] ${assetId}: compressed audio ` +
+                    `${(size / 1024 / 1024).toFixed(1)} MB → ${(compressed / 1024 / 1024).toFixed(1)} MB for Whisper`
+                );
+                uploadPath = tempPath;
+            }
+
+            const transcription = await openai.audio.transcriptions.create({
+                file:  fs.createReadStream(uploadPath),
+                model: 'whisper-1',
+            });
+
+            return transcription?.text || null;
+        } finally {
+            if (tempPath) {
+                try { fs.unlinkSync(tempPath); } catch { /* already gone */ }
+            }
+        }
+    }
+
+    /**
+     * Re-encode to mono 16 kHz 64 kbps MP3 — Whisper's preferred input and
+     * roughly 1 MB per minute of audio.
+     * Returns the temp path, or null if ffmpeg failed (caller skips transcription).
+     */
+    async _compressForWhisper(filePath, assetId) {
+        const os   = require('os');
+        const path = require('path');
+        const fs   = require('fs');
+        const { spawn } = require('child_process');
+
+        const outPath = path.join(os.tmpdir(), `whisper-${assetId}-${Date.now()}.mp3`);
+
+        return new Promise((resolve) => {
+            const ff = spawn('ffmpeg', [
+                '-i', filePath,
+                '-vn',                    // audio only — never decode video for this
+                '-ac', '1',               // mono
+                '-ar', '16000',           // 16 kHz
+                '-b:a', '64k',
+                '-f', 'mp3',
+                '-y', outPath,
+            ], { stdio: ['ignore', 'ignore', 'pipe'] });
+
+            let stderrTail = '';
+            ff.stderr.on('data', c => { stderrTail = (stderrTail + c).slice(-400); });
+
+            const timer = setTimeout(() => {
+                ff.kill('SIGKILL');
+                console.warn(`[MediaPipeline] ${assetId}: Whisper compression timed out`);
+                resolve(null);
+            }, 120_000);
+
+            ff.on('close', (code) => {
+                clearTimeout(timer);
+                if (code === 0 && fs.existsSync(outPath)) return resolve(outPath);
+                console.warn(
+                    `[MediaPipeline] ${assetId}: Whisper compression failed (code ${code}): ${stderrTail.slice(-200)}`
+                );
+                try { fs.unlinkSync(outPath); } catch { /* never created */ }
+                resolve(null);
+            });
+
+            ff.on('error', (err) => {
+                clearTimeout(timer);
+                console.warn(`[MediaPipeline] ${assetId}: ffmpeg unavailable for compression: ${err.message}`);
+                resolve(null);
+            });
         });
-
-        return transcription?.text || null;
     }
 }
 
