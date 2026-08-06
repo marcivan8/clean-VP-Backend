@@ -92,6 +92,14 @@ const DEPENDENCIES = [
         fix:     'Written by PatternLearner.persistAsync and /api/brain/observe-command (CLAUDE.md R37).',
     },
     {
+        table:   'story_intelligence',
+        expect:  'accumulating',
+        feature: 'Story map — beats, hook placement, sag windows, through-line delivery',
+        fix:     'Derived by StoryIntelligence.ensureMap from brainRoutes /analyze. Needs at least '
+               + '2 clips ON THE TIMELINE with transcripts — an unassembled project correctly '
+               + 'produces no row (CLAUDE.md R51).',
+    },
+    {
         table:   'project_intelligence',
         expect:  'accumulating',
         feature: 'Project map — project type, through-line, asset roles, coverage gaps',

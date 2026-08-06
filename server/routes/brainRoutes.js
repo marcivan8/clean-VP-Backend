@@ -31,6 +31,7 @@ const { PatternLearner }        = require('../brain/PatternLearner');
 const { UserProfileEngine }     = require('../brain/UserProfileEngine');
 const { MediaIntelligencePipeline } = require('../brain/media/MediaIntelligencePipeline');
 const { ProjectIntelligence }   = require('../brain/ProjectIntelligence');
+const { StoryIntelligence }     = require('../brain/StoryIntelligence');
 const { getOrCreateSession }    = require('../brain/Session');
 const { supabaseAdmin }         = require('../../config/database');
 const { ASSET_ANALYSIS_DONE }   = require('../brain/media/analysisStatus');
@@ -41,6 +42,7 @@ const learner        = new PatternLearner();
 const profileEngine  = new UserProfileEngine();
 const mediaIntel     = new MediaIntelligencePipeline();
 const projectIntel   = new ProjectIntelligence();
+const storyIntel     = new StoryIntelligence();
 
 // ── asset-analysis queue (lazy singleton) ────────────────────────────────────
 // Lazy so requiring this router never opens a Redis connection at import time
@@ -157,6 +159,31 @@ router.post('/analyze', authenticateUser, async (req, res) => {
             console.warn('[brainRoutes] /analyze: project map failed (continuing without it):', pmErr.message);
         }
 
+        // ── Enrich with the STORY MAP ─────────────────────────────────────────
+        // One level above the project map: does the ASSEMBLED cut actually tell
+        // the story? Fingerprinted on the CUT (clip order + durations), so this
+        // is a cheap read except on the requests where the timeline actually
+        // changed. Depends on the project map for the through-line, so it runs
+        // after it — but degrades fine without one.
+        //
+        // Best-effort, exactly like the project map: ensureMap() never throws,
+        // and a null story map means the Brain reasons without narrative context
+        // rather than the request failing.
+        let storyMap = null;
+        try {
+            if (projectState.projectId && Array.isArray(projectState.cut) && projectState.cut.length) {
+                storyMap = await storyIntel.ensureMap({
+                    projectId:  projectState.projectId,
+                    userId:     req.user.id,
+                    clips:      projectState.cut,
+                    projectMap,
+                    platform:   projectState.platform || null,
+                });
+            }
+        } catch (smErr) {
+            console.warn('[brainRoutes] /analyze: story map failed (continuing without it):', smErr.message);
+        }
+
         /** @type {import('../brain/types').BrainInput} */
         const input = {
             userId:   req.user.id,
@@ -169,6 +196,7 @@ router.post('/analyze', authenticateUser, async (req, res) => {
                 ...projectState,
                 assetIntelligence,
                 projectMap,
+                storyMap,
                 projectId: projectState.projectId || null,
             },
         };

@@ -137,6 +137,12 @@ class ContextEngine {
             // neither of which belongs in this pure/synchronous class.
             projectMap: state.projectMap || null,
 
+            // Narrative reading of the ASSEMBLED cut (story_intelligence row,
+            // attached by brainRoutes /analyze). The project map says what the
+            // project IS; this says whether the order the user built actually
+            // tells it. Passed through untouched for the same reason as above.
+            storyMap: state.storyMap || null,
+
             // How much of the bin actually has a completed profile. binReady is
             // the all-or-nothing version; this is what lets the Brain say
             // "3 of 5 analysed" instead of just "not ready".

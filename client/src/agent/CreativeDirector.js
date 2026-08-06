@@ -2,8 +2,36 @@ import { ContextGenerator } from './ContextGenerator.js';
 import useTimelineStore from '../store/useTimelineStore.js';
 
 /**
+ * ⚠️  SUPERSEDED — DO NOT WIRE THIS UP. See DirectorIntelligence.js (R52).
+ *
+ * This module has never had a single consumer, and wiring it up as written
+ * would ship broken UI. It emits `action.operation` for 14 operations, and
+ * TWELVE of them do not exist in CommandRegistry:
+ *
+ *   add_background_music, add_hook_text, add_ken_burns, add_zoom_punch,
+ *   apply_color_grade, extend_key_clips, generate_captions, reorder_for_hook,
+ *   split_long_clips, suggest_transition_points, trim_opening,
+ *   vary_clip_durations
+ *
+ * Only `add_sfx` and `add_transition` resolve. Every other proposal would
+ * render an Apply button routing to a handler that does not exist — R23
+ * requires every command to reach a real handler, and R30 requires a command
+ * that changes nothing to report failure rather than success.
+ *
+ * The rules it encodes (platform pacing targets, hook heuristics) are still
+ * reasonable and worth mining. But proposals must go through
+ * DirectorIntelligence.buildProposals(), which verifies every command against
+ * COMMAND_BY_ID and demotes anything unresolvable to advice instead of
+ * offering an action the editor cannot perform.
+ *
+ * If you want one of the twelve to become real: implement it properly first
+ * (EXT1's five files plus execution and validation), and only then let a
+ * proposal name it.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
  * Creative Director Agent for Viral Pilot
- * 
+ *
  * Suggests creative improvements - NEVER executes edits.
  * 
  * Responsibilities:
