@@ -281,10 +281,22 @@ class MediaIntelligencePipeline {
 
             const classification = await this.contentClassifier.classifyBin(assets);
 
-            // Update each asset with its classification
+            // NEVER call .catch() on a PostgREST query builder.
+            //
+            // The builder is THENABLE but not a Promise: it implements .then()
+            // and nothing else. `.eq(...).catch(fn)` therefore throws
+            // `TypeError: ....catch is not a function` SYNCHRONOUSLY, before the
+            // query is ever sent — so both of these updates never ran at all.
+            // The outer try/catch turned that into a single log line
+            // ("runBinClassification error: ... .catch is not a function") that
+            // looked like a runtime failure inside the query rather than a query
+            // that never happened. Await the builder and inspect `error`, the
+            // pattern used everywhere else in this file.
+            let classified = 0;
             for (const classifiedAsset of (classification.assets || [])) {
                 if (!classifiedAsset.id) continue;
-                await supabaseAdmin
+
+                const { error: assetErr } = await supabaseAdmin
                     .from('media_assets')
                     .update({
                         content_class:   classifiedAsset.content_class,
@@ -292,21 +304,37 @@ class MediaIntelligencePipeline {
                         related_to:      classifiedAsset.related_to || null,
                         confidence:      classifiedAsset.confidence,
                     })
-                    .eq('id', classifiedAsset.id)
-                    .catch(err => console.error('[MediaPipeline] asset class update error:', err.message));
+                    .eq('id', classifiedAsset.id);
+
+                if (assetErr) {
+                    console.error(
+                        `[MediaPipeline] asset class update failed for ${classifiedAsset.id}:`,
+                        assetErr.message
+                    );
+                } else {
+                    classified++;
+                }
             }
 
             // Update project with detected type
             if (classification.projectType || classification.projectDescription) {
-                await supabaseAdmin
+                const { error: projErr } = await supabaseAdmin
                     .from('projects')
                     .update({
                         detected_project_type: classification.projectType,
                         bin_classification:    classification,
                     })
-                    .eq('id', projectId)
-                    .catch(err => console.error('[MediaPipeline] project update error:', err.message));
+                    .eq('id', projectId);
+
+                if (projErr) {
+                    console.error('[MediaPipeline] project update failed:', projErr.message);
+                }
             }
+
+            console.log(
+                `[MediaPipeline] Bin classification persisted for ${classified}/` +
+                `${(classification.assets || []).length} asset(s)`
+            );
 
             console.log(`[MediaPipeline] Bin classification done: ${classification.projectType} for project ${projectId}`);
         } catch (err) {

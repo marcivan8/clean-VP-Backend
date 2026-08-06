@@ -331,6 +331,57 @@ check('an empty profile is read as NEW, not unskilled',
     }
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// R49 · A PostgREST query builder is thenable, NOT a Promise.
+//
+// `.eq(...).catch(fn)` throws `TypeError: .catch is not a function`
+// SYNCHRONOUSLY, before the query is sent — so the write never happens at all.
+// Both bin-classification updates were written that way and had never once
+// executed; the outer try/catch turned it into a single log line that read like
+// a failure inside the query rather than a query that never ran.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n── supabase writes never use .catch() on the builder ──');
+{
+    const files = [
+        'server/brain/media/MediaIntelligencePipeline.js',
+        'server/brain/ProjectIntelligence.js',
+        'server/brain/UserProfileEngine.js',
+        'routes/polarWebhook.js',
+    ];
+
+    for (const rel of files) {
+        let raw;
+        try { raw = require('fs').readFileSync(require('path').resolve(__dirname, '..', rel), 'utf8'); }
+        catch { continue; }
+
+        // Strip comments first — the comment in MediaIntelligencePipeline that
+        // EXPLAINS this bug contains the offending pattern verbatim, so a naive
+        // grep reports the very thing it is warning about.
+        const src = raw
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .split('\n').filter(l => !/^\s*(\/\/|\*)/.test(l)).join('\n');
+
+        // A .catch() chained directly onto a builder terminator (.eq/.select/
+        // .single/.maybeSingle) is the dangerous shape. Awaiting the builder and
+        // inspecting `error` is the correct one.
+        const bad = src.match(/\.(eq|select|single|maybeSingle|upsert|insert)\([^)]*\)\s*\n?\s*\.catch\(/g);
+        check(`${rel.split('/').pop()} has no .catch() on a query builder`,
+            !bad,
+            bad ? bad.join(' | ') : '');
+    }
+
+    const pipeSrc = require('fs').readFileSync(
+        require('path').resolve(__dirname, '../server/brain/media/MediaIntelligencePipeline.js'), 'utf8');
+
+    check('bin classification inspects the returned error instead',
+        /const \{ error: assetErr \} = await supabaseAdmin/.test(pipeSrc)
+        && /if \(assetErr\)/.test(pipeSrc));
+    check('it reports how many assets were actually persisted',
+        /Bin classification persisted for \$\{classified\}/.test(pipeSrc),
+        'a count is the only proof the write landed (R38)');
+}
+
 console.log(
     failures === 0
         ? '\nALL CREATOR MEMORY TESTS PASSED\n'
