@@ -35,6 +35,7 @@
  */
 
 import useTimelineStore from '../store/useTimelineStore.js';
+import { authFetch } from '../utils/authFetch.js';
 
 /** assetId → { peaks, duration } for this session. */
 const _memCache = new Map();
@@ -112,9 +113,16 @@ function _writePersisted(assetId, data) {
  * Throws on failure; the caller decides whether to retry.
  */
 async function _fetchPeaks(assetId, gcsPath, proxyUrl, signal, force = false) {
-    const res = await fetch('/api/waveform/extract', {
+    // authFetch, NOT bare fetch. The route runs on optionalAuth, so a missing
+    // Authorization header does not fail — it silently yields `req.user ===
+    // undefined`, and the route's `req.user?.id || 'anonymous'` then wrote every
+    // user's peaks to a SHARED `waveforms/anonymous/` prefix. Two problems:
+    // asset ids from different accounts collide in one namespace, and the path
+    // diverges from the `waveforms/{userId}/{assetId}.json` contract in R41.
+    // Exactly the trap TD3 warns about — a new fetch inside the client layer
+    // that forgot authFetch.
+    const res = await authFetch('/api/waveform/extract', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assetId, gcsPath, proxyUrl, force }),
         signal,
     });

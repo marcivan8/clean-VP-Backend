@@ -199,6 +199,77 @@ ${(() => {
     return lines.filter(l => l !== '').join('\n');
 })()}
 
+═══════════════════════════════════════════════
+THE CUT AS ASSEMBLED (does this order tell the story?)
+═══════════════════════════════════════════════
+${(() => {
+    const s = ctx.storyMap;
+    if (!s || s.status === 'failed') {
+        return '(not read yet — do NOT claim anything about how this cut flows, where the\n' +
+               'hook is, or whether it drags. You may ask, or suggest assembling more first.)';
+    }
+    if (s.status === 'insufficient_data') {
+        return `(not enough to read: ${s.through_line_note || 'too little on the timeline'}.\n` +
+               'Advise on getting material onto the timeline; do NOT describe a story that isn\'t there yet.)';
+    }
+    const beats = Array.isArray(s.beats) ? s.beats : [];
+    const sags  = Array.isArray(s.sag_windows) ? s.sag_windows : [];
+    const iss   = Array.isArray(s.issues) ? s.issues : [];
+    return [
+        `Length read:  ${s.analysed_sec ?? '?'}s across ${s.clip_count ?? 0} clip(s)`,
+        `Hook:         ${s.hook_strength || 'unknown'}` +
+            `${s.hook_at_sec !== null && s.hook_at_sec !== undefined ? ` — lands at ${s.hook_at_sec}s` : ''}` +
+            `${s.hook_note ? ` (${s.hook_note})` : ''}`,
+        `Through-line: ${s.delivers_through_line === true ? 'delivered by this order'
+            : s.delivers_through_line === false ? 'NOT delivered by this order' : 'unclear'}` +
+            `${s.through_line_note ? ` — ${s.through_line_note}` : ''}`,
+        '',
+        'Beats:',
+        beats.length === 0
+            ? '  (none identified)'
+            : beats.map(b => `  — ${b.startSec}s–${b.endSec}s ${b.beat}${b.summary ? `: ${b.summary}` : ''}`).join('\n'),
+        '',
+        'Sags:',
+        sags.length === 0
+            ? '  (none — the cut holds attention throughout)'
+            : sags.map(w => `  — [${w.severity}] ${w.startSec}s–${w.endSec}s: ${w.reason}`).join('\n'),
+        '',
+        'Issues with this cut:',
+        iss.length === 0
+            ? '  (none identified — do NOT invent one to fill this space)'
+            : iss.map(i => `  — [${i.severity}]${i.atSec !== null && i.atSec !== undefined ? ` at ${i.atSec}s` : ''} ${i.issue}${i.suggestion ? ` → ${i.suggestion}` : ''}`).join('\n'),
+    ].filter(l => l !== '').join('\n');
+})()}
+
+WHAT YOU CAN ACTUALLY OFFER TO DO:
+The editor can only perform commands that exist. When you propose an action,
+either name something the user can ask for in plain language and have happen,
+or frame it explicitly as an observation ("worth doing by hand", "something to
+shoot next time"). NEVER imply the app will do something it cannot.
+In particular: there is no command that reorders the timeline to fix a buried
+hook, and none that trims the opening. Those are real findings you SHOULD
+raise — as advice, describing what the user should do, not as an offer.
+What you CAN offer, when the finding calls for it: removing silences,
+generating captions on the timeline, adding a text overlay, organising clips,
+applying camera angles, zoom rhythm, sound effects, colour grade, transitions,
+audio normalisation, aspect-ratio changes and export.
+
+CUT RULES — this section is about what the user BUILT, not what they own:
+- This is the strongest material you have, because it is the only thing that
+  describes the SEQUENCE. Prefer a finding here over a generic pacing tip.
+- Always cite the TIME. "Your hook lands at 40s" is actionable; "add a hook"
+  is not, and is wrong when a hook already exists in the wrong place.
+- A sag is a fact about the cut, not a judgement of the footage. Say what to
+  do with it (tighten, cut away, reorder), never that the material is bad.
+- If the through-line is marked NOT delivered, that outranks everything else
+  in this prompt — the cut contains the pieces but buries the point, and
+  saying so is the single most useful thing you can tell them.
+- If the cut section says "not read yet" or "not enough to read", you do NOT
+  know how this edit flows. Advise from the timeline shape and transcript
+  only, and never describe beats, sags or hook placement.
+- The cut map reflects the LAST analysed state. If the user says they just
+  changed something, believe them and treat the map as possibly out of date.
+
 PROJECT MAP RULES — this section is the anchor for everything you say:
 - The through-line is what the video is ABOUT. Every suggestion must serve it.
   If you propose something that doesn't, say how it serves the through-line or

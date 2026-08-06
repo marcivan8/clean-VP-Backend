@@ -331,6 +331,104 @@ check('an empty profile is read as NEW, not unskilled',
     }
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// R49 · A PostgREST query builder is thenable, NOT a Promise.
+//
+// `.eq(...).catch(fn)` throws `TypeError: .catch is not a function`
+// SYNCHRONOUSLY, before the query is sent — so the write never happens at all.
+// Both bin-classification updates were written that way and had never once
+// executed; the outer try/catch turned it into a single log line that read like
+// a failure inside the query rather than a query that never ran.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n── supabase writes never use .catch() on the builder ──');
+{
+    const files = [
+        'server/brain/media/MediaIntelligencePipeline.js',
+        'server/brain/ProjectIntelligence.js',
+        'server/brain/UserProfileEngine.js',
+        'routes/polarWebhook.js',
+    ];
+
+    for (const rel of files) {
+        let raw;
+        try { raw = require('fs').readFileSync(require('path').resolve(__dirname, '..', rel), 'utf8'); }
+        catch { continue; }
+
+        // Strip comments first — the comment in MediaIntelligencePipeline that
+        // EXPLAINS this bug contains the offending pattern verbatim, so a naive
+        // grep reports the very thing it is warning about.
+        const src = raw
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .split('\n').filter(l => !/^\s*(\/\/|\*)/.test(l)).join('\n');
+
+        // A .catch() chained directly onto a builder terminator (.eq/.select/
+        // .single/.maybeSingle) is the dangerous shape. Awaiting the builder and
+        // inspecting `error` is the correct one.
+        const bad = src.match(/\.(eq|select|single|maybeSingle|upsert|insert)\([^)]*\)\s*\n?\s*\.catch\(/g);
+        check(`${rel.split('/').pop()} has no .catch() on a query builder`,
+            !bad,
+            bad ? bad.join(' | ') : '');
+    }
+
+    const pipeSrc = require('fs').readFileSync(
+        require('path').resolve(__dirname, '../server/brain/media/MediaIntelligencePipeline.js'), 'utf8');
+
+    check('bin classification inspects the returned error instead',
+        /const \{ error: assetErr \} = await supabaseAdmin/.test(pipeSrc)
+        && /if \(assetErr\)/.test(pipeSrc));
+    check('it reports how many assets were actually persisted',
+        /Bin classification persisted for \$\{classified\}/.test(pipeSrc),
+        'a count is the only proof the write landed (R38)');
+}
+
+// ── R50 · Whisper's 25 MB limit is enforced before the upload ────────────────
+// _transcribe() streamed the file straight in with no size check, so a long
+// clip failed outright with
+//   "413: Maximum content size limit (26214400) exceeded (26368000 bytes read)"
+// jobs/audioProcessor.js has always had a WHISPER_LIMIT guard; the Brain's own
+// transcription path never did.
+console.log('\n── transcription respects the Whisper size limit ──');
+{
+    const pipe = read('server/brain/media/MediaIntelligencePipeline.js');
+
+    check('a size limit is declared',
+        /WHISPER_LIMIT\s*=\s*25 \* 1024 \* 1024/.test(pipe));
+    check('the file size is measured before upload',
+        /fs\.statSync\(filePath\)/.test(pipe));
+    check('oversized audio is compressed, not blindly uploaded',
+        /_compressForWhisper\(/.test(pipe));
+    check('compression targets mono 16 kHz (what Whisper wants)',
+        /'-ac', '1'/.test(pipe) && /'-ar', '16000'/.test(pipe));
+    check('video is never decoded for a transcript',
+        /'-vn'/.test(pipe),
+        'decoding video to get audio is the R36 waste all over again');
+    check('a still-too-large file is skipped rather than 413ing',
+        /still \$\{\(compressed/.test(pipe));
+    check('the temp file is always cleaned up',
+        /finally \{[\s\S]{0,200}unlinkSync\(tempPath\)/.test(pipe));
+    check('transcription uses the audio capability (stays on the real API)',
+        /getAIClient\(\{ capability: 'audio' \}\)/.test(pipe),
+        'Ollama has no audio API — R45');
+}
+
+// ── R50 · The waveform route is called WITH auth ─────────────────────────────
+// optionalAuth does not fail on a missing header — it just leaves req.user
+// undefined, and the route then wrote every user's peaks to a shared
+// `waveforms/anonymous/` prefix.
+console.log('\n── waveform extraction is called with credentials ──');
+{
+    const engine = read('client/src/services/WaveformEngine.js');
+
+    check('WaveformEngine imports authFetch',
+        /import \{ authFetch \}/.test(engine));
+    check('the extract call uses authFetch, not bare fetch',
+        /authFetch\('\/api\/waveform\/extract'/.test(engine),
+        'bare fetch sends no Authorization header — peaks land under anonymous/');
+    check('it no longer hand-sets Content-Type (authFetch owns that)',
+        !/authFetch\('\/api\/waveform\/extract'[\s\S]{0,200}'Content-Type'/.test(engine));
+}
+
 console.log(
     failures === 0
         ? '\nALL CREATOR MEMORY TESTS PASSED\n'

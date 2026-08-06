@@ -102,6 +102,52 @@ if (!creds || !bucketName || bucketName === 'your-bucket-name') {
             }
         }
 
+        // ── Connection pooling + retry ───────────────────────────────────────
+        // Without these the SDK uses Node's DEFAULT https agent: unbounded
+        // sockets, keep-alive managed by the remote. Under an upload burst
+        // (5 files ⇒ ~8 waveform extracts + ~6 proxy range reads + waveform
+        // JSON reads/writes + thumbnail upload + diarize downloads, all against
+        // GCS at once) two things go wrong:
+        //
+        //   1. A pooled socket that GCS has already closed gets picked for a new
+        //      request, and the write fails as "socket hang up" — observed
+        //      hitting getMetadata, range reads, whole-object reads AND uploads
+        //      within the same two seconds.
+        //   2. Nothing bounds total concurrency, so the process opens as many
+        //      connections as there are in-flight requests and starves itself of
+        //      CPU (ffmpeg was decoding at speed=0.18x during that burst).
+        //
+        // maxSockets is the right lever for both: it is a real backpressure
+        // mechanism (requests queue instead of piling on), and it keeps the
+        // keep-alive pool small enough to stay warm rather than going stale.
+        // R47's per-request retries stay as the last line of defence for the
+        // drops that still happen.
+        const https = require('https');
+        storageOpts.retryOptions = {
+            autoRetry: true,
+            maxRetries: 3,
+            // Retry the transient network faults, not 4xx.
+            retryableErrorFn: (err) => {
+                const code = err?.code || err?.statusCode;
+                return (
+                    code === 'ECONNRESET' || code === 'ETIMEDOUT' ||
+                    code === 'EPIPE'      || code === 'ECONNREFUSED' ||
+                    code === 'EAI_AGAIN'  ||
+                    /socket hang up/i.test(err?.message || '') ||
+                    code === 429 || (typeof code === 'number' && code >= 500)
+                );
+            },
+        };
+        // Bounded, warm pool. 25 is comfortably above steady-state need and well
+        // below what a burst would otherwise open.
+        storageOpts.agent = new https.Agent({
+            keepAlive: true,
+            keepAliveMsecs: 10_000,
+            maxSockets: Number(process.env.GCS_MAX_SOCKETS || 25),
+            maxFreeSockets: 10,
+            timeout: 60_000,
+        });
+
         const gcsStorage = new Storage(storageOpts);
         const gcsBucket = gcsStorage.bucket(bucketName);
 

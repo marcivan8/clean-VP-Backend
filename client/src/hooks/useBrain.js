@@ -120,6 +120,40 @@ function buildProjectState() {
             type:      t.type,
             clipCount: (t.clips || []).length,
         })),
+
+        // ── The assembled CUT, in play order (Story Intelligence, R51) ───────
+        // Everything else here describes the bin or aggregate counts. The story
+        // map needs the SEQUENCE: which clip plays when, and what is said in it.
+        // Per-clip transcript is sliced from the caption/word list by the clip's
+        // own source window, the same way organize_clips does it — the words
+        // belong to the source file, not the timeline position.
+        cut: (() => {
+            const words = captions || [];
+            return tracks
+                .filter(t => t.type === 'video')
+                .flatMap(t => (t.clips || []).map(c => ({ ...c, _trackId: t.id })))
+                .sort((a, b) => (a.start ?? 0) - (b.start ?? 0))
+                .slice(0, 60)
+                .map(c => {
+                    const from = c.offset ?? 0;
+                    const to   = from + (c.duration ?? 0);
+                    const said = words
+                        .filter(w => (w.start ?? 0) >= from - 0.1 && (w.end ?? 0) <= to + 0.1)
+                        .map(w => w.word || w.text || '')
+                        .join(' ')
+                        .trim()
+                        .slice(0, 300);
+                    const asset = assets.find(a => a.id === c.assetId);
+                    return {
+                        id:         c.id,
+                        assetId:    c.assetId || null,
+                        name:       asset?.name || c.name || null,
+                        start:      c.start ?? 0,
+                        duration:   c.duration ?? 0,
+                        transcript: said || '',
+                    };
+                });
+        })(),
     };
 }
 

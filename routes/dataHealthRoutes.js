@@ -28,7 +28,8 @@
 const express = require('express');
 const router  = express.Router();
 
-const { checkDataHealth } = require('../services/DataHealthProbe');
+const { checkDataHealth }  = require('../services/DataHealthProbe');
+const { checkQueueHealth } = require('../services/QueueHealthProbe');
 
 function requireAdminSecret(req, res, next) {
     const expected = process.env.ADMIN_SECRET;
@@ -57,6 +58,28 @@ router.get('/data', requireAdminSecret, async (_req, res) => {
         return res.json(report);
     } catch (err) {
         console.error('[dataHealthRoutes] /data error:', err.message);
+        return res.status(500).json({ error: err.message });
+    }
+});
+
+// ── GET /api/health/queues ───────────────────────────────────────────────────
+// BullMQ queue depth. Answers the question row counts CANNOT: are the jobs
+// being consumed at all?
+//
+// In production the workers run as a SEPARATE Railway service with its own
+// deploy — `index.js` only starts them inline when GCS is unconfigured. So the
+// API can be running current code while the worker runs something months old,
+// and nothing in the API's own logs would show it. `media_assets` sitting at 0
+// rows through three separate code fixes is what motivated this: each fix was
+// real, but none of them established whether the queue was being drained.
+//
+// Same access rules and same never-5xx-for-a-data-problem contract as /data.
+router.get('/queues', requireAdminSecret, async (_req, res) => {
+    try {
+        const report = await checkQueueHealth();
+        return res.json(report);
+    } catch (err) {
+        console.error('[dataHealthRoutes] /queues error:', err.message);
         return res.status(500).json({ error: err.message });
     }
 });

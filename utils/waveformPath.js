@@ -31,17 +31,39 @@
  * @returns {string|null}
  */
 function deriveGcsPath(rawGcsPath, proxyUrl) {
-    if (rawGcsPath) return rawGcsPath;
-    if (!proxyUrl) return null;
-
     const gcsMarker   = '/api/proxy/gcs-media/';
     const localMarker = '/uploads/';
 
-    let idx = proxyUrl.indexOf(gcsMarker);
-    if (idx !== -1) return stripQuery(proxyUrl.slice(idx + gcsMarker.length));
+    // PROXY FIRST. This used to be `if (rawGcsPath) return rawGcsPath;`
+    // unconditionally, which meant that whenever the client sent a gcsPath —
+    // which it does for every clip, since asset.gcsPath is set from the RAW
+    // upload key — ffmpeg decoded the original camera file and the proxy was
+    // never used, no matter what proxyUrl said.
+    //
+    // R34 established that anything ffmpeg-decoding a source must prefer the
+    // proxy: raw phone footage is routinely HEVC with its moov atom at the END,
+    // so ffmpeg can't produce output until it has buffered nearly the whole
+    // object off GCS. Observed in production as two consecutive
+    // "ffmpeg decode timed out after 90s" failures on raw .MOV files whose
+    // proxies had already finished encoding — extraction from the proxy would
+    // have been trivial. R34 fixed the CLIENT callers; this resolver, which
+    // every one of them funnels through, still preferred raw.
+    //
+    // Proxies are always faststart and never trimmed, so timestamps carry over
+    // 1:1 and the peaks are identical.
+    if (proxyUrl) {
+        let idx = proxyUrl.indexOf(gcsMarker);
+        if (idx !== -1) return stripQuery(proxyUrl.slice(idx + gcsMarker.length));
 
-    idx = proxyUrl.indexOf(localMarker);
-    if (idx !== -1) return stripQuery(proxyUrl.slice(idx + localMarker.length));
+        idx = proxyUrl.indexOf(localMarker);
+        if (idx !== -1) return stripQuery(proxyUrl.slice(idx + localMarker.length));
+    }
+
+    // No usable proxy — fall back to the raw upload. Slower and prone to the
+    // timeout above, but better than no waveform at all (and the only option
+    // for audio-only assets, which have no proxy concept).
+    if (rawGcsPath) return rawGcsPath;
+    if (!proxyUrl) return null;
 
     // Shape 3: a raw/signed GCS https URL
     //   https://storage.googleapis.com/<bucket>/<path>[?X-Goog-Signature=…]

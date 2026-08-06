@@ -223,10 +223,24 @@ function extractPeaks(inputPath, inputStream) {
             // identically as `peaks: []`, and the caller had no way to tell them
             // apart — so a legitimately silent file was cached as an empty peaks
             // JSON forever and every later read failed. See CLAUDE.md R41.
+            //
+            // IT MUST BE GATED ON `code === 0`. The first version of this was
+            // `pcm.length > 0 && peaks.length > 0`, which is ALSO false whenever
+            // extraction merely FAILED — and because the client caches a
+            // hasAudio:false result as a FINAL answer ("render an empty track,
+            // stop asking"), a 90-second ffmpeg timeout on a raw HEVC .MOV
+            // presented permanently as "this clip has no audio". Observed in
+            // production on two clips whose transcripts contained 84 and 168
+            // words respectively — so they self-evidently had audio. A failed
+            // extraction must stay retryable; only a CLEAN exit may declare a
+            // source silent.
+            const cleanExit = code === 0;
             finish(null, {
                 peaks,
                 duration: sampleCount / SAMPLE_RATE,
-                hasAudio: pcm.length > 0 && peaks.length > 0,
+                hasAudio: cleanExit ? (pcm.length > 0 && peaks.length > 0) : null,
+                // null = "we don't know" — extraction did not complete cleanly.
+                extractionFailed: !cleanExit,
             });
         });
     });
@@ -317,10 +331,37 @@ router.post('/extract', optionalAuth, async (req, res) => {
         // attempt. `hasAudio` tells the client which case this is, so it can
         // render an empty track as a FINAL answer instead of retrying forever.
         if (!peaksData.peaks?.length) {
+            // `hasAudio: null` means ffmpeg did NOT exit cleanly — we produced no
+            // peaks because extraction broke, not because the source is silent.
+            // Forwarding `false` here would let the client cache "this clip has
+            // no audio" as a final answer over what is really a transient
+            // failure; that is what happened in production to two clips whose
+            // transcripts proved they had audio.
+            const unknown = peaksData.hasAudio === null || peaksData.extractionFailed;
+
             console.warn(
-                `[waveformRoutes] No peaks produced for ${assetId} `
-                + `(hasAudio=${peaksData.hasAudio}) — returning inline, not caching.`
+                `[waveformRoutes] No peaks produced for ${assetId} — `
+                + (unknown
+                    ? 'extraction did NOT complete cleanly; reporting as retryable, not silent.'
+                    : 'source genuinely carries no audio. Returning inline, not caching.')
             );
+
+            if (unknown) {
+                // 500, NOT 503. WaveformEngine deliberately treats 503 as
+                // backpressure that does NOT consume an attempt (so a saturated
+                // queue can't make it give up on a healthy asset) — returning
+                // 503 here would make a permanently-failing source retry every
+                // 5s forever. A failed extraction needs the BOUNDED retry path:
+                // a real error, a consumed attempt, and eventually a clean
+                // give-up. The only thing that was ever wrong here was calling
+                // it "silent"; the error path itself was correct.
+                return res.status(500).json({
+                    error:     'Waveform extraction did not complete cleanly.',
+                    retryable: true,
+                    hasAudio:  null,
+                });
+            }
+
             return res.json({
                 peaksUrl: null,
                 cached:   false,

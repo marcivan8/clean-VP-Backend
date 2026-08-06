@@ -73,17 +73,49 @@ class ClipAnalysisServiceClass {
             `[ClipAnalysisService] POST /classify-clips — ${clips.length} clips, ${totalFrames} total frames`
         );
 
-        const response = await axios.post(
-            `${BASE_URL}/classify-clips`,
-            { clips },
-            {
-                timeout:          TIMEOUT_MS,
-                headers:          { 'Content-Type': 'application/json' },
-                // Frames are large base64 blobs — allow big payloads
-                maxContentLength: Infinity,
-                maxBodyLength:    Infinity,
-            },
-        );
+        let response;
+        try {
+            response = await axios.post(
+                `${BASE_URL}/classify-clips`,
+                { clips },
+                {
+                    timeout:          TIMEOUT_MS,
+                    headers:          { 'Content-Type': 'application/json' },
+                    // Frames are large base64 blobs — allow big payloads
+                    maxContentLength: Infinity,
+                    maxBodyLength:    Infinity,
+                },
+            );
+        } catch (err) {
+            // axios stringifies to a bare "Request failed with status code 500",
+            // which tells you nothing about WHY the Python service rejected the
+            // call — and this path is a silent fallback, so that one line was
+            // the only evidence anyone would ever see. Surface the response body
+            // and the payload shape, since the usual causes are a payload the
+            // service can't parse, a model that failed to load on its side, or
+            // a frame count large enough to OOM it.
+            const status = err.response?.status;
+            const body   = err.response?.data;
+            const detail = typeof body === 'string'
+                ? body.slice(0, 500)
+                : JSON.stringify(body ?? {}).slice(0, 500);
+
+            console.error(
+                `[ClipAnalysisService] /classify-clips failed — status=${status ?? 'none'} ` +
+                `clips=${clips.length} frames=${totalFrames} url=${BASE_URL}\n` +
+                `  response: ${detail || '(empty body)'}\n` +
+                `  cause:    ${err.code || err.message}`
+            );
+
+            // Re-throw with the detail attached so the caller's own log line is
+            // actionable too, rather than repeating the bare axios message.
+            const wrapped = new Error(
+                `classify-clips ${status ?? 'request'} failed: ${detail || err.message}`
+            );
+            wrapped.status = status;
+            wrapped.serviceBody = body;
+            throw wrapped;
+        }
 
         const { clips: resultClips = [], num_topic_clusters = 1 } = response.data;
 
