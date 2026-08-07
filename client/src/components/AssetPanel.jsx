@@ -139,19 +139,54 @@ export default function AssetPanel({ onClose }) {
     // SFX → add to audio track
     const handleAddSFX = useCallback(sfx => {
         const state = useTimelineStore.getState();
-        const audioTrack = state.tracks?.find(t => t.type === 'audio');
-        if (!audioTrack) return;
-        // Naive placement at playhead — executor resolves $playhead
-        const atTime = state.playheadTime || 0;
+
+        // A sound effect with no playable URL cannot become a clip. The old code
+        // fell back to `sfx.id` — not a URL at all — which produced a clip
+        // pointing at nothing. Refuse loudly instead of adding a dead clip.
+        const src = sfx.preview_url || sfx.asset_url || sfx.file_url || null;
+        if (!src) {
+            console.warn(`[AssetPanel] SFX "${sfx.display_name || sfx.name || sfx.id}" has no playable URL — not adding.`);
+            return;
+        }
+
+        // CREATE the audio track when there isn't one.
+        //
+        // This used to be `if (!audioTrack) return;` — a silent no-op. Projects
+        // do not start with an audio track, so on most projects clicking a sound
+        // effect did literally nothing, with no error and no feedback: the exact
+        // "looks complete in the UI, does nothing underneath" pattern this
+        // codebase keeps hitting (R33/R37/R46/R52).
+        let audioTrack = state.tracks?.find(t => t.type === 'audio');
+        if (!audioTrack) {
+            const newId = state.addTrack?.('audio');
+            audioTrack = useTimelineStore.getState().tracks?.find(
+                t => t.id === newId || t.type === 'audio'
+            );
+            if (!audioTrack) {
+                console.error('[AssetPanel] Could not create an audio track for the SFX.');
+                return;
+            }
+        }
+
+        // Use the sound's REAL length. The hardcoded 2s made every effect the
+        // same size on the timeline regardless of what it actually is — a 0.3s
+        // whoosh and a 6s riser both became 2s, so the clip never matched the
+        // audio the user just previewed.
+        const duration = Number(sfx.duration) > 0 ? Number(sfx.duration) : 2;
+
+        const atTime = state.playheadTime ?? state.currentTime ?? 0;
+
         state.addClip?.(audioTrack.id, {
             id:       `sfx_${Date.now()}`,
             type:     'audio',
-            src:      sfx.preview_url || sfx.asset_url || sfx.id,
+            src,
+            url:      src,          // some consumers read `url`, others `src`
             assetId:  sfx.id,
             start:    atTime,
-            duration: 2,
-            volume:   0.8,
-            name:     sfx.display_name || sfx.name,
+            duration,
+            // The library ships a per-sound recommended level; fall back to 0.8.
+            volume:   Number(sfx.recommended_volume) > 0 ? Number(sfx.recommended_volume) : 0.8,
+            name:     sfx.display_name || sfx.name || 'SFX',
             isSFX:    true,
         });
     }, []);

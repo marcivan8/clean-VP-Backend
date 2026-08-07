@@ -1043,7 +1043,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     // Standard export path: FFmpeg + drawtext via BullMQ (jobs/exportProcessor.js).
     // Fast, stable, the default for every user.
     const handleFfmpegExport = async (settings) => {
-        const { tracks, duration, assets } = useTimelineStore.getState();
+        const { tracks, duration, assets, projectLUTId } = useTimelineStore.getState();
         const { authFetch }     = await import('../utils/authFetch.js');
         const { pollJobResult } = await import('../utils/jobPoller.js');
 
@@ -1056,6 +1056,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     platform: settings.platform || null,
                     quality:  settings.quality  || 'high',
                     resolution: settings.resolution || '1080p',
+                    // The selected colour grade. Stored in the timeline store but
+                    // never sent, so the export had no way to know a LUT was
+                    // chosen — one half of why selecting a LUT changed no pixel
+                    // (see CLAUDE.md R55). Null is the normal, ungraded case.
+                    projectLUTId: projectLUTId || null,
                 },
             }),
         });

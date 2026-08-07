@@ -535,6 +535,32 @@ module.exports = async function processExportJob(job) {
 
     const scaleFilter = buildScaleFilter(targetWidth, targetHeight);
 
+    // ── Project colour grade (LUT) ──────────────────────────────────────────
+    // server/lut-engine/library/LUTExportIntegration.js has always known how to
+    // download a .cube and build the `lut3d` filter string — nothing ever called
+    // it, so selecting a LUT changed no pixel in the export (nor in the preview;
+    // see R55). Resolved ONCE per job rather than per clip: it downloads a file,
+    // and the grade is a project-level setting.
+    //
+    // FAILS OPEN BY DESIGN: getLUTFilterForExport() returns null on every error
+    // path (missing LUT, no gcs_path, download failure), and a null simply means
+    // no filter is added. An export must never fail because a colour grade could
+    // not be fetched — an ungraded video is a far better outcome than no video.
+    let lutFilter = null;
+    const projectLUTId = settings.projectLUTId || timeline?.projectLUTId || null;
+    if (projectLUTId) {
+        try {
+            const { lutExportIntegration } = require('../server/lut-engine/library/LUTExportIntegration.js');
+            lutFilter = await lutExportIntegration.getLUTFilterForExport(projectLUTId, tmpDir);
+            console.log(lutFilter
+                ? `🎨 [ExportJob ${job.id}] LUT ${projectLUTId} applied: ${lutFilter}`
+                : `🎨 [ExportJob ${job.id}] LUT ${projectLUTId} could not be resolved — exporting ungraded`);
+        } catch (lutErr) {
+            console.warn(`[ExportJob ${job.id}] LUT lookup failed (exporting ungraded):`, lutErr.message);
+            lutFilter = null;
+        }
+    }
+
     await job.updateProgress(5);
 
     // ── STEP 1: Trim each clip into a segment ──────────────────────────────
@@ -705,6 +731,12 @@ module.exports = async function processExportJob(job) {
                     console.log(`  [rhythm] clip "${clip.name}": animated zoom (${scaleKfs.length} scale keyframes)`);
                 }
             }
+
+            // Colour grade LAST, so it grades the final composed frame rather
+            // than an intermediate one — after rotation correction, crop,
+            // zoompan and scale/pad. Grading before the scale would apply the
+            // LUT to padding bars as well.
+            if (lutFilter) vFilters.push(lutFilter);
 
             cmd.videoFilters(vFilters.join(','));
 

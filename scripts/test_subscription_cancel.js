@@ -44,7 +44,16 @@ function caseBody(eventName) {
     // Read to the next `case '` at the same level, or the switch's default.
     const rest  = src.slice(start + 1);
     const next  = rest.search(/\n\s{12}(case '|default:)/);
-    return next === -1 ? rest.slice(0, 800) : rest.slice(0, next);
+    const body  = next === -1 ? rest.slice(0, 800) : rest.slice(0, next);
+
+    // STRIP COMMENTS. The comments explaining these branches legitimately
+    // mention setPlan() — e.g. the renewal note says the first charge is
+    // "already covered by the plan-confirmation email that setPlan() sends" —
+    // and a naive grep then reports the explanation as the violation. Third
+    // time this exact trap has bitten in this codebase; strip first, always.
+    return body
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .split('\n').filter(l => !/^\s*(\/\/|\*)/.test(l)).join('\n');
 }
 
 // ── 1 · canceled ≠ revoked ───────────────────────────────────────────────────
@@ -201,6 +210,40 @@ section('6 · The page emails link to actually exists');
     check('the dashboard links to it',
         /navigate\('\/account'\)/.test(dashSrc),
         'a route with no in-app entry point is barely better than no route');
+}
+
+// ── 7 · Renewal receipts (R54) ───────────────────────────────────────────────
+// Polar emits order.created on every successful charge INCLUDING renewals.
+// Nothing listened, so a customer was billed monthly and only ever heard from
+// us once — at signup.
+section('7 · A renewal charge produces a receipt');
+{
+    check('order.created is handled', /case 'order\.created':/.test(src));
+    check('only renewal charges are announced',
+        /cycle\|renewal\|recurring/.test(src),
+        'the first charge is already covered by the plan email — both would double-mail');
+    check('it sends the renewal email type',
+        /sendEmail\('renewal'/.test(src));
+    check('the receipt never changes the plan',
+        (() => {
+            const i = src.indexOf('async function sendRenewalReceipt');
+            const body = src.slice(i, src.indexOf('\nrouter.', i));
+            return i !== -1 && !/setPlan\(/.test(body);
+        })(),
+        'a renewal is a charge, not a tier transition (R46)');
+    check('the amount comes from the order, not a hardcoded price',
+        /totalAmount|total_amount/.test(src),
+        'a receipt showing the wrong number is worse than showing none');
+    check('a failed email cannot fail the webhook',
+        /renewal receipt failed \(non-blocking\)/.test(src),
+        'a non-2xx makes Polar retry the whole billing event');
+
+    const edge = fs.readFileSync(
+        path.resolve(__dirname, '../supabase/functions/send-email/index.ts'), 'utf8');
+    check('the edge function knows the renewal type', /case 'renewal':/.test(edge));
+    check('its subject says renewed, not live',
+        /has renewed/.test(edge),
+        'telling a returning customer their plan "is live" reads like a new signup');
 }
 
 console.log(`\n${'─'.repeat(60)}`);
