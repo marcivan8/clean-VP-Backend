@@ -77,6 +77,13 @@ const VideoPlayer = () => {
     // Native video dimensions from onMetadata — used to pin canvas to source resolution
     // so that ResizeObserver doesn't downgrade it back to container size.
     const nativeVideoDimRef = useRef(null);
+    // Project frame aspect as [w, h]. Held in a ref because handleResize lives
+    // in a ResizeObserver effect with empty deps — reading the store value
+    // directly there would capture the mount-time ratio forever, so switching
+    // 9:16 → 16:9 would never resize the buffer. Same trap as R42's labelWRef.
+    const frameAspectRef = useRef([16, 9]);
+    // Lets the aspect-ratio effect re-run the buffer sizing without duplicating it.
+    const resizeHandlerRef = useRef(null);
 
     // Connect to store
     // NOTE: we subscribe to the full `tracks` array for clip lookups, but use
@@ -152,13 +159,21 @@ const VideoPlayer = () => {
             onMetadata: (videoWidth, videoHeight) => {
                 // Pin native resolution so ResizeObserver never downgrades it.
                 nativeVideoDimRef.current = { width: videoWidth, height: videoHeight };
-                // Sync canvas internal resolution to video's native dimensions.
-                // Also update GL viewport so subsequent render() calls use the right size.
-                if (canvasRef.current && engineRef.current) {
+
+                // Tell the engine the SOURCE shape so it can contain-fit into
+                // the project frame. Without this the fit falls back to
+                // identity (fill) — which is the old, wrong behaviour.
+                engineRef.current?.setSourceAspect?.(videoWidth, videoHeight);
+
+                // Re-derive the buffer from the PROJECT frame, not from these
+                // dimensions. Resizing the canvas to the video's own shape is
+                // exactly what made the preview disagree with the export (R53);
+                // handleResize uses the source only to pick a resolution, never
+                // an aspect ratio.
+                if (resizeHandlerRef.current) {
+                    resizeHandlerRef.current();
+                } else if (canvasRef.current && engineRef.current) {
                     engineRef.current.resize(videoWidth, videoHeight);
-                } else if (canvasRef.current) {
-                    canvasRef.current.width = videoWidth;
-                    canvasRef.current.height = videoHeight;
                 }
                 // Update store so Timeline and Engine know the true dimensions
                 useTimelineStore.setState({ videoWidth, videoHeight });
@@ -367,12 +382,37 @@ const VideoPlayer = () => {
             const quality = useTimelineStore.getState().previewQuality;
             const qualityScale = quality === 'low' ? 0.5 : 1.0;
 
-            // Once we know the native video resolution, always render at native res
-            // (adjusted for quality) — never let container size downgrade the canvas.
-            // Before metadata arrives, fall back to container size so the canvas isn't blank.
+            // The canvas buffer is the PROJECT FRAME, not the active clip.
+            //
+            // It used to be sized from nativeVideoDimRef — the current video's
+            // own pixel dimensions — which meant the preview surface was
+            // whatever shape the clip happened to be, not the shape being
+            // exported. Switch a 9:16 project to 16:9 and the buffer stayed
+            // 9:16 while the frame around it became 16:9, so the source got
+            // blown up to cover the difference: heavily upscaled, soft, and
+            // cropped top and bottom. Export never had this problem because it
+            // composites into a real output frame and pads (see
+            // buildScaleFilter's force_original_aspect_ratio=decrease).
+            //
+            // Deriving the buffer from the project's aspect ratio makes the two
+            // agree by construction; the source is then FITTED into it by the
+            // engine's contain-fit (computeContainFit). See CLAUDE.md R53.
             const native = nativeVideoDimRef.current;
-            const targetWidth  = native ? Math.floor(native.width  * qualityScale) : Math.floor(width  * qualityScale);
-            const targetHeight = native ? Math.floor(native.height * qualityScale) : Math.floor(height * qualityScale);
+
+            // Longest edge of the source, so a portrait project keeps portrait
+            // resolution and we never upscale beyond what the footage has.
+            const sourceLongEdge = native
+                ? Math.max(native.width, native.height)
+                : Math.max(width, height);
+
+            const [arW, arH] = frameAspectRef.current;   // e.g. [16, 9]
+            const frameIsLandscape = arW >= arH;
+
+            const baseW = frameIsLandscape ? sourceLongEdge : Math.round(sourceLongEdge * (arW / arH));
+            const baseH = frameIsLandscape ? Math.round(sourceLongEdge * (arH / arW)) : sourceLongEdge;
+
+            const targetWidth  = Math.max(2, Math.floor(baseW * qualityScale));
+            const targetHeight = Math.max(2, Math.floor(baseH * qualityScale));
 
             // Only update if changed to avoid thrashing
             if (canvasRef.current.width !== targetWidth || canvasRef.current.height !== targetHeight) {
@@ -387,6 +427,7 @@ const VideoPlayer = () => {
             }
         };
 
+        resizeHandlerRef.current = handleResize;
         const observer = new ResizeObserver(handleResize);
         observer.observe(containerRef.current);
 
@@ -451,6 +492,23 @@ const VideoPlayer = () => {
         }
     };
     const dynamicRatio = getPlayerRatioString(aspectRatio);
+
+    // Keep the resize closure's view of the project frame current, and re-run
+    // the buffer sizing when the ratio changes. Without this second part the
+    // buffer would only be re-derived on a container resize, so switching
+    // aspect ratio would leave the old frame shape until the window moved.
+    useEffect(() => {
+        const [w, h] = (dynamicRatio || '16 / 9').split('/').map(n => parseFloat(n.trim()));
+        frameAspectRef.current = [
+            Number.isFinite(w) && w > 0 ? w : 16,
+            Number.isFinite(h) && h > 0 ? h : 9,
+        ];
+        // Re-run the buffer sizing directly. A ResizeObserver only fires when
+        // the observed ELEMENT's box changes, and the container box does not
+        // necessarily change when the ratio does — so without this the new
+        // frame shape would not take effect until the window was resized.
+        resizeHandlerRef.current?.();
+    }, [dynamicRatio]);
 
     // --- Interpolate Keyframes for Smart Zoom ---
     let transformStyle = '';

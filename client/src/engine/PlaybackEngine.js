@@ -11,6 +11,54 @@ import { EffectPipeline, EffectRenderer, GPUEffectEngine } from '../effects';
  * PAUSED     - Clock stopped, buffers held, resumption possible.
  * ERROR      - Unrecoverable error, requires user action.
  */
+/**
+ * CONTAIN fit: how much to shrink the full-screen quad so the source keeps its
+ * own aspect ratio inside the output frame.
+ *
+ * Returns { x, y } NDC scale factors, at most one of which is < 1 — the other
+ * axis fills the frame and the shrunk one gets the letterbox/pillarbox bars.
+ *
+ * PURE and exported so the geometry can be verified without a WebGL context;
+ * this is the one piece of the fix that is testable headlessly, and it is the
+ * piece that decides whether the picture is right.
+ *
+ * `cropW`/`cropH` are the UV crop region (R14 virtual multicam). Cropping
+ * changes the VISIBLE aspect, so the fit must be computed from the cropped
+ * shape — otherwise a cropped angle is letterboxed for its uncropped shape.
+ *
+ * Degrades to identity (fill, i.e. the pre-fix behaviour) whenever the inputs
+ * are unknown, so an unmeasured source can never make the frame collapse.
+ */
+export function computeContainFit({
+    sourceAspect, cropW = 1, cropH = 1, frameWidth, frameHeight,
+} = {}) {
+    const IDENTITY = { x: 1, y: 1 };
+
+    if (!Number.isFinite(sourceAspect) || sourceAspect <= 0) return IDENTITY;
+    if (!Number.isFinite(frameWidth) || !Number.isFinite(frameHeight)) return IDENTITY;
+    if (frameWidth <= 0 || frameHeight <= 0) return IDENTITY;
+
+    const w = Number.isFinite(cropW) && cropW > 0 ? cropW : 1;
+    const h = Number.isFinite(cropH) && cropH > 0 ? cropH : 1;
+
+    // Aspect of what is actually SAMPLED, not of the whole source file.
+    const visibleAspect = sourceAspect * (w / h);
+    const frameAspect   = frameWidth / frameHeight;
+
+    if (!Number.isFinite(visibleAspect) || visibleAspect <= 0) return IDENTITY;
+
+    if (visibleAspect > frameAspect) {
+        // Source is WIDER than the frame → full width, bars top and bottom.
+        return { x: 1, y: frameAspect / visibleAspect };
+    }
+    if (visibleAspect < frameAspect) {
+        // Source is TALLER than the frame → full height, bars left and right.
+        // This is the 9:16-in-a-16:9-project case that was being upscaled ~3x.
+        return { x: visibleAspect / frameAspect, y: 1 };
+    }
+    return IDENTITY; // exact match — fills the frame, no bars
+}
+
 const PlaybackState = {
     IDLE: 'IDLE',
     PRELOADING: 'PRELOADING',
@@ -181,8 +229,32 @@ class PlaybackEngine {
         out vec2 v_texCoord;
         uniform vec2 u_cropOffset; // (x, y) UV start of crop region
         uniform vec2 u_cropSize;   // (w, h) UV size of crop region
+
+        // ── Aspect fit (CONTAIN) + user transform ────────────────────────────
+        // u_fitScale shrinks the quad on whichever axis is over-long so the
+        // source keeps its own aspect ratio inside the output frame, leaving
+        // letterbox/pillarbox bars on the other axis.
+        //
+        // This did not exist before: gl_Position was a plain vec4(a_position, ...), a
+        // FIXED full-screen quad, so the source was always stretched to fill the
+        // whole buffer no matter what shape either one was. Switching a 9:16
+        // project to 16:9 therefore blew the source up ~3x to cover the new
+        // width — visibly soft, with the top and bottom of frame cropped away —
+        // while EXPORT letterboxed correctly via
+        // force_original_aspect_ratio=decrease,pad=... . Preview and export
+        // disagreed because they never shared this logic. See CLAUDE.md R53.
+        //
+        // u_userScale / u_userOffset compose ON TOP, so a user who wants the
+        // CapCut behaviour (resize/reposition the source inside the frame) gets
+        // it multiplicatively rather than by replacing the fit — the same
+        // compose-don't-stack rule R16 established for crop vs zoom.
+        uniform vec2 u_fitScale;   // (sx, sy) <= 1 on the letterboxed axis
+        uniform vec2 u_userScale;  // user resize, default (1,1)
+        uniform vec2 u_userOffset; // user reposition in NDC, default (0,0)
+
         void main() {
-            gl_Position = vec4(a_position, 0.0, 1.0);
+            vec2 pos = a_position * u_fitScale * u_userScale + u_userOffset;
+            gl_Position = vec4(pos, 0.0, 1.0);
             v_texCoord = u_cropOffset + a_texCoord * u_cropSize;
         }`;
 
@@ -304,10 +376,22 @@ class PlaybackEngine {
             // Virtual-multicam crop uniforms
             cropOffset: gl.getUniformLocation(this.program, "u_cropOffset"),
             cropSize:   gl.getUniformLocation(this.program, "u_cropSize"),
+            // Aspect-fit + user transform
+            fitScale:   gl.getUniformLocation(this.program, "u_fitScale"),
+            userScale:  gl.getUniformLocation(this.program, "u_userScale"),
+            userOffset: gl.getUniformLocation(this.program, "u_userOffset"),
         };
 
         // Default crop = full frame
         this.cropParams = { x: 0, y: 0, w: 1, h: 1 };
+
+        // Default fit = fill (identity). Replaced the moment source dimensions
+        // are known — see setSourceAspect(). Identity here means a source whose
+        // aspect matches the frame renders exactly as before this change.
+        this.fitScale   = { x: 1, y: 1 };
+        this.userScale  = { x: 1, y: 1 };
+        this.userOffset = { x: 0, y: 0 };
+        this._sourceAspect = null;
 
         // Setup Buffers (Quad)
         this.positionBuffer = gl.createBuffer();
@@ -374,6 +458,8 @@ class PlaybackEngine {
         this.canvas.width = width;
         this.canvas.height = height;
         this.gl.viewport(0, 0, width, height);
+        // The frame aspect just changed, so the contain-fit is stale.
+        this._recomputeFit();
     }
 
     setQuality(quality) {
@@ -646,6 +732,47 @@ class PlaybackEngine {
      */
     setCrop(x = 0, y = 0, w = 1, h = 1) {
         this.cropParams = { x, y, w, h };
+        // The visible aspect changes when a crop narrows the sampled region, so
+        // the fit has to be recomputed — otherwise a cropped multicam angle
+        // would be letterboxed for its UNCROPPED shape. See R16 on composing
+        // crop with scale rather than applying them independently.
+        this._recomputeFit();
+    }
+
+    /**
+     * Tell the engine the source's natural pixel dimensions.
+     * Called when video metadata arrives, and whenever the active clip changes.
+     */
+    setSourceAspect(width, height) {
+        this._sourceAspect = (width > 0 && height > 0) ? (width / height) : null;
+        this._recomputeFit();
+    }
+
+    /**
+     * User resize / reposition of the source inside the output frame.
+     * scale 1 = fitted (letterboxed); >1 zooms in past the frame edges.
+     * offset is in NDC, so (0,0) is centred and (1,0) is one half-frame right.
+     */
+    setUserTransform({ scale = 1, offsetX = 0, offsetY = 0 } = {}) {
+        const s = Number.isFinite(scale) && scale > 0 ? scale : 1;
+        this.userScale  = { x: s, y: s };
+        this.userOffset = {
+            x: Number.isFinite(offsetX) ? offsetX : 0,
+            y: Number.isFinite(offsetY) ? offsetY : 0,
+        };
+    }
+
+    /** Recompute the contain-fit from the current source aspect, crop and buffer. */
+    _recomputeFit() {
+        const bufW = this.canvas?.width  || 0;
+        const bufH = this.canvas?.height || 0;
+        this.fitScale = computeContainFit({
+            sourceAspect: this._sourceAspect,
+            cropW: this.cropParams?.w ?? 1,
+            cropH: this.cropParams?.h ?? 1,
+            frameWidth:  bufW,
+            frameHeight: bufH,
+        });
     }
 
     // === EFFECTS API ===
@@ -1221,6 +1348,15 @@ class PlaybackEngine {
         // Virtual-multicam crop (full frame when cropW=1 cropH=1)
         gl.uniform2f(this.loc.cropOffset, this.cropParams.x, this.cropParams.y);
         gl.uniform2f(this.loc.cropSize,   this.cropParams.w, this.cropParams.h);
+
+        // Aspect fit + user transform. Defaults are identity, so a source whose
+        // aspect matches the frame renders exactly as it did before this existed.
+        const fit = this.fitScale   || { x: 1, y: 1 };
+        const us  = this.userScale  || { x: 1, y: 1 };
+        const uo  = this.userOffset || { x: 0, y: 0 };
+        gl.uniform2f(this.loc.fitScale,   fit.x, fit.y);
+        gl.uniform2f(this.loc.userScale,  us.x,  us.y);
+        gl.uniform2f(this.loc.userOffset, uo.x,  uo.y);
 
         // DRAW
         gl.drawArrays(gl.TRIANGLES, 0, 6);

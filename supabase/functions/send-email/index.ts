@@ -59,6 +59,17 @@ serve(async (req: Request) => {
         html    = planEmail(data as Parameters<typeof planEmail>[0]);
         break;
       }
+      // Sent AFTER a successful recurring charge (Polar `order.created` on an
+      // existing subscription). Reuses the plan template — same visual, but the
+      // subject and the data the webhook passes describe a renewal, not a new
+      // signup, so a returning customer is never told their plan "is live" as
+      // if they had just subscribed.
+      case 'renewal': {
+        const planName = (data.plan_name as string) ?? 'Creator';
+        subject = `Your ${planName} plan has renewed`;
+        html    = planEmail(data as Parameters<typeof planEmail>[0]);
+        break;
+      }
       case 'feature': {
         const featureName = (data.feature_name as string) ?? 'New feature';
         subject = `Just shipped: ${featureName}`;

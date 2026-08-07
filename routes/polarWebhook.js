@@ -374,6 +374,63 @@ router.post('/portal', authenticateUser, async (req, res) => {
     }
 });
 
+/**
+ * Tell a paying customer their subscription just renewed.
+ *
+ * Deliberately NOT a plan change: this never touches `profiles.plan`. A renewal
+ * is a charge, not a tier transition — conflating them is the same class of
+ * mistake as R46's canceled/revoked collapse.
+ *
+ * Best-effort and non-blocking: a failed email must never make the webhook
+ * return non-2xx, or Polar will retry the whole event and we risk double-
+ * charging semantics on a purely cosmetic failure.
+ */
+async function sendRenewalReceipt(customerEmail, plan, order) {
+    try {
+        const { data: userId } = await supabaseAdmin
+            .rpc('get_user_id_by_email', { email_param: customerEmail });
+
+        let firstName = customerEmail.split('@')[0];
+        if (userId) {
+            const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+            firstName = (authUser?.user?.user_metadata?.full_name ?? customerEmail).split(' ')[0];
+        }
+
+        // Next renewal date, straight from the order when Polar provides it —
+        // computing "one month from now" locally drifts from the real billing
+        // date and is exactly the sort of small lie a billing email must not tell.
+        const periodEnd = order?.subscription?.currentPeriodEnd
+            ?? order?.subscription?.current_period_end
+            ?? null;
+        const nextDate = periodEnd ? new Date(periodEnd) : null;
+        const renewalStr = nextDate && !Number.isNaN(nextDate.getTime())
+            ? nextDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+            : 'your next billing date';
+
+        // Real amount charged, not a hardcoded price list — plans change and a
+        // receipt showing the wrong number is worse than showing none.
+        const amountCents = order?.totalAmount ?? order?.total_amount ?? null;
+        const currency    = (order?.currency || 'EUR').toUpperCase();
+        const amountStr   = Number.isFinite(amountCents)
+            ? new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amountCents / 100)
+            : '';
+
+        await sendEmail('renewal', customerEmail, {
+            first_name:      firstName,
+            plan_name:       plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : 'Your',
+            renewal_date:    renewalStr,
+            plan_price:      amountStr,
+            cta_url:         `${PUBLIC_URL}/dashboard`,
+            account_url:     `${PUBLIC_URL}/account`,
+            unsubscribe_url: userId ? `${PUBLIC_URL}/unsubscribe?uid=${userId}` : `${PUBLIC_URL}/account`,
+        });
+
+        console.log(`[PolarWebhook] renewal receipt sent to ${customerEmail} (${plan || 'unknown plan'}, ${amountStr || 'amount n/a'})`);
+    } catch (err) {
+        console.warn('[PolarWebhook] renewal receipt failed (non-blocking):', err.message);
+    }
+}
+
 router.post(
     '/webhook',
     express.raw({ type: 'application/json' }), // must be raw for HMAC verification
@@ -445,8 +502,34 @@ router.post(
                 if (email) await markCancellation(email, null);
                 break;
             }
+            // ── RENEWAL RECEIPT ──────────────────────────────────────────────
+            // Polar emits `order.created` for every successful charge, including
+            // each recurring renewal. Nothing was listening, so a customer was
+            // billed every month and only ever heard from us once — at signup.
+            //
+            // Only the RENEWAL charges are announced here: the first charge is
+            // already covered by the plan-confirmation email that setPlan()
+            // sends, and sending both would double-mail every new subscriber.
+            // Polar marks recurring charges with billing_reason; anything that
+            // isn't clearly a renewal is skipped rather than guessed at.
+            case 'order.created': {
+                const reason = data?.billingReason ?? data?.billing_reason ?? null;
+                const isRenewal = typeof reason === 'string'
+                    && /cycle|renewal|recurring/i.test(reason);
+
+                if (!isRenewal) {
+                    console.log(`[PolarWebhook] order.created (${reason || 'no billing reason'}) — not a renewal, no email`);
+                    break;
+                }
+                if (!email) break;
+
+                const plan = PRODUCT_TO_PLAN[productId] || null;
+                await sendRenewalReceipt(email, plan, data);
+                break;
+            }
+
             default:
-                // Ignore other event types (order.created, benefit.granted, etc.)
+                // Ignore other event types (benefit.granted, checkout.*, etc.)
                 break;
         }
 
