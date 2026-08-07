@@ -150,6 +150,24 @@ if (!FFMPEG) {
     fs.rmSync(dir, { recursive: true, force: true });
 }
 
+section('6 · The PREVIEW is graded too, not just the export');
+{
+    const player = read('client/src/components/Player/VideoPlayer.jsx');
+    const hook   = read('client/src/hooks/useAudioEngine.js');
+
+    check('applyLUT stores a CSS filter for the editor',
+        /projectLUTId: lutId, projectLUTFilter: cssFilter/.test(hook));
+    check('the player subscribes to it',
+        /useTimelineStore\(state => state\.projectLUTFilter\)/.test(player),
+        'getState() would not re-render on apply — the immediacy is the point');
+    check('the canvas actually applies it',
+        /filter: projectLUTFilter \|\| 'none'/.test(player),
+        'the filter was stored and never used — clicking a LUT changed nothing visible');
+    check('the ungraded path stays neutral',
+        /\|\| 'none'/.test(player),
+        "'none' is a valid CSS filter and costs nothing");
+}
+
 console.log(`\n${'─'.repeat(60)}`);
 console.log(`LUT export: ${passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ''}`);
 console.log('─'.repeat(60));
