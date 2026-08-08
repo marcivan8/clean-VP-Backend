@@ -45,7 +45,17 @@ class LUTExportIntegration {
 
             const gcsPath = lut.gcs_path || lut.gcsPath;
             if (!gcsPath) {
-                console.warn(`[LUTExportIntegration] LUT ${lutId} has no gcs_path (not seeded with file)`);
+                // The SEEDED library has no .cube files — the `luts` table has no
+                // gcs_path column at all, only warmth/contrast/saturation/
+                // highlights/shadows (R55b). Returning null here meant every
+                // built-in LUT exported ungraded while the preview looked right.
+                // Derive the same look from the same parameters instead.
+                const parametric = lutService.buildParametricFilter(lut);
+                if (parametric) {
+                    console.log(`[LUTExportIntegration] LUT ${lutId} has no .cube — using parametric grade: ${parametric}`);
+                    return parametric;
+                }
+                console.warn(`[LUTExportIntegration] LUT ${lutId} has neither a .cube file nor usable parameters`);
                 return null;
             }
 

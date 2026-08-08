@@ -175,6 +175,60 @@ class LUTService {
      * @param {string} lutPath — local or GCS-mounted absolute path to .cube file
      * @returns {string|null}  e.g. "lut3d=/path/to/file.cube"
      */
+    /**
+     * Build an FFmpeg colour-adjustment chain from a PARAMETER-based LUT.
+     *
+     * The seeded library has no `.cube` files — the `luts` table has no
+     * `gcs_path` column at all, only `warmth` / `contrast` / `saturation` /
+     * `highlights` / `shadows` on a roughly -3..+3 scale plus a
+     * `css_filter_preview` string (see CLAUDE.md R55b). So `lut3d` can never
+     * apply to a built-in LUT, and the export rendered ungraded while the
+     * preview (which uses the CSS filter) looked correct.
+     *
+     * This derives the same look from the same numbers, using the SAME mapping
+     * the editor applies (LUTCard.buildColorPresetSettings: 1 + value/10), so
+     * preview and export agree by construction rather than by coincidence.
+     *
+     * PURE — no I/O — so the regression can execute it and assert on the string.
+     * Returns null when every parameter is neutral: an all-zero LUT should add
+     * no filter at all rather than a no-op that costs a decode pass.
+     */
+    buildParametricFilter(lut) {
+        if (!lut) return null;
+
+        const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+        const warmth     = num(lut.warmth);
+        const contrast   = num(lut.contrast);
+        const saturation = num(lut.saturation);
+        const highlights = num(lut.highlights);
+        const shadows    = num(lut.shadows);
+
+        if (!warmth && !contrast && !saturation && !highlights && !shadows) return null;
+
+        const parts = [];
+
+        // eq: contrast/saturation use the editor's 1 + x/10 mapping. gamma
+        // carries the highlight/shadow lift-or-crush — a coarse approximation of
+        // a tone curve, but it moves in the right direction and is cheap.
+        const eq = [];
+        if (contrast)   eq.push(`contrast=${(1 + contrast   / 10).toFixed(3)}`);
+        if (saturation) eq.push(`saturation=${(1 + saturation / 10).toFixed(3)}`);
+
+        const gamma = 1 + (highlights - shadows) / 60;   // ±0.1 at the extremes
+        if (Math.abs(gamma - 1) > 0.001) eq.push(`gamma=${gamma.toFixed(3)}`);
+        if (eq.length) parts.push(`eq=${eq.join(':')}`);
+
+        // Warmth → colour temperature. FFmpeg's colortemperature takes Kelvin,
+        // where LOWER is warmer, so positive warmth must lower the value from
+        // the 6500K neutral. Clamped well inside the filter's 1000–40000 range.
+        if (warmth) {
+            const kelvin = Math.max(2000, Math.min(12000, Math.round(6500 - warmth * 400)));
+            parts.push(`colortemperature=temperature=${kelvin}:mix=0.85`);
+        }
+
+        return parts.length ? parts.join(',') : null;
+    }
+
     buildFFmpegFilter(lutId, lutPath) {
         if (!lutPath) return null;
         // Escape colons in Windows paths (not needed on Linux but defensive)
