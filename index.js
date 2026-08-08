@@ -268,7 +268,6 @@ app.use('/api/effects', require('./routes/effectsRoutes'));
 // producing 429s on proxy.mp4 mid-playback. proxyRoutes.js applies uploadLimiter
 // itself, scoped only to the actual upload/generate POST endpoints.
 app.use('/api/proxy', require('./routes/proxyRoutes'));
-app.use('/api/revideo', require('./routes/revideoRenderRoutes')); // headless Chrome
 // app.use('/api/presets', require('./routes/presetRoutes'));  // OLD — superseded by asset engine
 app.use('/api/presets', require('./server/routes/presetRoutes')); // Asset Engine: presets CRUD + execute
 app.use('/api/export', uploadLimiter, require('./routes/nleExport')); // NLE export (OTIO)

@@ -32,15 +32,14 @@ const QUALITY_PROFILES = [
     { id: 'low',    labelKey: 'exportModal.qualityDraft',  bitrate: '2 Mbps',  subKey: 'exportModal.qualityFastRender'  },
 ];
 
-// Two render pipelines live side by side (see CLAUDE.md NODE 1 · SYSTEM ARCHITECTURE):
-//   ffmpeg  → jobs/exportProcessor.js via BullMQ — the default, fast and battle-tested.
-//   revideo → render-lambda/ (AWS Lambda + Chromium) — renders through a real browser
-//             engine instead of FFmpeg's drawtext filter, so fonts/effects are more
-//             faithful, but it depends on backend env vars that may not be configured
-//             on every deployment (see routes/revideoRenderRoutes.js).
+// ONE render pipeline: jobs/exportProcessor.js via BullMQ.
+// The "cinematic" Revideo/Lambda engine was removed — it never applied the
+// colour grade (R55) or the multicam crop (R14), and required AWS credentials,
+// a font layer and a webhook to be configured before it rendered anything at
+// all. See CLAUDE.md R56. The array is kept so a second engine can be added
+// back without restructuring the modal.
 const RENDER_ENGINES = [
     { id: 'ffmpeg',  labelKey: 'exportModal.engineStandard',  subKey: 'exportModal.engineFastStable' },
-    { id: 'revideo', labelKey: 'exportModal.engineCinematic', subKey: 'exportModal.engineChromiumRender', beta: true },
 ];
 
 const AUDIO_FORMATS = [
@@ -414,11 +413,6 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                             );
                                         })}
                                     </div>
-                                    {settings.engine === 'revideo' && (
-                                        <p style={{ margin: 0, fontSize: 10.5, color: 'var(--fg-4)', fontFamily: 'var(--f-mono)', lineHeight: 1.5 }}>
-                                            {t('exportModal.revideoWarning')}
-                                        </p>
-                                    )}
                                 </div>
 
                                 {/* FPS / Format — compact row */}

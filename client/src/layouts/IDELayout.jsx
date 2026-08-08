@@ -1075,43 +1075,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
         return { url: result.url, filename: result.filename, metadata: result.metadata };
     };
-
-    // Cinematic (beta) export path: real Chromium render via Revideo on AWS Lambda
-    // (render-lambda/). Renders through an actual browser engine instead of FFmpeg's
-    // drawtext filter, so it handles fonts/effects more faithfully — but it depends
-    // on RENDER_WORKER_URL / WORKER_SECRET / AWS_LAMBDA_FUNCTION_NAME being configured
-    // on the backend (see routes/revideoRenderRoutes.js). If those aren't set, the
     // route responds 500 "Render proxy not configured" and we surface a clear,
     // actionable error instead of a cryptic failure.
-    const handleRevideoExport = async () => {
-        const { tracks, duration, aspectRatio } = useTimelineStore.getState();
-        const { authFetch }        = await import('../utils/authFetch.js');
-        const { pollRevideoResult } = await import('../utils/revideoPoller.js');
-
-        const response = await authFetch('/api/revideo/render', {
-            method: 'POST',
-            body: JSON.stringify({
-                tracks,
-                duration,
-                fps: 30,
-                aspectRatio: aspectRatio || '16:9',
-            }),
-        });
-
-        const data = await response.json().catch(() => ({}));
-
-        if (response.status === 500 && /not configured/i.test(data.error || '')) {
-            throw new Error(
-                'Cinematic render isn’t set up yet on this deployment (missing RENDER_WORKER_URL / WORKER_SECRET / AWS Lambda config). Use Standard export for now, or ask your admin to finish the Revideo/Lambda setup.'
-            );
-        }
-        if (!response.ok) throw new Error(data.error || data.message || 'Cinematic render failed to start');
-        if (!data.jobId)  throw new Error('Cinematic render response missing jobId');
-
-        const result = await pollRevideoResult(data.jobId);
-        return { url: result.url, filename: `vibed-export-${result.renderId || Date.now()}.mp4`, metadata: null };
-    };
-
     const handleExportConfirm = async (settings) => {
         trackEvent('video_exported');
         setIsExporting(true);
@@ -1120,9 +1085,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         setExportUrl(null);
 
         try {
-            const result = settings.engine === 'revideo'
-                ? await handleRevideoExport()
-                : await handleFfmpegExport(settings);
+            // Only one export path. The "cinematic" Revideo/Lambda renderer was
+            // removed: it needed AWS credentials, a font layer and a webhook to
+            // be configured before it worked at all, applied no colour grade
+            // (R55) and no multicam crop (R14), and duplicated a pipeline FFmpeg
+            // already does correctly. See CLAUDE.md R56.
+            const result = await handleFfmpegExport(settings);
 
             setExportResult({ success: true, url: result.url, filename: result.filename, metadata: result.metadata });
             setExportUrl(result.url);

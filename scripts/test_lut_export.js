@@ -168,6 +168,71 @@ section('6 · The PREVIEW is graded too, not just the export');
         "'none' is a valid CSS filter and costs nothing");
 }
 
+// ── 7 · Parameter-based LUTs (R55b) ─────────────────────────────────────────
+// The seeded library has NO .cube files — the `luts` table has no gcs_path
+// column at all — so lut3d can never apply to a built-in LUT. Without a
+// parametric fallback every built-in grade exported ungraded while the preview
+// looked correct.
+section('7 · Built-in (parameter-based) LUTs still grade the export');
+{
+    const svcSrc = read('server/lut-engine/library/LUTService.js');
+    const fnSrc  = svcSrc.slice(
+        svcSrc.indexOf('buildParametricFilter(lut) {'),
+        svcSrc.indexOf('buildFFmpegFilter(lutId, lutPath)'));
+    const build = new Function('lut',
+        fnSrc.replace('buildParametricFilter(lut) {', '').replace(/\}\s*$/, ''));
+
+    // Real production row (the "film noir" LUT from the reported error).
+    const noir = build({ warmth: -1, contrast: 3, saturation: -3, highlights: 0, shadows: -3 });
+    check('a real seeded LUT produces a filter', !!noir, String(noir));
+    check('it uses the editor\'s 1 + x/10 contrast mapping',
+        /contrast=1\.300/.test(noir), noir);
+    check('it uses the editor\'s saturation mapping',
+        /saturation=0\.700/.test(noir), noir);
+    check('warmth becomes a colour temperature', /colortemperature=temperature=/.test(noir));
+
+    // LOWER Kelvin is warmer, so positive warmth must lower it from 6500.
+    const warm = build({ warmth: 3, contrast: 0, saturation: 0, highlights: 0, shadows: 0 });
+    const cool = build({ warmth: -3, contrast: 0, saturation: 0, highlights: 0, shadows: 0 });
+    const kOf  = (f) => parseInt((f.match(/temperature=(\d+)/) || [])[1], 10);
+    check('positive warmth lowers Kelvin (warmer)', kOf(warm) < 6500, String(kOf(warm)));
+    check('negative warmth raises Kelvin (cooler)', kOf(cool) > 6500, String(kOf(cool)));
+
+    // An all-neutral LUT must add NO filter — a no-op still costs a decode pass.
+    check('a fully neutral LUT yields null',
+        build({ warmth: 0, contrast: 0, saturation: 0, highlights: 0, shadows: 0 }) === null);
+    check('null/garbage input is handled', build(null) === null);
+
+    const integ = read('server/lut-engine/library/LUTExportIntegration.js');
+    check('the export falls back to the parametric grade when there is no .cube',
+        /buildParametricFilter\(lut\)/.test(integ),
+        'without this every built-in LUT exports ungraded');
+
+    if (FFMPEG) {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lut-param-'));
+        const out = path.join(dir, 'o.mp4');
+        const chain =
+            'scale=320:180:force_original_aspect_ratio=decrease,' +
+            'pad=320:180:(ow-iw)/2:(oh-ih)/2,setsar=1,' + noir;
+        const r = spawnSync(FFMPEG, ['-f', 'lavfi', '-i', 'testsrc=size=320x180:duration=1:rate=10',
+            '-vf', chain, '-frames:v', '3', '-y', out], { encoding: 'utf8', timeout: 60_000 });
+        check('the parametric chain runs in the real exporter shape', r.status === 0,
+            (r.stderr || '').split('\n').slice(-3).join(' | '));
+
+        const a = path.join(dir, 'a.png'), b = path.join(dir, 'b.png');
+        spawnSync(FFMPEG, ['-f', 'lavfi', '-i', 'color=c=0x808080:size=64x64:duration=0.1:rate=1',
+            '-frames:v', '1', '-y', a], { timeout: 30_000 });
+        spawnSync(FFMPEG, ['-f', 'lavfi', '-i', 'color=c=0x808080:size=64x64:duration=0.1:rate=1',
+            '-vf', noir, '-frames:v', '1', '-y', b], { timeout: 30_000 });
+        check('the parametric grade actually changes the pixels',
+            fs.existsSync(a) && fs.existsSync(b) && !fs.readFileSync(a).equals(fs.readFileSync(b)),
+            'a grade that runs but changes nothing is the bug it replaced');
+        fs.rmSync(dir, { recursive: true, force: true });
+    } else {
+        skip('parametric chain executes', 'no ffmpeg binary');
+    }
+}
+
 console.log(`\n${'─'.repeat(60)}`);
 console.log(`LUT export: ${passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ''}`);
 console.log('─'.repeat(60));
