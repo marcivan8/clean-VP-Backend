@@ -192,13 +192,70 @@ export default function AssetPanel({ onClose }) {
     }, []);
 
     // LUT toggle
+    /**
+     * Convert a LUT's stored parameters into the `clip.grading` shape the
+     * playback engine already consumes.
+     *
+     * WHY THIS EXISTS: applying a LUT only set `projectLUTId` + a CSS filter.
+     * Nothing in the app has ever written `clip.grading` — yet VideoPlayer reads
+     * it every frame and pushes it into the engine's brightness/contrast/
+     * saturation/hue uniforms. That is the live, proven grading path, and it was
+     * sitting unused while the LUT tried to grade via a canvas CSS filter.
+     *
+     * setGrading() takes PERCENTAGES (it divides by 100); the LUT columns are on
+     * a -3..+3 scale. The 1 + x/10 mapping is the editor's own
+     * (LUTCard.buildColorPresetSettings), so the numbers here agree with the CSS
+     * preview and with the FFmpeg export filter (R55b) by construction.
+     */
+    const lutToGrading = useCallback((lut) => {
+        const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+        return {
+            // Shadows/highlights nudge overall brightness — a coarse stand-in
+            // for a tone curve, matching what the export's gamma term does.
+            brightness: Math.round(100 * (1 + (n(lut.highlights) - n(lut.shadows)) / 60)),
+            contrast:   Math.round(100 * (1 + n(lut.contrast)   / 10)),
+            saturate:   Math.round(100 * (1 + n(lut.saturation) / 10)),
+            // Warmth as a small hue shift: positive = toward orange.
+            hueRotate:  Math.round(n(lut.warmth) * -3),
+            _lutId:     lut.id,             // so clearing can tell a LUT grade from a manual one
+            _lutName:   lut.name || lut.display_name || null, // shown by the Colour panel's "based on" badge
+        };
+    }, []);
+
     const handleLUTApply = useCallback(async lut => {
-        if (projectLUTId === lut.id) {
-            clearLUT();
-        } else {
-            await applyLUT(lut.id);
+        const store   = useTimelineStore.getState();
+        const clearing = projectLUTId === lut.id;
+
+        // Write the grade onto every video clip, so it is visible on the
+        // timeline immediately and survives as normal clip state the user can
+        // later edit per clip — the same mechanism the engine already uses.
+        //
+        // SKIP any clip the user has since hand-tuned in the Colour panel
+        // (`grading._manuallyAdjusted`, set by handleGradingChange /
+        // handleSelectiveGradingChange in IDELayout.jsx). Without this, simply
+        // re-clicking the SAME LUT to toggle it off — or picking a DIFFERENT
+        // one — silently overwrote every per-clip tweak project-wide. That
+        // defeats the entire point of making the grade editable per clip: an
+        // edit a user can lose by touching an unrelated button isn't a real
+        // per-clip edit.
+        const grading = clearing ? null : lutToGrading(lut);
+        let skipped = 0;
+        for (const track of (store.tracks || [])) {
+            if (track.type !== 'video') continue;
+            for (const clip of (track.clips || [])) {
+                if (clip.grading?._manuallyAdjusted) { skipped++; continue; }
+                store.updateClip?.(track.id, clip.id, { grading });
+            }
         }
-    }, [projectLUTId, applyLUT, clearLUT]);
+        if (skipped > 0) {
+            console.log(`[AssetPanel] handleLUTApply: left ${skipped} manually-graded clip(s) untouched`);
+        }
+
+        // Keep the project-level id/CSS filter too: the id is what the EXPORT
+        // reads (R55/R55b), and the CSS filter still grades the canvas.
+        if (clearing) clearLUT();
+        else          await applyLUT(lut.id);
+    }, [projectLUTId, applyLUT, clearLUT, lutToGrading]);
 
     // Preset apply
     const handlePresetApply = useCallback(async (preset, approved) => {

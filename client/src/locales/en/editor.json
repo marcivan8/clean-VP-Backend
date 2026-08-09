@@ -125,6 +125,9 @@
     "colorGrading": {
       "title": "Color Grading",
       "selectClip": "Select a clip to adjust color.",
+      "basedOnLut": "Based on LUT: {{name}}",
+      "customLut": "Custom LUT",
+      "adjusted": "adjusted",
       "brightness": "Brightness",
       "contrast": "Contrast",
       "saturation": "Saturation",
