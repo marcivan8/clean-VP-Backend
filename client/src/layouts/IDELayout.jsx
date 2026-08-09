@@ -355,7 +355,13 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const handleGradingChange = (key, value) => {
         if (!activeClip || !activeTrackId) return;
         const currentGrading = activeClip.grading || { brightness: 100, contrast: 100, saturate: 100, hueRotate: 0 };
-        const newGrading = { ...currentGrading, [key]: value };
+        // `_manuallyAdjusted` marks this clip as hand-tuned. It keeps whatever
+        // LUT attribution (`_lutId`/`_lutName`) was already there — the badge
+        // in the Colour panel still shows "based on <LUT>" — but tells
+        // AssetPanel's handleLUTApply to leave this clip alone the next time
+        // a LUT is applied or cleared project-wide, instead of clobbering the
+        // tweak the user just made.
+        const newGrading = { ...currentGrading, [key]: value, _manuallyAdjusted: true };
         const filter = `brightness(${newGrading.brightness}%) contrast(${newGrading.contrast}%) saturate(${newGrading.saturate}%) hue-rotate(${newGrading.hueRotate}deg)`;
         updateClip(activeTrackId, activeClip.id, {
             grading: newGrading,
@@ -537,8 +543,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 [key]: value
             }
         };
+        // Same reasoning as handleGradingChange: a selective-colour edit is
+        // still a manual per-clip edit, so it must be protected from being
+        // overwritten by a project-wide LUT apply/clear too.
         updateClip(activeTrackId, activeClip.id, {
-            grading: { ...currentGrading, selective: newSelective }
+            grading: { ...currentGrading, selective: newSelective, _manuallyAdjusted: true }
         });
     };
 
@@ -1574,11 +1583,31 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                             </div>
                                         ) : (
                                             <>
+                                                {/* LUT attribution — the sliders below edit the SAME clip.grading
+                                                    object handleLUTApply (AssetPanel.jsx) writes, so this badge is
+                                                    the only way to tell a LUT is the starting point for what's on
+                                                    screen. Once the user drags a slider, _manuallyAdjusted is set
+                                                    and this clip is protected from future project-wide LUT changes. */}
+                                                {activeClip.grading?._lutId && (
+                                                    <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-md bg-primary/10 border border-primary/20">
+                                                        <span className="text-[11px] text-primary truncate">
+                                                            {t('ideLayout.colorGrading.basedOnLut', { name: activeClip.grading._lutName || t('ideLayout.colorGrading.customLut') })}
+                                                        </span>
+                                                        {activeClip.grading._manuallyAdjusted && (
+                                                            <span className="text-[10px] text-muted-foreground shrink-0">{t('ideLayout.colorGrading.adjusted')}</span>
+                                                        )}
+                                                    </div>
+                                                )}
                                                 {[
                                                     { key: 'brightness', label: t('ideLayout.colorGrading.brightness'), min: 0, max: 200, unit: '%' },
                                                     { key: 'contrast', label: t('ideLayout.colorGrading.contrast'), min: 0, max: 200, unit: '%' },
                                                     { key: 'saturate', label: t('ideLayout.colorGrading.saturation'), min: 0, max: 200, unit: '%' },
-                                                    { key: 'hueRotate', label: t('ideLayout.colorGrading.hueRotate'), min: 0, max: 360, unit: '°' },
+                                                    // -180..180, not 0..360: lutToGrading (AssetPanel.jsx) can produce
+                                                    // a NEGATIVE hueRotate from a LUT's warmth column. A 0-based range
+                                                    // can't represent that — the thumb clamped to 0 while the number
+                                                    // beside it kept showing the true negative value, and the first
+                                                    // drag would jump the clip's hue instead of nudging it.
+                                                    { key: 'hueRotate', label: t('ideLayout.colorGrading.hueRotate'), min: -180, max: 180, unit: '°' },
                                                 ].map(({ key, label, min, max, unit }) => (
                                                     <div key={key} className="space-y-2">
                                                         <div className="flex justify-between text-xs">

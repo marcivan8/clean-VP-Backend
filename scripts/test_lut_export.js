@@ -233,6 +233,77 @@ section('7 · Built-in (parameter-based) LUTs still grade the export');
     }
 }
 
+// ── 8 · The LUT lands on the CLIPS, via the engine's real grading path ──────
+// The canvas CSS filter alone was not enough. Nothing in the app had ever
+// written `clip.grading`, yet VideoPlayer reads it every frame and pushes it
+// into the engine's brightness/contrast/saturation/hue uniforms — a live,
+// proven path sitting unused while the LUT tried to grade some other way.
+section('8 · Applying a LUT grades the clips themselves');
+{
+    const panel  = read('client/src/components/AssetPanel.jsx');
+    const player = read('client/src/components/Player/VideoPlayer.jsx');
+
+    check('the panel converts LUT params into a grading object',
+        /lutToGrading/.test(panel));
+    check('it uses the editor\'s 1 + x/10 mapping',
+        /1 \+ n\(lut\.contrast\)\s*\/ 10/.test(panel),
+        'so preview, canvas filter and FFmpeg export all agree');
+    check('grading is written onto video clips',
+        /updateClip\?\.\(track\.id, clip\.id, \{ grading \}\)/.test(panel));
+    check('clearing a LUT clears the grading',
+        /const grading = clearing \? null :/.test(panel),
+        'leaving a stale grade behind would make the LUT impossible to remove');
+    check('the project id is still set for the export',
+        /await applyLUT\(lut\.id\)/.test(panel),
+        'the export reads projectLUTId (R55/R55b)');
+
+    // The consuming half must stay intact or the grade goes nowhere.
+    check('VideoPlayer still forwards clip.grading to the engine',
+        /engineRef\.current\.setGrading\(\{/.test(player)
+        && /activeClip\.grading\.contrast/.test(player));
+    check('grading is part of the engine-relevant clip memo',
+        /grading:\s*activeClip\.grading/.test(player),
+        'excluding it would stop the engine seeing grade changes');
+}
+
+// ── 9 · The LUT grade is per-clip editable from the Colour panel (R55d) ────
+// §8 wired a LUT onto clip.grading, but the Colour panel could not yet show
+// or protect that per-clip. Two real gaps surfaced when actually wiring it
+// up: the hueRotate slider ran 0..360 so a LUT's negative hue shift
+// (lutToGrading's warmth mapping) couldn't be dragged from where it truly
+// started, and applying/clearing a LUT overwrote EVERY video clip
+// unconditionally — a user's manual per-clip tweak was one accidental
+// re-click of the LUT card away from being wiped out project-wide.
+section('9 · The Colour panel can edit a LUT grade per clip, safely');
+{
+    const panel = read('client/src/components/AssetPanel.jsx');
+    const ide   = read('client/src/layouts/IDELayout.jsx');
+
+    check('the LUT grade carries its name for the Colour panel badge',
+        /_lutName:\s*lut\.name \|\| lut\.display_name \|\| null/.test(panel));
+
+    check('handleLUTApply skips clips the user has manually adjusted',
+        /if \(clip\.grading\?\.\_manuallyAdjusted\) \{ skipped\+\+; continue; \}/.test(panel),
+        'without this, applying/clearing a LUT wipes every per-clip tweak project-wide');
+
+    check('a manual slider edit marks the clip as manually adjusted',
+        /const newGrading = \{ \.\.\.currentGrading, \[key\]: value, _manuallyAdjusted: true \};/.test(ide));
+    check('a selective-colour edit does too',
+        /grading: \{ \.\.\.currentGrading, selective: newSelective, _manuallyAdjusted: true \}/.test(ide));
+
+    check('the hue slider range covers negative values',
+        /key:\s*'hueRotate'[^}]*min:\s*-180,\s*max:\s*180/.test(ide),
+        "lutToGrading's warmth mapping can be negative; a 0..360 range can't reach it");
+
+    check('the Colour panel shows which LUT a clip is based on',
+        /activeClip\.grading\?\.\_lutId/.test(ide) && /colorGrading\.basedOnLut/.test(ide));
+
+    const enLocale = JSON.parse(read('client/src/locales/en/editor.json'));
+    const frLocale = JSON.parse(read('client/src/locales/fr/editor.json'));
+    check('the "based on LUT" string exists in both shipped locales',
+        !!enLocale?.ideLayout?.colorGrading?.basedOnLut && !!frLocale?.ideLayout?.colorGrading?.basedOnLut);
+}
+
 console.log(`\n${'─'.repeat(60)}`);
 console.log(`LUT export: ${passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ''}`);
 console.log('─'.repeat(60));
