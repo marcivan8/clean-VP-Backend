@@ -168,6 +168,23 @@ export const COMMANDS = [
         requires: ['transcript', 'multiple_clips'],
     },
 
+    // ── AI Animation Intelligence (R68) ─────────────────────────────────────
+    // "Brain chooses animations. Users don't." — one explicit command runs
+    // detection (TimelineEventDetector.js) + resolution (AnimationKnowledgeGraph.js)
+    // + application (MediaExecutionEngine.js `animate_automatically`) as one
+    // undoable pass. Deliberately NOT automatic on upload — see CLAUDE.md R68.
+    {
+        id: 'animate_automatically',
+        executes: 'animate_automatically',
+        category: 'transform',
+        label: 'Animate automatically',
+        summary: 'Detects reveal/punchline/emphasis/emotional-beat moments and applies animations + SFX — no manual picks.',
+        phrases: ['animate this automatically', 'animate automatically', 'auto animate',
+                  'animate this for me', 'add animations automatically', 'automatically animate this'],
+        negative: ['crop', 'silence', 'filler'],
+        destructive: false,
+    },
+
     // ── Text / captions ──────────────────────────────────────────────────────
     {
         id: 'auto_captions',
@@ -238,9 +255,53 @@ export const COMMANDS = [
         category: 'transform',
         label: 'Colour grade',
         summary: 'Applies a colour look across clips.',
+        // FIX (R75): 'apply a lut' used to live here, so typing it ran the
+        // generic brightness/contrast/saturation adjuster instead of the real
+        // LUT library — a vocabulary collision of exactly the kind this
+        // registry exists to catch. Moved to the new apply_lut command below.
         phrases: ['color grade', 'colour grade', 'apply a look', 'make it cinematic',
-                  'warm it up', 'cool it down', 'apply a lut'],
+                  'warm it up', 'cool it down'],
         params: [{ name: 'style', type: 'text', optional: true }],
+        destructive: false,
+    },
+    {
+        id: 'apply_lut',
+        category: 'transform',
+        label: 'Apply a LUT',
+        summary: 'Applies a curated LUT look, resolved from a text description, to the timeline.',
+        // Resolves the description via the real LUT library (searchLUTs) and
+        // applies the best match — distinct from color_grade's ad hoc
+        // brightness/contrast/saturation adjuster.
+        phrases: ['apply a lut', 'apply the lut', 'apply a color preset', 'apply a colour preset',
+                  'use a lut', 'try a lut', 'give me a lut', 'find me a lut',
+                  'apply the recommended lut', 'apply the suggested look', 'use the suggested look'],
+        negative: ['clear', 'remove', 'reset'],
+        params: [
+            { name: 'query',  type: 'text',   optional: true, description: 'Mood/style description, e.g. "warm cinematic"' },
+            { name: 'target', type: 'target', default: 'clip', description: 'clip | all — whether to override manually-graded clips' },
+        ],
+        destructive: false,
+    },
+    {
+        id: 'clear_lut',
+        category: 'transform',
+        label: 'Clear LUT',
+        summary: 'Removes the applied LUT look from the timeline.',
+        phrases: ['clear the lut', 'remove the lut', 'clear the color grade', 'clear the colour grade',
+                  'reset the color look', 'remove the color look', 'undo the lut'],
+        params: [
+            { name: 'target', type: 'target', default: 'clip', description: 'clip | all — whether to override manually-graded clips' },
+        ],
+        destructive: false,
+    },
+    {
+        id: 'recommend_luts',
+        category: 'transform',
+        label: 'Recommend LUTs',
+        summary: 'Suggests LUTs that fit the footage — content-aware, not just format-based.',
+        phrases: ['recommend a lut', 'recommend luts', 'suggest a lut', 'suggest a look',
+                  'what lut should i use', 'what look would work', 'lut suggestions'],
+        params: [{ name: 'limit', type: 'text', optional: true }],
         destructive: false,
     },
 
@@ -486,7 +547,27 @@ export function extractParams(cmd, prompt) {
             value = (p.values || []).find(v => text.includes(String(v).toLowerCase()));
         } else if (p.type === 'text') {
             const q = String(prompt || '').match(/["“]([^"”]+)["”]/);
-            if (q) value = q[1];
+            if (q) {
+                value = q[1];
+            } else if (p.name === 'query' || p.name === 'style') {
+                // No quotes given — fall back to whatever's left of the prompt
+                // after stripping this command's own trigger words, e.g.
+                // "apply a warm cinematic lut" → trigger words "apply/a/lut"
+                // stripped → "warm cinematic". Without this, typed mood/style
+                // requests ("apply a warm lut") would silently resolve the
+                // command but drop the very description that picks the LUT.
+                const stop = new Set(['a', 'an', 'the', 'to', 'me', 'please', 'it', 'on',
+                    'for', 'with', 'my', 'this', 'that', 'i', 'want', 'can', 'you', 'and',
+                    'all', 'every', 'whole', 'clip', 'clips']);
+                const phraseWords = new Set((cmd.phrases || []).join(' ').toLowerCase().split(/\s+/));
+                const leftover = text
+                    .replace(/["“”]/g, '')
+                    .split(/\s+/)
+                    .filter(w => w && !phraseWords.has(w) && !stop.has(w))
+                    .join(' ')
+                    .trim();
+                if (leftover) value = leftover;
+            }
         }
 
         if (value === undefined && p.default !== undefined) value = p.default;

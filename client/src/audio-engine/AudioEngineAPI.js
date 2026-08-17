@@ -75,6 +75,23 @@ class AudioEngineAPI {
     }
 
     /**
+     * Fetch a single LUT by id — includes the raw warmth/contrast/saturation/
+     * highlights/shadows columns needed to compute a real per-clip grade
+     * (see client/src/utils/lutGrading.js), unlike getLUTPreview() which only
+     * returns the CSS filter string.
+     *
+     * @param {string} lutId — UUID
+     * @returns {Promise<object|null>} the LUT, or null if not found
+     */
+    async getLUT(lutId) {
+        if (!lutId) return null;
+        const resp = await authFetch(`/api/luts/${lutId}`);
+        if (!resp.ok) return null;
+        const { lut } = await resp.json();
+        return lut || null;
+    }
+
+    /**
      * List all available LUTs.
      *
      * @param {{ cinematicOnly?: boolean, category?: string, limit?: number }} [opts]

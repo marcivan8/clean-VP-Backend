@@ -120,7 +120,8 @@
       "settings": "settings",
       "effects": "effects",
       "interview": "interview",
-      "marketplace": "marketplace"
+      "marketplace": "marketplace",
+      "motion": "motion"
     },
     "colorGrading": {
       "title": "Color Grading",
@@ -205,6 +206,7 @@
     "uploadUploading": "Uploading",
     "uploadProcessing": "Processing",
     "uploadReady": "Ready",
+    "uploadProcessingDetail": "Generating a proxy so edits and timeline playback stay smooth",
     "securelyUploaded": "Securely uploaded to Google Cloud Storage",
     "noFileSelected": "ROKA: No file selected. Please import a file first.",
     "rokaError": "ROKA error: {{message}}",
@@ -479,7 +481,8 @@
     "deleteThisAsset": "Delete this asset?",
     "deleteAsset": "Delete Asset",
     "dragToTimeline": "Drag to Timeline",
-    "added": "Added!"
+    "added": "Added!",
+    "addAsOverlay": "Add as sticker/logo overlay"
   },
   "audioExportPanel": {
     "title": "Export Audio",
@@ -494,5 +497,29 @@
     "optional": "optional",
     "cancel": "Cancel",
     "applyFullEdit": "Apply Full Edit"
+  },
+  "motionPanel": {
+    "title": "Motion",
+    "selectClip": "Select a clip to animate it.",
+    "keyframes": "Keyframes",
+    "clear": "Clear",
+    "noAnimation": "No animation",
+    "customKeyframes": "Custom keyframes",
+    "usingPreset": "Preset: {{name}}",
+    "startAnimating": "Add a {{param}} keyframe at the playhead",
+    "group": {
+      "text": "Text",
+      "image": "Image",
+      "sticker": "Sticker",
+      "camera": "Camera"
+    },
+    "param": {
+      "x": "X offset",
+      "y": "Y offset",
+      "scale": "Scale",
+      "rotation": "Rotation",
+      "opacity": "Opacity",
+      "blur": "Blur"
+    }
   }
 }

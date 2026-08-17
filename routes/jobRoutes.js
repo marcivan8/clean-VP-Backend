@@ -11,7 +11,7 @@
 
 const express = require('express');
 const router  = express.Router();
-const { videoQueue, audioQueue, analysisQueue, exportQueue } = require('../queue/queues');
+const { videoQueue, audioQueue, analysisQueue, exportQueue, visionQueue } = require('../queue/queues');
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
@@ -23,6 +23,8 @@ async function findJob(jobId) {
     job = await analysisQueue.getJob(jobId);
     if (job) return job;
     job = await exportQueue.getJob(jobId);
+    if (job) return job;
+    job = await visionQueue.getJob(jobId); // R67 — object-segmentation (SAM2) jobs
     return job;
 }
 

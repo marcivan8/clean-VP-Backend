@@ -432,13 +432,32 @@ function compileRemoveRepeatedTakes(step, ctx) {
 // ── NEW: identify_quotable_moments ─────────────────────────────────────────────
 
 /**
- * Analysis-only step — no edits are executed.
- * Deposits its configuration into ctx.computedValues so downstream steps
- * or the UI can access the quotable moments config.
- * The actual filtering happens in VideoEditorTools / ContentAnalyzer at runtime.
+ * FIX: This was compiled as `skip(...)` — analysis-only, no commands emitted.
+ *      It deposited a `quotable_moments_config` computed value that nothing
+ *      downstream ever read (confirmed: no other reference to that key
+ *      anywhere in the codebase), so the "best standalone clips for
+ *      repurposing" the plan's own approval message promised were identified
+ *      and then silently thrown away — the long-form pipeline never actually
+ *      produced repurposable clips.
+ *
+ * Now emits a real ENGINE.STORE command. MediaExecutionEngine delegates
+ * 'identify_quotable_moments' to VideoEditorTools.identifyQuotableMoments(),
+ * which re-derives the candidate segments from ContentAnalyzer's cached
+ * analysis and lands each one as an independent clip on a dedicated
+ * "Highlights" track — the main edited timeline is left untouched.
  */
 function compileIdentifyQuotableMoments(step, ctx) {
-    return skip(step.step_id, 'Identify quotable moments (analysis only — no edits)', {
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'identify_quotable_moments', {
+            min_duration: step.min_duration || 15,
+            max_duration: step.max_duration || 90,
+            min_importance: step.min_importance || 0.6,
+            max_results: step.max_results || 5,
+        }, {
+            source_step_id: step.step_id,
+            description: 'Extract the best standalone moments as separate clips for repurposing',
+        }),
+    ], {
         key: 'quotable_moments_config',
         value: {
             min_duration: step.min_duration || 15,
@@ -722,13 +741,36 @@ function compileRhythmZoom(step, ctx) {
     ]);
 }
 
+// ── Smart zoom (Ken Burns / punch-ins) — long-form planner's animation step ────
+// FIX: LongFormEditPlanner emits an `apply_smart_zoom` step in every edit mode
+//      (CLEAN_EDIT, YOUTUBE_OPTIMIZED, FULL_BUILD), but this action had no
+//      COMMAND_MAP entry — every long-form job silently dropped it via
+//      compileFallback ("Unknown action: apply_smart_zoom") while still
+//      reporting "✓ Long-form edit complete" for the steps that DID compile.
+//      MediaExecutionEngine already has a real handler for this exact command
+//      (see the 'apply_smart_zoom' case in executeStoreAction, which delegates
+//      to VideoEditorTools.applySmartZoom() → ZoomAnalyzer.generateZoomEvents())
+//      — compilation just never emitted the command that would reach it.
+function compileApplySmartZoom(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'apply_smart_zoom', {},
+            { source_step_id: step.step_id, description: 'Apply context-aware zoom keyframes (Ken Burns / punch-ins)' }),
+    ]);
+}
+
 // ── Semantic clip organizer — "organize my clips / auto-arrange" ───────────────
 // Delegates to the organize_clips case in MediaExecutionEngine.executeStoreAction.
 // Extracts one frame per asset via server-side ffmpeg, classifies with GPT-4o-mini
 // Vision, then reorders clips on the timeline to match the recommended narrative order.
+//
+// FIX: step.storyHints threads a DirectorIntelligence proposal's finding
+// (buried hook / through-line issue, from the stored story_intelligence row)
+// through to the organize-clips request body, so a re-organize triggered from
+// that proposal carries the SPECIFIC finding forward instead of running the
+// exact same context-free ordering pass the first organize already ran.
 function compileOrganizeClips(step, ctx) {
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'organize_clips', {},
+        cmd(ENGINE.STORE, 'organize_clips', { storyHints: step.storyHints || null },
             { source_step_id: step.step_id, description: 'Analyze and auto-organize clips by semantic content' }),
     ]);
 }
@@ -825,18 +867,43 @@ function compileSearchPresets(step, ctx) {
     ]);
 }
 
+// FIX (R75): these two used to emit action 'setProjectLUT' — a store action
+// MediaExecutionEngine has NO handler for at all (confirmed: zero references
+// to 'setProjectLUT' anywhere in MediaExecutionEngine.js), so any compiled
+// plan containing apply_lut/clear_lut silently did nothing. Separately,
+// VideoEditorTools.applyLUT()/clearLUT() (reachable via the OTHER execution
+// path, VideoEditorTools.execute()'s direct dispatch) only set the stale
+// project-level CSS-filter preview, not real per-clip grading — also fixed
+// this entry. Rather than have two divergent implementations, both compiled
+// paths now emit the SAME action names VideoEditorTools.execute() already
+// switches on, and MediaExecutionEngine delegates them to VideoEditorTools
+// (see the long-form-semantic-actions delegation block), so there is exactly
+// ONE real implementation of "apply a LUT."
 function compileApplyLUT(step, ctx) {
     const lutId = step.lut_id || step.lutId || null;
-    if (!lutId) return validationError(step.step_id, 'apply_lut requires lut_id', VALIDATION_ERRORS.MISSING_PARAM);
+    const query = step.query || '';
+    // Typed requests ("apply a warm lut") only have a text description at
+    // compile time — resolving it to an id requires a search call, which
+    // CANNOT happen here (this compiler is pure/synchronous, no I/O). So
+    // either a resolved lutId OR a query to resolve at execution time is
+    // required; VideoEditorTools.applyLUT() does the actual search-then-apply
+    // when lutId is absent.
+    if (!lutId && !query) {
+        return validationError(step.step_id, 'apply_lut requires lut_id or query', VALIDATION_ERRORS.MISSING_PARAM);
+    }
+    const applyToAll = !!(step.apply_to_all || step.applyToAll);
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'setProjectLUT', { lutId },
-            { source_step_id: step.step_id, description: `Apply LUT: ${lutId}` }),
+        cmd(ENGINE.STORE, 'apply_lut', { lutId, query, applyToAll },
+            { source_step_id: step.step_id, description: lutId
+                ? `Apply LUT: ${lutId}${applyToAll ? ' (all clips)' : ''}`
+                : `Apply a LUT matching: "${query}"${applyToAll ? ' (all clips)' : ''}` }),
     ]);
 }
 
 function compileClearLUT(step, ctx) {
+    const applyToAll = !!(step.apply_to_all || step.applyToAll);
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'setProjectLUT', { lutId: null },
+        cmd(ENGINE.STORE, 'clear_lut', { applyToAll },
             { source_step_id: step.step_id, description: 'Clear LUT' }),
     ]);
 }
@@ -965,6 +1032,7 @@ const COMMAND_REGISTRY = new Map([
     // NEW long-form audio/analysis steps
     ['remove_repeated_takes', { compiler: compileRemoveRepeatedTakes }],
     ['identify_quotable_moments', { compiler: compileIdentifyQuotableMoments }],
+    ['apply_smart_zoom', { compiler: compileApplySmartZoom }],
 
     // Interview / talking-head / clip organization
     ['rhythm_zoom',      { compiler: compileRhythmZoom }],

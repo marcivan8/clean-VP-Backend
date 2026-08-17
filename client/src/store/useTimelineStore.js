@@ -16,6 +16,13 @@ import {
     LAYER_TYPES,
     ENTITY_TYPES
 } from '../timeline/index.js';
+// R65 — pure, dependency-free (no React/DOM/store deps of its own), so a
+// static import costs nothing meaningful in bundle size, unlike the heavier
+// Compositor.js/CaptionCompiler.js which IDELayout.jsx deliberately loads
+// dynamically only at export time.
+import { buildComponent } from '../motion/ComponentLibrary.js';
+import { clipsInGroup, computeGroupMoveUpdates, computeGroupDuplicateSpecs } from '../motion/ClipGrouping.js';
+import { deriveSpeakerCrop, deriveTrackingSegments } from '../motion/ObjectLayers.js';
 
 // Module-level debounce timer — lives outside React so it survives re-renders
 let _autosaveTimer = null;
@@ -709,8 +716,18 @@ const useTimelineStore = create(
                 if (updates.opacity !== undefined) clipUpdates.opacity = updates.opacity;
                 if (updates.keyframes !== undefined) clipUpdates.keyframes = updates.keyframes;
                 if (updates.animation !== undefined) clipUpdates.animation = updates.animation;
+                // R66 — clip grouping. `null` is a legitimate value (ungroup),
+                // so this checks `!== undefined`, same as every field above —
+                // an explicit `updateClip(..., { groupId: null })` must go
+                // through, not be silently skipped the way `if (updates.groupId)` would.
+                if (updates.groupId !== undefined) clipUpdates.groupId = updates.groupId;
                 // Virtual multicam crop metadata
                 if (updates.virtualCam !== undefined) clipUpdates.virtualCam = updates.virtualCam;
+                // R67 — Object Intelligence (SAM2). `null` is legitimate for both
+                // (clearing a separation / a target), same `!== undefined` rule
+                // as groupId above.
+                if (updates.layerMask !== undefined) clipUpdates.layerMask = updates.layerMask;
+                if (updates.layerTarget !== undefined) clipUpdates.layerTarget = updates.layerTarget;
 
                 if (Object.keys(clipUpdates).length > 0 && placement.clipId) {
                     timelineManager.dispatch(
@@ -930,6 +947,354 @@ const useTimelineStore = create(
                     order: 0 // text tracks go on top
                 }));
                 set({ tracks: timelineManager.toLegacyTracks() });
+            },
+
+            /**
+             * R62 — Graphics/Overlay track.
+             *
+             * Adds a sticker/logo/shape clip to the (single) 'overlay' track,
+             * creating that track on first use. Reuses `addTrack`/`addClip`
+             * as-is rather than a bespoke code path, so overlay clips get the
+             * exact same persistence, undo history, and duration-sync
+             * behaviour every other clip type already has for free.
+             *
+             * `asset` is whatever the media library already produces for an
+             * image (id, url/sourceUrl, name, resolution) — the same shape
+             * `addAssetToTimeline` accepts. `kind` selects the clip.type,
+             * which `ClipAdapter.inferKind()` maps onto a LAYER_KINDS value
+             * (defaults to 'sticker' — a small, positioned graphic, as
+             * opposed to 'image' which the adapter treats as a full-bleed
+             * background layer).
+             */
+            addOverlayClip: (asset, opts = {}) => {
+                if (!asset) return null;
+
+                // Deliberately NOT calling _saveHistory() here: addTrack() already
+                // saves one when it creates a fresh track, and addClip() saves one
+                // of its own below. Adding a third save-point here (matching the
+                // addAssetToTimeline pattern above, which has the same two-step
+                // find-or-create shape) would cost the user two undos to remove
+                // one overlay instead of one.
+                let track = get().tracks.find(t => t.type === 'overlay');
+                const trackId = track ? track.id : get().addTrack('overlay');
+
+                const start = Number.isFinite(opts.start) ? opts.start : get().currentTime;
+                const duration = Number.isFinite(opts.duration) ? opts.duration : (asset.duration || 5);
+
+                get().addClip(trackId, {
+                    type: opts.kind || 'sticker',
+                    assetId: asset.id,
+                    name: asset.name || 'Overlay',
+                    url: asset.url || asset.sourceUrl,
+                    sourceUrl: asset.url || asset.sourceUrl,
+                    thumbnail: asset.thumbnail,
+                    metadata: asset.resolution ? { resolution: asset.resolution } : {},
+                    start,
+                    duration,
+                    // Centred-ish default (upper-right third) so a freshly added
+                    // sticker/logo is visible immediately rather than dead
+                    // centre, covering the subject — matches how most editors
+                    // default a newly dropped watermark/logo.
+                    x: Number.isFinite(opts.x) ? opts.x : 78,
+                    y: Number.isFinite(opts.y) ? opts.y : 18,
+                    scale: Number.isFinite(opts.scale) ? opts.scale : 1,
+                    rotation: 0,
+                    opacity: 1,
+                });
+
+                return trackId;
+            },
+
+            /**
+             * R65 — Motion Graphics Components.
+             *
+             * The store-side half of `client/src/motion/ComponentLibrary.js`.
+             * `buildComponent()` is pure — it never touches the store — and
+             * returns PLACEMENT DESCRIPTORS; this turns each one into a real
+             * `addClip` call on the appropriate track (finding-or-creating it,
+             * same as `addOverlayClip`/`addTextOverlay` already do). This is
+             * also the function `MediaExecutionEngine.executeStoreAction`'s
+             * new `addMotionComponent` case calls — the AI-tool entry point:
+             * `{ component: "CTAWidget", preset: "subscribe" }` arrives here
+             * as `(componentId, presetId, params)`.
+             *
+             * ONE history entry for the whole component in the common case
+             * (its track(s) already exist) — `_saveHistory()` once up front,
+             * every `addClip` call below passes `skipHistory: true`, same
+             * fan-out pattern `updateClip`'s `$ALL_CLIPS` and `applyColorGrade`
+             * already use. `addTrack()` has no skip-history option and always
+             * saves one of its own, so a component whose track(s) don't exist
+             * yet costs 2 undo steps instead of 1 the first time — the exact
+             * same accepted tradeoff `addOverlayClip`'s own comment documents,
+             * not a new compromise introduced here.
+             *
+             * @param {string} componentId one of ComponentLibrary.COMPONENT_IDS
+             * @param {string} presetId a preset key for that component
+             * @param {object} [params] component-specific content (text/url/emoji/...)
+             * @returns {{success:boolean, error?:string, clipCount?:number}}
+             */
+            addMotionComponent: (componentId, presetId, params = {}) => {
+                let result;
+                try {
+                    result = buildComponent(componentId, presetId, params);
+                } catch (err) {
+                    return { success: false, error: `could not build component: ${err.message}` };
+                }
+                if (!result || !Array.isArray(result.placements) || result.placements.length === 0) {
+                    return { success: false, error: result?.error || `component "${componentId}" produced nothing` };
+                }
+
+                get()._saveHistory();
+
+                const start = Number.isFinite(Number(params.start)) ? Number(params.start) : get().currentTime;
+                let textTrackId = null;
+                let overlayTrackId = null;
+                const ensureTextTrack = () => {
+                    if (textTrackId) return textTrackId;
+                    const existing = get().tracks.find(t => t.type === 'text');
+                    textTrackId = existing ? existing.id : get().addTrack('text');
+                    return textTrackId;
+                };
+                const ensureOverlayTrack = () => {
+                    if (overlayTrackId) return overlayTrackId;
+                    const existing = get().tracks.find(t => t.type === 'overlay');
+                    overlayTrackId = existing ? existing.id : get().addTrack('overlay');
+                    return overlayTrackId;
+                };
+
+                let clipCount = 0;
+                for (const placement of result.placements) {
+                    if (placement.trackType === 'text') {
+                        const trackId = ensureTextTrack();
+                        get().addClip(trackId, { ...placement.clip, start }, { skipHistory: true });
+                        clipCount++;
+                    } else if (placement.trackType === 'overlay') {
+                        const trackId = ensureOverlayTrack();
+                        const a = placement.asset || {};
+                        get().addClip(trackId, {
+                            type: 'sticker',
+                            assetId: a.id,
+                            name: a.name || componentId,
+                            url: a.url,
+                            sourceUrl: a.url,
+                            ...placement.clip,
+                            start,
+                        }, { skipHistory: true });
+                        clipCount++;
+                    }
+                }
+
+                // R66 — every composite component's placements share a groupId
+                // (stamped by ComponentLibrary.buildComponent → assignGroupId);
+                // surfacing it lets a caller immediately follow up with
+                // moveClipGroup/duplicateClipGroup/removeClipGroup. null for
+                // the 5 single-clip components, which were never grouped.
+                const groupId = result.placements[0]?.clip?.groupId ?? null;
+                return { success: true, clipCount, groupId };
+            },
+
+            /**
+             * R66 — Clip grouping. Three group-aware operations built on the
+             * pure `client/src/motion/ClipGrouping.js`, mirroring exactly how
+             * `addMotionComponent` above wraps `ComponentLibrary`: the pure
+             * module computes WHAT changes, this dispatches it.
+             *
+             * Every member moves/is-removed/is-duplicated as ONE undo step —
+             * `_saveHistory()` once up front, every underlying call passes
+             * `{ skipHistory: true }`, the same fan-out shape `updateClip`'s
+             * `$ALL_CLIPS` case already uses.
+             */
+            moveClipGroup: (groupId, delta = {}) => {
+                const updates = computeGroupMoveUpdates(get().tracks, groupId, delta);
+                if (updates.length === 0) return { success: false, error: `no clips found for group "${groupId}"` };
+
+                get()._saveHistory();
+                for (const u of updates) {
+                    get().updateClip(u.trackId, u.clipId, u.updates, { skipHistory: true });
+                }
+                return { success: true, moved: updates.length };
+            },
+
+            duplicateClipGroup: (groupId, opts = {}) => {
+                const specs = computeGroupDuplicateSpecs(get().tracks, groupId, opts);
+                if (specs.length === 0) return { success: false, error: `no clips found for group "${groupId}"` };
+
+                get()._saveHistory();
+                let newGroupId = null;
+                for (const { trackId, clip } of specs) {
+                    newGroupId = clip.groupId;
+                    get().addClip(trackId, clip, { skipHistory: true });
+                }
+                return { success: true, duplicated: specs.length, groupId: newGroupId };
+            },
+
+            /**
+             * Deletes every clip in a group as one action. Deliberately does
+             * NOT call the store's own `removeClip` — that method has a
+             * "delete every currently multi-selected clip, not just the one
+             * passed" fan-out of its own (see its own body), and looping it
+             * per group member could accidentally sweep in whatever else the
+             * user has selected at the time. Dispatches the same primitive
+             * `removeClip` uses internally instead, and replicates its
+             * "clean up now-empty tracks" step so a group delete behaves
+             * exactly like an ordinary delete, just for N clips at once.
+             */
+            removeClipGroup: (groupId) => {
+                const members = clipsInGroup(get().tracks, groupId);
+                if (members.length === 0) return { success: false, error: `no clips found for group "${groupId}"` };
+
+                get()._saveHistory();
+                members.forEach(({ clip }) => {
+                    timelineManager.dispatch(TimelineActions.removePlacement(clip.id));
+                });
+
+                const currentPlacements = Object.values(timelineManager.getState().entities.placements);
+                const currentLayers = Object.values(timelineManager.getState().entities.layers);
+                currentLayers.forEach(layer => {
+                    if (layer.id === 'track-default-video' || layer.id === 'track-default-audio') return;
+                    if (layer.type === 'video' || layer.type === 'audio') return;
+                    const hasClips = currentPlacements.some(p => p.layerId === layer.id);
+                    if (!hasClips) {
+                        timelineManager.dispatch(TimelineActions.removeLayer(layer.id));
+                    }
+                });
+
+                set({
+                    tracks: timelineManager.toLegacyTracks(),
+                    activeClipId: null,
+                    selectedClipIds: [],
+                });
+                return { success: true, removed: members.length };
+            },
+
+            /**
+             * R67 — Object Intelligence Integration. Four actions built on the
+             * pure `client/src/motion/ObjectLayers.js`, mirroring how
+             * `addMotionComponent`/`moveClipGroup` above wrap their own pure
+             * modules: ObjectLayers computes WHAT the crop/segments should be,
+             * these dispatch it. The actual SAM2 API call + job polling lives
+             * in `MediaExecutionEngine.js`'s `separate_speaker` case (it
+             * already owns `resolveAssetServerPath`/`authFetch`/`pollJobResult`
+             * for exactly this shape of work — see its `detect_scene` case)
+             * and calls `applyLayerSeparation` once the mask/bboxTrack come back.
+             */
+
+            /** Store the SAM2 result on a clip. One history step. */
+            applyLayerSeparation: (trackId, clipId, { maskAssetUrl, bboxTrack, sourceWidth, sourceHeight } = {}) => {
+                if (!maskAssetUrl || !Array.isArray(bboxTrack) || bboxTrack.length === 0) {
+                    return { success: false, error: 'applyLayerSeparation: maskAssetUrl and a non-empty bboxTrack are required' };
+                }
+                get().updateClip(trackId, clipId, {
+                    layerMask: { maskAssetUrl, bboxTrack, sourceWidth, sourceHeight, status: 'ready' },
+                });
+                return { success: true };
+            },
+
+            /**
+             * "Zoom speaker" / "animate speaker": ONE static crop for the whole
+             * clip, reusing the existing virtualCam pipeline unchanged (see
+             * ObjectLayers.js's header for why this needs no new render code
+             * in either preview or export). `clip.offset` is the source-in
+             * point SAM2's bboxTrack timestamps are relative to.
+             */
+            zoomToSpeaker: (trackId, clipId) => {
+                const track = get().tracks.find(t => t.id === trackId);
+                const clip = track?.clips?.find(c => c.id === clipId);
+                if (!clip) return { success: false, error: `clip "${clipId}" not found on track "${trackId}"` };
+                if (!clip.layerMask?.bboxTrack?.length) {
+                    return { success: false, error: 'No SAM2 separation on this clip yet — run "separate speaker" first.' };
+                }
+
+                const crop = deriveSpeakerCrop(clip.layerMask.bboxTrack, {
+                    sourceStart: Number(clip.offset) || 0,
+                    duration: Number(clip.duration) || Infinity,
+                });
+                if (!crop) return { success: false, error: 'Could not derive a crop — no mask samples cover this clip\'s trimmed range.' };
+
+                get().updateClip(trackId, clipId, { virtualCam: crop, layerTarget: 'speaker' });
+                return { success: true, crop };
+            },
+
+            /**
+             * "Track speaker": splits the clip into re-centering pieces (see
+             * ObjectLayers.deriveTrackingSegments), each with its own static
+             * virtualCam crop — the SAME piece-splitting shape virtual_multicam
+             * already uses for per-turn angle changes, applied to subject
+             * motion. Replaces the original clip with N new clips as ONE
+             * history step (removeClip/addClip below run with skipHistory
+             * since this wrapper already called _saveHistory once).
+             */
+            trackSpeaker: (trackId, clipId, opts = {}) => {
+                const track = get().tracks.find(t => t.id === trackId);
+                const clip = track?.clips?.find(c => c.id === clipId);
+                if (!clip) return { success: false, error: `clip "${clipId}" not found on track "${trackId}"` };
+                if (!clip.layerMask?.bboxTrack?.length) {
+                    return { success: false, error: 'No SAM2 separation on this clip yet — run "separate speaker" first.' };
+                }
+
+                const sourceOffset = Number(clip.offset) || 0;
+                const timelineStart = Number(clip.start) || 0;
+                const duration = Number(clip.duration) || 0;
+                const segments = deriveTrackingSegments(clip.layerMask.bboxTrack, {
+                    sourceStart: sourceOffset,
+                    duration,
+                    ...opts,
+                });
+                if (segments.length === 0) {
+                    return { success: false, error: 'Could not derive tracking segments — no mask samples cover this clip\'s trimmed range.' };
+                }
+                if (segments.length === 1) {
+                    // Nothing to split — the subject never drifted past threshold.
+                    // Falls back to the single-crop path so the caller still gets a result.
+                    return get().zoomToSpeaker(trackId, clipId);
+                }
+
+                get()._saveHistory();
+                get().removeClip(trackId, clipId, { skipHistory: true });
+
+                let pieceCursor = timelineStart;
+                let created = 0;
+                for (const seg of segments) {
+                    const pieceDuration = seg.end - seg.start;
+                    if (!(pieceDuration > 0)) continue;
+                    get().addClip(trackId, {
+                        ...clip,
+                        id: `${clipId}-track-${Math.round(seg.start * 1000)}`,
+                        start: pieceCursor,
+                        duration: pieceDuration,
+                        offset: seg.start,
+                        virtualCam: seg.crop,
+                        layerTarget: 'speaker',
+                        groupId: null, // a tracking split is not a Motion Graphics component group
+                    }, { skipHistory: true });
+                    pieceCursor += pieceDuration;
+                    created++;
+                }
+
+                return { success: true, segments: created };
+            },
+
+            /**
+             * "Blur background": no crop math — this only flags WHICH side of
+             * the mask an effect should apply to. The actual blur compositing
+             * is a genuinely new render primitive (see
+             * client/src/components/Player/ObjectLayerOverlay.jsx for preview,
+             * jobs/exportProcessor.js's buildBackgroundBlurFilter for export) —
+             * this action just makes `clip.layerTarget` the thing both of
+             * those read.
+             */
+            setLayerTarget: (trackId, clipId, target) => {
+                if (target !== null && target !== 'speaker' && target !== 'background') {
+                    return { success: false, error: `invalid layerTarget "${target}"` };
+                }
+                const track = get().tracks.find(t => t.id === trackId);
+                const clip = track?.clips?.find(c => c.id === clipId);
+                if (!clip) return { success: false, error: `clip "${clipId}" not found on track "${trackId}"` };
+                if (target && !clip.layerMask?.bboxTrack?.length) {
+                    return { success: false, error: 'No SAM2 separation on this clip yet — run "separate speaker" first.' };
+                }
+                get().updateClip(trackId, clipId, { layerTarget: target });
+                return { success: true };
             },
 
             removeTrack: (trackId) => {
@@ -1157,6 +1522,18 @@ const useTimelineStore = create(
                                                : { width: 2, color: '#000000' },
                             textAlign:     existingTextClip?.textAlign   || 'center',
                             animation:     existingTextClip?.animation   || 'none',
+                            // Motion Graphics engine (R58). `cap.words` now arrives
+                            // populated from groupWordsIntoCaptions → the caption
+                            // model's groupWordsIntoSegments; before R58 the word
+                            // array was discarded during grouping and captions were
+                            // line-level only. Carried onto the clip so per-word
+                            // highlighting can resolve without re-reading the
+                            // transcript (which may have been dropped from storage
+                            // under size pressure — see DROP_ORDER).
+                            // Times are ABSOLUTE, same clock as start/duration.
+                            words:         Array.isArray(cap.words) ? cap.words : undefined,
+                            captionStyle:  existingTextClip?.captionStyle,
+                            animations:    existingTextClip?.animations,
                             sourceUrl: null,
                             sourceDuration: duration,
                             metadata: {},

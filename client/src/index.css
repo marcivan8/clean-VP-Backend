@@ -400,6 +400,69 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
+/* ── Caption/text fonts — none of these were registered for the browser ──────
+ * All 36 fonts TextPanel.jsx / ReasoningPanel.jsx let a user pick, and that
+ * FONT_SPECS/FONT_MAP in exportProcessor.js and TextOverlay.jsx already
+ * reference by name, have their .ttf sitting right here in
+ * client/public/fonts/ (served at /fonts/*.ttf) — but NOTHING ever declared
+ * an @font-face for them. Every @font-face above this comment is for the
+ * app's OWN UI chrome (Geist/Instrument Serif/JetBrains Mono), not for
+ * caption text at all.
+ * So `fontFamily: '"Anton", sans-serif'` (TextOverlay's FONT_MAP) or
+ * `fontFamily={clip.fontFamily}` (the Revideo preview scene,
+ * client/src/revideo/project.tsx) asked the browser for a family it had
+ * never loaded, and silently fell through to the `sans-serif`/`serif`
+ * fallback every single time — captions always rendered in the browser
+ * default font, never the one actually picked, in both the live preview
+ * and the orphaned CaptionOverlay.jsx.
+ * The export path (jobs/exportProcessor.js) never had this bug — FFmpeg's
+ * drawtext reads these same .ttf files directly by path, no browser
+ * @font-face involved. So this was a preview-only bug, but the editor is
+ * the ONLY place a user ever judges "does this font look right".
+ * Weights below mirror FONT_SPECS in jobs/exportProcessor.js exactly — keep
+ * both in sync; a font added to one and not the other silently breaks either
+ * the preview or the export for that family. All 36 files are single static
+ * instances (no separate italic/bold files besides the two noted), so this
+ * is font-style: normal throughout; a caption's `fontWeight`/`fontStyle`
+ * toggles fall back to the browser's faux-bold/faux-italic synthesis, same
+ * as before this fix — that part was never broken. */
+@font-face { font-family: 'Anton';              font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Anton-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Bebas Neue';         font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/BebasNeue-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Montserrat';         font-style: normal; font-weight: 800; font-display: swap; src: url('/fonts/Montserrat-Bold.ttf') format('truetype'); }
+@font-face { font-family: 'Inter';              font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Inter-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Barlow Condensed';   font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/BarlowCondensed-Bold.ttf') format('truetype'); }
+@font-face { font-family: 'Playfair Display';   font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/PlayfairDisplay-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Lora';               font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Lora-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Merriweather';       font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Merriweather-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'DM Serif Display';   font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/DMSerifDisplay-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Cormorant Garamond'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/CormorantGaramond-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Nunito';             font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Nunito-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Poppins';            font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Poppins-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Quicksand';          font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Quicksand-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Josefin Sans';       font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/JosefinSans-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Raleway';            font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Raleway-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Rajdhani';           font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Rajdhani-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Exo 2';              font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Exo2-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Orbitron';           font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Orbitron-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Oxanium';            font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Oxanium-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Roboto Condensed';   font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/RobotoCondensed-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Oswald';             font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Oswald-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Teko';               font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Teko-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Black Han Sans';     font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/BlackHanSans-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Saira Condensed';    font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/SairaCondensed-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Cabin';              font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Cabin-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Caveat';             font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Caveat-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Pacifico';           font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Pacifico-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Kalam';              font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Kalam-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Satisfy';            font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Satisfy-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Dancing Script';     font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/DancingScript-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Boogaloo';           font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Boogaloo-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Righteous';          font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Righteous-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Press Start 2P';     font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/PressStart2P-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Audiowide';          font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Audiowide-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'DM Sans';            font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/DMSans-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Unbounded';          font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/Unbounded-Regular.ttf') format('truetype'); }
+
 
 @layer base {
 /* ─────────── Vibed — design tokens ─────────── */

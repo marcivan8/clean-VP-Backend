@@ -191,19 +191,42 @@ router.post('/upload', authenticateUser, upload.single('lut'), async (req, res) 
 
 // ── POST /api/luts/recommend ──────────────────────────────────────────────────
 router.post('/recommend', authenticateUser, async (req, res) => {
-    const { projectState } = req.body || {};
+    const { projectState = null, projectId = null } = req.body || {};
+    const userId = req.user?.id || null;
 
-    if (!projectState) {
-        return res.status(400).json({ error: 'projectState is required' });
+    // projectId alone is enough to run — recommendLUTs degrades gracefully with
+    // an empty projectState (format signals just won't be available), and
+    // projectId is what unlocks the content-aware tone lookup below. This also
+    // fixes a real gap: the AI-command path (typed "recommend a lut" / a Brain
+    // suggestion accept) never had a full projectState to send — only a
+    // projectId — so it 400'd every time before this.
+    if (!projectState && !projectId) {
+        return res.status(400).json({ error: 'projectState or projectId is required' });
     }
 
     try {
+        // Content-aware signal: the project's derived tone (ProjectIntelligence),
+        // e.g. "dramatic" / "conversational" — fed to RecommendationEngine as a
+        // mood word so results react to what the footage actually IS, not just
+        // its platform/aspect-ratio. Mirrors the storyHints auto-fetch-by-
+        // projectId pattern already used by /api/interview/organize-clips.
+        let tone = null;
+        if (projectId) {
+            try {
+                const { ProjectIntelligence } = require('../brain/ProjectIntelligence');
+                const map = await new ProjectIntelligence().getMap(projectId, userId);
+                tone = map?.tone || null;
+            } catch (piErr) {
+                console.warn('[lutRoutes POST /recommend] tone lookup failed (continuing without it):', piErr.message);
+            }
+        }
+
         const luts = await recommendationEngine.recommendLUTs(
-            projectState,
-            req.user?.id || null,
-            { limit: 3 }
+            projectState || {},
+            userId,
+            { limit: 3, tone }
         );
-        return res.json({ luts });
+        return res.json({ luts, toneApplied: !!tone });
     } catch (err) {
         console.error('[lutRoutes POST /recommend] error:', err.message);
         return res.status(500).json({ error: err.message });

@@ -120,10 +120,25 @@ class RecommendationEngine {
     /**
      * Recommend LUTs based on project context (platform, content type, emotion).
      *
+     * CONTENT-AWARE (R75): previously this only reasoned about FORMAT — platform,
+     * captions, aspect ratio, duration, clip count — via _inferIntentsFromProject.
+     * Two projects with the same format but wildly different footage (a somber
+     * interview vs. an upbeat product demo) got identical suggestions. `opts.tone`
+     * (the project's derived tone from ProjectIntelligence — "dramatic",
+     * "conversational", etc.) and `opts.moodWords` (any other mood signal a caller
+     * already has, e.g. aggregated per-asset emotional_tone) are now folded into
+     * the query text and run through QueryParser's LUT_KEYWORD_MAP, which resolves
+     * mood words to a warmth/contrast profile — the same mechanism the manual
+     * "moody lut" search box already uses. When that resolves, getLUTsByProfile
+     * runs alongside the existing intent-based lookup and its matches lead the
+     * ranking, since they reflect what the footage actually IS.
+     *
      * @param {Object}  projectState
      * @param {string}  [userId]
      * @param {Object}  [opts]
      * @param {number}  [opts.limit=3]
+     * @param {string}  [opts.tone] — project-level tone from ProjectIntelligence
+     * @param {string[]} [opts.moodWords] — additional mood/style words
      * @returns {Promise<import('../types').SearchResult[]>}
      */
     async recommendLUTs(projectState, userId = null, opts = {}) {
@@ -131,17 +146,41 @@ class RecommendationEngine {
 
         try {
             const intents = this._inferIntentsFromProject(projectState);
+            const moodWords = [...(opts.moodWords || []), opts.tone || null].filter(Boolean);
 
-            // Build a LUT query from project platform/intent
+            // Build a LUT query from project platform/intent + content mood
             const platform = projectState?.platform || null;
             const queryText = [
                 ...intents.slice(0, 3).map(i => i.toLowerCase().replace(/_/g, ' ')),
+                ...moodWords,
                 platform ? `for ${platform}` : '',
             ].filter(Boolean).join(' ') || 'cinematic';
 
             const parsed = this.parser.parse(queryText, { forcedAssetType: AssetType.LUT });
 
-            const luts = await this.taxonomy.getLUTsByIntents(intents, limit + 5);
+            const hasProfileHint = parsed._warmthHint !== null || parsed._contrastHint !== null;
+            const [byIntent, byProfile] = await Promise.all([
+                this.taxonomy.getLUTsByIntents(intents, limit + 5),
+                hasProfileHint
+                    ? this.taxonomy.getLUTsByProfile({
+                        warmthMin:   parsed._warmthHint   !== null ? parsed._warmthHint   - 1.5 : undefined,
+                        warmthMax:   parsed._warmthHint   !== null ? parsed._warmthHint   + 1.5 : undefined,
+                        contrastMin: parsed._contrastHint !== null ? parsed._contrastHint - 1.5 : undefined,
+                        contrastMax: parsed._contrastHint !== null ? parsed._contrastHint + 1.5 : undefined,
+                    }, limit + 5)
+                    : Promise.resolve([]),
+            ]);
+
+            // Profile matches (content-aware) lead; intent matches (format-aware)
+            // fill in behind them, deduplicated.
+            const seen = new Set();
+            const ordered = [...byProfile, ...byIntent];
+            const luts = [];
+            for (const asset of ordered) {
+                const id = asset.id || asset.name;
+                if (!seen.has(id)) { seen.add(id); luts.push(asset); }
+            }
+            const profileIds = new Set(byProfile.map(a => a.id || a.name));
 
             const userPrefs = userId
                 ? await this.prefs.getUserPrefs(userId, AssetType.LUT)
@@ -153,14 +192,14 @@ class RecommendationEngine {
                 contextTimelineEvent: null,
                 naturalLanguage: queryText,
                 _allIntents:     intents,
-                _allEmotions:    [],
+                _allEmotions:    parsed._allEmotions || [],
             };
 
             const entries = luts.map(asset => ({
                 asset,
                 scores: {
                     semanticSimilarity:  0,
-                    intentMatch:         0.7,
+                    intentMatch:         profileIds.has(asset.id || asset.name) ? 0.85 : 0.7,
                     emotionMatch:        0,
                     energyMatch:         0,
                     popularityScore:     0,

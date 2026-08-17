@@ -204,6 +204,9 @@ export class EditPlanner {
             case 'organize_clips': return this.planOrganizeClips(planId, state, constraints);
             case 'rhythm_zoom': return this.planRhythmZoom(planId, constraints);
             case 'crop_clip':   return this.planCropClip(planId, constraints);
+            case 'apply_lut':      return this.planApplyLUT(planId, constraints);
+            case 'clear_lut':      return this.planClearLUT(planId, constraints);
+            case 'recommend_luts': return this.planRecommendLUTs(planId, constraints);
             case 'detect_speakers': return this.planSingleStep(planId, 'detect_speakers', 'Detect who is speaking (no timeline changes)');
             case 'detect_scene':    return this.planSingleStep(planId, 'detect_scene', 'Analyse framing and plan camera angles (no timeline changes)');
             case 'apply_angle':     return this.planSingleStep(planId, 'apply_angle', 'Apply the planned camera angles to the clips');
@@ -676,6 +679,48 @@ export class EditPlanner {
     static planResetCrop(planId) {
         return this.buildPlan(planId, 'reset_crop', [
             { step_id: 'step_1', action: 'reset_crop', reason: 'Clear crop back to the full frame' }
+        ]);
+    }
+
+    static planApplyLUT(planId, constraints) {
+        const lutId       = constraints?.lutId || constraints?.lut_id || null;
+        const query       = constraints?.query || '';
+        const applyToAll  = constraints?.target === 'all';
+        return this.buildPlan(planId, 'apply_lut', [
+            {
+                step_id: 'step_1',
+                action:  'apply_lut',
+                lut_id:  lutId,
+                query,
+                apply_to_all: applyToAll,
+                reason: query
+                    ? `Apply a LUT matching: "${query}"${applyToAll ? ' (all clips)' : ''}`
+                    : `Apply LUT${lutId ? `: ${lutId}` : ''}${applyToAll ? ' (all clips)' : ''}`,
+            }
+        ]);
+    }
+
+    static planClearLUT(planId, constraints) {
+        const applyToAll = constraints?.target === 'all';
+        return this.buildPlan(planId, 'clear_lut', [
+            {
+                step_id: 'step_1',
+                action:  'clear_lut',
+                apply_to_all: applyToAll,
+                reason: `Clear LUT${applyToAll ? ' (all clips)' : ''}`,
+            }
+        ]);
+    }
+
+    static planRecommendLUTs(planId, constraints) {
+        const limit = constraints?.limit || 3;
+        return this.buildPlan(planId, 'recommend_luts', [
+            {
+                step_id: 'step_1',
+                action:  'recommend_luts',
+                limit,
+                reason: 'Fetch LUT recommendations based on the current project',
+            }
         ]);
     }
 

@@ -22,10 +22,18 @@ const { assetSearchEngine }      = require('../audio-engine/search/AssetSearchEn
 const { recommendationEngine }   = require('../audio-engine/recommendations/RecommendationEngine.js');
 const { userPreferenceEngine }   = require('../audio-engine/search/UserPreferenceEngine.js');
 const { QueryParser }            = require('../audio-engine/search/QueryParser.js');
+const { TaxonomyService }        = require('../audio-engine/search/TaxonomyService.js');
+const { timelineEventDetector }  = require('../audio-engine/timeline/TimelineEventDetector.js');
+const {
+    SEMANTIC_EVENT_TYPES,
+    animationsForEventType,
+    sfxIntentsForEventType,
+}                                 = require('../audio-engine/timeline/AnimationKnowledgeGraph.js');
 
 // TODO: apply apiLimiter to search and recommendation routes
 
 const qp = new QueryParser();
+const taxonomyService = new TaxonomyService();
 
 // ── POST /api/audio/search ────────────────────────────────────────────────────
 // Universal asset search — SFX, LUTs, and presets via the three-pass engine.
@@ -112,6 +120,73 @@ router.post('/recommend/sfx', authenticateUser, async (req, res) => {
         return res.json({ results });
     } catch (err) {
         console.error('[audioEngineRoutes POST /recommend/sfx] error:', err.message);
+        return res.status(500).json({ error: err.message });
+    }
+});
+
+// ── POST /api/audio/animate-automatically ─────────────────────────────────────
+// R68 — AI Animation Intelligence. "Brain chooses animations. Users don't."
+// One explicit command: detect the four semantic events heuristically
+// (TimelineEventDetector.js), resolve each through AnimationKnowledgeGraph.js
+// into a real motion preset id + real SFX rows, and hand back a flat plan.
+// This route only DETECTS and RESOLVES — it never writes to the timeline;
+// applying the plan (calling applyPresetToClip, inserting SFX clips) happens
+// client-side as one undoable action (client/src/agent/MediaExecutionEngine.js
+// `animate_automatically`), matching how every other timeline mutation in
+// this app is required to go through the store's own history/undo path.
+router.post('/animate-automatically', authenticateUser, async (req, res) => {
+    const { projectState } = req.body || {};
+
+    if (!projectState || !Array.isArray(projectState.tracks)) {
+        return res.status(400).json({ error: 'projectState.tracks is required' });
+    }
+
+    try {
+        const events = timelineEventDetector
+            .detect(projectState)
+            .filter(e => SEMANTIC_EVENT_TYPES.includes(e.eventType));
+
+        // clipId → layer kind, so animations resolve to the right preset
+        // family (text vs camera) for the clip the event actually landed on.
+        const clipKind = {};
+        for (const track of projectState.tracks) {
+            for (const clip of (track.clips || [])) {
+                if (!clip?.id) continue;
+                const t = clip.type || track.type;
+                clipKind[clip.id] = (t === 'text' || t === 'caption' || clip.isCaption) ? 'text' : 'video';
+            }
+        }
+
+        // Memoize SFX lookups per event type within this request — several
+        // events of the same type shouldn't re-query Supabase identically.
+        const sfxCache = new Map();
+        const plan = [];
+        for (const event of events) {
+            const kind = clipKind[event.clipId] || 'video';
+            const presetId = animationsForEventType(event.eventType, kind)[0] || null;
+
+            const intents = sfxIntentsForEventType(event.eventType);
+            let sfx = [];
+            if (intents.length) {
+                if (!sfxCache.has(event.eventType)) {
+                    sfxCache.set(event.eventType, await taxonomyService.getSFXByIntents(intents, 3));
+                }
+                sfx = sfxCache.get(event.eventType);
+            }
+
+            plan.push({
+                eventType:    event.eventType,
+                timelineTime: event.timelineTime,
+                clipId:       event.clipId,
+                trackId:      event.trackId,
+                presetId,
+                sfx,
+            });
+        }
+
+        return res.json({ events, plan });
+    } catch (err) {
+        console.error('[audioEngineRoutes POST /animate-automatically] error:', err.message);
         return res.status(500).json({ error: err.message });
     }
 });

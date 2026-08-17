@@ -402,10 +402,15 @@ export function getPlacementClip(state, placementId) {
  * Get all layers sorted by order
  */
 export function getSortedLayers(state) {
+    // 'overlay' (R62) sits between video and audio: it's a visual track like
+    // video, but conceptually "on top of everything" the same way text is,
+    // so this keeps it out of the unnamed-type bucket (99) that silently
+    // swallows anything nobody remembered to add here.
     const TYPE_ORDER = {
         'text': 0,
         'video': 1,
-        'audio': 2
+        'overlay': 2,
+        'audio': 3
     };
 
     return Object.values(state.entities.layers)

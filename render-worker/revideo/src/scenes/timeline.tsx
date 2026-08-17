@@ -1,104 +1,106 @@
-import { makeScene2D, Video, Audio, Img, Txt, Node, Rect, brightness, contrast, saturate, hue } from '@revideo/2d';
+import { makeScene2D, Video, Img, Txt, Node } from '@revideo/2d';
 import { waitFor, useScene, all, createRef } from '@revideo/core';
+import { clipToLayer } from '../motion/RevideoLayerAdapter.js';
+import { resolveMotionAt } from '../motion/MotionResolver.js';
+import { revealedWordCount } from '../motion/CaptionModel.js';
 
 /**
- * Evaluate a keyframe array at a given local clip time.
- * Supports: linear, easeIn, easeOut, easeInOut, bounce, elastic.
+ * render-worker/revideo/src/scenes/timeline.tsx
+ *
+ * R69 — AI Animation Intelligence's sibling entry: the render architecture
+ * split (CLAUDE.md, "let's build and wire revideo for animation, captions
+ * and motion graphics"). Rewritten from the pre-existing scene, which only
+ * understood the old flat `clip.keyframes` format and had no caption/sticker/
+ * lower-third support at all.
+ *
+ * ─── WHAT THIS SCENE DOES, AND WHAT IT DELIBERATELY DOES NOT DO ────────────
+ * Per the confirmed architecture split: FFmpeg owns cuts, audio, encoding,
+ * muxing, compression, AND camera-motion (push/pull/zoom/shake stays in
+ * `jobs/exportProcessor.js`'s existing zoompan path — R64, already reliable).
+ * This scene receives exactly ONE pre-cut, pre-graded, fully-audio-mixed
+ * `baseVideoUrl` — the output of FFmpeg's STEP 1–3 — and draws ONLY:
+ *   - 'text' tracks (captions, titles) — word-timed reveal + the SAME
+ *     `resolveMotionAt()` every other surface (DOM preview, FFmpeg's R63
+ *     caption program) uses, via the ported motion/ files in this directory.
+ *   - 'overlay' tracks (stickers, logos, lower-thirds, motion-graphic
+ *     composite groups) — image-sourced only, matching R62's own scope limit.
+ * It does NOT re-implement per-clip video trimming, transitions, colour
+ * grading, or virtualCam crop — those stay exactly where FFmpeg already does
+ * them reliably, so this scene never duplicates that logic (the "two
+ * implementations of one rule" failure this codebase has hit before:
+ * R14/R16/R53/R56).
+ *
+ * ─── COORDINATES ────────────────────────────────────────────────────────────
+ * `layer.x`/`layer.y` are PERCENT-of-frame naming the element's CENTRE (the
+ * same convention TextOverlay.jsx / GraphicOverlay.jsx use). Revideo's node
+ * origin is canvas-centre, so converting is one line: pixelX = (x-50)/100*cw.
+ *
+ * ─── SCOPE LIMITS, STATED PLAINLY ───────────────────────────────────────────
+ * - No per-word colour highlight of the actively-spoken word yet — captions
+ *   reveal word-by-word (real timing, via `revealedWordCount`) but render as
+ *   one flat colour. `CAPTION_STYLE_PACKS.wordHighlight` is not applied here.
+ * - No custom font embedding (render-lambda's `FontInstaller` base64-embeds
+ *   fonts for a stateless Lambda cold start; this worker doesn't need that
+ *   trick, but font loading here is still just a named `fontFamily` on `Txt`,
+ *   falling back to the browser's built-in sans-serif if the family isn't
+ *   otherwise available in the render container).
  */
-function evaluateKF(keyframes: any[], time: number, defaultValue: number): number {
-    if (!keyframes || keyframes.length === 0) return defaultValue;
-    const sorted = [...keyframes].sort((a, b) => a.time - b.time);
-    if (time <= sorted[0].time) return sorted[0].value;
-    if (time >= sorted[sorted.length - 1].time) return sorted[sorted.length - 1].value;
 
-    let from = sorted[0], to = sorted[1];
-    for (let i = 0; i < sorted.length - 1; i++) {
-        if (time >= sorted[i].time && time < sorted[i + 1].time) { from = sorted[i]; to = sorted[i + 1]; break; }
-    }
-    const t0 = (time - from.time) / Math.max(to.time - from.time, 0.0001);
-    const easingMap: Record<string, (t: number) => number> = {
-        linear: t => t,
-        easeIn: t => t * t,
-        easeOut: t => t * (2 - t),
-        easeInOut: t => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t,
-        'ease-in': t => t * t,
-        'ease-out': t => t * (2 - t),
-        'ease-in-out': t => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t,
-        bounce: t => { const n1 = 7.5625, d1 = 2.75; if (t < 1/d1) return n1*t*t; if (t < 2/d1) return n1*(t-=1.5/d1)*t+0.75; if (t < 2.5/d1) return n1*(t-=2.25/d1)*t+0.9375; return n1*(t-=2.625/d1)*t+0.984375; },
-        elastic: t => t === 0 || t === 1 ? t : Math.pow(2, -10*t) * Math.sin((t-0.1)*5*Math.PI) + 1,
-    };
-    const easing = easingMap[to.easing || 'linear'] || easingMap.linear;
-    return from.value + (to.value - from.value) * easing(t0);
-}
-
-function clipLocalTime(playbackTime: number, clipStart: number): number {
-    return Math.max(0, playbackTime - clipStart);
+function useVar<T>(vars: any, name: string, fallback: T): T {
+    const signal = vars.get(name, fallback);
+    return (typeof signal === 'function' ? signal() : signal) as T;
 }
 
 export default makeScene2D('timeline', function* (view) {
-    
-    // ── Capture scene reference ONCE (safe inside generator body) ──
     const scene = useScene();
     const playback = scene.playback;
     const vars = scene.variables;
 
-    const backendUrlSignal = vars.get('backendUrl', 'http://127.0.0.1:3000');
-    const backendUrl: string = (typeof backendUrlSignal === 'function'
-        ? backendUrlSignal()
-        : backendUrlSignal) as string;
-
+    const backendUrl = useVar<string>(vars, 'backendUrl', '');
     const fixUrl = (url: string) => {
         if (!url) return url;
-        if (url.startsWith('blob:')) return url;
-        if (url.startsWith('/api') || url.startsWith('/uploads')) {
-            return backendUrl + url;
-        }
+        if (url.startsWith('blob:') || url.startsWith('http') || url.startsWith('data:')) return url;
+        if (url.startsWith('/api') || url.startsWith('/uploads')) return backendUrl + url;
         return url;
     };
 
-    const durationSignal = vars.get('duration', 10);
-    const totalDuration: number = (durationSignal ? typeof durationSignal === 'function' ? durationSignal() : durationSignal : 10) as number;
+    const totalDuration = useVar<number>(vars, 'duration', 10);
+    const baseVideoUrl = useVar<string>(vars, 'baseVideoUrl', '');
+    const tracks = useVar<any[]>(vars, 'tracks', []); // ONLY 'text'/'overlay' tracks — see header
 
-    const tracksSignal = vars.get('tracks', []);
-    const tracks: any[] = (tracksSignal ? typeof tracksSignal === 'function' ? tracksSignal() : tracksSignal : []) as any[];
-
-    const arSignal = vars.get('aspectRatio', '16:9');
-    const ar: string = (typeof arSignal === 'function' ? arSignal() : arSignal) as string;
+    const ar = useVar<string>(vars, 'aspectRatio', '16:9');
     const SIZE_MAP: Record<string, [number, number]> = {
-        '16:9':  [1920, 1080],
-        '9:16':  [1080, 1920],
-        '1:1':   [1080, 1080],
-        '4:3':   [1440, 1080],
-        '4:5':   [1080, 1350],
-        '21:9':  [2560, 1080],
+        '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1080, 1080],
+        '4:3': [1440, 1080], '4:5': [1080, 1350], '21:9': [2560, 1080],
     };
     const [cw, ch] = SIZE_MAP[ar] ?? SIZE_MAP['16:9'];
     view.size([cw, ch]);
 
-    const canvasWidth = cw;
-    const canvasHeight = ch;
-
-    // Simple placeholder text when no tracks/clips.
-    // Loop quickly (0.5s) so the scene re-reads tracks as soon as a clip is
-    // added — the player key also remounts on empty→media transition as a
-    // belt-and-suspenders guard.
-    const hasClips = tracks.some(t => t.clips && t.clips.length > 0);
-    if (!hasClips) {
+    // ── Base video — the ONE video node, already cut/graded/mixed by FFmpeg ──
+    if (baseVideoUrl) {
         yield view.add(
-            <Txt
-                text="NO MEDIA"
-                fontSize={48}
-                fontWeight={700}
-                fontFamily="Inter, sans-serif"
-                fill="rgba(255,255,255,0.15)"
+            <Video
+                src={fixUrl(baseVideoUrl)}
+                width={cw}
+                height={ch}
+                x={0}
+                y={0}
+                time={() => playback.time}
+                play={true}
             />
         );
-        yield* waitFor(0.5);
-        return;
+    } else {
+        // No base video passed — this scene is only ever called with one from
+        // exportProcessor.js's Revideo branch, but fail visibly rather than
+        // silently rendering a blank/black export if that contract is broken.
+        yield view.add(
+            <Txt text="NO BASE VIDEO" fontSize={48} fontWeight={700} fontFamily="Inter, sans-serif" fill="rgba(255,0,0,0.4)" />
+        );
     }
 
-    // Sort tracks: highest order first, 0 last. 0 is drawn last (on top).
-    const sortedTracks = [...tracks].sort((a,b) => (b.order ?? 0) - (a.order ?? 0));
+    // Sort tracks highest-order-first so order:0 draws LAST (on top) — same
+    // convention the old scene and the DOM preview both already use.
+    const sortedTracks = [...tracks].sort((a, b) => (b.order ?? 0) - (a.order ?? 0));
 
     const layerRefs: Record<string, any> = {};
     sortedTracks.forEach(track => {
@@ -107,189 +109,75 @@ export default makeScene2D('timeline', function* (view) {
         view.add(<Node ref={ref} />);
     });
 
-    /**
-     * FIX: Cover-mode scaling — video fills the canvas completely.
-     * Uses max scale so the media covers every pixel (cropping overflow
-     * rather than leaving letterbox/pillarbox bars).
-     *
-     * When source dimensions are unknown we fall back to the canvas size
-     * directly (1:1 mapping) instead of the old 1920×1080 hard-code which
-     * was wrong for 9:16 canvases and caused the squeeze bug.
-     */
-    function fitSize(mediaW: number, mediaH: number): { w: number; h: number } {
-        // Unknown dimensions → assume the media already matches the canvas
-        if (!mediaW || !mediaH) return { w: canvasWidth, h: canvasHeight };
-        const scaleW = canvasWidth / mediaW;
-        const scaleH = canvasHeight / mediaH;
-        // "cover" — scale up so the smaller dimension fills its canvas axis;
-        // the larger dimension overflows and is cropped by the node boundary.
-        const s = Math.max(scaleW, scaleH);
-        return { w: Math.round(mediaW * s), h: Math.round(mediaH * s) };
-    }
+    // ── Percent-of-frame-centre → pixel-from-canvas-centre ──────────────────
+    const toPxX = (pct: number) => ((pct ?? 50) - 50) / 100 * cw;
+    const toPxY = (pct: number) => ((pct ?? 50) - 50) / 100 * ch;
 
-    // Play all clips at their respective start times
-    const runningClips: any[] = [];
+    const runningLayers: any[] = [];
     sortedTracks.forEach((track: any) => {
-        track.clips.forEach((clip: any) => {
-            runningClips.push(function* () {
-                // Wait for clip's start time on the timeline
-                yield* waitFor(clip.start);
+        (track.clips || []).forEach((clip: any) => {
+            const layer = clipToLayer(clip, track);
+            if (!layer) return;
 
-                if (!layerRefs[track.id]) return;
+            runningLayers.push(function* () {
+                yield* waitFor(layer.startTime);
+                if (!layerRefs[track.id] || !layerRefs[track.id]()) return;
 
-                let wrapperRef: any = null;
-                let mediaRef: any = null;
-                if (clip.type === 'video') {
-                    wrapperRef = createRef<Node>();
-                    mediaRef = createRef<Video>();
-                    const kf = clip.keyframes || {};
+                const resolved = () => resolveMotionAt(layer, playback.time);
+                const nodeRef = createRef<Node>();
 
-                    // FIX: Fall back to canvasWidth/canvasHeight (not 1920×1080)
-                    // so 9:16 clips on a 9:16 canvas get the correct 1:1 mapping.
-                    const srcW = clip.metadata?.resolution?.w || clip.sourceWidth || canvasWidth;
-                    const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || canvasHeight;
-                    const fitted = fitSize(srcW, srcH);
-
-                    const g = clip.grading;
-                    const videoFilters = g ? [
-                        brightness((g.brightness ?? 100) / 100),
-                        contrast((g.contrast ?? 100) / 100),
-                        saturate((g.saturate ?? 100) / 100),
-                        hue(g.hueRotate ?? 0),
-                    ] : [];
-
+                if (track.type === 'text') {
+                    const wordCount = Array.isArray(layer.words) ? layer.words.length : 0;
+                    const textFn = () => {
+                        if (wordCount > 0) {
+                            const r = resolved();
+                            const n = revealedWordCount(layer.words, playback.time, r.reveal, wordCount);
+                            return layer.words.slice(0, n).map((w: any) => w.text).join(' ');
+                        }
+                        return layer.content || '';
+                    };
                     layerRefs[track.id]().add(
-                        <Node ref={wrapperRef}>
-                            <Video
-                                ref={mediaRef}
-                            src={fixUrl(clip.url)}
-                            width={fitted.w}
-                            height={fitted.h}
-                            time={() => playback.time - clip.start + (clip.offset || 0)}
-                            play={true}
-                            volume={(clip.volume ?? 1) * (clip.globalVolume ?? 1)}
-                            x={() => evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0)}
-                            y={() => evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0)}
-                            scaleX={() => evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
-                            scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
-                            rotation={() => evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
-                            opacity={() => evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
-                            filters={videoFilters}
-                        />
-                        </Node>
-                    );
-                } else if (clip.type === 'audio') {
-                    wrapperRef = createRef<Node>();
-                    mediaRef = createRef<Audio>();
-                    layerRefs[track.id]().add(
-                        <Node ref={wrapperRef}>
-                            <Audio
-                                ref={mediaRef}
-                            src={fixUrl(clip.url)}
-                            time={() => playback.time - clip.start + (clip.offset || 0)}
-                            play={true}
-                                volume={(clip.volume ?? 1) * (clip.globalVolume ?? 1)}
-                            />
-                        </Node>
-                    );
-                } else if (clip.type === 'image') {
-                    wrapperRef = createRef<Node>();
-                    mediaRef = createRef<Img>();
-                    const kf = clip.keyframes || {};
-
-                    // FIX: Same canvas-relative fallback for images
-                    const srcW = clip.metadata?.resolution?.w || clip.sourceWidth || canvasWidth;
-                    const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || canvasHeight;
-                    const fitted = fitSize(srcW, srcH);
-
-                    const gi = clip.grading;
-                    const imgFilters = gi ? [
-                        brightness((gi.brightness ?? 100) / 100),
-                        contrast((gi.contrast ?? 100) / 100),
-                        saturate((gi.saturate ?? 100) / 100),
-                        hue(gi.hueRotate ?? 0),
-                    ] : [];
-
-                    layerRefs[track.id]().add(
-                        <Node ref={wrapperRef}>
-                            <Img
-                                ref={mediaRef}
-                            src={fixUrl(clip.url)}
-                            width={fitted.w}
-                            height={fitted.h}
-                            x={() => evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0)}
-                            y={() => evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0)}
-                            scaleX={() => evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
-                            scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
-                            rotation={() => evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
-                            opacity={() => evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
-                            filters={imgFilters}
-                        />
-                        </Node>
-                    );
-                } else if (clip.type === 'text') {
-                    wrapperRef = createRef<Node>();
-                    mediaRef = createRef<Txt>();
-                    const kf = clip.keyframes || {};
-                    layerRefs[track.id]().add(
-                        <Node ref={wrapperRef}>
-                            <Txt
-                                ref={mediaRef}
-                            text={clip.content || ''}
+                        <Txt
+                            ref={nodeRef}
+                            text={textFn}
                             fill={clip.color || '#ffffff'}
                             fontSize={clip.fontSize || 48}
                             fontFamily={clip.fontFamily || 'Inter'}
-                            x={() => evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0)}
-                            y={() => evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0)}
-                            scaleX={() => evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
-                            scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
-                            rotation={() => evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
-                            opacity={() => evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
-                            />
-                        </Node>
+                            fontWeight={clip.fontWeight || 400}
+                            x={() => toPxX(resolved().x)}
+                            y={() => toPxY(resolved().y)}
+                            scale={() => resolved().scale}
+                            rotation={() => resolved().rotation}
+                            opacity={() => resolved().opacity}
+                        />
+                    );
+                } else if (track.type === 'overlay') {
+                    // Image-sourced only — matches R62's own scope limit
+                    // (lower thirds/logos/stickers are all real image files;
+                    // vector shapes have a model, still no renderer, anywhere).
+                    const url = clip.url || clip.proxyUrl || clip.sourceUrl;
+                    if (!url) return;
+                    layerRefs[track.id]().add(
+                        <Img
+                            ref={nodeRef}
+                            src={fixUrl(url)}
+                            x={() => toPxX(resolved().x)}
+                            y={() => toPxY(resolved().y)}
+                            scale={() => resolved().scale}
+                            rotation={() => resolved().rotation}
+                            opacity={() => resolved().opacity}
+                        />
                     );
                 }
 
-                // Keep the media alive for its duration and apply transitions if any
-                if (wrapperRef) {
-                    const trans = clip.transition;
-                    if (trans && trans.duration > 0) {
-                        const tDur = Math.min(trans.duration, clip.duration);
-                        const waitTime = clip.duration - tDur;
-
-                        if (waitTime > 0) {
-                            yield* waitFor(waitTime);
-                        }
-
-                        if (wrapperRef()) {
-                            if (trans.type === 'fade' || trans.type === 'crossfade') {
-                                yield* wrapperRef().opacity(0, tDur);
-                            } else if (trans.type === 'slide') {
-                                yield* wrapperRef().x(-1920, tDur);
-                            } else if (trans.type === 'zoom') {
-                                yield* wrapperRef().scale(0, tDur);
-                            } else {
-                                yield* waitFor(tDur);
-                            }
-                        }
-                    } else {
-                        yield* waitFor(clip.duration);
-                    }
-
-                    if (wrapperRef()) {
-                        if (mediaRef() && typeof mediaRef().pause === 'function') {
-                            mediaRef().pause();
-                        }
-                        wrapperRef().remove();
-                    }
-                }
+                yield* waitFor(layer.duration);
+                // Remove this clip's node once its window ends — without this
+                // every text/overlay clip would stay on screen for the REST of
+                // the render, stacking on top of whatever plays after it.
+                if (nodeRef()) nodeRef().remove();
             }());
         });
     });
 
-    yield* all(
-        waitFor(totalDuration),
-        ...runningClips
-    );
-
+    yield* all(waitFor(totalDuration), ...runningLayers);
 });

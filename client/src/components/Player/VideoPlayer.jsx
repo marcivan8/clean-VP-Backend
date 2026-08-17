@@ -7,6 +7,7 @@ import TextOverlay from './TextOverlay';
 import FatigueAlert from './FatigueAlert';
 import DebugOverlay from './DebugOverlay';
 import PlaybackEngine from '../../engine/PlaybackEngine';
+import ObjectLayerOverlay from './ObjectLayerOverlay'; // R67 — Object Intelligence "blur background"
 
 /**
  * Interpolates a keyframe track at `localTime` (clip-local seconds).
@@ -587,6 +588,28 @@ const VideoPlayer = () => {
                     // costs nothing, so the ungraded path is unchanged.
                     filter: projectLUTFilter || 'none',
                 }}
+            />
+
+            {/* R67 — Object Intelligence "blur background". Reuses the same
+                asset URL priority (proxy > clip.url > raw asset.url) the
+                engine's own load effect uses above, kept inline here rather
+                than refactored into a shared helper since this is the only
+                other place in the component that needs it and duplicating
+                three lines is cheaper than a premature abstraction. */}
+            <ObjectLayerOverlay
+                clip={activeClip}
+                sourceUrl={(() => {
+                    if (!activeClip) return null;
+                    const asset = activeClip.assetId ? assets.find(a => a.id === activeClip.assetId) : null;
+                    let url = asset?.proxyUrl || activeClip.url || asset?.url || null;
+                    if (url && (url.startsWith('proxies/') || url.startsWith('raw/'))) {
+                        url = `/api/proxy/gcs-media/${url}`;
+                    }
+                    return url;
+                })()}
+                currentTime={currentTime}
+                isPlaying={isPlaying}
+                containerStyle={{ transform: transformStyle, transformOrigin }}
             />
 
             {/* Proxy still generating — shown when user presses play before the

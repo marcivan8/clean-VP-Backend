@@ -120,6 +120,145 @@ function buildZoomKeyframeExpr(kfs, { multiplier = 1, minZoom = 1.0, maxZoom = 2
 }
 
 /**
+ * R67 — Object Intelligence Integration, "blur background" export path.
+ *
+ * This is a genuinely NEW render primitive, unlike zoom/track/animate
+ * speaker (which reuse the existing `clip.virtualCam` crop pipeline
+ * unchanged — see client/src/motion/ObjectLayers.js's header for why).
+ * Nothing in this codebase has ever composited two video sources with an
+ * alpha mask before (confirmed by ADR-001's audit before this was written).
+ *
+ * DELIBERATE SCOPE LIMIT, stated plainly per this project's convention
+ * (see CameraMotionCompiler.js's translate-preset scope note for the
+ * precedent): a clip using `layerTarget: 'background'` renders through
+ * THIS function instead of the main per-clip pipeline above, which means
+ * rotation-correction, `virtualCam` crop, and zoom-rhythm keyframes on the
+ * SAME clip are not composed with the blur here — layerTarget is set by
+ * `setLayerTarget`/`zoomToSpeaker` as mutually-exclusive choices in the
+ * store today, so this has not come up in practice, but if a future clip
+ * genuinely needs both, this function is the one to extend.
+ *
+ * Filter graph (fluent-ffmpeg complexFilter, two inputs — source + mask):
+ *   [0:v] scale to output dims                                  → [base]
+ *   [1:v] scale mask to output dims (nearest-neighbor edges         )
+ *                                                                → [maskscaled]
+ *   [base] boxblur (background blur amount)                     → [blurred]
+ *   [base][maskscaled] alphamerge (mask's luma → base's alpha)  → [fg]
+ *   [blurred][fg] overlay                                       → [outv]
+ * `alphamerge` is the standard FFmpeg primitive for "use this second video's
+ * luma as this first video's alpha channel" — exactly matte-video compositing,
+ * which is what a SAM2 "highlighted" mask output already is.
+ */
+async function downloadUrlToFile(url, localPath) {
+    const response = await axios.get(url, { responseType: 'stream', timeout: 120_000 });
+    await new Promise((resolve, reject) => {
+        const writer = fs.createWriteStream(localPath);
+        response.data.pipe(writer);
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+        response.data.on('error', reject);
+    });
+    return localPath;
+}
+
+/**
+ * R69 — resolve this backend's own public URL, for handing to the render-worker
+ * so it can fetch `/uploads/...`-relative assets. SAME resolution order the
+ * internal-proxy-download fallback already uses a few dozen lines below
+ * (PUBLIC_URL → RAILWAY_PUBLIC_DOMAIN → localhost) — reused here rather than
+ * re-derived, so the two can never silently disagree about what "this server"
+ * means.
+ */
+function resolvePublicBackendUrl() {
+    return process.env.PUBLIC_URL
+        || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : null)
+        || `http://localhost:${process.env.PORT || 3000}`;
+}
+
+/**
+ * R69 — call the self-hosted (non-Lambda) Revideo render-worker (render-worker/,
+ * deployed to Fly.io) to composite captions/motion-graphics/stickers on top of
+ * an already-cut, already-graded, already-audio-mixed base video. Streams the
+ * resulting MP4 to `outputPath`.
+ *
+ * Deliberately a single request/response call, not a queued job — the worker
+ * itself is the concurrency boundary (see CLAUDE.md: without Lambda's elastic
+ * scaling, this is one fixed-capacity renderer, sized by RENDER_WORKER_URL's
+ * own machine). A future high-concurrency mode would swap this call for the
+ * dormant `render-lambda/` path instead of changing anything here.
+ *
+ * @throws on any failure — caller is responsible for the fails-open fallback.
+ */
+async function renderViaRevideoWorker({ baseVideoUrl, tracks, duration, aspectRatio, fps, backendUrl, outputPath }) {
+    const workerUrl    = process.env.RENDER_WORKER_URL;
+    const workerSecret = process.env.WORKER_SECRET;
+    if (!workerUrl) throw new Error('RENDER_WORKER_URL is not configured');
+
+    const controller  = new AbortController();
+    const timeoutMs   = Number(process.env.REVIDEO_RENDER_TIMEOUT_MS) || 6 * 60 * 1000; // 6 min — matches other long-render timeouts in this codebase
+    const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+        const res = await fetch(`${workerUrl.replace(/\/$/, '')}/render`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(workerSecret ? { Authorization: workerSecret } : {}),
+            },
+            body: JSON.stringify({ baseVideoUrl, tracks, duration, aspectRatio, fps, backendUrl }),
+            signal: controller.signal,
+        });
+
+        if (!res.ok) {
+            const errText = await res.text().catch(() => '');
+            throw new Error(`render-worker responded ${res.status}: ${errText.slice(0, 300)}`);
+        }
+
+        const buffer = Buffer.from(await res.arrayBuffer());
+        if (buffer.length === 0) throw new Error('render-worker returned an empty response');
+        fs.writeFileSync(outputPath, buffer);
+        return outputPath;
+    } finally {
+        clearTimeout(timeoutHandle);
+    }
+}
+
+function renderBackgroundBlurSegment(clip, src, segPath, opts) {
+    const { targetWidth, targetHeight, targetFps, codec, profile, audioBitrate, maskLocalPath, blurAmount = 20 } = opts;
+    return new Promise((resolve, reject) => {
+        const cmd = ffmpeg()
+            .input(src)
+            .setStartTime(clip.offset || 0)
+            .setDuration(clip.duration)
+            .input(maskLocalPath);
+
+        cmd.complexFilter([
+            `[0:v]scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=increase,crop=${targetWidth}:${targetHeight}[base]`,
+            `[1:v]scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=increase,crop=${targetWidth}:${targetHeight}[maskscaled]`,
+            `[base]boxblur=${blurAmount}:2[blurred]`,
+            `[base][maskscaled]alphamerge[fg]`,
+            `[blurred][fg]overlay=shortest=1[outv]`,
+        ], 'outv');
+
+        const vol = (clip.volume ?? 1.0) * (clip.trackVolume ?? 1.0);
+        if (vol !== 1.0) cmd.audioFilters(`volume=${vol.toFixed(4)}`);
+
+        cmd
+            .fps(targetFps)
+            .videoCodec(codec)
+            .addOutputOption('-profile:v', profile)
+            .addOutputOption('-pix_fmt', 'yuv420p')
+            .addOutputOption('-movflags', '+faststart')
+            .addOutputOption('-shortest')
+            .audioBitrate(audioBitrate)
+            .output(segPath)
+            .on('end', resolve)
+            .on('error', reject)
+            .run();
+    });
+}
+
+/**
  * Probe a video file and return its stored rotation in degrees (0, 90, 180, 270).
  * Phone-recorded portrait videos are often stored as landscape with a rotate=90
  * metadata tag. We need to correct for this before applying the scale filter,
@@ -337,6 +476,21 @@ module.exports = async function processExportJob(job) {
     const audioTracks = timeline.tracks.filter(t =>
         t.type === 'audio' && t.clips?.length > 0
     );
+    // R69 — render architecture split. 'text' (captions/titles) and 'overlay'
+    // (stickers/logos/lower-thirds) tracks are the two categories that move to
+    // the Revideo render-worker when it's enabled; everything else (cuts,
+    // grading, camera motion, audio) stays exactly where it already is in
+    // this file, per the confirmed split.
+    const revideoTextTracks    = timeline.tracks.filter(t => t.type === 'text'    && t.clips?.length > 0);
+    const revideoOverlayTracks = timeline.tracks.filter(t => t.type === 'overlay' && t.clips?.length > 0);
+    // Opt-in only — with this unset (the default), nothing below changes:
+    // STEP 2.5 and STEP 4 run exactly as they always have. This is a NEW,
+    // not-yet-independently-verified render path (see CLAUDE.md), so it does
+    // not become every user's default behaviour just by existing.
+    const revideoEnabled = process.env.REVIDEO_RENDER_ENABLED === '1' && !!process.env.RENDER_WORKER_URL;
+    const useRevideo = revideoEnabled && (revideoTextTracks.length > 0 || revideoOverlayTracks.length > 0);
+    let revideoSucceeded = false;
+    let revideoWarning = null;
 
     if (videoTracks.length === 0) {
         throw new Error('No video or image clips found in timeline');
@@ -592,6 +746,37 @@ module.exports = async function processExportJob(job) {
         const speed   = clip.speed || 1.0;
         const isImage = clip.type === 'image';
 
+        // R67 — "blur background" (Object Intelligence). A genuinely different
+        // render path (two-input alpha compositing, see
+        // renderBackgroundBlurSegment's header for why this is a separate
+        // function rather than another branch inside the shared vFilters
+        // pipeline below). Handled and `continue`d here so every clip WITHOUT
+        // layerTarget:'background' goes through the existing, unmodified path.
+        if (!isImage && clip.layerTarget === 'background' && clip.layerMask?.maskAssetUrl) {
+            try {
+                const maskLocalPath = path.join(tmpDir, `mask-${i}.mp4`);
+                await downloadUrlToFile(clip.layerMask.maskAssetUrl, maskLocalPath);
+                await renderBackgroundBlurSegment(clip, src, segPath, {
+                    targetWidth, targetHeight, targetFps, codec, profile, audioBitrate,
+                    maskLocalPath,
+                });
+                segments.push(segPath);
+                segOutputStarts.push(cumulativeOut);
+                segClips.push(clip);
+                cumulativeOut += dur / speed;
+                console.log(`  [blur-background] clip "${clip.name}": composited via SAM2 mask`);
+            } catch (err) {
+                console.error(`[ExportJob] blur-background failed for clip "${clip.name}", falling back to unblurred: ${err.message}`);
+                // Fail-open per this project's convention (see CLAUDE.md's
+                // compositorWarning/captionProgramWarning precedent) — an
+                // export must never hard-fail because one effect couldn't
+                // render. Falls through to the normal per-clip path below by
+                // simply NOT `continue`-ing, so the clip still exports, just
+                // without the blur.
+            }
+            if (segments[segments.length - 1] === segPath) continue;
+        }
+
         // Probe rotation BEFORE we build the filter chain.
         // Phones store portrait clips as landscape + rotate=90 metadata. When
         // we add a -vf filter chain, FFmpeg's automatic display-matrix rotation
@@ -805,6 +990,117 @@ module.exports = async function processExportJob(job) {
 
     await job.updateProgress(70);
 
+    // ── STEP 2.5: Composite overlay layers (R60) ───────────────────────────
+    // The layered-graphics pass. Everything above this line composites NOTHING:
+    // `allClips` flattens every clip from every video track into one array
+    // sorted by start time, so two clips overlapping in time on different
+    // tracks are played in SEQUENCE, not stacked. That is why stickers, logos,
+    // lower thirds and picture-in-picture have been impossible.
+    //
+    // ── THIS RUNS ALONGSIDE THE EXISTING PIPELINE, IT DOES NOT REPLACE IT ──
+    // Three independent conditions must all hold before a single filter runs:
+    //   1. the client sent a composition plan,
+    //   2. the plan validates,
+    //   3. the plan has at least one overlay (`planIsNoOp` is false).
+    // A project with one video track — i.e. every project that renders
+    // correctly today — produces an empty overlay list, so this block is
+    // skipped entirely and the export is byte-for-byte what it was before.
+    // COMPOSITOR_DISABLED=1 is a deploy-free kill switch if it ever misbehaves
+    // in production.
+    //
+    // FAILS OPEN, like the LUT lookup (R55) and the caption burn-in: any error
+    // leaves `finalVideoPath` pointing at the un-composited video and the export
+    // continues. A video missing its stickers is a far better outcome than no
+    // video, and the reason is surfaced to the user rather than swallowed.
+    let compositorWarning = null;
+    const rawPlan = settings.compositionPlan || null;
+
+    // R69: when Revideo is compositing overlays, FFmpeg must not ALSO
+    // composite them here — doing both would draw every sticker/lower-third
+    // twice. `useRevideo` is decided up front, before this step, for exactly
+    // that reason.
+    if (rawPlan && process.env.COMPOSITOR_DISABLED !== '1' && !useRevideo) {
+        try {
+            const { compileCompositionPlan, validateCompositionPlanShape } =
+                require('../server/compositor/CompositorCompiler.js');
+
+            // The plan carries its own version; a worker that predates a plan
+            // format must decline it rather than mis-render it.
+            const planErrors = validateCompositionPlanShape(rawPlan, targetWidth, targetHeight);
+            if (planErrors.length > 0) {
+                throw new Error(`plan rejected: ${planErrors.slice(0, 3).join('; ')}`);
+            }
+
+            // Plan geometry is NORMALISED (0..1 of the frame), so the same plan
+            // renders correctly at any resolution. Tell the compiler which one
+            // this job is actually producing — this is where fractions become
+            // pixels, and it is the only place that conversion happens.
+            rawPlan.renderWidth  = targetWidth;
+            rawPlan.renderHeight = targetHeight;
+
+            const overlays = rawPlan.overlays || [];
+            console.log(`🧩 [ExportJob ${job.id}] compositing ${overlays.length} overlay layer(s)`);
+
+            // Fetch each overlay's source. A layer we cannot fetch is DROPPED,
+            // not fatal — one dead sticker URL must not cost the whole export.
+            const inputs = [];
+            const inputFiles = [];
+            for (let i = 0; i < overlays.length; i++) {
+                const ov = overlays[i];
+                const srcClip = {
+                    id: ov.clipId,
+                    name: `overlay-${i}${path.extname(ov.source?.url || '') || '.mp4'}`,
+                    assetId: ov.source?.assetId,
+                    url: ov.source?.url,
+                    sourceUrl: ov.source?.url,
+                    proxyUrl: ov.source?.url,
+                };
+                const dlPath = path.join(tmpDir, `ovdl-${i}${path.extname(ov.source?.url || '') || '.mp4'}`);
+                const src = await fetchClipSource(srcClip, dlPath);
+                if (!src) {
+                    console.warn(`  ⚠️  overlay ${ov.id}: source unresolved — layer skipped`);
+                    continue;
+                }
+                // Input 0 is the base video, so overlay inputs start at 1.
+                inputs.push({ overlayId: ov.id, inputIndex: inputFiles.length + 1 });
+                inputFiles.push({ path: src, isImage: ov.source?.type === 'image', outputEnd: ov.outputEnd });
+            }
+
+            const compiled = compileCompositionPlan(rawPlan, inputs);
+            if (!compiled) throw new Error('no drawable overlay layers after source resolution');
+
+            const compositedPath = path.join(tmpDir, 'composited.mp4');
+            await new Promise((resolve, reject) => {
+                let cmd = ffmpeg(finalVideoPath);
+                for (const f of inputFiles) {
+                    // A still image has no duration of its own; -loop 1 gives it
+                    // one, and -t stops it running past its window forever.
+                    if (f.isImage) cmd = cmd.input(f.path).inputOptions(['-loop', '1', '-t', String(Math.max(0.1, f.outputEnd))]);
+                    else           cmd = cmd.input(f.path);
+                }
+                cmd
+                    .complexFilter(compiled.filterComplex, compiled.outputLabel)
+                    .videoCodec(codec)
+                    .videoBitrate(videoBitrate)
+                    .outputOptions([`-profile:v`, profile, '-pix_fmt', 'yuv420p'])
+                    // Audio is untouched here — STEP 3 still mixes it afterwards.
+                    .audioCodec('copy')
+                    .output(compositedPath)
+                    .on('end', resolve)
+                    .on('error', reject)
+                    .run();
+            });
+
+            finalVideoPath = compositedPath;
+            console.log(`  ✅ Composited ${compiled.used} overlay layer(s)`);
+        } catch (compErr) {
+            compositorWarning = `Overlay layers could not be composited: ${compErr.message}`;
+            console.warn(`[ExportJob ${job.id}] compositor failed (exporting without overlays):`, compErr.message);
+        }
+    }
+
+    await job.updateProgress(74);
+
     // ── STEP 3: Mix audio tracks ───────────────────────────────────────────
     if (audioTracks.length > 0) {
         const audioSegments = [];
@@ -861,7 +1157,77 @@ module.exports = async function processExportJob(job) {
 
     await job.updateProgress(82);
 
+    // ── STEP 3.5: Revideo composite — captions + motion graphics (R69) ─────
+    // Only runs when REVIDEO_RENDER_ENABLED=1, RENDER_WORKER_URL is set, and
+    // there's actually a 'text' or 'overlay' track to draw. `finalVideoPath`
+    // at this point is FFmpeg's fully cut/graded/audio-mixed output — exactly
+    // the single `baseVideoUrl` the render-worker's scene expects (see its
+    // own header for why it owns nothing else).
+    //
+    // FAILS OPEN, same rule as STEP 2.5 and STEP 4 below: any failure here
+    // (worker unreachable, timeout, bad response) leaves `finalVideoPath`
+    // pointing at the plain base video and STEP 4 runs as the fallback —
+    // this call and the old drawtext path are mutually exclusive, so a
+    // Revideo failure means "ship the video without captions/graphics and
+    // say so," never "run both and risk double-rendering."
+    if (useRevideo) {
+        try {
+            const backendUrl = resolvePublicBackendUrl();
+
+            // The worker fetches this by URL — it cannot read tmpDir directly
+            // (it's a separate service, possibly on a different machine).
+            let baseVideoUrl;
+            let uploadedTempGcsPath = null;
+            if (gcsBucket) {
+                uploadedTempGcsPath = `exports/${userId}/_revideo-base-${jobId}.mp4`;
+                await gcsBucket.upload(finalVideoPath, {
+                    destination: uploadedTempGcsPath,
+                    metadata: { contentType: 'video/mp4' },
+                });
+                baseVideoUrl = `https://storage.googleapis.com/${bucketName}/${uploadedTempGcsPath}`;
+            } else {
+                // Local-storage dev mode: serve it from this same backend's
+                // /uploads/exports/ static route, same fallback local exports
+                // already use for the final result.
+                const localName = `_revideo-base-${jobId}.mp4`;
+                fs.copyFileSync(finalVideoPath, path.join(exportsDir, localName));
+                baseVideoUrl = `${backendUrl}/uploads/exports/${localName}`;
+            }
+
+            const revideoOutPath = path.join(tmpDir, 'revideo-composite.mp4');
+            await renderViaRevideoWorker({
+                baseVideoUrl,
+                tracks: [...revideoTextTracks, ...revideoOverlayTracks],
+                duration: allClips.reduce((max, c) => Math.max(max, (c.start || 0) + (c.duration || 0)), 0),
+                aspectRatio: settings.aspectRatio || '16:9',
+                fps: targetFps,
+                backendUrl,
+                outputPath: revideoOutPath,
+            });
+
+            finalVideoPath = revideoOutPath;
+            revideoSucceeded = true;
+            console.log('  ✅ Revideo composite (captions + motion graphics) applied');
+
+            // Best-effort cleanup of the temporary base-video copy — a failure
+            // here doesn't affect the export, so it's logged, not thrown.
+            if (uploadedTempGcsPath) {
+                gcsBucket.file(uploadedTempGcsPath).delete().catch(err =>
+                    console.warn(`  ⚠️  Could not clean up temp GCS base video: ${err.message}`));
+            }
+        } catch (revideoErr) {
+            revideoWarning = revideoErr.message.slice(0, 800);
+            console.error(`  ❌ Revideo composite failed — captions/graphics missing:\n${revideoErr.message}`);
+        }
+    }
+
     // ── STEP 4: Text overlays ──────────────────────────────────────────────
+    // Skipped when Revideo already composited captions (revideoSucceeded) —
+    // running both would draw every caption twice. When useRevideo was
+    // requested but failed, this does NOT run either (see the fails-open note
+    // above): a Revideo attempt that fails ships without captions/graphics
+    // rather than silently falling through to the old drawtext path, which
+    // could otherwise mask a worker outage as "everything's fine."
     // captionError is set if the burn-in step fails; surfaced in job result.
     let captionError = null;
     // Fonts the user actually asked for that couldn't be resolved to a real file
@@ -871,7 +1237,7 @@ module.exports = async function processExportJob(job) {
     const fontFallbackWarnings = new Set();
     const textTracks = timeline.tracks.filter(t => t.type === 'text' && t.clips?.length > 0);
 
-    if (textTracks.length > 0) {
+    if (textTracks.length > 0 && !useRevideo) {
         // ── Font resolution ────────────────────────────────────────────────
         const fontsDir = path.join(publicDir, 'fonts');
         if (!fs.existsSync(fontsDir)) fs.mkdirSync(fontsDir, { recursive: true });
@@ -951,8 +1317,56 @@ module.exports = async function processExportJob(job) {
             const textFilters = [];
             let filterIdx = 0;
 
+            // ── R63: animated captions (motion/textShadow/uppercase/reveal) ────
+            // `captionProgram` is built client-side from the SAME resolver that
+            // drives the live preview (client/src/motion/CaptionCompiler.js) and
+            // ships in export settings exactly like `compositionPlan` (R59-60).
+            // Clips it covers are rendered by the compiled program below and
+            // SKIPPED by the plain per-clip loop that follows — one clip must
+            // never be drawn by both paths. A clip with no animation/shadow/
+            // uppercase never appears in the program at all, so today's plain
+            // captions take the exact code path they always have.
+            // FAILS OPEN like the compositor and the LUT lookup (R55): any
+            // problem here just means `programClipIds` stays empty and every
+            // clip falls through to the untouched static path below.
+            let captionProgramWarning = null;
+            const programClipIds = new Set();
+            let compiledCaptionProgram = { filters: [], tempFiles: [], skipped: [] };
+            const rawCaptionProgram = settings.captionProgram || null;
+
+            if (rawCaptionProgram && process.env.CAPTION_PROGRAM_DISABLED !== '1') {
+                try {
+                    const { compileCaptionProgram, validateCaptionProgramShape } =
+                        require('../server/compositor/CaptionCompiler.js');
+
+                    const programErrors = validateCaptionProgramShape(rawCaptionProgram);
+                    if (programErrors.length > 0) {
+                        throw new Error(`caption program rejected: ${programErrors.slice(0, 3).join('; ')}`);
+                    }
+
+                    compiledCaptionProgram = compileCaptionProgram(rawCaptionProgram, {
+                        tmpDir,
+                        escapePath: (p) => p.replace(/\\/g, '/').replace(/:/g, '\\:'),
+                        fallbackFontPath,
+                        resolveFont: (family) => (family && FAMILY_PATHS[family]) ? FAMILY_PATHS[family] : null,
+                    });
+
+                    for (const entry of rawCaptionProgram.entries) programClipIds.add(entry.clipId);
+                    if (compiledCaptionProgram.skipped.length > 0) {
+                        captionProgramWarning = `${compiledCaptionProgram.skipped.length} animated caption(s) fell back to plain rendering (font unresolved).`;
+                    }
+                    console.log(`🎬 [ExportJob ${job.id}] animated captions: ${rawCaptionProgram.entries.length} clip(s), ${compiledCaptionProgram.filters.length} filter(s)`);
+                } catch (progErr) {
+                    captionProgramWarning = `Animated captions could not be rendered — exported with plain static captions instead: ${progErr.message}`;
+                    console.warn(`[ExportJob ${job.id}] caption program failed (falling back to static captions):`, progErr.message);
+                    programClipIds.clear();
+                    compiledCaptionProgram = { filters: [], tempFiles: [], skipped: [] };
+                }
+            }
+
             for (const track of textTracks) {
                 for (const clip of track.clips) {
+                    if (programClipIds.has(clip.id)) continue; // rendered by the compiled program instead
                     const rawText    = clip.content || clip.name || '';
                     // Convert Vibed timeline positions to output video positions.
                     const vibedStart = typeof clip.start    === 'number' ? clip.start    : 0;
@@ -1044,6 +1458,19 @@ module.exports = async function processExportJob(job) {
                     filterIdx++;
                 }
             }
+
+            // Splice in the animated-caption filters built above, appended
+            // AFTER every static filter. Each drawtext is `enable`-gated to
+            // its own window, so this is correct for the overwhelmingly
+            // common case (one caption visible at a time). KNOWN LIMIT: if a
+            // project has a STATIC caption on one track overlapping in time
+            // with an ANIMATED caption on another, the animated one always
+            // draws on top regardless of track order — this reorders relative
+            // to the original per-track/per-clip interleaving the static-only
+            // path used. Narrow edge case (multiple simultaneous overlapping
+            // caption tracks are themselves unusual); stated here rather than
+            // left to be discovered.
+            textFilters.push(...compiledCaptionProgram.filters);
 
             if (textFilters.length > 0) {
                 const textOverlayPath = path.join(tmpDir, 'with_text.mp4');
@@ -1151,6 +1578,24 @@ module.exports = async function processExportJob(job) {
         // Populated when the caption burn-in step failed outright (no captions
         // at all) OR when captions rendered but with a substituted font.
         captionWarning,
+        // Populated when the overlay compositing pass (STEP 2.5) failed and the
+        // video was exported WITHOUT its overlay layers. Surfaced rather than
+        // swallowed: the export succeeded, but not as the user composed it, and
+        // silently shipping a video missing its graphics is the failure mode
+        // this codebase keeps rediscovering.
+        compositorWarning: compositorWarning || undefined,
+        // Populated when animated captions (R63) couldn't render — the export
+        // still has captions (the static path never ran for those clips'
+        // siblings, and on failure `programClipIds` is cleared so EVERY
+        // caption falls back to the static path), just without their motion/
+        // shadow/uppercase/reveal.
+        captionProgramWarning: captionProgramWarning || undefined,
+        // R69 — populated when Revideo compositing was attempted (useRevideo)
+        // but failed: the export ships WITHOUT captions/motion-graphics/
+        // stickers rather than silently falling back to the FFmpeg drawtext
+        // path, so this is the one warning field that means "missing
+        // entirely," not "missing some polish."
+        revideoWarning: revideoWarning || undefined,
         metadata: {
             duration:   `${duration}s render time`,
             sizeMB:     parseFloat(sizeMB) || 0,

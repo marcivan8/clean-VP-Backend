@@ -120,7 +120,8 @@
       "settings": "paramètres",
       "effects": "effets",
       "interview": "interview",
-      "marketplace": "extensions"
+      "marketplace": "extensions",
+      "motion": "animation"
     },
     "colorGrading": {
       "title": "Étalonnage",
@@ -205,6 +206,7 @@
     "uploadUploading": "Envoi en cours",
     "uploadProcessing": "Traitement",
     "uploadReady": "Prêt",
+    "uploadProcessingDetail": "Génération d'un proxy pour un montage et une lecture fluides sur la timeline",
     "securelyUploaded": "Envoyé en toute sécurité vers Google Cloud Storage",
     "noFileSelected": "ROKA : Aucun fichier sélectionné. Importez d'abord un fichier.",
     "rokaError": "Erreur ROKA : {{message}}",
@@ -479,7 +481,8 @@
     "deleteThisAsset": "Supprimer cet asset ?",
     "deleteAsset": "Supprimer l'asset",
     "dragToTimeline": "Glisser vers la timeline",
-    "added": "Ajouté !"
+    "added": "Ajouté !",
+    "addAsOverlay": "Ajouter comme sticker/logo en incrustation"
   },
   "audioExportPanel": {
     "title": "Exporter l'audio",
@@ -494,5 +497,29 @@
     "optional": "facultatif",
     "cancel": "Annuler",
     "applyFullEdit": "Appliquer l'édition complète"
+  },
+  "motionPanel": {
+    "title": "Animation",
+    "selectClip": "Sélectionnez un clip pour l'animer.",
+    "keyframes": "Images clés",
+    "clear": "Effacer",
+    "noAnimation": "Aucune animation",
+    "customKeyframes": "Images clés personnalisées",
+    "usingPreset": "Préréglage : {{name}}",
+    "startAnimating": "Ajouter une image clé {{param}} à la tête de lecture",
+    "group": {
+      "text": "Texte",
+      "image": "Image",
+      "sticker": "Sticker",
+      "camera": "Caméra"
+    },
+    "param": {
+      "x": "Décalage X",
+      "y": "Décalage Y",
+      "scale": "Échelle",
+      "rotation": "Rotation",
+      "opacity": "Opacité",
+      "blur": "Flou"
+    }
   }
 }

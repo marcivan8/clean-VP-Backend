@@ -14,6 +14,7 @@ const { getAIClient, isAIConfigured } = require('../../../services/AIProvider');
 const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
+const ffmpeg = require('fluent-ffmpeg');
 
 const execFileAsync = promisify(execFile);
 
@@ -22,6 +23,16 @@ try {
     ffmpegPath = require('ffmpeg-static');
 } catch {
     ffmpegPath = 'ffmpeg';
+}
+
+// Same pattern as server/audio-engine/export/AudioExportService.js and
+// jobs/exportProcessor.js — point fluent-ffmpeg at the bundled ffprobe binary
+// rather than relying on one being on PATH.
+try {
+    const ffprobeInstaller = require('@ffprobe-installer/ffprobe');
+    ffmpeg.setFfprobePath(ffprobeInstaller.path);
+} catch {
+    // fall back to whatever ffprobe fluent-ffmpeg finds on PATH
 }
 
 const OpenAI = require('openai');
@@ -73,7 +84,17 @@ class VisualAnalyzer {
                 return { ...ERROR_RESULT, error: false, sceneType: 'unknown' };
             }
 
-            const frames = await this.extractFrames(filePath, duration || 0, tempFiles);
+            // MediaIntelligencePipeline.analyzeAsset() has never had a real
+            // duration to pass here — it always calls `analyze(localPath, null)`
+            // — so extractFrames() silently fell back to a hardcoded `duration
+            // || 10` and sampled at ~1s/5s/9s on every clip regardless of its
+            // actual length. A 10-minute interview and a 10-second clip got the
+            // exact same three frames near the start. Probe the real duration
+            // when the caller doesn't have one; only fall back to the 10s
+            // default (inside extractFrames) if ffprobe itself fails.
+            const realDuration = duration || await this.probeDuration(filePath);
+
+            const frames = await this.extractFrames(filePath, realDuration, tempFiles);
             if (!frames.length) return ERROR_RESULT;
 
             const result = await this.analyzeWithVision(frames);
@@ -88,6 +109,31 @@ class VisualAnalyzer {
                 try { fs.unlinkSync(f); } catch { /* ignore */ }
             }
         }
+    }
+
+    /**
+     * Probe the file's real duration via ffprobe.
+     *
+     * @param {string} filePath
+     * @returns {Promise<number>} duration in seconds, or 0 on failure (caller
+     *   falls back to the old fixed-window sampling behaviour)
+     */
+    async probeDuration(filePath) {
+        return new Promise((resolve) => {
+            try {
+                ffmpeg.ffprobe(filePath, (err, metadata) => {
+                    if (err) {
+                        console.warn('[VisualAnalyzer] ffprobe failed, falling back to default sampling window:', err.message);
+                        return resolve(0);
+                    }
+                    const d = Number(metadata?.format?.duration);
+                    resolve(Number.isFinite(d) && d > 0 ? d : 0);
+                });
+            } catch (err) {
+                console.warn('[VisualAnalyzer] ffprobe threw, falling back to default sampling window:', err.message);
+                resolve(0);
+            }
+        });
     }
 
     /**

@@ -75,6 +75,10 @@ class MediaIntelligencePipeline {
                 // row full of 'unknown' that looks like a real (bad) result.
                 console.error(`[MediaPipeline] Could not resolve a readable file for ${assetId} (${filePath})`);
                 await this._updateAssetStatus(assetId, ASSET_ANALYSIS_FAILED);
+                // This asset resolving to 'failed' (rather than staying stuck)
+                // may be exactly what the rest of the bin was waiting on — see
+                // the comment on _maybeRunBinClassification's gate below.
+                await this._maybeRunBinClassification(userId, projectId);
                 return;
             }
 
@@ -149,6 +153,10 @@ class MediaIntelligencePipeline {
             // ALWAYS mark as failed — never leave as 'processing'
             console.error(`[MediaPipeline] analyzeAsset FAILED for ${assetId}:`, err.message);
             await this._updateAssetStatus(assetId, ASSET_ANALYSIS_FAILED);
+            // Same reasoning as the early-return branch above: this asset just
+            // resolved (to 'failed'), which can be the last one the rest of the
+            // bin was waiting on.
+            await this._maybeRunBinClassification(userId, projectId);
         } finally {
             // Only remove a file WE downloaded — never a pre-existing local upload.
             if (cleanupPath) {
@@ -241,10 +249,11 @@ class MediaIntelligencePipeline {
     }
 
     /**
-     * Run bin classification once all project assets are analyzed.
+     * Run bin classification once nothing in the project is still analysing.
      * @private
      */
     async _maybeRunBinClassification(userId, projectId) {
+        if (!projectId) return;
         try {
             const { data: assets, error } = await supabaseAdmin
                 .from('media_assets')
@@ -253,9 +262,21 @@ class MediaIntelligencePipeline {
 
             if (error || !assets) return;
 
-            const allDone = assets.length > 0 && assets.every(a => a.analysis_status === ASSET_ANALYSIS_DONE);
-            if (allDone) {
-                console.log(`[MediaPipeline] All assets done for project ${projectId} — running bin classification`);
+            // Previously this required assets.every(status === DONE) — a single
+            // asset that never finished (a crashed worker leaving the row at
+            // 'processing' forever) silently blocked classification for the
+            // WHOLE project, with no automatic way out. The stale-processing
+            // sweep below now guarantees 'processing' always eventually resolves
+            // to 'done' or 'failed', so the correct gate is "nothing is still in
+            // flight" — a permanently-failed asset no longer blocks its siblings
+            // from being classified, it just isn't included in the result.
+            const noneInFlight = assets.length > 0 && assets.every(a =>
+                a.analysis_status === ASSET_ANALYSIS_DONE || a.analysis_status === ASSET_ANALYSIS_FAILED
+            );
+            const anyDone = assets.some(a => a.analysis_status === ASSET_ANALYSIS_DONE);
+
+            if (noneInFlight && anyDone) {
+                console.log(`[MediaPipeline] All assets resolved for project ${projectId} — running bin classification`);
                 await this.runBinClassification(userId, projectId);
             }
         } catch (err) {
@@ -436,9 +457,15 @@ class MediaIntelligencePipeline {
     /** @private */
     async _updateAssetStatus(assetId, status) {
         try {
+            // updated_at wasn't being set on this write at all, even though the
+            // column exists (20240004_media_assets.sql) and defaults `now()` on
+            // INSERT only — never on UPDATE. That leaves no signal for how long an
+            // asset has actually sat at 'processing', which is exactly what the
+            // stale-processing sweep below needs to tell "still legitimately
+            // running" apart from "the worker crashed and this will never move."
             await supabaseAdmin
                 .from('media_assets')
-                .update({ analysis_status: status })
+                .update({ analysis_status: status, updated_at: new Date().toISOString() })
                 .eq('id', assetId);
         } catch (err) {
             console.error('[MediaPipeline] _updateAssetStatus error:', err.message);
@@ -566,5 +593,68 @@ class MediaIntelligencePipeline {
         });
     }
 }
+
+// ─── Stale-processing recovery ──────────────────────────────────────────────
+// analyzeAsset()'s own try/catch always resolves a row to 'done' or 'failed'
+// — EXCEPT when the whole Node process dies mid-job (OOM, deploy, crash). That
+// leaves the row at 'processing' forever: no error, no log, nothing to retry
+// it (getAssetAnalysisQueue() has no defaultJobOptions), and — before the gate
+// change above — nothing else in the project could ever be classified either,
+// because _maybeRunBinClassification()'s old all-or-nothing check waited on it
+// indefinitely.
+//
+// A periodic sweep, same shape as Session.js's TTL sweep: any asset stuck at
+// 'processing' past a generous timeout is recorded as 'failed' (not silently
+// dropped — R38/R40's empty-vs-broken distinction again), and any project the
+// sweep touches gets its classification gate re-checked, since resolving the
+// stuck asset may be exactly what the rest of the bin was waiting on.
+const STALE_PROCESSING_MS = 15 * 60 * 1000; // generous — real jobs include Whisper + GPT-4o Vision + optional compression
+const STALE_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+
+// Per-process guard: this module can be required (and singleton-instantiated)
+// from more than one file (Orchestrator.js, brainRoutes.js, interviewRoutes.js).
+// Only start one interval per process, not one per instance.
+let _staleSweepStarted = false;
+
+async function _recoverStaleProcessing(pipeline) {
+    try {
+        const cutoff = new Date(Date.now() - STALE_PROCESSING_MS).toISOString();
+        const { data, error } = await supabaseAdmin
+            .from('media_assets')
+            .update({ analysis_status: ASSET_ANALYSIS_FAILED, updated_at: new Date().toISOString() })
+            .eq('analysis_status', ASSET_ANALYSIS_PROCESSING)
+            .lt('updated_at', cutoff)
+            .select('id, project_id, user_id');
+
+        if (error) {
+            console.error('[MediaPipeline] stale-processing sweep failed:', error.message);
+            return;
+        }
+        if (!data?.length) return;
+
+        console.warn(`[MediaPipeline] stale-processing sweep: recovered ${data.length} stuck asset(s)`);
+
+        const byProject = new Map();
+        for (const row of data) {
+            if (row.project_id && !byProject.has(row.project_id)) {
+                byProject.set(row.project_id, row.user_id);
+            }
+        }
+        for (const [projectId, userId] of byProject) {
+            await pipeline._maybeRunBinClassification(userId, projectId).catch(() => {});
+        }
+    } catch (err) {
+        console.error('[MediaPipeline] stale-processing sweep error:', err.message);
+    }
+}
+
+function _startStaleProcessingSweep() {
+    if (_staleSweepStarted) return;
+    _staleSweepStarted = true;
+    const sweepPipeline = new MediaIntelligencePipeline();
+    setInterval(() => { _recoverStaleProcessing(sweepPipeline); }, STALE_SWEEP_INTERVAL_MS).unref();
+}
+
+_startStaleProcessingSweep();
 
 module.exports = { MediaIntelligencePipeline };
