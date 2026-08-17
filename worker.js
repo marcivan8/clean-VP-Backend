@@ -7,6 +7,7 @@ const processVideoJob    = require('./jobs/videoProcessor');
 const processAudioJob    = require('./jobs/audioProcessor');
 const processAnalysisJob = require('./jobs/analysisProcessor');
 const processExportJob   = require('./jobs/exportProcessor');
+const processObjectSegmentationJob = require('./jobs/objectSegmentationProcessor'); // R67
 
 console.log('👷 Worker service starting...');
 
@@ -144,6 +145,29 @@ try {
 } catch (err) {
     console.error('⚠️  [EmbeddingQueue] EmbeddingWorker not available — embedding jobs will be skipped:', err.message);
 }
+
+// 7. Object Segmentation Worker (R67 — SAM2 speaker/background separation)
+// concurrency: 2 — I/O bound (Replicate API + polling), like analysisWorker,
+// not CPU bound. Each job downloads the source once and the SAM2 output once,
+// so it competes for bandwidth/disk with videoWorker during an upload burst
+// but not for CPU — see R24's reasoning for why that distinction matters on a
+// small Railway instance.
+const objectSegmentationWorker = new Worker('object-segmentation', processObjectSegmentationJob, {
+    connection,
+    concurrency: 2,
+    // SAM2 video inference can run several minutes; give BullMQ enough lock
+    // duration that a still-running job isn't mistaken for stalled and retried
+    // (which would double-pay for the same Replicate call — see audioWorker's
+    // identical reasoning for Whisper above).
+    lockDuration: 10 * 60 * 1000,
+});
+
+objectSegmentationWorker.on('completed', job => {
+    console.log(`✅ [ObjectSegmentationQueue] Job ${job.id} completed`);
+});
+objectSegmentationWorker.on('failed', (job, err) => {
+    console.error(`❌ [ObjectSegmentationQueue] Job ${job.id} failed:`, err.message);
+});
 
 // ── Build heartbeat ──────────────────────────────────────────────────────────
 // Publish which build this worker is running so the API can tell whether the

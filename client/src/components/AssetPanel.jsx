@@ -16,6 +16,7 @@ import { Search, Music2, Palette, Layers, Loader2, RefreshCw, Upload } from 'luc
 import { useAudioEngine }        from '../hooks/useAudioEngine.js';
 import useTimelineStore          from '../store/useTimelineStore.js';
 import { audioEngineAPI }        from '../audio-engine/AudioEngineAPI.js';
+import { lutToGrading }          from '../utils/lutGrading.js';
 import SoundCard                 from './SoundCard.jsx';
 import LUTCard                   from './LUTCard.jsx';
 import PresetCard                from './PresetCard.jsx';
@@ -206,22 +207,12 @@ export default function AssetPanel({ onClose }) {
      * a -3..+3 scale. The 1 + x/10 mapping is the editor's own
      * (LUTCard.buildColorPresetSettings), so the numbers here agree with the CSS
      * preview and with the FFmpeg export filter (R55b) by construction.
+     *
+     * R75: extracted to client/src/utils/lutGrading.js so VideoEditorTools.js's
+     * AI-executable applyLUT() computes the identical grade instead of a
+     * separate, out-of-sync formula (it previously only set the CSS-filter
+     * preview and never wrote real per-clip grading at all).
      */
-    const lutToGrading = useCallback((lut) => {
-        const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
-        return {
-            // Shadows/highlights nudge overall brightness — a coarse stand-in
-            // for a tone curve, matching what the export's gamma term does.
-            brightness: Math.round(100 * (1 + (n(lut.highlights) - n(lut.shadows)) / 60)),
-            contrast:   Math.round(100 * (1 + n(lut.contrast)   / 10)),
-            saturate:   Math.round(100 * (1 + n(lut.saturation) / 10)),
-            // Warmth as a small hue shift: positive = toward orange.
-            hueRotate:  Math.round(n(lut.warmth) * -3),
-            _lutId:     lut.id,             // so clearing can tell a LUT grade from a manual one
-            _lutName:   lut.name || lut.display_name || null, // shown by the Colour panel's "based on" badge
-        };
-    }, []);
-
     const handleLUTApply = useCallback(async lut => {
         const store   = useTimelineStore.getState();
         const clearing = projectLUTId === lut.id;

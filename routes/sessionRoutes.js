@@ -6,18 +6,18 @@
  *   POST /api/session/migrate → link sessionId to a verified user account
  *   GET  /api/session/:id     → return status (expiresAt, isMigrated, hoursLeft)
  *
- * Storage: in-memory Map (fast, zero migration needed).
- * For persistence across deploys, create this table in Supabase and swap the
- * three CRUD helpers below to use supabaseAdmin:
- *
- *   CREATE TABLE anonymous_sessions (
- *     id           TEXT PRIMARY KEY,
- *     created_at   TIMESTAMPTZ DEFAULT NOW(),
- *     expires_at   TIMESTAMPTZ NOT NULL,
- *     user_id      UUID REFERENCES auth.users(id) ON DELETE SET NULL,
- *     migrated_at  TIMESTAMPTZ
- *   );
- *   CREATE INDEX ON anonymous_sessions (expires_at);
+ * Storage: Supabase `anonymous_sessions` table is PRIMARY (survives Railway
+ * restarts/redeploys); an in-memory Map is the fallback, used only when that
+ * table isn't reachable (e.g. local dev against a project that hasn't run the
+ * migration yet). The table is defined in
+ * `supabase/migrations/20240008_anonymous_sessions.sql` — apply it once per
+ * Supabase project. Previously this schema lived only as a comment here (never
+ * actually migrated anywhere), which meant the Supabase-primary code below had
+ * never run in production and every anonymous session was silently lost on
+ * every restart. Don't re-embed the CREATE TABLE here — the migration file is
+ * the single source of truth; a second copy is exactly the kind of drift this
+ * codebase's other migrations (see 20240004_media_assets.sql's header) warn
+ * against.
  */
 
 const express        = require('express');
@@ -27,18 +27,11 @@ const rateLimit      = require('express-rate-limit');
 const router = express.Router();
 
 // ── Persistence layer ─────────────────────────────────────────────────────────
-// Primary: Supabase `anonymous_sessions` table (survives Railway restarts).
-// Fallback: in-memory Map (used when table does not exist yet).
-//
-// To enable Supabase persistence, run this migration once in your project:
-//   CREATE TABLE IF NOT EXISTS anonymous_sessions (
-//     id           TEXT PRIMARY KEY,
-//     created_at   TIMESTAMPTZ DEFAULT NOW(),
-//     expires_at   TIMESTAMPTZ NOT NULL,
-//     user_id      UUID REFERENCES auth.users(id) ON DELETE SET NULL,
-//     migrated_at  TIMESTAMPTZ
-//   );
-//   CREATE INDEX IF NOT EXISTS anon_sessions_expires ON anonymous_sessions (expires_at);
+// Primary: Supabase `anonymous_sessions` table (survives Railway restarts) —
+// see supabase/migrations/20240008_anonymous_sessions.sql for the schema and
+// apply it once per Supabase project.
+// Fallback: in-memory Map, used only when that table isn't reachable yet
+// (dbAvailable() below probes it once per process and caches the result).
 
 let supabaseAdmin = null;
 try {

@@ -10,6 +10,10 @@ import classNames from 'classnames';
 import useUserPreferences from '../../store/useUserPreferences';
 import { workflowController } from '../../agent/WorkflowController.js';
 import { useBrain } from '../../hooks/useBrain.js';
+import { buildProposals } from '../../agent/DirectorIntelligence.js';
+// R61 — motion behaviour for this card's caption style packs. See
+// LEGACY_PACK_MOTION for why the mapping lives there rather than a second picker.
+import { legacyPackToCaptionStyle } from '../../motion/CaptionModel.js';
 import BrainPanel from '../BrainPanel.jsx';
 import { useTranslation } from 'react-i18next';
 
@@ -486,6 +490,16 @@ const UploadStatusCard = ({ asset }) => {
                     }}
                 />
             </div>
+            {/* What's actually happening — explains the "processing" step rather
+                than leaving it as an opaque spinner. This is the only thing the
+                assistant panel should say while a proxy is generating; the real,
+                content-aware insight comes once uploadPhase reaches 'ready' (see
+                the asset_added advisory trigger below). */}
+            {phase === 'processing' && (
+                <div className="mt-2" style={{ fontFamily: 'var(--f-sans)', fontSize: 10, color: 'var(--fg-3)', lineHeight: 1.4 }}>
+                    {t('assistant.uploadProcessingDetail')}
+                </div>
+            )}
             {/* GCS trust note */}
             <div className="flex items-center gap-1.5 mt-2">
                 <Shield className="w-2.5 h-2.5 shrink-0" style={{ color: 'var(--fg-4)' }} />
@@ -587,6 +601,19 @@ const CaptionStylesCard = ({ log }) => {
             stroke: style.stroke || null,
             textShadow: style.textShadow || null,
             fontStyle: style.style || 'normal',
+            // R61 — the MOTION half of a style pack. This card has only ever set
+            // visual properties, which is why every pack above defines a
+            // `transform: 'uppercase'` that was applied to nothing, and why
+            // picking a style never changed how captions animated.
+            // `captionStyle` carries the uppercase flag, the motion preset the
+            // captions animate with, and how the currently-spoken word is
+            // highlighted — all read by TextOverlay.
+            captionStyle: legacyPackToCaptionStyle(style.id),
+            // Clear any hand-authored per-clip animation so the pack's own
+            // preset is what actually renders. Leaving one behind would make the
+            // style the user just picked visibly fail to take effect.
+            animations: [],
+            animation: 'none',
         };
         textTracks.forEach(track => {
             track.clips.forEach(clip => updateClip(track.id, clip.id, updates));
@@ -827,12 +854,26 @@ const ReasoningPanel = () => {
     } = useBrain();
 
     // Advisory trigger: analyze once per project load ("project_opened").
+    //
+    // GUARD: if the user's very first action after opening is dropping a
+    // file, this effect used to fire immediately — before the upload could
+    // possibly have landed — giving a content-free "start by uploading
+    // footage" advisory at the exact moment the UploadStatusCard below is
+    // already showing that an upload IS in progress. Two contradictory
+    // messages, one of them stale on arrival. If any asset is actively
+    // proxying right now, skip the analysis call here (still mark the ref,
+    // so the asset_added effect below — which correctly waits for uploads to
+    // settle — is allowed to fire) and let THAT be the project's first real
+    // advisory once the footage is actually ready to talk about. A project
+    // reopened with already-settled clips (not proxying) is unaffected —
+    // this only defers the truly-empty-at-this-instant case.
     const analyzedProjectRef = useRef(null);
     useEffect(() => {
         if (!projectId || analyzedProjectRef.current === projectId) return;
         analyzedProjectRef.current = projectId;
+        if (assets.some(a => a.isProxying)) return;
         analyzeProject('project_opened');
-    }, [projectId, analyzeProject]);
+    }, [projectId, analyzeProject, assets]);
 
     // Advisory trigger: analyze when a new asset finishes uploading ("asset_added").
     // Tracks the count of non-proxying assets so it only fires once per new asset,
@@ -917,21 +958,39 @@ const ReasoningPanel = () => {
     useEffect(() => {
         if (!brainLastResponse) return;
         const r = brainLastResponse.response || {};
-        const hasContent = !!(r.message || r.insight || (r.suggestions || []).length || (r.warnings || []).length);
+
+        // DirectorIntelligence turns the raw project/story maps into ranked,
+        // verified-executable proposals (server/brain/ProjectIntelligence.js +
+        // StoryIntelligence.js already derived these — this was previously the
+        // dead end: the maps reached the client via useBrain but nothing ever
+        // called buildProposals() on them, so two real GPT-4o analyses were
+        // computed on every advisory call and then thrown away). Pure and
+        // synchronous — safe to run on every render of this effect.
+        const directorProposals = buildProposals({
+            storyMap:   brainLastResponse.storyMap   || null,
+            projectMap: brainLastResponse.projectMap || null,
+        });
+
+        const hasContent = !!(
+            r.message || r.insight || (r.suggestions || []).length || (r.warnings || []).length
+            || directorProposals.proposals.length
+        );
         if (!hasContent) return;
 
         // De-dupe: the hook keeps the same object across unrelated re-renders,
-        // and an identical re-analysis shouldn't stack a duplicate card.
+        // and an identical re-analysis shouldn't stack a duplicate card. Proposal
+        // ids are included so a re-analysis that changes only the maps (message
+        // text unchanged) still surfaces as a fresh card.
         const key = brainLastResponse.sessionId
-            ? `${brainLastResponse.sessionId}:${r.message || ''}`
-            : `${r.message || ''}|${(r.suggestions || []).map(s => s.type || s.text || s.label).join(',')}`;
+            ? `${brainLastResponse.sessionId}:${r.message || ''}:${directorProposals.proposals.map(p => p.id).join(',')}`
+            : `${r.message || ''}|${(r.suggestions || []).map(s => s.type || s.text || s.label).join(',')}|${directorProposals.proposals.map(p => p.id).join(',')}`;
         if (lastBrainKeyRef.current === key) return;
         lastBrainKeyRef.current = key;
 
         addSuggestion({
             id:   'brain-' + Date.now(),
             type: 'brain_advisory',
-            data: brainLastResponse,
+            data: { ...brainLastResponse, directorProposals },
         });
     }, [brainLastResponse, addSuggestion]);
 

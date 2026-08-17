@@ -268,9 +268,20 @@ export function useBrain() {
                 ...(prev || {}),
                 response: {
                     ...(prev?.response || {}),
-                    suggestions: data.nextSuggestions || [],
-                    message: data.response?.message || null,
+                    // Previously only `message` and `suggestions` were pulled off
+                    // data.response — insight and warnings were silently dropped
+                    // on every advisory call (project_opened/asset_added/
+                    // edit_applied all go through this function), so BrainPanel's
+                    // InsightCard and WarningBanner never had anything to render
+                    // no matter what the Brain actually returned.
+                    ...(data.response || {}),
+                    suggestions: data.nextSuggestions || data.response?.suggestions || [],
                 },
+                // projectMap/storyMap are returned by /api/brain/analyze but were
+                // never carried into lastResponse — DirectorIntelligence.js needs
+                // the raw maps to derive proposals, so they have to survive here.
+                projectMap: data.projectMap ?? null,
+                storyMap:   data.storyMap   ?? null,
             }));
             return data;
 

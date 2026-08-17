@@ -203,10 +203,20 @@ router.post('/analyze', authenticateUser, async (req, res) => {
 
         const brainOutput = await orchestrator.process(input);
 
-        // Return only response fields — no intent or learning exposed
+        // Return only response fields — no intent or learning exposed.
+        //
+        // projectMap/storyMap were computed above (GPT-4o calls, real cost) and
+        // fed into the Brain's own prose via ContextEngine/EditorialBrain, but
+        // were never actually returned to the client — DirectorIntelligence.js
+        // (client/src/agent/DirectorIntelligence.js), the module that turns
+        // these two maps into ranked, verified-executable proposals, had no way
+        // to receive them and was consequently never callable from the UI.
+        // Exposing the raw maps here is what makes that wiring possible.
         return res.json({
             response:        brainOutput.response,
             nextSuggestions: brainOutput.response?.suggestions || [],
+            projectMap,
+            storyMap,
         });
 
     } catch (err) {

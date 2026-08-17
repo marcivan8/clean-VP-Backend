@@ -93,7 +93,8 @@ export class LongFormEditPlanner {
      * Step 1: silence_removal         — conservative threshold, preserves natural pauses
      * Step 2: remove_repeated_takes   — cuts "let me say that again" moments
      * Step 3: remove_filler_words     — only if filler density > 15%
-     * Step 4: identify_quotable_moments — surfaces best standalone clips (no edits)
+     * Step 4: identify_quotable_moments — cuts the best standalone moments out
+     *          onto a separate "Highlights" track for repurposing (main edit untouched)
      * Step 5: normalize_audio
      * Step 6: denoise_audio
      */
@@ -129,7 +130,7 @@ export class LongFormEditPlanner {
             max_duration: 90,
             min_importance: 0.6,
             max_results: 5,
-            reason: 'Surface the best standalone clips for repurposing (no edits made)',
+            reason: 'Cut the best standalone moments onto a separate Highlights track for repurposing',
         }));
         
         steps.push(S('apply_smart_zoom', {

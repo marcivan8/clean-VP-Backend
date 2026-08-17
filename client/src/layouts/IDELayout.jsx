@@ -1,7 +1,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Menu, Upload, Palette, Move, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Menu, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap } from 'lucide-react';
 import classNames from 'classnames';
 import { Player } from '@revideo/player-react';
 import project from '../revideo/project';
@@ -16,11 +16,20 @@ import DraggableAsset from '../components/DraggableAsset';
 import TextPanel from '../components/TextPanel';
 import TranscriptPanel from '../components/TranscriptPanel';
 import TextOverlay from '../components/Player/TextOverlay';
+import GraphicOverlay from '../components/Player/GraphicOverlay'; // R62 — stickers/logos/graphics track
 import MobileToolbar from '../components/MobileToolbar';
 import MobileAIBar from '../components/MobileAIBar';
 import useDeviceType from '../hooks/useDeviceType';
 import MixerPanel from '../components/Sidebar/MixerPanel';
 import InterviewEditPanel from '../components/InterviewEditPanel';
+// R61 — the Motion tab. NOTE: adding a panel here requires BOTH this import
+// AND an entry in the tab array below. This file already contains three render
+// branches ('effects', 'interview', 'marketplace') whose tab buttons were
+// trimmed from that array, so they can never be selected — and 'effects' also
+// renders a component that was never imported, which would throw a
+// ReferenceError if it ever were. Add both halves or the panel is dead on
+// arrival.
+import MotionPanel from '../components/MotionPanel';
 import AssetPanel from '../components/AssetPanel';
 import ExportModal from '../components/ExportModal';
 import { Type } from 'lucide-react';
@@ -294,7 +303,14 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         // handles interactive drag/resize. Passing them to the Revideo player
         // would cause duplicate captions AND make every text-clip mutation
         // (e.g. scale drag) reload the scene generator, jumping the playhead.
-        const nonTextTracks = deferredTracks.filter(t => t.type !== 'text');
+        //
+        // 'overlay' tracks (R62 — stickers/logos/graphics) are excluded for the
+        // exact same reason: <GraphicOverlay /> renders and drags them in the
+        // DOM, and the export-side equivalent is the compositor's overlay pass
+        // (motion/Compositor.js), not Revideo. Passing them here would triple-
+        // render a sticker (Revideo + GraphicOverlay + compositor) and make
+        // every drag reload the Revideo scene.
+        const nonTextTracks = deferredTracks.filter(t => t.type !== 'text' && t.type !== 'overlay');
         const isAnySolo = deferredTracks.some(tr => tr.solo);
 
         // Compute duration from non-text (video/audio/image) clips only.
@@ -1056,11 +1072,93 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         const { authFetch }     = await import('../utils/authFetch.js');
         const { pollJobResult } = await import('../utils/jobPoller.js');
 
+        // ── Composition plan (R59/R60) ─────────────────────────────────────
+        // Built HERE, on the client, by the same module that drives the preview,
+        // and shipped to the worker to be executed rather than re-derived. That
+        // is the whole point: client-composites-for-preview plus
+        // worker-composites-independently-for-export is the exact shape of R14,
+        // R16, R53 and R56 — four incidents, one root cause. A plan computed
+        // once cannot disagree with itself.
+        //
+        // Plan geometry is NORMALISED (0..1 of the frame), so the client does not
+        // need to know the export resolution — the worker multiplies by whatever
+        // it renders. That matters because the platform/resolution preset tables
+        // live in jobs/exportProcessor.js, and mirroring them here would create a
+        // second list to keep in sync — the exact shape of the bug that made
+        // every caption font silently wrong (R57).
+        // ASPECT still has to match, since a height fraction is derived from a
+        // width fraction; the frame below supplies it and the worker verifies it.
+        let compositionPlan = null;
+        let plan = null; // kept even when compositionPlan is nulled-out — captionProgram needs plan.base
+        try {
+            const { buildCompositionPlan, planIsNoOp } = await import('../motion/Compositor.js');
+            const [aw, ah] = String(aspectRatio || '9:16').split(':').map(Number);
+            const ratio = (aw > 0 && ah > 0) ? aw / ah : 9 / 16;
+            // Nominal frame — only its ASPECT is load-bearing.
+            const nominalHeight = 1920;
+            plan = buildCompositionPlan(tracks, {
+                width:  Math.round(nominalHeight * ratio),
+                height: nominalHeight,
+                fps:    settings.fps || 30,
+            });
+            // Sending an empty plan would be harmless but pointless — omitting it
+            // keeps the worker on its original, untouched path for every project
+            // that has nothing to composite.
+            compositionPlan = planIsNoOp(plan) ? null : plan;
+            if (compositionPlan) {
+                console.log(`[Export] composition plan: ${compositionPlan.overlays.length} overlay layer(s)`);
+            }
+        } catch (planErr) {
+            // A plan we cannot build must never block an export — the video
+            // simply ships without its overlay layers, same fail-open rule the
+            // LUT and caption passes follow.
+            console.warn('[Export] could not build composition plan (exporting without overlays):', planErr.message);
+            compositionPlan = null;
+        }
+
+        // R63 — animated captions (motion/textShadow/uppercase/word-reveal) in
+        // the exported video, not just the preview. Reuses `plan.base` for
+        // the identical timeline→output time map the overlay plan already
+        // computed, rather than re-deriving "which track is the base video" a
+        // third time (client, again) — see CaptionCompiler.js's own header.
+        let captionProgram = null;
+        try {
+            const { buildCaptionProgram, captionProgramIsNoOp } = await import('../motion/CaptionCompiler.js');
+            const baseTrack = tracks.find(t => t.id === plan?.base?.trackId);
+            const program = buildCaptionProgram(tracks, baseTrack?.clips || []);
+            captionProgram = captionProgramIsNoOp(program) ? null : program;
+            if (captionProgram) {
+                console.log(`[Export] caption program: ${captionProgram.entries.length} animated caption clip(s)`);
+            }
+        } catch (progErr) {
+            // Same fail-open rule as the composition plan and the LUT lookup —
+            // a caption program we cannot build must never block an export.
+            console.warn('[Export] could not build caption program (exporting with static captions):', progErr.message);
+            captionProgram = null;
+        }
+
+        // R64 — camera-preset motion (push/pull/punch-zoom) applied to a clip
+        // on the BASE video track. `clip.animations` is written by the Motion
+        // tab for ANY clip, but exportProcessor's STEP 2 zoom path only ever
+        // read `clip.keyframes.scale` — so this derives an equivalent
+        // keyframe array and ships it on a cloned tracks array, reusing the
+        // existing zoompan path unchanged. See CameraMotionCompiler.js header.
+        let tracksForExport = tracks;
+        try {
+            const { applyCameraMotionToBaseTrack } = await import('../motion/CameraMotionCompiler.js');
+            tracksForExport = applyCameraMotionToBaseTrack(tracks, plan?.base?.trackId || null);
+        } catch (camErr) {
+            // Same fail-open rule as the plan/program passes above — never
+            // block an export over a derived-motion failure.
+            console.warn('[Export] could not derive base-track camera motion (exporting without it):', camErr.message);
+            tracksForExport = tracks;
+        }
+
         // Enqueue the export job — returns { jobId } immediately
         const response = await authFetch('/api/render', {
             method: 'POST',
             body: JSON.stringify({
-                timeline: { tracks, duration, assets: assets || [] },
+                timeline: { tracks: tracksForExport, duration, assets: assets || [] },
                 settings: {
                     platform: settings.platform || null,
                     quality:  settings.quality  || 'high',
@@ -1070,6 +1168,13 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     // chosen — one half of why selecting a LUT changed no pixel
                     // (see CLAUDE.md R55). Null is the normal, ungraded case.
                     projectLUTId: projectLUTId || null,
+                    // Null for every project with nothing to composite, which is
+                    // what keeps the worker's original path byte-for-byte intact.
+                    compositionPlan,
+                    // R63 — null for every project whose captions have no
+                    // animation/shadow/uppercase/reveal, which is what keeps
+                    // STEP 4's static drawtext path byte-for-byte intact.
+                    captionProgram,
                 },
             }),
         });
@@ -1452,7 +1557,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                         <div className="relative border-b" style={{ borderColor: "var(--line-soft)" }}>
                             <div ref={tabBarRef} className="p-2 flex gap-1 overflow-x-auto no-scrollbar">
-                                {['media', 'captions', 'transcript', 'color', 'assets', 'audio', 'transform', 'settings'].map(tab => (
+                                {['media', 'captions', 'transcript', 'color', 'motion', 'assets', 'audio', 'transform', 'settings'].map(tab => (
                                     <button
                                         key={tab}
                                         onClick={() => setActiveTab(tab)}
@@ -1462,6 +1567,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         {tab === 'captions'   && <Type     className="w-2.5 h-2.5" />}
                                         {tab === 'transcript' && <span style={{ fontSize: 9 }}>📝</span>}
                                         {tab === 'color'      && <Palette  className="w-2.5 h-2.5" />}
+                                        {tab === 'motion'     && <Zap      className="w-2.5 h-2.5" />}
                                         {tab === 'assets'     && <Sparkles className="w-2.5 h-2.5" />}
                                         {tab === 'audio'      && <span style={{ fontSize: 9 }}>🎤</span>}
                                         {tab === 'transform'  && <Move     className="w-2.5 h-2.5" />}
@@ -1625,6 +1731,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     </div>
                                 </section>
                             )}
+
+                            {/* Motion (R61) — presets + hand-authored keyframes.
+                                The tab button for this lives in the array above;
+                                both halves are required. */}
+                            {activeTab === 'motion' && <MotionPanel />}
 
                             {activeTab === 'interview' && <section className="border-b border-border/50"><InterviewEditPanel /></section>}
                             {activeTab === 'captions' && <section className="p-4 border-b border-border/50"><TextPanel /></section>}
@@ -1806,6 +1917,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     })()}
                                 </ErrorBoundary>
                                 <TextOverlay />
+                                <GraphicOverlay />
                             </div>
 
                             {/* Floating Playback Controls */}

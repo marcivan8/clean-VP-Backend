@@ -463,6 +463,7 @@ export class VideoEditorTools {
             case 'reorder_clips': return await this.reorderClips(action.args, action.signal);
             case 'reorder_segment': return this.reorderSegment(action.args);
             case 'cut_segment': return this.cutSegment(action.args);
+            case 'identify_quotable_moments': return await this.identifyQuotableMoments(action.args);
 
             // Asset Engine — Creative Asset Intelligence System
             case 'search_assets':     return await this.searchAssets(action.args);
@@ -470,7 +471,7 @@ export class VideoEditorTools {
             case 'search_luts':       return await this.searchLUTs(action.args);
             case 'search_presets':    return await this.searchPresets(action.args);
             case 'apply_lut':         return await this.applyLUT(action.args);
-            case 'clear_lut':         return this.clearLUT();
+            case 'clear_lut':         return this.clearLUT(action.args);
             case 'add_sfx':           return this.addSFX(action.args);
             case 'apply_preset':      return await this.applyPreset(action.args);
             case 'export_audio':      return await this.exportAudio(action.args);
@@ -649,6 +650,139 @@ export class VideoEditorTools {
         } catch (error) {
             console.error('[VideoEditorTools] applySmartZoom error:', error);
             return { success: false, message: `Failed to apply smart zoom: ${error.message}` };
+        }
+    }
+
+    // ─── QUOTABLE MOMENTS (repurposing) ───────────────────────────────────────
+
+    /**
+     * Surfaces the best standalone segments for repurposing AND actually cuts
+     * them out as separate clips, instead of only recording thresholds.
+     *
+     * FIX: LongFormEditPlanner's identify_quotable_moments step promised "the
+     *      best standalone clips for repurposing" in its own approval message,
+     *      but CommandCompiler compiled it as analysis-only — it wrote a
+     *      `quotable_moments_config` computed value that nothing downstream
+     *      ever read (confirmed: no other reference to that key anywhere in
+     *      the codebase). The moments were identified and then discarded.
+     *      This method is the actual consumer: it re-derives the same
+     *      candidate list from ContentAnalyzer's cached segments and lands
+     *      each one as a real, independently movable/exportable clip on a
+     *      dedicated "Highlights" track, leaving the main edited timeline
+     *      untouched.
+     */
+    async identifyQuotableMoments(args = {}) {
+        try {
+            console.log('[VideoEditorTools] Executing identify_quotable_moments');
+
+            const {
+                min_duration: minDuration = 15,
+                max_duration: maxDuration = 90,
+                min_importance: minImportance = 0.6,
+                max_results: maxResults = 5,
+            } = args;
+
+            let analysis = ContentAnalyzer.getCachedAnalysis();
+            if (!analysis?.success || !analysis.segments?.length) {
+                console.log('[VideoEditorTools] No cached analysis. Running ContentAnalyzer first...');
+                analysis = await ContentAnalyzer.analyze();
+            }
+
+            if (!analysis?.success || !analysis.segments?.length) {
+                return {
+                    success: false,
+                    message: `Could not identify quotable moments: ${analysis?.error || 'no content analysis available'}`,
+                    moments: [],
+                };
+            }
+
+            const state = this.store;
+            const videoTracks = state.tracks.filter(t => t.type === 'video');
+            const allClips = [];
+            videoTracks.forEach(t => allClips.push(...t.clips));
+
+            if (allClips.length === 0) {
+                return { success: false, message: 'No video clips found to extract moments from.', moments: [] };
+            }
+
+            // Candidate segments: long enough, important enough, within bounds.
+            const candidates = analysis.segments
+                .filter(seg => {
+                    const dur = (seg.end ?? 0) - (seg.start ?? 0);
+                    return dur >= minDuration && dur <= maxDuration
+                        && (seg.importance_score ?? 0) >= minImportance;
+                })
+                .sort((a, b) => (b.importance_score ?? 0) - (a.importance_score ?? 0))
+                .slice(0, maxResults);
+
+            if (candidates.length === 0) {
+                return {
+                    success: true,
+                    message: `Analysed the timeline but found no segment above the importance threshold (${minImportance}) in the ${minDuration}s–${maxDuration}s range — nothing extracted.`,
+                    moments: [],
+                };
+            }
+
+            // Each segment's start/end are source-file timestamps. Find which
+            // base clip covers each one via source-time (offset), matching the
+            // convention ZoomAnalyzer already relies on for post-silence-removal
+            // timelines — clip.start (timeline position) is not reliable here.
+            const findCoveringClip = (srcTime) => allClips.find(c => {
+                const srcStart = c.offset ?? c.start ?? 0;
+                const srcEnd = srcStart + (c.duration || 0);
+                return srcTime >= srcStart && srcTime <= srcEnd;
+            });
+
+            let highlightsTrackId = null;
+            const moments = [];
+
+            for (let i = 0; i < candidates.length; i++) {
+                const seg = candidates[i];
+                const baseClip = findCoveringClip(seg.start) || allClips[0];
+                if (!baseClip) continue;
+
+                if (!highlightsTrackId) {
+                    highlightsTrackId = state.addTrack('video');
+                }
+
+                const duration = seg.end - seg.start;
+                const label = `${Math.floor(seg.start / 60)}m${String(Math.floor(seg.start % 60)).padStart(2, '0')}s`;
+
+                state.addClip(highlightsTrackId, {
+                    ...baseClip,
+                    id: `clip_quote_${Date.now()}_${i}`,
+                    start: 0,
+                    duration,
+                    offset: seg.start,
+                    name: `Highlight ${i + 1} (${label}) — ${seg.topic || seg.type || 'moment'}`,
+                });
+
+                moments.push({
+                    start: seg.start,
+                    end: seg.end,
+                    duration,
+                    importance: seg.importance_score ?? null,
+                    topic: seg.topic || null,
+                    reason: seg.is_cta ? 'cta' : seg.is_question ? 'question' : (seg.type || 'value'),
+                });
+            }
+
+            if (moments.length === 0) {
+                return {
+                    success: false,
+                    message: 'Found quotable segments but none overlapped a clip on the timeline — nothing extracted.',
+                    moments: [],
+                };
+            }
+
+            return {
+                success: true,
+                message: `✓ Extracted ${moments.length} quotable moment(s) onto a new Highlights track — ready to trim, export, or repurpose individually.`,
+                moments,
+            };
+        } catch (error) {
+            console.error('[VideoEditorTools] identifyQuotableMoments error:', error);
+            return { success: false, message: `Failed to identify quotable moments: ${error.message}`, moments: [] };
         }
     }
 
@@ -1227,18 +1361,109 @@ export class VideoEditorTools {
      * Stores lutId in Zustand state (no store action needed — setState is always valid).
      * Fetches CSS preview filter for immediate visual feedback.
      */
-    async applyLUT({ lutId } = {}) {
-        if (!lutId) return { success: false, message: 'lutId is required' };
-        const { audioEngineAPI } = await import('../audio-engine/AudioEngineAPI.js');
-        const cssFilter = await audioEngineAPI.getLUTPreview(lutId);
-        // Store lutId + cssFilter in timeline state without a named action
-        useTimelineStore.setState({ projectLUTId: lutId, projectLUTFilter: cssFilter });
-        return { success: true, message: `LUT applied`, lutId, cssFilter };
+    /**
+     * FIX (R75): this used to only set `projectLUTId` + a CSS-filter preview
+     * — the exact bug AssetPanel.jsx's own header comment already documented
+     * as fixed for the MANUAL button ("applying a LUT only set projectLUTId +
+     * a CSS filter. Nothing in the app has ever written clip.grading — yet
+     * VideoPlayer reads it every frame"). The AI-executable version was never
+     * updated to match, so an AI-triggered "make it warmer" produced a
+     * visibly weaker/different look than clicking Apply, and export (which
+     * reads per-clip `grading`, not the CSS preview) wouldn't reflect it at
+     * all. Now computes the identical grade via the shared
+     * client/src/utils/lutGrading.js formula and writes it per clip, exactly
+     * like AssetPanel.jsx's handleLUTApply.
+     *
+     * @param {object}  args
+     * @param {string}  [args.lutId] — resolved id, when already known
+     * @param {string}  [args.query] — mood/style text ("warm cinematic") to
+     *   resolve via search when lutId isn't given — this is how typed
+     *   requests like "apply a warm lut" reach a real LUT: CommandCompiler
+     *   can't resolve a query to an id itself (no I/O allowed there), so
+     *   VideoEditorTools does the search-then-apply here at execution time.
+     * @param {boolean} [args.applyToAll=false] — when true, overwrite even
+     *   clips the user has manually graded (grading._manuallyAdjusted). By
+     *   default those are left untouched, matching the manual UI's guard —
+     *   only apply to all when the user explicitly asked for that.
+     */
+    async applyLUT({ lutId, query = '', applyToAll = false } = {}) {
+        if (!lutId && !query) return { success: false, message: 'lutId or query is required' };
+        try {
+            const { audioEngineAPI } = await import('../audio-engine/AudioEngineAPI.js');
+            const { lutToGrading }   = await import('../utils/lutGrading.js');
+
+            let lut = null;
+            if (lutId) {
+                lut = await audioEngineAPI.getLUT(lutId);
+                if (!lut) return { success: false, message: `LUT ${lutId} not found` };
+            } else {
+                const { luts = [] } = await audioEngineAPI.searchLUTs(query, { limit: 1 });
+                if (!luts.length) {
+                    return { success: false, message: `No LUT found matching "${query}" — try a different description.` };
+                }
+                lut = luts[0];
+                lutId = lut.id;
+            }
+
+            const cssFilter = lut.cssFilterPreview || lut.css_filter_preview
+                || await audioEngineAPI.getLUTPreview(lutId);
+            const grading = lutToGrading(lut);
+
+            const state = this.store;
+            let touched = 0;
+            let skipped = 0;
+            for (const track of (state.tracks || [])) {
+                if (track.type !== 'video') continue;
+                for (const clip of (track.clips || [])) {
+                    if (!applyToAll && clip.grading?._manuallyAdjusted) { skipped++; continue; }
+                    state.updateClip?.(track.id, clip.id, { grading });
+                    touched++;
+                }
+            }
+
+            // Project-level id/CSS filter kept too: the id is what export
+            // reads (R55/R55b), and the CSS filter still grades the canvas.
+            useTimelineStore.setState({ projectLUTId: lutId, projectLUTFilter: cssFilter });
+
+            const skippedNote = skipped > 0
+                ? ` (left ${skipped} manually-graded clip(s) untouched — say "apply to all clips" to override)`
+                : '';
+            return {
+                success: true,
+                message: `✓ Applied "${lut.display_name || lut.name || lutId}" to ${touched} clip(s)${skippedNote}.`,
+                lutId, cssFilter, touched, skipped,
+            };
+        } catch (error) {
+            console.error('[VideoEditorTools] applyLUT error:', error);
+            return { success: false, message: `Failed to apply LUT: ${error.message}` };
+        }
     }
 
-    clearLUT() {
-        useTimelineStore.setState({ projectLUTId: null, projectLUTFilter: 'none' });
-        return { success: true, message: 'LUT cleared' };
+    /**
+     * @param {object}  args
+     * @param {boolean} [args.applyToAll=false] — same manually-adjusted guard as applyLUT().
+     */
+    clearLUT({ applyToAll = false } = {}) {
+        try {
+            const state = this.store;
+            let touched = 0;
+            let skipped = 0;
+            for (const track of (state.tracks || [])) {
+                if (track.type !== 'video') continue;
+                for (const clip of (track.clips || [])) {
+                    if (!clip.grading) continue; // nothing to clear on this clip
+                    if (!applyToAll && clip.grading?._manuallyAdjusted) { skipped++; continue; }
+                    state.updateClip?.(track.id, clip.id, { grading: null });
+                    touched++;
+                }
+            }
+            useTimelineStore.setState({ projectLUTId: null, projectLUTFilter: 'none' });
+            const skippedNote = skipped > 0 ? ` (left ${skipped} manually-graded clip(s) untouched)` : '';
+            return { success: true, message: `LUT cleared from ${touched} clip(s)${skippedNote}.`, touched, skipped };
+        } catch (error) {
+            console.error('[VideoEditorTools] clearLUT error:', error);
+            return { success: false, message: `Failed to clear LUT: ${error.message}` };
+        }
     }
 
     /**

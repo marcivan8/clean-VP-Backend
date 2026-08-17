@@ -204,6 +204,91 @@ const InsightCard = ({ insight }) => {
     );
 };
 
+// ── ProposalItem ──────────────────────────────────────────────────────────────
+// Renders one item from DirectorIntelligence.buildProposals(). Unlike
+// SuggestionChip (which renders whatever the model returned, unverified), every
+// proposal here has already passed isExecutable() against CommandRegistry —
+// `applicable` tells us honestly whether tapping this can resolve to a real
+// command or is an observation with no handler behind it yet. Rendering both
+// identically would silently promise the app can do things it can't (the exact
+// failure mode DirectorIntelligence.js's docblock documents against the old
+// CreativeDirector.js: 12 of 14 proposed operations resolved to nothing).
+
+const ProposalItem = ({ proposal, onAccept, onDismiss }) => {
+    const [dismissed, setDismissed] = useState(false);
+    if (dismissed) return null;
+
+    const colors = PRIORITY_COLORS[proposal.priority] || PRIORITY_COLORS.low;
+
+    const handleClick = () => {
+        if (!proposal.applicable) return; // advisory — nothing to accept
+        onAccept?.(proposal);
+        setDismissed(true);
+    };
+
+    const handleDismiss = (e) => {
+        e.stopPropagation();
+        onDismiss?.(proposal);
+        setDismissed(true);
+    };
+
+    return (
+        <div
+            className="group flex items-start gap-2 rounded-lg p-2.5 transition-all duration-150"
+            style={{
+                background: colors.bg,
+                border: `0.5px solid ${colors.border}`,
+                marginBottom: 6,
+                cursor: proposal.applicable ? 'pointer' : 'default',
+            }}
+            onClick={handleClick}
+        >
+            <span
+                className="mt-0.5 w-1.5 h-1.5 rounded-full shrink-0"
+                style={{ background: colors.text, boxShadow: proposal.priority !== 'low' ? `0 0 5px ${colors.glow}` : 'none' }}
+            />
+            <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-1">
+                    <span style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg)', fontWeight: 500, lineHeight: 1.35 }}>
+                        {proposal.title}
+                    </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                        {proposal.applicable && (
+                            <ChevronRight
+                                className="w-3 h-3 opacity-50 group-hover:opacity-100 transition-opacity"
+                                style={{ color: colors.text }}
+                            />
+                        )}
+                        <button
+                            title="Dismiss"
+                            onClick={handleDismiss}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-white/10"
+                            style={{ color: 'var(--fg-4)' }}
+                        >
+                            <X className="w-2.5 h-2.5" />
+                        </button>
+                    </div>
+                </div>
+
+                {proposal.why && (
+                    <p className="mt-0.5" style={{ fontFamily: 'var(--f-sans)', fontSize: 11, color: 'var(--fg-3)', lineHeight: 1.45 }}>
+                        {proposal.why}
+                    </p>
+                )}
+
+                {!proposal.applicable && (
+                    <p
+                        className="mt-1"
+                        style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.06em' }}
+                    >
+                        Observation — not an applicable action
+                    </p>
+                )}
+            </div>
+        </div>
+    );
+};
+
 // ── BrainResponseMessage ──────────────────────────────────────────────────────
 
 const BrainResponseMessage = ({ message }) => {
@@ -267,7 +352,12 @@ const BrainPanel = ({ brainOutput, isProcessing, onSendCommand, onSendFeedback }
     const warnings    = response?.warnings    || [];
     const insight     = response?.insight     || null;
 
-    const hasContent = !!(message || suggestions.length || warnings.length || insight);
+    // Ranked, verified-executable proposals derived from projectMap/storyMap by
+    // DirectorIntelligence.buildProposals() — see the effect in ReasoningPanel.jsx
+    // that attaches this before pushing the advisory card.
+    const directorProposals = brainOutput?.directorProposals?.proposals || [];
+
+    const hasContent = !!(message || suggestions.length || warnings.length || insight || directorProposals.length);
 
     // Nothing to show (and not loading) — render nothing to avoid empty chrome
     if (!hasContent && !isProcessing) return null;
@@ -285,6 +375,16 @@ const BrainPanel = ({ brainOutput, isProcessing, onSendCommand, onSendFeedback }
 
     const handleDismiss = (suggestion) => {
         onSendFeedback?.(suggestion?.type, false);
+    };
+
+    // Proposals resubmit their (human-readable) title through the same
+    // standard pipeline as suggestion chips — same reasoning as handleAccept
+    // above. Not routed through onSendFeedback: proposal ids are per-finding
+    // (e.g. `sag_42`) rather than a stable suggestion type, so recording
+    // feedback against them wouldn't accumulate into anything PatternLearner's
+    // permanently_hidden list could act on — it would just grow unbounded.
+    const handleAcceptProposal = (proposal) => {
+        if (proposal?.title) onSendCommand?.(proposal.title);
     };
 
     return (
@@ -315,6 +415,35 @@ const BrainPanel = ({ brainOutput, isProcessing, onSendCommand, onSendFeedback }
 
             {/* Insight */}
             <InsightCard insight={insight} />
+
+            {/* Editorial findings — from DirectorIntelligence, ranked by priority
+                (a critical advisory finding like "your hook is buried" outranks
+                a low-priority applicable tweak; see buildProposals()'s comment
+                on why applicability is deliberately NOT the sort key). */}
+            {directorProposals.length > 0 && (
+                <div>
+                    <div
+                        style={{
+                            fontFamily:    'var(--f-mono)',
+                            fontSize:      9,
+                            color:         'var(--fg-4)',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.09em',
+                            marginBottom:  6,
+                        }}
+                    >
+                        Editorial findings
+                    </div>
+                    {directorProposals.map(p => (
+                        <ProposalItem
+                            key={p.id}
+                            proposal={p}
+                            onAccept={handleAcceptProposal}
+                            onDismiss={() => {}}
+                        />
+                    ))}
+                </div>
+            )}
 
             {/* Suggestion chips */}
             {suggestions.length > 0 && (

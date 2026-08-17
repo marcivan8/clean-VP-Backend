@@ -913,6 +913,28 @@ export class TimelineStateManager {
                         animation: clip.animation,
                         position: clip.position,
                         style: clip.style,
+                        // Motion Graphics engine (R58) — see client/src/motion/.
+                        // These three MUST also appear in fromLegacyTracks below;
+                        // a field projected here but not read back there silently
+                        // vanishes on project reload, which is exactly what was
+                        // happening to `animation` before R58.
+                        animations: clip.animations,
+                        words: clip.words,
+                        captionStyle: clip.captionStyle,
+                        // R66 — clip grouping (see client/src/motion/ClipGrouping.js).
+                        // Same persistence-contract rule as the three fields above:
+                        // MUST also appear in fromLegacyTracks below, or a group
+                        // silently falls apart into independent clips on reload.
+                        groupId: clip.groupId ?? null,
+                        // R67 — Object Intelligence (SAM2 speaker/background
+                        // separation, see client/src/motion/ObjectLayers.js).
+                        // Same persistence-contract rule: MUST also appear in
+                        // fromLegacyTracks below, or a separated clip's mask
+                        // reference and blur-target selection silently vanish
+                        // on reload — exactly the failure this project has
+                        // hit R58/R66 times before for new clip fields.
+                        layerMask: clip.layerMask ?? null,
+                        layerTarget: clip.layerTarget ?? null,
                         // Transform
                         x: clip.x,
                         y: clip.y,
@@ -985,6 +1007,24 @@ export class TimelineStateManager {
                                 textAlign: legacyClip.textAlign,
                                 position: legacyClip.position,
                                 style: legacyClip.style,
+                                // `animation` was PROJECTED OUT by toLegacyTracks
+                                // and never read back here — so every text
+                                // animation silently reset to undefined on
+                                // project reload. Restored as part of R58, since
+                                // the motion engine treats it as the legacy
+                                // fallback that keeps old projects animating.
+                                animation: legacyClip.animation,
+                                // Motion Graphics engine (R58) — mirrors the
+                                // projection in toLegacyTracks above. Keep the
+                                // two lists in sync.
+                                animations: legacyClip.animations,
+                                words: legacyClip.words,
+                                captionStyle: legacyClip.captionStyle,
+                                // R66 — clip grouping. Mirrors toLegacyTracks above.
+                                groupId: legacyClip.groupId ?? null,
+                                // R67 — Object Intelligence. Mirrors toLegacyTracks above.
+                                layerMask: legacyClip.layerMask ?? null,
+                                layerTarget: legacyClip.layerTarget ?? null,
                                 // Transform
                                 x: legacyClip.x,
                                 y: legacyClip.y,

@@ -32,6 +32,15 @@ import useTimelineStore  from '../store/useTimelineStore.js';
 import { TimelineActions } from '../timeline/index.js';
 import { mediaBunnyService } from '../services/MediaBunnyService.js';
 import useAIStore from '../store/useAIStore.js';
+// R58 — Motion Graphics engine. Caption grouping now preserves per-word
+// timings instead of collapsing them to a line of text; see
+// groupWordsIntoCaptions below and client/src/motion/CaptionModel.js.
+import { groupWordsIntoSegments } from '../motion/CaptionModel.js';
+// R68 — AI Animation Intelligence. `animate_automatically` applies the
+// server's resolved plan (AnimationKnowledgeGraph.js) the exact same way
+// the manual Motion tab does, so a brain-picked preset and a hand-picked one
+// are indistinguishable to every downstream consumer (preview, export).
+import { applyPresetToClip } from '../motion/ClipAdapter.js';
 
 export const EXECUTION_STATES = {
     QUEUED:    'QUEUED',
@@ -149,33 +158,23 @@ function resolveAssetServerPath(asset) {
 /**
  * Group word-level timestamps into caption lines.
  * Splits on natural pauses (gap > 0.4 s) or every MAX_WORDS words.
+ *
+ * R58: delegates to the Motion Graphics engine's caption model, which returns
+ * the SAME `{ text, start, end }` fields PLUS a `words` array.
+ *
+ * WHY THIS MATTERS: this function was the single place per-word timings died.
+ * Three providers produce them (AssemblyAI, Whisper `verbose_json`, WhisperX)
+ * and they survive all the way into `state.captions` — and then the old body
+ * here did `group.map(x => x.word).join(' ')` and dropped the array on the
+ * floor. Every caption downstream was therefore only ever a line of text,
+ * which is why per-word highlighting looked like it needed "adding word-level
+ * timing" when the timings had been there the whole time.
+ *
+ * Callers reading only `text`/`start`/`end` are unaffected — the extra field
+ * is purely additive, which is what makes this safe to swap in.
  */
 function groupWordsIntoCaptions(words, maxWords = 6, pauseThreshold = 0.4) {
-    if (!words || words.length === 0) return [];
-    const captions = [];
-    let group = [];
-    for (let i = 0; i < words.length; i++) {
-        const w = words[i];
-        const gap = i > 0 ? (w.start || 0) - (words[i - 1].end || 0) : 0;
-        const shouldFlush = group.length >= maxWords || (group.length > 0 && gap >= pauseThreshold);
-        if (shouldFlush) {
-            captions.push({
-                text: group.map(x => x.word).join(' '),
-                start: group[0].start,
-                end: group[group.length - 1].end,
-            });
-            group = [];
-        }
-        group.push(w);
-    }
-    if (group.length > 0) {
-        captions.push({
-            text: group.map(x => x.word).join(' '),
-            start: group[0].start,
-            end: group[group.length - 1].end,
-        });
-    }
-    return captions;
+    return groupWordsIntoSegments(words, maxWords, pauseThreshold);
 }
 
 /**
@@ -505,6 +504,25 @@ export class MediaExecutionEngine {
         return store[methodName](...methodArgs);
     }
 
+    /**
+     * R67 — find which track a clip id lives on. Several new Object
+     * Intelligence cases (separate_speaker/zoom_speaker/track_speaker/
+     * blur_background) take a bare clipId the way most other single-clip
+     * commands in this file already assume a trackId is known ahead of
+     * time — this is the one place that assumption gets resolved, so those
+     * cases don't each duplicate a `tracks.flatMap(...)` scan.
+     * Returns { trackId: null, clipId: null } (not throw) when not found —
+     * every caller above already checks `!clipId` and returns a clean error.
+     */
+    _findClipAndTrack(store, clipId) {
+        if (!clipId) return { trackId: null, clipId: null };
+        for (const track of (store.tracks || [])) {
+            const clip = (track.clips || []).find(c => c.id === clipId);
+            if (clip) return { trackId: track.id, clipId: clip.id };
+        }
+        return { trackId: null, clipId: null };
+    }
+
     async executeStoreAction(command, job) {
         const store  = useTimelineStore.getState();
         const action = command.action;
@@ -561,6 +579,185 @@ export class MediaExecutionEngine {
                 return { action, success: true };
             }
             case 'addTextOverlay': this._callStore(store, 'addTextOverlay', args.text, args.position, args.duration, args.style); return { action, success: true };
+            // R65 — Motion Graphics Components. The AI-tool entry point for
+            // client/src/motion/ComponentLibrary.js: `{ action: 'addMotionComponent',
+            // args: { component: 'CTAWidget', preset: 'subscribe', params: {...} } }`.
+            // `component`/`preset` are top-level (matching how the feature was
+            // asked for) with everything content-specific — text/url/emoji/
+            // direction/position — under `params`, so those two reserved keys
+            // can never collide with a component's own fields.
+            case 'addMotionComponent': {
+                const result = this._callStore(store, 'addMotionComponent', args.component, args.preset, args.params || {});
+                return { action, success: !!result?.success, error: result?.error, message: result?.success ? `Added ${args.component} (${args.preset})` : result?.error };
+            }
+            // R66 — clip grouping. `groupId` is returned by `addMotionComponent`
+            // on success as part of the created clips (see ComponentLibrary.js);
+            // callers building on a composite component pass it straight back in.
+            case 'moveClipGroup': {
+                const result = this._callStore(store, 'moveClipGroup', args.groupId, args.delta || {});
+                return { action, success: !!result?.success, error: result?.error };
+            }
+            case 'duplicateClipGroup': {
+                const result = this._callStore(store, 'duplicateClipGroup', args.groupId, args.options || {});
+                return { action, success: !!result?.success, error: result?.error, groupId: result?.groupId };
+            }
+            case 'removeClipGroup': {
+                const result = this._callStore(store, 'removeClipGroup', args.groupId);
+                return { action, success: !!result?.success, error: result?.error };
+            }
+            // R67 — Object Intelligence Integration ("separate speaker" → SAM2
+            // → speaker/background layers → target-aware motion). This case owns
+            // the actual network call + job polling (same shape as `detect_scene`
+            // above — resolveAssetServerPath + authFetch + pollJobResult); the
+            // store action it calls at the end (`applyLayerSeparation`) only
+            // stores the result, exactly like `setSceneAnalysis` does for
+            // detect_scene. SAM2 video inference is minutes, not seconds — the
+            // timeout below is generous on purpose (matches the diarize
+            // Whisper-job timeout precedent elsewhere in this file).
+            case 'separate_speaker': {
+                const { trackId, clipId } = this._findClipAndTrack(store, args.clipId);
+                if (!clipId) return { action, success: false, error: `clip "${args.clipId}" not found` };
+
+                const clip = (store.tracks || []).find(t => t.id === trackId)?.clips?.find(c => c.id === clipId);
+                const assetObj = (store.assets || []).find(a => a.id === clip?.assetId);
+                const gcsPath = resolveAssetServerPath(assetObj);
+                if (!gcsPath) {
+                    return { action, success: false, error: 'Could not resolve this clip\'s source file on the server — try again once upload processing finishes.' };
+                }
+
+                try {
+                    const enqueueRes = await authFetch('/api/vision/separate-speaker', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            clipId,
+                            assetId: clip.assetId,
+                            gcsPath,
+                            clickPoint: args.clickPoint || null,
+                            clickFrame: args.clickFrame || 0,
+                        }),
+                    });
+                    const enqueueData = await enqueueRes.json();
+                    if (!enqueueRes.ok) {
+                        return { action, success: false, error: enqueueData.error || 'Could not start speaker separation.' };
+                    }
+
+                    // SAM2 video inference: allow up to 8 minutes, matching
+                    // services/ReplicateSAM2Service.js's own DEFAULT_MAX_WAIT_MS.
+                    const result = await pollJobResult(enqueueData.jobId, job?.signal ?? null, 8 * 60 * 1000);
+                    const applied = this._callStore(store, 'applyLayerSeparation', trackId, clipId, result);
+                    return {
+                        action, success: !!applied?.success, error: applied?.error,
+                        message: applied?.success
+                            ? 'Separated speaker from background. You can now say "zoom to speaker", "track speaker", or "blur background".'
+                            : applied?.error,
+                    };
+                } catch (err) {
+                    console.warn('[separate_speaker] failed:', err.message);
+                    return { action, success: false, error: err.message };
+                }
+            }
+            case 'zoom_speaker': {
+                const { trackId, clipId } = this._findClipAndTrack(store, args.clipId);
+                if (!clipId) return { action, success: false, error: `clip "${args.clipId}" not found` };
+                const result = this._callStore(store, 'zoomToSpeaker', trackId, clipId);
+                return { action, success: !!result?.success, error: result?.error };
+            }
+            case 'track_speaker': {
+                const { trackId, clipId } = this._findClipAndTrack(store, args.clipId);
+                if (!clipId) return { action, success: false, error: `clip "${args.clipId}" not found` };
+                const result = this._callStore(store, 'trackSpeaker', trackId, clipId, args.options || {});
+                return { action, success: !!result?.success, error: result?.error, segments: result?.segments };
+            }
+            case 'blur_background': {
+                const { trackId, clipId } = this._findClipAndTrack(store, args.clipId);
+                if (!clipId) return { action, success: false, error: `clip "${args.clipId}" not found` };
+                const result = this._callStore(store, 'setLayerTarget', trackId, clipId, 'background');
+                return { action, success: !!result?.success, error: result?.error };
+            }
+            // R68 — AI Animation Intelligence. "Brain chooses animations.
+            // Users don't." Explicit command, autonomous execution: one call
+            // detects reveal/punchline/emphasis/emotional-beat moments on the
+            // server (TimelineEventDetector.js), resolves each through
+            // AnimationKnowledgeGraph.js into a real preset id + real SFX
+            // rows, and this case applies the whole plan as ONE undoable
+            // action — the same `_saveHistory()`-once-then-`skipHistory`
+            // fan-out pattern already used by the `$ALL_CLIPS` branches above.
+            case 'animate_automatically': {
+                const aaStore = useTimelineStore.getState();
+                try {
+                    const aaRes = await authFetch('/api/audio/animate-automatically', {
+                        method: 'POST',
+                        body: JSON.stringify({ projectState: { tracks: aaStore.tracks } }),
+                    });
+                    const aaData = await aaRes.json();
+                    if (!aaRes.ok) {
+                        return { action, success: false, error: aaData.error || 'animate-automatically failed' };
+                    }
+
+                    const plan = aaData.plan || [];
+                    if (plan.length === 0) {
+                        return {
+                            action, success: true,
+                            message: 'No reveal, punchline, emphasis, or emotional-beat moments detected to animate.',
+                        };
+                    }
+
+                    aaStore._saveHistory?.();
+
+                    let animatedCount = 0, sfxCount = 0, sfxTrackId = null;
+
+                    for (const item of plan) {
+                        if (item.presetId && item.clipId) {
+                            const { trackId, clipId } = this._findClipAndTrack(aaStore, item.clipId);
+                            const clip = clipId
+                                ? (aaStore.tracks || []).find(t => t.id === trackId)?.clips?.find(c => c.id === clipId)
+                                : null;
+                            if (clip) {
+                                const updates = applyPresetToClip(clip, item.presetId);
+                                if (Object.keys(updates).length > 0) {
+                                    aaStore.updateClip(trackId, clipId, updates, { skipHistory: true });
+                                    animatedCount++;
+                                }
+                            }
+                        }
+
+                        // Top SFX pick only — this is autonomous execution, not a
+                        // picker; ranking (use_count desc) already comes from
+                        // TaxonomyService, so index 0 is the best match.
+                        const topSfx = item.sfx?.[0];
+                        if (topSfx) {
+                            if (!sfxTrackId) {
+                                const existingSfxTrack = aaStore.tracks?.find(t => t.type === 'audio' && t.name === 'SFX');
+                                sfxTrackId = existingSfxTrack?.id || aaStore.addTrack('audio');
+                                if (sfxTrackId && !existingSfxTrack) aaStore.renameTrack(sfxTrackId, 'SFX');
+                            }
+                            if (sfxTrackId) {
+                                const sfxUrl = topSfx.previewUrl || topSfx.preview_url || topSfx.gcsPath || topSfx.gcs_path;
+                                aaStore.addClip(sfxTrackId, {
+                                    id:        `sfx-${item.eventType}-${Math.round(item.timelineTime * 1000)}-${Date.now()}`,
+                                    type:      'audio',
+                                    name:      topSfx.name || topSfx.displayName || topSfx.display_name || 'SFX',
+                                    url:       sfxUrl,
+                                    sourceUrl: sfxUrl,
+                                    start:     Math.max(0, item.timelineTime),
+                                    duration:  topSfx.duration || 1,
+                                }, { skipHistory: true });
+                                sfxCount++;
+                            }
+                        }
+                    }
+
+                    return {
+                        action, success: true,
+                        message: `Animated ${animatedCount} moment${animatedCount !== 1 ? 's' : ''}` +
+                            (sfxCount > 0 ? ` and added ${sfxCount} sound effect${sfxCount !== 1 ? 's' : ''}` : '') +
+                            ` — brain-detected reveal/punchline/emphasis/emotional-beat moments, zero manual picks.`,
+                    };
+                } catch (err) {
+                    console.warn('[animate_automatically] failed:', err.message);
+                    return { action, success: false, error: err.message };
+                }
+            }
             case 'applyColorGrade': {
                 if (args.clipId === '$ALL_CLIPS') {
                     store._saveHistory?.();
@@ -635,6 +832,9 @@ export class MediaExecutionEngine {
             case 'analyzeStructure':
             case 'apply_zoom':        // alias — server fallback generates this for "zoom in/out"
             case 'apply_smart_zoom':
+            case 'identify_quotable_moments':
+            case 'apply_lut':
+            case 'clear_lut':
             case 'smart_cleanup':
             case 'longFormEdit': {
                 let VideoEditorTools;
@@ -1313,11 +1513,29 @@ export class MediaExecutionEngine {
 
                 console.log(`[organize_clips] ${clipPayload.length} clips → POST /api/interview/organize-clips`);
 
+                // FIX: DirectorIntelligence's 'hook_buried' and 'through_line_buried'
+                // proposals both route to this same command when the STORED story map
+                // (server/brain/StoryIntelligence.js) found the hook in the wrong place
+                // or the order burying the through-line — but until now that call was
+                // indistinguishable from a bare "organize my clips" with no memory of
+                // what was actually wrong. args.storyHints (set by DirectorIntelligence's
+                // proposal params, see CommandCompiler.compileOrganizeClips) carries the
+                // specific finding forward so the SAME re-organize call can act on it.
+                const storyHints = args.storyHints || null;
+
                 let orderMsg = '';
                 try {
                     const ocRes  = await authFetch('/api/interview/organize-clips', {
                         method: 'POST',
-                        body:   JSON.stringify({ clips: clipPayload }),
+                        // projectId lets the server run the SAME real analysis
+                        // (MediaIntelligencePipeline) it queues at upload for any
+                        // clip that doesn't have a stored profile yet, instead of
+                        // writing a media_assets row with no project attached.
+                        body:   JSON.stringify({
+                            clips: clipPayload,
+                            projectId: ocStore.projectId || null,
+                            storyHints,
+                        }),
                     });
                     const ocData = await ocRes.json();
 
@@ -2176,6 +2394,16 @@ export class MediaExecutionEngine {
                 resolvedPayload[key] = serverPath || store.uploadedFile?.name || 'video.mp4';
                 console.log(`[MediaExecutionEngine] Resolved $uploaded_file → "${resolvedPayload[key]}"`);
             }
+        }
+
+        // /api/luts/recommend requires projectState OR projectId (server-side
+        // R75 fix). CommandCompiler is pure/sync and cannot read the store, so
+        // compileRecommendLUTs' payload only ever has { limit } — without this,
+        // every AI-triggered "recommend a lut" (typed or a Brain suggestion
+        // accept) 400'd. Injecting projectId here lets the server derive the
+        // rest (tone, etc.) itself, mirroring the storyHints pattern.
+        if (endpoint === '/api/luts/recommend' && !resolvedPayload.projectId) {
+            resolvedPayload.projectId = store.projectId || null;
         }
 
         // Guard: if $uploaded_file couldn't resolve to a real GCS path, the

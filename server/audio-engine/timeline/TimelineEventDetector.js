@@ -17,6 +17,19 @@
  *   CHAPTER_START — marker clips
  *   SPEAKER_CHANGE — diarization speaker changes
  *
+ *   REVEAL           — caption/text wording that reads as a reveal, or a big
+ *                       push-in following a pause (R68 — heuristic, no LLM call)
+ *   PUNCHLINE_DETECTED — a silence gap immediately followed by a loud audio
+ *                       peak — the setup/pause/payoff shape of a punchline
+ *   EMPHASIS_MOMENT   — a standalone loud audio peak not already claimed as
+ *                       a punchline
+ *   EMOTIONAL_BEAT    — a soft-cut/silence gap covered by caption wording
+ *                       that reads as emotionally weighted
+ *
+ * These four are documented in AnimationKnowledgeGraph.js as the semantic
+ * events the "AI Animation Intelligence" feature (R68) acts on — this file
+ * only detects them; it does not decide what animation or SFX to apply.
+ *
  * Detection is synchronous and runs in O(n) over clips.
  */
 
@@ -27,6 +40,18 @@ const { TimelineEventType } = require('../types.js');
 const HARD_CUT_GAP_MS      = 80;   // ≤ 80ms gap between clips = hard cut
 const SOFT_CUT_DURATION_MS = 600;  // ≤ 600ms crossfade = soft cut
 const SILENCE_THRESHOLD_S  = 0.25; // gap in seconds counted as silence gap
+
+// R68 semantic-event heuristic thresholds. All heuristics run against
+// signals this file already computes or that already exist on clips —
+// no LLM call, per the confirmed "heuristic-based on existing signals" scope.
+const PUNCHLINE_PEAK_WINDOW_S = 1.2;  // silence→peak gap read as comedic timing
+const PUNCHLINE_PEAK_DB       = -8;   // peak loudness above this counts
+const EMPHASIS_PEAK_DB        = -4;   // standalone peak this loud reads as emphasis
+const REVEAL_ZOOM_THRESHOLD   = 1.3;  // a push bigger than plain ZOOM_IN's 1.05 reads as a reveal
+const EMOTIONAL_SILENCE_S     = 1.0;  // a pause this long, near matching wording, reads as a beat
+
+const REVEAL_KEYWORDS = /\b(reveal(?:ing|ed)?|introduc(?:e|ing)|here'?s|check (?:this|it) out|behold|unveil(?:ing|ed)?|presenting|meet the|watch this)\b/i;
+const EMOTIONAL_KEYWORDS = /\b(love|miss(?:ed|ing)?|sorry|goodbye|remember|thank you|proud|hurts?|heart|cry(?:ing)?)\b/i;
 
 class TimelineEventDetector {
     /**
@@ -54,9 +79,127 @@ class TimelineEventDetector {
             }
         }
 
+        // R68 — semantic events derive from the structural events + clip
+        // wording above, so they run as a second pass once those exist.
+        this._detectSemanticEvents(tracks, events);
+
         // Sort by timeline position
         events.sort((a, b) => a.timelineTime - b.timelineTime);
         return events;
+    }
+
+    // ── Semantic events (R68 — AI Animation Intelligence) ─────────────────────
+
+    /**
+     * Detect REVEAL, PUNCHLINE_DETECTED, EMPHASIS_MOMENT and EMOTIONAL_BEAT
+     * purely from signals already present on `events` (silence gaps, audio
+     * peaks, soft cuts) and `tracks` (caption/text wording, zoom). No LLM
+     * call — every check here is a threshold or keyword match against data
+     * this detector or an earlier analysis pass already produced.
+     * @private
+     */
+    _detectSemanticEvents(tracks, events) {
+        const silenceEnds  = events.filter(e => e.eventType === TimelineEventType.SILENCE_END);
+        const silenceStarts = events.filter(e => e.eventType === TimelineEventType.SILENCE_START);
+        const audioPeaks   = events.filter(e => e.eventType === TimelineEventType.AUDIO_PEAK);
+
+        // Flatten text/caption clips once — several heuristics below need to
+        // ask "is there wording near time T", so build the lookup up front
+        // rather than re-scanning tracks per candidate.
+        const textClips = [];
+        for (const track of tracks) {
+            if (!track || track.type !== 'text') continue;
+            for (const clip of (track.clips || [])) {
+                if (!clip) continue;
+                const start = clip.startTime || clip.start || 0;
+                const end   = clip.endTime || clip.end || (start + (clip.duration || 0));
+                const text  = clip.text || clip.caption || '';
+                textClips.push({ clip, start, end, text });
+            }
+        }
+
+        // ── PUNCHLINE_DETECTED / EMPHASIS_MOMENT — both read off audio peaks ──
+        // A peak that lands shortly after a silence gap has the setup/pause/
+        // payoff shape of a punchline. A peak that's just loud on its own,
+        // with no preceding pause, reads as emphasis instead. Each peak is
+        // claimed by at most one of the two so they never double-fire.
+        for (const peak of audioPeaks) {
+            const db = peak.metadata?.db;
+            if (typeof db !== 'number') continue;
+
+            const precedingSilence = silenceEnds.find(s =>
+                peak.timelineTime >= s.timelineTime &&
+                (peak.timelineTime - s.timelineTime) <= PUNCHLINE_PEAK_WINDOW_S
+            );
+
+            if (precedingSilence && db >= PUNCHLINE_PEAK_DB) {
+                events.push({
+                    eventType:    TimelineEventType.PUNCHLINE_DETECTED,
+                    timelineTime: peak.timelineTime,
+                    clipId:       peak.clipId,
+                    trackId:      peak.trackId,
+                    metadata:     { db, silenceGapS: peak.timelineTime - precedingSilence.timelineTime },
+                });
+            } else if (db >= EMPHASIS_PEAK_DB) {
+                events.push({
+                    eventType:    TimelineEventType.EMPHASIS_MOMENT,
+                    timelineTime: peak.timelineTime,
+                    clipId:       peak.clipId,
+                    trackId:      peak.trackId,
+                    metadata:     { db },
+                });
+            }
+        }
+
+        // ── REVEAL — reveal-coded wording, or a big push-in ────────────────
+        for (const { clip, start, text } of textClips) {
+            if (REVEAL_KEYWORDS.test(text)) {
+                events.push({
+                    eventType:    TimelineEventType.REVEAL,
+                    timelineTime: start,
+                    clipId:       clip.id || null,
+                    trackId:      null,
+                    metadata:     { via: 'keyword', text: text.slice(0, 100) },
+                });
+            }
+        }
+        for (const track of tracks) {
+            if (!track || track.type !== 'video') continue;
+            for (const clip of (track.clips || [])) {
+                if (!clip) continue;
+                const zoom = clip.zoom || clip.zoomLevel || null;
+                if (zoom && zoom >= REVEAL_ZOOM_THRESHOLD) {
+                    events.push({
+                        eventType:    TimelineEventType.REVEAL,
+                        timelineTime: clip.startTime || clip.start || 0,
+                        clipId:       clip.id || null,
+                        trackId:      track.id || null,
+                        metadata:     { via: 'push-in', zoomLevel: zoom },
+                    });
+                }
+            }
+        }
+
+        // ── EMOTIONAL_BEAT — a real pause covered by emotionally-coded wording ──
+        for (const silence of silenceStarts) {
+            const durationS = silence.metadata?.durationS;
+            if (typeof durationS !== 'number' || durationS < EMOTIONAL_SILENCE_S) continue;
+
+            const nearbyWording = textClips.find(({ start, end, text }) =>
+                EMOTIONAL_KEYWORDS.test(text) &&
+                start <= silence.timelineTime + 0.5 &&
+                end   >= silence.timelineTime - 2.0
+            );
+            if (nearbyWording) {
+                events.push({
+                    eventType:    TimelineEventType.EMOTIONAL_BEAT,
+                    timelineTime: silence.timelineTime,
+                    clipId:       nearbyWording.clip.id || null,
+                    trackId:      silence.trackId,
+                    metadata:     { durationS, text: nearbyWording.text.slice(0, 100) },
+                });
+            }
+        }
     }
 
     // ── Video track ────────────────────────────────────────────────────────────

@@ -1085,10 +1085,19 @@ const ASSET_PROFILE_COLUMNS = [
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// The success value of `media_assets.analysis_status`. Imported, never inlined:
+// The values `media_assets.analysis_status` can hold. Imported, never inlined:
 // filtering on the wrong literal here rejects every analysed asset silently and
 // leaves the profile path permanently dead. See server/brain/media/analysisStatus.js.
-const { ASSET_ANALYSIS_DONE } = require('../server/brain/media/analysisStatus');
+const { ASSET_ANALYSIS_DONE, ASSET_ANALYSIS_PROCESSING } = require('../server/brain/media/analysisStatus');
+
+// Same pipeline `POST /api/brain/analyze-asset` queues at upload time (see
+// server/routes/brainRoutes.js's `mediaIntel` singleton, same pattern) — reused
+// here so organize-clips can trigger the REAL analysis on demand for any clip
+// that reaches it without a stored profile, rather than falling straight to
+// the lighter live-frame-extraction fallback below. One module-level instance,
+// not one per request — MediaIntelligencePipeline holds no per-request state.
+const { MediaIntelligencePipeline } = require('../server/brain/media/MediaIntelligencePipeline');
+const mediaIntel = new MediaIntelligencePipeline();
 
 /**
  * Fetch stored asset profiles for the requesting user, keyed by asset id.
@@ -1351,7 +1360,7 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
     const { spawn } = require('child_process');
 
     try {
-        const { clips = [] } = req.body;
+        const { clips = [], projectId = null, storyHints: bodyStoryHints = null } = req.body;
         const requestUserId = resolveRequestUserId(req);
 
         if (!clips.length) {
@@ -1374,8 +1383,93 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
         // ffmpeg, and no vision call: the profile already describes the whole
         // asset. This is the Upload → Analyze → Asset Profile → Organize path.
         const profilesById  = await fetchAssetProfiles(clips.map(c => c.assetId), requestUserId);
-        const profiledClips = clips.filter(c => c.assetId && profilesById[c.assetId]);
-        const needFrames    = clips.filter(c => !(c.assetId && profilesById[c.assetId]));
+        let profiledClips = clips.filter(c => c.assetId && profilesById[c.assetId]);
+        let needFrames    = clips.filter(c => !(c.assetId && profilesById[c.assetId]));
+
+        // ── 1b. Real analysis, on demand, for whatever's still unprofiled ───────
+        // The design decision (confirmed): analysis is still queued eagerly at
+        // upload (unchanged), but organize is ALSO where it gets triggered and
+        // waited on for anything that reaches here without a completed profile
+        // — a still-in-flight upload analysis, one that failed, or a clip whose
+        // asset was never queued at all. This runs the SAME MediaIntelligencePipeline
+        // upload uses, not a second lighter classifier — only clips with BOTH an
+        // assetId and a gcsPath qualify; anything else falls through to the
+        // live-frame-extraction fallback below exactly as before.
+        const needsAnalysis = new Map(); // assetId -> { gcsPath, name }
+        for (const clip of needFrames) {
+            if (!clip.assetId || !clip.gcsPath || needsAnalysis.has(clip.assetId)) continue;
+            needsAnalysis.set(clip.assetId, { gcsPath: clip.gcsPath, name: clip.assetName || null });
+        }
+
+        if (needsAnalysis.size > 0) {
+            const ids = [...needsAnalysis.keys()];
+            try {
+                const { supabaseAdmin } = require('../config/database');
+
+                // Read current status first. An asset already 'processing' (queued
+                // at upload, not yet finished) must be WAITED ON, never re-triggered
+                // — calling analyzeAsset() again on a row mid-analysis would race
+                // two writers against the same row and risks an interleaved result.
+                let statusById = {};
+                if (supabaseAdmin && UUID_RE.test(String(requestUserId || ''))) {
+                    const { data } = await supabaseAdmin
+                        .from('media_assets')
+                        .select('id, analysis_status')
+                        .eq('user_id', requestUserId)
+                        .in('id', ids);
+                    (data || []).forEach(r => { statusById[r.id] = r.analysis_status; });
+                }
+
+                const toTrigger = ids.filter(id => statusById[id] !== ASSET_ANALYSIS_PROCESSING);
+                const toWaitOn  = ids.filter(id => statusById[id] === ASSET_ANALYSIS_PROCESSING);
+
+                console.log(
+                    `[interviewRoutes] organize-clips: real analysis — triggering ${toTrigger.length}, ` +
+                    `waiting on ${toWaitOn.length} already in flight`
+                );
+
+                // Fires each asset's analysis and fails open per-asset — analyzeAsset()
+                // already never throws past its own try/catch (sets 'failed' instead),
+                // so a single bad file can't abort the rest of the batch.
+                await Promise.all(toTrigger.map(id => {
+                    const a = needsAnalysis.get(id);
+                    return mediaIntel
+                        .analyzeAsset(id, a.gcsPath, projectId, requestUserId, a.name)
+                        .catch(err => console.warn(`[interviewRoutes] organize-clips: analyzeAsset(${id}) failed —`, err.message));
+                }));
+
+                // Poll whatever's still pending (just-triggered above, or was
+                // already running before this request) until it settles. organize
+                // is a synchronous HTTP call — "wait for it" means wait HERE, not
+                // queue-and-hope the way the upload-time trigger does.
+                const pendingIds = [...toTrigger, ...toWaitOn];
+                if (pendingIds.length > 0 && supabaseAdmin) {
+                    const deadline = Date.now() + 45_000;
+                    while (Date.now() < deadline) {
+                        const { data } = await supabaseAdmin
+                            .from('media_assets')
+                            .select('id, analysis_status')
+                            .in('id', pendingIds);
+                        const stillGoing = (data || []).some(r => r.analysis_status === ASSET_ANALYSIS_PROCESSING);
+                        if (!stillGoing) break;
+                        await new Promise(r => setTimeout(r, 1500));
+                    }
+                }
+
+                // Re-fetch: fold whatever just finished into the profile set and
+                // recompute the split before frame extraction runs, so anything
+                // that just got analysed skips the ffmpeg/vision fallback entirely.
+                const freshProfiles = await fetchAssetProfiles(ids, requestUserId);
+                Object.assign(profilesById, freshProfiles);
+                profiledClips = clips.filter(c => c.assetId && profilesById[c.assetId]);
+                needFrames    = clips.filter(c => !(c.assetId && profilesById[c.assetId]));
+            } catch (analysisErr) {
+                // Fails open: whatever didn't get analysed just falls through to
+                // the existing live-frame-extraction fallback below, same as if
+                // this step never ran.
+                console.warn('[interviewRoutes] organize-clips: on-demand analysis step failed —', analysisErr.message);
+            }
+        }
 
         // ── 2. ffmpeg frame extraction — ONLY for clips with no stored profile ──
         // Pipes JPEG bytes to stdout — no temp files, no race conditions.
@@ -1503,6 +1597,71 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
         const { descriptors, imageDescriptors, unanalysedIds, pipeline } =
             buildOrganizeDescriptors({ clips, profilesById, mlById, clipFrameMap });
 
+        // ── 5b. Story guidance — auto-pick-up + explicit override ──────────────
+        // FIX: DirectorIntelligence.buildProposals() (R51/R52) flags a buried
+        // hook or a sagging through-line from the STORED story_intelligence row
+        // and proposes re-running organize to fix it — but that proposal has
+        // never actually changed what organize does, because nothing threaded
+        // the finding through. Rather than require the click-to-accept UI path
+        // to carry it (BrainPanel currently only resubmits the proposal's
+        // TITLE as chat text, dropping proposal.params — a separate, real gap
+        // of its own), this route reads the SAME stored map StoryIntelligence
+        // already persists, by projectId, so ANY organize-clips call — typed,
+        // clicked, or scripted — automatically benefits from the latest story
+        // reading without requiring new client plumbing. An explicit
+        // `storyHints` in the request body (e.g. from a future direct-invoke
+        // path) still wins when both are present.
+        let storyHints = bodyStoryHints;
+        if (!storyHints && projectId && UUID_RE.test(String(requestUserId || ''))) {
+            try {
+                const { StoryIntelligence } = require('../server/brain/StoryIntelligence');
+                const storyMap = await new StoryIntelligence().getMap(projectId, requestUserId);
+                if (storyMap && storyMap.status === 'ok') {
+                    const hasHookFinding = typeof storyMap.hook_at_sec === 'number'
+                        || storyMap.hook_strength === 'weak' || storyMap.hook_strength === 'absent';
+                    const hasSags = Array.isArray(storyMap.sag_windows) && storyMap.sag_windows.length > 0;
+                    const hasThroughLineIssue = storyMap.delivers_through_line === false;
+
+                    if (hasHookFinding || hasSags || hasThroughLineIssue) {
+                        storyHints = {
+                            hook: hasHookFinding
+                                ? { atSec: storyMap.hook_at_sec ?? null, strength: storyMap.hook_strength || null, note: storyMap.hook_note || null }
+                                : null,
+                            sagWindows: hasSags ? storyMap.sag_windows : [],
+                            throughLineNote: hasThroughLineIssue ? (storyMap.through_line_note || null) : null,
+                        };
+                        console.log(`[interviewRoutes] organize-clips: applying stored story guidance for project ${projectId}`);
+                    }
+                }
+            } catch (storyErr) {
+                // Never let a story-map read block or fail the organize call itself.
+                console.warn('[interviewRoutes] organize-clips: story hint lookup failed (non-fatal) —', storyErr.message);
+            }
+        }
+
+        const storyGuidanceBlock = (() => {
+            if (!storyHints) return '';
+            const lines = [];
+            if (storyHints.hook && (typeof storyHints.hook.atSec === 'number' || storyHints.hook.strength)) {
+                if (typeof storyHints.hook.atSec === 'number' && storyHints.hook.atSec > 0) {
+                    lines.push(`• The real hook was previously found at ${storyHints.hook.atSec}s, not the start. ${storyHints.hook.note || ''} Open with whichever clip covers that moment.`);
+                } else if (storyHints.hook.strength === 'weak' || storyHints.hook.strength === 'absent') {
+                    lines.push(`• A prior read found the opening does not hook the viewer: ${storyHints.hook.note || 'no strong opening moment.'} Prioritise whichever clip has the highest-energy or most attention-grabbing opening line as clip #1.`);
+                }
+            }
+            if (Array.isArray(storyHints.sagWindows) && storyHints.sagWindows.length > 0) {
+                const worst = [...storyHints.sagWindows].sort((a, b) => (b.severity === 'high' ? 1 : 0) - (a.severity === 'high' ? 1 : 0)).slice(0, 3);
+                worst.forEach(sag => {
+                    lines.push(`• A prior read found a ${sag.severity || 'medium'}-severity drag between ${sag.startSec}s–${sag.endSec}s (${sag.reason || 'no new information in this stretch'}). Avoid recreating a long unbroken stretch covering the same ground — break it up or separate it with a different topic/energy.`);
+                });
+            }
+            if (storyHints.throughLineNote) {
+                lines.push(`• A prior read found this order buries the point: ${storyHints.throughLineNote} Favor an order that makes the payoff clear rather than delayed.`);
+            }
+            if (lines.length === 0) return '';
+            return `\n\n━━━ STORY GUIDANCE (from a prior read of this project) ━━━\n${lines.join('\n')}\n`;
+        })();
+
         // ── 6. Single ordering call ────────────────────────────────────────────
         // Text-only (GPT-4o) when every clip already has a written description;
         // Vision (GPT-4o-mini) only when at least one clip still needs an image.
@@ -1532,7 +1691,7 @@ ${metadataLines}
 • Demonstrations come after the verbal introduction of the topic
 • End with a clear outro: low-energy summary talking head or call-to-action
 • Avoid placing two establishing shots or two product shots back-to-back
-• Emotional moments are best placed just before or after a key-point clip${unanalysedNote}
+• Emotional moments are best placed just before or after a key-point clip${unanalysedNote}${storyGuidanceBlock}
 
 Return ONLY valid JSON:
 {
@@ -1603,6 +1762,7 @@ Return ONLY valid JSON:
                 pipeline,
                 coverage,
                 unanalyzedIds: unanalysedIds,
+                storyGuidanceApplied: !!storyHints,
             });
         }
 

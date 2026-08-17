@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { useTranslation } from 'react-i18next';
-import { Video, Music, Image as ImageIcon, Trash2, Loader2, Plus } from 'lucide-react';
+import { Video, Music, Image as ImageIcon, Trash2, Loader2, Plus, Layers } from 'lucide-react';
 import useTimelineStore from '../store/useTimelineStore';
 import useDeviceType from '../hooks/useDeviceType';
 import { computeProxyPollTimeout } from '../services/proxyService';
@@ -179,6 +179,31 @@ const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","
             >
                 <Trash2 className="w-3 h-3 text-white" />
             </button>
+
+            {/* R62 — Add as overlay (sticker/logo/graphic). Image assets only:
+                the overlay track/compositor pipeline needs a real image file to
+                composite (see motion/Compositor.js), so this is offered exactly
+                where that requirement is already satisfied. Placed top-left so
+                it never collides with the delete button (top-right). */}
+            {asset.type === 'image' && !asset.isProxying && (
+                <button
+                    className="absolute top-1 left-1 z-50 p-1 bg-black/60 hover:bg-[var(--accent,#00E5FF)] rounded-full opacity-0 group-hover:opacity-100 transition-all scale-90 hover:scale-100 pointer-events-auto cursor-pointer"
+                    onPointerDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        useTimelineStore.getState().addOverlayClip(asset);
+                        setAddedOverlay(true);
+                        setTimeout(() => setAddedOverlay(false), 1000);
+                    }}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                    }}
+                    title={t('draggableAsset.addAsOverlay')}
+                >
+                    <Layers className="w-3 h-3 text-white" />
+                </button>
+            )}
 
             {/* Thumbnail Image or Placeholder */}
             {asset.thumbnail ? (

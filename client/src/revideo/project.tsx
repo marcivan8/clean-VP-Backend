@@ -2,6 +2,8 @@
 import { makeProject, DependencyContext } from '@revideo/core';
 import { makeScene2D, Video, Audio, Img, Txt, Node, brightness, contrast, saturate, hue } from '@revideo/2d';
 import { waitFor, useScene, all, any, createRef } from '@revideo/core';
+import { clipToMotionLayer } from '../motion/ClipAdapter.js';
+import { resolveMotionAt } from '../motion/MotionResolver.js';
 
 /**
  * PATCH: DependencyContext.collectPromise uses Promise.all in consumePromises(),
@@ -50,6 +52,33 @@ function evaluateKF(keyframes: any[], time: number, defaultValue: number): numbe
 /** Helper: get clip-local time relative to clip start (for keyframe evaluation) */
 function clipLocalTime(playbackTime: number, clipStart: number): number {
     return Math.max(0, playbackTime - clipStart);
+}
+
+/**
+ * R64 — resolve a base video/image clip's `clip.animations` (Motion-tab
+ * camera presets) at the current playback time.
+ *
+ * `motionLayer.x`/`.y` default to 50 (percent-of-frame, the convention every
+ * OTHER layer kind uses — see MotionSchema.js header) while this file's own
+ * `clip.x`/`clip.y` default to 0 (pixels, centred). Rather than assume which
+ * convention a given clip's base position is in, this measures only the
+ * DELTA the animation contributed (`resolved.x - motionLayer.x`) and applies
+ * that delta, as pixels, on top of whatever pixel position the clip already
+ * had — so it is correct regardless of the 50-vs-0 base mismatch. scale,
+ * rotation and opacity have no such mismatch (their bases already agree with
+ * `clip.scale`/`clip.rotation`/`clip.opacity`), so those resolve directly.
+ */
+function motionOffsets(motionLayer: any, absoluteTime: number, canvasWidth: number, canvasHeight: number) {
+    const resolved = resolveMotionAt(motionLayer, absoluteTime);
+    const dxPct = resolved.x - (Number.isFinite(motionLayer?.x) ? motionLayer.x : 50);
+    const dyPct = resolved.y - (Number.isFinite(motionLayer?.y) ? motionLayer.y : 50);
+    return {
+        dx: (dxPct / 100) * canvasWidth,
+        dy: (dyPct / 100) * canvasHeight,
+        scale: resolved.scale,
+        rotation: resolved.rotation,
+        opacity: resolved.opacity,
+    };
 }
 
 const timelineScene = makeScene2D('timeline', function* (view) {
@@ -165,6 +194,14 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     wrapperRef = createRef<Node>();
                     mediaRef = createRef<Video>();
                     const kf = clip.keyframes || {};
+                    // R64: Motion-tab camera presets (push/pull/punch-zoom/
+                    // whip/shake) write clip.animations for ANY clip,
+                    // including a plain base-track video clip. Only build a
+                    // layer when there's actually something to resolve —
+                    // every other clip keeps the exact evaluateKF path below.
+                    const motionLayer = (Array.isArray(clip.animations) && clip.animations.length > 0)
+                        ? clipToMotionLayer(clip, track)
+                        : null;
 
                     // FIX: Fall back to canvasWidth/canvasHeight (not 1920×1080)
                     // so 9:16 clips on a 9:16 canvas get the correct 1:1 mapping.
@@ -188,12 +225,12 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             play={true}
                             volume={(clip.volume ?? 1) * (clip.globalVolume ?? 1)}
                             allowVolumeAmplificationInPreview={true}
-                            x={() => evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0)}
-                            y={() => evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0)}
-                            scaleX={() => evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
-                            scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
-                            rotation={() => evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
-                            opacity={() => evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
+                            x={() => motionLayer ? (clip.x || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dx : evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0)}
+                            y={() => motionLayer ? (clip.y || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dy : evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0)}
+                            scaleX={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
+                            scaleY={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
+                            rotation={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).rotation : evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
+                            opacity={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).opacity : evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
                             filters={g ? [
                                 brightness((g.brightness ?? 100) / 100),
                                 contrast((g.contrast ?? 100) / 100),
@@ -228,6 +265,10 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     wrapperRef = createRef<Node>();
                     mediaRef = createRef<Img>();
                     const kf = clip.keyframes || {};
+                    // R64: see the identical comment in the video branch above.
+                    const motionLayer = (Array.isArray(clip.animations) && clip.animations.length > 0)
+                        ? clipToMotionLayer(clip, track)
+                        : null;
 
                     // FIX: Same canvas-relative fallback for images
                     const srcW = clip.metadata?.resolution?.w || clip.sourceWidth || canvasWidth;
@@ -243,12 +284,12 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             src={resolvedUrl}
                             width={fitted.w}
                             height={fitted.h}
-                            x={() => evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0)}
-                            y={() => evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0)}
-                            scaleX={() => evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
-                            scaleY={() => evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
-                            rotation={() => evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
-                            opacity={() => evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
+                            x={() => motionLayer ? (clip.x || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dx : evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0)}
+                            y={() => motionLayer ? (clip.y || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dy : evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0)}
+                            scaleX={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
+                            scaleY={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
+                            rotation={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).rotation : evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
+                            opacity={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).opacity : evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
                             filters={g ? [
                                 brightness((g.brightness ?? 100) / 100),
                                 contrast((g.contrast ?? 100) / 100),

@@ -1,17 +1,27 @@
 /**
  * server/brain/PipelineAdapter.js
  *
- * THE ONLY file in server/brain/ that imports from the existing AI pipeline.
- * Creates a thin bridge so the brain can delegate to the existing backend
- * handlers without modifying them.
+ * Executes a brain-resolved command when the caller doesn't have a real
+ * command handler for it — a lightweight, independent fallback, NOT a call
+ * into controllers/aiAgentController.js's chatAgentHandler.
+ *
+ * CORRECTION (found auditing "the other intelligences"): the header here used
+ * to claim "this adapter uses the backend's chatAgentHandler logic directly"
+ * and destructured `{ chatAgentHandler: _unused, ...controller }` from that
+ * controller — but `controller` was never referenced anywhere below. It
+ * doesn't call chatAgentHandler or anything else in that file; it runs its
+ * own separate GPT-4o call against a hardcoded, independently-maintained
+ * 18-action system prompt. That's a real drift hazard (the two action lists
+ * have no compile-time link — the same class of hazard documented for
+ * ASSET_ANALYSIS_QUEUE's name in brainRoutes.js), so leaving the comment
+ * wrong was worse than leaving it undocumented. A full refactor to actually
+ * route through the real controller is a larger, riskier change — out of
+ * scope here. This comment is now honest about what the file does; the dead
+ * import is removed below.
  *
  * DO NOT change IntentParser, EditPlanner, CommandCompiler, or
- * MediaExecutionEngine — only import and call from here.
- *
- * The existing backend AI pipeline is in controllers/aiAgentController.js.
- * The client-side pipeline (IntentParser, EditPlanner, CommandCompiler,
- * MediaExecutionEngine) lives in client/src/agent/ and runs in the browser.
- * This adapter uses the backend's chatAgentHandler logic directly.
+ * MediaExecutionEngine — those are the client-side pipeline in
+ * client/src/agent/ and run in the browser; this file has never touched them.
  */
 
 'use strict';
@@ -20,13 +30,12 @@ const OpenAI = require('openai');
 
 const { getAIClient, isAIConfigured } = require('../../services/AIProvider');
 /**
- * Execute a command string via the existing AI pipeline on the backend.
+ * Execute a command string via an independent, lightweight GPT-4o call.
  *
- * The existing backend pipeline (controllers/aiAgentController.js)
- * takes { command, context } → GPT-4o → { success, message, actions }.
- *
- * We call the handler's core logic directly (same pattern as chatAgentHandler)
- * rather than making an HTTP call, to avoid network overhead.
+ * This is NOT the existing backend pipeline (controllers/aiAgentController.js)
+ * — see the file header for why that used to be claimed here and wasn't true.
+ * It's a self-contained fallback: { command, context } → GPT-4o → { success,
+ * message, actions }, using its own hardcoded action list.
  *
  * @param {string} commandString  - Resolved command from the brain
  * @param {Object} projectContext - Full project context
@@ -49,10 +58,6 @@ async function executeAICommand(commandString, projectContext, userId) {
                 actionTaken: `Simulated: ${commandString}`,
             };
         }
-
-        // Call the existing backend pipeline directly
-        // This mirrors exactly what chatAgentHandler does, but returns a typed result
-        const { chatAgentHandler: _unused, ...controller } = require('../../controllers/aiAgentController');
 
         const openai = getAIClient();
 
@@ -95,11 +100,27 @@ Keep responses concise.`;
                 { role: 'system', content: systemPrompt },
                 {
                     role: 'user',
+                    // Previously only timeline/duration/platform/clipCount were
+                    // sent — this fallback path had no idea whether captions or
+                    // a music track already existed, what was in the media bin,
+                    // or what had already been done to the project, so it could
+                    // (and did) re-propose or duplicate work the user had
+                    // already completed. projectContext here is the SAME
+                    // enriched context object the main advisory path builds
+                    // (buildProjectState() on the client, or /analyze's
+                    // enrichment on the server) — these fields were already
+                    // available, just never read.
                     content: `Context: ${JSON.stringify({
-                        timeline:  projectContext?.timeline || {},
-                        duration:  projectContext?.duration || 0,
-                        platform:  projectContext?.platform || null,
-                        clipCount: (projectContext?.timeline?.tracks || []).reduce((sum, t) => sum + (t.clips || []).length, 0),
+                        timeline:      projectContext?.timeline || {},
+                        duration:      projectContext?.duration || 0,
+                        platform:      projectContext?.platform || null,
+                        clipCount:     (projectContext?.timeline?.tracks || []).reduce((sum, t) => sum + (t.clips || []).length, 0),
+                        hasCaptions:   !!projectContext?.hasCaptions,
+                        hasMusicTrack: !!projectContext?.hasMusicTrack,
+                        mediaBin:      (projectContext?.mediaBin || []).map(a => ({
+                            name: a.name, type: a.type, analysis_status: a.analysis_status,
+                        })),
+                        editHistory:   (projectContext?.editHistory || []).slice(-15),
                     })}
 Command: "${commandString}"`,
                 },

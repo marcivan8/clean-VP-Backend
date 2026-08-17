@@ -2,6 +2,20 @@ import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../../store/useTimelineStore';
+// R58 — Motion Graphics engine. Animation is now resolved as a pure function
+// of (layer, time) instead of being fired as a CSS keyframe on mount. That is
+// the correct model for an editor: scrubbing into the middle of a 0.35s
+// entrance must SHOW it half-played, which a CSS animation cannot do — it runs
+// on wall-clock from mount, which is why this file needed a key-remount hack
+// to retrigger it at all. Same resolver the Revideo scene and (later) the
+// export call, so the three cannot drift apart the way R14/R16/R53 did.
+import { clipToMotionLayer } from '../../motion/ClipAdapter.js';
+import { resolveMotionAt }   from '../../motion/MotionResolver.js';
+import { revealedWordCount, activeWordIndex } from '../../motion/CaptionModel.js';
+// R66 — clip grouping. See the identical import in GraphicOverlay.jsx: a
+// LowerThird's title (this component) and its background bar (GraphicOverlay,
+// a different track) share a `groupId`; dragging either one must move both.
+import { clipsInGroup } from '../../motion/ClipGrouping.js';
 
 // Map preset names to actual font families
 const FONT_MAP = {
@@ -54,41 +68,88 @@ const FONT_MAP = {
     'Outfit':             '"Outfit", sans-serif',
 };
 
-// CSS keyframes injected once
-const ANIMATION_CSS = `
-@keyframes vibed-fade-in    { from { opacity:0 }                           to { opacity:1 } }
-@keyframes vibed-slide-up   { from { opacity:0; transform:translate(-50%,calc(-50%+16px)) scale(var(--clip-scale,1)) }   to { opacity:1; transform:translate(-50%,-50%) scale(var(--clip-scale,1)) } }
-@keyframes vibed-pop        { 0% { opacity:0; transform:translate(-50%,-50%) scale(calc(var(--clip-scale,1)*0.75)) } 60% { transform:translate(-50%,-50%) scale(calc(var(--clip-scale,1)*1.08)) } 100% { opacity:1; transform:translate(-50%,-50%) scale(var(--clip-scale,1)) } }
-`;
-if (typeof document !== 'undefined' && !document.getElementById('vibed-overlay-anims')) {
-    const s = document.createElement('style');
-    s.id = 'vibed-overlay-anims';
-    s.textContent = ANIMATION_CSS;
-    document.head.appendChild(s);
-}
+// REMOVED IN R58: the injected `vibed-fade-in` / `vibed-slide-up` / `vibed-pop`
+// CSS keyframes and their `getAnimationStyle()` helper.
+//
+// They are superseded by the motion resolver, which computes the same three
+// entrances (and 23 more) as a function of timeline time. Deleting rather than
+// leaving them behind is deliberate: a second, dormant animation path is
+// exactly how this codebase accumulates "built but never wired" surface area,
+// and two systems both claiming to animate the same element is worse than
+// either alone. `LEGACY_ANIMATION_MAP` in motion/MotionPresets.js maps the old
+// `clip.animation` strings onto presets, so existing projects are unaffected.
+//
+// NOTE: client/src/components/Player/CaptionOverlay.jsx still defines
+// identically-NAMED keyframes with different transform semantics. It is
+// currently mounted nowhere (its only importer, VideoPlayer.jsx, is itself
+// imported by nothing) — but if it is ever revived, it must not reintroduce
+// these names, or the two definitions will collide in the global stylesheet.
 
-const getAnimationStyle = (animation, clipScale) => {
-    if (!animation || animation === 'none') return {};
-    const dur = '0.35s';
-    const ease = 'cubic-bezier(0.22,0.61,0.36,1)';
-    const base = { '--clip-scale': clipScale || 1 };
-    if (animation === 'fade-in')  return { ...base, animation: `vibed-fade-in  ${dur} ${ease} both` };
-    if (animation === 'slide-up') return { ...base, animation: `vibed-slide-up ${dur} ${ease} both` };
-    if (animation === 'pop')      return { ...base, animation: `vibed-pop      0.45s ${ease} both` };
-    return {};
-};
+/**
+ * Word-level caption rendering (R58).
+ *
+ * Replaces the old `WordByWord`, which split the clip's STRING on spaces and
+ * revealed words by linear clip progress — it had no access to real word
+ * timings because `groupWordsIntoCaptions` discarded them during grouping.
+ * Now that captions carry a `words` array, reveal and highlight are driven by
+ * the actual spoken timing, and fall back to linear progress (identical to the
+ * old behaviour) for any caption without word data — e.g. hand-typed text, or
+ * projects captioned before R58.
+ *
+ * @param {string} content   the caption text
+ * @param {Array}  words     [{text,start,end}] in ABSOLUTE timeline seconds, or null
+ * @param {number} time      current timeline time
+ * @param {number} reveal    0..1 from a reveal animation (typewriter / word-reveal)
+ * @param {object} highlight the style pack's wordHighlight config, or null
+ */
+const CaptionWords = ({ content, words, time, reveal, highlight }) => {
+    const tokens = (content || '').split(' ').filter(Boolean);
+    if (tokens.length === 0) return null;
 
-// Word-by-word: reveal words progressively across clip duration
-const WordByWord = ({ content, progress }) => {
-    const words = (content || '').split(' ');
-    const revealCount = Math.ceil(progress * words.length);
+    const shown = revealedWordCount(words, time, reveal, tokens.length);
+    // Only meaningful when real word timings exist; -1 disables highlighting.
+    const activeIdx = Array.isArray(words) && words.length > 0
+        ? activeWordIndex(words, time)
+        : -1;
+
+    const mode = highlight?.mode || 'none';
+
     return (
         <span>
-            {words.map((word, i) => (
-                <span key={i} style={{ opacity: i < revealCount ? 1 : 0, transition: 'opacity 0.1s', marginRight: '0.25em' }}>
-                    {word}
-                </span>
-            ))}
+            {tokens.map((word, i) => {
+                const visible = i < shown;
+                const isActive = mode !== 'none' && i === activeIdx;
+
+                const style = {
+                    opacity: visible ? 1 : 0,
+                    marginRight: '0.25em',
+                    display: 'inline-block',
+                    // Transition only opacity — transitioning transform would
+                    // fight the per-word scale below and read as jitter.
+                    transition: 'opacity 0.1s linear',
+                };
+
+                if (isActive) {
+                    if (highlight.scale && highlight.scale !== 1) {
+                        style.transform = `scale(${highlight.scale})`;
+                    }
+                    if (mode === 'color' && highlight.color) {
+                        style.color = highlight.color;
+                    } else if (mode === 'box') {
+                        if (highlight.background) style.background = highlight.background;
+                        if (highlight.color) style.color = highlight.color;
+                        style.padding = '0 0.12em';
+                        style.borderRadius = '0.08em';
+                    } else if (mode === 'opacity') {
+                        // Everything else dims instead of the active word brightening.
+                        style.opacity = 1;
+                    }
+                } else if (visible && mode === 'opacity' && activeIdx >= 0) {
+                    style.opacity = 0.55;
+                }
+
+                return <span key={i} style={style}>{word}</span>;
+            })}
         </span>
     );
 };
@@ -109,11 +170,12 @@ const TextOverlay = () => {
     // directly, which is always single-clip, so a drag here ignored the Text
     // panel's global/individual toggle entirely: the user set "Global", dragged a
     // caption on the canvas, and only that one segment moved.
-    const { currentTime, tracks, activeClipId, applyCaptionUpdate, setActiveClip, saveToHistory } = useTimelineStore(useShallow(state => ({
+    const { currentTime, tracks, activeClipId, applyCaptionUpdate, updateClip, setActiveClip, saveToHistory } = useTimelineStore(useShallow(state => ({
         currentTime:        state.currentTime,
         tracks:             state.tracks,
         activeClipId:       state.activeClipId,
         applyCaptionUpdate: state.applyCaptionUpdate,
+        updateClip:         state.updateClip,
         setActiveClip:      state.setActiveClip,
         saveToHistory:      state.saveToHistory,
     })));
@@ -163,6 +225,21 @@ const TextOverlay = () => {
             state.initialClipX  = typeof clip.x === 'number' ? clip.x : 50;
             state.initialClipY  = typeof clip.y === 'number' ? clip.y : 50;
             state.mode          = 'drag';
+            // R66 — every OTHER member of this clip's group (this clip's own
+            // position is already owned by `applyCaptionUpdate` below —
+            // unchanged, including its global/individual scope fan-out).
+            // Position only; pinch-to-scale deliberately does NOT fan out to
+            // the group (scaling a bar+text pair together isn't a single
+            // well-defined operation the way "move together" is).
+            state.groupMembers = clip.groupId
+                ? clipsInGroup(tracks, clip.groupId)
+                    .filter(({ clip: c }) => c.id !== clip.id)
+                    .map(({ trackId: tId, clip: c }) => ({
+                        trackId: tId, clipId: c.id,
+                        initialX: typeof c.x === 'number' ? c.x : 50,
+                        initialY: typeof c.y === 'number' ? c.y : 50,
+                    }))
+                : null;
         } else if (pointerCount === 2) {
             // Second finger arrived — switch to pinch-to-scale
             saveToHistory();
@@ -206,10 +283,21 @@ const TextOverlay = () => {
             // Single-finger drag: reposition
             const deltaX = e.clientX - state.dragStartX;
             const deltaY = e.clientY - state.dragStartY;
-            const newX = state.initialClipX + (deltaX / rect.width)  * 100;
-            const newY = state.initialClipY + (deltaY / rect.height) * 100;
+            const deltaXPct = (deltaX / rect.width)  * 100;
+            const deltaYPct = (deltaY / rect.height) * 100;
+            const newX = state.initialClipX + deltaXPct;
+            const newY = state.initialClipY + deltaYPct;
             state.pendingUpdate = { x: newX, y: newY };
             applyCaptionUpdate({ x: newX, y: newY }, { clipId: clip.id, skipHistory: true, liveOnly: true });
+            // R66 — drag the rest of the group (e.g. a LowerThird's
+            // background bar, on a different track) along with the text.
+            // Plain updateClip, not applyCaptionUpdate — a bar isn't a
+            // caption and has no global/individual scope of its own.
+            if (state.groupMembers) {
+                for (const m of state.groupMembers) {
+                    updateClip(m.trackId, m.clipId, { x: m.initialX + deltaXPct, y: m.initialY + deltaYPct }, { skipHistory: true });
+                }
+            }
         }
     };
 
@@ -298,27 +386,63 @@ const TextOverlay = () => {
         <div ref={containerRef} className="absolute inset-0 pointer-events-none overflow-hidden z-10">
             {activeTextClips.map((clip) => {
                 const isActive = clip.id === activeClipId;
-                const { left, top } = resolvePos(clip);
-                const clipScale = clip.scale || 1;
-                const animStyle = clip.animation !== 'word-by-word'
-                    ? getAnimationStyle(clip.animation, clipScale)
-                    : {};
-                const clipProgress = clip.duration > 0
-                    ? Math.min(1, Math.max(0, (currentTime - clip.start) / clip.duration))
-                    : 1;
+
+                // ── Motion resolution (R58) ─────────────────────────────────
+                // The layer is a pure VIEW over the clip — see motion/ClipAdapter.
+                // clipToMotionLayer folds the legacy `clip.animation` string and
+                // any caption style pack into real animations, so a project made
+                // before R58 keeps animating without migration.
+                const layer = clipToMotionLayer(clip);
+                const motion = layer
+                    ? resolveMotionAt(layer, currentTime)
+                    : { x: 50, y: 50, scale: clip.scale || 1, rotation: 0, opacity: clip.opacity ?? 1, blur: 0, glow: 0, reveal: 1 };
+
+                // Fall back to the original positioning helper if adaptation
+                // failed for any reason — never leave a caption unrenderable.
+                const pos = layer
+                    ? { left: `${motion.x}%`, top: `${motion.y}%` }
+                    : resolvePos(clip);
+
+                const transform = [
+                    'translate(-50%, -50%)',
+                    motion.rotation ? `rotate(${motion.rotation}deg)` : '',
+                    `scale(${motion.scale})`,
+                ].filter(Boolean).join(' ');
+
+                const highlight = clip.captionStyle?.wordHighlight || null;
+                // Render per-word when there is real word timing to honour, or
+                // when a reveal animation is mid-flight. Otherwise emit the
+                // plain string — one text node is cheaper than N spans, and
+                // most captions are static most of the time.
+                const needsWordRender =
+                    (Array.isArray(clip.words) && clip.words.length > 0 && highlight && highlight.mode !== 'none')
+                    || motion.reveal < 1;
+
+                const content = clip.content || t('timeline.newTextDefault');
+
+                const filters = [];
+                if (motion.blur > 0) filters.push(`blur(${motion.blur}px)`);
+                const glowShadow = motion.glow > 0
+                    ? `0 0 ${motion.glow}px currentColor, 0 0 ${motion.glow * 2}px currentColor`
+                    : null;
 
                 return (
                     <div
-                        key={`${clip.id}-${clip.animation || 'none'}`}
+                        // Keyed on id alone (R58). The old key folded in
+                        // `clip.animation` purely to force a remount so the CSS
+                        // keyframe would replay — the resolver is time-driven and
+                        // needs no remount, and remounting mid-gesture used to
+                        // drop the pointer capture on a drag.
+                        key={clip.id}
                         onPointerDown={(e) => handlePointerDown(e, clip)}
                         onPointerMove={(e) => handlePointerMove(e, clip)}
                         onPointerUp={(e)   => handlePointerUp(e, clip)}
                         onPointerCancel={(e) => handlePointerUp(e, clip)}
                         className={`absolute whitespace-pre-wrap select-none origin-center ${isActive ? 'ring-1 ring-primary ring-offset-1 ring-offset-transparent' : 'opacity-90'}`}
                         style={{
-                            left,
-                            top,
-                            transform: `translate(-50%, -50%) scale(${clipScale})`,
+                            left: pos.left,
+                            top: pos.top,
+                            transform,
                             width: '80%',
                             fontFamily: FONT_MAP[clip.fontFamily] || FONT_MAP[clip.fontFamily?.split(',')[0]?.trim()] || 'Inter, sans-serif',
                             fontSize: `${clip.fontSize || 48}px`,
@@ -327,9 +451,11 @@ const TextOverlay = () => {
                             textDecoration: clip.textDecoration || 'none',
                             color: clip.color || '#ffffff',
                             textAlign: clip.textAlign || 'center',
-                            textShadow: clip.textShadow || 'none',
+                            textShadow: glowShadow || clip.textShadow || 'none',
                             WebkitTextStroke: clip.stroke ? `${clip.stroke.width}px ${clip.stroke.color}` : 'none',
-                            opacity: clip.opacity ?? 1,
+                            textTransform: clip.captionStyle?.uppercase ? 'uppercase' : 'none',
+                            opacity: motion.opacity,
+                            ...(filters.length > 0 ? { filter: filters.join(' ') } : {}),
                             pointerEvents: 'auto',
                             // ↓ Critical for mobile: prevents browser scroll/zoom from
                             //   stealing the touch sequence before our handler runs.
@@ -337,12 +463,17 @@ const TextOverlay = () => {
                             cursor: 'move',
                             userSelect: 'none',
                             WebkitUserSelect: 'none',
-                            ...animStyle,
                         }}
                     >
-                        {clip.animation === 'word-by-word'
-                            ? <WordByWord content={clip.content || t('timeline.newTextDefault')} progress={clipProgress} />
-                            : (clip.content || t('timeline.newTextDefault'))
+                        {needsWordRender
+                            ? <CaptionWords
+                                  content={content}
+                                  words={clip.words}
+                                  time={currentTime}
+                                  reveal={motion.reveal}
+                                  highlight={highlight}
+                              />
+                            : content
                         }
 
                         {/* Active selection ring hint (mobile: always show when active) */}
