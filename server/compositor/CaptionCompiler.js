@@ -195,17 +195,34 @@ function compileCaptionEntry(entry, ctx) {
  *
  * @param {object} program           a validated caption program
  * @param {object} opts              { tmpDir, resolveFont(family) => path|null, fallbackFontPath }
- * @returns {{filters: string[], tempFiles: string[], skipped: string[]}}
- *          `skipped` lists clipIds that fell back to no rendering (font
- *          unresolvable) — surfaced as a warning, never a hard failure.
+ * @returns {{filters: string[], tempFiles: string[], skipped: string[], fontFallbacks: Array}}
+ *          `skipped` lists clipIds that fell back to no rendering at all —
+ *          only possible when even `fallbackFontPath` itself is unresolvable
+ *          (effectively "no usable font exists on this worker at all").
+ *          `fontFallbacks` lists clipIds that DID render, but not in the font
+ *          the clip actually asked for — `resolveFont(family)` came back
+ *          null (the family wasn't found in FONT_SPECS, or its file never
+ *          finished downloading) and the fallback font was substituted
+ *          instead. This used to be silent: the `|| opts.fallbackFontPath`
+ *          below always produces a truthy fontFile once ANY fallback exists,
+ *          so `skipped` almost never actually fires in practice — the static
+ *          per-clip drawtext loop (jobs/exportProcessor.js STEP 4) tracks
+ *          this exact same substitution into `fontFallbackWarnings` and
+ *          surfaces it to the user; this path rendered the wrong font
+ *          with zero signal that anything had been substituted at all.
  */
 function compileCaptionProgram(program, opts) {
-    const out = { filters: [], tempFiles: [], skipped: [] };
+    const out = { filters: [], tempFiles: [], skipped: [], fontFallbacks: [] };
     if (!program || !Array.isArray(program.entries) || program.entries.length === 0) return out;
 
     for (const entry of program.entries) {
-        const fontFile = opts.resolveFont(entry.style.fontFamily) || opts.fallbackFontPath;
+        const requestedFamily = entry.style.fontFamily;
+        const resolvedFamilyFont = requestedFamily ? opts.resolveFont(requestedFamily) : null;
+        const fontFile = resolvedFamilyFont || opts.fallbackFontPath;
         if (!fontFile) { out.skipped.push(entry.clipId); continue; }
+        if (requestedFamily && !resolvedFamilyFont) {
+            out.fontFallbacks.push({ clipId: entry.clipId, requestedFamily });
+        }
 
         const { filters, tempFiles } = compileCaptionEntry(entry, {
             tmpDir: opts.tmpDir,

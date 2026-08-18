@@ -1369,6 +1369,20 @@ module.exports = async function processExportJob(job) {
                     if (compiledCaptionProgram.skipped.length > 0) {
                         captionProgramWarning = `${compiledCaptionProgram.skipped.length} animated caption(s) fell back to plain rendering (font unresolved).`;
                     }
+                    // Font substitutions on THIS path used to be completely silent —
+                    // see the comment on compileCaptionProgram's return shape in
+                    // server/compositor/CaptionCompiler.js. Feed them into the SAME
+                    // `fontFallbackWarnings` set the static per-clip loop below
+                    // already populates, so both rendering paths report through the
+                    // one unified `captionWarning` field instead of the static path
+                    // being the only one honest about a substitution happening.
+                    for (const { requestedFamily } of (compiledCaptionProgram.fontFallbacks || [])) {
+                        fontFallbackWarnings.add(
+                            FONT_SPECS[requestedFamily]
+                                ? `"${requestedFamily}" (download failed — see [fonts] log above)`
+                                : `"${requestedFamily}" (unknown font — not in FONT_SPECS)`
+                        );
+                    }
                     console.log(`🎬 [ExportJob ${job.id}] animated captions: ${rawCaptionProgram.entries.length} clip(s), ${compiledCaptionProgram.filters.length} filter(s)`);
                 } catch (progErr) {
                     captionProgramWarning = `Animated captions could not be rendered — exported with plain static captions instead: ${progErr.message}`;

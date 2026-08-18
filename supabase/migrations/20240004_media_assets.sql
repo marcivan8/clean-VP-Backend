@@ -67,6 +67,7 @@ CREATE INDEX IF NOT EXISTS media_assets_status_idx  ON media_assets(analysis_sta
 -- 20240001_brain.sql and 20240003_favorites.sql.
 ALTER TABLE media_assets ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "media_assets_owner" ON media_assets;
 CREATE POLICY "media_assets_owner"
     ON media_assets
     FOR ALL
@@ -74,6 +75,7 @@ CREATE POLICY "media_assets_owner"
     USING (user_id = auth.uid())
     WITH CHECK (user_id = auth.uid());
 
+DROP POLICY IF EXISTS "media_assets_service" ON media_assets;
 CREATE POLICY "media_assets_service"
     ON media_assets
     FOR ALL

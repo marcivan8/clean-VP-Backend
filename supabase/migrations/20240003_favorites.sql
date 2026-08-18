@@ -40,6 +40,7 @@ create index if not exists user_favorites_user_idx on user_favorites(user_id);
 
 alter table user_favorites enable row level security;
 
+drop policy if exists "user_favorites_owner" on user_favorites;
 create policy "user_favorites_owner"
     on user_favorites for all
     to authenticated
