@@ -1484,9 +1484,37 @@ const useTimelineStore = create(
                 const trackId = textTrack.id;
                 let maxEnd = get().duration;
 
+                // Regenerating captions (re-running "Generate captions", the
+                // short-circuit re-derive path, or any retry) used to be purely
+                // ADDITIVE: nothing here ever removed the PREVIOUS auto-generated
+                // batch, so every re-run stacked a second full set of caption
+                // clips on top of the first, overlapping in time — the exact
+                // "captions come out double" symptom. Manually-added text
+                // overlays (`addTextOverlay`, id prefix `text-`) and any other
+                // text-track content are untouched; only clips this function
+                // itself created (id prefix `caption-`) are cleared before the
+                // new batch goes in, so regeneration REPLACES its own prior
+                // output instead of piling onto it.
+                //
+                // The style-inheritance snapshot below is taken from the OLD
+                // batch BEFORE it's removed — this is also what fixes the
+                // accompanying "wrong font" symptom: previously each duplicate
+                // run re-read `textTrack.clips[0]` from a stale pre-transaction
+                // snapshot, which after several regenerations could resolve to
+                // whichever old clip happened to sit first rather than the
+                // clip carrying the user's actual current font choice. Captured
+                // once, up front, it unambiguously reflects the batch that was
+                // on the timeline the moment this call started.
+                const priorCaptionClips = (textTrack.clips || []).filter(c => c.id.startsWith('caption-'));
+                const existingTextClip = priorCaptionClips[0] || textTrack?.clips?.[0];
+
                 // ── ONE transaction → ONE timeline event → ONE React render ──
                 timelineManager.beginTransaction();
                 try {
+                    for (const old of priorCaptionClips) {
+                        timelineManager.dispatch(TimelineActions.removePlacement(old.id));
+                    }
+
                     captions.forEach((cap, i) => {
                         const clipId = `caption-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`;
                         // Clamp end to the next caption's start so ASR timing jitter never
@@ -1500,7 +1528,6 @@ const useTimelineStore = create(
                         // Add the clip entity (metadata / visual properties)
                         // Preserve any existing global style from the text track (so style
                         // card picks survive re-captioning), otherwise use Vibed defaults.
-                        const existingTextClip = textTrack?.clips?.[0];
                         timelineManager.dispatch(TimelineActions.addClip({
                             id: clipId,
                             name: cap.text,
