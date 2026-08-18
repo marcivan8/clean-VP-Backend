@@ -210,47 +210,56 @@ alter table timeline_event_log      enable row level security;
 alter table audio_exports           enable row level security;
 
 -- System assets: readable by all authenticated users
+drop policy if exists "assets_public_read" on assets;
 create policy "assets_public_read"
     on assets for select
     to authenticated
     using (is_active = true);
 
+drop policy if exists "sound_effects_public_read" on sound_effects;
 create policy "sound_effects_public_read"
     on sound_effects for select
     to authenticated
     using (true);
 
+drop policy if exists "luts_public_read" on luts;
 create policy "luts_public_read"
     on luts for select
     to authenticated
     using (true);
 
+drop policy if exists "presets_public_read" on presets;
 create policy "presets_public_read"
     on presets for select
     to authenticated
     using (true);
 
 -- User-owned rows
+drop policy if exists "user_presets_owner" on user_presets;
 create policy "user_presets_owner"
     on user_presets for all
     to authenticated
     using (user_id = auth.uid());
 
+drop policy if exists "usage_log_owner_read" on asset_usage_log;
 create policy "usage_log_owner_read"
     on asset_usage_log for select
     to authenticated
     using (user_id = auth.uid());
 
+drop policy if exists "preferences_owner" on user_asset_preferences;
 create policy "preferences_owner"
     on user_asset_preferences for all
     to authenticated
     using (user_id = auth.uid());
 
+drop policy if exists "event_log_owner_read" on timeline_event_log;
 create policy "event_log_owner_read"
     on timeline_event_log for select
     to authenticated
     using (user_id = auth.uid());
 
+drop policy if exists "audio_exports_owner" on audio_exports;
 create policy "audio_exports_owner"
     on audio_exports for all
     to authenticated

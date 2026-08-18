@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS user_editing_profiles (
 -- RLS: users can only read/write their own profile
 ALTER TABLE user_editing_profiles ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "user_editing_profiles_self" ON user_editing_profiles;
 CREATE POLICY "user_editing_profiles_self"
     ON user_editing_profiles
     FOR ALL
@@ -37,6 +38,7 @@ CREATE POLICY "user_editing_profiles_self"
     WITH CHECK (auth.uid() = user_id);
 
 -- Service role bypass (backend writes via supabaseAdmin)
+DROP POLICY IF EXISTS "user_editing_profiles_service" ON user_editing_profiles;
 CREATE POLICY "user_editing_profiles_service"
     ON user_editing_profiles
     FOR ALL
@@ -71,6 +73,7 @@ CREATE INDEX IF NOT EXISTS idx_editing_sessions_session_id
 -- RLS: service role only (brain writes; no direct client access)
 ALTER TABLE editing_sessions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "editing_sessions_service" ON editing_sessions;
 CREATE POLICY "editing_sessions_service"
     ON editing_sessions
     FOR ALL
@@ -97,6 +100,7 @@ CREATE INDEX IF NOT EXISTS idx_suggestion_feedback_user_type
 -- RLS: service role only
 ALTER TABLE suggestion_feedback ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "suggestion_feedback_service" ON suggestion_feedback;
 CREATE POLICY "suggestion_feedback_service"
     ON suggestion_feedback
     FOR ALL

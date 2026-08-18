@@ -29,6 +29,38 @@ if (SENTRY_DSN) {
         tracesSampleRate: 0.1,
         replaysSessionSampleRate: 0.05,
         replaysOnErrorSampleRate: 1.0,
+        // Known-noisy, non-actionable errors that originate OUTSIDE Vibed's own
+        // code — filtered here rather than left to alert-fatigue the Sentry feed.
+        ignoreErrors: [
+            // @supabase/auth-js's cross-tab session lock (navigator.locks)
+            // constructs a `LockAcquireTimeoutError` when the lock can't be
+            // acquired in time — `class ... extends Error { constructor(e) {
+            // super(e); this.isAcquireTimeout = true; } }`. In a normal
+            // browser that just makes a LockAcquireTimeoutError. Traced one
+            // instance of this via the client bundle's sourcemap back to
+            // exactly that file (node_modules/@supabase/auth-js/dist/module/
+            // lib/locks.js) — the surrounding app code (client/src/lib/
+            // supabaseClient.js) doesn't touch navigator.locks or Error
+            // itself at all, so there's nothing here for Vibed's own code to
+            // have gotten wrong.
+            //
+            // The TypeError specifically ("Cannot add property
+            // isAcquireTimeout, object is not extensible" / Firefox's "can't
+            // define property ... is not extensible") means `super(e)`
+            // itself returned an object that was ALREADY non-extensible
+            // before that assignment ran — i.e. something in that browser
+            // tab had frozen/sealed Error (or its prototype) before
+            // auth-js's lock code ever got a chance to run. That's a known
+            // side effect of "SES lockdown" hardening that several crypto
+            // wallet extensions (MetaMask, Phantom, Rabby, …) inject into
+            // every page for their own security sandboxing — not something
+            // a page's own script can prevent or catch upstream of. No
+            // report of the editor actually breaking for a real user has
+            // come with this alert; it's page-load noise from whichever
+            // wallet extension a visitor happens to have enabled.
+            /Cannot add property isAcquireTimeout/,
+            /can't define property "isAcquireTimeout"/,
+        ],
     });
 }
 

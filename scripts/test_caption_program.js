@@ -346,6 +346,69 @@ section('10 · Shadow and glow layers are visibly distinct from plain text');
 
 }
 
+section("10b · A font substitution on the animated path is reported, not silent");
+{
+    // A real production bug: when `resolveFont(family)` came back null (the
+    // requested font wasn't in FONT_SPECS, or its file never finished
+    // downloading), `compileCaptionProgram` silently rendered with
+    // `fallbackFontPath` instead — same substitution the static per-clip
+    // drawtext loop already tracks into `fontFallbackWarnings` and surfaces
+    // to the user, but on THIS path nothing was ever recorded. A user who
+    // picked "Nunito" got Anton in their export with no warning anywhere.
+    // No FFmpeg needed — this is testing what compileCaptionProgram RETURNS,
+    // not what it renders, so it runs unconditionally (not gated on FFMPEG).
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-fallback-'));
+    const clip = {
+        id: 'nunito1', type: 'text', content: 'hi', start: 0, duration: 1,
+        fontFamily: 'Nunito', fontSize: 48, x: 50, y: 50,
+        animations: CLIENT.buildPreset('pop', { duration: 1 }), // needs SOME motion field to enter the program
+    };
+    const program = CLIENT.buildCaptionProgram([baseTrack(1), textTrack([clip])], baseTrack(1).clips);
+    check('the entry carries the requested font family through',
+        program.entries[0]?.style?.fontFamily === 'Nunito');
+
+    // resolveFont never resolves ANYTHING — every family falls back, exactly
+    // like a font whose download failed on a real worker.
+    const FAKE_FALLBACK = '/fake/fallback/Anton-Regular.ttf';
+    const compiled = compileCaptionProgram(program, {
+        tmpDir: dir,
+        fallbackFontPath: FAKE_FALLBACK,
+        resolveFont: () => null,
+        escapePath: (p) => p,
+    });
+
+    check('the clip still renders (fails open — fallback font used, not dropped)',
+        compiled.filters.length > 0);
+    check('nothing is reported as fully SKIPPED — the fallback font resolved fine',
+        compiled.skipped.length === 0,
+        'skipped means no font resolved at all, including the fallback — not what happened here');
+    const fallbacks = Array.isArray(compiled.fontFallbacks) ? compiled.fontFallbacks : [];
+    check('the substitution IS reported via fontFallbacks',
+        fallbacks.length === 1,
+        `got ${JSON.stringify(compiled.fontFallbacks)}`);
+    check('the reported fallback names the ACTUAL requested family',
+        fallbacks[0]?.clipId === 'nunito1' && fallbacks[0]?.requestedFamily === 'Nunito');
+
+    // The non-substitution control: when resolveFont DOES resolve the
+    // requested family, nothing should be reported as a fallback.
+    const compiledOk = compileCaptionProgram(program, {
+        tmpDir: dir,
+        fallbackFontPath: FAKE_FALLBACK,
+        resolveFont: (family) => (family === 'Nunito' ? '/fake/real/Nunito-Regular.ttf' : null),
+        escapePath: (p) => p,
+    });
+    check('no fallback is reported when the requested family DOES resolve',
+        Array.isArray(compiledOk.fontFallbacks) && compiledOk.fontFallbacks.length === 0);
+}
+
+section("10c · exportProcessor.js actually wires the animated path's fallbacks into the user-facing warning");
+{
+    const src = read('jobs/exportProcessor.js');
+    check('font fallbacks from the animated path feed the SAME fontFallbackWarnings set the static loop uses',
+        /for \(const \{ requestedFamily \} of \(compiledCaptionProgram\.fontFallbacks \|\| \[\]\)\)/.test(src) &&
+        /fontFallbackWarnings\.add\(/.test(src));
+}
+
 section('11 · Wired into the export job, guarded and fail-open');
 {
     const src = read('jobs/exportProcessor.js');
