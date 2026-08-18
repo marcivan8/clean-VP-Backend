@@ -186,8 +186,20 @@ console.log('\n── 7. Every caption surface routes through the shared action 
     check('TextPanel makes no direct updateClip call',
         !/\bupdateClip\s*\(/.test(stripComments(panel)),
         'Caption edits must go through applyCaptionUpdate or the scope toggle stops meaning anything.');
-    check('TextOverlay makes no direct updateClip call',
-        !/\bupdateClip\s*\(/.test(stripComments(overlay)));
+    // R66 — clip grouping added a LEGITIMATE direct updateClip() call: dragging
+    // a caption also drags its group members (e.g. a LowerThird's background
+    // bar, on a different track) via `updateClip(m.trackId, m.clipId, ...)`.
+    // A bar isn't a caption and has no captionEditScope of its own, so routing
+    // it through applyCaptionUpdate would be wrong, not safer. The check below
+    // is scoped to catch only a direct updateClip() call that targets the
+    // CAPTION CLIP ITSELF (`clip.id`) — that's the actual split-brain
+    // regression this section exists to catch — while allowing calls that
+    // target a group member (`m.clipId`, which never contains the literal
+    // substring "clip.id").
+    check('TextOverlay makes no direct updateClip call on the caption itself',
+        !/\bupdateClip\s*\([^)]*\bclip\.id\b/.test(stripComments(overlay)),
+        'A direct updateClip() targeting the dragged CAPTION bypasses applyCaptionUpdate\'s scope logic. ' +
+        'updateClip() on a GROUP MEMBER (m.clipId, R66) is fine — a LowerThird\'s bar has no caption scope of its own.');
     check('TextPanel reads scope from the store, not local useState',
         /captionEditScope/.test(panel) && !/useState\(['"]global['"]\)/.test(panel),
         'Component-local scope is invisible to the canvas — that WAS the bug.');
