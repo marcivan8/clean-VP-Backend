@@ -571,6 +571,48 @@ section('11 · REACHABILITY — the "overlay" graphics track has real callers (R
         'visual[0] would let an overlay track become "base" whenever its order value ties with the video track\'s');
 }
 
+section('12 · Regenerating captions REPLACES the prior batch, not stacks on it');
+{
+    // A real production bug: addCaptionClips was purely additive — nothing
+    // ever removed the PREVIOUS auto-generated batch before adding a new one.
+    // Any second call (a retry, the short-circuit re-derive path, re-running
+    // "Generate captions" after editing the timeline) stacked a full second
+    // set of caption clips on top of the first, overlapping in time — visibly
+    // "double" captions on screen, and a font mismatch between the two
+    // batches whenever the user had changed the font in between runs.
+    const store = read('client/src/store/useTimelineStore.js');
+    const fnStart = store.indexOf('addCaptionClips: (captions) => {');
+    // addCaptionClips is defined once; slice from its start to the next
+    // same-indent store method so later methods can't accidentally satisfy
+    // these checks.
+    const nextMethodMatch = fnStart !== -1
+        ? store.slice(fnStart + 1).match(/\n {12}\w+: \(/)
+        : null;
+    const fnEnd = fnStart !== -1 && nextMethodMatch
+        ? fnStart + 1 + nextMethodMatch.index
+        : store.length;
+    const fn = fnStart !== -1 ? store.slice(fnStart, fnEnd) : '';
+
+    check('addCaptionClips was found', fnStart !== -1);
+    check('it identifies its OWN previously-generated clips by id prefix',
+        /priorCaptionClips\s*=\s*\(textTrack\.clips \|\| \[\]\)\.filter\(c => c\.id\.startsWith\('caption-'\)\)/.test(fn));
+    check('it removes those prior clips before adding the new batch',
+        /for \(const old of priorCaptionClips\)/.test(fn) &&
+        /TimelineActions\.removePlacement\(old\.id\)/.test(fn));
+    check('the removal loop runs BEFORE the forEach that adds new clips',
+        fn.indexOf('for (const old of priorCaptionClips)') <
+        fn.indexOf('captions.forEach((cap, i) =>'),
+        'adding first then removing would delete the clips just created, not the stale ones');
+    check('manually-added text overlays are untouched (only `caption-` ids are cleared)',
+        !/priorCaptionClips\s*=\s*\(textTrack\.clips \|\| \[\]\)\.filter\(c => c\.id\.startsWith\('text-'\)\)/.test(fn),
+        'addTextOverlay clips use the "text-" id prefix and must survive caption regeneration');
+    check('style inheritance is captured ONCE, before removal, not re-read per clip',
+        /const existingTextClip = priorCaptionClips\[0\] \|\| textTrack\?\.clips\?\.\[0\];/.test(fn) &&
+        !/const existingTextClip = textTrack\?\.clips\?\.\[0\];\s*\n\s*timelineManager\.dispatch\(TimelineActions\.addClip/.test(fn),
+        'reading it fresh inside the forEach (the old bug) means later runs can inherit from ' +
+        'whichever old clip happens to be first rather than a stable snapshot');
+}
+
 console.log(`\n${'─'.repeat(60)}`);
 console.log(`Motion engine: ${passed} passed, ${failed} failed`);
 console.log('─'.repeat(60));
