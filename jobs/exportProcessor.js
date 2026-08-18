@@ -1015,6 +1015,18 @@ module.exports = async function processExportJob(job) {
     let compositorWarning = null;
     const rawPlan = settings.compositionPlan || null;
 
+    // R63 — animated captions. Declared here, at function scope, NOT inside the
+    // `if (textTracks.length > 0 && !useRevideo)` block further down where the
+    // caption program is actually compiled: the final return statement (below)
+    // reads this value long after that block has closed, and `let` is block-
+    // scoped. A declaration nested inside that if/else was invisible to the
+    // return statement — every export unconditionally threw
+    // "captionProgramWarning is not defined" building the result object, since
+    // the reference at the bottom resolved to no binding at all, not to a not-
+    // yet-initialized one. Mirrors compositorWarning/revideoWarning above/below,
+    // which are correctly declared at this same top level for the same reason.
+    let captionProgramWarning = null;
+
     // R69: when Revideo is compositing overlays, FFmpeg must not ALSO
     // composite them here — doing both would draw every sticker/lower-third
     // twice. `useRevideo` is decided up front, before this step, for exactly
@@ -1329,7 +1341,9 @@ module.exports = async function processExportJob(job) {
             // FAILS OPEN like the compositor and the LUT lookup (R55): any
             // problem here just means `programClipIds` stays empty and every
             // clip falls through to the untouched static path below.
-            let captionProgramWarning = null;
+            // captionProgramWarning itself is declared at function scope (near
+            // compositorWarning, above) — see the comment there. Only reassigned
+            // here, never re-declared, so the final return statement can see it.
             const programClipIds = new Set();
             let compiledCaptionProgram = { filters: [], tempFiles: [], skipped: [] };
             const rawCaptionProgram = settings.captionProgram || null;
