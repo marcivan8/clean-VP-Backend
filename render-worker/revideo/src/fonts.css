@@ -1,0 +1,85 @@
+/**
+ * render-worker/revideo/src/fonts.css
+ *
+ * Caption fonts for the Revideo render-worker's headless Chrome.
+ *
+ * ─── WHY THIS FILE EXISTS ───────────────────────────────────────────────────
+ * `timeline.tsx` passes `fontFamily={clip.fontFamily}` straight into
+ * Revideo's <Txt> for every caption/text clip. Its own header comment
+ * already says the quiet part out loud: "font loading here is still just a
+ * named fontFamily on Txt, falling back to the browser's built-in sans-serif
+ * if the family isn't otherwise available in the render container" — and
+ * this worker's render container never had ANY of the 36 caption fonts
+ * available. Its Docker build context is render-worker/ only (see
+ * render-worker/Dockerfile's `COPY . .`), so it can't see
+ * client/src/index.css's @font-face block (added for the browser preview —
+ * see that file's "Caption/text fonts" comment) or client/public/fonts/ at
+ * all. Every export through this worker silently rendered every caption in
+ * Chrome's default font, regardless of what the user picked — this was the
+ * actual cause of "the exported caption font doesn't match the selected
+ * font," independent of (and not fixed by) the font-fallback-warning work
+ * done on the FFmpeg drawtext path in jobs/exportProcessor.js /
+ * server/compositor/CaptionCompiler.js, which is a DIFFERENT code path that
+ * only runs when this worker is NOT used (see exportProcessor.js's
+ * `useRevideo` flag, gated on REVIDEO_RENDER_ENABLED + RENDER_WORKER_URL).
+ *
+ * Font files are physically duplicated into render-worker/revideo/src/fonts/
+ * (copied from client/public/fonts/) for the same reason CaptionModel.js is
+ * a hand-synced copy in this directory: the isolated Docker build context
+ * can't reach client/ at build time. scripts/test_revideo_render_path.js
+ * checks this file's family list and the fonts/ directory both stay in sync
+ * with jobs/exportProcessor.js's FONT_SPECS — a font added to one and not
+ * the others silently breaks either the export or this worker for that
+ * family, exactly like the existing CaptionModel.js sync check guards
+ * against.
+ *
+ * `font-display: block` (not `swap`, which client/src/index.css correctly
+ * uses for a real browser where a brief fallback flash is harmless): a
+ * frame-capturing headless render must never paint the fallback-font frame
+ * at all, since there's no live viewer to see the swap happen a moment
+ * later — whatever's on screen when the frame is captured is permanent.
+ * `block` makes the browser hold text invisible briefly rather than paint
+ * it in the wrong font while waiting.
+ *
+ * Family names, weights, and filenames mirror client/src/index.css's
+ * caption-font block and jobs/exportProcessor.js's FONT_SPECS exactly.
+ * Imported once, as a side-effect import, in project.ts — Vite bundles it
+ * (and resolves the relative url() paths into real asset URLs) for every
+ * scene render, so it only needs to be imported in one place.
+ */
+@font-face { font-family: 'Anton';              font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Anton-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Bebas Neue';         font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/BebasNeue-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Montserrat';         font-style: normal; font-weight: 800; font-display: block; src: url('./fonts/Montserrat-Bold.ttf') format('truetype'); }
+@font-face { font-family: 'Inter';              font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Inter-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Barlow Condensed';   font-style: normal; font-weight: 700; font-display: block; src: url('./fonts/BarlowCondensed-Bold.ttf') format('truetype'); }
+@font-face { font-family: 'Playfair Display';   font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/PlayfairDisplay-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Lora';               font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Lora-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Merriweather';       font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Merriweather-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'DM Serif Display';   font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/DMSerifDisplay-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Cormorant Garamond'; font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/CormorantGaramond-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Nunito';             font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Nunito-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Poppins';            font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Poppins-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Quicksand';          font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Quicksand-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Josefin Sans';       font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/JosefinSans-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Raleway';            font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Raleway-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Rajdhani';           font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Rajdhani-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Exo 2';              font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Exo2-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Orbitron';           font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Orbitron-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Oxanium';            font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Oxanium-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Roboto Condensed';   font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/RobotoCondensed-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Oswald';             font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Oswald-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Teko';               font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Teko-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Black Han Sans';     font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/BlackHanSans-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Saira Condensed';    font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/SairaCondensed-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Cabin';              font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Cabin-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Caveat';             font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Caveat-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Pacifico';           font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Pacifico-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Kalam';              font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Kalam-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Satisfy';            font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Satisfy-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Dancing Script';     font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/DancingScript-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Boogaloo';           font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Boogaloo-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Righteous';          font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Righteous-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Press Start 2P';     font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/PressStart2P-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Audiowide';          font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Audiowide-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'DM Sans';            font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/DMSans-Regular.ttf') format('truetype'); }
+@font-face { font-family: 'Unbounded';          font-style: normal; font-weight: 400; font-display: block; src: url('./fonts/Unbounded-Regular.ttf') format('truetype'); }

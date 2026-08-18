@@ -129,6 +129,73 @@ section('3 · new scene (render-worker/revideo/src/scenes/timeline.tsx) — stru
     check('word-timed reveal uses revealedWordCount, not a flat reveal fraction', /revealedWordCount\(/.test(scene));
 }
 
+section('3b · render-worker caption fonts — @font-face registration for headless Chrome');
+{
+    // The worker's Chrome instance is a fully isolated build (its own Docker
+    // context, see Dockerfile's `COPY . .` from render-worker/ only) with no
+    // access to client/src/index.css's @font-face rules or client/public/
+    // fonts/. Without its own registration, every caption font silently
+    // rendered as Chrome's default sans-serif — see fonts.css's header for
+    // the full story. This section pins that the fix stays wired up AND
+    // stays in sync with the two other places a font must be registered
+    // (jobs/exportProcessor.js's FONT_SPECS, client/src/index.css) — adding
+    // a font to one and not the others is exactly the kind of drift that
+    // silently reintroduces this bug for just that one family.
+    const scene = read('render-worker/revideo/src/scenes/timeline.tsx');
+    check('scene still assigns the raw fontFamily to Txt (the fix is registering it, not routing around it)',
+        /fontFamily=\{clip\.fontFamily \|\| 'Inter'\}/.test(scene));
+
+    const project = read('render-worker/revideo/src/project.ts');
+    check('project.ts imports fonts.css as a side effect, so every scene render has it bundled',
+        /import '\.\/fonts\.css';/.test(project));
+
+    const fontsCss = read('render-worker/revideo/src/fonts.css');
+    const cssFamilies = [...fontsCss.matchAll(/^@font-face \{ font-family: '([^']+)';.*src: url\('\.\/fonts\/([^']+)'\)/gm)]
+        .map(m => ({ family: m[1], file: m[2] }));
+    check('fonts.css declares at least one @font-face rule (parse sanity)', cssFamilies.length > 0);
+    check('every fonts.css @font-face uses font-display: block, not swap',
+        (fontsCss.match(/@font-face/g) || []).length ===
+        (fontsCss.match(/font-display: block/g) || []).length,
+        'a headless frame-capture must never paint the fallback-font frame — see fonts.css header on why `swap` (fine for a live browser) is wrong here');
+
+    const exportProc = read('jobs/exportProcessor.js');
+    const specMatches = [...exportProc.matchAll(/'([^']+)':\s*\{\s*file:\s*'([^']+)'/g)]
+        .map(m => ({ family: m[1], file: m[2] }));
+    check('jobs/exportProcessor.js FONT_SPECS was actually parsed (regression guard for this check itself)',
+        specMatches.length >= 30);
+
+    const cssFamilySet = new Set(cssFamilies.map(f => f.family));
+    const missingFromWorkerCss = specMatches.filter(s => !cssFamilySet.has(s.family));
+    check('every FONT_SPECS family has a matching @font-face in the worker\'s fonts.css',
+        missingFromWorkerCss.length === 0,
+        `missing: ${missingFromWorkerCss.map(f => f.family).join(', ')}`);
+
+    const cssFileSet = new Set(cssFamilies.map(f => f.file));
+    const missingFromWorkerCssFiles = specMatches.filter(s => !cssFileSet.has(s.file));
+    check('every FONT_SPECS file is referenced by the worker\'s fonts.css (same filenames as client/public/fonts/)',
+        missingFromWorkerCssFiles.length === 0,
+        `missing: ${missingFromWorkerCssFiles.map(f => f.file).join(', ')}`);
+
+    let workerFontFiles = [];
+    try { workerFontFiles = fs.readdirSync(path.join(ROOT, 'render-worker/revideo/src/fonts')); } catch { /* reported below */ }
+    check('render-worker/revideo/src/fonts/ directory exists with .ttf files in it', workerFontFiles.length > 0);
+    const workerFileSet = new Set(workerFontFiles);
+    const missingActualFiles = specMatches.filter(s => !workerFileSet.has(s.file));
+    check('every FONT_SPECS .ttf file actually exists in render-worker/revideo/src/fonts/ (not just referenced in CSS)',
+        missingActualFiles.length === 0,
+        `missing: ${missingActualFiles.map(f => f.file).join(', ')}`);
+
+    const clientCss = read('client/src/index.css');
+    const clientFamilySet = new Set(
+        [...clientCss.matchAll(/^@font-face \{ font-family: '([^']+)';.*src: url\('\/fonts\/([^']+)'\)/gm)]
+            .map(m => m[1])
+    );
+    const missingFromClient = specMatches.filter(s => !clientFamilySet.has(s.family));
+    check('every FONT_SPECS family also has a browser @font-face in client/src/index.css (three-way sync, not just worker+export)',
+        missingFromClient.length === 0,
+        `missing: ${missingFromClient.map(f => f.family).join(', ')}`);
+}
+
 section('4 · render-worker/server.js — updated contract');
 {
     const server = read('render-worker/server.js');
