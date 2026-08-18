@@ -44,7 +44,7 @@ function loadModules() {
 
     const sandbox = {};
     const fn = new Function(
-        `${registry}\n${director}\nreturn { buildProposals, isExecutable, PRIORITY, COMMAND_BY_ID, COMMANDS };`
+        `${registry}\n${director}\nreturn { buildProposals, isExecutable, proposal, rankProposals, PRIORITY, COMMAND_BY_ID, COMMANDS };`
     );
     return Object.assign(sandbox, fn());
 }
@@ -103,17 +103,43 @@ async function main() {
 
     section('2 · A named-but-nonexistent command is DEMOTED, not dropped');
     {
-        // The buried-hook finding names reorder_for_hook, which does not exist.
-        // The observation is still true and must survive — as advice.
+        // The buried-hook finding USED TO name reorder_for_hook (nonexistent)
+        // here — R74 rewired it to the real organize_clips command precisely
+        // so this finding stopped being permanently advisory. Testing the
+        // demotion mechanism through buildProposals() with a real finding
+        // means this section goes stale every time another gap gets closed
+        // (as it just did) — so it exercises proposal() directly with a
+        // synthetic nonexistent command instead, independent of whichever
+        // finding happens to lack a real command this month.
+        const fake = M.proposal({
+            id: 'fake_finding',
+            title: 'A hypothetical finding',
+            why: 'Exercises the demotion path directly.',
+            priority: 'critical',
+            command: 'this_command_does_not_exist',
+            atSec: 12.5,
+            source: 'story',
+        });
+
+        check('a proposal naming a nonexistent command is NOT applicable', fake.applicable === false);
+        check('its command is nulled out', fake.command === null,
+            'leaving a nonexistent command here would let a UI offer it');
+        check('the advisory reason names the missing command',
+            /this_command_does_not_exist/.test(fake.advisoryReason), fake.advisoryReason);
+        check('it still cites its own time', fake.atSec === 12.5);
+
+        // The positive counterpart, pinned so a future revert doesn't pass
+        // silently: hook_buried used to BE the demoted case above and is
+        // deliberately no longer — R74 rewired it to the real organize_clips
+        // command. If this ever regresses back to a nonexistent command, this
+        // assertion is what catches it (the demotion checks above wouldn't,
+        // since they no longer touch the real finding at all).
         const { proposals } = M.buildProposals({ storyMap: STORY_OK });
         const hook = proposals.find(p => p.id === 'hook_buried');
-
         check('the buried-hook finding is still surfaced', !!hook);
-        check('it is NOT applicable', hook && hook.applicable === false);
-        check('its command is nulled out', hook && hook.command === null,
-            'leaving reorder_for_hook here would let a UI offer it');
-        check('the advisory reason names the missing command',
-            hook && /reorder_for_hook/.test(hook.advisoryReason), hook?.advisoryReason);
+        check('hook_buried is now genuinely applicable (R74)', hook && hook.applicable === true);
+        check('hook_buried resolves to the real organize_clips command',
+            hook && hook.command === 'organize_clips', hook?.command);
         check('it still cites the time', hook && hook.atSec === 41.2);
     }
 
@@ -137,11 +163,25 @@ async function main() {
         check('priorities are non-decreasing', prio.every((v, i) => i === 0 || v >= prio[i - 1]),
             proposals.map(p => `${p.id}:${p.priority}`).join(' '));
 
-        // The critical finding here is advisory. It must still come first —
-        // sorting applicable-first would be a UI convenience that misleads.
+        // This ranking property is about rankProposals() itself, not any
+        // particular real finding — every finding this module currently knows
+        // how to describe now resolves to a real command (R74/R75), so
+        // nothing in STORY_OK/PROJECT_OK naturally produces a critical+
+        // advisory item to rank against a lower-priority applicable one any
+        // more. Tested directly against two synthetic proposals so it can't
+        // go stale the next time another gap closes.
+        const criticalAdvisory = M.proposal({
+            id: 'critical_advisory', title: 'critical but advisory', why: 'x',
+            priority: 'critical', command: null, source: 'story',
+        });
+        const lowApplicable = M.proposal({
+            id: 'low_applicable', title: 'low but applicable', why: 'x',
+            priority: 'low', command: 'silence_removal', source: 'story',
+        });
+        const rankedSynthetic = M.rankProposals([lowApplicable, criticalAdvisory]);
         check('a critical ADVISORY outranks an applicable lower-priority item',
-            proposals[0].priority === 'critical' && proposals[0].applicable === false,
-            `first was ${proposals[0].id} (${proposals[0].priority}, applicable=${proposals[0].applicable})`);
+            rankedSynthetic[0].id === 'critical_advisory' && rankedSynthetic[0].applicable === false,
+            `first was ${rankedSynthetic[0].id} (${rankedSynthetic[0].priority}, applicable=${rankedSynthetic[0].applicable})`);
 
         const ids = proposals.map(p => p.id);
         check('ranking is deterministic across runs',

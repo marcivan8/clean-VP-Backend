@@ -72,7 +72,7 @@ export function isExecutable(commandId) {
  * DEMOTED to advice. The observation is still true and worth telling the user;
  * what changes is that we stop pretending we can act on it.
  */
-function proposal({ id, title, why, priority, command = null, params = null, atSec = null, source }) {
+export function proposal({ id, title, why, priority, command = null, params = null, atSec = null, source }) {
     const applicable = isExecutable(command);
     return {
         id,
@@ -107,6 +107,28 @@ function proposal({ id, title, why, priority, command = null, params = null, atS
  * @param {Object} [args.projectMap] - project_intelligence row (R44)
  * @returns {{ proposals: Array, executableCount: number, advisoryCount: number, basis: string }}
  */
+/**
+ * Stable, deterministic ranking: priority first, declaration order second.
+ * Deliberately NOT sorted by applicability — a critical advisory finding
+ * ("your hook is buried") must outrank a low-priority applicable tweak.
+ * Ranking by what we can DO rather than by what matters would be a UI
+ * convenience that quietly misleads.
+ *
+ * Exported (and factored out of buildProposals) so this property is directly
+ * testable against synthetic proposals, independent of whichever real
+ * finding happens to be advisory this month — every finding this module
+ * currently knows how to describe now resolves to a real command (R74/R75),
+ * so nothing in the live fixtures naturally produces a critical+advisory
+ * item to rank against any more.
+ */
+export function rankProposals(list) {
+    return list
+        .map((p, i) => ({ p, i }))
+        .sort((a, b) =>
+            (PRIORITY[a.p.priority] ?? 9) - (PRIORITY[b.p.priority] ?? 9) || a.i - b.i)
+        .map(({ p }) => p);
+}
+
 export function buildProposals({ storyMap = null, projectMap = null } = {}) {
     const out = [];
 
@@ -244,16 +266,7 @@ export function buildProposals({ storyMap = null, projectMap = null } = {}) {
         }
     }
 
-    // Stable, deterministic ranking: priority first, declaration order second.
-    // Deliberately NOT sorted by applicability — a critical advisory finding
-    // ("your hook is buried") must outrank a low-priority applicable tweak.
-    // Ranking by what we can DO rather than by what matters would be a UI
-    // convenience that quietly misleads.
-    const ranked = out
-        .map((p, i) => ({ p, i }))
-        .sort((a, b) =>
-            (PRIORITY[a.p.priority] ?? 9) - (PRIORITY[b.p.priority] ?? 9) || a.i - b.i)
-        .map(({ p }) => p);
+    const ranked = rankProposals(out);
 
     return {
         proposals:       ranked,
@@ -266,4 +279,4 @@ export function buildProposals({ storyMap = null, projectMap = null } = {}) {
     };
 }
 
-export default { buildProposals, isExecutable, PRIORITY };
+export default { buildProposals, isExecutable, proposal, rankProposals, PRIORITY };
