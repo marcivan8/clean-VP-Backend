@@ -240,13 +240,18 @@ section('7 · Built-in (parameter-based) LUTs still grade the export');
 // proven path sitting unused while the LUT tried to grade some other way.
 section('8 · Applying a LUT grades the clips themselves');
 {
-    const panel  = read('client/src/components/AssetPanel.jsx');
-    const player = read('client/src/components/Player/VideoPlayer.jsx');
+    const panel      = read('client/src/components/AssetPanel.jsx');
+    const player     = read('client/src/components/Player/VideoPlayer.jsx');
+    // R75 — lutToGrading() moved out of AssetPanel.jsx into a shared util so
+    // the manual Colour-panel path and the AI's VideoEditorTools.applyLUT()
+    // path compute the identical grade from ONE formula instead of two that
+    // could drift apart. The formula lives here now, not inline in the panel.
+    const lutGrading = read('client/src/utils/lutGrading.js');
 
     check('the panel converts LUT params into a grading object',
         /lutToGrading/.test(panel));
     check('it uses the editor\'s 1 + x/10 mapping',
-        /1 \+ n\(lut\.contrast\)\s*\/ 10/.test(panel),
+        /1 \+ n\(lut\.contrast\)\s*\/ 10/.test(lutGrading),
         'so preview, canvas filter and FFmpeg export all agree');
     check('grading is written onto video clips',
         /updateClip\?\.\(track\.id, clip\.id, \{ grading \}\)/.test(panel));
@@ -276,11 +281,14 @@ section('8 · Applying a LUT grades the clips themselves');
 // re-click of the LUT card away from being wiped out project-wide.
 section('9 · The Colour panel can edit a LUT grade per clip, safely');
 {
-    const panel = read('client/src/components/AssetPanel.jsx');
-    const ide   = read('client/src/layouts/IDELayout.jsx');
+    const panel      = read('client/src/components/AssetPanel.jsx');
+    const ide        = read('client/src/layouts/IDELayout.jsx');
+    // Same R75 move as §8 — the formula (and _lutName) now live in the
+    // shared util, not inline in the panel.
+    const lutGrading = read('client/src/utils/lutGrading.js');
 
     check('the LUT grade carries its name for the Colour panel badge',
-        /_lutName:\s*lut\.name \|\| lut\.display_name \|\| null/.test(panel));
+        /_lutName:\s*lut\.name \|\| lut\.display_name \|\| null/.test(lutGrading));
 
     check('handleLUTApply skips clips the user has manually adjusted',
         /if \(clip\.grading\?\.\_manuallyAdjusted\) \{ skipped\+\+; continue; \}/.test(panel),
