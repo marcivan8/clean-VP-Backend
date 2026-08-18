@@ -107,7 +107,7 @@ jobs:
             echo "::error::Add it under Settings → Environments → ${{ github.ref_name == 'main' && 'production' || 'staging' }} → Secrets."
             exit 1
           fi
-          for f in $(ls migrations/*.sql | sort); do
+          for f in $(ls supabase/migrations/*.sql | sort) $(ls migrations/*.sql | sort); do
             echo "Applying $f …"
             psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "$f"
           done
