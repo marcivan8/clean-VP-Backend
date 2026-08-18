@@ -368,6 +368,32 @@ section('11 · Wired into the export job, guarded and fail-open');
     check('the failure is surfaced to the user, not swallowed',
         /captionProgramWarning/.test(src) && /captionProgramWarning: captionProgramWarning \|\| undefined/.test(src));
 
+    // A real production incident: `let captionProgramWarning` was declared
+    // INSIDE `if (textTracks.length > 0 && !useRevideo) { ... }` — the block
+    // that compiles the program — while the final `return { ... }` reads it
+    // from outside that block. `let` is block-scoped, so every single export
+    // threw "captionProgramWarning is not defined" building the result
+    // object; the regex checks above still passed throughout, because they
+    // only look for the identifier's presence, never where it's declared.
+    // Pinning two structural properties so this exact class of bug — a
+    // warning variable declared inside the block that sets it instead of at
+    // function scope alongside its siblings — can't ship silently again:
+    check('captionProgramWarning is declared exactly once (no nested re-declaration)',
+        (src.match(/\blet\s+captionProgramWarning\b/g) || []).length === 1,
+        'a second `let` nested inside the compile block would shadow the outer one there ' +
+        'and leave it null everywhere else — same bug, different shape');
+    check('captionProgramWarning is declared at function scope, matching compositorWarning/revideoWarning',
+        /\n {4}let captionProgramWarning = null;/.test(src),
+        '4-space indent = declared directly in processExportJob\'s body, not nested inside ' +
+        'the `if (textTracks.length > 0 ...)` block where it used to live');
+    check('the declaration comes BEFORE the block that compiles the program, not inside it',
+        src.indexOf('let captionProgramWarning = null;') <
+        // Matched as actual code (line-anchored, 4-space indent), not the
+        // phrase appearing inside an explanatory comment above the declaration.
+        src.search(/\n {4}if \(textTracks\.length > 0 && !useRevideo\) \{/),
+        'declared after/inside that if-block is exactly the regression: the return statement ' +
+        'reads a name the block-scoped `let` never made visible outside it');
+
     const client = read('client/src/layouts/IDELayout.jsx');
     check('the client builds and sends the program',
         /buildCaptionProgram/.test(client) && /captionProgram,/.test(client));
