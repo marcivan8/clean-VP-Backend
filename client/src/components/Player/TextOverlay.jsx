@@ -16,6 +16,7 @@ import { revealedWordCount, activeWordIndex } from '../../motion/CaptionModel.js
 // LowerThird's title (this component) and its background bar (GraphicOverlay,
 // a different track) share a `groupId`; dragging either one must move both.
 import { clipsInGroup } from '../../motion/ClipGrouping.js';
+import { getPlayerDimensions } from '../../utils/playerDimensions.js';
 
 // Map preset names to actual font families
 const FONT_MAP = {
@@ -170,15 +171,51 @@ const TextOverlay = () => {
     // directly, which is always single-clip, so a drag here ignored the Text
     // panel's global/individual toggle entirely: the user set "Global", dragged a
     // caption on the canvas, and only that one segment moved.
-    const { currentTime, tracks, activeClipId, applyCaptionUpdate, updateClip, setActiveClip, saveToHistory } = useTimelineStore(useShallow(state => ({
+    const { currentTime, tracks, activeClipId, aspectRatio, applyCaptionUpdate, updateClip, setActiveClip, saveToHistory } = useTimelineStore(useShallow(state => ({
         currentTime:        state.currentTime,
         tracks:             state.tracks,
         activeClipId:       state.activeClipId,
+        aspectRatio:        state.aspectRatio,
         applyCaptionUpdate: state.applyCaptionUpdate,
         updateClip:         state.updateClip,
         setActiveClip:      state.setActiveClip,
         saveToHistory:      state.saveToHistory,
     })));
+
+    // ── Preview↔export font-size parity ─────────────────────────────────────
+    // `clip.fontSize` (and `clip.stroke.width`) are defined in the project's
+    // REFERENCE resolution — the same pixel space `<Player width={dims.width}
+    // height={dims.height}>` is mounted at in IDELayout.jsx, and (absent an
+    // explicit platform/resolution export override) the same space the export
+    // worker renders drawtext at. But this container itself is NOT locked to
+    // that resolution in actual CSS pixels — it's the responsively-sized div
+    // Player/TextOverlay/GraphicOverlay all share (Tailwind classes like
+    // `max-h-[70vh]`), so its rendered width is whatever the browser layout
+    // gives it. Applying `clip.fontSize`px directly, with no compensation,
+    // made captions look right or wrong purely by accident of window size —
+    // and never matched the export, which always renders at the full
+    // reference resolution. x/y positions never had this problem because
+    // they're stored as resolution-independent percentages; fontSize is the
+    // one property that's an absolute pixel value instead.
+    //
+    // previewScale = actual on-screen container width ÷ reference width, so
+    // `fontSize * previewScale` always LOOKS the same size on screen as
+    // `fontSize` px does when rendered at the full reference resolution —
+    // which is what the export produces.
+    const [previewScale, setPreviewScale] = React.useState(1);
+    React.useLayoutEffect(() => {
+        const el = containerRef.current;
+        if (!el) return;
+        const { width: refWidth } = getPlayerDimensions(aspectRatio);
+        const recompute = () => {
+            const rect = el.getBoundingClientRect();
+            if (rect.width > 0) setPreviewScale(rect.width / refWidth);
+        };
+        recompute();
+        const observer = new ResizeObserver(recompute);
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, [aspectRatio]);
 
     const textTracks = tracks.filter(t => t.type === 'text');
     if (textTracks.length === 0) return null;
@@ -421,9 +458,9 @@ const TextOverlay = () => {
                 const content = clip.content || t('timeline.newTextDefault');
 
                 const filters = [];
-                if (motion.blur > 0) filters.push(`blur(${motion.blur}px)`);
+                if (motion.blur > 0) filters.push(`blur(${motion.blur * previewScale}px)`);
                 const glowShadow = motion.glow > 0
-                    ? `0 0 ${motion.glow}px currentColor, 0 0 ${motion.glow * 2}px currentColor`
+                    ? `0 0 ${motion.glow * previewScale}px currentColor, 0 0 ${motion.glow * 2 * previewScale}px currentColor`
                     : null;
 
                 return (
@@ -445,14 +482,17 @@ const TextOverlay = () => {
                             transform,
                             width: '80%',
                             fontFamily: FONT_MAP[clip.fontFamily] || FONT_MAP[clip.fontFamily?.split(',')[0]?.trim()] || 'Inter, sans-serif',
-                            fontSize: `${clip.fontSize || 48}px`,
+                            // See the previewScale comment above the hook that
+                            // computes it — clip.fontSize/clip.stroke.width are
+                            // reference-resolution pixels, not screen pixels.
+                            fontSize: `${(clip.fontSize || 48) * previewScale}px`,
                             fontWeight: clip.fontWeight || 'normal',
                             fontStyle: clip.fontStyle || 'normal',
                             textDecoration: clip.textDecoration || 'none',
                             color: clip.color || '#ffffff',
                             textAlign: clip.textAlign || 'center',
                             textShadow: glowShadow || clip.textShadow || 'none',
-                            WebkitTextStroke: clip.stroke ? `${clip.stroke.width}px ${clip.stroke.color}` : 'none',
+                            WebkitTextStroke: clip.stroke ? `${clip.stroke.width * previewScale}px ${clip.stroke.color}` : 'none',
                             textTransform: clip.captionStyle?.uppercase ? 'uppercase' : 'none',
                             opacity: motion.opacity,
                             ...(filters.length > 0 ? { filter: filters.join(' ') } : {}),

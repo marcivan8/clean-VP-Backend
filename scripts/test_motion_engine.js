@@ -613,6 +613,55 @@ section('12 · Regenerating captions REPLACES the prior batch, not stacks on it'
         'whichever old clip happens to be first rather than a stable snapshot');
 }
 
+// ── §13. Preview↔export caption font-SIZE parity ────────────────────────────
+// TextOverlay.jsx renders captions in the DOM, as a sibling of Revideo's
+// <Player>, inside a div that's CSS-responsively sized (Tailwind classes like
+// `max-h-[70vh]`) rather than locked in actual CSS pixels to the project's
+// reference resolution (`getPlayerDimensions(aspectRatio)` — the same numbers
+// `<Player width={dims.width} height={dims.height}>` is mounted at, and the
+// resolution the export worker's drawtext filters render `clip.fontSize` at).
+// clip.fontSize is an absolute reference-resolution pixel value — unlike x/y,
+// which are stored as resolution-independent percentages — so rendering it
+// directly as `${fontSize}px` in the DOM made the on-screen caption size
+// depend on window/panel layout instead of matching the export. Fixed by
+// scaling fontSize (and stroke width / glow blur) by
+// `containerRef.getBoundingClientRect().width / referenceWidth`.
+{
+    section("13 · TextOverlay scales caption fontSize to match the export's reference resolution");
+
+    const dims = read('client/src/utils/playerDimensions.js');
+    check('getPlayerDimensions is exported from a shared util (not just a local const in IDELayout.jsx)',
+        /export const getPlayerDimensions = \(ratio\) => \{/.test(dims));
+
+    const layout = read('client/src/layouts/IDELayout.jsx');
+    check('IDELayout imports the shared getPlayerDimensions instead of redeclaring it',
+        /import \{ getPlayerDimensions \} from '\.\.\/utils\/playerDimensions'/.test(layout) &&
+        !/\nconst getPlayerDimensions = \(ratio\) => \{/.test(layout),
+        'a second, divergent copy of this function is exactly how the reference resolution used by ' +
+        'the editor and the one used by TextOverlay could silently drift apart again');
+
+    const overlay = read('client/src/components/Player/TextOverlay.jsx');
+    check('TextOverlay imports the shared getPlayerDimensions',
+        /import \{ getPlayerDimensions \} from '\.\.\/\.\.\/utils\/playerDimensions\.js'/.test(overlay));
+    check('TextOverlay reads aspectRatio from the timeline store',
+        /aspectRatio:\s*state\.aspectRatio,/.test(overlay));
+    check('a previewScale is computed from the container\'s actual rendered width vs the reference width',
+        /const \{ width: refWidth \} = getPlayerDimensions\(aspectRatio\);/.test(overlay) &&
+        /setPreviewScale\(rect\.width \/ refWidth\)/.test(overlay));
+    check('the scale recomputes on resize, not just once at mount (ResizeObserver, not a one-shot read)',
+        /new ResizeObserver\(recompute\)/.test(overlay) &&
+        /observer\.observe\(el\)/.test(overlay));
+    check('fontSize is multiplied by previewScale, not rendered as a raw pixel value',
+        /fontSize: `\$\{\(clip\.fontSize \|\| 48\) \* previewScale\}px`/.test(overlay),
+        'the old `${clip.fontSize || 48}px` had no relationship to the actual on-screen container size');
+    check('stroke width scales too, so thick captions don\'t look thin relative to the (now correctly scaled) text',
+        /WebkitTextStroke: clip\.stroke \? `\$\{clip\.stroke\.width \* previewScale\}px/.test(overlay));
+    check('the ResizeObserver hook runs unconditionally, before the early `return null`s (rules of hooks)',
+        overlay.indexOf('React.useLayoutEffect(() => {') < overlay.indexOf('if (textTracks.length === 0) return null;'),
+        'a hook placed after a conditional return is called on some renders and not others, which React ' +
+        'forbids — the fix must sit alongside the other unconditional hooks above the early-return checks');
+}
+
 console.log(`\n${'─'.repeat(60)}`);
 console.log(`Motion engine: ${passed} passed, ${failed} failed`);
 console.log('─'.repeat(60));

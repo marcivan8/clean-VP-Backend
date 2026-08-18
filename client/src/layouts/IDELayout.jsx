@@ -17,6 +17,7 @@ import TextPanel from '../components/TextPanel';
 import TranscriptPanel from '../components/TranscriptPanel';
 import TextOverlay from '../components/Player/TextOverlay';
 import GraphicOverlay from '../components/Player/GraphicOverlay'; // R62 — stickers/logos/graphics track
+import { getPlayerDimensions } from '../utils/playerDimensions';
 import MobileToolbar from '../components/MobileToolbar';
 import MobileAIBar from '../components/MobileAIBar';
 import useDeviceType from '../hooks/useDeviceType';
@@ -60,17 +61,10 @@ const VideoTimeDisplay = () => {
     return <span ref={timeRef} className="font-mono text-xs text-primary">0.00</span>;
 };
 
-const getPlayerDimensions = (ratio) => {
-    switch (ratio) {
-        case '9:16': return { width: 1080, height: 1920 };
-        case '1:1':  return { width: 1080, height: 1080 };
-        case '4:3':  return { width: 1440, height: 1080 };
-        case '4:5':  return { width: 1080, height: 1350 };
-        case '21:9': return { width: 2560, height: 1080 };
-        case '16:9':
-        default:     return { width: 1920, height: 1080 };
-    }
-};
+// getPlayerDimensions now lives in ../utils/playerDimensions.js — TextOverlay
+// needs the exact same numbers (to scale caption fontSize to match this
+// container's actual on-screen size) and previously had no way to reach a
+// function declared as a local, un-exported const in this file.
 
 // ── Video type detection + contextual welcome message ─────────────────────────
 // Uses resolution, fps, file extension, duration, and filename — in that order

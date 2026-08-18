@@ -39,11 +39,15 @@ import { revealedWordCount } from '../motion/CaptionModel.js';
  * - No per-word colour highlight of the actively-spoken word yet — captions
  *   reveal word-by-word (real timing, via `revealedWordCount`) but render as
  *   one flat colour. `CAPTION_STYLE_PACKS.wordHighlight` is not applied here.
- * - No custom font embedding (render-lambda's `FontInstaller` base64-embeds
- *   fonts for a stateless Lambda cold start; this worker doesn't need that
- *   trick, but font loading here is still just a named `fontFamily` on `Txt`,
- *   falling back to the browser's built-in sans-serif if the family isn't
- *   otherwise available in the render container).
+ * - Font loading here is just a named `fontFamily` on `Txt` — but unlike a
+ *   stateless Lambda cold start (render-lambda's `FontInstaller` base64-
+ *   embeds fonts per-invocation), this worker's fonts are registered once,
+ *   ahead of time, via `../fonts.css`'s @font-face block (imported as a
+ *   side effect in project.ts) plus the .ttf files duplicated into
+ *   ../fonts/. Every caption family a user can pick is covered; a family
+ *   that's genuinely missing from both still falls back to the browser's
+ *   built-in sans-serif, same as before — see fonts.css's header for the
+ *   full story of why this was needed and what silently broke without it.
  */
 
 function useVar<T>(vars: any, name: string, fallback: T): T {
