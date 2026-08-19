@@ -1059,10 +1059,30 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         fileInputRef.current.click();
     };
 
+    // pollJobResult's own default (300s / 5 min) was sized for typical 1080p-
+    // and-under exports. A real ffmpeg encode measured directly (same filter
+    // chain + bitrates this job actually uses: scale/pad, drawtext, libx264
+    // high profile) showed 4k running ~2.8x slower than 1080p per clip — for
+    // anything beyond a very short project, that easily exceeds 5 minutes of
+    // real server-side work across all clips + captions + concat + audio,
+    // even though the export itself is still succeeding. The client would
+    // then report a false "timed out" while the job quietly finishes anyway.
+    // Mirrors the precedent already set for the Revideo path, which gets 16
+    // minutes instead of 5 for the same reason (see pollJobResult's own
+    // docblock + CLAUDE.md's note on why that one must never be shrunk back
+    // to 300s). Keyed on resolution only — a platform preset (tiktok/reels/
+    // shorts/youtube) is always ~1080p-equivalent, so it stays on the default.
+    const EXPORT_POLL_TIMEOUT_MS_BY_RESOLUTION = {
+        '2k': 10 * 60 * 1000,
+        '4k': 20 * 60 * 1000,
+    };
+    const getExportPollTimeoutMs = (settings) =>
+        (!settings.platform && EXPORT_POLL_TIMEOUT_MS_BY_RESOLUTION[settings.resolution]) || undefined; // undefined -> pollJobResult's own default
+
     // Standard export path: FFmpeg + drawtext via BullMQ (jobs/exportProcessor.js).
     // Fast, stable, the default for every user.
     const handleFfmpegExport = async (settings) => {
-        const { tracks, duration, assets, projectLUTId } = useTimelineStore.getState();
+        const { tracks, duration, assets, projectLUTId, aspectRatio: projectAspectRatio } = useTimelineStore.getState();
         const { authFetch }     = await import('../utils/authFetch.js');
         const { pollJobResult } = await import('../utils/jobPoller.js');
 
@@ -1157,6 +1177,15 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     platform: settings.platform || null,
                     quality:  settings.quality  || 'high',
                     resolution: settings.resolution || '1080p',
+                    // The project's actual aspect ratio — previously never sent for
+                    // this (the default, non-Revideo) export path at all. Without
+                    // it, a non-16:9 project exported without an explicit platform
+                    // preset silently rendered at plain 16:9 dimensions (the export
+                    // worker's aspect-ratio-blind resolution default), mismatching
+                    // both the frame itself and every caption's on-screen size
+                    // against what the editor showed — see jobs/exportProcessor.js's
+                    // getResolutionDimensions() for the server-side half of this fix.
+                    aspectRatio: projectAspectRatio || '16:9',
                     // The selected colour grade. Stored in the timeline store but
                     // never sent, so the export had no way to know a LUT was
                     // chosen — one half of why selecting a LUT changed no pixel
@@ -1177,8 +1206,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         if (!response.ok) throw new Error(data.error || data.message || 'Export failed');
         if (!data.jobId)   throw new Error('Export response missing jobId');
 
-        // Poll until the worker finishes (handles Railway timeouts gracefully)
-        const result = await pollJobResult(data.jobId);
+        // Poll until the worker finishes (handles Railway timeouts gracefully).
+        // 2k/4k get a longer budget than the 300s default — see
+        // getExportPollTimeoutMs's comment above for why.
+        const result = await pollJobResult(data.jobId, null, getExportPollTimeoutMs(settings));
         if (!result?.url) throw new Error('Export completed but no URL returned');
 
         return { url: result.url, filename: result.filename, metadata: result.metadata };

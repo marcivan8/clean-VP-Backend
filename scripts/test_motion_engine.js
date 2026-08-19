@@ -662,6 +662,130 @@ section('12 · Regenerating captions REPLACES the prior batch, not stacks on it'
         'forbids — the fix must sit alongside the other unconditional hooks above the early-return checks');
 }
 
+// ── §14. Export resolution actually follows the project's aspect ratio ─────
+// jobs/exportProcessor.js's targetWidth/targetHeight used to come ONLY from
+// RESOLUTION_PRESETS/PLATFORM_PRESETS — both blind to the project's actual
+// aspect ratio unless the user picked a platform preset (tiktok/reels/
+// shorts) that happened to match it. A 9:16 project exported at the default
+// '1080p' resolution with no platform selected rendered at 1920x1080
+// LANDSCAPE, while the editor's reference resolution for that same project
+// was 1080x1920 PORTRAIT — every caption's fontSize (an absolute pixel
+// value in the reference space) came out roughly 1.78x off, independent of
+// (and not fixed by) §13's TextOverlay.jsx previewScale fix, which only
+// made the EDITOR correctly show fontSize against its own reference
+// resolution — it had no way to fix an export computing a DIFFERENT one.
+{
+    section("14 · export resolution follows the project's aspect ratio, not a hardcoded 16:9 default");
+
+    const exportSrc = read('jobs/exportProcessor.js');
+    const dimsSrc = read('client/src/utils/playerDimensions.js');
+
+    check('exportProcessor declares its own ASPECT_RATIO_DIMENSIONS table', /const ASPECT_RATIO_DIMENSIONS = \{/.test(exportSrc));
+    check('exportProcessor declares getResolutionDimensions()', /function getResolutionDimensions\(aspectRatio, tier\) \{/.test(exportSrc));
+    check('targetWidth/targetHeight are computed via getResolutionDimensions when no platform is set',
+        /const resolvedDims = platform \|\| getResolutionDimensions\(settings\.aspectRatio, settings\.resolution\);/.test(exportSrc) &&
+        /const targetWidth  = platform\?\.width  \|\| resolvedDims\.width;/.test(exportSrc) &&
+        /const targetHeight = platform\?\.height \|\| resolvedDims\.height;/.test(exportSrc));
+    check('an explicit platform preset still wins over the aspect-ratio-derived dimensions',
+        exportSrc.indexOf('platform || getResolutionDimensions') !== -1 || /platform\?\.width  \|\| resolvedDims\.width/.test(exportSrc),
+        'a platform preset (tiktok/reels/shorts) is an explicit user choice and must not be overridden');
+
+    const layout = read('client/src/layouts/IDELayout.jsx');
+    check('IDELayout reads the project aspectRatio out of the timeline store for export',
+        /const \{ tracks, duration, assets, projectLUTId, aspectRatio: projectAspectRatio \} = useTimelineStore\.getState\(\);/.test(layout));
+    check('the export request body actually sends aspectRatio to the server',
+        /aspectRatio: projectAspectRatio \|\| '16:9',/.test(layout),
+        'without this the server-side fix has nothing to key off — settings.aspectRatio would always be undefined');
+
+    // ── Extract and actually RUN getResolutionDimensions (not just regex it) ──
+    // Pulls ASPECT_RATIO_DIMENSIONS + RESOLUTION_PRESETS + the function body
+    // verbatim out of the real source and evaluates them for real — proves the
+    // arithmetic is right, not just that the code shape looks plausible.
+    const resPresetsMatch = exportSrc.match(/const RESOLUTION_PRESETS = \{[\s\S]*?\n\};/);
+    const aspectDimsMatch = exportSrc.match(/const ASPECT_RATIO_DIMENSIONS = \{[\s\S]*?\n\};/);
+    const fnMatch = exportSrc.match(/function getResolutionDimensions\(aspectRatio, tier\) \{[\s\S]*?\n\}/);
+    check('all three pieces needed to eval getResolutionDimensions for real were found in source',
+        !!(resPresetsMatch && aspectDimsMatch && fnMatch));
+
+    if (resPresetsMatch && aspectDimsMatch && fnMatch) {
+        // eslint-disable-next-line no-new-func
+        const getResolutionDimensions = new Function(
+            `${resPresetsMatch[0]}\n${aspectDimsMatch[0]}\n${fnMatch[0]}\nreturn getResolutionDimensions;`
+        )();
+
+        check('16:9 at every quality tier is BYTE-IDENTICAL to the pre-fix RESOLUTION_PRESETS values (zero regression for the common case)',
+            ['720p', '1080p', '2k', '4k'].every(tier => {
+                const d = getResolutionDimensions('16:9', tier);
+                const p = { '720p': [1280, 720], '1080p': [1920, 1080], '2k': [2560, 1440], '4k': [3840, 2160] }[tier];
+                return d.width === p[0] && d.height === p[1];
+            }));
+
+        const v916 = getResolutionDimensions('9:16', '1080p');
+        check('9:16 at 1080p resolves to portrait 1080x1920 — matching the editor\'s reference resolution exactly',
+            v916.width === 1080 && v916.height === 1920, `got ${JSON.stringify(v916)}`);
+
+        const v11_4k = getResolutionDimensions('1:1', '4k');
+        check('1:1 at 4k resolves to a square (both dimensions equal, scaled to the 4k tier)',
+            v11_4k.width === v11_4k.height && v11_4k.width === 2160, `got ${JSON.stringify(v11_4k)}`);
+
+        check('every generated dimension is even (required by yuv420p output)',
+            ['9:16', '1:1', '4:3', '4:5', '21:9', '16:9'].every(ar =>
+                ['720p', '1080p', '2k', '4k'].every(tier => {
+                    const d = getResolutionDimensions(ar, tier);
+                    return d.width % 2 === 0 && d.height % 2 === 0;
+                })));
+
+        const unknownAr = getResolutionDimensions('unknown-ratio', '1080p');
+        check('an unrecognized aspect ratio fails open to the plain 16:9 1080p preset rather than throwing',
+            unknownAr.width === 1920 && unknownAr.height === 1080, `got ${JSON.stringify(unknownAr)}`);
+    }
+}
+
+// ── §15. 2k/4k exports get a longer client poll budget ─────────────────────
+// pollJobResult's 300s default was sized for typical 1080p-and-under
+// exports. A real ffmpeg encode measured directly (same filter chain +
+// bitrates jobs/exportProcessor.js actually uses) showed 4k running ~2.8x
+// slower than 1080p per clip — for anything beyond a very short project,
+// that plausibly exceeds 5 minutes of real work even though the export is
+// still succeeding server-side, producing a false "timed out" error on the
+// client while the job quietly finishes anyway. Mirrors the precedent
+// already set for the Revideo path (16 min instead of 5, for the same
+// underlying reason — see pollJobResult's own docblock).
+{
+    section("15 · 2k/4k exports get a longer poll timeout than the 300s default");
+
+    const layout = read('client/src/layouts/IDELayout.jsx');
+    check('a resolution-keyed timeout table exists for 2k/4k',
+        /const EXPORT_POLL_TIMEOUT_MS_BY_RESOLUTION = \{/.test(layout) &&
+        /'2k':\s*10 \* 60 \* 1000,/.test(layout) &&
+        /'4k':\s*20 \* 60 \* 1000,/.test(layout));
+    check('the timeout lookup is keyed on settings.resolution AND falls back to the default (undefined) for anything else',
+        /const getExportPollTimeoutMs = \(settings\) =>/.test(layout) &&
+        /EXPORT_POLL_TIMEOUT_MS_BY_RESOLUTION\[settings\.resolution\]/.test(layout));
+    check('an explicit platform preset (tiktok/reels/shorts/youtube) is excluded — those are ~1080p-equivalent',
+        /!settings\.platform && EXPORT_POLL_TIMEOUT_MS_BY_RESOLUTION\[settings\.resolution\]/.test(layout),
+        'a platform preset always resolves to ~1080p dimensions regardless of the resolution field, so it should never get the longer budget by accident');
+    check('the FFmpeg export path actually passes the computed timeout into pollJobResult',
+        /pollJobResult\(data\.jobId, null, getExportPollTimeoutMs\(settings\)\)/.test(layout),
+        'computing the timeout without passing it into the actual poll call would be a no-op fix');
+
+    // ── Actually evaluate the real function, not just regex its shape ──────
+    const fnMatch = layout.match(/const EXPORT_POLL_TIMEOUT_MS_BY_RESOLUTION = \{[\s\S]*?\n    \};\n    const getExportPollTimeoutMs = \(settings\) =>\n        .*;/);
+    check('the timeout function was found in source for real evaluation', !!fnMatch);
+    if (fnMatch) {
+        // eslint-disable-next-line no-new-func
+        const getExportPollTimeoutMs = new Function(`${fnMatch[0]}\nreturn getExportPollTimeoutMs;`)();
+        check('1080p (no platform) gets undefined → pollJobResult\'s own 300s default applies',
+            getExportPollTimeoutMs({ resolution: '1080p', platform: null }) === undefined);
+        check('2k (no platform) gets 10 minutes',
+            getExportPollTimeoutMs({ resolution: '2k', platform: null }) === 10 * 60 * 1000);
+        check('4k (no platform) gets 20 minutes',
+            getExportPollTimeoutMs({ resolution: '4k', platform: null }) === 20 * 60 * 1000);
+        check('4k WITH a platform preset selected still gets undefined (the default) — platform wins',
+            getExportPollTimeoutMs({ resolution: '4k', platform: 'tiktok' }) === undefined);
+    }
+}
+
 console.log(`\n${'─'.repeat(60)}`);
 console.log(`Motion engine: ${passed} passed, ${failed} failed`);
 console.log('─'.repeat(60));

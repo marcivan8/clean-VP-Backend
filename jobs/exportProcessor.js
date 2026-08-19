@@ -439,6 +439,58 @@ const RESOLUTION_PRESETS = {
     '4k':    { width: 3840, height: 2160, bitrate: '35000k' },
 };
 
+// ── Aspect-ratio reference dimensions ───────────────────────────────────────
+// MUST mirror client/src/utils/playerDimensions.js's getPlayerDimensions()
+// exactly — that table is what `project.settings.shared.size` gets synced to
+// for the live `<Player>`, what `clip.fontSize` is authored against (a raw
+// pixel value in THIS coordinate space), and what TextOverlay.jsx's
+// `previewScale` divides by. Every RESOLUTION_PRESETS width below is that
+// same table's 16:9 width at each quality tier (1280/1920/2560/3840) — no
+// coincidence, `getResolutionDimensions()` below derives every OTHER aspect
+// ratio's dimensions the same way, so 16:9 exports are byte-identical to
+// before this fix and every other aspect ratio finally matches too.
+//
+// THE BUG THIS FIXES: `targetWidth`/`targetHeight` (below) used to come
+// ONLY from RESOLUTION_PRESETS/PLATFORM_PRESETS — both blind to the
+// project's actual aspect ratio unless the user happens to pick a platform
+// preset (tiktok/reels/shorts) that matches it. A 9:16 project exported at
+// the default '1080p' resolution (no platform selected) rendered at
+// 1920x1080 — LANDSCAPE — while the editor's reference resolution for that
+// same project was 1080x1920 PORTRAIT. `clip.fontSize` is an absolute pixel
+// value in that reference space, so every caption came out roughly 1.78x
+// off from what the editor showed, on top of the video itself being
+// letterboxed into the wrong orientation. This is the actual cause of
+// "caption size doesn't match the editor" that survived the earlier
+// TextOverlay.jsx previewScale fix — that fix made the editor correctly
+// show fontSize against ITS reference resolution; it could never have fixed
+// the export using a DIFFERENT, aspect-ratio-blind one.
+const ASPECT_RATIO_DIMENSIONS = {
+    '9:16': { width: 1080, height: 1920 },
+    '1:1':  { width: 1080, height: 1080 },
+    '4:3':  { width: 1440, height: 1080 },
+    '4:5':  { width: 1080, height: 1350 },
+    '21:9': { width: 2560, height: 1080 },
+    '16:9': { width: 1920, height: 1080 },
+};
+
+/**
+ * Derive target export dimensions for a resolution TIER ('720p'/'1080p'/
+ * '2k'/'4k') at a given aspect ratio, by scaling ASPECT_RATIO_DIMENSIONS'
+ * 1080p-tier numbers to that tier's long edge — the same numbers
+ * RESOLUTION_PRESETS already uses for 16:9, so 16:9 output is unchanged.
+ * Falls back to the plain 16:9 RESOLUTION_PRESETS entry for an unrecognized
+ * aspect ratio rather than throwing — an export must never fail over this.
+ */
+function getResolutionDimensions(aspectRatio, tier) {
+    const resPreset = RESOLUTION_PRESETS[tier] || RESOLUTION_PRESETS['1080p'];
+    const ref = ASPECT_RATIO_DIMENSIONS[aspectRatio];
+    if (!ref) return { width: resPreset.width, height: resPreset.height };
+    const scale = resPreset.width / ASPECT_RATIO_DIMENSIONS['16:9'].width;
+    // FFmpeg's yuv420p output requires even width/height.
+    const roundEven = (n) => Math.round(n * scale / 2) * 2;
+    return { width: roundEven(ref.width), height: roundEven(ref.height) };
+}
+
 // ─── Main job handler ─────────────────────────────────────────────────────────
 
 module.exports = async function processExportJob(job) {
@@ -450,9 +502,18 @@ module.exports = async function processExportJob(job) {
     // ── Resolve platform / resolution settings ─────────────────────────────
     const platform   = settings.platform && PLATFORM_PRESETS[settings.platform] ? PLATFORM_PRESETS[settings.platform] : null;
     const resPreset  = RESOLUTION_PRESETS[settings.resolution] || RESOLUTION_PRESETS['1080p'];
+    // A platform preset (tiktok/reels/shorts/youtube) already names an exact
+    // orientation the user explicitly opted into — leave those untouched.
+    // Otherwise derive from the PROJECT's actual aspect ratio (see
+    // ASPECT_RATIO_DIMENSIONS/getResolutionDimensions above) instead of
+    // blindly using resPreset's bare (always-16:9) width/height — that blind
+    // default was the real cause of captions (and the whole frame) rendering
+    // at the wrong size/orientation for any non-16:9 project exported
+    // without an explicit platform selected.
+    const resolvedDims = platform || getResolutionDimensions(settings.aspectRatio, settings.resolution);
 
-    const targetWidth  = platform?.width  || resPreset.width;
-    const targetHeight = platform?.height || resPreset.height;
+    const targetWidth  = platform?.width  || resolvedDims.width;
+    const targetHeight = platform?.height || resolvedDims.height;
     const targetFps    = platform?.fps    || settings.fps    || 30;
     const codec        = platform?.codec  || 'libx264';
     const profile      = platform?.profile || 'high';
