@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, ArrowRight, Play, CheckCircle2, MousePointerClick, Layers, LayoutGrid, Link as LinkIcon, MessageSquare, Mic, Scissors, UserCheck, Zap } from 'lucide-react';
+import { Sparkles, ArrowRight, Play, CheckCircle2, MousePointerClick, Layers, LayoutGrid, Link as LinkIcon, MessageSquare, Mic, Scissors, UserCheck, Zap, Video, BookOpen, Megaphone, Presentation, Film } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
@@ -85,6 +85,7 @@ const Nav = () => {
                 <Logo />
                 <div style={{ display: "flex", gap: 22, fontSize: 13.5, color: "var(--fg-2)" }} className="hidden sm:flex font-medium">
                     <a href="#product" className="hover:text-foreground transition-colors">{t('nav.product')}</a>
+                    <a href="#brain" className="hover:text-foreground transition-colors">{t('nav.brain')}</a>
                     <a href="#exports" className="hover:text-foreground transition-colors">{t('nav.exports')}</a>
                     <a href="/about" className="hover:text-foreground transition-colors">{t('nav.about')}</a>
                 </div>
@@ -191,12 +192,6 @@ const Hero = () => {
             <div className="aurora" />
             <div className="wrap" style={{ position: "relative", zIndex: 2 }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 28 }}>
-                    <div className="tag fade-up">
-                        <span className="dot" />
-                        <span>{t('hero.badge')}</span>
-                        <span style={{ color: "var(--fg-4)" }}>—</span>
-                        <span>{t('hero.version')}</span>
-                    </div>
                     <h1 className="display fade-up fade-up-d1" style={{ whiteSpace: "pre-line" }}>
                         {t('hero.headline').split('\n').map((line, i, arr) => (
                             <React.Fragment key={i}>
@@ -227,6 +222,30 @@ const Hero = () => {
 const A = ({ children }) => <span style={{ color: "var(--accent)", fontWeight: 600 }}>{children}</span>;
 const G = ({ children }) => <span style={{ color: "var(--mint)", fontWeight: 600 }}>{children}</span>;
 const W = ({ children }) => <span style={{ color: "var(--fg)", fontWeight: 600 }}>{children}</span>;
+
+// ── Animated logo mark — the real Vibed waveform, breathing like a live level meter.
+// Bars/gradient match components/Logo.jsx exactly; .wave-bar keyframes live in index.css
+// and are disabled under prefers-reduced-motion alongside the site's other animations.
+const LOGO_BARS = [
+    { x: 2.5,  y: 15,   h: 70, delay: '-0.9s', color: '#00E5FF' },
+    { x: 13.5, y: 25,   h: 50, delay: '-0.7s', color: '#17CDFB' },
+    { x: 24.5, y: 33,   h: 34, delay: '-1.3s', color: '#2EB5F7' },
+    { x: 35.5, y: 39.5, h: 21, delay: '-0.4s', color: '#459DF3' },
+    { x: 46.5, y: 43,   h: 14, delay: '-1.1s', color: '#5B85EF' },
+    { x: 57.5, y: 39.5, h: 21, delay: '-0.2s', color: '#726DEB' },
+    { x: 68.5, y: 33,   h: 34, delay: '-1.5s', color: '#8855E7' },
+    { x: 79.5, y: 25,   h: 50, delay: '-0.6s', color: '#9F3DE3' },
+    { x: 90.5, y: 15,   h: 70, delay: '-1s',   color: '#8A2BE2' },
+];
+const AnimatedLogo = ({ size = 48, glow = true }) => (
+    <svg width={size} height={size} viewBox="0 0 100 100" fill="none" aria-hidden="true"
+        style={glow ? { filter: "drop-shadow(0 0 14px rgba(114,109,235,.45))" } : undefined}>
+        {LOGO_BARS.map((bar, i) => (
+            <rect key={i} className="wave-bar" x={bar.x} y={bar.y} width="7" height={bar.h} rx="3.5"
+                fill={bar.color} style={{ animationDelay: bar.delay }} />
+        ))}
+    </svg>
+);
 
 // ── Problem Section ───────────────────────────────────────────────────────────
 const ProblemSection = () => {
@@ -315,6 +334,80 @@ const ProblemSection = () => {
     );
 };
 
+// ── Editorial Brain — scenario-aware suggestions ────────────────────────────────
+const BRAIN_SCENARIO_ICONS = [Mic, Video, BookOpen, Megaphone, Presentation, Film];
+
+const EditorialBrain = () => {
+    const { t } = useTranslation('landing');
+    const [ref, visible] = useReveal(0.1);
+
+    const _rawScenarios = t('brain.scenarios', { returnObjects: true });
+    const scenarios = Array.isArray(_rawScenarios) ? _rawScenarios : [];
+
+    return (
+        <section id="brain" style={{ padding: "80px 0", position: "relative", overflow: "hidden" }}>
+            <div className="aurora" style={{ opacity: 0.5 }} />
+            <div className="wrap" style={{ position: "relative", zIndex: 2 }}>
+                <div className="section-head text-center" style={{ marginBottom: 56, alignItems: "center", marginInline: "auto" }}>
+                    <span className="eyebrow">{t('brain.eyebrow')}</span>
+                    <h2 className="h-section">
+                        {t('brain.headline').split('\n').map((line, i, arr) => (
+                            <React.Fragment key={i}>
+                                {i === arr.length - 1 ? <em>{line}</em> : line}
+                                {i < arr.length - 1 && <br />}
+                            </React.Fragment>
+                        ))}
+                    </h2>
+                    <p className="body-lg" style={{ maxWidth: 620, marginInline: "auto" }}>{t('brain.body')}</p>
+                </div>
+
+                <div
+                    className="grid-cols-1 md:grid-cols-[220px_1fr]"
+                    style={{ display: "grid", gap: 40, alignItems: "center" }}
+                >
+                    <div style={{ display: "flex", justifyContent: "center" }}>
+                        <div style={{ position: "relative" }}>
+                            <div style={{
+                                position: "absolute", inset: -32, borderRadius: "50%",
+                                background: "radial-gradient(circle, color-mix(in oklch, var(--violet) 28%, transparent), transparent 70%)",
+                                filter: "blur(4px)", pointerEvents: "none",
+                            }} />
+                            <AnimatedLogo size={104} />
+                        </div>
+                    </div>
+
+                    <div
+                        ref={ref}
+                        className="grid-cols-1 md:grid-cols-3"
+                        style={{ display: "grid", gap: 16 }}
+                    >
+                        {scenarios.map((s, i) => {
+                            const Icon = BRAIN_SCENARIO_ICONS[i % BRAIN_SCENARIO_ICONS.length];
+                            return (
+                                <div key={i} className="card" style={{
+                                    padding: "24px 22px", display: "flex", flexDirection: "column", gap: 14,
+                                    opacity: visible ? 1 : 0,
+                                    transform: visible ? "translateY(0)" : "translateY(18px)",
+                                    transition: `opacity 0.55s ease ${i * 0.08}s, transform 0.55s ease ${i * 0.08}s`,
+                                }}>
+                                    <div style={{
+                                        width: 44, height: 44, borderRadius: 12, background: "var(--bg-3)", border: "0.5px solid var(--line)",
+                                        display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)",
+                                    }}>
+                                        <Icon size={19} strokeWidth={1.7} />
+                                    </div>
+                                    <h3 style={{ fontSize: 16.5, fontWeight: 600, margin: 0 }}>{s.title}</h3>
+                                    <p style={{ fontSize: 13.5, color: "var(--fg-3)", lineHeight: 1.6, margin: 0 }}>{s.body}</p>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+        </section>
+    );
+};
+
 // ── Feature Moments ───────────────────────────────────────────────────────────
 const FeatureMoments = () => {
     const { t } = useTranslation('landing');
@@ -340,10 +433,10 @@ const FeatureMoments = () => {
             icon: Scissors
         },
         {
-            title: translatedMoments[3]?.title || "Speaker-scoped commands",
-            copy: translatedMoments[3]?.copy || "Cut all of Marc's stumbles — VIBED highlights segments and removes them.",
+            title: translatedMoments[3]?.title || "Analysis and edit suggestions",
+            copy: translatedMoments[3]?.copy || "ROKA watches where your project stands and proposes the next move — you accept, tweak, or dismiss.",
             img: "/AI acceptreject.png",
-            icon: UserCheck
+            icon: Sparkles
         }
     ];
 
@@ -898,6 +991,7 @@ const FinalCTA = () => {
         <section style={{ position: "relative", overflow: "hidden", paddingTop: 140, paddingBottom: 140 }}>
             <div className="aurora" />
             <div className="wrap" style={{ position: "relative", zIndex: 2, textAlign: "center", display: "flex", flexDirection: "column", gap: 28, alignItems: "center" }}>
+                <AnimatedLogo size={44} />
                 <h2 className="display" style={{ fontSize: "clamp(48px, 6.4vw, 96px)" }}>
                     {t('finalCta.headline').split('\n').map((line, i, arr) => (
                         <React.Fragment key={i}>
@@ -981,6 +1075,7 @@ const HomePage = () => {
             <main>
                 <Hero />
                 <ProblemSection />
+                <EditorialBrain />
                 <FeatureMoments />
                 <BeforeAfterSection />
                 <PersonasSection />

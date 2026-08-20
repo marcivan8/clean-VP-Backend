@@ -1,7 +1,5 @@
 {
   "hero": {
-    "badge": "Vibed Studio",
-    "version": "v0.6 \"Cinema\"",
     "headline": "Create at the\nspeed of thought.",
     "body": "Vibed is the creative operating system for storytellers and editors. Edit, organize and refine your footage in conversation with an assistant that respects your taste. Every edit lands as a named, reversible action.",
     "cta": "See plans",
@@ -57,9 +55,23 @@
         "copy": "Show 'cut from so anyway to let's move on' → the cut appears."
       },
       {
-        "title": "Speaker-scoped commands",
-        "copy": "Cut all of Marc's stumbles — VIBED highlights segments and removes them."
+        "title": "Analysis and edit suggestions",
+        "copy": "ROKA watches where your project stands and proposes the next move — a multicam angle, a zoom rhythm, a tighter cut — so you accept, tweak, or dismiss instead of starting from a blank timeline."
       }
+    ]
+  },
+
+  "brain": {
+    "eyebrow": "The editorial brain",
+    "headline": "It knows what you're making —\nnot just what you clicked.",
+    "body": "Vibed reads your footage the way an assistant editor would. Tell it what you're building, or let it recognize the format, and its suggestions change with it — a podcast gets different treatment than a product demo.",
+    "scenarios": [
+      { "title": "Podcasts & interviews", "body": "Speaker-colored transcript, cross-talk cleanup, and chapter suggestions for multi-guest conversations." },
+      { "title": "Vlogs & talking head", "body": "Pacing-aware cuts and best-moment picks tuned for personality-led, single-shot footage." },
+      { "title": "Tutorials & training", "body": "Keeps step-by-step structure intact while trimming dead air between demonstrations." },
+      { "title": "Ads & product demos", "body": "Flags your strongest hook and suggests a punchier first three seconds for the cut." },
+      { "title": "Presentations", "body": "Recognizes slide-driven pacing and keeps voice-over aligned to what's on screen." },
+      { "title": "Narrative & montage", "body": "Groups related takes and B-roll, so assembling a sequence starts from a shortlist, not a bin." }
     ]
   },
 
