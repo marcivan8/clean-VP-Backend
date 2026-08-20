@@ -790,6 +790,17 @@ section { padding: 96px 0; position: relative; }
   50% { transform: translate(2%, -2%); }
 }
 
+/* Animated logo mark — each waveform bar breathes like a live level meter.
+   Used by HomePage's AnimatedLogo component (hero, editorial brain, final CTA). */
+@keyframes barPulse {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.45); }
+}
+.wave-bar {
+  transform-origin: center;
+  animation: barPulse 1.6s ease-in-out infinite;
+}
+
 /* Focus rings */
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
@@ -842,6 +853,10 @@ section { padding: 96px 0; position: relative; }
   .fade-up {
     animation: none !important;
     opacity: 1 !important;
+    transform: none !important;
+  }
+  .wave-bar {
+    animation: none !important;
     transform: none !important;
   }
 }

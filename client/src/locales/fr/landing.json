@@ -1,7 +1,5 @@
 {
   "hero": {
-    "badge": "Vibed Studio",
-    "version": "v0.6 « Cinema »",
     "headline": "Créez à la\nvitesse de la pensée.",
     "body": "Vibed est le système d'exploitation créatif pour les créateurs et monteurs. Montez, organisez et affinez vos prises en conversation avec un assistant qui respecte votre goût. Chaque modification est nommée et réversible.",
     "cta": "Voir les offres",
@@ -57,9 +55,23 @@
         "copy": "Écrivez 'couper de donc voilà à passons à la suite' → la coupe apparaît."
       },
       {
-        "title": "Commandes par intervenant",
-        "copy": "Supprimer toutes les hésitations de Marc — VIBED surligne les segments et les supprime."
+        "title": "Analyse et suggestions de montage",
+        "copy": "ROKA observe où en est votre projet et propose la prochaine étape — un angle multicam, un rythme de zoom, une coupe plus serrée — pour que vous acceptiez, ajustiez ou refusiez au lieu de partir d'une timeline vide."
       }
+    ]
+  },
+
+  "brain": {
+    "eyebrow": "Le cerveau éditorial",
+    "headline": "Il sait ce que vous créez —\npas seulement ce que vous avez cliqué.",
+    "body": "Vibed lit vos rushes comme le ferait un assistant monteur. Dites-lui ce que vous construisez, ou laissez-le reconnaître le format, et ses suggestions changent en conséquence — un podcast reçoit un traitement différent d'une démo produit.",
+    "scenarios": [
+      { "title": "Podcasts & interviews", "body": "Transcription colorée par intervenant, nettoyage des interruptions, et suggestions de chapitres pour les conversations à plusieurs invités." },
+      { "title": "Vlogs & face caméra", "body": "Coupes sensibles au rythme et sélection des meilleurs moments, adaptées aux formats portés par une personnalité, en plan unique." },
+      { "title": "Tutoriels & formation", "body": "Conserve la structure étape par étape tout en supprimant les temps morts entre les démonstrations." },
+      { "title": "Publicités & démos produit", "body": "Repère votre accroche la plus forte et propose des trois premières secondes plus percutantes." },
+      { "title": "Présentations", "body": "Reconnaît le rythme porté par les diapositives et garde la voix off alignée avec ce qui est à l'écran." },
+      { "title": "Récit & montage", "body": "Regroupe les prises et B-roll apparentés, pour assembler une séquence à partir d'une sélection, pas d'un bac entier." }
     ]
   },
 
