@@ -124,6 +124,20 @@ class PlaybackEngine {
         this._lastTickNotify = 0;  // Throttle onTick to ~12fps so React re-renders don't flood main thread
         this._playGeneration = 0;  // Incremented on every play()/pause() to abort stale preload awaits
 
+        // Set the instant handleWorkerMessage() receives ANYTHING from the worker
+        // (a LOG line, a config error, a real frame — doesn't matter which). Used
+        // by play()'s preload timeout below to tell "the worker is alive and just
+        // running slowly" apart from "the worker never started at all" — e.g. a
+        // module Worker whose top-level `import * as MP4Box from './libs/...'`
+        // throws/fails to resolve on some WebKit/iOS Safari versions, which is a
+        // known class of bug where the failure never reaches `worker.onerror`
+        // either. Without this distinction the old code treated both cases
+        // identically: wait 5s, then "start anyway" straight into PLAYING with an
+        // empty buffer — permanently black, with no error ever raised, because
+        // silence from a worker that's simply behind and silence from a worker
+        // that never booted look the same from the outside.
+        this._workerEverResponded = false;
+
         this.gradingParams = {
             brightness: 1.0,
             contrast: 1.0,
@@ -577,6 +591,9 @@ class PlaybackEngine {
             this.setState(PlaybackState.PRELOADING);
             console.log('[PlaybackEngine] Preloading buffers...');
 
+            // Reset per-attempt: only messages received for THIS load attempt count.
+            this._workerEverResponded = false;
+
             // Start decoding
             this.worker.postMessage({
                 type: 'START_GENERATING',
@@ -587,18 +604,24 @@ class PlaybackEngine {
             const preloadTimeout = 5000; // 5 seconds max
             const startTime = Date.now();
 
-            await new Promise((resolve) => {
+            const timedOutWithNoResponse = await new Promise((resolve) => {
                 const checkPreload = () => {
                     // Bail immediately if a newer play()/pause() call superseded us
                     if (myGeneration !== this._playGeneration || this.isDestroyed) {
-                        resolve();
+                        resolve(false);
                         return;
                     }
                     if (this.isPreloadComplete()) {
-                        resolve();
+                        resolve(false);
                     } else if (Date.now() - startTime > preloadTimeout) {
-                        console.warn('[PlaybackEngine] Preload timeout, starting anyway');
-                        resolve(); // Start anyway with partial buffer
+                        // Zero messages of ANY kind (not even a LOG line) after 5s means
+                        // the worker itself almost certainly never booted — module Worker
+                        // construction/import failures on some WebKit/iOS builds don't
+                        // reliably fire worker.onerror, so this timeout is the only signal
+                        // we get. A worker that HAS been talking to us (partial buffer,
+                        // still filling) is a different, legitimate case — keep the old
+                        // "start anyway" leniency for that one.
+                        resolve(!this._workerEverResponded);
                     } else {
                         setTimeout(checkPreload, 50);
                     }
@@ -608,6 +631,20 @@ class PlaybackEngine {
 
             // If we were superseded (pause() was called, or a new play() arrived), abort
             if (myGeneration !== this._playGeneration || this.isDestroyed) return;
+
+            if (timedOutWithNoResponse) {
+                console.error('[PlaybackEngine] Worker never responded — pipeline failed to start');
+                this.setState(PlaybackState.ERROR);
+                this.onError({
+                    type: 'worker_unresponsive',
+                    message: 'Video pipeline failed to start on this device/browser (no response from decoder worker).',
+                });
+                return;
+            }
+
+            if (!this.isPreloadComplete()) {
+                console.warn('[PlaybackEngine] Preload timeout, starting anyway with partial buffer');
+            }
 
             this.setState(PlaybackState.READY);
         }
@@ -850,6 +887,7 @@ class PlaybackEngine {
     }
 
     handleWorkerMessage(e) {
+        this._workerEverResponded = true;
         const { type, payload } = e.data;
         if (type === 'LOG') {
             // The worker overrides its own console.log/error to postMessage
