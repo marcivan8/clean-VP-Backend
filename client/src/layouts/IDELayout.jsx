@@ -1559,7 +1559,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             "flex flex-col font-sans shrink-0 transition-transform duration-300 ease-in-out",
                             "border-[var(--line-soft)]",
                             // Mobile: fixed bottom sheet above toolbar
-                            "fixed inset-x-0 bottom-14 z-40 max-h-[65vh] rounded-t-2xl border-t overflow-hidden",
+                            "fixed inset-x-0 bottom-14 z-40 h-[65vh] max-h-[65vh] rounded-t-2xl border-t overflow-hidden",
                             // Desktop: revert to static left sidebar
                             "md:static md:inset-auto md:bottom-auto md:z-30 md:max-h-none md:rounded-none md:border-t-0 md:border-r md:w-72 md:shadow-none md:overflow-y-auto md:translate-y-0",
                             // Mobile visibility + disable pointer events when hidden (prevents touch bleed-through)
@@ -1866,7 +1866,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     )}
 
                     {/* Center — Viewport & Timeline (always visible on all screen sizes) */}
-                    <main className="flex-1 flex flex-col min-w-0 relative">
+                    <main className="flex-1 flex flex-col min-w-0 min-h-0 relative">
                         <div
                             className={classNames(
                                 "relative overflow-hidden shrink-0",
@@ -1984,7 +1984,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             "flex flex-col font-sans shrink-0 transition-transform duration-300 ease-in-out",
                             "border-[var(--line-soft)]",
                             // Mobile: fixed bottom sheet above toolbar (taller than media panel for the chat)
-                            "fixed inset-x-0 bottom-14 z-40 max-h-[80vh] rounded-t-2xl border-t overflow-hidden",
+                            "fixed inset-x-0 bottom-14 z-40 h-[80vh] max-h-[80vh] rounded-t-2xl border-t overflow-hidden",
                             // Desktop: revert to static right sidebar (always visible)
                             "md:static md:inset-auto md:bottom-auto md:z-30 md:max-h-none md:rounded-none md:border-t-0 md:border-l md:w-80 md:shadow-none md:overflow-y-auto md:translate-y-0",
                             // Mobile visibility + disable pointer events when hidden

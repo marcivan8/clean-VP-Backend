@@ -2378,16 +2378,30 @@ export class MediaExecutionEngine {
                 if (!serverPath && store.assets) {
                     const videoAsset = store.assets.find(a => a.type === 'video');
                     if (videoAsset) {
-                        const toGcsRawPath = (url) => {
-                            if (!url) return null;
-                            if (url.startsWith('raw/') || url.startsWith('temp/')) return url;
-                            const m = url.match(/\/(raw\/[^?#]+)/);
-                            if (m) return m[1];
-                            const p = url.match(/\/api\/proxy\/gcs-media\/proxies\/([^/]+)\/([^/]+)/);
-                            if (p) return `raw/${p[1]}/${p[2]}`;
-                            return null;
-                        };
-                        serverPath = toGcsRawPath(videoAsset.sourceUrl) || toGcsRawPath(videoAsset.proxyUrl);
+                        // Prefer the asset's own gcsPath field — set directly at upload
+                        // time (IDELayout.jsx: updateAsset(assetId, { gcsPath })) and
+                        // always exactly correct, including the Date.now()-prefixed
+                        // filename GCS actually stores the raw upload under. The
+                        // sourceUrl/proxyUrl regex fallback below can't reconstruct
+                        // that timestamp prefix from a proxy URL (proxies are named
+                        // differently from raw uploads), which was silently sending
+                        // a filename-only path to the server — producing "File not
+                        // found locally and GCS download failed" once the server
+                        // guessed a raw/{userId}/{filename} path missing the prefix.
+                        if (videoAsset.gcsPath) {
+                            serverPath = videoAsset.gcsPath;
+                        } else {
+                            const toGcsRawPath = (url) => {
+                                if (!url) return null;
+                                if (url.startsWith('raw/') || url.startsWith('temp/')) return url;
+                                const m = url.match(/\/(raw\/[^?#]+)/);
+                                if (m) return m[1];
+                                const p = url.match(/\/api\/proxy\/gcs-media\/proxies\/([^/]+)\/([^/]+)/);
+                                if (p) return `raw/${p[1]}/${p[2]}`;
+                                return null;
+                            };
+                            serverPath = toGcsRawPath(videoAsset.sourceUrl) || toGcsRawPath(videoAsset.proxyUrl);
+                        }
                     }
                 }
 
