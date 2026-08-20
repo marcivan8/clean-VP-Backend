@@ -52,7 +52,7 @@
       },
       {
         "title": "Tapez ce que vous voulez couper",
-        "copy": "Écrivez 'couper de donc voilà à passons à la suite' → la coupe apparaît."
+        "copy": "Tapez 'couper de donc voilà à passons à la suite' → la coupe apparaît."
       },
       {
         "title": "Analyse et suggestions de montage",
@@ -78,7 +78,7 @@
   "beforeAfter": {
     "eyebrow": "La différence",
     "headline": "Votre montage de 3h.\nTerminé en 20 minutes.",
-    "subtitle": "Ce qui change quand vous montez avec VIBED",
+    "subtitle": "Ce qui change quand vous montez avec Vibed",
     "withoutHeader": "SANS VIBED",
     "withHeader": "AVEC VIBED",
     "rows": [
@@ -129,8 +129,8 @@
   },
 
   "roi": {
-    "body": "En économisant 2,5 heures par vidéo et 3 vidéos par semaine, VIBED vous fait gagner 30 heures par mois. Le plan Créateur coûte moins d'une heure de votre temps.",
-    "boldPart": "VIBED vous fait gagner 30 heures par mois.",
+    "body": "En économisant 2,5 heures par vidéo et 3 vidéos par semaine, Vibed vous fait gagner 30 heures par mois. Le plan Créateur coûte moins d'une heure de votre temps.",
+    "boldPart": "Vibed vous fait gagner 30 heures par mois.",
     "accentPart": "une heure de votre temps."
   },
 
@@ -138,7 +138,7 @@
     "eyebrow": "Prêt pour l'aller-retour",
     "headline": "Fonctionne avec la suite dans laquelle vous finissez déjà.",
     "body1": "Vibed n'est pas la dernière application que vous ouvrirez — c'est la première. Transmettez proprement aux outils de montage professionnels dès que vous êtes prêt à peaufiner.",
-    "body2": "Le montage par transcription se fait dans VIBED. La finition se fait là où vous avez toujours fini.",
+    "body2": "Le montage par transcription se fait dans Vibed. La finition se fait là où vous avez toujours fini.",
     "formatTag": "XML · FCPXML · EDL · OTIO",
     "metadataTag": "Métadonnées des bacs préservées",
     "tools": {

@@ -118,7 +118,13 @@ const Nav = () => {
 };
 
 const HeroFrame = () => {
+    const { i18n } = useTranslation();
+    const isFrench = i18n.language?.slice(0, 2) === 'fr';
     const images = [
+        // French-only: real screenshot of AI subtitle styling + ROKA's proactive
+        // edit suggestions, with French UI chrome — only fits the fr locale since
+        // its on-screen labels are French.
+        ...(isFrench ? ["/Sous-titres et suggestions IA.png"] : []),
         "/Hero Editor.png",
         "/AI commands.png",
         "/Transcript editing.png",
@@ -186,7 +192,7 @@ const HeroFrame = () => {
 };
 
 const Hero = () => {
-    const { t } = useTranslation('landing');
+    const { t, i18n } = useTranslation('landing');
     return (
         <section style={{ paddingTop: 140, paddingBottom: 40, position: "relative", overflow: "hidden" }}>
             <div className="aurora" />
@@ -211,7 +217,7 @@ const Hero = () => {
                     </div>
                 </div>
                 <div className="fade-up fade-up-d4" style={{ marginTop: 72 }}>
-                    <HeroFrame />
+                    <HeroFrame key={i18n.language} />
                 </div>
             </div>
         </section>
@@ -261,6 +267,7 @@ const ProblemSection = () => {
             background: "var(--bg-2)",
             borderTop: "0.5px solid var(--line)",
             borderBottom: "0.5px solid var(--line)",
+            "--accent": "var(--coral)",
         }}>
             <div className="wrap">
                 <div style={{ textAlign: "center", marginBottom: 72 }}>
@@ -336,6 +343,9 @@ const ProblemSection = () => {
 
 // ── Editorial Brain — scenario-aware suggestions ────────────────────────────────
 const BRAIN_SCENARIO_ICONS = [Mic, Video, BookOpen, Megaphone, Presentation, Film];
+// Rotate through the design system's full accent family so the scenario grid feels
+// varied rather than monochrome — matches the approved preview.
+const BRAIN_SCENARIO_COLORS = ["var(--mint)", "var(--coral)", "var(--violet)", "var(--indigo)", "var(--mint)", "var(--coral)"];
 
 const EditorialBrain = () => {
     const { t } = useTranslation('landing');
@@ -345,7 +355,7 @@ const EditorialBrain = () => {
     const scenarios = Array.isArray(_rawScenarios) ? _rawScenarios : [];
 
     return (
-        <section id="brain" style={{ padding: "80px 0", position: "relative", overflow: "hidden" }}>
+        <section id="brain" style={{ padding: "80px 0", position: "relative", overflow: "hidden", "--accent": "var(--violet)" }}>
             <div className="aurora" style={{ opacity: 0.5 }} />
             <div className="wrap" style={{ position: "relative", zIndex: 2 }}>
                 <div className="section-head text-center" style={{ marginBottom: 56, alignItems: "center", marginInline: "auto" }}>
@@ -392,7 +402,8 @@ const EditorialBrain = () => {
                                 }}>
                                     <div style={{
                                         width: 44, height: 44, borderRadius: 12, background: "var(--bg-3)", border: "0.5px solid var(--line)",
-                                        display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)",
+                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                        color: BRAIN_SCENARIO_COLORS[i % BRAIN_SCENARIO_COLORS.length],
                                     }}>
                                         <Icon size={19} strokeWidth={1.7} />
                                     </div>
@@ -409,6 +420,70 @@ const EditorialBrain = () => {
 };
 
 // ── Feature Moments ───────────────────────────────────────────────────────────
+// Rotate through the design system's accent family per row instead of one flat color.
+const MOMENT_COLORS = ["var(--indigo)", "var(--mint)", "var(--coral)", "var(--violet)"];
+
+// Illustrated mockups (from the approved preview) instead of static screenshots —
+// each takes the row's rotating accent color so it stays in sync visually.
+const MomentIllustration = ({ index, color }) => {
+    if (index === 0) {
+        // Conversational editing: a command + the AI's reply
+        return (
+            <div style={{ width: "80%", display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ alignSelf: "flex-end", background: color, color: "#fff", padding: "9px 14px", borderRadius: "14px 14px 4px 14px", fontSize: 13, maxWidth: "80%" }}>
+                    Cut the dead air after the intro and tighten pacing
+                </div>
+                <div style={{ alignSelf: "flex-start", background: "var(--bg-3)", border: "0.5px solid var(--line)", padding: "9px 14px", borderRadius: "14px 14px 14px 4px", fontSize: 13, maxWidth: "80%" }}>
+                    Removed 6 silences · trimmed 3 stumbles · timeline updated
+                </div>
+            </div>
+        );
+    }
+    if (index === 1) {
+        // Transcript-as-timeline: a highlighted line of dialogue
+        return (
+            <div style={{ width: "82%", fontSize: 13.5, lineHeight: 2, color: "var(--fg-3)" }}>
+                So the thing I wanted to{" "}
+                <span style={{ background: `color-mix(in oklch, ${color} 28%, transparent)`, color: "var(--fg)", borderRadius: 3, padding: "1px 4px" }}>
+                    show you today
+                </span>{" "}
+                is the new dashboard.<br />
+                <span style={{ textDecoration: "line-through", opacity: 0.3 }}>Um, let me just—</span> Okay so if you look at the top left—
+            </div>
+        );
+    }
+    if (index === 2) {
+        // Type-to-cut: a timeline bar with a dashed removed segment
+        return (
+            <svg width="82%" viewBox="0 0 300 90">
+                <rect x="0" y="35" width="300" height="20" rx="4" fill="var(--bg-3)" />
+                <rect x="0" y="35" width="90" height="20" rx="4" fill={color} opacity="0.5" />
+                <rect x="90" y="35" width="60" height="20" rx="4" fill="var(--bg-3)" stroke="#EF4444" strokeDasharray="3 2" opacity="0.7" />
+                <rect x="150" y="35" width="150" height="20" rx="4" fill={color} opacity="0.5" />
+            </svg>
+        );
+    }
+    // index 3 — Analysis and edit suggestions: ROKA's "next steps" suggestion card
+    return (
+        <div style={{ width: "100%", padding: 20, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div className="mono" style={{ fontSize: 9.5, letterSpacing: "0.06em", color: "var(--fg-4)" }}>NEXT STEPS</div>
+            <div style={{ background: "var(--bg-3)", border: `0.5px solid ${color}`, borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                    <span style={{ fontSize: 12, fontWeight: 600, color: "var(--fg)" }}>Create virtual multicam angles</span>
+                </div>
+                <p style={{ fontSize: 11, color: "var(--fg-3)", margin: 0, lineHeight: 1.5 }}>
+                    Simulates multiple camera angles to add visual variety and keep the audience engaged.
+                </p>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 11, padding: "6px 12px", borderRadius: 999, background: color, color: "#fff", fontWeight: 600 }}>Add dynamic zoom rhythm</span>
+                <span style={{ fontSize: 11, padding: "6px 12px", borderRadius: 999, background: "transparent", border: "0.5px solid var(--line-strong)", color: "var(--fg-3)" }}>Dismiss</span>
+            </div>
+        </div>
+    );
+};
+
 const FeatureMoments = () => {
     const { t } = useTranslation('landing');
     const translatedMoments = t('workflow.moments', { returnObjects: true });
@@ -417,25 +492,21 @@ const FeatureMoments = () => {
         {
             title: translatedMoments[0]?.title || "Conversational Editing",
             copy: translatedMoments[0]?.copy || "Tell the AI what to do, and watch the timeline update.",
-            img: "/AI commands.png",
             icon: MessageSquare
         },
         {
             title: translatedMoments[1]?.title || "Your transcript is your timeline",
             copy: translatedMoments[1]?.copy || "Click a sentence, the playhead is already there.",
-            img: "/Transcript editing.png",
             icon: Layers
         },
         {
             title: translatedMoments[2]?.title || "Type what you want to cut",
-            copy: translatedMoments[2]?.copy || "Show 'cut from so anyway to let's move on' → the cut appears.",
-            img: "/AI edit timeline.png",
+            copy: translatedMoments[2]?.copy || "Type 'cut from so anyway to let's move on' → the cut appears.",
             icon: Scissors
         },
         {
             title: translatedMoments[3]?.title || "Analysis and edit suggestions",
             copy: translatedMoments[3]?.copy || "ROKA watches where your project stands and proposes the next move — you accept, tweak, or dismiss.",
-            img: "/AI acceptreject.png",
             icon: Sparkles
         }
     ];
@@ -446,9 +517,17 @@ const FeatureMoments = () => {
                 <div className="section-head text-center" style={{ marginBottom: 60, alignItems: "center" }}>
                     <span className="eyebrow">{t('workflow.eyebrow')}</span>
                     <h2 className="h-section">
+                        {/* Same bilingual-split pattern as the Exports headline below — the French
+                            translation says "avec", not "with", so both need to be checked or the
+                            italic emphasis silently disappears for French visitors. */}
                         {t('workflow.headline').split('with').map((part, i, arr) => (
-                            <React.Fragment key={i}>
-                                {part}
+                            <React.Fragment key={`en-${i}`}>
+                                {part.split('avec').map((subPart, j, subArr) => (
+                                    <React.Fragment key={`fr-${j}`}>
+                                        {subPart}
+                                        {j < subArr.length - 1 && <em>avec</em>}
+                                    </React.Fragment>
+                                ))}
                                 {i < arr.length - 1 && <em>with</em>}
                             </React.Fragment>
                         ))}
@@ -466,7 +545,8 @@ const FeatureMoments = () => {
                             <div style={{ order: i % 2 === 0 ? 1 : 2 }} className="md:order-none order-2">
                                 <div style={{
                                     width: 48, height: 48, borderRadius: 12, background: "var(--bg-2)", border: "0.5px solid var(--line)",
-                                    display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)",
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    color: MOMENT_COLORS[i % MOMENT_COLORS.length],
                                     marginBottom: 20
                                 }}>
                                     <m.icon className="w-6 h-6" />
@@ -480,21 +560,7 @@ const FeatureMoments = () => {
                                     aspectRatio: "16/9", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center",
                                     boxShadow: "var(--shadow-card)"
                                 }}>
-                                    <img
-                                        src={m.img}
-                                        alt={m.title}
-                                        loading="lazy"
-                                        width={1280}
-                                        height={720}
-                                        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                                        onError={(e) => {
-                                            e.target.style.display = 'none';
-                                            e.target.nextSibling.style.display = 'block';
-                                        }}
-                                    />
-                                    <div style={{ color: "var(--fg-4)", fontSize: 13, display: "none" }}>
-                                        [ {m.title} Visual ]
-                                    </div>
+                                    <MomentIllustration index={i} color={MOMENT_COLORS[i % MOMENT_COLORS.length]} />
                                 </div>
                             </div>
                         </div>
@@ -608,9 +674,9 @@ const PersonasSection = () => {
     const translatedPersonas = t('personas.list', { returnObjects: true }) || [];
 
     const personas = [
-        { Icon: Mic, ...translatedPersonas[0] },
-        { Icon: Layers, ...translatedPersonas[1] },
-        { Icon: UserCheck, ...translatedPersonas[2] },
+        { Icon: Mic, color: "var(--indigo)", ...translatedPersonas[0] },
+        { Icon: Layers, color: "var(--violet)", ...translatedPersonas[1] },
+        { Icon: UserCheck, color: "var(--coral)", ...translatedPersonas[2] },
     ];
 
     return (
@@ -643,6 +709,7 @@ const PersonasSection = () => {
                             opacity: visible ? 1 : 0,
                             transform: visible ? "translateY(0)" : "translateY(28px)",
                             transition: `opacity 0.65s ease ${i * 0.14}s, transform 0.65s ease ${i * 0.14}s`,
+                            "--accent": p.color,
                         }}>
                             <div style={{
                                 width: 48, height: 48, borderRadius: 12,
@@ -761,7 +828,7 @@ const Exports = () => {
         { key: "otio",     name: translatedTools.otio?.name     || "OpenTimelineIO",  fmt: translatedTools.otio?.fmt     || "Open standard" },
     ];
     return (
-        <section id="exports" style={{ padding: "100px 0" }}>
+        <section id="exports" style={{ padding: "100px 0", "--accent": "var(--mint)" }}>
             <div className="wrap">
                 <div style={{ display: "grid", gap: 80, alignItems: "center" }} className="grid-cols-1 md:grid-cols-2">
                     <div className="section-head" style={{ marginBottom: 0 }}>
@@ -869,7 +936,7 @@ const Pricing = () => {
     };
 
     return (
-        <section id="pricing" style={{ padding: '120px 0 80px', background: 'var(--bg)' }}>
+        <section id="pricing" style={{ padding: '120px 0 80px', background: 'var(--bg)', '--accent': 'var(--violet)' }}>
             <div className="wrap">
                 <div style={{ textAlign: 'center', marginBottom: 64 }}>
                     <div className="tag" style={{ display: 'inline-flex', marginBottom: 20 }}>
@@ -988,7 +1055,7 @@ const SocialProof = () => {
 const FinalCTA = () => {
     const { t } = useTranslation('landing');
     return (
-        <section style={{ position: "relative", overflow: "hidden", paddingTop: 140, paddingBottom: 140 }}>
+        <section style={{ position: "relative", overflow: "hidden", paddingTop: 140, paddingBottom: 140, "--accent": "var(--coral)" }}>
             <div className="aurora" />
             <div className="wrap" style={{ position: "relative", zIndex: 2, textAlign: "center", display: "flex", flexDirection: "column", gap: 28, alignItems: "center" }}>
                 <AnimatedLogo size={44} />
