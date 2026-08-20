@@ -117,82 +117,35 @@ const Nav = () => {
     );
 };
 
-const HeroFrame = () => {
-    const { i18n } = useTranslation();
-    const isFrench = i18n.language?.slice(0, 2) === 'fr';
-    const images = [
-        // French-only: real screenshot of AI subtitle styling + ROKA's proactive
-        // edit suggestions, with French UI chrome — only fits the fr locale since
-        // its on-screen labels are French.
-        ...(isFrench ? ["/Sous-titres et suggestions IA.png"] : []),
-        "/Hero Editor.png",
-        "/AI commands.png",
-        "/Transcript editing.png",
-        "/AI edit timeline.png",
-        "/NLE Export.png"
-    ];
-    const [activeIndex, setActiveIndex] = useState(0);
-    // Track which images have been mounted — starts with only image 0.
-    // Each tick adds the upcoming image so it pre-fetches while the previous
-    // one is still visible. Images are never unmounted (browser cache keeps
-    // them in memory and avoids re-downloads on repeat cycles).
-    const [loadedIndices, setLoadedIndices] = useState(() => new Set([0]));
-    const activeRef = useRef(0);
-
-    useEffect(() => {
-        const timer = setInterval(() => {
-            const next = (activeRef.current + 1) % images.length;
-            activeRef.current = next;
-            setActiveIndex(next);
-            setLoadedIndices(prev => {
-                if (prev.has(next)) return prev;
-                const s = new Set(prev);
-                s.add(next);
-                return s;
-            });
-        }, 3000);
-        return () => clearInterval(timer);
-    }, [images.length]);
-
-    return (
-        <div style={{
-            position: "relative",
-            borderRadius: 28,
-            overflow: "hidden",
-            border: "0.5px solid var(--glass-stroke)",
-            boxShadow: "var(--shadow-card)",
-            aspectRatio: "16/9",
-            background: "var(--bg-2)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center"
-        }}>
-            {images.map((src, i) => {
-                if (!loadedIndices.has(i)) return null;
-                return (
-                    <img
-                        key={src}
-                        src={src}
-                        alt={`Vibed editor — screen ${i + 1}`}
-                        loading={i === 0 ? "eager" : "lazy"}
-                        width={1920}
-                        height={1080}
-                        style={{
-                            position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover",
-                            opacity: activeIndex === i ? 1 : 0,
-                            transform: activeIndex === i ? "scale(1.05)" : "scale(1.0)",
-                            transition: "opacity 1s ease-in-out, transform 4s cubic-bezier(0.25, 1, 0.5, 1)",
-                            pointerEvents: "none"
-                        }}
-                    />
-                );
-            })}
-        </div>
-    );
-};
+// Static hero visual — the real editor: AI subtitle styling + ROKA's proactive
+// edit suggestions. Shown as-is in both locales (no more rotating screenshot
+// carousel).
+const HeroFrame = () => (
+    <div style={{
+        position: "relative",
+        borderRadius: 28,
+        overflow: "hidden",
+        border: "0.5px solid var(--glass-stroke)",
+        boxShadow: "var(--shadow-card)",
+        aspectRatio: "16/9",
+        background: "var(--bg-2)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center"
+    }}>
+        <img
+            src="/Sous-titres et suggestions IA.png"
+            alt="Vibed editor — AI subtitle styling and ROKA's proactive edit suggestions"
+            loading="eager"
+            width={1536}
+            height={1024}
+            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        />
+    </div>
+);
 
 const Hero = () => {
-    const { t, i18n } = useTranslation('landing');
+    const { t } = useTranslation('landing');
     return (
         <section style={{ paddingTop: 140, paddingBottom: 40, position: "relative", overflow: "hidden" }}>
             <div className="aurora" />
@@ -217,7 +170,7 @@ const Hero = () => {
                     </div>
                 </div>
                 <div className="fade-up fade-up-d4" style={{ marginTop: 72 }}>
-                    <HeroFrame key={i18n.language} />
+                    <HeroFrame />
                 </div>
             </div>
         </section>
@@ -331,8 +284,7 @@ const ProblemSection = () => {
                             lineHeight: 1.55,
                             letterSpacing: "-0.01em",
                         }}>
-                            {renderHighlightedText(t('problem.kicker'), t('problem.kickerAccent'), null, null, t('problem.kickerBoldFg'))}
-                            {t('problem.kickerBoldFg2') && <span style={{ color: "var(--fg)", fontWeight: 600 }}> {t('problem.kickerBoldFg2')}</span>}
+                            {renderHighlightedText(t('problem.kicker'), t('problem.kickerAccent'), t('problem.kickerBoldFg2'), null, t('problem.kickerBoldFg'))}
                         </p>
                     </div>
                 </div>
