@@ -861,54 +861,76 @@ section { padding: 96px 0; position: relative; }
     font-size: 12px !important;
   }
 
-  /* Collapsed by default: zero-width and clipped so it takes no space and
-     isn't reachable, but still transitions smoothly when opened. */
-  .nav-mobile-expand {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    max-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    font-size: 13px;
-    color: var(--fg-2);
-    transition: max-width 0.28s ease;
-  }
-  .nav-mobile-expand a {
-    flex-shrink: 0;
-    color: var(--fg-2);
-  }
-  .nav-mobile-expand a:hover {
-    color: var(--fg);
-  }
-
-  /* Expanded: the row grows to fill the available pill width and scrolls
-     horizontally if the content is wider than the screen. */
-  .nav-mobile-expand-open {
-    max-width: 60vw;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    padding-right: 4px;
-  }
-
-  /* Nav pill grows to make room once the menu is open, up to the viewport cap. */
-  .nav-pill-open {
-    max-width: calc(100vw - 24px) !important;
-  }
-
   /* Exports ("roundtrip-ready") tool grid: the inline gridTemplateColumns
      forced 2 columns at every width, squeezing each card below ~150px on
-     phones. Stack to 1 column here; the wrapping wrap-level Tailwind class
-     (grid-cols-1 md:grid-cols-2) restores 2 columns once there's room. */
+     phones. Stack to 1 column here. */
   .exports-tool-grid {
     grid-template-columns: 1fr !important;
   }
 }
 
-@media (min-width: 640px) {
-  /* Desktop never uses the mobile expand row or hamburger — they're
-     already hidden via the sm:hidden class, this just guards against any
-     leftover collapsed-state sizing. */
+/* ─── Nav responsive visibility ───
+   NOTE: this is plain CSS, not Tailwind's hidden/sm:*/md:* utilities —
+   this project has no tailwind.config.js/postcss.config.js wired into the
+   Vite build, so those utility classes compile to nothing and silently do
+   nothing at runtime. Every responsive show/hide in the Nav goes through
+   these two classes instead, with !important since some elements also
+   carry an inline `display` for their own layout purposes. Breakpoint
+   matches the rest of this file's mobile block (768px). */
+.nav-only-desktop {
+  display: none;
+}
+.nav-only-mobile {
+  display: flex;
+}
+.nav-hamburger.nav-only-mobile {
+  display: flex;
+}
+
+/* Collapsed by default: zero-width and clipped so it takes no space and
+   isn't reachable, but still transitions smoothly when opened. */
+.nav-mobile-expand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--fg-2);
+  transition: max-width 0.28s ease;
+}
+.nav-mobile-expand a {
+  flex-shrink: 0;
+  color: var(--fg-2);
+}
+.nav-mobile-expand a:hover {
+  color: var(--fg);
+}
+
+/* Expanded: the row grows to fill the available pill width and scrolls
+   horizontally if the content is wider than the screen. */
+.nav-mobile-expand-open {
+  max-width: 60vw;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 4px;
+}
+
+/* Nav pill grows to make room once the menu is open, up to the viewport cap. */
+.nav-pill-open {
+  max-width: calc(100vw - 24px) !important;
+}
+
+@media (min-width: 768px) {
+  .nav-only-desktop {
+    display: flex !important;
+  }
+  .nav-only-mobile {
+    display: none !important;
+  }
+  /* Desktop never uses the mobile expand row — everything is shown inline
+     via .nav-only-desktop instead. */
   .nav-mobile-expand {
     display: none !important;
   }

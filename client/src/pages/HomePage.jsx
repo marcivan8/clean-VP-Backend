@@ -96,8 +96,13 @@ const Nav = () => {
                 <Logo />
 
                 {/* Desktop nav links — inline from sm upward, hidden on mobile
-                    (mobile gets them inside the expandable menu instead). */}
-                <div style={{ display: "flex", gap: 22, fontSize: 13.5, color: "var(--fg-2)" }} className="hidden sm:flex font-medium">
+                    (mobile gets them inside the expandable menu instead).
+                    NOTE: visibility is controlled by the .nav-only-desktop
+                    class in index.css, not Tailwind's hidden/sm:flex — this
+                    project has no tailwind.config/postcss.config wired into
+                    the Vite build, so those utility classes compile to
+                    nothing and were silently no-ops. */}
+                <div style={{ gap: 22, fontSize: 13.5, color: "var(--fg-2)" }} className="nav-only-desktop font-medium">
                     <a href="#product" className="hover:text-foreground transition-colors">{t('nav.product')}</a>
                     <a href="#brain" className="hover:text-foreground transition-colors">{t('nav.brain')}</a>
                     <a href="#exports" className="hover:text-foreground transition-colors">{t('nav.exports')}</a>
@@ -110,7 +115,7 @@ const Nav = () => {
                     (see below). Collapsed by default; the hamburger toggle
                     below expands the pill horizontally to reveal this as a
                     scrollable row. */}
-                <div className={`nav-mobile-expand sm:hidden${menuOpen ? ' nav-mobile-expand-open' : ''}`}>
+                <div className={`nav-mobile-expand${menuOpen ? ' nav-mobile-expand-open' : ''}`}>
                     <a href="#product" onClick={() => setMenuOpen(false)}>{t('nav.product')}</a>
                     <a href="#brain" onClick={() => setMenuOpen(false)}>{t('nav.brain')}</a>
                     <a href="#exports" onClick={() => setMenuOpen(false)}>{t('nav.exports')}</a>
@@ -131,14 +136,14 @@ const Nav = () => {
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     {/* Language switcher is a primary, always-visible element —
                         shown on mobile too, not tucked into the expand menu. */}
-                    <div className="sm:hidden" style={{ flexShrink: 0 }}>
+                    <div className="nav-only-mobile" style={{ flexShrink: 0 }}>
                         <LanguageSwitcher />
                     </div>
 
                     {/* Desktop-only: language switcher + secondary auth action,
                         inline from sm upward (mobile has the switcher above and
                         the auth action in the expand row). */}
-                    <div className="hidden sm:flex" style={{ gap: 8, alignItems: "center" }}>
+                    <div className="nav-only-desktop" style={{ gap: 8, alignItems: "center" }}>
                         <LanguageSwitcher />
                         {user ? (
                             <span style={{
@@ -158,7 +163,7 @@ const Nav = () => {
 
                     {/* Mobile-only hamburger toggle for the expandable row above. */}
                     <button
-                        className="nav-hamburger sm:hidden"
+                        className="nav-hamburger nav-only-mobile"
                         onClick={() => setMenuOpen(o => !o)}
                         aria-label={menuOpen ? t('nav.closeMenu', 'Close menu') : t('nav.openMenu', 'Open menu')}
                         aria-expanded={menuOpen}
