@@ -16,6 +16,18 @@ const error = (msg, data) => self.postMessage({ type: 'LOG', payload: { level: '
 console.log = log;
 console.error = error;
 
+// Tell the main thread the pipeline has failed for good. This is distinct
+// from the LOG channel above: LOG messages are just forwarded console output
+// (previously PlaybackEngine.handleWorkerMessage didn't even handle the
+// 'LOG' type, so every console.error() in this worker — decoder errors,
+// demux errors — vanished into nothing, never reaching devtools). A real
+// decode/config failure needs to flip the player into a visible error
+// state instead of leaving a functional-looking but permanently black
+// canvas, so it gets its own message type.
+function reportPipelineError(stage, message) {
+    self.postMessage({ type: 'PIPELINE_ERROR', payload: { stage, message: String(message) } });
+}
+
 let decoder = null;
 let audioDecoder = null;
 let demuxer = null;
@@ -110,7 +122,10 @@ function initializePipeline(url) {
                 frame.close();
             }
         },
-        error: (e) => console.error('[Worker] Decoder Error:', e),
+        error: (e) => {
+            console.error('[Worker] Decoder Error:', e);
+            reportPipelineError('video_decode', e?.message || 'Video decoder error');
+        },
     });
 
     // 2. Create Audio Decoder
@@ -203,26 +218,78 @@ function initializePipeline(url) {
                 }
             }, [peaks.buffer, ...buffers.map(b => b.buffer)]);
         },
-        error: (e) => console.error('[Worker] Audio Decoder Error:', e)
+        error: (e) => {
+            console.error('[Worker] Audio Decoder Error:', e);
+            reportPipelineError('audio_decode', e?.message || 'Audio decoder error');
+        }
     });
 
     // 3. Create Demuxer
     demuxer = new MP4Demuxer(url, {
-        onConfig: (config) => {
+        onConfig: async (config) => {
             console.log('[Worker] Configuring Video Decoder:', config);
-            decoder.configure(config);
-            isReady = true;
+            // Root cause of the silent black-screen bug: decoder.configure()
+            // was called directly with no support check. When the source is
+            // an unsupported codec/profile — most commonly the RAW upload
+            // (e.g. an iPhone 10-bit HEVC .mov) served as a stand-in while
+            // the transcoded H.264 proxy is still generating, see
+            // IDELayout.jsx's `fallbackRaw` path — configure() throws
+            // asynchronously into this decoder's `error` callback, which
+            // used to be console.error-only and never reached the main
+            // thread (see the LOG-forwarding note above). The result: no
+            // frame ever decodes, but nothing ever tells PlaybackEngine or
+            // the UI that anything went wrong, so playback controls sit
+            // there fully functional over a permanently black canvas.
+            try {
+                const support = await VideoDecoder.isConfigSupported(config);
+                if (!support.supported) {
+                    const msg = `Unsupported video codec/profile: ${config.codec}`;
+                    console.error('[Worker]', msg);
+                    reportPipelineError('video_config_unsupported', msg);
+                    return;
+                }
+            } catch (e) {
+                // isConfigSupported itself can throw on a malformed config —
+                // fall through to configure() so we still get a real error
+                // (and the reportPipelineError from the decoder's error cb)
+                // rather than silently doing nothing.
+                console.error('[Worker] isConfigSupported check failed:', e);
+            }
+            try {
+                decoder.configure(config);
+                isReady = true;
+            } catch (e) {
+                console.error('[Worker] decoder.configure threw:', e);
+                reportPipelineError('video_config', e?.message || 'Failed to configure video decoder');
+            }
         },
         onChunk: (chunk) => {
             decoder.decode(chunk);
         },
-        onAudioConfig: (config) => {
+        onAudioConfig: async (config) => {
             console.log('[Worker] Configuring Audio Decoder:', config);
-            audioDecoder.configure(config);
+            try {
+                const support = await AudioDecoder.isConfigSupported(config);
+                if (!support.supported) {
+                    const msg = `Unsupported audio codec: ${config.codec}`;
+                    console.error('[Worker]', msg);
+                    reportPipelineError('audio_config_unsupported', msg);
+                    return;
+                }
+            } catch (e) {
+                console.error('[Worker] Audio isConfigSupported check failed:', e);
+            }
+            try {
+                audioDecoder.configure(config);
+            } catch (e) {
+                console.error('[Worker] audioDecoder.configure threw:', e);
+                reportPipelineError('audio_config', e?.message || 'Failed to configure audio decoder');
+            }
         },
         onAudioChunk: (chunk) => {
             audioDecoder.decode(chunk);
         },
         onStatus: (msg) => console.log(msg),
+        onError: (err) => reportPipelineError(err.stage || 'demux', err.message),
     });
 }

@@ -85,6 +85,11 @@ const VideoPlayer = () => {
     const frameAspectRef = useRef([16, 9]);
     // Lets the aspect-ratio effect re-run the buffer sizing without duplicating it.
     const resizeHandlerRef = useRef(null);
+    // Surfaces PlaybackEngine.onError to the UI. Previously `onError` was never
+    // even passed to `new PlaybackEngine(...)` below, so the engine's onError
+    // option defaulted to a no-op — a failed decode/config had nowhere to go
+    // and the canvas just stayed black with fully-working-looking controls.
+    const [playbackError, setPlaybackError] = useState(null);
 
     // Connect to store
     // NOTE: we subscribe to the full `tracks` array for clip lookups, but use
@@ -179,7 +184,14 @@ const VideoPlayer = () => {
                 // Update store so Timeline and Engine know the true dimensions
                 useTimelineStore.setState({ videoWidth, videoHeight });
                 console.log(`[VideoPlayer] Video metadata: ${videoWidth}x${videoHeight}`);
-            }
+                // A frame actually arrived — whatever error was showing (e.g. from
+                // a prior clip / prior URL) no longer applies.
+                setPlaybackError(null);
+            },
+            onError: (err) => {
+                console.error('[VideoPlayer] Playback error:', err);
+                setPlaybackError(err);
+            },
         });
 
         // Expose Engine to Store (for Direct Access from UI controls like Play Button)
@@ -226,6 +238,8 @@ const VideoPlayer = () => {
         // If the clip changes (e.g. Undo/Redo) while paused, we must tell the engine
         // to load the new URL, otherwise it holds onto the old one (or none).
         if (mediaUrl && engineRef.current.currentUrl !== mediaUrl) {
+            // New source — clear any error left over from the previous one.
+            setPlaybackError(null);
             // If playing, play() handles it below. But if paused, we must explicit load.
             if (!isPlaying) {
                 engineRef.current.load(mediaUrl);
@@ -632,6 +646,38 @@ const VideoPlayer = () => {
                         <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
                     </svg>
                     {t('player.generatingPreview')}
+                </div>
+            )}
+
+            {/* Was previously impossible to reach: PlaybackEngine's onError callback
+                was never wired up here at all (defaulted to a no-op inside the
+                engine), so a decode/config failure just left a black canvas with
+                fully-working-looking play/skip controls — no way for the editor,
+                let alone the user, to tell "still loading" apart from "failed for
+                good". Shown only when not mid-proxy-generation so the two overlays
+                never fight for the same space. */}
+            {!proxyGenerating && playbackError && (
+                <div style={{
+                    position: 'absolute', inset: 0,
+                    display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(0,0,0,0.8)',
+                    color: '#f0a0a0',
+                    fontSize: 13,
+                    fontFamily: 'var(--f-sans, system-ui)',
+                    gap: 8,
+                    textAlign: 'center',
+                    padding: '0 24px',
+                    pointerEvents: 'none',
+                }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                        xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="8" x2="12" y2="12" />
+                        <line x1="12" y1="16" x2="12.01" y2="16" />
+                    </svg>
+                    <div>{t('player.playbackError', 'Preview couldn\'t play this file')}</div>
+                    <div style={{ fontSize: 11, opacity: 0.7 }}>{playbackError.message}</div>
                 </div>
             )}
         </div>

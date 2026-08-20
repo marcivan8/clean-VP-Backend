@@ -146,6 +146,8 @@ class PlaybackEngine {
         this.worker.onmessage = this.handleWorkerMessage.bind(this);
         this.worker.onerror = (e) => {
             console.error('[PlaybackEngine] Worker Error:', e.message, e.filename, e.lineno);
+            this.setState(PlaybackState.ERROR);
+            this.onError({ type: 'worker_crash', message: e.message || 'Video worker crashed' });
         };
 
         // Cache for Audio Params (to avoid spamming Worklet)
@@ -849,6 +851,24 @@ class PlaybackEngine {
 
     handleWorkerMessage(e) {
         const { type, payload } = e.data;
+        if (type === 'LOG') {
+            // The worker overrides its own console.log/error to postMessage
+            // here instead (Worker-context console output doesn't otherwise
+            // reach the page's devtools console the same way). This handler
+            // used to only recognize NEW_FRAME/AUDIO_DATA, so every one of
+            // those messages — including every decoder/demuxer error — was
+            // silently dropped, never printed anywhere. Forward it to the
+            // real console so worker-side failures are actually visible.
+            const fn = payload?.level === 'error' ? console.error : console.log;
+            fn(`[Worker]`, payload?.msg, payload?.data ?? '');
+            return;
+        }
+        if (type === 'PIPELINE_ERROR') {
+            console.error('[PlaybackEngine] Pipeline error:', payload?.stage, payload?.message);
+            this.setState(PlaybackState.ERROR);
+            this.onError({ type: payload?.stage || 'pipeline', message: payload?.message || 'Playback failed' });
+            return;
+        }
         if (type === 'NEW_FRAME') {
             // Fire onMetadata once when we get the first frame with dimensions
             if (!this._metadataEmitted && payload.width && payload.height) {

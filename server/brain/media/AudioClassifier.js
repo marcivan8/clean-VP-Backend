@@ -172,11 +172,24 @@ class AudioClassifier {
         const integrated = loudness?.integratedLoudness;
         const rms        = spectrum?.rmsLevel;
 
-        // Very low level = probably ambient/background only
-        if (integrated !== null && integrated < -40) return 'ambient';
+        // BUG (root cause of "brain says no speech" false negatives):
+        // this used to be `integrated < -40` → ambient, then a SEPARATE
+        // "speech" band of only [-28, -12]. Anything between -40 and -28
+        // LUFS fell through every branch to the generic 'audio' type,
+        // which _MediaIntelligencePipeline.js_ maps to hasSpokenWord: false.
+        // Unprocessed, un-normalized mic audio (phone selfie video, room
+        // interview, mic held a bit far) very commonly measures -30 to -35
+        // LUFS integrated — well below typical loudnorm/broadcast targets —
+        // so real, audible dialogue was silently reclassified as "no
+        // speech" purely because it hadn't been loudness-normalized yet.
+        // Widening the speech band down to -45 closes that gap; only
+        // genuinely near-silent/ambient audio (<-45 LUFS) is excluded now.
+        if (integrated !== null && integrated < -45) return 'ambient';
 
-        // Typical speech: -18 to -28 LUFS integrated
-        if (integrated !== null && integrated >= -28 && integrated <= -12) return 'speech';
+        // Speech-compatible range: -45 to -12 LUFS integrated covers both
+        // normalized dialogue (-18 to -28, the old band) and quiet/
+        // un-normalized dialogue (-45 to -28) that was previously missed.
+        if (integrated !== null && integrated >= -45 && integrated <= -12) return 'speech';
 
         // Loud and dynamic = likely music
         if (integrated !== null && integrated > -10) return 'music';

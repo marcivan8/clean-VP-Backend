@@ -7,7 +7,7 @@ console.log('[MP4Demuxer] Module Loaded. MP4Box (Vendor ESM):', MP4Box);
  * Wraps mp4box.js to extract EncodedVideoChunks for WebCodecs VideoDecoder.
  */
 class MP4Demuxer {
-    constructor(fileUri, { onConfig, onChunk, onStatus, onAudioConfig, onAudioChunk }) {
+    constructor(fileUri, { onConfig, onChunk, onStatus, onAudioConfig, onAudioChunk, onError }) {
         this.fileUri = fileUri;
         this.onConfig = onConfig; // Video Config
         this.onChunk = onChunk; // Video Chunk
@@ -16,6 +16,11 @@ class MP4Demuxer {
         this.onAudioChunk = onAudioChunk;   // NEW: Audio Chunk
 
         this.onStatus = onStatus || console.log;
+        // Structured failure callback — separate from onStatus (which is just a
+        // log line) so the worker can tell the main thread "this pipeline is
+        // dead" instead of the old behavior of silently doing nothing forever
+        // (see load() below for why that mattered).
+        this.onError = onError || (() => {});
 
         this.file = MP4Box.createFile();
         this.file.onError = (e) => console.error("[Demuxer] MP4Box Error:", e);
@@ -82,6 +87,12 @@ class MP4Demuxer {
 
         console.error(lastErr);
         this.onStatus(`[Demuxer] Error: ${lastErr?.message || 'unknown error'}`);
+        // Previously nothing told the pipeline this had failed for good — the
+        // worker just sat there having never called onConfig/onChunk, and
+        // PlaybackEngine.play() has no way to distinguish "still loading" from
+        // "gave up", so it waited out its 5s preload timeout and then entered
+        // PLAYING anyway with an empty buffer → permanent black frame.
+        this.onError({ stage: 'fetch', message: lastErr?.message || 'Failed to fetch media file' });
     }
 
     handleReady(info) {
@@ -102,6 +113,7 @@ class MP4Demuxer {
             this.onConfig(config);
         } else {
             this.onStatus('[Demuxer] No video track found');
+            this.onError({ stage: 'demux', message: 'No video track found in file' });
         }
 
         // --- 2. Audio Track ---
