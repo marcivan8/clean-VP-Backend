@@ -870,13 +870,12 @@ section { padding: 96px 0; position: relative; }
 }
 
 /* ─── Nav responsive visibility ───
-   NOTE: this is plain CSS, not Tailwind's hidden/sm:*/md:* utilities —
-   this project has no tailwind.config.js/postcss.config.js wired into the
-   Vite build, so those utility classes compile to nothing and silently do
-   nothing at runtime. Every responsive show/hide in the Nav goes through
-   these two classes instead, with !important since some elements also
-   carry an inline `display` for their own layout purposes. Breakpoint
-   matches the rest of this file's mobile block (768px). */
+   Plain custom CSS classes (not Tailwind's hidden / sm:flex / sm:hidden
+   utilities) so the show/hide logic doesn't depend on which Tailwind
+   utility combinations happen to already exist elsewhere in the app.
+   !important is needed because some of these elements also carry an
+   inline `display` for their own layout purposes. Breakpoint matches
+   the rest of this file's mobile block (768px). */
 .nav-only-desktop {
   display: none;
 }
