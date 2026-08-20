@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, ArrowRight, Play, CheckCircle2, MousePointerClick, Layers, LayoutGrid, Link as LinkIcon, MessageSquare, Mic, Scissors, UserCheck, Zap, Video, BookOpen, Megaphone, Presentation, Film } from 'lucide-react';
+import { Sparkles, ArrowRight, Play, CheckCircle2, MousePointerClick, Layers, LayoutGrid, Link as LinkIcon, MessageSquare, Mic, Scissors, UserCheck, Zap, Video, BookOpen, Megaphone, Presentation, Film, Menu, X } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
@@ -50,6 +50,7 @@ const useReveal = (threshold = 0.15) => {
 const Nav = () => {
     const [scrolled, setScrolled] = useState(false);
     const [user, setUser] = useState(null);
+    const [menuOpen, setMenuOpen] = useState(false);
     const navigate = useNavigate();
     const { t } = useTranslation('common');
 
@@ -66,16 +67,26 @@ const Nav = () => {
         return () => subscription.unsubscribe();
     }, []);
 
+    // Close the mobile menu automatically once the viewport grows back past
+    // the breakpoint where everything fits inline again.
+    useEffect(() => {
+        const mq = window.matchMedia('(min-width: 640px)');
+        const handleChange = (e) => { if (e.matches) setMenuOpen(false); };
+        mq.addEventListener?.('change', handleChange);
+        return () => mq.removeEventListener?.('change', handleChange);
+    }, []);
+
     return (
         <nav style={{
             position: "fixed", top: 16, left: 0, right: 0, zIndex: 50,
             display: "flex", justifyContent: "center", pointerEvents: "none",
         }}>
-            <div style={{
+            <div className={`nav-pill${menuOpen ? ' nav-pill-open' : ''}`} style={{
                 pointerEvents: "auto",
                 display: "flex", alignItems: "center", gap: 28,
                 padding: "10px 12px 10px 22px",
                 borderRadius: 999,
+                maxWidth: "calc(100vw - 24px)",
                 background: scrolled ? "var(--glass-2)" : "transparent",
                 border: `0.5px solid ${scrolled ? "var(--glass-stroke)" : "transparent"}`,
                 backdropFilter: scrolled ? "blur(20px) saturate(160%)" : "none",
@@ -83,16 +94,53 @@ const Nav = () => {
                 transition: "all 0.3s ease",
             }}>
                 <Logo />
+
+                {/* Desktop nav links — inline from sm upward, hidden on mobile
+                    (mobile gets them inside the expandable menu instead). */}
                 <div style={{ display: "flex", gap: 22, fontSize: 13.5, color: "var(--fg-2)" }} className="hidden sm:flex font-medium">
                     <a href="#product" className="hover:text-foreground transition-colors">{t('nav.product')}</a>
                     <a href="#brain" className="hover:text-foreground transition-colors">{t('nav.brain')}</a>
                     <a href="#exports" className="hover:text-foreground transition-colors">{t('nav.exports')}</a>
                     <a href="/about" className="hover:text-foreground transition-colors">{t('nav.about')}</a>
                 </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <LanguageSwitcher />
+
+                {/* Mobile-only expandable row: nav links and (when logged out)
+                    the "log in" button — everything that isn't essential on
+                    a phone. The language switcher stays primary/always-visible
+                    (see below). Collapsed by default; the hamburger toggle
+                    below expands the pill horizontally to reveal this as a
+                    scrollable row. */}
+                <div className={`nav-mobile-expand sm:hidden${menuOpen ? ' nav-mobile-expand-open' : ''}`}>
+                    <a href="#product" onClick={() => setMenuOpen(false)}>{t('nav.product')}</a>
+                    <a href="#brain" onClick={() => setMenuOpen(false)}>{t('nav.brain')}</a>
+                    <a href="#exports" onClick={() => setMenuOpen(false)}>{t('nav.exports')}</a>
+                    <a href="/about" onClick={() => setMenuOpen(false)}>{t('nav.about')}</a>
                     {user ? (
-                        <>
+                        <span style={{
+                            fontSize: 12.5, color: "var(--fg-3)", padding: "0 4px",
+                            display: "flex", alignItems: "center", gap: 6, flexShrink: 0,
+                        }}>
+                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--mint)", flexShrink: 0, display: "inline-block" }} />
+                            <span style={{ whiteSpace: "nowrap" }}>{user.email}</span>
+                        </span>
+                    ) : (
+                        <button className="btn btn-ghost" style={{ height: 32, padding: "0 14px", fontSize: 13, flexShrink: 0 }} onClick={() => { setMenuOpen(false); navigate('/auth'); }}>{t('nav.logIn')}</button>
+                    )}
+                </div>
+
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    {/* Language switcher is a primary, always-visible element —
+                        shown on mobile too, not tucked into the expand menu. */}
+                    <div className="sm:hidden" style={{ flexShrink: 0 }}>
+                        <LanguageSwitcher />
+                    </div>
+
+                    {/* Desktop-only: language switcher + secondary auth action,
+                        inline from sm upward (mobile has the switcher above and
+                        the auth action in the expand row). */}
+                    <div className="hidden sm:flex" style={{ gap: 8, alignItems: "center" }}>
+                        <LanguageSwitcher />
+                        {user ? (
                             <span style={{
                                 fontSize: 12.5, color: "var(--fg-3)", padding: "0 12px",
                                 display: "flex", alignItems: "center", gap: 6,
@@ -103,13 +151,30 @@ const Nav = () => {
                                     {user.email}
                                 </span>
                             </span>
-                            <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/dashboard')}>{t('nav.account')}</button>
-                        </>
-                    ) : (
-                        <>
+                        ) : (
                             <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/auth')}>{t('nav.logIn')}</button>
-                            <button className="btn btn-primary" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => window.location.href='/auth'}>{t('nav.startFree')}</button>
-                        </>
+                        )}
+                    </div>
+
+                    {/* Mobile-only hamburger toggle for the expandable row above. */}
+                    <button
+                        className="nav-hamburger sm:hidden"
+                        onClick={() => setMenuOpen(o => !o)}
+                        aria-label={menuOpen ? t('nav.closeMenu', 'Close menu') : t('nav.openMenu', 'Open menu')}
+                        aria-expanded={menuOpen}
+                        style={{
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            width: 32, height: 32, borderRadius: "50%", border: "none",
+                            background: "transparent", color: "var(--fg-2)", cursor: "pointer", flexShrink: 0,
+                        }}
+                    >
+                        {menuOpen ? <X size={17} /> : <Menu size={17} />}
+                    </button>
+
+                    {user ? (
+                        <button className="btn btn-ghost" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => navigate('/dashboard')}>{t('nav.account')}</button>
+                    ) : (
+                        <button className="btn btn-primary" style={{ height: 36, padding: "0 16px", fontSize: 13 }} onClick={() => window.location.href='/auth'}>{t('nav.startFree')}</button>
                     )}
                 </div>
             </div>
@@ -808,7 +873,7 @@ const Exports = () => {
                         </div>
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+                    <div className="exports-tool-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
                         {tools.map((tool) => {
                             const Icon = ExportIcon[tool.key];
                             return (
