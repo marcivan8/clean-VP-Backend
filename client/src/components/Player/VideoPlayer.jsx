@@ -148,8 +148,23 @@ const VideoPlayer = () => {
     useEffect(() => {
         if (!canvasRef.current) return;
 
-        // Create Engine
-        engineRef.current = new PlaybackEngine(canvasRef.current, {
+        // PlaybackEngine's constructor throws synchronously if it can't get a
+        // WebGL context (`canvas.getContext('webgl2')` / experimental-webgl
+        // both return null). This used to be unguarded: the throw happened
+        // mid-effect, before `engineRef.current` was assigned and before
+        // `playbackEngine` was ever written to the store — so the failure was
+        // completely invisible (no error overlay, play button silently a
+        // no-op forever). This is the realistic failure mode on iOS Safari,
+        // which enforces a hard cap on simultaneous WebGL contexts per page;
+        // repeatedly mounting/unmounting this component (switching projects,
+        // re-opening the editor) can exhaust it even though PlaybackEngine's
+        // own destroy() now releases its context on unmount (see engine's
+        // WEBGL_lose_context fix) — a context freed by a PREVIOUS session
+        // (e.g. before that fix existed, or another tab/PWA instance) can
+        // still leave the budget exhausted for a while. Catching this turns
+        // "silently do nothing forever" into a visible, actionable error.
+        try {
+            engineRef.current = new PlaybackEngine(canvasRef.current, {
             onTick: (time) => {
                 // Determine if we should update store
                 // Optimally we don't spam the store with every tick unless UI needs it (scrubber)
@@ -192,7 +207,15 @@ const VideoPlayer = () => {
                 console.error('[VideoPlayer] Playback error:', err);
                 setPlaybackError(err);
             },
-        });
+            });
+        } catch (e) {
+            console.error('[VideoPlayer] Failed to construct PlaybackEngine:', e);
+            engineRef.current = null;
+            setPlaybackError({
+                type: 'engine_init_failed',
+                message: e?.message || 'Failed to initialize video preview on this device.',
+            });
+        }
 
         // Expose Engine to Store (for Direct Access from UI controls like Play Button)
         useTimelineStore.setState({ playbackEngine: engineRef.current });

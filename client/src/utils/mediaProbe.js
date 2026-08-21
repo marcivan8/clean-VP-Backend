@@ -44,8 +44,35 @@ const extractVideoMetadata = (url) => {
         video.crossOrigin = 'anonymous';
         video.preload = 'metadata';
         video.muted = true; // Required for unmuted autoplay policies in some browsers
-        
+
+        // BUG: this promise had no timeout. `onloadedmetadata` failing to fire
+        // — with no `onerror` either — is a known iOS Safari failure mode for
+        // large blob: URLs (a freshly-recorded phone video can be hundreds of
+        // MB) under memory pressure: the browser just never finishes loading
+        // metadata, silently, forever. handleFileImport in IDELayout.jsx
+        // `await`s this per file in a sequential loop — a stuck probe hangs
+        // that whole upload indefinitely, and since aspect-ratio auto-detection
+        // (detectAspectRatio) only runs AFTER this resolves, the project's
+        // aspectRatio field never leaves its '16:9' default. That's the root
+        // cause of exports coming out 16:9 "no matter what setting you choose"
+        // when no platform preset is picked (the project's own aspect ratio is
+        // what a platform-less export falls back to) — it's not a setting
+        // being ignored, it's this probe never completing in the first place.
+        // 12s is generous for reading a moov atom's worth of metadata even on
+        // a slow connection; a real load taking longer than that would have
+        // already made the editor feel broken well before export.
+        const PROBE_TIMEOUT_MS = 12000;
+        let settled = false;
+        const timeoutId = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            console.warn('[mediaProbe] Timed out waiting for video metadata (12s) — aspect ratio/duration will fall back to defaults.');
+            reject(new Error('Timed out loading video metadata'));
+        }, PROBE_TIMEOUT_MS);
+        const clearProbeTimeout = () => { settled = true; clearTimeout(timeoutId); };
+
         video.onloadedmetadata = () => {
+            clearProbeTimeout();
             // We have basic metadata, now seek to 25% to grab a thumbnail
             const duration = video.duration || 0;
             const width = video.videoWidth || 0;
@@ -88,7 +115,11 @@ const extractVideoMetadata = (url) => {
             video.currentTime = targetTime;
         };
 
-        video.onerror = () => reject(new Error("Failed to load video metadata"));
+        video.onerror = () => {
+            if (settled) return;
+            clearProbeTimeout();
+            reject(new Error("Failed to load video metadata"));
+        };
         video.src = url;
         video.load();
     });

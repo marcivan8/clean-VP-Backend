@@ -1462,6 +1462,29 @@ class PlaybackEngine {
             this.gpuEffectEngine = null;
         }
         this.effectsPipeline = null;
+
+        // Explicitly release the WebGL context. This was previously missing
+        // entirely — the constructor calls canvas.getContext('webgl2', ...)
+        // but nothing ever freed it, so every mount/unmount of VideoPlayer
+        // (switching projects, re-opening the editor, clip changes that
+        // remount the canvas) leaked one more live context. Desktop browsers
+        // tolerate dozens of these; iOS Safari enforces a hard per-page cap
+        // (historically ~8-16 simultaneous WebGL contexts) — once exceeded,
+        // getContext('webgl2') silently starts returning null for NEW
+        // contexts, no error, no event. That sends the next PlaybackEngine
+        // straight into the "WebGL not supported" throw in the constructor,
+        // which happens before engineRef.current is assigned in VideoPlayer's
+        // mount effect — so nothing downstream, including onError, ever runs.
+        // This is the leading theory for "playback works, then later on the
+        // same phone it's just silently black with no error at all": each
+        // failure is silent, but the SUCCESS of the next mount depends on how
+        // many leaked contexts have piled up, which is exactly the flaky
+        // "works sometimes, doesn't other times, desktop unaffected" pattern.
+        if (this.gl) {
+            const loseCtx = this.gl.getExtension('WEBGL_lose_context');
+            if (loseCtx) loseCtx.loseContext();
+            this.gl = null;
+        }
     }
 }
 
