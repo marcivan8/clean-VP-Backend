@@ -1276,7 +1276,13 @@ const ReasoningPanel = () => {
                         onKeyDown={handleKeyDown}
                         onInput={handleInput}
                         placeholder={isAnalyzing ? t('assistant.rokaWorking') : contextualSuggestion ? t('assistant.tryPlaceholder', { suggestion: contextualSuggestion }) : t('assistant.tellRokaPlaceholder')}
-                        className="w-full resize-none px-4 pt-3 pb-10 text-sm focus:outline-none transition-all disabled:opacity-50 placeholder:opacity-40"
+                        // text-[16px] md:text-sm: this panel is also the mobile AI bar's
+                        // "expanded" view (see MobileAIBar's onExpand). Below 16px, iOS
+                        // Safari auto-zooms the whole page on focus — same fix as
+                        // MobileAIBar.jsx's own textarea. Desktop keeps the original
+                        // text-sm (14px) via the md: breakpoint since it doesn't have
+                        // the zoom behavior.
+                        className="w-full resize-none px-4 pt-3 pb-10 text-[16px] md:text-sm focus:outline-none transition-all disabled:opacity-50 placeholder:opacity-40"
                         style={{ background: 'transparent', color: 'var(--fg)', fontFamily: 'var(--f-sans)', lineHeight: '1.5', minHeight: '88px', maxHeight: '160px' }}
                     />
                     <div className="absolute bottom-2.5 right-2.5 flex items-center gap-2">

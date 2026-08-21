@@ -181,9 +181,19 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     // ── keyboard shortcuts ────────────────────────────────────────────────────
     useEffect(() => {
         const handleKeyDown = (e) => {
-            // Don't intercept shortcuts while typing in an input or textarea
-            const tag = document.activeElement?.tagName;
-            if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+            // Don't intercept shortcuts while typing in an input or textarea.
+            // Checked BOTH document.activeElement and e.target (not just
+            // activeElement) — on some mobile browsers, a keydown from the
+            // virtual keyboard can be dispatched before focus is fully
+            // reflected in document.activeElement, which let Space (bound to
+            // togglePlay below) win the race and eat the keystroke that
+            // should have inserted a space into the AI chat textarea. Also
+            // covers contentEditable, which has no tagName check above.
+            const active = document.activeElement;
+            const target = e.target;
+            const isTypingTarget = (el) =>
+                el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+            if (isTypingTarget(active) || isTypingTarget(target)) return;
 
             if (e.code === 'Space') {
                 e.preventDefault();

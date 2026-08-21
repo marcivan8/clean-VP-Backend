@@ -1505,7 +1505,17 @@ module.exports = async function processExportJob(job) {
                     // Vibed caption defaults must match addCaptionClips defaults
                     // (#FACC15 yellow + Anton 48 — not plain white Roboto).
                     const color    = (clip.color || '#FACC15').replace('#', '0x');
-                    const size     = clip.fontSize || 48;
+                    // clip.scale is the pinch-to-resize/drag-handle factor applied in
+                    // the live preview (TextOverlay.jsx: `transform: scale(${clip.scale
+                    // || 1})` on top of `fontSize * previewScale`). The export never
+                    // read it, so a caption the user visibly enlarged in the editor
+                    // (e.g. to fill ~1/8 of the frame height) burned in at its raw,
+                    // un-resized base fontSize — tiny relative to what the preview
+                    // showed. previewScale itself is resolution-normalizing and cancels
+                    // out here since drawtext already renders at the true output
+                    // resolution, so `fontSize * clip.scale` is the correct export-side
+                    // equivalent.
+                    const size     = Math.round((clip.fontSize || 48) * (clip.scale || 1));
 
                     // IMPORTANT: clip.x/clip.y are 0-100 PERCENTAGES of the frame,
                     // representing where the CENTER of the text box sits — this is
@@ -1530,7 +1540,9 @@ module.exports = async function processExportJob(job) {
 
                     // Stroke (border) — maps directly to drawtext borderw / bordercolor.
                     // Default matches addCaptionClips: 2px black outline.
-                    const strokeWidth = clip.stroke?.width ?? 2;
+                    // Same clip.scale correction as fontSize above — the preview's
+                    // CSS scale() visually scales the stroke along with the glyphs.
+                    const strokeWidth = Math.round((clip.stroke?.width ?? 2) * (clip.scale || 1));
                     const strokeColor = (clip.stroke?.color || '#000000').replace('#', '0x');
                     const strokePart  = strokeWidth > 0
                         ? `:borderw=${strokeWidth}:bordercolor=${strokeColor}`

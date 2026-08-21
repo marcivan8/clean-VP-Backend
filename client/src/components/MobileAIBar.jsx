@@ -263,7 +263,13 @@ export default function MobileAIBar({ onExpand }) {
                         border:      '0.5px solid var(--line-strong)',
                         color:       'var(--fg)',
                         fontFamily:  'var(--f-sans)',
-                        fontSize:    13,
+                        // iOS Safari auto-zooms the whole page on focus for any text
+                        // input/textarea whose computed font-size is below 16px — this
+                        // is the "it zooms in" behavior when typing here. 13px tripped
+                        // it. 16px is the documented Safari threshold; the row's own
+                        // layout (minHeight/padding below) already gives it room, so
+                        // this doesn't need a compensating font-size hack elsewhere.
+                        fontSize:    16,
                         lineHeight:  1.45,
                         padding:     '8px 12px',
                         minHeight:   '36px',
