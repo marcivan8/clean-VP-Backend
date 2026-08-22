@@ -90,6 +90,41 @@ const VideoPlayer = () => {
     // option defaulted to a no-op — a failed decode/config had nowhere to go
     // and the canvas just stayed black with fully-working-looking controls.
     const [playbackError, setPlaybackError] = useState(null);
+    // ─── Native <video> fallback (mobile WebCodecs reliability fix) ──────────
+    // The primary pipeline (PlaybackEngine → VideoWorker → WebCodecs
+    // VideoDecoder/AudioDecoder, composited to a WebGL canvas) has no
+    // fallback of any kind — confirmed by reading every engine file, there is
+    // no plain <video> anywhere in this pipeline. On iOS Safari that pipeline
+    // can fail in ways that are invisible even with error reporting wired up
+    // (a WebGL context budget exhaustion throws before the engine object
+    // exists at all; a module Worker can fail to boot with no onerror; a
+    // codec/profile can be rejected by VideoDecoder.isConfigSupported). All
+    // of those previous fixes made the failure VISIBLE (a red error overlay)
+    // but did not make the video PLAY. This adds an actual second rendering
+    // path: when the primary pipeline fails to initialize at all, or fails
+    // for a SPECIFIC source file, fall back to a plain <video> element for
+    // that file. It loses the WebGL-only live preview features (color
+    // grading CSS filter still applies since that's just a CSS filter, but
+    // virtual-multicam crop does not, since that's WebGL UV-sampling) — an
+    // acceptable, clearly-scoped trade: the core feature (the video plays)
+    // wins over a preview-only nicety, and ONLY in the narrow case where the
+    // primary path has already provably failed.
+    //
+    // enginePermanentlyBroken: the engine couldn't even construct (no WebGL
+    // context available at all on this device/tab) — every clip falls back.
+    // failedUrls: per-URL — a SPECIFIC file's decode failed (bad codec, dead
+    // worker, etc.) without necessarily meaning EVERY other clip in the
+    // project would also fail. Scoping per-URL means one broken source file
+    // doesn't needlessly downgrade every other clip that would decode fine.
+    const [enginePermanentlyBroken, setEnginePermanentlyBroken] = useState(false);
+    const [failedUrls, setFailedUrls] = useState(() => new Set());
+    const fallbackVideoRef = useRef(null);
+    const fallbackSrcRef = useRef(null); // last URL actually assigned to the fallback <video>.src
+    // True only if the fallback <video> ITSELF also failed (vs. still loading,
+    // or already playing) — distinguishes "give the fallback a chance, don't
+    // show an error overlay over it" from "both paths failed, this file is
+    // genuinely unplayable here."
+    const [fallbackFailed, setFallbackFailed] = useState(false);
 
     // Connect to store
     // NOTE: we subscribe to the full `tracks` array for clip lookups, but use
@@ -143,6 +178,42 @@ const VideoPlayer = () => {
         activeClip?.grading, activeClip?.volume, activeClip?.virtualCam,
         activeClip?.start, activeClip?.duration,
     ]);
+
+    // Resolve the best available URL for the active clip. Extracted from the
+    // play/pause effect below into a memo so BOTH the primary engine path and
+    // the fallback <video> path (which needs this even when engineRef.current
+    // is null, i.e. exactly the case the play/pause effect's early-return
+    // used to make this unreachable) can use the same URL resolution.
+    // Priority: asset.proxyUrl > clip.url > asset.url (raw) — unchanged from
+    // before.
+    const mediaUrl = React.useMemo(() => {
+        let url = null;
+        if (activeClip?.assetId) {
+            const asset = assets.find(a => a.id === activeClip.assetId);
+            if (asset?.proxyUrl) {
+                url = asset.proxyUrl;
+                if (url.startsWith('proxies/') || url.startsWith('raw/')) {
+                    url = `/api/proxy/gcs-media/${url}`;
+                }
+            } else if (activeClip?.url) {
+                url = activeClip.url;
+            } else if (asset?.url) {
+                url = asset.url;
+                if (url.startsWith('proxies/') || url.startsWith('raw/')) {
+                    url = `/api/proxy/gcs-media/${url}`;
+                }
+            }
+        } else {
+            url = activeClip?.url || null;
+        }
+        return url;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeClip?.assetId, activeClip?.url, assets]);
+
+    // True when the primary pipeline has already provably failed — either for
+    // this specific file, or altogether on this device. Drives which element
+    // (canvas vs. fallback <video>) actually renders below.
+    const useFallbackPlayer = !!mediaUrl && (enginePermanentlyBroken || failedUrls.has(mediaUrl));
 
     // Initialize Engine
     useEffect(() => {
@@ -206,6 +277,15 @@ const VideoPlayer = () => {
             onError: (err) => {
                 console.error('[VideoPlayer] Playback error:', err);
                 setPlaybackError(err);
+                // Scope the fallback to the URL that actually failed. Read
+                // from the engine's own currentUrl (not the outer mediaUrl
+                // closure, which is stale inside this effect's one-time
+                // callback) — this is exactly the source the engine was
+                // trying, and failing, to play.
+                const failedUrl = engineRef.current?.currentUrl;
+                if (failedUrl) {
+                    setFailedUrls(prev => (prev.has(failedUrl) ? prev : new Set(prev).add(failedUrl)));
+                }
             },
             });
         } catch (e) {
@@ -215,6 +295,9 @@ const VideoPlayer = () => {
                 type: 'engine_init_failed',
                 message: e?.message || 'Failed to initialize video preview on this device.',
             });
+            // No WebGL context at all on this device/tab — every clip falls
+            // back to the plain <video> element, not just the current one.
+            setEnginePermanentlyBroken(true);
         }
 
         // Expose Engine to Store (for Direct Access from UI controls like Play Button)
@@ -230,32 +313,25 @@ const VideoPlayer = () => {
     useEffect(() => {
         if (!engineRef.current) return;
 
-        // Resolve the best available URL for this clip.
-        // Priority: asset.proxyUrl > clip.url > asset.url (raw).
+        // This URL (or the whole engine) is already known broken — the
+        // fallback <video> effect below owns playback instead. Just make
+        // sure the WebGL engine stays paused/silent so it can't fight the
+        // fallback for audio (both would otherwise be valid, separate audio
+        // sources for the same clip). In every failure case this targets,
+        // the engine's own audio decode already died alongside its video
+        // decode (same worker, same demuxer), so there is no real audio to
+        // lose by pausing here — the fallback <video>'s native audio becomes
+        // the only source.
+        if (useFallbackPlayer) {
+            engineRef.current.pause();
+            return;
+        }
+
+        // mediaUrl resolved above (memo): asset.proxyUrl > clip.url > asset.url (raw).
         // We must always check asset.proxyUrl first: a clip may have been created with
         // clip.url pointing at a raw unprocessed upload.  Once the proxy job finishes,
         // assets[].proxyUrl is set and this effect re-runs — the engine then switches
         // to the streamable proxy automatically.
-        let mediaUrl = null;
-        if (activeClip?.assetId) {
-            const asset = assets.find(a => a.id === activeClip.assetId);
-            if (asset?.proxyUrl) {
-                mediaUrl = asset.proxyUrl;
-                if (mediaUrl.startsWith('proxies/') || mediaUrl.startsWith('raw/')) {
-                    mediaUrl = `/api/proxy/gcs-media/${mediaUrl}`;
-                }
-            } else if (activeClip?.url) {
-                // Proxy not ready yet — use the clip's stored URL as a fallback
-                mediaUrl = activeClip.url;
-            } else if (asset?.url) {
-                mediaUrl = asset.url;
-                if (mediaUrl.startsWith('proxies/') || mediaUrl.startsWith('raw/')) {
-                    mediaUrl = `/api/proxy/gcs-media/${mediaUrl}`;
-                }
-            }
-        } else {
-            mediaUrl = activeClip?.url || null;
-        }
 
         // --- URL Sync Fix for Paused State ---
         // If the clip changes (e.g. Undo/Redo) while paused, we must tell the engine
@@ -328,7 +404,7 @@ const VideoPlayer = () => {
             }
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isPlaying, avTracks, assets, activeClipForEngine]);
+    }, [isPlaying, avTracks, assets, activeClipForEngine, mediaUrl, useFallbackPlayer]);
 
     // --- Composed crop effect (virtual multicam + zoom rhythm) ---
     // Runs on every currentTime tick (both playing and paused) so a rhythm
@@ -359,6 +435,46 @@ const VideoPlayer = () => {
             engineRef.current.setCrop(cropX, cropY, cropW, cropH);
         }
     }, [currentTime, activeClip?.id, activeClip?.start, activeClip?.virtualCam, activeClip?.keyframes]);
+
+    // --- Fallback <video> element sync (only active while useFallbackPlayer) ---
+    // Mirrors the primary engine's own load/play/pause/seek behavior above,
+    // using the plain HTMLMediaElement API instead of the WebCodecs pipeline.
+    useEffect(() => {
+        const video = fallbackVideoRef.current;
+        if (!video || !useFallbackPlayer || !mediaUrl) return;
+        // Compare against our own ref, not video.src — the browser normalizes
+        // video.src to an absolute URL, so a plain !== check against the
+        // (possibly relative) mediaUrl would re-assign and reload on every
+        // render.
+        if (fallbackSrcRef.current !== mediaUrl) {
+            fallbackSrcRef.current = mediaUrl;
+            setFallbackFailed(false); // fresh source — give it a clean attempt
+            video.src = mediaUrl;
+            video.load();
+        }
+    }, [useFallbackPlayer, mediaUrl]);
+
+    useEffect(() => {
+        const video = fallbackVideoRef.current;
+        if (!video || !useFallbackPlayer) return;
+        if (isPlaying) {
+            const p = video.play();
+            if (p?.catch) p.catch(e => console.warn('[VideoPlayer] Fallback <video>.play() rejected:', e.message));
+        } else {
+            video.pause();
+        }
+    }, [isPlaying, useFallbackPlayer]);
+
+    useEffect(() => {
+        const video = fallbackVideoRef.current;
+        // Only force-seek while paused — while playing, the <video> owns its
+        // own clock and this would fight it every render (same reasoning as
+        // the primary engine's paused-scrub effect below).
+        if (!video || !useFallbackPlayer || isPlaying) return;
+        if (Math.abs(video.currentTime - currentTime) > 0.05) {
+            video.currentTime = currentTime;
+        }
+    }, [currentTime, isPlaying, useFallbackPlayer]);
 
     // --- Paused-scrub seek effect ---
     // Runs only when currentTime changes while paused so the preview frame stays in sync
@@ -606,7 +722,12 @@ const VideoPlayer = () => {
             style={{ aspectRatio: dynamicRatio }}
         >
             {proxyGenerating && <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>}
-            {/* The Custom Rendering Surface */}
+            {/* The Custom Rendering Surface — kept permanently mounted (never
+                conditionally unmounted) even while the fallback <video> below
+                is what's actually visible, so canvasRef never goes stale and
+                the WebGL engine's own internal plumbing (already paused, see
+                the play/pause effect's useFallbackPlayer branch) is never
+                disturbed by a DOM remount. display:none instead. */}
             <canvas
                 ref={canvasRef}
                 className="transition-transform duration-75"
@@ -624,8 +745,68 @@ const VideoPlayer = () => {
                     // 'none' (the cleared state) is a valid CSS filter value and
                     // costs nothing, so the ungraded path is unchanged.
                     filter: projectLUTFilter || 'none',
+                    display: useFallbackPlayer ? 'none' : 'block',
                 }}
             />
+
+            {/* Fallback native <video> — see the useFallbackPlayer state block
+                above for exactly when/why this engages. Only mounted once the
+                primary pipeline has actually failed, so it costs nothing in
+                the normal (working) case. Not muted: the primary engine is
+                paused (and therefore silent) whenever this is active, so this
+                is the sole audio source for the clip — see the play/pause
+                effect's useFallbackPlayer branch for why that's safe. Loses
+                virtual-multicam crop (WebGL-only) but keeps the CSS transform
+                (position/scale/rotation) and colour-grade filter, which apply
+                the same way to any element. */}
+            {useFallbackPlayer && mediaUrl && (
+                <video
+                    ref={fallbackVideoRef}
+                    playsInline
+                    className="transition-transform duration-75"
+                    style={{
+                        position: 'absolute',
+                        inset: 0,
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'contain',
+                        transform: transformStyle,
+                        transformOrigin,
+                        filter: projectLUTFilter || 'none',
+                    }}
+                    onTimeUpdate={(e) => {
+                        // Mirrors the primary engine's onTick → seek() wiring.
+                        // Only push into the store while actually playing —
+                        // while paused, the scrub-sync effect above is the one
+                        // driving video.currentTime, not the other way round.
+                        if (isPlaying) useTimelineStore.getState().seek(e.currentTarget.currentTime);
+                    }}
+                    onLoadedMetadata={(e) => {
+                        const { videoWidth, videoHeight } = e.currentTarget;
+                        if (videoWidth && videoHeight) {
+                            useTimelineStore.setState({ videoWidth, videoHeight });
+                        }
+                        // A frame is now genuinely playable — the error banner
+                        // describes the primary pipeline, which is accurate
+                        // information, but once the fallback is visibly
+                        // working there is nothing actionable left to show.
+                        setPlaybackError(null);
+                    }}
+                    onError={(e) => {
+                        // Both the primary pipeline AND the plain <video>
+                        // element failed on this source — genuinely
+                        // unplayable in this browser (e.g. a truly corrupt
+                        // file), not just a WebCodecs-specific gap. Surface
+                        // that distinction rather than silently doing nothing.
+                        console.error('[VideoPlayer] Fallback <video> also failed:', e.currentTarget.error);
+                        setFallbackFailed(true);
+                        setPlaybackError({
+                            type: 'fallback_also_failed',
+                            message: 'This video format isn\'t supported for preview on this device.',
+                        });
+                    }}
+                />
+            )}
 
             {/* R67 — Object Intelligence "blur background". Reuses the same
                 asset URL priority (proxy > clip.url > raw asset.url) the
@@ -679,7 +860,7 @@ const VideoPlayer = () => {
                 let alone the user, to tell "still loading" apart from "failed for
                 good". Shown only when not mid-proxy-generation so the two overlays
                 never fight for the same space. */}
-            {!proxyGenerating && playbackError && (
+            {!proxyGenerating && playbackError && (!useFallbackPlayer || fallbackFailed) && (
                 <div style={{
                     position: 'absolute', inset: 0,
                     display: 'flex', flexDirection: 'column',
