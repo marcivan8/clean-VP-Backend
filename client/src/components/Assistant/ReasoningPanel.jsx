@@ -947,8 +947,16 @@ const ReasoningPanel = () => {
             return;
         }
         lastAnalyzedEditCountRef.current = editCount;
-        if (projectId) analyzeProject('edit_applied');
-    }, [editCount, projectId, analyzeProject]);
+        // Same reasoning as the project_opened guard above: an edit applied
+        // while a DIFFERENT asset (e.g. the second file of a multi-import) is
+        // still proxying re-analyzes a media bin that's still filling in —
+        // this trigger was the one left unguarded when that fix landed, and
+        // it reproduces the identical "generic pass vs. real pass, shown out
+        // of context" mismatch via a different door. asset_added already
+        // fires its own analysis once the upload actually settles, so
+        // skipping here (rather than queueing a retry) loses nothing.
+        if (projectId && !assets.some(a => a.isProxying)) analyzeProject('edit_applied');
+    }, [editCount, projectId, assets, analyzeProject]);
 
     // Push each NEW Brain advisory into the chronological feed.
     // BrainPanel used to be a fixed element rendered after the feed, so its card

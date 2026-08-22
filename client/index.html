@@ -4,7 +4,24 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vibed-logo.svg" />
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- maximum-scale=1, user-scalable=no: the editor implements its OWN
+         two-finger pinch-to-scale gesture for captions (TextOverlay.jsx's
+         handlePointerDown/Move — pointer events, not native browser zoom).
+         Without this, a pinch gesture that starts partly outside the caption
+         element (very easy — the touch target is small, a real two-finger
+         pinch usually spans wider than it) is ALSO interpreted by Safari as
+         a native page pinch-zoom, since only the caption element itself sets
+         touch-action:none — the rest of the page (canvas, background) still
+         allows it. The two zoom systems then fight, and Safari's zoom wins
+         visually: the whole page stays pinch-zoomed in until the user
+         manually zooms back out, which is exactly "the platform was zoomed
+         in when I opened the project" (the zoom level from a previous pinch
+         gesture persists across an in-app navigation, since it's a browser-
+         level view state, not app state). Disabling native page zoom
+         entirely removes this conflict; the app's own pinch-to-scale is
+         unaffected since it never depended on native zoom in the first
+         place. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="description" content="Vibed — AI-powered video editing for creators. Edit faster, vibe harder." />
     <meta name="theme-color" content="#0a0e1a" />
     <title>Vibed — Vibe Editing</title>

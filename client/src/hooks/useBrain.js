@@ -177,6 +177,22 @@ export function useBrain() {
     // Track the last session ID returned by the brain for feedback correlation
     const sessionIdRef = useRef(null);
 
+    // ── Stale-response guard for analyzeProject ──────────────────────────────
+    // ReasoningPanel.jsx fires analyzeProject() from three independent
+    // triggers — project_opened, asset_added (debounced 1.2-4s), and
+    // edit_applied (no debounce at all, fires on every edit) — and any two of
+    // them can have HTTP round-trips in flight at once (each is a GPT-4o call,
+    // typically 1-5s+). Without tracking call order, `setLastResponse` below
+    // applied whichever response happened to ARRIVE last, not whichever was
+    // REQUESTED last — so an older analysis (e.g. one that started before a
+    // proxy/vision job had finished) could resolve after a newer one and
+    // silently overwrite it with stale, contradicting data. This is exactly
+    // the reported "brain gives insights before and after the proxy is
+    // generated... not matching" symptom, and it surfaces far more on mobile
+    // because higher/more variable network latency widens the window for an
+    // older request to finish after a newer one.
+    const analyzeGenerationRef = useRef(0);
+
     // ── sendCommand ───────────────────────────────────────────────────────────
     /**
      * Send a natural-language command to the brain. Returns the BrainOutput
@@ -242,6 +258,11 @@ export function useBrain() {
         trigger = 'project_opened',
         extraState = {}
     ) => {
+        // Stamp this call's generation BEFORE the async work starts, so any
+        // call that starts later (even from a different trigger) is always a
+        // strictly higher number.
+        const myGeneration = ++analyzeGenerationRef.current;
+
         setIsProcessing(true);
         setError(null);
 
@@ -264,30 +285,48 @@ export function useBrain() {
             }
 
             const data = await res.json();
-            setLastResponse(prev => ({
-                ...(prev || {}),
-                response: {
-                    ...(prev?.response || {}),
-                    // Previously only `message` and `suggestions` were pulled off
-                    // data.response — insight and warnings were silently dropped
-                    // on every advisory call (project_opened/asset_added/
-                    // edit_applied all go through this function), so BrainPanel's
-                    // InsightCard and WarningBanner never had anything to render
-                    // no matter what the Brain actually returned.
-                    ...(data.response || {}),
-                    suggestions: data.nextSuggestions || data.response?.suggestions || [],
-                },
-                // projectMap/storyMap are returned by /api/brain/analyze but were
-                // never carried into lastResponse — DirectorIntelligence.js needs
-                // the raw maps to derive proposals, so they have to survive here.
-                projectMap: data.projectMap ?? null,
-                storyMap:   data.storyMap   ?? null,
-            }));
+
+            // A NEWER analyzeProject() call started while this one was still
+            // in flight — that call's own resolution (whenever it lands)
+            // reflects the project's current state better than this one does
+            // by now. Skip the state write so its result can never clobber a
+            // fresher one just by arriving later on the wire. Still RETURN
+            // `data` unconditionally — callers like ReasoningPanel's
+            // asset_added handler read the settled value directly (not
+            // `lastResponse`) to decide whether the brain "spoke", and that
+            // per-call bookkeeping is unaffected by whether this call was the
+            // latest one.
+            if (myGeneration === analyzeGenerationRef.current) {
+                setLastResponse(prev => ({
+                    ...(prev || {}),
+                    response: {
+                        ...(prev?.response || {}),
+                        // Previously only `message` and `suggestions` were pulled off
+                        // data.response — insight and warnings were silently dropped
+                        // on every advisory call (project_opened/asset_added/
+                        // edit_applied all go through this function), so BrainPanel's
+                        // InsightCard and WarningBanner never had anything to render
+                        // no matter what the Brain actually returned.
+                        ...(data.response || {}),
+                        suggestions: data.nextSuggestions || data.response?.suggestions || [],
+                    },
+                    // projectMap/storyMap are returned by /api/brain/analyze but were
+                    // never carried into lastResponse — DirectorIntelligence.js needs
+                    // the raw maps to derive proposals, so they have to survive here.
+                    projectMap: data.projectMap ?? null,
+                    storyMap:   data.storyMap   ?? null,
+                }));
+            }
             return data;
 
         } catch (err) {
             console.error('[useBrain] analyzeProject error:', err.message);
-            setError(err.message);
+            // Same staleness guard on the error path — an older call's
+            // network hiccup shouldn't blank out `error` state after a newer
+            // call already succeeded (or is still legitimately in flight).
+            if (myGeneration === analyzeGenerationRef.current) {
+                setError(err.message);
+            }
             return null;
         } finally {
             setIsProcessing(false);

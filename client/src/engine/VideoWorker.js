@@ -86,11 +86,58 @@ self.onmessage = async (e) => {
     }
 };
 
+// Release the PREVIOUS decoder pair before a new one is created. VideoDecoder/
+// AudioDecoder each hold a real hardware/OS codec session — dropping the JS
+// reference (which is all initializePipeline used to do: `decoder = new
+// VideoDecoder(...)` straight over the old one) does NOT promptly free that
+// session. The WebCodecs spec requires an explicit close() to release it;
+// without one, the browser only reclaims it whenever GC happens to run the
+// object's finalizer, which is unbounded and, for hardware decode sessions,
+// often never happens soon enough to matter. Desktop Chrome tolerates many
+// concurrent sessions so this was invisible there; mobile Safari/WebKit caps
+// concurrent decode sessions much more tightly (similar in spirit to the
+// WebGL-context cap fixed in PlaybackEngine.destroy()). This worker is reused
+// across every clip/project change within one tab — the engine and its
+// worker are only torn down when VideoPlayer itself unmounts — so every clip
+// switch was silently leaking one more decoder pair. Once the session cap is
+// hit, every subsequent video fails to decode with no visible error (the
+// existing error/isConfigSupported wiring only reports failures from the
+// pipeline actually being built, not this kind of resource exhaustion), and
+// unlike the per-tab WebGL cap, a hardware decode-session cap can be scoped
+// to the whole browser process, so even a fresh tab doesn't reset it — only
+// fully closing and reopening the browser does, matching exactly what was
+// reported ("closing the window completely" needed, not just a new tab).
+function closeDecoders() {
+    if (decoder) {
+        try {
+            if (decoder.state !== 'closed') decoder.close();
+        } catch (e) {
+            console.warn('[Worker] Error closing previous video decoder:', e?.message || e);
+        }
+        decoder = null;
+    }
+    if (audioDecoder) {
+        try {
+            if (audioDecoder.state !== 'closed') audioDecoder.close();
+        } catch (e) {
+            console.warn('[Worker] Error closing previous audio decoder:', e?.message || e);
+        }
+        audioDecoder = null;
+    }
+    demuxer = null;
+    isReady = false;
+}
+
 function initializePipeline(url) {
     if (decoder && demuxer && demuxer.fileUri === url) {
         console.log('[Worker] Pipeline already initialized for:', url);
         return;
     }
+
+    // A different URL (new clip, new upload, new project) than whatever this
+    // worker was last playing — release the old decoder pair first. See
+    // closeDecoders() above for why this matters.
+    closeDecoders();
 
     console.log('[Worker] Initializing Video Pipeline for:', url);
 

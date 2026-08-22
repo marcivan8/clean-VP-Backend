@@ -518,6 +518,23 @@ module.exports = async function processExportJob(job) {
     const codec        = platform?.codec  || 'libx264';
     const profile      = platform?.profile || 'high';
 
+    // ── Caption font-size resolution correction ────────────────────────────
+    // `clip.fontSize`/`clip.stroke.width` are authored in the project's
+    // REFERENCE resolution for its aspect ratio (ASPECT_RATIO_DIMENSIONS
+    // above — the same table client/src/utils/playerDimensions.js uses for
+    // the live `<Player>`). That equals `targetWidth` exactly for the common
+    // case (no platform preset, default '1080p' resolution tier), which is
+    // why the earlier R57/clip.scale fix looked complete on its own. It is
+    // NOT equal whenever a DIFFERENT resolution tier is chosen — '720p'/'2k'/
+    // '4k' all scale targetWidth/targetHeight by getResolutionDimensions()
+    // above, but nothing scaled the caption font/stroke to match, so a
+    // caption authored (and correctly shown) at the 1080p reference came out
+    // proportionally too big at 720p and too small at 2k/4k. Computed once
+    // here and applied to BOTH caption render paths below (the plain
+    // per-clip drawtext loop and the animated captionProgram path).
+    const captionRefDims = ASPECT_RATIO_DIMENSIONS[settings.aspectRatio] || ASPECT_RATIO_DIMENSIONS['16:9'];
+    const captionScaleFactor = targetWidth / captionRefDims.width;
+
     let videoBitrate;
     switch (settings.quality) {
         case 'high':   videoBitrate = platform?.bitrate || '8000k';  break;
@@ -1419,7 +1436,32 @@ module.exports = async function processExportJob(job) {
                         throw new Error(`caption program rejected: ${programErrors.slice(0, 3).join('; ')}`);
                     }
 
-                    compiledCaptionProgram = compileCaptionProgram(rawCaptionProgram, {
+                    // Same reference-resolution correction as the static drawtext
+                    // path above (`captionScaleFactor`) — `entry.style.fontSize`/
+                    // `stroke.width` are reference-resolution pixels, and
+                    // CaptionCompiler.js has no other way to know the actual
+                    // render resolution can differ from that reference (any
+                    // resolution tier other than the '1080p' one the reference
+                    // table matches). Scaled once here, at the call site, so
+                    // CaptionCompiler.js itself stays resolution-agnostic rather
+                    // than also learning about targetWidth/ASPECT_RATIO_DIMENSIONS.
+                    const scaledCaptionProgram = captionScaleFactor === 1
+                        ? rawCaptionProgram
+                        : {
+                            ...rawCaptionProgram,
+                            entries: rawCaptionProgram.entries.map(entry => ({
+                                ...entry,
+                                style: {
+                                    ...entry.style,
+                                    fontSize: (Number(entry.style?.fontSize) || 48) * captionScaleFactor,
+                                    stroke: entry.style?.stroke
+                                        ? { ...entry.style.stroke, width: (Number(entry.style.stroke.width) || 0) * captionScaleFactor }
+                                        : entry.style?.stroke,
+                                },
+                            })),
+                        };
+
+                    compiledCaptionProgram = compileCaptionProgram(scaledCaptionProgram, {
                         tmpDir,
                         escapePath: (p) => p.replace(/\\/g, '/').replace(/:/g, '\\:'),
                         fallbackFontPath,
@@ -1515,7 +1557,7 @@ module.exports = async function processExportJob(job) {
                     // out here since drawtext already renders at the true output
                     // resolution, so `fontSize * clip.scale` is the correct export-side
                     // equivalent.
-                    const size     = Math.round((clip.fontSize || 48) * (clip.scale || 1));
+                    const size     = Math.round((clip.fontSize || 48) * (clip.scale || 1) * captionScaleFactor);
 
                     // IMPORTANT: clip.x/clip.y are 0-100 PERCENTAGES of the frame,
                     // representing where the CENTER of the text box sits — this is
@@ -1542,7 +1584,7 @@ module.exports = async function processExportJob(job) {
                     // Default matches addCaptionClips: 2px black outline.
                     // Same clip.scale correction as fontSize above — the preview's
                     // CSS scale() visually scales the stroke along with the glyphs.
-                    const strokeWidth = Math.round((clip.stroke?.width ?? 2) * (clip.scale || 1));
+                    const strokeWidth = Math.round((clip.stroke?.width ?? 2) * (clip.scale || 1) * captionScaleFactor);
                     const strokeColor = (clip.stroke?.color || '#000000').replace('#', '0x');
                     const strokePart  = strokeWidth > 0
                         ? `:borderw=${strokeWidth}:bordercolor=${strokeColor}`
