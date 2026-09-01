@@ -8,6 +8,7 @@
  */
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Logo } from '../components/Logo.jsx';
@@ -59,7 +60,7 @@ function formatDuration(secs) {
 
 // ── 3-dot menu ────────────────────────────────────────────────────────────────
 
-function ContextMenu({ projectId, projectName, onRename, onDuplicate, onDelete, onClose }) {
+function ContextMenu({ projectId, projectName, onRename, onDuplicate, onDelete, onClose, anchorRect }) {
     const ref = useRef(null);
     const { t } = useTranslation('dashboard');
 
@@ -69,6 +70,20 @@ function ContextMenu({ projectId, projectName, onRename, onDuplicate, onDelete, 
         }
         document.addEventListener('mousedown', handler);
         return () => document.removeEventListener('mousedown', handler);
+    }, [onClose]);
+
+    // Close rather than track — a fixed-position portal menu has no live
+    // relationship to the trigger button's position once the page scrolls or
+    // resizes (the whole point of the portal below is that it no longer
+    // shares a DOM/scroll ancestor with the card), so closing is simpler and
+    // safer than trying to re-measure and follow it.
+    useEffect(() => {
+        window.addEventListener('scroll', onClose, true);
+        window.addEventListener('resize', onClose);
+        return () => {
+            window.removeEventListener('scroll', onClose, true);
+            window.removeEventListener('resize', onClose);
+        };
     }, [onClose]);
 
     const item = (label, action, danger = false) => (
@@ -96,14 +111,41 @@ function ContextMenu({ projectId, projectName, onRename, onDuplicate, onDelete, 
         </button>
     );
 
-    return (
+    // `.card` sets `backdrop-filter` (client/src/index.css) purely for the
+    // frosted-glass look, but per spec a `backdrop-filter`/`filter` other than
+    // `none` also creates a NEW STACKING CONTEXT on that element. This menu
+    // used to be `position:absolute` *inside* the card, so its `zIndex:100`
+    // only ever won against other elements INSIDE that same card's stacking
+    // context — it could never rise above a SIBLING card, no matter how high
+    // the number, because stacking contexts are compared as one sealed unit
+    // at the level where they're created (the grid). The menu is taller than
+    // the remaining space below the "···" button, so it visibly overflows
+    // into the next row/column, and that sibling card — painted after it in
+    // DOM order, with no competing z-index of its own to lose to — covers it.
+    // (This CSS-spec trap is specific to desktop; the same rule in index.css
+    // strips `backdrop-filter` on mobile for GPU cost, so mobile didn't hit
+    // this exact mechanism — but the same absolute-positioned-inside-a-card
+    // shape is fragile regardless, hence fixing it structurally here rather
+    // than only patching the desktop symptom.)
+    //
+    // Portaling to `document.body` and switching to `position:fixed` at the
+    // trigger button's actual screen coordinates sidesteps the whole class of
+    // problem: the menu no longer has ANY stacking-context or overflow
+    // ancestor in common with sibling cards. Same pattern already used by
+    // Timeline/ClipContextMenu.jsx elsewhere in this codebase.
+    const menu = (
         <div
             ref={ref}
             style={{
-                position: 'absolute',
-                top: 36,
-                right: 0,
-                zIndex: 100,
+                position: 'fixed',
+                // Right-align to the button, same as the old `right: 0`, but
+                // clamped so it can never render off the left edge of the
+                // viewport on a narrow (mobile) card.
+                left: Math.max(8, anchorRect.right - 160),
+                // Clamp so a "···" near the bottom of the page/grid opens
+                // UPWARD instead of getting clipped by the viewport edge.
+                top: Math.min(anchorRect.bottom + 6, window.innerHeight - 176),
+                zIndex: 9999,
                 minWidth: 160,
                 background: 'var(--bg-2)',
                 border: '0.5px solid var(--glass-stroke)',
@@ -118,12 +160,21 @@ function ContextMenu({ projectId, projectName, onRename, onDuplicate, onDelete, 
             {item(t('contextMenu.delete'),    () => onDelete(projectId), true)}
         </div>
     );
+
+    return ReactDOM.createPortal(menu, document.body);
 }
 
 // ── project card ──────────────────────────────────────────────────────────────
 
 function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete, isMobile }) {
     const [menuOpen, setMenuOpen] = useState(false);
+    // Screen-space rect of the "···" trigger, captured at open time — the
+    // portaled ContextMenu below is `position:fixed` and has no other way to
+    // know where its own trigger button is (see the portal comment on
+    // ContextMenu itself for why it can no longer just be `position:absolute`
+    // inside this card).
+    const [anchorRect, setAnchorRect] = useState(null);
+    const triggerRef = useRef(null);
     const { t, i18n } = useTranslation('dashboard');
     const isLandscape = (project.aspect_ratio ?? '16:9') !== '9:16';
 
@@ -214,7 +265,12 @@ function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete, isMobil
                     {/* 3-dot menu trigger */}
                     <div style={{ position: 'relative' }}>
                         <button
-                            onClick={e => { e.stopPropagation(); setMenuOpen(v => !v); }}
+                            ref={triggerRef}
+                            onClick={e => {
+                                e.stopPropagation();
+                                if (!menuOpen) setAnchorRect(triggerRef.current.getBoundingClientRect());
+                                setMenuOpen(v => !v);
+                            }}
                             style={{
                                 background: 'none',
                                 border: 'none',
@@ -237,7 +293,7 @@ function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete, isMobil
                         >
                             ···
                         </button>
-                        {menuOpen && (
+                        {menuOpen && anchorRect && (
                             <ContextMenu
                                 projectId={project.id}
                                 projectName={project.name}
@@ -245,6 +301,7 @@ function ProjectCard({ project, onOpen, onRename, onDuplicate, onDelete, isMobil
                                 onDuplicate={onDuplicate}
                                 onDelete={onDelete}
                                 onClose={() => setMenuOpen(false)}
+                                anchorRect={anchorRect}
                             />
                         )}
                     </div>
