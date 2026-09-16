@@ -161,6 +161,14 @@ const NLP_MAP = {
         'most engaging part', 'best hook', 'what should i use as hook',
         'find the best part', 'find the opener',
     ],
+    contextualBroll: [
+        'place my b-roll', 'place the b-roll', 'match my b-roll', 'match the b-roll',
+        'sync my b-roll', 'sync the b-roll', 'sync b-roll to the dialogue',
+        'cut to my b-roll', 'add cutaways', 'add the cutaways',
+        'match footage to what he\'s saying', 'match my footage to the dialogue',
+        'place b-roll automatically', 'auto place my b-roll', 'auto-edit my b-roll',
+        'insert b-roll where it fits', 'cut away to matching footage',
+    ],
     buildFromRushes: [
         'build a full video', 'build from rushes', 'build from raw',
         'assemble the video', 'edit my rushes', 'edit the rushes',
@@ -597,6 +605,40 @@ export class IntentParser {
             return { intent: 'edit', operation: 'remove_filler_words', parameters: {}, confidence: 'HIGH', missingParameters: [] };
         }
 
+        // ── Combined cleanup: "remove silences and filler words" ────────────────
+        // ROOT CAUSE FIX: this exact phrase is the suggestion chip text emitted by
+        // SuggestionEngine.js ("Remove silences and filler words"), but it matched
+        // none of the atomic ^...$ -anchored regexes above (they require the WHOLE
+        // prompt to be just "remove silences" or just "remove filler words") and it
+        // doesn't contain "dynamic", so the compound_clean_dynamic guard below never
+        // caught it either. It fell all the way through to parseViaAPI() (GPT-4o),
+        // which — per the mis-routing pattern already documented elsewhere in this
+        // file (see the removeRepetition/removeSpeaker comments on conversation-
+        // history contamination) — would infer the broader "clean + dynamic" bundle
+        // and return compound_clean_dynamic, silently adding rhythm_zoom that was
+        // never requested. Caught here deterministically, before the API ever sees
+        // it, and routed to the same CLEAN_EDIT plan the "clean it up" phrasing
+        // uses — which only ever emits silence_removal + remove_filler_words steps
+        // (see EditPlanner.planLongFormEdit) and never rhythm_zoom.
+        {
+            const hasSilenceToken = matches('silence');
+            const hasFillerToken  = matches('fillerWords');
+            const hasDynamicWord  = /\b(dynamic|zoom\s*rhythm|make\s+it\s+(more\s+)?engaging)\b/.test(lower);
+            if (hasSilenceToken && hasFillerToken && !hasDynamicWord) {
+                return {
+                    intent: 'long_form_build',
+                    operation: 'long_form_edit',
+                    parameters: {
+                        editMode: 'CLEAN_EDIT',
+                        actions: ['silence_removal', 'remove_filler_words'],
+                        reason: 'Combined "remove silences and filler words" request — cleanup only, no rhythm',
+                    },
+                    confidence: 'HIGH',
+                    missingParameters: []
+                };
+            }
+        }
+
         // ── Split-speakers compound: "split speakers and add multicam" ──────────
         // Must run before the virtualMulticam / rhythmZoom blocks so "multicam" in
         // "split speakers and add multicam" doesn't get swallowed by rhythmZoom.
@@ -846,7 +888,11 @@ export class IntentParser {
 
         // "extract personal stories" / "best parts for social" etc.
         // Maps to long_form_edit so clips are actually cut onto the timeline.
-        // analyze_structure only summarises — it never changes the timeline.
+        // (analyze_structure now ALSO places real chapter markers on the
+        // timeline from its detected sections, not just a chat summary —
+        // see VideoEditorTools.analyzeStructure — but this route stays
+        // long_form_edit for "extract"-phrased requests since that's the
+        // one that produces trimmed, repurposable highlight clips.)
         if (matches('extractHighlights')) {
             return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.LONG_FORM_EDIT, {
                 constraints: {
@@ -869,6 +915,14 @@ export class IntentParser {
 
         if (matches('hook')) {
             return this.createIntent(INTENT_TYPES.ANALYZE, OPERATIONS.FIND_HOOK, { constraints: {} });
+        }
+
+        // "match my b-roll to the dialogue" / "place cutaways automatically" —
+        // reads word-level transcript timestamps + each clip's already-computed
+        // visual content profile (VisualAnalyzer), no new LLM call. See
+        // VideoEditorTools.placeContextualBroll.
+        if (matches('contextualBroll')) {
+            return this.createIntent(INTENT_TYPES.ANALYZE, OPERATIONS.PLACE_CONTEXTUAL_BROLL, { constraints: {} });
         }
 
         if (matches('buildFromRushes')) {

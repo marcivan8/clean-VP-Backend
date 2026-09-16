@@ -1027,6 +1027,46 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             }
                             useTimelineStore.getState().updateAsset(assetId, { isProxying: false, uploadPhase: 'ready' });
                         });
+                } else if (file.type.startsWith('image')) {
+                    // Images never went through any content-analysis pipeline
+                    // before this — see MediaIntelligencePipeline.
+                    // analyzeImageAsset()'s doc comment. No GCS upload needed
+                    // here (images aren't proxied/transcribed): read the file
+                    // as base64 and send it inline, fire-and-forget, the same
+                    // non-blocking pattern the video branch above uses for its
+                    // own analyze-asset call. This is what lets a photo be
+                    // matched by place_contextual_broll the same way a b-roll
+                    // video clip already is.
+                    const MAX_IMAGE_ANALYSIS_BYTES = 15 * 1024 * 1024; // ~20MB base64 — matches the server's cap
+                    if (file.size > MAX_IMAGE_ANALYSIS_BYTES) {
+                        console.warn(`[IDELayout] "${file.name}" is too large for automatic content analysis (${Math.round(file.size / 1024 / 1024)}MB) — it can still be used manually, just without AI-matched placement.`);
+                    } else {
+                        (async () => {
+                            try {
+                                const imageBase64 = await new Promise((resolve, reject) => {
+                                    const reader = new FileReader();
+                                    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+                                    reader.onerror = reject;
+                                    reader.readAsDataURL(file);
+                                });
+                                const { authFetch } = await import('../utils/authFetch.js');
+                                const resp = await authFetch('/api/brain/analyze-asset', {
+                                    method: 'POST',
+                                    body: JSON.stringify({
+                                        assetId,
+                                        imageBase64,
+                                        name: file.name,
+                                        projectId: useTimelineStore.getState().projectId || null,
+                                    }),
+                                });
+                                console.log(resp.ok
+                                    ? `[IDELayout] 🧠 media intelligence queued for image "${file.name}"`
+                                    : `[IDELayout] image analysis not queued (${resp.status}) — Brain advice stays generic for "${file.name}"`);
+                            } catch (e) {
+                                console.warn('[IDELayout] image analysis request failed (non-critical):', e.message);
+                            }
+                        })();
+                    }
                 }
             }
 

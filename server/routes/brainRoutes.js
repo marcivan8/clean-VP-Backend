@@ -12,8 +12,9 @@
  *   POST   /api/brain/analyze         — Analyze project state (advise only)
  *   POST   /api/brain/feedback        — Record suggestion chip feedback
  *   POST   /api/brain/observe-command — Learn from an executed command (no GPT)
- *   POST   /api/brain/analyze-asset   — Queue asset analysis (BullMQ job)
+ *   POST   /api/brain/analyze-asset   — Queue asset analysis (BullMQ job); video via gcsPath, image via imageBase64
  *   GET    /api/brain/bin-summary     — Fast media bin summary (no AI)
+ *   GET    /api/brain/broll-profiles  — Raw per-asset visual profiles (no AI)
  *   POST   /api/brain/organize        — Build a timeline organize plan
  *   GET    /api/brain/profile         — Return learned user style (for "Your Style" page)
  *   DELETE /api/brain/profile/reset   — Reset learned profile (GDPR: right to erasure)
@@ -327,13 +328,23 @@ router.post('/observe-command', authenticateUser, async (req, res) => {
 // Vision analysis can take 10–30s and must not block the HTTP response.
 router.post('/analyze-asset', authenticateUser, async (req, res) => {
     try {
-        const { assetId, gcsPath, projectId, name } = req.body || {};
+        const { assetId, gcsPath, projectId, name, imageBase64 } = req.body || {};
 
         if (!assetId || typeof assetId !== 'string') {
             return res.status(400).json({ error: 'assetId is required' });
         }
-        if (!gcsPath || typeof gcsPath !== 'string') {
-            return res.status(400).json({ error: 'gcsPath is required' });
+        // A still image has no GCS upload to point at (IDELayout.jsx never
+        // uploads images to GCS — they only ever lived as client-side blob
+        // URLs) — it sends its raw base64 bytes directly instead. Exactly one
+        // of the two must be present.
+        if ((!gcsPath || typeof gcsPath !== 'string') && (!imageBase64 || typeof imageBase64 !== 'string')) {
+            return res.status(400).json({ error: 'gcsPath or imageBase64 is required' });
+        }
+        // ~15MB of image bytes is already ~20MB base64 — comfortably inside
+        // the 50mb express.json() limit (index.js) but large enough to be worth
+        // a named cap rather than silently accepting anything the client sends.
+        if (imageBase64 && Buffer.byteLength(imageBase64, 'utf8') > 20 * 1024 * 1024) {
+            return res.status(413).json({ error: 'imageBase64 too large (20MB base64 limit)' });
         }
 
         // Module-level singleton, NOT a per-request Queue. This used to
@@ -347,15 +358,17 @@ router.post('/analyze-asset', authenticateUser, async (req, res) => {
 
         const job = await assetAnalysisQueue.add('analyze', {
             assetId,
-            filePath: gcsPath,
+            filePath: gcsPath || null,
+            imageBase64: imageBase64 || null,
             projectId: projectId || null,
             userId: req.user.id,
             // Stored on the media_assets row so the Brain can refer to footage
             // BY NAME (R22) rather than as an opaque id. Falls back to the
-            // filename in the GCS key when the client doesn't send one.
+            // filename in the GCS key when the client doesn't send one (not
+            // meaningful for the imageBase64 path, which always sends a name).
             name: (typeof name === 'string' && name.trim())
                 ? name.trim()
-                : gcsPath.split('/').pop() || null,
+                : (gcsPath ? (gcsPath.split('/').pop() || null) : null),
         });
 
         return res.json({ jobId: job.id, status: 'queued' });
@@ -392,6 +405,57 @@ router.get('/bin-summary', authenticateUser, async (req, res) => {
 
     } catch (err) {
         console.error('[brainRoutes] /bin-summary error:', err.message);
+        return res.status(500).json({ error: err.message });
+    }
+});
+
+// ── GET /api/brain/broll-profiles ────────────────────────────────────────────
+// Fast read of each analyzed asset's stored visual-content profile — pure DB
+// query, no AI calls (same shape as bin-summary). Feeds the client-side
+// place_contextual_broll matcher (VideoEditorTools.placeContextualBroll),
+// which otherwise has NO way to see VisualAnalyzer's output: /analyze-asset
+// only ever returns {jobId, status:'queued'}, and nothing client-side reads
+// the finished row back — confirmed by grep, this route is the missing link,
+// not a duplicate of an existing one. Unlike bin-summary, this does NOT run
+// the result through MediaIntelligencePipeline.getSummary() (which reduces
+// each asset down to just a name) — the matcher needs the raw
+// content_description/scene_type/etc, so this returns those fields directly.
+router.get('/broll-profiles', authenticateUser, async (req, res) => {
+    try {
+        const { projectId } = req.query;
+
+        if (!projectId) {
+            return res.status(400).json({ error: 'projectId query param required' });
+        }
+
+        const { data: assets, error } = await supabaseAdmin
+            .from('media_assets')
+            .select('id, name, content_description, suggested_label, scene_type, location_type, is_broll, has_main_speaker, camera_angle, emotional_tone')
+            .eq('project_id', projectId)
+            .eq('analysis_status', ASSET_ANALYSIS_DONE);
+
+        if (error) {
+            console.error('[brainRoutes] broll-profiles DB error:', error.message);
+            return res.status(500).json({ error: error.message });
+        }
+
+        const profiles = (assets || []).map(a => ({
+            assetId:        a.id,
+            name:           a.name || null,
+            contentDescription: a.content_description || null,
+            suggestedLabel: a.suggested_label || null,
+            sceneType:      a.scene_type || null,
+            locationType:   a.location_type || null,
+            isBroll:        a.is_broll === true,
+            hasMainSpeaker: a.has_main_speaker === true,
+            cameraAngle:    a.camera_angle || null,
+            emotionalTone:  a.emotional_tone || null,
+        }));
+
+        return res.json({ success: true, profiles });
+
+    } catch (err) {
+        console.error('[brainRoutes] /broll-profiles error:', err.message);
         return res.status(500).json({ error: err.message });
     }
 });

@@ -89,6 +89,7 @@ export const OPERATIONS = {
     BUILD_FROM_RUSHES: 'build_from_rushes',
     REORDER_SEGMENT: 'reorder_segment',
     REORDER_CLIPS: 'reorder_clips',
+    PLACE_CONTEXTUAL_BROLL: 'place_contextual_broll',
 
     // Conversational
     CHAT: 'chat',

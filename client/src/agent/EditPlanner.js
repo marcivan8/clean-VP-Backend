@@ -197,6 +197,7 @@ export class EditPlanner {
             case 'long_form_edit': return this.planLongFormEdit(planId, constraints);
             case 'build_from_rushes': return this.planLongFormEdit(planId, { ...constraints, editMode: 'FULL_BUILD' });
             case 'find_hook': return this.planFindHook(planId);
+            case 'place_contextual_broll': return this.planPlaceContextualBroll(planId);
             case 'remove_repetition': return this.planRemoveRepetition(planId);
             case 'chat': return this.planChat(planId, intent.message);
             case 'reorder_segment': return this.planReorderSegment(planId, constraints);
@@ -585,6 +586,19 @@ export class EditPlanner {
         return {
             plan_id: planId, operation: 'find_hook', step_count: 1, requiresApproval: true,
             steps: [{ step_id: 'step_1', action: 'find_hook', reason: 'Scan content analysis for the highest-energy opening segment' }]
+        };
+    }
+
+    // Matches b-roll clips already on the timeline to moments in the spoken
+    // dialogue using each clip's already-computed visual content profile
+    // (VisualAnalyzer, via GET /api/brain/broll-profiles) against word-level
+    // transcript timestamps — no new LLM call. Gated by the same
+    // requiresApproval:true → EditJobManager approval-dialog mechanism every
+    // other real-edit ANALYZE operation here uses (find_hook, analyze_structure).
+    static planPlaceContextualBroll(planId) {
+        return {
+            plan_id: planId, operation: 'place_contextual_broll', step_count: 1, requiresApproval: true,
+            steps: [{ step_id: 'step_1', action: 'place_contextual_broll', reason: 'Match b-roll (video and images, on the timeline or still in the media bin) to spoken dialogue and chapter transitions using their stored visual content profile' }]
         };
     }
 

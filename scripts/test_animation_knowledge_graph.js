@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * Regression: AI Animation Intelligence (CLAUDE.md R68) —
- * AnimationKnowledgeGraph.js, the 4 semantic-event heuristic emitters added
- * to TimelineEventDetector.js, the POST /api/audio/animate-automatically
- * route, and the `animate_automatically` AI-tool-switch wiring.
+ * Regression: AI Animation Intelligence (CLAUDE.md R68, extended by R79) —
+ * AnimationKnowledgeGraph.js, the 5 semantic-event heuristic emitters added
+ * to TimelineEventDetector.js (R79 added CHAPTER_START + the marker→title-card
+ * retargeting), the POST /api/audio/animate-automatically route, and the
+ * `animate_automatically` AI-tool-switch wiring.
  *
  * Run: node scripts/test_animation_knowledge_graph.js
  */
@@ -39,8 +40,8 @@ const {
 
 section('1 · AnimationKnowledgeGraph — shape matches the feature request');
 {
-    check('has reveal/punchline/emphasis/emotional_beat entries',
-        ['reveal', 'punchline', 'emphasis', 'emotional_beat'].every(k => ANIMATION_KNOWLEDGE_GRAPH[k]));
+    check('has reveal/punchline/emphasis/emotional_beat/chapter_transition entries',
+        ['reveal', 'punchline', 'emphasis', 'emotional_beat', 'chapter_transition'].every(k => ANIMATION_KNOWLEDGE_GRAPH[k]));
 
     const reveal = ANIMATION_KNOWLEDGE_GRAPH.reveal;
     check('reveal.animations.text uses REAL preset ids (scale-reveal, blur-reveal)',
@@ -58,10 +59,20 @@ section('1 · AnimationKnowledgeGraph — shape matches the feature request');
     check('every sfxIntents value is a real EditingIntent value',
         Object.values(ANIMATION_KNOWLEDGE_GRAPH).every(e => e.sfxIntents.every(i => Object.values(EditingIntent).includes(i))));
 
-    check('SEMANTIC_EVENT_TYPES has exactly the 4 target events',
-        SEMANTIC_EVENT_TYPES.length === 4 &&
-        [TimelineEventType.REVEAL, TimelineEventType.PUNCHLINE_DETECTED, TimelineEventType.EMPHASIS_MOMENT, TimelineEventType.EMOTIONAL_BEAT]
+    check('SEMANTIC_EVENT_TYPES has exactly the 5 target events',
+        SEMANTIC_EVENT_TYPES.length === 5 &&
+        [TimelineEventType.REVEAL, TimelineEventType.PUNCHLINE_DETECTED, TimelineEventType.EMPHASIS_MOMENT, TimelineEventType.EMOTIONAL_BEAT, TimelineEventType.CHAPTER_START]
             .every(t => SEMANTIC_EVENT_TYPES.includes(t)));
+
+    const chapterTransition = ANIMATION_KNOWLEDGE_GRAPH.chapter_transition;
+    check('chapter_transition.eventType is CHAPTER_START', chapterTransition.eventType === TimelineEventType.CHAPTER_START);
+    check('chapter_transition.animations.text uses REAL preset ids (mask-reveal, slide-up)',
+        chapterTransition.animations.text.includes('mask-reveal') && chapterTransition.animations.text.includes('slide-up'));
+    check('chapter_transition.animations.video includes camera-pull', chapterTransition.animations.video.includes('camera-pull'));
+    check('chapter_transition.animations.image includes ken-burns', chapterTransition.animations.image.includes('ken-burns'));
+    check('chapter_transition.animations.sticker is deliberately empty (same restraint as emotional_beat)',
+        Array.isArray(chapterTransition.animations.sticker) && chapterTransition.animations.sticker.length === 0);
+    check('chapter_transition.sfxIntents includes TRANSITION', chapterTransition.sfxIntents.includes(EditingIntent.TRANSITION));
 
     check('graphForEventType resolves REVEAL', graphForEventType(TimelineEventType.REVEAL)?.event === 'reveal');
     check('graphForEventType returns null for an unknown type', graphForEventType('NOT_A_REAL_EVENT') === null);
@@ -179,6 +190,53 @@ section('4 · TimelineEventDetector — EMOTIONAL_BEAT from a real pause + emoti
     check('a too-short pause does not fire EMOTIONAL_BEAT even with matching wording', !events3.some(e => e.eventType === TimelineEventType.EMOTIONAL_BEAT));
 }
 
+section('4b · TimelineEventDetector — R79 CHAPTER_START retargeted onto the real title-card clip');
+{
+    // A marker clip (R77) plus a matching title card (R78-followup) on a
+    // track named exactly "Chapter Titles", at the same boundary.
+    const tracksWithCard = [
+        { id: 'v1', type: 'video', clips: [
+            { id: 'marker-1', start: 10, duration: 0, isChapter: true, label: 'The Turn' },
+        ]},
+        { id: 'ct1', type: 'text', name: 'Chapter Titles', clips: [
+            { id: 'title-card-1', type: 'text', start: 10.2, duration: 2.5, content: 'The Turn' },
+        ]},
+    ];
+    const eventsWithCard = timelineEventDetector.detect({ tracks: tracksWithCard });
+    const chapterEvent = eventsWithCard.find(e => e.eventType === TimelineEventType.CHAPTER_START);
+    check('CHAPTER_START event exists', !!chapterEvent);
+    check('its clipId is retargeted to the title-card clip, not the marker', chapterEvent?.clipId === 'title-card-1');
+    check('its trackId is retargeted to the "Chapter Titles" track', chapterEvent?.trackId === 'ct1');
+    check('the original marker clip id is preserved under metadata.markerClipId', chapterEvent?.metadata?.markerClipId === 'marker-1');
+
+    // Same shape, but the title card starts 0.6s away — outside the 0.5s
+    // epsilon — so it must NOT be treated as a match.
+    const tracksTooFar = [
+        { id: 'v1', type: 'video', clips: [
+            { id: 'marker-1', start: 10, duration: 0, isChapter: true, label: 'The Turn' },
+        ]},
+        { id: 'ct1', type: 'text', name: 'Chapter Titles', clips: [
+            { id: 'title-card-1', type: 'text', start: 10.6, duration: 2.5, content: 'The Turn' },
+        ]},
+    ];
+    const eventsTooFar = timelineEventDetector.detect({ tracks: tracksTooFar });
+    const chapterEventTooFar = eventsTooFar.find(e => e.eventType === TimelineEventType.CHAPTER_START);
+    check('a title card outside the 0.5s epsilon is not treated as a match (falls back to the marker clip)',
+        chapterEventTooFar?.clipId === 'marker-1');
+
+    // No "Chapter Titles" track at all yet — e.g. place_contextual_broll has
+    // never run. The event must still fire, just against the marker clip.
+    const tracksNoCard = [
+        { id: 'v1', type: 'video', clips: [
+            { id: 'marker-1', start: 10, duration: 0, isChapter: true, label: 'The Turn' },
+        ]},
+    ];
+    const eventsNoCard = timelineEventDetector.detect({ tracks: tracksNoCard });
+    const chapterEventNoCard = eventsNoCard.find(e => e.eventType === TimelineEventType.CHAPTER_START);
+    check('with no title-card track at all, CHAPTER_START still fires, against the marker clip',
+        chapterEventNoCard?.clipId === 'marker-1' && chapterEventNoCard?.metadata?.markerClipId === undefined);
+}
+
 section('5 · backend route wiring (server/routes/audioEngineRoutes.js)');
 {
     const routes = read('server/routes/audioEngineRoutes.js');
@@ -221,7 +279,7 @@ section('7 · pure-module sanity — MotionPresets ids referenced by the graph a
     const { MOTION_PRESETS } = new Function(src)();
 
     const allGraphPresetIds = Object.values(ANIMATION_KNOWLEDGE_GRAPH)
-        .flatMap(e => [...e.animations.text, ...e.animations.video]);
+        .flatMap(e => [...e.animations.text, ...e.animations.video, ...(e.animations.image || []), ...(e.animations.sticker || [])]);
     check('every preset id in the knowledge graph exists in MOTION_PRESETS',
         allGraphPresetIds.every(id => Object.prototype.hasOwnProperty.call(MOTION_PRESETS, id)),
         `missing: ${allGraphPresetIds.filter(id => !Object.prototype.hasOwnProperty.call(MOTION_PRESETS, id)).join(', ')}`);

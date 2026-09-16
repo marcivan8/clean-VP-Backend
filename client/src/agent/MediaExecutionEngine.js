@@ -42,6 +42,9 @@ import { groupWordsIntoSegments } from '../motion/CaptionModel.js';
 // are indistinguishable to every downstream consumer (preview, export).
 import { applyPresetToClip } from '../motion/ClipAdapter.js';
 
+// See _deriveAudioPeaksForClip below.
+const DERIVED_PEAK_DB_FLOOR = -8;
+
 export const EXECUTION_STATES = {
     QUEUED:    'QUEUED',
     RUNNING:   'RUNNING',
@@ -505,6 +508,86 @@ export class MediaExecutionEngine {
     }
 
     /**
+     * R68 fix — TimelineEventDetector's PUNCHLINE_DETECTED/EMPHASIS_MOMENT
+     * heuristics read `clip.peaks`/`clip.audioPeaks` (discrete {offset, db}
+     * markers), but nothing in this codebase ever wrote that field onto any
+     * clip — WaveformEngine's real per-asset amplitude data (50 samples/sec,
+     * normalised 0-1, already cached in `store.waveformsByAsset` for the
+     * waveform UI) was never converted into it. Net effect: those two event
+     * types — the only ones in AnimationKnowledgeGraph.js with a `video`
+     * preset (camera-shake / camera-zoom) — could never fire, so
+     * `animate_automatically` could only ever land on caption/text clips
+     * (REVEAL via keyword match, EMOTIONAL_BEAT by construction) and the
+     * base video clip was never animated no matter how punchy the audio was.
+     *
+     * This derives real discrete peaks for a video clip's VISIBLE (trimmed)
+     * window from the already-cached asset waveform — local maxima only
+     * (not all 50 samples/sec, which would flood the detector with false
+     * emphasis events on any sustained-loud stretch), converted from
+     * normalised amplitude to an approximate dB value on the same scale
+     * TimelineEventDetector's PUNCHLINE_PEAK_DB/EMPHASIS_PEAK_DB constants
+     * already use (20·log10(amplitude), so amplitude 1.0 → 0dB).
+     *
+     * Read-only: builds a plain array, never mutates the clip or touches
+     * the store, so it can't affect persistence/undo (R29/R4).
+     */
+    _deriveAudioPeaksForClip(store, clip) {
+        const asset = clip?.assetId ? store.waveformsByAsset?.[clip.assetId] : null;
+        const samples = asset?.peaks;
+        if (!Array.isArray(samples) || samples.length === 0) return [];
+
+        const SAMPLE_RATE_HZ = 50; // matches routes/waveformRoutes.js SAMPLES_PER_WIN extraction rate
+        const sourceStart = Number(clip.offset) || 0;
+        const duration     = Number(clip.duration) || 0;
+        if (duration <= 0) return [];
+        const sourceEnd = sourceStart + duration;
+
+        const firstIdx = Math.max(0, Math.floor(sourceStart * SAMPLE_RATE_HZ));
+        const lastIdx  = Math.min(samples.length - 1, Math.ceil(sourceEnd * SAMPLE_RATE_HZ));
+
+        const peaks = [];
+        for (let i = firstIdx; i <= lastIdx; i++) {
+            const amplitude = samples[i];
+            if (typeof amplitude !== 'number' || amplitude <= 0) continue;
+            // Local maximum only — strictly louder than both neighbours —
+            // so a sustained loud stretch reads as one peak, not fifty.
+            const prev = samples[i - 1] ?? 0;
+            const next = samples[i + 1] ?? 0;
+            if (amplitude < prev || amplitude < next) continue;
+
+            const db = 20 * Math.log10(Math.min(amplitude, 1));
+            // -8dB matches TimelineEventDetector's PUNCHLINE_PEAK_DB — the more
+            // permissive of its two thresholds; the detector applies its own
+            // exact PUNCHLINE/EMPHASIS cutoffs downstream, this is just a floor
+            // so quiet room-tone samples never get pushed through as "peaks".
+            if (db < DERIVED_PEAK_DB_FLOOR) continue;
+
+            const sourceTimeS = i / SAMPLE_RATE_HZ;
+            peaks.push({ offset: sourceTimeS - sourceStart, db });
+        }
+        return peaks;
+    }
+
+    /**
+     * R68 fix — clones `store.tracks` with `peaks` attached to every video
+     * clip (see `_deriveAudioPeaksForClip` above) for the ONE
+     * `animate_automatically` request body. Does not touch the store.
+     */
+    _tracksWithDerivedAudioPeaks(store) {
+        return (store.tracks || []).map(track => {
+            if (track.type !== 'video') return track;
+            return {
+                ...track,
+                clips: (track.clips || []).map(clip => {
+                    if (clip.peaks?.length || clip.audioPeaks?.length) return clip;
+                    const peaks = this._deriveAudioPeaksForClip(store, clip);
+                    return peaks.length ? { ...clip, peaks } : clip;
+                }),
+            };
+        });
+    }
+
+    /**
      * R67 — find which track a clip id lives on. Several new Object
      * Intelligence cases (separate_speaker/zoom_speaker/track_speaker/
      * blur_background) take a bare clipId the way most other single-clip
@@ -685,9 +768,18 @@ export class MediaExecutionEngine {
             case 'animate_automatically': {
                 const aaStore = useTimelineStore.getState();
                 try {
+                    // See _tracksWithDerivedAudioPeaks — without this, video clips
+                    // never carry the peak markers PUNCHLINE_DETECTED/EMPHASIS_MOMENT
+                    // need, so the brain could only ever animate text.
+                    const aaTracks = this._tracksWithDerivedAudioPeaks(aaStore);
+                    // R82 — projectId lets the route do a READ-ONLY lookup of
+                    // this project's already-cached tone (ProjectIntelligence
+                    // .getMap(), never a fresh/paid computation) to flavour
+                    // which secondary preset gets combined in. Omitted/null
+                    // (no project open yet) just means no tone signal.
                     const aaRes = await authFetch('/api/audio/animate-automatically', {
                         method: 'POST',
-                        body: JSON.stringify({ projectState: { tracks: aaStore.tracks } }),
+                        body: JSON.stringify({ projectState: { tracks: aaTracks }, projectId: aaStore.projectId || null }),
                     });
                     const aaData = await aaRes.json();
                     if (!aaRes.ok) {
@@ -713,7 +805,19 @@ export class MediaExecutionEngine {
                                 ? (aaStore.tracks || []).find(t => t.id === trackId)?.clips?.find(c => c.id === clipId)
                                 : null;
                             if (clip) {
-                                const updates = applyPresetToClip(clip, item.presetId);
+                                // R81 — item.intensity (AnimationIntensity.js,
+                                // computed server-side from this specific
+                                // event's own metadata) scales the preset's
+                                // keyframes so two moments of the same
+                                // semantic type don't land identically.
+                                // R82 — item.secondaryPresetId (AnimationCombiner.js)
+                                // layers one complementary preset on top, so
+                                // the resulting motion is a considered
+                                // combination, not always a single preset alone.
+                                const updates = applyPresetToClip(clip, item.presetId, {
+                                    intensity: item.intensity,
+                                    secondaryPresetId: item.secondaryPresetId,
+                                });
                                 if (Object.keys(updates).length > 0) {
                                     aaStore.updateClip(trackId, clipId, updates, { skipHistory: true });
                                     animatedCount++;
@@ -833,6 +937,7 @@ export class MediaExecutionEngine {
             case 'apply_zoom':        // alias — server fallback generates this for "zoom in/out"
             case 'apply_smart_zoom':
             case 'identify_quotable_moments':
+            case 'place_contextual_broll':
             case 'apply_lut':
             case 'clear_lut':
             case 'smart_cleanup':

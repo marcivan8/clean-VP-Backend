@@ -183,7 +183,7 @@ class VisualAnalyzer {
      * @param {{ timestamp: number, base64: string }[]} frames
      * @returns {Promise<Object>}
      */
-    async analyzeWithVision(frames) {
+    async analyzeWithVision(frames, mediaKind = 'video') {
         try {
             const imageMessages = frames.map(f => ({
                 type: 'image_url',
@@ -193,7 +193,8 @@ class VisualAnalyzer {
                 },
             }));
 
-            const prompt = `Analyse these video frames and return a JSON object with this exact shape:
+            const subject = mediaKind === 'image' ? 'this photograph' : 'these video frames';
+            const prompt = `Analyse ${subject} and return a JSON object with this exact shape:
 {
   "sceneType": "talking_head|interview|broll|screen_recording|podcast|vlog|tutorial|product|unknown",
   "cameraAngle": "close_up|medium|wide|overhead|unknown",
@@ -249,6 +250,35 @@ Return ONLY the JSON object, no explanation.`;
 
         } catch (err) {
             console.error('[VisualAnalyzer] analyzeWithVision error:', err.message);
+            return ERROR_RESULT;
+        }
+    }
+
+    /**
+     * Analyse a still IMAGE with GPT-4o Vision — no ffmpeg, no frame
+     * extraction, no temp files. Reuses the exact same analyzeWithVision()
+     * call and JSON schema as video analysis (one frame instead of three)
+     * so the result lands in the identical media_assets columns and
+     * GET /api/brain/broll-profiles / place_contextual_broll need zero
+     * changes to also match against images.
+     *
+     * @param {string} base64  - Raw base64-encoded image bytes (no data: URI prefix)
+     * @returns {Promise<Object>} Visual analysis result (same shape as analyze())
+     */
+    async analyzeImageBase64(base64) {
+        try {
+            if (!base64) {
+                console.warn('[VisualAnalyzer] analyzeImageBase64 called with no image data');
+                return ERROR_RESULT;
+            }
+            if (!this.openai) {
+                console.warn('[VisualAnalyzer] No OpenAI key — skipping image vision analysis');
+                return { ...ERROR_RESULT, error: false, sceneType: 'unknown' };
+            }
+
+            return await this.analyzeWithVision([{ timestamp: 0, base64 }], 'image');
+        } catch (err) {
+            console.error('[VisualAnalyzer] analyzeImageBase64 error:', err.message);
             return ERROR_RESULT;
         }
     }

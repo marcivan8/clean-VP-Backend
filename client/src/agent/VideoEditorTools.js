@@ -2,6 +2,7 @@ import useTimelineStore from '../store/useTimelineStore.js';
 import { performSilenceRemoval, performFillerRemoval, performAudioDenoise, performAudioNormalization, performAutoCaptions } from '../services/autoEditService.js';
 import { ContentAnalyzer } from './ContentAnalyzer.js';
 import { LongFormEditPlanner } from './LongFormEditPlanner.js';
+import { authFetch } from '../utils/authFetch.js';
 
 /**
  * VideoEditorTools
@@ -369,6 +370,367 @@ export const TOOL_DEFINITIONS = [
     }
 ];
 
+// ── Shared segment→clip helpers (identifyQuotableMoments, findHook, analyzeStructure) ──
+//
+// "find the best part"/"find the hook" used to only move the playhead and
+// report a timestamp in chat, while "best moments"/"highlight reel"
+// (identifyQuotableMoments) created a real clip on a new Highlights track —
+// same underlying request, two different outcomes depending on phrasing.
+// Both paths now go through the same two pure helpers below so they produce
+// the identical real timeline edit. A third helper does the equivalent for
+// analyzeStructure's chapter markers. Kept pure (no store access) so they're
+// unit-testable without a live Zustand store.
+
+/**
+ * Finds the clip that covers `srcTime` in SOURCE time (clip.offset/clip.start
+ * plus clip.duration), not timeline position — the same convention
+ * ZoomAnalyzer and identifyQuotableMoments already rely on for
+ * post-silence-removal timelines, where timeline position has drifted from
+ * source position after edits.
+ * @param {Array<Object>} allClips
+ * @param {number} srcTime
+ * @returns {Object|undefined} the covering clip, or undefined if none covers it
+ */
+export function findCoveringClipBySourceTime(allClips, srcTime) {
+    return allClips.find(c => {
+        const srcStart = c.offset ?? c.start ?? 0;
+        const srcEnd = srcStart + (c.duration || 0);
+        return srcTime >= srcStart && srcTime <= srcEnd;
+    });
+}
+
+/**
+ * Builds the clip payload for extracting a segment [segStart, segEnd) of
+ * `baseClip`'s source onto a new standalone clip — a copy of baseClip's
+ * media fields, retimed to start at 0 on its own track and offset into the
+ * source at segStart. Caller is responsible for state.addTrack/state.addClip;
+ * kept pure so it's unit-testable without a live store.
+ * @param {Object} baseClip
+ * @param {number} segStart
+ * @param {number} segEnd
+ * @param {string} name
+ * @returns {Object} a clip payload ready for state.addClip(trackId, payload)
+ */
+export function buildHighlightClipPayload(baseClip, segStart, segEnd, name) {
+    const duration = Math.max(0.1, (segEnd ?? 0) - (segStart ?? 0));
+    return {
+        ...baseClip,
+        id: `clip_quote_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        start: 0,
+        duration,
+        offset: segStart ?? 0,
+        name,
+    };
+}
+
+/**
+ * Builds real chapter-marker clip payloads from the content-analysis
+ * `structure.sections` array (`server/controllers/aiAgentController.js`
+ * merges GPT's semantic sections with `viralEngine/structure.js`'s heuristic
+ * `detectedSections` under this one key — both share the same
+ * {start,end,topic,type} shape). Marker clips carry `type:'marker'` +
+ * `isChapter:true` and no media fields —
+ * `server/audio-engine/timeline/TimelineEventDetector.js` already reads
+ * exactly this shape (`clip.isChapter || clip.type === 'marker'`) to emit
+ * CHAPTER_START events for the R68 animation/SFX intelligence layer; nothing
+ * anywhere ever wrote that shape before this, so that branch was permanently
+ * dead. Caller is responsible for state.addTrack/state.addClip.
+ * @param {Array<{start:number,end:number,topic?:string,type?:string}>} sections
+ * @returns {Array<Object>} one clip payload per section
+ */
+export function buildChapterMarkerPayloads(sections) {
+    if (!Array.isArray(sections)) return [];
+    return sections.map((section, i) => {
+        const start = section?.start ?? 0;
+        const end = section?.end ?? start;
+        const duration = Math.max(0.1, end - start);
+        const label = section?.topic || section?.type || `Chapter ${i + 1}`;
+        return {
+            id: `clip_chapter_${Date.now()}_${i}`,
+            type: 'marker',
+            isChapter: true,
+            start,
+            duration,
+            offset: 0,
+            label,
+            name: `Chapter ${i + 1} — ${label}`,
+        };
+    });
+}
+
+// ── place_contextual_broll — matching helpers ───────────────────────────────
+//
+// Matches b-roll clips already on the timeline to moments in the spoken
+// dialogue, using each clip's ALREADY-COMPUTED visual content profile
+// (VisualAnalyzer, fetched via GET /api/brain/broll-profiles) against
+// word-level transcript timestamps (state.captions). Deliberately no new
+// LLM call — same "heuristic on existing signals" scope R68 established for
+// AnimationKnowledgeGraph's semantic event detection, applied here to
+// transcript-to-footage matching instead of transcript-to-animation timing.
+// Kept as pure, unit-testable functions; only placeContextualBroll() itself
+// touches the store/network.
+
+const BROLL_STOPWORDS = new Set([
+    'that', 'this', 'with', 'from', 'have', 'were', 'they', 'been', 'their',
+    'what', 'when', 'where', 'which', 'about', 'would', 'could', 'should',
+    'there', 'here', 'just', 'like', 'really', 'going', 'gonna', 'know',
+    'thing', 'things', 'kind', 'sort', 'actually', 'basically', 'literally',
+]);
+
+const BROLL_MIN_SHARED_KEYWORDS   = 1;
+const BROLL_WINDOW_SECONDS        = 6;    // sliding window of dialogue words to match against
+const BROLL_DEFAULT_CUTAWAY_S     = 2.5;  // how long a cutaway stays on screen
+const BROLL_MIN_SPACING_S         = 4;    // don't place two cutaways closer than this
+const BROLL_COOLDOWN_S            = 12;   // don't reuse the SAME b-roll clip within this window
+const BROLL_MAX_PLACEMENTS        = 8;
+
+// A window within this many seconds of a real chapter-marker boundary
+// (buildChapterMarkerPayloads' output, read back off the timeline — see
+// extractChapterBoundaries below) is treated as a TOPIC TRANSITION, not just
+// mid-sentence illustration. Transition matches get a scoring bonus (so a
+// weaker keyword match at a real topic change can still beat a stronger one
+// that isn't near one) and a longer cutaway, since a beat bridging one topic
+// to the next reads better held a little longer than a quick illustrative cut.
+// This never LOWERS the keyword bar below BROLL_MIN_SHARED_KEYWORDS — the
+// same "don't act with false confidence" reasoning analyzeStructure's
+// degraded-path already applies (R77) means proximity to a chapter boundary
+// alone is never enough to justify a placement with zero real content match.
+const BROLL_CHAPTER_PROXIMITY_S   = 5;
+const BROLL_CHAPTER_SCORE_BONUS   = 2;
+const BROLL_TRANSITION_CUTAWAY_S  = 3.5;
+
+/**
+ * Lowercases and splits free text into a keyword set — words longer than 4
+ * chars, stopwords dropped. Same convention `viralEngine/structure.js`'s
+ * `_inferTopic` already uses for topic inference, reused here for the
+ * transcript-window <-> b-roll-profile overlap comparison.
+ * @param {string} text
+ * @returns {Set<string>}
+ */
+export function tokenizeForBrollMatch(text) {
+    const words = (text || '').toLowerCase().split(/[^a-z0-9']+/).filter(w => w.length > 4 && !BROLL_STOPWORDS.has(w));
+    return new Set(words);
+}
+
+/**
+ * Builds the keyword-tagged candidate list: b-roll profiles (from
+ * GET /api/brain/broll-profiles) cross-referenced against assets ACTUALLY
+ * present in the media bin (`state.assets`) — nothing can be cut to if it
+ * was never imported at all. Deliberately checks the BIN, not the timeline:
+ * `IDELayout.jsx`'s upload flow calls `addAssets(processedAssets)`
+ * unconditionally for every uploaded file, but only auto-places a clip on
+ * the timeline when exactly one file was uploaded — a multi-file upload (the
+ * user's own vlog example: interview + walking/equipment/project shots
+ * dropped in together) leaves every asset but the first sitting in the bin,
+ * analysed and ready, with no clip anywhere yet. Checking `state.tracks`
+ * here (as this used to) silently excluded all of them. `addOverlayClip`
+ * itself never required a pre-existing clip — it builds the overlay clip
+ * straight from the asset's own url/thumbnail/duration — so this was an
+ * artificial restriction, not a real one. Profiles flagged `hasMainSpeaker`
+ * are excluded outright (never cut TO the interview subject as a "cutaway"
+ * from himself); everything else is treated as a broll candidate rather
+ * than requiring `isBroll === true` specifically, since that field isn't
+ * guaranteed populated on every asset.
+ * @param {Array<Object>} profiles — from GET /api/brain/broll-profiles
+ * @param {Array<Object>} assets — state.assets (the full media bin, placed or not)
+ * @returns {Array<{assetId:string,name:string|null,keywords:Set<string>}>}
+ */
+export function buildBrollCandidates(profiles, assets) {
+    if (!Array.isArray(profiles) || profiles.length === 0) return [];
+    if (!Array.isArray(assets) || assets.length === 0) return [];
+
+    const binAssetIds = new Set();
+    for (const asset of assets) {
+        if (asset?.id) binAssetIds.add(asset.id);
+    }
+
+    return profiles
+        .filter(p => p && p.assetId && binAssetIds.has(p.assetId))
+        .filter(p => p.hasMainSpeaker !== true)
+        .map(p => ({
+            assetId: p.assetId,
+            name: p.name || null,
+            keywords: tokenizeForBrollMatch(
+                [p.contentDescription, p.suggestedLabel, p.sceneType, p.locationType].filter(Boolean).join(' ')
+            ),
+        }))
+        .filter(c => c.keywords.size > 0);
+}
+
+/**
+ * Reads chapter-boundary timestamps off the timeline — clips with
+ * `isChapter === true || type === 'marker'`, the exact shape
+ * buildChapterMarkerPayloads() writes (R77) and TimelineEventDetector.js
+ * already reads for its own CHAPTER_START event. Scans every track (chapter
+ * markers live on a dedicated "Chapters" video track, but nothing here
+ * assumes that name or position) so this keeps working even if that track
+ * gets renamed or reordered.
+ * @param {Array<Object>} tracks — state.tracks
+ * @returns {number[]} sorted, de-duplicated boundary times in seconds
+ */
+export function extractChapterBoundaries(tracks) {
+    if (!Array.isArray(tracks) || tracks.length === 0) return [];
+
+    const boundaries = new Set();
+    for (const track of tracks) {
+        if (!track) continue;
+        for (const clip of (track.clips || [])) {
+            if (clip && (clip.isChapter === true || clip.type === 'marker') && typeof clip.start === 'number') {
+                boundaries.add(clip.start);
+            }
+        }
+    }
+    return [...boundaries].sort((a, b) => a - b);
+}
+
+const CHAPTER_TITLE_CARD_DURATION_S = 2.5;
+const CHAPTER_TITLE_MATCH_EPSILON_S = 0.5; // for the idempotency check below
+
+/**
+ * Like extractChapterBoundaries, but keeps each marker's own label too —
+ * the "text overlay to transition to a different topic/chapter" the user
+ * asked for reads that label as a title card, so it needs more than just
+ * the timestamp. Reads the exact same clip shape (isChapter/type:'marker')
+ * buildChapterMarkerPayloads (R77) writes.
+ * @param {Array<Object>} tracks — state.tracks
+ * @returns {Array<{start:number,label:string}>} sorted, de-duplicated by start (first wins)
+ */
+export function extractChapterMarkers(tracks) {
+    if (!Array.isArray(tracks) || tracks.length === 0) return [];
+
+    const byStart = new Map();
+    for (const track of tracks) {
+        if (!track) continue;
+        for (const clip of (track.clips || [])) {
+            if (clip && (clip.isChapter === true || clip.type === 'marker') && typeof clip.start === 'number') {
+                if (!byStart.has(clip.start)) {
+                    byStart.set(clip.start, { start: clip.start, label: clip.label || clip.name || 'Chapter' });
+                }
+            }
+        }
+    }
+    return [...byStart.values()].sort((a, b) => a.start - b.start);
+}
+
+/**
+ * Builds a text-clip payload for one chapter-boundary title card — the
+ * visual counterpart to a chapter marker, since markers themselves are
+ * purely structural (R77: "not a chapters UI panel") and render nothing on
+ * screen. Shares the same clip fields `useTimelineStore.addTextOverlay`
+ * writes (id/start/duration/name/content/position/style/type) so it renders
+ * through the exact same text-clip path captions and manual text overlays
+ * already use — no new rendering logic.
+ * @param {{start:number,label:string}} marker — one entry from extractChapterMarkers
+ * @returns {Object} clip payload ready for state.addClip(textTrackId, payload)
+ */
+export function buildChapterTitleCardPayload(marker) {
+    return {
+        id: `clip_chaptertitle_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        type: 'text',
+        start: marker.start,
+        duration: CHAPTER_TITLE_CARD_DURATION_S,
+        name: `Chapter Title — ${marker.label}`,
+        content: marker.label,
+        position: 'center',
+    };
+}
+
+
+/**
+ * Slides a BROLL_WINDOW_SECONDS window over the word-level transcript,
+ * tokenizes each window's text, and scores it against every candidate's
+ * keyword set by shared-keyword count — the same "how many distinctive
+ * words overlap" idea `viralEngine/structure.js` already uses for
+ * topic-shift detection, applied here to transcript<->b-roll matching
+ * instead of transcript<->transcript. Enforces a minimum spacing between
+ * ANY two placements and a longer cooldown before the SAME clip can be
+ * reused, so one strongly-matching b-roll clip doesn't get cut in
+ * repeatedly. Windows never overlap — each is consumed once, left to right.
+ *
+ * `chapterBoundaries` (extractChapterBoundaries' output) makes this
+ * TRANSITION-aware: a window within BROLL_CHAPTER_PROXIMITY_S of a real
+ * chapter boundary gets a scoring bonus (so it can win a tie against a
+ * window with a marginally stronger keyword match elsewhere) and a longer
+ * cutaway — a b-roll shot bridging into the next topic reads better held a
+ * beat longer than a quick mid-sentence illustration. The bonus only breaks
+ * ties between otherwise-valid candidates; it never substitutes for one —
+ * BROLL_MIN_SHARED_KEYWORDS is still checked against the RAW (unboosted)
+ * overlap, so a chapter boundary with no matching footage nearby still gets
+ * nothing placed, same as R77's "don't act with false confidence" reasoning
+ * for analyzeStructure's own degraded path.
+ * @param {Array<{start:number,end?:number,word?:string,text?:string}>} words — state.captions
+ * @param {Array<{assetId:string,name:string|null,keywords:Set<string>}>} candidates
+ * @param {number[]} [chapterBoundaries] — extractChapterBoundaries(state.tracks)
+ * @returns {Array<{timelineTime:number,duration:number,assetId:string,name:string|null,matchedKeywords:string[],isChapterTransition:boolean}>}
+ */
+export function matchTranscriptToBroll(words, candidates, chapterBoundaries = []) {
+    if (!Array.isArray(words) || words.length === 0) return [];
+    if (!Array.isArray(candidates) || candidates.length === 0) return [];
+
+    const boundaries = Array.isArray(chapterBoundaries) ? chapterBoundaries : [];
+    const isNearChapterBoundary = (t) => boundaries.some(b => Math.abs(t - b) <= BROLL_CHAPTER_PROXIMITY_S);
+
+    const placements = [];
+    const lastPlacedAt = new Map(); // assetId -> last timelineTime it was placed at
+    let lastPlacementEnd = -Infinity;
+
+    let i = 0;
+    while (i < words.length) {
+        const windowStart = words[i]?.start ?? 0;
+        let j = i;
+        const windowWords = [];
+        while (j < words.length && (words[j]?.start ?? 0) < windowStart + BROLL_WINDOW_SECONDS) {
+            windowWords.push(words[j]?.word || words[j]?.text || '');
+            j++;
+        }
+        if (windowWords.length === 0) { i = j + 1; continue; }
+
+        if (windowStart >= lastPlacementEnd + BROLL_MIN_SPACING_S) {
+            const windowKeywords = tokenizeForBrollMatch(windowWords.join(' '));
+
+            if (windowKeywords.size > 0) {
+                const nearBoundary = isNearChapterBoundary(windowStart);
+                let best = null;
+                let bestOverlap = [];
+                let bestScore = -1;
+                for (const candidate of candidates) {
+                    const lastUse = lastPlacedAt.get(candidate.assetId);
+                    if (lastUse !== undefined && windowStart - lastUse < BROLL_COOLDOWN_S) continue; // still cooling down
+
+                    const shared = [...windowKeywords].filter(w => candidate.keywords.has(w));
+                    if (shared.length < BROLL_MIN_SHARED_KEYWORDS) continue; // never placed on the boundary bonus alone
+
+                    const score = shared.length + (nearBoundary ? BROLL_CHAPTER_SCORE_BONUS : 0);
+                    if (score > bestScore) {
+                        best = candidate;
+                        bestOverlap = shared;
+                        bestScore = score;
+                    }
+                }
+
+                if (best) {
+                    const duration = nearBoundary ? BROLL_TRANSITION_CUTAWAY_S : BROLL_DEFAULT_CUTAWAY_S;
+                    placements.push({
+                        timelineTime: windowStart,
+                        duration,
+                        assetId: best.assetId,
+                        name: best.name,
+                        matchedKeywords: bestOverlap,
+                        isChapterTransition: nearBoundary,
+                    });
+                    lastPlacedAt.set(best.assetId, windowStart);
+                    lastPlacementEnd = windowStart + duration;
+                    if (placements.length >= BROLL_MAX_PLACEMENTS) break;
+                }
+            }
+        }
+
+        i = j; // advance past this window — windows never overlap
+    }
+
+    return placements;
+}
+
 export class VideoEditorTools {
     // Always read fresh state — never cache a snapshot
     get store() {
@@ -459,6 +821,7 @@ export class VideoEditorTools {
             case 'long_form_edit': return await this.longFormEdit(action.args, action.signal);
             case 'smart_cleanup': return await this.smartCleanup(action.args, action.signal);
             case 'find_hook': return await this.findHook();
+            case 'place_contextual_broll': return await this.placeContextualBroll(action.args, action.signal);
             case 'remove_repetition': return await this.removeRepetition(action.args);
             case 'reorder_clips': return await this.reorderClips(action.args, action.signal);
             case 'reorder_segment': return this.reorderSegment(action.args);
@@ -727,40 +1090,33 @@ export class VideoEditorTools {
             // base clip covers each one via source-time (offset), matching the
             // convention ZoomAnalyzer already relies on for post-silence-removal
             // timelines — clip.start (timeline position) is not reliable here.
-            const findCoveringClip = (srcTime) => allClips.find(c => {
-                const srcStart = c.offset ?? c.start ?? 0;
-                const srcEnd = srcStart + (c.duration || 0);
-                return srcTime >= srcStart && srcTime <= srcEnd;
-            });
-
+            // Shared with findHook via findCoveringClipBySourceTime/
+            // buildHighlightClipPayload (module-level, above this class) so
+            // both "best moments" and "find the best part" phrasing produce
+            // the identical real timeline edit.
             let highlightsTrackId = null;
             const moments = [];
 
             for (let i = 0; i < candidates.length; i++) {
                 const seg = candidates[i];
-                const baseClip = findCoveringClip(seg.start) || allClips[0];
+                const baseClip = findCoveringClipBySourceTime(allClips, seg.start) || allClips[0];
                 if (!baseClip) continue;
 
                 if (!highlightsTrackId) {
                     highlightsTrackId = state.addTrack('video');
                 }
 
-                const duration = seg.end - seg.start;
                 const label = `${Math.floor(seg.start / 60)}m${String(Math.floor(seg.start % 60)).padStart(2, '0')}s`;
 
-                state.addClip(highlightsTrackId, {
-                    ...baseClip,
-                    id: `clip_quote_${Date.now()}_${i}`,
-                    start: 0,
-                    duration,
-                    offset: seg.start,
-                    name: `Highlight ${i + 1} (${label}) — ${seg.topic || seg.type || 'moment'}`,
-                });
+                state.addClip(highlightsTrackId, buildHighlightClipPayload(
+                    baseClip, seg.start, seg.end,
+                    `Highlight ${i + 1} (${label}) — ${seg.topic || seg.type || 'moment'}`
+                ));
 
                 moments.push({
                     start: seg.start,
                     end: seg.end,
-                    duration,
+                    duration: seg.end - seg.start,
                     importance: seg.importance_score ?? null,
                     topic: seg.topic || null,
                     reason: seg.is_cta ? 'cta' : seg.is_question ? 'question' : (seg.type || 'value'),
@@ -789,7 +1145,16 @@ export class VideoEditorTools {
     // ── Long-Form Tool Implementations ───────────────────────────────────────
 
     /**
-     * Run ContentAnalyzer and return the full analysis for approval.
+     * Run ContentAnalyzer and place real chapter markers on the timeline from
+     * its detected sections, in addition to returning the analysis for chat.
+     *
+     * FIX: previously analysis-only — computed a segmented structure and
+     * discarded it, the same "built but never wired" shape as R74's Gap 2
+     * (identify_quotable_moments) before it was fixed. See the
+     * buildChapterMarkerPayloads doc comment (module-level, above this
+     * class) for why these markers are picked up automatically by the
+     * existing R68 animation/SFX intelligence layer with no changes needed
+     * there — it already reads exactly this clip shape.
      */
     async analyzeStructure({ platform = null, targetDuration = null } = {}, signal = null) {
         console.log('[VideoEditorTools] Running ContentAnalyzer...');
@@ -798,10 +1163,12 @@ export class VideoEditorTools {
         // ContentAnalyzer silently degrades to _localAnalysis() whenever the
         // backend call fails (401, timeout, no transcript). That fallback does
         // NOT analyse anything — it emits one placeholder segment per clip with
-        // a hardcoded importance_score of 0.5. Reporting "analysis complete: 3
-        // segments detected" over that is how every downstream consumer
-        // (find_hook, remove_repetition, long_form_edit) inherited false
-        // confidence in data that was never computed. Name it.
+        // a hardcoded importance_score of 0.5, and its structure.sections is
+        // never populated by a real analysis pass. Reporting "analysis
+        // complete: 3 segments detected" over that is how every downstream
+        // consumer (find_hook, remove_repetition, long_form_edit) inherited
+        // false confidence in data that was never computed. Name it, and
+        // don't place chapter markers from it either — same reasoning.
         if (result.success && result.localFallback) {
             return {
                 success: true,
@@ -812,16 +1179,50 @@ export class VideoEditorTools {
                     `Generate captions first, then re-run for a real breakdown.`,
                 analysisResult: result,
                 requiresApproval: true,
+                chaptersCreated: 0,
             };
         }
 
+        if (!result.success) {
+            return {
+                success: false,
+                message: `Analysis failed: ${result.error}`,
+                analysisResult: result,
+                requiresApproval: true,
+                chaptersCreated: 0,
+            };
+        }
+
+        // `structure.sections` is what controllers/aiAgentController.js's
+        // analyzeContentHandler actually merges GPT's semantic sections and
+        // viralEngine/structure.js's heuristic detectedSections into (both
+        // share the {start,end,topic,type} shape) — see
+        // buildChapterMarkerPayloads' doc comment for the full trace.
+        const sections = result.structure?.sections || [];
+        let chaptersCreated = 0;
+
+        if (sections.length > 0) {
+            const state = this.store;
+            const chaptersTrackId = state.addTrack('video');
+            state.renameTrack(chaptersTrackId, 'Chapters');
+
+            for (const payload of buildChapterMarkerPayloads(sections)) {
+                state.addClip(chaptersTrackId, payload);
+                chaptersCreated++;
+            }
+        }
+
+        const segmentCount = result.segments?.length || 0;
+        const message = chaptersCreated > 0
+            ? `Content analysis complete: ${segmentCount} segment(s) detected, ${chaptersCreated} chapter marker(s) placed on a new Chapters track.`
+            : `Content analysis complete: ${segmentCount} segment(s) detected. No distinct chapter sections found — nothing placed on the timeline.`;
+
         return {
-            success: result.success,
-            message: result.success
-                ? `Content analysis complete: ${result.segments?.length || 0} segments detected.`
-                : `Analysis failed: ${result.error}`,
+            success: true,
+            message,
             analysisResult: result,
-            requiresApproval: true,
+            requiresApproval: false,
+            chaptersCreated,
         };
     }
 
@@ -949,10 +1350,34 @@ export class VideoEditorTools {
 
         if (hook) {
             this.store.seek(hook.start);
+
+            // Extract the hook segment onto a new Highlights track too — see
+            // the module-level comment above findCoveringClipBySourceTime for
+            // why. Reuses the exact same helpers identifyQuotableMoments uses
+            // so both phrasings produce the identical real timeline edit.
+            const state = this.store;
+            const videoTracks = state.tracks.filter(t => t.type === 'video');
+            const allClips = [];
+            videoTracks.forEach(t => allClips.push(...t.clips));
+
+            const baseClip = findCoveringClipBySourceTime(allClips, hook.start) || allClips[0] || null;
+            let highlightClipId = null;
+
+            if (baseClip) {
+                const highlightsTrackId = state.addTrack('video');
+                const label = `${Math.floor(hook.start / 60)}m${String(Math.floor(hook.start % 60)).padStart(2, '0')}s`;
+                const payload = buildHighlightClipPayload(baseClip, hook.start, hook.end, `Hook (${label})`);
+                highlightClipId = payload.id;
+                state.addClip(highlightsTrackId, payload);
+            }
+
             return {
                 success: true,
-                message: `Hook found at ${hook.start.toFixed(0)}s–${hook.end.toFixed(0)}s`,
+                message: highlightClipId
+                    ? `Hook found at ${hook.start.toFixed(0)}s–${hook.end.toFixed(0)}s — extracted onto a new Highlights track.`
+                    : `Hook found at ${hook.start.toFixed(0)}s–${hook.end.toFixed(0)}s`,
                 hookCandidate: hook,
+                clipId: highlightClipId,
             };
         }
 
@@ -961,6 +1386,156 @@ export class VideoEditorTools {
             message: 'No hook candidate found even after analysis.',
             hookCandidate: null,
         };
+    }
+
+    /**
+     * Matches b-roll from the media BIN — video clips AND still images
+     * alike, whether or not already dragged onto a track — to moments in the
+     * spoken dialogue, using each one's stored visual content profile
+     * (VisualAnalyzer) against word-level transcript timestamps, and is aware
+     * of real chapter-marker boundaries (R77) so a match landing right at a
+     * topic change gets treated as a TRANSITION cut rather than just
+     * mid-sentence illustration. Places each match as a full-frame overlay
+     * clip (the 'overlay' track already composites above the base track in
+     * both preview and export, per R59/R60) at that exact moment — audio
+     * keeps rolling from the base clip underneath while the b-roll visually
+     * takes over, the standard documentary "cutaway" shape. Also places a
+     * short text title card at each real chapter boundary, reusing the
+     * chapter's own label — chapter markers themselves render nothing on
+     * screen (R77: purely structural), so this is what actually shows a
+     * transition to the next topic, the text half of "illustrate or
+     * transition to a different topic/chapter".
+     *
+     * Deliberately does NOT call a new LLM — the matching is pure keyword
+     * overlap between the transcript and data already computed by the
+     * upload-time VisualAnalyzer pass (video AND, as of this feature, still
+     * images — see MediaIntelligencePipeline.analyzeImageAsset()), fetched
+     * fresh here since nothing client-side stores it (GET /api/brain/
+     * broll-profiles is the missing read path this needed). The title cards
+     * reuse the chapter labels the same GPT-4o/heuristic structure pass
+     * already produced — no new generation of any kind.
+     */
+    async placeContextualBroll(args = {}, signal = null) {
+        try {
+            const state = this.store;
+            const words = state.captions;
+
+            if (!Array.isArray(words) || words.length === 0) {
+                return {
+                    success: false,
+                    message: 'No transcript found — generate captions first, then try matching b-roll again.',
+                    placements: [],
+                };
+            }
+
+            const projectId = state.projectId || null;
+            if (!projectId) {
+                return { success: false, message: 'No project id available to fetch b-roll profiles.', placements: [] };
+            }
+
+            const response = await authFetch(`/api/brain/broll-profiles?projectId=${encodeURIComponent(projectId)}`, { signal });
+            if (!response.ok) {
+                const errText = await response.text().catch(() => '');
+                return { success: false, message: `Could not load b-roll profiles: ${errText || response.status}`, placements: [] };
+            }
+            const { profiles = [] } = await response.json();
+
+            // Checked against the media BIN, not the timeline — see
+            // buildBrollCandidates' doc comment. A match can now be an asset
+            // the user imported but never dragged onto a track yet.
+            const candidates = buildBrollCandidates(profiles, state.assets);
+            if (candidates.length === 0) {
+                return {
+                    success: true,
+                    message: 'No analyzed b-roll found in the media bin to match against — nothing placed. (Clips or images need to finish their content analysis first.)',
+                    placements: [],
+                    titleCardsCreated: 0,
+                };
+            }
+
+            // Which of those candidates are already sitting on a track, BEFORE
+            // any placement below — used only to report how many were newly
+            // pulled in from the bin, not to gate anything.
+            const alreadyOnTimeline = new Set();
+            (state.tracks || []).forEach(t => (t.clips || []).forEach(c => { if (c?.assetId) alreadyOnTimeline.add(c.assetId); }));
+
+            const chapterBoundaries = extractChapterBoundaries(state.tracks);
+            const matches = matchTranscriptToBroll(words, candidates, chapterBoundaries);
+
+            for (const match of matches) {
+                const asset = (state.assets || []).find(a => a.id === match.assetId);
+                if (!asset) continue;
+                const duration = Math.min(match.duration, asset.duration || match.duration);
+                state.addOverlayClip(asset, {
+                    start: match.timelineTime,
+                    duration,
+                    kind: asset.type === 'image' ? 'image' : 'video',
+                    x: 50,
+                    y: 50,
+                    scale: 4,
+                });
+            }
+
+            // ── Chapter-transition title cards ──────────────────────────────
+            // Text overlay half of "illustrate or transition to a different
+            // topic/chapter" — chapter markers (R77) are purely structural and
+            // render nothing on screen, so a real chapter transition currently
+            // has no on-screen text at all. Idempotent: re-running this command
+            // (e.g. after importing more footage) must not stack a second title
+            // card on top of one already placed for the same chapter.
+            let titleCardsCreated = 0;
+            const chapterMarkers = extractChapterMarkers(state.tracks);
+            if (chapterMarkers.length > 0) {
+                const existingTextClips = [];
+                (state.tracks || []).forEach(t => { if (t.type === 'text') existingTextClips.push(...(t.clips || [])); });
+
+                const newMarkers = chapterMarkers.filter(m => !existingTextClips.some(c =>
+                    typeof c.start === 'number' &&
+                    Math.abs(c.start - m.start) < CHAPTER_TITLE_MATCH_EPSILON_S &&
+                    c.content === m.label
+                ));
+
+                if (newMarkers.length > 0) {
+                    let titleTrackId = (state.tracks || []).find(t => t.type === 'text' && t.name === 'Chapter Titles')?.id || null;
+                    if (!titleTrackId) {
+                        titleTrackId = state.addTrack('text');
+                        state.renameTrack(titleTrackId, 'Chapter Titles');
+                    }
+                    for (const marker of newMarkers) {
+                        state.addClip(titleTrackId, buildChapterTitleCardPayload(marker));
+                        titleCardsCreated++;
+                    }
+                }
+            }
+
+if (matches.length === 0 && titleCardsCreated === 0) {
+                return {
+                    success: true,
+                    message: 'Found analyzed b-roll but none matched a moment in the dialogue closely enough, and no new chapter title cards were needed — nothing placed.',
+                    placements: [],
+                    titleCardsCreated: 0,
+                };
+            }
+
+            const transitionCount = matches.filter(m => m.isChapterTransition).length;
+            const newlyImportedCount = matches.filter(m => !alreadyOnTimeline.has(m.assetId)).length;
+
+            const notes = [];
+            if (transitionCount > 0) notes.push(`${transitionCount} placed as chapter-transition bridges`);
+            if (newlyImportedCount > 0) notes.push(`${newlyImportedCount} pulled in from the media bin`);
+            if (titleCardsCreated > 0) notes.push(`${titleCardsCreated} chapter title card(s) added`);
+            const notesText = notes.length > 0 ? ` (${notes.join('; ')})` : '';
+
+            return {
+                success: true,
+                message: `✓ Placed ${matches.length} b-roll cutaway(s) matched to the dialogue${notesText}.`,
+                placements: matches,
+                titleCardsCreated,
+            };
+        } catch (error) {
+            console.error('[VideoEditorTools] placeContextualBroll error:', error);
+            return { success: false, message: `Failed to place contextual b-roll: ${error.message}`, placements: [], titleCardsCreated: 0 };
+        }
     }
 
     /**

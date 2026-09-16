@@ -166,6 +166,94 @@ class MediaIntelligencePipeline {
     }
 
     /**
+     * Full analysis pipeline for a single IMAGE asset — the still-image
+     * counterpart to analyzeAsset(). Images never went through this pipeline
+     * at all (IDELayout.jsx's upload flow only ever called
+     * POST /api/brain/analyze-asset inside its `if (isVideo)` branch), so a
+     * b-roll photo's content_description/scene_type/etc columns stayed
+     * permanently empty — place_contextual_broll (and everything else that
+     * reads media_assets) could only ever see analyzed VIDEO clips.
+     *
+     * Deliberately skips everything video-only: no local/GCS file resolve
+     * (the base64 bytes already ARE the image — no ffmpeg, no download), no
+     * AudioClassifier (a photo has no audio track), no transcription. Writes
+     * to the exact same visual-analysis columns analyzeAsset() does, so this
+     * asset flows through GET /api/brain/broll-profiles and the client
+     * matcher with zero changes needed on either side.
+     *
+     * On success: sets analysis_status='done'
+     * On failure: sets analysis_status='failed' (NEVER leaves as 'processing')
+     *
+     * @param {string} assetId
+     * @param {string} imageBase64  - Raw base64-encoded image bytes (no data: URI prefix)
+     * @param {string} projectId
+     * @param {string} userId
+     */
+    async analyzeImageAsset(assetId, imageBase64, projectId, userId, name = null) {
+        await this._ensureAssetRow(assetId, projectId, userId, name);
+        await this._updateAssetStatus(assetId, ASSET_ANALYSIS_PROCESSING);
+
+        try {
+            if (!imageBase64) {
+                console.error(`[MediaPipeline] No image data for ${assetId}`);
+                await this._updateAssetStatus(assetId, ASSET_ANALYSIS_FAILED);
+                await this._maybeRunBinClassification(userId, projectId);
+                return;
+            }
+
+            const visualAnalysis = await this.visualAnalyzer.analyzeImageBase64(imageBase64).catch(err => {
+                console.error(`[MediaPipeline] Image visual analyze error for ${assetId}:`, err.message);
+                return { error: true, sceneType: 'unknown' };
+            });
+
+            const { error: updateError } = await supabaseAdmin
+                .from('media_assets')
+                .update({
+                    // Visual (same columns analyzeAsset() writes)
+                    scene_type:          visualAnalysis.sceneType,
+                    camera_angle:        visualAnalysis.cameraAngle,
+                    subject_count:       visualAnalysis.subjectCount,
+                    has_main_speaker:    visualAnalysis.hasMainSpeaker,
+                    has_faces:           visualAnalysis.hasFaces,
+                    is_broll:            visualAnalysis.isBroll,
+                    is_screen_recording: visualAnalysis.isScreenRecording,
+                    location_type:       visualAnalysis.locationType,
+                    lighting_quality:    visualAnalysis.lightingQuality,
+                    stability:           visualAnalysis.stability,
+                    emotional_tone:      visualAnalysis.emotionalTone,
+                    content_description: visualAnalysis.contentDescription,
+                    suggested_label:     visualAnalysis.suggestedLabel,
+
+                    // Images have no audio/transcript — explicit false/null rather
+                    // than leaving the columns at whatever _ensureAssetRow's upsert
+                    // left them, so a query never mistakes "never analysed" for
+                    // "analysed, has no audio".
+                    has_audio:        false,
+                    has_spoken_word:  false,
+                    transcript_text:  null,
+
+                    // Status
+                    analysis_status: ASSET_ANALYSIS_DONE,
+                    analyzed_at:     new Date().toISOString(),
+                })
+                .eq('id', assetId);
+
+            if (updateError) {
+                console.error(`[MediaPipeline] Image DB update failed for ${assetId}:`, updateError.message);
+            }
+
+            console.log(`[MediaPipeline] \u2713 Image asset ${assetId} analyzed (${visualAnalysis.sceneType})`);
+
+            await this._maybeRunBinClassification(userId, projectId);
+
+        } catch (err) {
+            console.error(`[MediaPipeline] analyzeImageAsset FAILED for ${assetId}:`, err.message);
+            await this._updateAssetStatus(assetId, ASSET_ANALYSIS_FAILED);
+            await this._maybeRunBinClassification(userId, projectId);
+        }
+    }
+
+    /**
      * Create the media_assets row if it doesn't exist yet.
      *
      * This is the row every other write in this file targets. Without it,

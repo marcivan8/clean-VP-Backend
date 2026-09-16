@@ -29,6 +29,8 @@
 
 import { createMotionLayer, LAYER_KINDS } from './MotionSchema.js';
 import { buildPreset, LEGACY_ANIMATION_MAP } from './MotionPresets.js';
+// R81 — zero-cost bespoke-animation intensity scaling
+import { scaleAnimations } from './AnimationSynthesizer.js';
 
 /** Map a legacy clip/track type onto a motion layer kind. */
 function inferKind(clip, trackType) {
@@ -174,17 +176,47 @@ export function motionLayerToClipUpdates(layer) {
 
 /**
  * Apply a motion preset to a clip, returning the clip updates to dispatch.
- * Replaces any existing animations rather than appending — stacking presets
- * by accident produces compounding scale/opacity that reads as a bug.
+ * Replaces any PREVIOUSLY-APPLIED animations rather than appending onto them
+ * — stacking a new preset on top of whatever was already there by accident
+ * produces compounding scale/opacity that reads as a bug. R82's
+ * `opts.secondaryPresetId` is the one deliberate exception: exactly one
+ * hand-curated complementary preset, from AnimationCombiner.js's
+ * SECONDARY_PRESETS map, layered onto the primary in THIS SAME call — not an
+ * accident, a single considered combination.
  *
  * @param {object} clip
  * @param {string} presetId
+ * @param {object} [opts]
+ * @param {number} [opts.intensity] — 0..1, R81's zero-cost bespoke-animation
+ *   synthesizer (AnimationSynthesizer.js). Omitted/non-numeric is a strict
+ *   no-op — see that file's header for why 0.5 (not omission) is its own
+ *   neutral identity value; every pre-R81 caller (the manual Motion tab
+ *   preset picker, every test written before R81) never passes this and is
+ *   byte-for-byte unaffected.
+ * @param {string} [opts.secondaryPresetId] — R82, from
+ *   AnimationCombiner.js's `pickSecondaryPreset`. When present, that preset's
+ *   own Animation[] is built, scaled by the SAME intensity, and appended
+ *   after the primary's — MotionResolver.js's existing per-property
+ *   composition (add/multiply/max/min) merges the two at render time, in
+ *   both preview and export. Omitted is a strict no-op (single-preset
+ *   behaviour, unchanged from R81).
  * @returns {object} clip updates ({} when the preset is unknown)
  */
-export function applyPresetToClip(clip, presetId) {
+export function applyPresetToClip(clip, presetId, opts = {}) {
     if (!clip) return {};
-    const animations = buildPreset(presetId, { duration: Number(clip.duration) || 0 });
-    if (animations.length === 0) return {};
+    const duration = Number(clip.duration) || 0;
+    const built = buildPreset(presetId, { duration });
+    if (built.length === 0) return {};
+
+    let animations = scaleAnimations(built, opts?.intensity);
+
+    if (opts?.secondaryPresetId) {
+        const builtSecondary = buildPreset(opts.secondaryPresetId, { duration });
+        if (builtSecondary.length > 0) {
+            animations = animations.concat(scaleAnimations(builtSecondary, opts?.intensity));
+        }
+    }
+
     return {
         animations,
         // Clear the legacy single-string field so the two can't both claim to

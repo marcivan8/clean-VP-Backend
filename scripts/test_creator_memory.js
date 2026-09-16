@@ -263,7 +263,10 @@ check('only downloaded temp files are deleted',
 // refer to footage by opaque id (R22 wants it to speak in real clip names).
 console.log('\n── the asset name reaches the row ──');
 check('the route accepts/derives a name',
-    /const \{ assetId, gcsPath, projectId, name \}/.test(brainRoutes));
+    // R78 extended this destructure with imageBase64 (still-image analysis) —
+    // match the leading assetId/gcsPath/projectId/name fields regardless of
+    // what else the route has since grown to accept.
+    /const \{ assetId, gcsPath, projectId, name[^}]*\}/.test(brainRoutes));
 check('the worker forwards the name to analyzeAsset',
     /analyzeAsset\(assetId, filePath, projectId, userId, name/.test(read('worker.js')));
 check('the client sends the real filename',

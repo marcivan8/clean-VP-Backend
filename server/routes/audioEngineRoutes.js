@@ -28,7 +28,11 @@ const {
     SEMANTIC_EVENT_TYPES,
     animationsForEventType,
     sfxIntentsForEventType,
+    layerKindForClip,
+    resolveOverlayAnimations,
 }                                 = require('../audio-engine/timeline/AnimationKnowledgeGraph.js');
+const { computeIntensity, pickPresetForIntensity } = require('../audio-engine/timeline/AnimationIntensity.js'); // R81 — zero-cost bespoke-animation synthesizer
+const { computeStyleSeed, pickSecondaryPreset } = require('../audio-engine/timeline/AnimationCombiner.js'); // R82 — zero-cost animation combinations
 
 // TODO: apply apiLimiter to search and recommendation routes
 
@@ -126,34 +130,62 @@ router.post('/recommend/sfx', authenticateUser, async (req, res) => {
 
 // ── POST /api/audio/animate-automatically ─────────────────────────────────────
 // R68 — AI Animation Intelligence. "Brain chooses animations. Users don't."
-// One explicit command: detect the four semantic events heuristically
-// (TimelineEventDetector.js), resolve each through AnimationKnowledgeGraph.js
+// One explicit command: detect the five semantic events heuristically
+// (TimelineEventDetector.js — R79 added CHAPTER_START to the original four),
+// resolve each through AnimationKnowledgeGraph.js
 // into a real motion preset id + real SFX rows, and hand back a flat plan.
-// This route only DETECTS and RESOLVES — it never writes to the timeline;
-// applying the plan (calling applyPresetToClip, inserting SFX clips) happens
-// client-side as one undoable action (client/src/agent/MediaExecutionEngine.js
+// R81 adds one more field per plan item: `intensity`, a 0..1 value computed
+// from that SPECIFIC event's own metadata (AnimationIntensity.js) — so the
+// preset choice AND the eventual keyframes are no longer identical for every
+// instance of the same event type. This route only DETECTS and RESOLVES — it
+// never writes to the timeline; applying the plan (calling
+// applyPresetToClip, inserting SFX clips) happens client-side as one
+// undoable action (client/src/agent/MediaExecutionEngine.js
 // `animate_automatically`), matching how every other timeline mutation in
 // this app is required to go through the store's own history/undo path.
 router.post('/animate-automatically', authenticateUser, async (req, res) => {
-    const { projectState } = req.body || {};
+    const { projectState, projectId } = req.body || {};
 
     if (!projectState || !Array.isArray(projectState.tracks)) {
         return res.status(400).json({ error: 'projectState.tracks is required' });
     }
 
     try {
+        // R82 — a project's cached tone (ProjectIntelligence.js), READ ONLY.
+        // getMap never triggers a fresh computation (that's ensureMap/
+        // deriveMap, which call OpenAI) — a missing row just means no tone
+        // signal, not an error. Mirrors the exact pattern lutRoutes.js's own
+        // POST /recommend already uses for the same reason.
+        const userId = req.user?.id || null;
+        let projectTone = null;
+        if (projectId && userId) {
+            try {
+                const { ProjectIntelligence } = require('../brain/ProjectIntelligence');
+                const map = await new ProjectIntelligence().getMap(projectId, userId);
+                projectTone = map?.tone || null;
+            } catch (piErr) {
+                console.warn('[audioEngineRoutes POST /animate-automatically] tone lookup failed (continuing without it):', piErr.message);
+            }
+        }
+
         const events = timelineEventDetector
             .detect(projectState)
             .filter(e => SEMANTIC_EVENT_TYPES.includes(e.eventType));
 
-        // clipId → layer kind, so animations resolve to the right preset
-        // family (text vs camera) for the clip the event actually landed on.
-        const clipKind = {};
+        // clipId → { kind, trackId }, so animations resolve to the right preset
+        // family for the clip an event actually landed on. layerKindForClip is
+        // the real 5-kind classifier (text/caption/image/video/sticker) ported
+        // from ClipAdapter.inferKind — this used to be a crude text-vs-video
+        // ternary, which is why an overlay photo/sticker could never resolve to
+        // its own preset family even if an event had somehow targeted one.
+        const clipInfo = {};
         for (const track of projectState.tracks) {
             for (const clip of (track.clips || [])) {
                 if (!clip?.id) continue;
-                const t = clip.type || track.type;
-                clipKind[clip.id] = (t === 'text' || t === 'caption' || clip.isCaption) ? 'text' : 'video';
+                clipInfo[clip.id] = {
+                    kind:    layerKindForClip(clip, track.type),
+                    trackId: track.id || null,
+                };
             }
         }
 
@@ -162,8 +194,24 @@ router.post('/animate-automatically', authenticateUser, async (req, res) => {
         const sfxCache = new Map();
         const plan = [];
         for (const event of events) {
-            const kind = clipKind[event.clipId] || 'video';
-            const presetId = animationsForEventType(event.eventType, kind)[0] || null;
+            const primaryInfo = clipInfo[event.clipId];
+            const kind = primaryInfo?.kind || 'video';
+            const candidates = animationsForEventType(event.eventType, kind);
+            // R81 — "brain chooses animations" used to mean "the brain always
+            // chooses the SAME animation" for a given event type. intensity is
+            // a real 0..1 signal (loudness, pause length, push-in size — see
+            // AnimationIntensity.js) computed from THIS event's own metadata,
+            // so two PUNCHLINE_DETECTED moments with different db/silenceGapS
+            // now resolve to genuinely different keyframes downstream
+            // (ClipAdapter.applyPresetToClip → AnimationSynthesizer.js), not
+            // just the same fixed preset replayed twice.
+            const intensity = computeIntensity(event.eventType, event.metadata);
+            const presetId  = pickPresetForIntensity(candidates, intensity);
+            // R82 — layer a complementary secondary preset (a different
+            // animation-type channel, e.g. scale+glow) on top of the primary,
+            // deterministically chosen from this event's own text/label plus
+            // the project's cached tone (both free — see AnimationCombiner.js).
+            const secondaryPresetId = pickSecondaryPreset(presetId, computeStyleSeed(event, projectTone));
 
             const intents = sfxIntentsForEventType(event.eventType);
             let sfx = [];
@@ -180,9 +228,23 @@ router.post('/animate-automatically', authenticateUser, async (req, res) => {
                 clipId:       event.clipId,
                 trackId:      event.trackId,
                 presetId,
+                secondaryPresetId,
+                intensity,
                 sfx,
             });
         }
+
+        // Overlay clips (images/stickers/shapes the user has manually placed
+        // via "add as overlay") and secondary/picture-in-picture video clips
+        // are invisible to the heuristics above — REVEAL/PUNCHLINE/EMPHASIS/
+        // EMOTIONAL_BEAT only ever look at the base video/audio/caption
+        // tracks for a clipId to attach an event to. But if a moment is
+        // happening on screen, whatever else is ALSO visible at that same
+        // instant should react to it too — a photo sitting on the overlay
+        // track during a punchline should still get its own punch, not just
+        // sit static. No SFX on these — one moment triggers one sound
+        // effect, already on the primary item above.
+        plan.push(...resolveOverlayAnimations(events, projectState.tracks, projectTone));
 
         return res.json({ events, plan });
     } catch (err) {

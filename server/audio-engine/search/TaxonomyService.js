@@ -4,12 +4,13 @@
  * server/audio-engine/search/TaxonomyService.js
  *
  * Provides taxonomy-aware retrieval from the assets, sound_effects,
- * luts, and presets tables via Supabase.
+ * luts, presets, and stickers tables via Supabase.
  *
  * Methods are grouped by asset type:
- *   SFX    — getSFXByIntents, getSFXByEvent, getSFXByName
- *   LUT    — getLUTsByProfile, getLUTsByIntents, getLUTByName
- *   Preset — getPresetsByType, getPresetsByIntents, getPresetByName
+ *   SFX     — getSFXByIntents, getSFXByEvent, getSFXByName
+ *   LUT     — getLUTsByProfile, getLUTsByIntents, getLUTByName
+ *   Preset  — getPresetsByType, getPresetsByIntents, getPresetByName
+ *   Sticker — getStickersByKeywords, getStickersByKind, getStickerByName (R83)
  *   Generic — getAssetsByIds, incrementUseCount
  */
 
@@ -290,6 +291,102 @@ class TaxonomyService {
         }
     }
 
+    // ── Stickers (icons/emoji — R83) ──────────────────────────────────────────
+
+    /**
+     * Fetch stickers (icons/emoji) whose search_keywords overlap the given
+     * keywords — the same `overlaps()` shape getSFXByIntents/getPresetsByIntents
+     * already use, just against `search_keywords` (free-text concepts, e.g.
+     * "money", "warning", "love") rather than `editing_intents` (mood/genre),
+     * since a sticker is picked for WHAT it depicts, not the edit's overall feel.
+     *
+     * @param {string[]} keywords
+     * @param {?('icon'|'emoji')} [kindFilter] — restrict to one sticker_kind
+     * @param {number} [limit=10]
+     * @returns {Promise<Object[]>}
+     */
+    async getStickersByKeywords(keywords, kindFilter = null, limit = 10) {
+        if (!keywords?.length) return [];
+
+        try {
+            let query = this.db
+                .from('assets')
+                .select(`*, stickers!inner (*)`)
+                .eq('type', AssetType.STICKER)
+                .eq('is_active', true)
+                .overlaps('search_keywords', keywords);
+
+            if (kindFilter) {
+                query = query.eq('stickers.sticker_kind', kindFilter);
+            }
+
+            const { data, error } = await query
+                .order('use_count', { ascending: false })
+                .limit(limit);
+
+            if (error) throw error;
+            return this._mergeStickers(data || []);
+        } catch (err) {
+            console.error('[TaxonomyService.getStickersByKeywords]', err.message);
+            return [];
+        }
+    }
+
+    /**
+     * Fetch stickers of a single kind ('icon' or 'emoji'), most-used first.
+     * Useful for a browse/picker UI rather than a keyword search.
+     *
+     * @param {'icon'|'emoji'} kind
+     * @param {number} [limit=20]
+     * @returns {Promise<Object[]>}
+     */
+    async getStickersByKind(kind, limit = 20) {
+        if (!kind) return [];
+
+        try {
+            const { data, error } = await this.db
+                .from('assets')
+                .select(`*, stickers!inner (*)`)
+                .eq('type', AssetType.STICKER)
+                .eq('is_active', true)
+                .eq('stickers.sticker_kind', kind)
+                .order('use_count', { ascending: false })
+                .limit(limit);
+
+            if (error) throw error;
+            return this._mergeStickers(data || []);
+        } catch (err) {
+            console.error('[TaxonomyService.getStickersByKind]', err.message);
+            return [];
+        }
+    }
+
+    /**
+     * Fetch a single sticker by slug name (e.g. "icon-heart", "emoji-fire").
+     *
+     * @param {string} name
+     * @returns {Promise<Object|null>}
+     */
+    async getStickerByName(name) {
+        if (!name) return null;
+
+        try {
+            const { data, error } = await this.db
+                .from('assets')
+                .select(`*, stickers (*)`)
+                .eq('name', name)
+                .eq('type', AssetType.STICKER)
+                .single();
+
+            if (error) return null;
+            const merged = this._mergeStickers([data]);
+            return merged[0] || null;
+        } catch (err) {
+            console.error('[TaxonomyService.getStickerByName]', err.message);
+            return null;
+        }
+    }
+
     // ── Generic ───────────────────────────────────────────────────────────────
 
     /**
@@ -370,6 +467,18 @@ class TaxonomyService {
             const preset = Array.isArray(row.presets) ? row.presets[0] : row.presets;
             const { presets: _ignored, ...base } = row;
             return { ...base, ...(preset || {}) };
+        });
+    }
+
+    /**
+     * Flatten joined rows (assets + stickers sub-object).
+     * @private
+     */
+    _mergeStickers(rows) {
+        return rows.map(row => {
+            const sticker = Array.isArray(row.stickers) ? row.stickers[0] : row.stickers;
+            const { stickers: _ignored, ...base } = row;
+            return { ...base, ...(sticker || {}) };
         });
     }
 }

@@ -113,9 +113,17 @@ const assetAnalysisWorker = new Worker('asset-analysis', async (job) => {
     if (!_MediaIntelligencePipeline) {
         throw new Error('MediaIntelligencePipeline not loaded — redeploy with server/brain/ committed');
     }
-    const { assetId, filePath, projectId, userId, name } = job.data;
+    const { assetId, filePath, projectId, userId, name, imageBase64 } = job.data;
     const pipeline = new _MediaIntelligencePipeline();
-    await pipeline.analyzeAsset(assetId, filePath, projectId, userId, name || null);
+    // imageBase64 present -> a still image queued from IDELayout.jsx's image
+    // upload branch (no GCS path, no proxy/transcription pipeline needed).
+    // See MediaIntelligencePipeline.analyzeImageAsset()'s doc comment for why
+    // images never reached this worker before now.
+    if (imageBase64) {
+        await pipeline.analyzeImageAsset(assetId, imageBase64, projectId, userId, name || null);
+    } else {
+        await pipeline.analyzeAsset(assetId, filePath, projectId, userId, name || null);
+    }
 }, { connection, concurrency: 1 });
 
 assetAnalysisWorker.on('completed', job => {

@@ -640,6 +640,12 @@ function compileFindHook(step, ctx) {
     ]);
 }
 
+function compilePlaceContextualBroll(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'placeContextualBroll', {}, { source_step_id: step.step_id, description: 'Match b-roll to spoken dialogue' }),
+    ]);
+}
+
 function compileRemoveRepetition(step, ctx) {
     return ok(step.step_id, [
         cmd(ENGINE.STORE, 'removeRepetition', { importance_threshold: step.importance_threshold || 0.3 },
@@ -1065,6 +1071,7 @@ const COMMAND_REGISTRY = new Map([
     ['long_form_edit', { compiler: compileLongFormEdit }],
     ['smart_cleanup', { compiler: compileSmartCleanup }],
     ['find_hook', { compiler: compileFindHook }],
+    ['place_contextual_broll', { compiler: compilePlaceContextualBroll }],
     ['remove_repetition', { compiler: compileRemoveRepetition }],
     ['reorder_segment', { compiler: compileReorderSegment }],
     ['reorder_clips',   { compiler: compileReorderClips }],

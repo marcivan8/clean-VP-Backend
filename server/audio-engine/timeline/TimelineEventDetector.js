@@ -14,7 +14,10 @@
  *   B_ROLL_START  — secondary video clips starting
  *   SCENE_CHANGE  — large visual jump between clips
  *   AUDIO_PEAK    — audio track peak markers
- *   CHAPTER_START — marker clips
+ *   CHAPTER_START — marker clips (clip.isChapter || clip.type==='marker'
+ *                    on a video-type track; created by
+ *                    VideoEditorTools.analyzeStructure() from detected
+ *                    content sections — this detector only consumes them)
  *   SPEAKER_CHANGE — diarization speaker changes
  *
  *   REVEAL           — caption/text wording that reads as a reveal, or a big
@@ -26,9 +29,11 @@
  *   EMOTIONAL_BEAT    — a soft-cut/silence gap covered by caption wording
  *                       that reads as emotionally weighted
  *
- * These four are documented in AnimationKnowledgeGraph.js as the semantic
- * events the "AI Animation Intelligence" feature (R68) acts on — this file
- * only detects them; it does not decide what animation or SFX to apply.
+ * These four (plus CHAPTER_START, retargeted below) are documented in
+ * AnimationKnowledgeGraph.js as the semantic events the "AI Animation
+ * Intelligence" feature (R68/R79) acts on — this file only detects them
+ * (and, for CHAPTER_START, points them at the right clip); it does not
+ * decide what animation or SFX to apply.
  *
  * Detection is synchronous and runs in O(n) over clips.
  */
@@ -82,6 +87,14 @@ class TimelineEventDetector {
         // R68 — semantic events derive from the structural events + clip
         // wording above, so they run as a second pass once those exist.
         this._detectSemanticEvents(tracks, events);
+
+        // R79 — a CHAPTER_START event's clipId, as detected in
+        // _detectVideoEvents above, is the structural marker clip (R77) —
+        // isChapter/type:'marker', rendered nowhere (see this class's own
+        // CHAPTER_START doc comment at the top of the file). Nothing visible
+        // can animate off that id. Retarget onto the real visible chapter
+        // title-card clip (R78-followup) when one has been placed.
+        this._retargetChapterEventsToTitleCards(tracks, events);
 
         // Sort by timeline position
         events.sort((a, b) => a.timelineTime - b.timelineTime);
@@ -199,6 +212,42 @@ class TimelineEventDetector {
                     metadata:     { durationS, text: nearbyWording.text.slice(0, 100) },
                 });
             }
+        }
+    }
+
+    /**
+     * R79 — retarget CHAPTER_START events from R77's invisible structural
+     * marker clip onto R78-followup's real visible title-card TEXT clip
+     * (placed on a track named exactly "Chapter Titles"), when one exists
+     * at (approximately) the same timestamp.
+     *
+     * Same 0.5s epsilon R78-followup's own idempotency check uses when
+     * deciding a title card already exists for a given boundary, so this
+     * agrees with what actually placed the card rather than inventing a
+     * second notion of "close enough".
+     *
+     * The original marker clip id is preserved under
+     * `event.metadata.markerClipId` rather than discarded — useful for
+     * debugging and for any caller that still wants the structural id.
+     * Events are mutated in place; nothing here changes their count or
+     * order.
+     * @private
+     */
+    _retargetChapterEventsToTitleCards(tracks, events) {
+        const titleTrack = (tracks || []).find(t => t?.type === 'text' && t?.name === 'Chapter Titles');
+        if (!titleTrack) return;
+        const titleClips = titleTrack.clips || [];
+        if (titleClips.length === 0) return;
+
+        for (const event of events) {
+            if (event.eventType !== TimelineEventType.CHAPTER_START) continue;
+
+            const card = titleClips.find(c => Math.abs((c.start ?? 0) - event.timelineTime) <= 0.5);
+            if (!card?.id) continue;
+
+            event.metadata = { ...(event.metadata || {}), markerClipId: event.clipId };
+            event.clipId  = card.id;
+            event.trackId = titleTrack.id || null;
         }
     }
 
