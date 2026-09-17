@@ -10,7 +10,7 @@
 'use strict';
 
 const { execFile } = require('child_process');
-const { getAIClient, isAIConfigured } = require('../../../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel } = require('../../../services/AIProvider');
 const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
@@ -60,7 +60,10 @@ const ERROR_RESULT = {
 class VisualAnalyzer {
 
     constructor() {
-        this.openai = getAIClient();
+        // capability: 'vision' — frames go out as image_url content parts.
+        // Under AI_VISION_PROVIDER=gemini this is served free; groq has no
+        // free vision model, so vision never routes there (see AIProvider.js).
+        this.openai = getAIClient({ capability: 'vision' });
     }
 
     /**
@@ -213,7 +216,7 @@ class VisualAnalyzer {
 Return ONLY the JSON object, no explanation.`;
 
             const response = await this.openai.chat.completions.create({
-                model: 'gpt-4o',
+                model: resolveModel('gpt-4o', 'vision'),
                 max_tokens: 400,
                 response_format: { type: 'json_object' },
                 messages: [

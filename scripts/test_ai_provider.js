@@ -1,20 +1,27 @@
 #!/usr/bin/env node
 /**
- * Regression: AI provider factory (CLAUDE.md R45).
+ * Regression: AI provider factory (CLAUDE.md R45, extended by R84 for the
+ * groq/gemini free-tier providers).
  *
  * The properties worth pinning here are safety properties — the cost of getting
  * them wrong is either a real user receiving mocked editorial advice, or a
  * staging run silently billing the production OpenAI account.
  *
  *   1. The DEFAULT is openai. An unset AI_PROVIDER must not change prod behaviour.
- *   2. A non-openai provider is REFUSED in production, loudly, without throwing.
- *   3. Audio and embeddings never route to ollama — it has no audio API, and its
- *      embedding dimensions are incompatible with the stored pgvector columns.
+ *   2. ollama and mock are REFUSED in production, loudly, without throwing.
+ *      groq and gemini are ALLOWED in production — they're real hosted APIs,
+ *      not a local/mock stand-in (R84).
+ *   3. Embeddings never route anywhere but openai. Audio never routes to
+ *      ollama or gemini — but DOES route to groq (whisper-large-v3, free).
+ *      Vision never routes to groq (no free vision model there) — but DOES
+ *      route to gemini when AI_VISION_PROVIDER=gemini.
  *   4. Mock responses parse, and satisfy the schema each caller expects.
  *   5. No call site constructs `new OpenAI(...)` directly any more — one bypass
  *      would keep billing the real API in the environments this exists to avoid.
+ *      (sceneAnalyzer.js was exactly this bypass until R84 — see §7.)
  *   6. Nothing gates AI availability on OPENAI_API_KEY directly; that question
- *      is now "is a provider configured", which mock/ollama answer yes to.
+ *      is now "is a provider configured", which mock/ollama/groq/gemini each
+ *      answer according to their own key.
  *
  * Run: node scripts/test_ai_provider.js
  */
@@ -36,7 +43,8 @@ function section(t) { console.log(`\n${t}`); }
 const provider = require(path.resolve(__dirname, '../services/AIProvider.js'));
 const {
     getAIClient, isAIConfigured, resolveProvider, resolveModel,
-    mockBodyFor, VALID_PROVIDERS, REAL_ONLY_CAPABILITIES, _resetForTests,
+    mockBodyFor, VALID_PROVIDERS, REAL_ONLY_CAPABILITIES,
+    PRODUCTION_REFUSED_PROVIDERS, CAPABILITY_PROVIDERS, _resetForTests,
 } = provider;
 
 /** Run fn with a temporary env, always restoring afterwards. */
@@ -78,19 +86,29 @@ async function main() {
         quiet(() => withEnv({ AI_PROVIDER: 'llamafile', NODE_ENV: undefined }, () => {
             check('an unrecognised provider falls back to openai', resolveProvider() === 'openai');
         }));
-        check('the valid set is exactly openai/ollama/mock',
-            VALID_PROVIDERS.join(',') === 'openai,ollama,mock', VALID_PROVIDERS.join(','));
+        check('the valid set is exactly openai/ollama/groq/gemini/mock',
+            VALID_PROVIDERS.join(',') === 'openai,ollama,groq,gemini,mock', VALID_PROVIDERS.join(','));
     }
 
     // ── 2 · Production safety ────────────────────────────────────────────────
-    section('2 · Non-openai providers are refused in production');
+    section('2 · ollama/mock are refused in production; groq/gemini are NOT (R84)');
     {
+        check('the refused set is exactly ollama/mock',
+            PRODUCTION_REFUSED_PROVIDERS.join(',') === 'ollama,mock', PRODUCTION_REFUSED_PROVIDERS.join(','));
+
         for (const p of ['mock', 'ollama']) {
             quiet(() => withEnv({ AI_PROVIDER: p, NODE_ENV: 'production' }, () => {
                 check(`AI_PROVIDER=${p} is ignored in production`,
                     resolveProvider() === 'openai',
                     'a mocked or local model would answer real users confidently and wrongly');
             }));
+        }
+        for (const p of ['groq', 'gemini']) {
+            withEnv({ AI_PROVIDER: p, NODE_ENV: 'production' }, () => {
+                check(`AI_PROVIDER=${p} IS allowed in production`,
+                    resolveProvider() === p,
+                    'groq/gemini are real hosted APIs, not a mock/local stand-in — R84');
+            });
         }
         withEnv({ AI_PROVIDER: 'mock', NODE_ENV: 'staging' }, () => {
             check('mock IS allowed outside production', resolveProvider() === 'mock');
@@ -106,14 +124,29 @@ async function main() {
             try { getAIClient(); } catch { threw = true; }
         }));
         check('production refusal does not throw', !threw);
+
+        // AI_VISION_PROVIDER is capability-scoped — it must not leak into the
+        // base (chat/audio) provider resolution.
+        withEnv({ AI_PROVIDER: 'groq', AI_VISION_PROVIDER: 'gemini', NODE_ENV: 'production' }, () => {
+            check('AI_VISION_PROVIDER only affects capability:vision',
+                resolveProvider({ capability: 'chat' }) === 'groq');
+            check('AI_VISION_PROVIDER wins for capability:vision',
+                resolveProvider({ capability: 'vision' }) === 'gemini');
+        });
     }
 
     // ── 3 · Capability routing ───────────────────────────────────────────────
-    section('3 · Audio and embeddings never route to ollama');
+    section('3 · Each capability only reaches a provider that can actually serve it');
     {
-        check('the real-only list names audio and embeddings',
-            REAL_ONLY_CAPABILITIES.includes('audio') && REAL_ONLY_CAPABILITIES.includes('embeddings'),
-            REAL_ONLY_CAPABILITIES.join(','));
+        check('embeddings are still real-only',
+            REAL_ONLY_CAPABILITIES.join(',') === 'embeddings', REAL_ONLY_CAPABILITIES.join(','));
+        check('capability matrix: audio is openai+groq only',
+            CAPABILITY_PROVIDERS.audio.slice().sort().join(',') === 'groq,openai',
+            CAPABILITY_PROVIDERS.audio.join(','));
+        check('capability matrix: vision excludes groq (no free vision model there)',
+            !CAPABILITY_PROVIDERS.vision.includes('groq'), CAPABILITY_PROVIDERS.vision.join(','));
+        check('capability matrix: embeddings is openai-only',
+            CAPABILITY_PROVIDERS.embeddings.join(',') === 'openai');
 
         quiet(() => withEnv({
             AI_PROVIDER: 'ollama', NODE_ENV: undefined, OPENAI_API_KEY: 'sk-test',
@@ -139,6 +172,56 @@ async function main() {
         withEnv({ AI_PROVIDER: 'mock', NODE_ENV: undefined }, () => {
             check('mock stubs audio too', getAIClient({ capability: 'audio' })._mock === true);
         });
+
+        // Groq: chat AND audio route to it; vision (no free model there) falls
+        // back to the real client instead of erroring or silently misrouting.
+        quiet(() => withEnv({
+            AI_PROVIDER: 'groq', NODE_ENV: undefined, GROQ_API_KEY: 'gsk-test', OPENAI_API_KEY: 'sk-test',
+        }, () => {
+            const chat = getAIClient({ capability: 'chat' });
+            check('chat under groq uses the groq endpoint',
+                String(chat?.baseURL || '').includes('groq.com'), `baseURL was ${chat?.baseURL}`);
+
+            const audio = getAIClient({ capability: 'audio' });
+            check('audio under groq ALSO uses the groq endpoint (free whisper-large-v3)',
+                String(audio?.baseURL || '').includes('groq.com'), `baseURL was ${audio?.baseURL}`);
+
+            const vision = getAIClient({ capability: 'vision' });
+            check('vision under groq (no override) falls back to the real API',
+                String(vision?.baseURL || '').includes('groq.com') === false,
+                `baseURL was ${vision?.baseURL} — groq has no free vision model`);
+        }));
+
+        // Gemini: vision routes to it; audio (no reachable audio API) falls
+        // back to the real client.
+        quiet(() => withEnv({
+            AI_PROVIDER: 'gemini', NODE_ENV: undefined, GEMINI_API_KEY: 'g-test', OPENAI_API_KEY: 'sk-test',
+        }, () => {
+            const vision = getAIClient({ capability: 'vision' });
+            check('vision under gemini uses the gemini endpoint',
+                String(vision?.baseURL || '').includes('generativelanguage.googleapis.com'),
+                `baseURL was ${vision?.baseURL}`);
+
+            const audio = getAIClient({ capability: 'audio' });
+            check('audio under gemini falls back to the real API',
+                String(audio?.baseURL || '').includes('generativelanguage') === false,
+                `baseURL was ${audio?.baseURL} — gemini has no reachable audio API here`);
+        }));
+
+        // The hybrid setup this was built for: groq as the base provider,
+        // gemini specifically for vision.
+        quiet(() => withEnv({
+            AI_PROVIDER: 'groq', AI_VISION_PROVIDER: 'gemini', NODE_ENV: undefined,
+            GROQ_API_KEY: 'gsk-test', GEMINI_API_KEY: 'g-test', OPENAI_API_KEY: 'sk-test',
+        }, () => {
+            const chat = getAIClient({ capability: 'chat' });
+            check('hybrid: chat goes to groq', String(chat?.baseURL || '').includes('groq.com'));
+            const audio = getAIClient({ capability: 'audio' });
+            check('hybrid: audio goes to groq', String(audio?.baseURL || '').includes('groq.com'));
+            const vision = getAIClient({ capability: 'vision' });
+            check('hybrid: vision goes to gemini',
+                String(vision?.baseURL || '').includes('generativelanguage.googleapis.com'));
+        }));
     }
 
     // ── 4 · Configuration questions ──────────────────────────────────────────
@@ -159,6 +242,19 @@ async function main() {
         withEnv({ AI_PROVIDER: 'openai', NODE_ENV: undefined, OPENAI_API_KEY: 'sk-test' }, () => {
             check('openai with a key is configured', isAIConfigured() === true);
         });
+        withEnv({ AI_PROVIDER: 'groq', NODE_ENV: undefined, GROQ_API_KEY: undefined }, () => {
+            check('groq without a key is NOT configured', isAIConfigured() === false);
+            check('groq without a key returns null', getAIClient({ capability: 'chat' }) === null);
+        });
+        withEnv({ AI_PROVIDER: 'groq', NODE_ENV: undefined, GROQ_API_KEY: 'gsk-test' }, () => {
+            check('groq with a key is configured', isAIConfigured() === true);
+        });
+        withEnv({ AI_PROVIDER: 'gemini', NODE_ENV: undefined, GEMINI_API_KEY: undefined }, () => {
+            check('gemini without a key is NOT configured', isAIConfigured() === false);
+        });
+        withEnv({ AI_PROVIDER: 'gemini', NODE_ENV: undefined, GEMINI_API_KEY: 'g-test' }, () => {
+            check('gemini with a key is configured', isAIConfigured() === true);
+        });
     }
 
     // ── 5 · Model mapping ────────────────────────────────────────────────────
@@ -174,6 +270,24 @@ async function main() {
         }, () => {
             check('ollama maps a text model', resolveModel('gpt-4o') === 'llama3.1');
             check('ollama maps a vision model', resolveModel('gpt-4o-mini') === 'llava');
+        });
+        withEnv({ AI_PROVIDER: 'groq', NODE_ENV: undefined }, () => {
+            check('groq maps a chat model to a real default (not a bare passthrough)',
+                resolveModel('gpt-4o', 'chat') !== 'gpt-4o' && !!resolveModel('gpt-4o', 'chat'));
+            check('groq maps audio to whisper-large-v3',
+                resolveModel('whisper-1', 'audio') === 'whisper-large-v3');
+        });
+        withEnv({ AI_PROVIDER: 'groq', NODE_ENV: undefined, GROQ_CHAT_MODEL: 'llama-3.3-70b-versatile' }, () => {
+            check('GROQ_CHAT_MODEL overrides the default',
+                resolveModel('gpt-4o', 'chat') === 'llama-3.3-70b-versatile');
+        });
+        withEnv({ AI_PROVIDER: 'gemini', NODE_ENV: undefined }, () => {
+            check('gemini maps a vision model to a real default (not a bare passthrough)',
+                resolveModel('gpt-4o', 'vision') !== 'gpt-4o' && !!resolveModel('gpt-4o', 'vision'));
+        });
+        withEnv({ AI_PROVIDER: 'gemini', NODE_ENV: undefined, GEMINI_MODEL: 'gemini-2.0-flash' }, () => {
+            check('GEMINI_MODEL overrides the default',
+                resolveModel('gpt-4o', 'vision') === 'gemini-2.0-flash');
         });
     }
 
@@ -263,6 +377,11 @@ async function main() {
             'server/brain/media/VisualAnalyzer.js',
             'server/brain/media/ContentClassifier.js',
             'server/audio-engine/embeddings/EmbeddingService.js',
+            // R84: this file was the one undetected bypass — it built its own
+            // `new OpenAI(...)` off OPENAI_API_KEY directly and was never in
+            // this list, so no provider swap ever reached it. Added so a
+            // future bypass here fails loudly instead of going unnoticed again.
+            'utils/sceneAnalyzer.js',
         ];
 
         for (const rel of files) {

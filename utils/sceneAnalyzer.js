@@ -1,19 +1,26 @@
 // utils/sceneAnalyzer.js - Analyse des objets et scènes avec GPT-4o-mini-vision
-const OpenAI = require('openai');
+//
+// Was the one call site in the whole codebase that bypassed
+// services/AIProvider.js (R45) — it constructed its own OpenAI SDK client
+// directly, straight off OPENAI_API_KEY, so no AI_PROVIDER/AI_VISION_PROVIDER setting
+// ever reached it: it kept billing the real API (or failing with no key at
+// all) no matter what the rest of the app was configured to use. Routed
+// through the factory now, capability:'vision' — same boundary as
+// VisualAnalyzer.js: never served by groq (no free vision model there),
+// served by gemini when AI_VISION_PROVIDER=gemini.
 const fs = require('fs');
 const path = require('path');
+const { getAIClient, resolveModel } = require('../services/AIProvider');
 
 let openai = null;
 
 /**
- * Initialise le client OpenAI
+ * Initialise le client AI (via services/AIProvider.js — voir commentaire ci-dessus)
  */
 function initializeOpenAI() {
-  if (!openai && process.env.OPENAI_API_KEY) {
-    openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
-    console.log('✅ OpenAI client initialisé pour analyse visuelle');
+  if (!openai) {
+    openai = getAIClient({ capability: 'vision' });
+    if (openai) console.log('✅ AI client initialisé pour analyse visuelle');
   }
   return openai;
 }
@@ -112,8 +119,9 @@ Yanıtınızı aşağıdaki yapıya sahip bir JSON nesnesi olarak biçimlendirin
 
     console.log(`🔍 Analyse de scène avec GPT-4o-mini-vision: ${imagePath}`);
 
+    const modelUsed = resolveModel('gpt-4o-mini', 'vision');
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: modelUsed,
       messages: [
         {
           role: "user",
@@ -168,7 +176,7 @@ Yanıtınızı aşağıdaki yapıya sahip bir JSON nesnesi olarak biçimlendirin
     return {
       success: true,
       analysis: analysisResult,
-      model: 'gpt-4o-mini',
+      model: modelUsed,
       timestamp: new Date().toISOString()
     };
 

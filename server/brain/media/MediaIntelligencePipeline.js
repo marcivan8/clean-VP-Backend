@@ -16,7 +16,7 @@
 'use strict';
 
 const fs   = require('fs');
-const { getAIClient, isAIConfigured } = require('../../../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel } = require('../../../services/AIProvider');
 const os   = require('os');
 const path = require('path');
 
@@ -567,8 +567,10 @@ class MediaIntelligencePipeline {
         if (!isAIConfigured()) return null;
 
         const fs = require('fs');
-        // capability:'audio' — Whisper has no local equivalent, so this stays on
-        // the real API even under AI_PROVIDER=ollama (R45).
+        // capability:'audio' — ollama/gemini have no reachable audio API, so
+        // this always falls back to openai under those providers (R45). Under
+        // AI_PROVIDER=groq, this IS served — free, OpenAI-compatible
+        // whisper-large-v3 — see services/AIProvider.js.
         const openai = getAIClient({ capability: 'audio' });
         if (!openai) return null;
 
@@ -619,7 +621,7 @@ class MediaIntelligencePipeline {
 
             const transcription = await openai.audio.transcriptions.create({
                 file:  fs.createReadStream(uploadPath),
-                model: 'whisper-1',
+                model: resolveModel('whisper-1', 'audio'),
             });
 
             return transcription?.text || null;

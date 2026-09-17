@@ -14,7 +14,7 @@
 'use strict';
 
 const OpenAI = require('openai');
-const { getAIClient, isAIConfigured } = require('../../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel } = require('../../services/AIProvider');
 const { ContextEngine } = require('./ContextEngine');
 const { UserProfileEngine } = require('./UserProfileEngine');
 const { ASSET_ANALYSIS_DONE } = require('./media/analysisStatus');
@@ -22,7 +22,9 @@ const { ASSET_ANALYSIS_DONE } = require('./media/analysisStatus');
 class EditorialBrain {
 
     constructor() {
-        this.openai = getAIClient();
+        // capability: 'chat' — this is text-only reasoning, never vision. Under
+        // AI_PROVIDER=groq this is served free; see services/AIProvider.js.
+        this.openai = getAIClient({ capability: 'chat' });
         this.contextEngine = new ContextEngine();
         this.profileEngine = new UserProfileEngine();
     }
@@ -57,7 +59,7 @@ class EditorialBrain {
                 : `Trigger: ${input?.trigger || 'unknown'}. Analyze the project and provide suggestions.`;
 
             const completion = await this.openai.chat.completions.create({
-                model: 'gpt-4o',
+                model: resolveModel('gpt-4o', 'chat'),
                 temperature,
                 max_tokens: 800,
                 response_format: { type: 'json_object' },
@@ -510,7 +512,14 @@ CONTENT FORMAT RULES (critical — do not override with generic assessment):
                 reasoning: 'Brain unavailable — passing through raw input',
             },
             response: {
-                message: 'Processing your request…',
+                // null, not a placeholder string — a fallback BrainOutput means
+                // the Brain call failed (no key, empty completion, or a thrown
+                // error just above); rendering a fixed "Processing your
+                // request…" string here made every failure look like a
+                // still-in-progress state that never resolves. BrainPanel.jsx
+                // already treats a falsy message as "nothing to show" via its
+                // hasContent check, so null renders no misleading card at all.
+                message: null,
                 suggestions: [],
                 warnings: [],
                 insight: null,

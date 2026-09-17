@@ -475,7 +475,14 @@ router.get('/gcs-media/*', async (req, res) => {
             const stream = file.createReadStream();
             stream.on('error', (err) => {
                 console.error('[proxy/gcs-media] Video stream error', gcsPath, ':', err.message);
+                // Same fix as the range-request branch above: Content-Length is
+                // already set and piping may have started, so headersSent is
+                // true by the time a mid-stream GCS hiccup fires. The old
+                // `if (!res.headersSent)` guard then does nothing and leaves
+                // the socket dangling until Railway's edge times it out and
+                // synthesises a 502/ERR_HTTP2_PROTOCOL_ERROR — always end it.
                 if (!res.headersSent) res.status(500).end();
+                else res.destroy();
             });
             res.on('close', () => stream.destroy());
             stream.pipe(res);

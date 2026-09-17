@@ -12,11 +12,12 @@
 
 const OpenAI = require('openai');
 
-const { getAIClient, isAIConfigured } = require('../../../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel } = require('../../../services/AIProvider');
 class ContentClassifier {
 
     constructor() {
-        this.openai = getAIClient();
+        // capability: 'chat' — this reads text asset summaries only, no images.
+        this.openai = getAIClient({ capability: 'chat' });
     }
 
     /**
@@ -75,7 +76,7 @@ Return ONLY valid JSON matching this exact schema:
 }`;
 
             const response = await this.openai.chat.completions.create({
-                model: 'gpt-4o',
+                model: resolveModel('gpt-4o', 'chat'),
                 max_tokens: 1000,
                 response_format: { type: 'json_object' },
                 messages: [
