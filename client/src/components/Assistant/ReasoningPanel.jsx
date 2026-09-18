@@ -754,7 +754,7 @@ const CaptionStylesCard = ({ log }) => {
     );
 };
 
-const ReasoningPanel = () => {
+const ReasoningPanel = ({ className }) => {
     const { t } = useTranslation('editor');
     const { logs, suggestions, isAnalyzing, setIsAnalyzing, addLog, addSuggestion, removeSuggestion, contextualSuggestion, quickChips, setActiveTab } = useAIStore();
     const { uploadedFile, performAction, assets, tracks, projectId } = useTimelineStore(useShallow(state => ({
@@ -1087,7 +1087,7 @@ const ReasoningPanel = () => {
     };
 
     return (
-        <aside className="w-full h-full border-l border-border bg-card flex flex-col shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.1)]">
+        <aside className={classNames("w-full h-full border-l border-border bg-card flex flex-col shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.1)]", className)}>
             {/* Header */}
             <div className="p-3 border-b flex items-center justify-between" style={{ borderColor: "var(--line-soft)", background: "var(--glass)" }}>
                 <div className="flex items-center gap-2">
