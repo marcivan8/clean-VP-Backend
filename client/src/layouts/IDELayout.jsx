@@ -2036,7 +2036,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             // Mobile: fixed bottom sheet above toolbar (taller than media panel for the chat)
                             "fixed inset-x-0 bottom-14 z-40 h-[80vh] max-h-[80vh] rounded-t-2xl border-t overflow-hidden",
                             // Desktop: revert to static right sidebar (always visible)
-                            "md:static md:inset-auto md:bottom-auto md:z-30 md:max-h-none md:rounded-none md:border-t-0 md:border-l md:w-80 md:shadow-none md:overflow-y-auto md:translate-y-0",
+                            "md:static md:inset-auto md:bottom-auto md:z-30 md:max-h-none md:rounded-none md:border-t-0 md:border-l md:w-80 md:shadow-none md:overflow-hidden md:translate-y-0",
                             // Mobile visibility + disable pointer events when hidden
                             mobileSheet === 'ai' ? "translate-y-0" : "translate-y-full pointer-events-none md:pointer-events-auto"
                         )}
