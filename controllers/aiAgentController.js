@@ -1,5 +1,5 @@
 const OpenAI = require('openai');
-const { getAIClient, isAIConfigured } = require('../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel } = require('../services/AIProvider');
 const { analyzeStructure } = require('../viralEngine/structure.js');
 
 const openai = getAIClient();
@@ -58,7 +58,7 @@ User Command: "${command}"`;
                 { role: "system", content: systemPrompt },
                 { role: "user", content: userPrompt }
             ],
-            model: "gpt-4o",
+            model: resolveModel('gpt-4o', 'chat'),
             response_format: { type: "json_object" }
         });
 
@@ -459,7 +459,7 @@ USER REQUEST:
                 ...safeHistory,
                 { role: "user", content: userMessage }
             ],
-            model: "gpt-4o",
+            model: resolveModel('gpt-4o', 'chat'),
             tools: tools,
             tool_choice: { type: "function", function: { name: "execute_video_edit" } },
             temperature: 0.15
@@ -1625,7 +1625,7 @@ Respond with this exact JSON structure:
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: userMessage }
             ],
-            model: 'gpt-4o',
+            model: resolveModel('gpt-4o', 'chat'),
             response_format: { type: 'json_object' },
             temperature: 0.2
         }, { timeout: 30000 });
@@ -1753,7 +1753,7 @@ Respond ONLY with valid JSON:
 {"removeIndices": [array of integer indices to remove], "reasoning": "one sentence summary of what was removed"}`;
 
         const completion = await openai.chat.completions.create({
-            model: 'gpt-4o',
+            model: resolveModel('gpt-4o', 'chat'),
             messages: [{ role: 'user', content: prompt }],
             response_format: { type: 'json_object' },
             temperature: 0.1,
@@ -1809,7 +1809,7 @@ Rules:
 Respond ONLY with valid JSON: {"newOrder": ["id1","id2",...], "reasoning": "one sentence"}`;
 
         const completion = await openai.chat.completions.create({
-            model: 'gpt-4o',
+            model: resolveModel('gpt-4o', 'chat'),
             messages: [
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: `User instruction: "${userPrompt}"\n\nClips (${clips.length} total):\n${clipsText}` },
@@ -2007,7 +2007,7 @@ Respond ONLY with valid JSON:
         let cutRanges = [];
         try {
             const arbitration = await openai.chat.completions.create({
-                model: 'gpt-4o',
+                model: resolveModel('gpt-4o', 'chat'),
                 messages: [{ role: 'user', content: arbitrationPrompt }],
                 response_format: { type: 'json_object' },
                 temperature: 0.1,

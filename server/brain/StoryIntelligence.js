@@ -39,7 +39,7 @@
 const crypto = require('crypto');
 
 const { supabaseAdmin } = require('../../config/database');
-const { getAIClient, isAIConfigured } = require('../../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel } = require('../../services/AIProvider');
 
 /** Beat vocabulary. Closed, because the Brain switches on these. */
 const BEATS = ['hook', 'setup', 'build', 'turn', 'payoff', 'outro', 'filler'];
@@ -210,7 +210,10 @@ class StoryIntelligence {
         const prompt = this.buildDerivationPrompt({ clips, projectMap, platform });
 
         const completion = await openai.chat.completions.create({
-            model:           'gpt-4o',
+            // R84 missed this call site (same bug as ProjectIntelligence.js) —
+            // hardcoded 'gpt-4o' 404s under AI_PROVIDER=groq/gemini. Route
+            // through resolveModel() like every other real call site does.
+            model:           resolveModel('gpt-4o', 'chat'),
             messages:        [{ role: 'user', content: prompt }],
             response_format: { type: 'json_object' },
             temperature:     0.2,

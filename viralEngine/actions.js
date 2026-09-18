@@ -1,9 +1,12 @@
 
-const OpenAI = require('openai');
+// R45/R84: services/AIProvider.js is the ONLY place an OpenAI-compatible
+// client is constructed. This file used to build its own `new OpenAI()`
+// straight off the raw env var (and requested a stale literal model name,
+// 'gpt-4-1106-preview', that no other provider serves) — same bug class as
+// analysis/audioAnalyzer.js and utils/transcribe.js, found in the same sweep.
+const { getAIClient, resolveModel } = require('../services/AIProvider');
 
-const openai = process.env.OPENAI_API_KEY ? new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-}) : null;
+const openai = getAIClient({ capability: 'chat' });
 
 /**
  * Generates actionable suggestions based on analysis data.
@@ -50,7 +53,7 @@ Transcript: ${transcript.slice(0, 500)}...
                 { role: "system", content: systemPrompt },
                 { role: "user", content: userPrompt }
             ],
-            model: "gpt-4-1106-preview", // Use a capable model
+            model: resolveModel('gpt-4o', 'chat'),
             response_format: { type: "json_object" }
         });
 

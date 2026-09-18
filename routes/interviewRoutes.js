@@ -23,7 +23,7 @@
  */
 
 const express        = require('express');
-const { getAIClient, isAIConfigured } = require('../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel } = require('../services/AIProvider');
 const router         = express.Router();
 const path           = require('path');
 const fs             = require('fs');
@@ -241,7 +241,7 @@ async function detectHostSideViaVision(words, speakers, filename, requestUserId)
         ];
 
         const resp = await openai.chat.completions.create({
-            model:       'gpt-4o-mini',
+            model:       resolveModel('gpt-4o-mini', 'vision'),
             messages:    [{ role: 'user', content }],
             max_tokens:  30,
             temperature: 0,
@@ -415,7 +415,7 @@ async function detectSceneLayout(words, speakers, filename, requestUserId) {
         ];
 
         const resp = await openai.chat.completions.create({
-            model:       'gpt-4o-mini',
+            model:       resolveModel('gpt-4o-mini', 'vision'),
             messages:    [{ role: 'user', content }],
             max_tokens:  200,
             temperature: 0,
@@ -701,7 +701,7 @@ Extra rules when ML data is present:
 ` : '';
 
         const completion = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
+            model: resolveModel('gpt-4o-mini', 'chat'),
             messages: [{
                 role: 'user',
                 content:
@@ -1716,7 +1716,7 @@ Return ONLY valid JSON:
             }
 
             const completion = await openai.chat.completions.create({
-                model:           useVision ? 'gpt-4o-mini' : 'gpt-4o',
+                model:           useVision ? resolveModel('gpt-4o-mini', 'vision') : resolveModel('gpt-4o', 'chat'),
                 messages:        [{ role: 'user', content }],
                 response_format: { type: 'json_object' },
                 temperature:     0.15,
@@ -2293,7 +2293,7 @@ router.post('/classify-pauses', ...authAndGate, async (req, res) => {
         }));
 
         const completion = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
+            model: resolveModel('gpt-4o-mini', 'chat'),
             messages: [{
                 role: 'user',
                 content:
@@ -2635,7 +2635,7 @@ router.post('/identify-speakers', ...authAndGate, async (req, res) => {
         const openai = getAIClient({ timeout: 15_000 });
 
         const completion = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
+            model: resolveModel('gpt-4o-mini', 'chat'),
             messages: [{
                 role: 'user',
                 content:

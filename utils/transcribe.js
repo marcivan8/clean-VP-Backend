@@ -1,17 +1,16 @@
 const fs = require('fs');
-const { OpenAI } = require('openai');
+// R45/R84: services/AIProvider.js is the ONLY place an OpenAI-compatible
+// client is constructed. This file used to build its own `new OpenAI()`
+// directly off the raw env var AND throw at require-time when
+// OPENAI_API_KEY was missing/blank — which would have crashed the whole
+// process on `require('./utils/transcribe')` under AI_PROVIDER=groq/gemini
+// (OPENAI_API_KEY is intentionally blank in that setup). No current caller
+// in this codebase requires this file, but the same bug class already bit
+// analysis/audioAnalyzer.js in production, so it's fixed here too rather
+// than left as a live bypass waiting for the next caller to hit it.
+const { getAIClient, resolveModel } = require('../services/AIProvider');
 
-const apiKey = process.env.OPENAI_API_KEY;
-
-// Check if API key is loaded correctly
-if (!apiKey || apiKey.startsWith('=')) {
-  console.error('❌ Clé API invalide ou non définie. Vérifiez votre fichier .env');
-  throw new Error('Invalid or missing OpenAI API key');
-}
-
-const openai = new OpenAI({
-  apiKey: apiKey,
-});
+const openai = getAIClient({ capability: 'audio' });
 
 /**
  * Transcribes audio using Whisper with word-level timestamps.
@@ -21,7 +20,7 @@ async function transcribeAudio(filePath) {
   try {
     const transcription = await openai.audio.transcriptions.create({
       file: fs.createReadStream(filePath),
-      model: 'whisper-1',
+      model: resolveModel('whisper-1', 'audio'),
     });
 
     return transcription.text;
@@ -52,7 +51,7 @@ async function transcribeWithTimestamps(filePath) {
 
     const transcription = await openai.audio.transcriptions.create({
       file: fs.createReadStream(filePath),
-      model: 'whisper-1',
+      model: resolveModel('whisper-1', 'audio'),
       response_format: 'verbose_json',
       timestamp_granularities: ['word', 'segment'],
     });

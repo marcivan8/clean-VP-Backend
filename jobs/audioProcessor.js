@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { detectBeats } = require('../analysis/beatDetector');
 const { OpenAI } = require('openai');
-const { getAIClient, isAIConfigured } = require('../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel } = require('../services/AIProvider');
 const storageConfig = require('../config/storage');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -157,7 +157,7 @@ Respond ONLY with valid JSON:
 
     try {
         const completion = await openai.chat.completions.create({
-            model: 'gpt-4o',
+            model: resolveModel('gpt-4o', 'chat'),
             messages: [{ role: 'user', content: prompt }],
             response_format: { type: 'json_object' },
             temperature: 0.1,
@@ -254,7 +254,7 @@ async function detectFillerWords(inputPath, language = 'en', tempDir = null, pre
         const openai = getOpenAI();
         const transcription = await openai.audio.transcriptions.create({
             file: fs.createReadStream(whisperPath),
-            model: 'whisper-1',
+            model: resolveModel('whisper-1', 'audio'),
             response_format: 'verbose_json',
             timestamp_granularities: ['word'],
             language: language === 'auto' ? undefined : language,
@@ -434,7 +434,7 @@ module.exports = async function processAudioJob(job) {
                 try {
                     transcription = await openai.audio.transcriptions.create({
                         file: fs.createReadStream(tWhisperPath),
-                        model: 'whisper-1',
+                        model: resolveModel('whisper-1', 'audio'),
                         prompt: 'This is a video transcript. The speech might be faint, or there may be long pauses.',
                         response_format: 'verbose_json',
                         timestamp_granularities: ['word', 'segment']
@@ -571,7 +571,7 @@ module.exports = async function processAudioJob(job) {
 
                 const transcription = await openai.audio.transcriptions.create({
                     file:             fs.createReadStream(whisperPath),
-                    model:            'whisper-1',
+                    model:            resolveModel('whisper-1', 'audio'),
                     language:         language || undefined,
                     response_format:  'verbose_json',
                     timestamp_granularities: ['word'],
@@ -792,7 +792,7 @@ module.exports = async function processAudioJob(job) {
                     const openai = getOpenAI();
                     const tx = await openai.audio.transcriptions.create({
                         file: fs.createReadStream(rzTempAudio),
-                        model: 'whisper-1',
+                        model: resolveModel('whisper-1', 'audio'),
                         response_format: 'verbose_json',
                         timestamp_granularities: ['word'],
                     });
@@ -838,7 +838,7 @@ module.exports = async function processAudioJob(job) {
             try {
                 const compact = sampledPhrases.map((p, i) => ({ i, s: p.start.toFixed(2), t: p.text.slice(0, 80) }));
                 const completion = await openai.chat.completions.create({
-                    model: 'gpt-4o-mini',   // fast + cheap for this classification task
+                    model: resolveModel('gpt-4o-mini', 'chat'),   // fast + cheap for this classification task
                     messages: [{
                         role: 'user',
                         content: `You are a video editor analyzing a talking-head/interview video for camera zoom rhythm.

@@ -38,7 +38,7 @@
 
 const crypto = require('crypto');
 
-const { getAIClient, isAIConfigured } = require('../../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel } = require('../../services/AIProvider');
 const { supabaseAdmin } = require('../../config/database');
 const { ASSET_ANALYSIS_DONE } = require('./media/analysisStatus');
 
@@ -176,7 +176,12 @@ class ProjectIntelligence {
         const prompt = this.buildDerivationPrompt({ assets, clipCount, platform });
 
         const completion = await openai.chat.completions.create({
-            model:           'gpt-4o',
+            // R84 missed this call site — hardcoded 'gpt-4o' worked fine while
+            // AI_PROVIDER was unset (openai is a no-op passthrough in
+            // resolveModel), but 404s under AI_PROVIDER=groq/gemini, neither of
+            // which serves anything literally named 'gpt-4o'. See
+            // EditorialBrain.js/ContentClassifier.js for the pattern this now matches.
+            model:           resolveModel('gpt-4o', 'chat'),
             messages:        [{ role: 'user', content: prompt }],
             response_format: { type: 'json_object' },
             temperature:     0.15,

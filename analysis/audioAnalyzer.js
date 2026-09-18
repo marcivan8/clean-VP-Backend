@@ -1,10 +1,14 @@
 const fs = require('fs');
-const OpenAI = require('openai');
 const ffmpeg = require('fluent-ffmpeg');
+// R45/R84: services/AIProvider.js is the ONLY place an OpenAI-compatible
+// client is constructed. This file used to build its own `new OpenAI()`
+// straight off the raw env var — a bypass that never saw AI_PROVIDER=groq,
+// so it silently returned mock data the moment OPENAI_API_KEY went blank
+// (the `if (!openai)` branch below), regardless of what AI_PROVIDER was set
+// to. Same bug class as R84's "sixteenth bypass" (utils/sceneAnalyzer.js).
+const { getAIClient, resolveModel } = require('../services/AIProvider');
 
-const openai = process.env.OPENAI_API_KEY ? new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-}) : null;
+const openai = getAIClient({ capability: 'audio' });
 
 /**
  * Analyzes audio from a video file.
@@ -57,7 +61,7 @@ async function analyzeAudio(videoPath) {
         // 2. Transcribe using Whisper
         const transcription = await openai.audio.transcriptions.create({
             file: fs.createReadStream(audioPath),
-            model: "whisper-1",
+            model: resolveModel('whisper-1', 'audio'),
             response_format: "verbose_json",
             timestamp_granularities: ["word", "segment"]
         });

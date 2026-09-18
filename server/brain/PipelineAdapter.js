@@ -28,7 +28,7 @@
 
 const OpenAI = require('openai');
 
-const { getAIClient, isAIConfigured } = require('../../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel } = require('../../services/AIProvider');
 /**
  * Execute a command string via an independent, lightweight GPT-4o call.
  *
@@ -92,7 +92,7 @@ OUTPUT FORMAT — return a JSON object with:
 Keep responses concise.`;
 
         const completion = await openai.chat.completions.create({
-            model: 'gpt-4o',
+            model: resolveModel('gpt-4o', 'chat'),
             temperature: 0.1,
             max_tokens: 600,
             response_format: { type: 'json_object' },
