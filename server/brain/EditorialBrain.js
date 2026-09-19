@@ -8,7 +8,12 @@
  * - process() NEVER throws — returns fallbackOutput on any error
  * - Temperature 0.2 for 'execute', 0.4 for advise/clarify
  * - max_tokens: 800
- * - response_format: json_object always
+ * - response_format: strict JSON Schema Mode (BRAIN_OUTPUT_SCHEMA below) —
+ *   was the loose json_object mode, which is how a large, rule-dense system
+ *   prompt on Groq's small open-weight model produced "400
+ *   json_validate_failed" errors (every one already survived, by contract,
+ *   via fallbackOutput() below — but every one was also a silently degraded
+ *   response the user had no way to know was a fallback, not a real answer).
  */
 
 'use strict';
@@ -18,6 +23,102 @@ const { getAIClient, isAIConfigured, resolveModel } = require('../../services/AI
 const { ContextEngine } = require('./ContextEngine');
 const { UserProfileEngine } = require('./UserProfileEngine');
 const { ASSET_ANALYSIS_DONE } = require('./media/analysisStatus');
+
+/**
+ * Strict JSON Schema Mode schema for BrainOutput — kept in sync with the
+ * "RESPONSE FORMAT" block in buildSystemPrompt() below, with
+ * fallbackOutput(), and with _normalizeBrainOutput()'s defensive coercion
+ * (which stays in place regardless — this schema makes malformed JSON
+ * structurally impossible on models that honor strict mode, it doesn't
+ * replace validating what comes back from ones that don't).
+ *
+ * Strict-mode rules (Groq's constrained decoding, matches OpenAI's own
+ * Structured Outputs spec): every property must be listed in `required`
+ * (there is no true "optional" — a field that may be absent in spirit is
+ * expressed as a nullable type union, e.g. `["string", "null"]`), and every
+ * object needs `additionalProperties: false`.
+ *
+ * `profileUpdates` is modelled as always-`{}`: nothing in this codebase
+ * currently reads specific keys out of it (Orchestrator.js and both
+ * fallback paths here only ever set it to `{}`), so a closed empty object
+ * matches actual behaviour rather than inventing a shape nothing consumes.
+ */
+const BRAIN_OUTPUT_SCHEMA = {
+    type: 'json_schema',
+    json_schema: {
+        name: 'brain_output',
+        strict: true,
+        schema: {
+            type: 'object',
+            properties: {
+                intent: {
+                    type: 'object',
+                    properties: {
+                        type:       { type: 'string', enum: ['execute', 'advise', 'clarify', 'learn_only'] },
+                        confidence: { type: 'number' },
+                        command:    { type: ['string', 'null'] },
+                        reasoning:  { type: 'string' },
+                    },
+                    required: ['type', 'confidence', 'command', 'reasoning'],
+                    additionalProperties: false,
+                },
+                response: {
+                    type: 'object',
+                    properties: {
+                        message: { type: 'string' },
+                        suggestions: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    type:     { type: 'string' },
+                                    text:     { type: 'string' },
+                                    command:  { type: 'string' },
+                                    reason:   { type: 'string' },
+                                    priority: { type: 'string', enum: ['critical', 'high', 'medium', 'low'] },
+                                },
+                                required: ['type', 'text', 'command', 'reason', 'priority'],
+                                additionalProperties: false,
+                            },
+                        },
+                        warnings: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    type:     { type: 'string' },
+                                    text:     { type: 'string' },
+                                    severity: { type: 'string', enum: ['critical', 'warning', 'info'] },
+                                },
+                                required: ['type', 'text', 'severity'],
+                                additionalProperties: false,
+                            },
+                        },
+                        insight: { type: ['string', 'null'] },
+                    },
+                    required: ['message', 'suggestions', 'warnings', 'insight'],
+                    additionalProperties: false,
+                },
+                learning: {
+                    type: 'object',
+                    properties: {
+                        patternObserved: { type: ['string', 'null'] },
+                        profileUpdates: {
+                            type: 'object',
+                            properties: {},
+                            required: [],
+                            additionalProperties: false,
+                        },
+                    },
+                    required: ['patternObserved', 'profileUpdates'],
+                    additionalProperties: false,
+                },
+            },
+            required: ['intent', 'response', 'learning'],
+            additionalProperties: false,
+        },
+    },
+};
 
 class EditorialBrain {
 
@@ -62,7 +163,7 @@ class EditorialBrain {
                 model: resolveModel('gpt-4o', 'chat'),
                 temperature,
                 max_tokens: 800,
-                response_format: { type: 'json_object' },
+                response_format: BRAIN_OUTPUT_SCHEMA,
                 messages: [
                     { role: 'system', content: systemPrompt },
                     { role: 'user',   content: userMessage },

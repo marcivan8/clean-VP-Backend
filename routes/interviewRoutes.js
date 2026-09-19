@@ -700,11 +700,27 @@ Extra rules when ML data is present:
   • energy=low: lean toward "wide" or "medium"
 ` : '';
 
-        const completion = await openai.chat.completions.create({
-            model: resolveModel('gpt-4o-mini', 'chat'),
-            messages: [{
-                role: 'user',
-                content:
+        // Both the API call itself AND the JSON.parse of its response need to
+        // degrade to the cycle-based default below — not just the parse. The
+        // GROQ_CHAT_MODEL Groq serves under AI_PROVIDER=groq (a small
+        // open-weight model) is a known-flaky JSON generator on prompts this
+        // long and rule-dense: it doesn't always return malformed content in
+        // a 200 (which the JSON.parse try/catch below already handled) — it
+        // sometimes REJECTS the request outright with a 400
+        // "json_validate_failed" before any content comes back at all (same
+        // failure class already seen and handled in EditorialBrain.js). That
+        // used to come from OUTSIDE both try/catches here, so it escaped to
+        // the route's outer catch (line ~880) and 500'd the whole endpoint —
+        // denying the user the working fallback that already exists two
+        // lines down for the sibling failure mode. One GPT hiccup should
+        // degrade the rhythm assignment, not break rhythm-zoom entirely.
+        let gptAssignments = [];
+        try {
+            const completion = await openai.chat.completions.create({
+                model: resolveModel('gpt-4o-mini', 'chat'),
+                messages: [{
+                    role: 'user',
+                    content:
 `You are a short-form social video editor (TikTok/Reels/Shorts retention style) assigning shot types to create a multi-camera zoom rhythm for a talking-head video.
 Each clip is already edited and cut. Assign each a shot type:
   "wide"   – neutral, low energy, transition, breather
@@ -723,16 +739,57 @@ EMPHASIS: for each clip, also identify "ew" — the single most emphasized word 
 Return ONLY valid JSON: {"c":[{"i":N,"type":"wide"|"medium"|"close","ew":"word"|null}]}
 
 Clips: ${JSON.stringify(compact)}`,
-            }],
-            response_format: { type: 'json_object' },
-            temperature:     0.2,
-            max_tokens:      1024,
-        });
+                }],
+                // Strict JSON Schema Mode (not the loose json_object mode) —
+                // Groq does constrained decoding against this schema on
+                // openai/gpt-oss-20b/120b and qwen3.8-27b, so the response
+                // structurally cannot violate it. This is the actual fix for
+                // the "400 json_validate_failed" errors this call was
+                // producing under json_object mode; the try/catch above and
+                // the FALLBACK_CYCLE below stay in place as defense-in-depth
+                // for providers/models that don't honor strict mode (real
+                // OpenAI supports it too; Ollama in dev may not).
+                response_format: {
+                    type: 'json_schema',
+                    json_schema: {
+                        name: 'rhythm_zoom_assignments',
+                        strict: true,
+                        schema: {
+                            type: 'object',
+                            properties: {
+                                c: {
+                                    type: 'array',
+                                    items: {
+                                        type: 'object',
+                                        properties: {
+                                            i:    { type: 'integer' },
+                                            type: { type: 'string', enum: ['wide', 'medium', 'close'] },
+                                            // Strict mode requires every field listed in
+                                            // `required` — "optional" is expressed as a
+                                            // nullable type union, not an absent key.
+                                            ew:   { type: ['string', 'null'] },
+                                        },
+                                        required: ['i', 'type', 'ew'],
+                                        additionalProperties: false,
+                                    },
+                                },
+                            },
+                            required: ['c'],
+                            additionalProperties: false,
+                        },
+                    },
+                },
+                temperature:     0.2,
+                max_tokens:      1024,
+            });
 
-        let gptAssignments = [];
-        try {
             gptAssignments = JSON.parse(completion.choices[0].message.content).c || [];
-        } catch (_) { /* fallback to cycle below */ }
+        } catch (gptErr) {
+            console.warn(
+                `[interviewRoutes] rhythm-zoom: shot-assignment model call failed — ` +
+                `falling back to the default cycle (${gptErr.message})`
+            );
+        }
 
         const gptMap      = {};
         const emphasisMap = {};  // index → emphasis word (verbatim) or undefined
