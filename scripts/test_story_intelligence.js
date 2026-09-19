@@ -75,6 +75,17 @@ function load(supabaseStub, { body = null, throwOnCall = false } = {}) {
                     return { choices: [{ message: { content: JSON.stringify(body) } }] };
                 } } },
             }),
+            // StoryIntelligence.deriveMap() now routes its model name through
+            // resolveModel() (the R84-class fix for the hardcoded-'gpt-4o'
+            // 404s under AI_PROVIDER=groq/gemini). This stub replaces the
+            // whole AIProvider module, so without a resolveModel mock here
+            // deriveMap's destructured import is undefined — calling it
+            // throws "resolveModel is not a function" on every "GOOD" run,
+            // ensureMap's catch swallows it as a derivation failure, and
+            // ensureMap returns null instead of a map. The mocked chat
+            // client above never checks the model value, so identity is a
+            // safe stand-in here.
+            resolveModel: (model) => model,
         },
     };
     delete require.cache[SI_PATH];
