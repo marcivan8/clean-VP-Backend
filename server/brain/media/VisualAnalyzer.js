@@ -10,7 +10,7 @@
 'use strict';
 
 const { execFile } = require('child_process');
-const { getAIClient, isAIConfigured, resolveModel } = require('../../../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel, describeAIError } = require('../../../services/AIProvider');
 const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
@@ -252,7 +252,11 @@ Return ONLY the JSON object, no explanation.`;
             };
 
         } catch (err) {
-            console.error('[VisualAnalyzer] analyzeWithVision error:', err.message);
+            // describeAIError() unwraps Gemini's array-wrapped error body —
+            // see services/AIProvider.js for why err.message alone was only
+            // ever showing "404 status code (no body)" here, no matter what
+            // actually went wrong (bad model name, bad key, quota).
+            console.error('[VisualAnalyzer] analyzeWithVision error:', describeAIError(err));
             return ERROR_RESULT;
         }
     }

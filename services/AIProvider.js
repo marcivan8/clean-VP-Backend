@@ -396,11 +396,58 @@ function _resetForTests() {
     _warnedProdRealProvider = false;
 }
 
+/**
+ * Extract a usable message out of an error thrown by an OpenAI-compatible
+ * call, working around a real bug in Gemini's OpenAI-compatibility layer:
+ * Gemini wraps its error body in a JSON ARRAY — `[{ "error": {...} }]` —
+ * instead of the plain `{ "error": {...} }` object the `openai` npm SDK
+ * expects (confirmed on Google's own AI Developer forum, "Issue with
+ * OpenAI-Compatible API Error Response (Root Array)..."). The SDK can't
+ * parse that shape, so every Gemini failure — an invalid/deprecated model
+ * name, a bad GEMINI_API_KEY, an exhausted free-tier quota — surfaces
+ * identically as `err.message === '404 status code (no body)'` with the
+ * real cause thrown away. That's exactly what call sites like
+ * VisualAnalyzer.analyzeWithVision were logging, which made this
+ * undiagnosable from logs alone.
+ *
+ * Call this in a catch block instead of reading `err.message` directly for
+ * any call built from getAIClient()/resolveModel() — it's harmless (falls
+ * through to err.message) for the openai/groq/ollama providers, whose error
+ * bodies are already shaped the way the SDK expects.
+ *
+ * @param {*} err - the error thrown by openai.chat.completions.create() etc.
+ * @returns {string} a human-readable "[status] real message" string
+ */
+function describeAIError(err) {
+    if (!err) return 'Unknown error';
+
+    const status = err.status ?? err.statusCode ?? err.response?.status;
+
+    // Where the SDK stashes the parsed (or unparsed) error body varies by
+    // version/transport — check every shape it's been seen to use.
+    let body = err.error ?? err.response?.data ?? err.body ?? null;
+
+    // The actual Gemini bug: body is an array, real error is body[0].error.
+    if (Array.isArray(body) && body.length > 0) {
+        body = body[0]?.error ?? body[0];
+    }
+
+    const realMessage =
+        body?.message ??
+        body?.error?.message ??
+        (typeof body === 'string' ? body : null) ??
+        err.message ??
+        'Unknown error';
+
+    return `[${status ?? '?'}] ${realMessage}`;
+}
+
 module.exports = {
     getAIClient,
     isAIConfigured,
     resolveProvider,
     resolveModel,
+    describeAIError,
     mockBodyFor,
     VALID_PROVIDERS,
     REAL_ONLY_CAPABILITIES,
