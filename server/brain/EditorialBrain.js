@@ -7,7 +7,9 @@
  * Contract:
  * - process() NEVER throws — returns fallbackOutput on any error
  * - Temperature 0.2 for 'execute', 0.4 for advise/clarify
- * - max_tokens: 800
+ * - max_tokens: 1800 (Groq gpt-oss also gets reasoning_effort:'low' — see
+ *   process(); strict JSON Schema Mode has no partial credit, so the budget
+ *   has to cover both the model's reasoning tokens and every required field)
  * - response_format: strict JSON Schema Mode (BRAIN_OUTPUT_SCHEMA below) —
  *   was the loose json_object mode, which is how a large, rule-dense system
  *   prompt on Groq's small open-weight model produced "400
@@ -19,7 +21,7 @@
 'use strict';
 
 const OpenAI = require('openai');
-const { getAIClient, isAIConfigured, resolveModel } = require('../../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel, resolveProvider } = require('../../services/AIProvider');
 const { ContextEngine } = require('./ContextEngine');
 const { UserProfileEngine } = require('./UserProfileEngine');
 const { ASSET_ANALYSIS_DONE } = require('./media/analysisStatus');
@@ -172,7 +174,23 @@ class EditorialBrain {
             const completion = await this.openai.chat.completions.create({
                 model: resolveModel('gpt-4o', 'chat'),
                 temperature,
-                max_tokens: 800,
+                // FIX: was 800. Same class of bug as StoryIntelligence.js's
+                // max_tokens fix (see its comment) — production logs showed
+                // "max completion tokens reached... missing properties:
+                // response, learning", the last two fields in
+                // BRAIN_OUTPUT_SCHEMA. Strict JSON Schema Mode has no partial
+                // credit: if generation is cut off before every required key
+                // is emitted, the whole document is rejected. 800 was already
+                // tight for a schema with a reasoning string, an intent
+                // object, and a profileUpdates object; Groq's gpt-oss models
+                // also draw their internal thinking tokens from this same
+                // budget, which left little room for the actual answer.
+                max_tokens: 1800,
+                // Structured extraction, not open-ended reasoning — cap the
+                // model's internal thinking so the budget goes to the schema
+                // fields. Groq-only: other providers' APIs don't expect
+                // 'reasoning_effort'.
+                ...(resolveProvider({ capability: 'chat' }) === 'groq' ? { reasoning_effort: 'low' } : {}),
                 response_format: BRAIN_OUTPUT_SCHEMA,
                 messages: [
                     { role: 'system', content: systemPrompt },

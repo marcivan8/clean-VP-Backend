@@ -162,8 +162,15 @@ const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","
             className="aspect-video bg-secondary/30 border border-border rounded-md relative group overflow-hidden cursor-grab active:cursor-grabbing hover:border-primary/50 transition-colors"
         >
             {/* Delete Button */}
+            {/* FIX: was unconditionally `opacity-0 group-hover:opacity-100` —
+                touch devices have no `:hover`, so on mobile this button never
+                became visible at all. It still had `pointer-events-auto`, so
+                it was technically tappable if you knew the exact invisible
+                spot to hit, which is indistinguishable from "delete doesn't
+                work". isTouch (already read above via useDeviceType) keeps it
+                permanently visible there instead of relying on hover. */}
             <button
-                className="absolute top-1 right-1 z-50 p-1 bg-black/60 hover:bg-red-500/80 rounded-full opacity-0 group-hover:opacity-100 transition-all scale-90 hover:scale-100 pointer-events-auto cursor-pointer"
+                className={`absolute top-1 right-1 z-50 p-1 bg-black/60 hover:bg-red-500/80 rounded-full transition-all scale-90 hover:scale-100 pointer-events-auto cursor-pointer ${isTouch ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                 onPointerDown={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
@@ -187,7 +194,7 @@ const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","
                 it never collides with the delete button (top-right). */}
             {asset.type === 'image' && !asset.isProxying && (
                 <button
-                    className="absolute top-1 left-1 z-50 p-1 bg-black/60 hover:bg-[var(--accent,#00E5FF)] rounded-full opacity-0 group-hover:opacity-100 transition-all scale-90 hover:scale-100 pointer-events-auto cursor-pointer"
+                    className={`absolute top-1 left-1 z-50 p-1 bg-black/60 hover:bg-[var(--accent,#00E5FF)] rounded-full transition-all scale-90 hover:scale-100 pointer-events-auto cursor-pointer ${isTouch ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                     onPointerDown={(e) => {
                         e.stopPropagation();
                         e.preventDefault();

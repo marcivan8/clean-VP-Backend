@@ -180,20 +180,36 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
     // ── keyboard shortcuts ────────────────────────────────────────────────────
     useEffect(() => {
+        // FIX: mobile "space bar plays the video instead of typing a space"
+        // (MobileAIBar.jsx's chat textarea, TextPanel.jsx's caption textarea).
+        // The activeElement/e.target checks below were ALREADY the previous
+        // fix for a mobile focus race — but they both read focus state at
+        // keydown time, and that's exactly what races on-device: iOS/Android
+        // virtual keyboards are documented to sometimes dispatch a
+        // keydown for Space/Enter before — or without correctly attributing
+        // it to — the element the OS just focused, so both activeElement AND
+        // e.target can miss even though the browser's own focus management
+        // already moved focus to the textarea.
+        //
+        // focusin/focusout are different: they fire from the browser's actual
+        // focus change, not from the IME's keystroke synthesis, so they don't
+        // share that race. Tracking focus independently here — instead of
+        // re-deriving it from the keydown event — is the fix; the old checks
+        // are left in place as a second, harmless line of defense.
+        const isTextInputFocusedRef = { current: false };
+        const isTypingTarget = (el) =>
+            el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+
+        const handleFocusIn  = (e) => { if (isTypingTarget(e.target)) isTextInputFocusedRef.current = true; };
+        const handleFocusOut = (e) => { if (isTypingTarget(e.target)) isTextInputFocusedRef.current = false; };
+        document.addEventListener('focusin', handleFocusIn);
+        document.addEventListener('focusout', handleFocusOut);
+
         const handleKeyDown = (e) => {
             // Don't intercept shortcuts while typing in an input or textarea.
-            // Checked BOTH document.activeElement and e.target (not just
-            // activeElement) — on some mobile browsers, a keydown from the
-            // virtual keyboard can be dispatched before focus is fully
-            // reflected in document.activeElement, which let Space (bound to
-            // togglePlay below) win the race and eat the keystroke that
-            // should have inserted a space into the AI chat textarea. Also
-            // covers contentEditable, which has no tagName check above.
             const active = document.activeElement;
             const target = e.target;
-            const isTypingTarget = (el) =>
-                el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
-            if (isTypingTarget(active) || isTypingTarget(target)) return;
+            if (isTextInputFocusedRef.current || isTypingTarget(active) || isTypingTarget(target)) return;
 
             if (e.code === 'Space') {
                 e.preventDefault();
@@ -220,7 +236,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             }
         };
         window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            document.removeEventListener('focusin', handleFocusIn);
+            document.removeEventListener('focusout', handleFocusOut);
+        };
     }, []);
 
     const { isPlaying, setUploadedFile, updateClip, uploadedFile, aspectRatio, assets, addAssets, addClip, zoomLevel, tracks, activeClipId, setActiveClip, past, future, duration, projectName, projectId, setProjectName } = useTimelineStore(useShallow(state => ({

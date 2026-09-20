@@ -39,7 +39,7 @@
 const crypto = require('crypto');
 
 const { supabaseAdmin } = require('../../config/database');
-const { getAIClient, isAIConfigured, resolveModel } = require('../../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel, resolveProvider } = require('../../services/AIProvider');
 
 /** Beat vocabulary. Closed, because the Brain switches on these. */
 const BEATS = ['hook', 'setup', 'build', 'turn', 'payoff', 'outro', 'filler'];
@@ -296,7 +296,24 @@ class StoryIntelligence {
             messages:        [{ role: 'user', content: prompt }],
             response_format: STORY_MAP_SCHEMA,
             temperature:     0.2,
-            max_tokens:      1500,
+            // FIX: was 1500. Strict JSON Schema Mode has to emit the FULL
+            // object — every required field, including the beats/sagWindows/
+            // issues arrays — before the document is valid; there is no
+            // partial-credit. Production logs showed real projects (7 assets)
+            // hitting "max completion tokens reached... missing properties:
+            // deliversThroughLine, throughLineNote, issues" — exactly the LAST
+            // three properties in this schema, meaning generation ran out of
+            // budget after the earlier arrays and never reached them. Raised
+            // to a ceiling wide enough for a fully-populated map on a
+            // multi-beat cut. Groq's gpt-oss models are reasoning models —
+            // their thinking tokens are drawn from this same budget, which is
+            // why 1500 was tight even for output that isn't itself huge.
+            max_tokens:      3000,
+            // Structured extraction, not open-ended reasoning — cap the
+            // model's internal thinking so it spends the token budget on the
+            // schema fields, not on deliberating. Groq-only: 'reasoning_effort'
+            // is a gpt-oss-specific field other providers' APIs don't expect.
+            ...(resolveProvider({ capability: 'chat' }) === 'groq' ? { reasoning_effort: 'low' } : {}),
         });
 
         const raw = completion?.choices?.[0]?.message?.content;

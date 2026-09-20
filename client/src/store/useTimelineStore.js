@@ -1867,9 +1867,21 @@ const useTimelineStore = create(
                     past: [],
                     future: [],
                 };
-                if (projectData.assets?.length) {
-                    updates.assets = projectData.assets;
-                }
+                // FIX: was `if (projectData.assets?.length) updates.assets = ...` —
+                // an EMPTY array still has `.length === 0`, which is falsy, so
+                // `updates.assets` was never set for a brand-new or genuinely
+                // empty project. Zustand's `set()` shallow-merges, so the
+                // previous project's `assets` array survived untouched in the
+                // store — "New Project" (and any saved project with zero
+                // assets) opened showing the last project's media bin. Unlike
+                // the transcript/caption fields above (which fall back to the
+                // in-memory value on purpose, for older projects saved before
+                // those keys existed), a project's asset list is foundational
+                // and always has a definite value — there's no case where
+                // "assets missing from the payload" should mean "keep
+                // whatever was already loaded". Always set it, defaulting to
+                // empty, exactly like tracks/duration/captions above.
+                updates.assets = projectData.assets || [];
                 if (projectData.uploadedFilePath) {
                     updates.uploadedFilePath = projectData.uploadedFilePath;
                     updates.uploadedFile = { name: projectData.uploadedFilePath };
