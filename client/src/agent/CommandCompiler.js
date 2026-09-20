@@ -784,30 +784,44 @@ function compileOrganizeClips(step, ctx) {
 // ── Atomic store-op factory ───────────────────────────────────────────────────
 // Atomic commands (R23) compile to exactly one STORE command, so they share a
 // factory instead of each getting a near-identical compiler function.
+//
+// FIX: this returned a bare array instead of the ok()-shaped
+// { outcome, step_id, commands } object every other compiler in this file
+// returns. CommandCompiler.compile()'s loop reads `result.outcome` and
+// `result.commands` — on a bare array both are undefined, so the switch on
+// result.outcome matches none of OK/SKIP/VALIDATION_ERROR/FALLBACK_USED,
+// nothing is pushed to `commands`, no error is logged, and compile() reports
+// success with 0 commands. That silently no-op'd every command built on this
+// factory — detect_speakers, detect_scene, apply_angle, and (newly, before
+// this fix) animate_automatically — the exact "looks done, changes nothing"
+// failure this codebase has hit before with apply_smart_zoom (see above).
 function compileAtomicStore(action, description) {
-    return (step, ctx) => [
+    return (step, ctx) => ok(step.step_id, [
         cmd(ENGINE.STORE, action, { ...(step.args || {}) },
             { source_step_id: step.step_id, description }),
-    ];
+    ]);
 }
 
 // ── Atomic spatial crop ───────────────────────────────────────────────────────
 // Pure STORE op: sets clip.virtualCam. Kept separate from virtual_multicam so a
 // user can reframe without triggering diarization, splitting or angle logic.
 function compileCropClip(step, ctx) {
-    return [
+    // FIX: was returning a bare array — see compileAtomicStore's comment
+    // above for why that silently produced 0 commands in compile().
+    return ok(step.step_id, [
         cmd(ENGINE.STORE, 'crop_clip',
             { amount: step.amount ?? 1.5, speaker: step.speaker ?? null },
             { source_step_id: step.step_id,
               description: `Crop to ${Math.round((step.amount ?? 1.5) * 100)}%${step.speaker ? ` on ${step.speaker}` : ''}` }),
-    ];
+    ]);
 }
 
 function compileResetCrop(step, ctx) {
-    return [
+    // FIX: same bare-array bug as compileCropClip above.
+    return ok(step.step_id, [
         cmd(ENGINE.STORE, 'reset_crop', {},
             { source_step_id: step.step_id, description: 'Reset framing to full frame' }),
-    ];
+    ]);
 }
 
 // ── Virtual multicam — "interview close shots / cut between speakers" ──────────
@@ -1046,6 +1060,13 @@ const COMMAND_REGISTRY = new Map([
     ['detect_speakers',  { compiler: compileAtomicStore('detect_speakers', 'Detect speakers (analysis only)') }],
     ['detect_scene',     { compiler: compileAtomicStore('detect_scene', 'Analyse framing (analysis only)') }],
     ['apply_angle',      { compiler: compileAtomicStore('apply_angle', 'Apply planned camera angles') }],
+    // R68 — AI Animation Intelligence. No params: MediaExecutionEngine's
+    // 'animate_automatically' case reads the live store itself and calls
+    // POST /api/audio/animate-automatically. This entry was the missing
+    // link — the plan/execution handler existed, but with no COMMAND_MAP
+    // entry here, compile() fell through to compileFallback and the whole
+    // command silently did nothing (same class of bug as apply_smart_zoom above).
+    ['animate_automatically', { compiler: compileAtomicStore('animate_automatically', 'Animate automatically — apply motion to the most interesting/relevant moments') }],
     ['reset_crop',       { compiler: compileResetCrop }],
     ['split_speakers',   { compiler: compileSplitSpeakers }],
     ['remove_speaker',   { compiler: compileRemoveSpeaker }],

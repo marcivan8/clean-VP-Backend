@@ -248,6 +248,22 @@ These commands mean the user wants a FULL EDIT of their video. Map them to opera
 - "organize my clips / auto-arrange clips / sort clips by content / put these in order / arrange the clips / sequence my clips / auto-organize / figure out the order / what order should these go in" → organize_clips
 
 ══════════════════════════════════════════════════
+🎞 MOTION GRAPHICS / ANIMATION JARGON
+══════════════════════════════════════════════════
+
+These commands mean the user wants the brain to find the most interesting/relevant
+moments on its own and bring them to life with motion — NOT a specific manual preset
+pick (that's a different, more specific request). Map them to operation: "animate_automatically":
+- "add animations and motion graphics / add motion graphics / add some motion graphics"
+- "animate the interesting parts / animate the best moments / animate the highlights"
+- "animate this automatically / auto animate / automatically animate this / animate this for me"
+- "add animations automatically / add some animation / add animation"
+- "bring it to life / bring this to life / make it come alive"
+- "illustrate this / illustrate the video / pin out the interesting parts and animate them"
+→ animate_automatically (no params — the brain detects reveal/punchline/emphasis/emotional-beat
+  moments itself and applies motion graphics; do not ask which moments or which preset)
+
+══════════════════════════════════════════════════
 ✂️ PRO CUTTING JARGON
 ══════════════════════════════════════════════════
 
@@ -336,6 +352,7 @@ OPERATIONS:
 - find_hook: Find best hook moment. Params: {}
 - remove_repetition: Remove repeated segments. Params: {}
 - build_from_rushes: Build video from raw rushes. Params: { platform?, targetDuration? }
+- animate_automatically: Detect the most interesting/relevant moments (reveals, punchlines, emphasis, emotional beats) and automatically apply motion graphics/animations to them to illustrate and bring the video to life — no manual picks. Params: {}
 
 For direct commands with valid duration logic, return:
 {
@@ -357,13 +374,69 @@ Your job is to act as a human-like creative assistant and converge toward execut
 Output ONLY valid JSON. Include the word "json" in your response.`;
 
 
-        // Attach context for better LLM grounding
+        // Attach context for better LLM grounding — but ONLY the fields this
+        // prompt's own GROUNDING RULES / CONTEXTUAL INTELLIGENCE sections
+        // above actually say it reads (ProjectContext, TimelineState,
+        // MediaMetadata, SpeakerContext). This used to be `{ ...context }` —
+        // a raw, unbounded spread of the FULL object ContextGenerator.
+        // getStructuredContext() builds client-side, which also includes
+        // ClipTranscript (a second, fragmented copy of the transcript),
+        // SpeakerWordTimestamps (up to 600 more words), and `display` (a
+        // THIRD copy of the same track/clip/duration info as a formatted
+        // string, kept there only "for backward compat" — nothing in this
+        // prompt reads it). None of those are in this prompt's documented
+        // grounding fields; intent PARSING doesn't need them, even though
+        // deeper operations elsewhere (SMART_CLEANUP, reorganization) do.
+        //
+        // Sent whole, that payload regularly built double-digit-thousand-
+        // token requests. Under AI_PROVIDER=groq's free tier — 8,000 TPM on
+        // openai/gpt-oss-20b — that's over budget in a SINGLE request,
+        // regardless of concurrency, so every intent parse 413'd with
+        // "Request too large" no matter how simple the actual user command
+        // was (e.g. "add animations and motion graphics").
+        const md   = context?.MediaMetadata || {};
+        const tl   = context?.TimelineState || {};
+        const proj = context?.ProjectContext || {};
+
+        // transcriptSummary is genuinely used (CHAT answers about video
+        // content read it) so it isn't dropped — but the client's own budget
+        // for it (up to 2000 words, ~2,500+ tokens) was sized for a
+        // real-GPT-4o-scale context window, not an 8,000 TPM free tier.
+        // Intent classification needs enough to ground a short answer, not
+        // the full transcript.
+        const MAX_TRANSCRIPT_SUMMARY_CHARS = 500;
+        const transcriptSummary = typeof md.transcriptSummary === 'string' && md.transcriptSummary.length > MAX_TRANSCRIPT_SUMMARY_CHARS
+            ? `${md.transcriptSummary.slice(0, MAX_TRANSCRIPT_SUMMARY_CHARS)}…`
+            : md.transcriptSummary;
+
         const enrichedContext = {
-            ...context,
+            ProjectContext: {
+                editingMode: proj.editingMode,
+            },
+            TimelineState: {
+                totalTimelineDuration: tl.totalTimelineDuration,
+                selectedClipDuration:  tl.selectedClipDuration,
+                totalClips:            tl.totalClips,
+                videoClipCount:        tl.videoClipCount,
+            },
+            MediaMetadata: {
+                sourceDuration:         md.sourceDuration,
+                clipType:               md.clipType,
+                aspectRatio:            md.aspectRatio,
+                hasTranscript:          md.hasTranscript,
+                transcriptionAttempted: md.transcriptionAttempted,
+                transcriptSummary,
+                energyProfile:          md.energyProfile,
+                hasBeatMarkers:         md.hasBeatMarkers,
+            },
+            // Already budgeted client-side (150 words/speaker) — kept as-is.
+            ...(context?.SpeakerContext ? { SpeakerContext: context.SpeakerContext } : {}),
         };
 
+        // Compact, not pretty-printed — the 2-space indentation on a nested
+        // object this size was pure whitespace tokens with no grounding value.
         const userMessage = `STRUCTURED CONTEXT:
-${JSON.stringify(enrichedContext || {}, null, 2)}
+${JSON.stringify(enrichedContext)}
 
 USER REQUEST:
 "${prompt}"`;
@@ -414,6 +487,8 @@ USER REQUEST:
                                             // Talking-head / interview / clip intelligence
                                             "rhythm_zoom", "split_speakers", "organize_clips",
                                             "compound_clean_dynamic",
+                                            // AI Animation Intelligence (R68)
+                                            "animate_automatically",
                                             // Conversational
                                             "chat"
                                         ]
@@ -776,6 +851,24 @@ function localParseIntent(prompt, context) {
                 intent: 'edit',
                 operation: 'rhythm_zoom',
                 parameters: { style: 'dynamic' },
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
+
+        // ── AI Animation Intelligence (R68) ───────────────────────────────────
+        // "add animations and motion graphics", "bring it to life", etc. The
+        // brain picks the moments (reveal/punchline/emphasis/emotional-beat)
+        // itself — this is deliberately broader/less specific than rhythm_zoom.
+        if (has('motion graphic', 'animate automatically', 'auto animate',
+                'animate this', 'animate the', 'add animations', 'add animation',
+                'some animation', 'bring it to life', 'bring this to life',
+                'come alive', 'illustrate this', 'illustrate the video',
+                'pin out the interesting', 'pin the interesting')) {
+            return {
+                intent: 'edit',
+                operation: 'animate_automatically',
+                parameters: {},
                 confidence: 'HIGH',
                 missingParameters: []
             };
@@ -1377,6 +1470,14 @@ function generateLocalPlan(intent, context, planId) {
 
         case 'adjust_volume':
             steps = [{ step_id: 'volume', action: 'adjust_volume', clip_id: clipId, volume: params.volume ?? 0.8 }];
+            break;
+
+        case 'animate_automatically':
+            // R68 — atomic passthrough, no params. MediaExecutionEngine's
+            // 'animate_automatically' case does its own server call
+            // (POST /api/audio/animate-automatically) to detect and apply
+            // motion; this plan step just has to survive compilation.
+            steps = [{ step_id: 'animate', action: 'animate_automatically' }];
             break;
 
         case 'redo_action':

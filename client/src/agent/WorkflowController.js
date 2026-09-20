@@ -22,6 +22,9 @@ const OPERATION_META = {
     dynamic_rhythm:    { description: 'Dynamic zoom keyframes applied — cuts punch in sync with your speech energy.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
     rhythm_zoom:       { description: 'Dynamic zoom rhythm applied — scale keyframes pulse in sync with your speech energy.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
 
+    // AI Animation Intelligence (R68)
+    animate_automatically: { description: 'The most interesting moments — reveals, punchlines, emphasis, and emotional beats — now have motion graphics applied automatically.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
+
     // Compound clean + dynamic
     compound_clean_dynamic: { description: 'Silences removed and dynamic zoom applied — your edit flows tighter and punches with energy.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
     compound_clean_virtual_multicam: { description: 'Silences removed and virtual camera angles generated. Tight, professional multi-shot feel.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
