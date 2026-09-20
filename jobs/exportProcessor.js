@@ -1621,9 +1621,23 @@ module.exports = async function processExportJob(job) {
                 // Note: commas inside individual filter options are already inside
                 // single-quoted strings so they don't act as filter separators.
                 const vfChain = textFilters.join(',');
+                // A project with many animated caption clips (per-word reveal
+                // effects generate ~10 drawtext filters per clip) can produce a
+                // vf chain hundreds of KB long. Passing that as a single argv
+                // entry to spawn() blows past the OS's combined argv+environ
+                // limit (ARG_MAX) and spawn() fails with `spawn E2BIG` before
+                // ffmpeg even starts — this is why captions silently went
+                // missing on exports with many caption clips (41 clips / 402
+                // filters in the reported case). Fix: write the filtergraph to
+                // a file and point ffmpeg at it with -filter_script:v, which
+                // takes the same syntax as -vf but reads it from disk instead
+                // of the command line, so the argv stays tiny regardless of
+                // how many filters are chained.
+                const filterScriptPath = path.join(tmpDir, 'caption_filters.txt');
+                fs.writeFileSync(filterScriptPath, vfChain, 'utf-8');
                 const drawtextArgs = [
                     '-i',  finalVideoPath,
-                    '-vf', vfChain,
+                    '-filter_script:v', filterScriptPath,
                     '-map', '0:v',
                     '-map', '0:a?',
                     '-c:v', codec,
