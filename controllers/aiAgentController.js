@@ -371,7 +371,7 @@ For direct commands with valid duration logic, return:
 TONE: Professional, calm, helpful, conversational, concise. Understand creative direction and production language. Be friendly and personalized.
 STRICT: Never generate FFmpeg commands. Never modify timeline state. Never skip clarification for destructive edits. Never assume durations.
 Your job is to act as a human-like creative assistant and converge toward execution grounded in real media state when an edit is requested.
-Output ONLY valid JSON. Include the word "json" in your response.`;
+You MUST respond by calling the execute_video_edit function — never as plain text.`;
 
 
         // Attach context for better LLM grounding — but ONLY the fields this
