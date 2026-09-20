@@ -564,6 +564,45 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                     ))}
                                 </div>
 
+                                {/* FIX: exportResult.{captionWarning,compositorWarning,
+                                    captionProgramWarning,revideoWarning} were already
+                                    computed server-side (jobs/exportProcessor.js) but
+                                    got dropped on the client before reaching this
+                                    component — see IDELayout.jsx's handleFfmpegExport/
+                                    handleExportConfirm fix. Without this banner, a
+                                    render that shipped without its captions/overlays/
+                                    motion still showed the plain green "complete" state
+                                    above with no way to tell anything was missing.
+                                    revideoWarning means captions are missing entirely;
+                                    the others mean "rendered, but degraded" — worded
+                                    accordingly rather than lumped together. */}
+                                {(exportResult.revideoWarning || exportResult.captionWarning || exportResult.compositorWarning || exportResult.captionProgramWarning) && (
+                                    <div style={{
+                                        width: '100%',
+                                        background: 'color-mix(in srgb, #f5a623 10%, transparent)',
+                                        border: '0.5px solid color-mix(in srgb, #f5a623 32%, transparent)',
+                                        borderRadius: 'var(--r-md)',
+                                        padding: '12px 14px',
+                                        display: 'flex', flexDirection: 'column', gap: 6,
+                                    }}>
+                                        {[
+                                            exportResult.revideoWarning && { text: exportResult.revideoWarning, missing: true },
+                                            exportResult.captionWarning && { text: exportResult.captionWarning },
+                                            exportResult.compositorWarning && { text: exportResult.compositorWarning },
+                                            exportResult.captionProgramWarning && { text: exportResult.captionProgramWarning },
+                                        ].filter(Boolean).map((w, i) => (
+                                            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                                                <AlertCircle size={14} style={{ color: '#f5a623', flexShrink: 0, marginTop: 1 }} />
+                                                <p style={{ margin: 0, fontSize: 12, lineHeight: 1.45, color: 'var(--fg-2)' }}>
+                                                    {w.missing
+                                                        ? t('exportModal.captionsMissingEntirely', { defaultValue: 'Captions/overlays did not render: {{reason}}', reason: w.text })
+                                                        : w.text}
+                                                </p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
                                 {/* Actions */}
                                 <div style={{ display: 'flex', gap: 8, width: '100%' }}>
                                     <button

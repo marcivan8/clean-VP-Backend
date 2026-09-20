@@ -1282,7 +1282,25 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         const result = await pollJobResult(data.jobId, null, getExportPollTimeoutMs(settings));
         if (!result?.url) throw new Error('Export completed but no URL returned');
 
-        return { url: result.url, filename: result.filename, metadata: result.metadata };
+        // FIX: this used to return only {url, filename, metadata} — silently
+        // dropping the four warning fields jobs/exportProcessor.js already
+        // computes (captionWarning, compositorWarning, captionProgramWarning,
+        // revideoWarning). The backend is fully instrumented to say WHY
+        // captions/overlays/motion silently came out missing (worker down,
+        // font unresolved, caption program failed to compile) — that
+        // information just never survived this pick. "Export completed" with
+        // captions quietly absent and no warning anywhere is exactly the
+        // failure mode revideoWarning's own comment in exportProcessor.js
+        // calls out by name.
+        return {
+            url: result.url,
+            filename: result.filename,
+            metadata: result.metadata,
+            captionWarning: result.captionWarning,
+            compositorWarning: result.compositorWarning,
+            captionProgramWarning: result.captionProgramWarning,
+            revideoWarning: result.revideoWarning,
+        };
     };
     // route responds 500 "Render proxy not configured" and we surface a clear,
     // actionable error instead of a cryptic failure.
@@ -1301,7 +1319,20 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             // already does correctly. See CLAUDE.md R56.
             const result = await handleFfmpegExport(settings);
 
-            setExportResult({ success: true, url: result.url, filename: result.filename, metadata: result.metadata });
+            // FIX: same pick-and-drop bug as handleFfmpegExport's own return
+            // above — carry the four warning fields through to exportResult
+            // so ExportModal can actually show the user why something is
+            // missing, instead of a silent "success".
+            setExportResult({
+                success: true,
+                url: result.url,
+                filename: result.filename,
+                metadata: result.metadata,
+                captionWarning: result.captionWarning,
+                compositorWarning: result.compositorWarning,
+                captionProgramWarning: result.captionProgramWarning,
+                revideoWarning: result.revideoWarning,
+            });
             setExportUrl(result.url);
         } catch (err) {
             console.error('Export Failed:', err);
