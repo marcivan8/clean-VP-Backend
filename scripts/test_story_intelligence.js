@@ -86,6 +86,18 @@ function load(supabaseStub, { body = null, throwOnCall = false } = {}) {
             // client above never checks the model value, so identity is a
             // safe stand-in here.
             resolveModel: (model) => model,
+            // Same class of bug, recurring: deriveMap() also now calls
+            // resolveProvider({capability:'chat'}) to decide whether to send
+            // Groq's reasoning_effort field (the max_tokens-truncation fix —
+            // see StoryIntelligence.js's comment at that call site). This
+            // stub replaces the whole AIProvider module, so an unmocked
+            // resolveProvider is undefined too — calling it throws
+            // "resolveProvider is not a function", caught the same way and
+            // again collapsing ensureMap() to null. 'openai' is a safe
+            // stand-in: the mocked chat client above never checks it, and it
+            // keeps the reasoning_effort branch off, matching what a real
+            // non-Groq provider would do.
+            resolveProvider: () => 'openai',
         },
     };
     delete require.cache[SI_PATH];
