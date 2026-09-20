@@ -47,6 +47,85 @@ const BEATS = ['hook', 'setup', 'build', 'turn', 'payoff', 'outro', 'filler'];
 const HOOK_STRENGTHS = ['strong', 'adequate', 'weak', 'absent'];
 const SEVERITIES     = ['low', 'medium', 'high'];
 
+// Strict JSON Schema Mode — same fix already applied to interviewRoutes.js's
+// rhythm-zoom endpoint and EditorialBrain.js this session. deriveMap()'s loose
+// `response_format: json_object` let Groq's small open-weight model produce
+// JSON that satisfied the parser but not this file's own (much stricter)
+// vocabulary — "Failed to validate JSON" 400s under load on real transcripts.
+// Constrained decoding makes that structurally impossible instead of relying
+// on prompt instructions the model can drift from. Shape matches exactly what
+// normalizeMap() below reads — every optional field is a nullable type union
+// (strict mode has no true "optional": every key must be in `required`).
+const STORY_MAP_SCHEMA = {
+    type: 'json_schema',
+    json_schema: {
+        name: 'story_map',
+        strict: true,
+        schema: {
+            type: 'object',
+            properties: {
+                beats: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            beat:     { type: 'string', enum: BEATS },
+                            startSec: { type: 'number' },
+                            endSec:   { type: 'number' },
+                            clipIds:  { type: 'array', items: { type: 'string' } },
+                            summary:  { type: ['string', 'null'] },
+                        },
+                        required: ['beat', 'startSec', 'endSec', 'clipIds', 'summary'],
+                        additionalProperties: false,
+                    },
+                },
+                hook: {
+                    type: 'object',
+                    properties: {
+                        atSec:    { type: ['number', 'null'] },
+                        strength: { type: 'string', enum: HOOK_STRENGTHS },
+                        note:     { type: ['string', 'null'] },
+                    },
+                    required: ['atSec', 'strength', 'note'],
+                    additionalProperties: false,
+                },
+                sagWindows: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            startSec: { type: 'number' },
+                            endSec:   { type: ['number', 'null'] },
+                            reason:   { type: 'string' },
+                            severity: { type: 'string', enum: SEVERITIES },
+                        },
+                        required: ['startSec', 'endSec', 'reason', 'severity'],
+                        additionalProperties: false,
+                    },
+                },
+                deliversThroughLine: { type: ['boolean', 'null'] },
+                throughLineNote:     { type: ['string', 'null'] },
+                issues: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            issue:      { type: 'string' },
+                            severity:   { type: 'string', enum: SEVERITIES },
+                            suggestion: { type: ['string', 'null'] },
+                            atSec:      { type: ['number', 'null'] },
+                        },
+                        required: ['issue', 'severity', 'suggestion', 'atSec'],
+                        additionalProperties: false,
+                    },
+                },
+            },
+            required: ['beats', 'hook', 'sagWindows', 'deliversThroughLine', 'throughLineNote', 'issues'],
+            additionalProperties: false,
+        },
+    },
+};
+
 /** Below this many clips there is no sequence to reason about. */
 const MIN_CLIPS_FOR_STORY = 2;
 
@@ -215,7 +294,7 @@ class StoryIntelligence {
             // through resolveModel() like every other real call site does.
             model:           resolveModel('gpt-4o', 'chat'),
             messages:        [{ role: 'user', content: prompt }],
-            response_format: { type: 'json_object' },
+            response_format: STORY_MAP_SCHEMA,
             temperature:     0.2,
             max_tokens:      1500,
         });

@@ -103,10 +103,20 @@ const BRAIN_OUTPUT_SCHEMA = {
                     type: 'object',
                     properties: {
                         patternObserved: { type: ['string', 'null'] },
+                        // FIX: an object with `properties: {}` + `required: []`
+                        // compiled fine but Groq's strict-mode schema validator
+                        // rejected it at request time: "'required' present but
+                        // 'properties' is missing" — a zero-keys `properties`
+                        // object is apparently treated as absent. profileUpdates
+                        // is still never read anywhere (see file header), so a
+                        // single always-nullable placeholder key keeps it a
+                        // real, non-empty object without giving it any meaning.
                         profileUpdates: {
                             type: 'object',
-                            properties: {},
-                            required: [],
+                            properties: {
+                                note: { type: ['string', 'null'] },
+                            },
+                            required: ['note'],
                             additionalProperties: false,
                         },
                     },
@@ -550,7 +560,7 @@ RESPONSE FORMAT — return ONLY valid JSON matching this exact schema:
   },
   "learning": {
     "patternObserved": null,
-    "profileUpdates": {}
+    "profileUpdates": { "note": null }
   }
 }
 
