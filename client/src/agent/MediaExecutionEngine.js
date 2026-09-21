@@ -32,6 +32,7 @@ import useTimelineStore  from '../store/useTimelineStore.js';
 import { TimelineActions } from '../timeline/index.js';
 import { mediaBunnyService } from '../services/MediaBunnyService.js';
 import useAIStore from '../store/useAIStore.js';
+import { EventBus, EVENT_TYPES } from './EventBus.js';
 // R58 — Motion Graphics engine. Caption grouping now preserves per-word
 // timings instead of collapsing them to a line of text; see
 // groupWordsIntoCaptions below and client/src/motion/CaptionModel.js.
@@ -2680,9 +2681,21 @@ export class MediaExecutionEngine {
                 try {
                     const errorBody = await response.json();
                     if (response.status === 402 || errorBody.error === 'AI_OPS_LIMIT') {
-                        // Quota exhausted — surface a user-friendly upgrade message
+                        // Quota exhausted — surface a user-friendly upgrade message.
+                        // Previously this just threw, and the message ended up (at
+                        // best) as a line of chat/log text with no way to act on it
+                        // — no button, no link to checkout. Emitting on the shared
+                        // QUOTA_EXCEEDED channel lets IDELayout show a real upgrade
+                        // modal wired to /api/checkout/create; the throw below is
+                        // kept so existing callers that surface err.message still
+                        // get a readable string.
                         const msg = errorBody.message || "You've used all your AI operations this month.";
                         const upgrade = errorBody.upgradeRequired ? ` Upgrade to ${errorBody.upgradeRequired} to continue.` : '';
+                        EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
+                            reason: 'ai_ops',
+                            message: msg,
+                            upgradeRequired: errorBody.upgradeRequired || 'creator',
+                        });
                         throw new Error(`${msg}${upgrade}`);
                     }
                     if (errorBody.error === 'Route not found' && response.status === 404) {

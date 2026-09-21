@@ -42,6 +42,9 @@ import ProxyService from '../services/proxyService';
 import useAIStore from '../store/useAIStore';
 import useSessionStore from '../store/useSessionStore';
 import AuthPromptModal from '../components/AuthPromptModal';
+import UpgradeModal from '../components/UpgradeModal';
+import OnboardingTour, { shouldShowOnboardingTour } from '../components/OnboardingTour';
+import { EventBus, EVENT_TYPES } from '../agent/EventBus';
 import { useSupabasePersistence } from '../hooks/useSupabasePersistence';
 
 const VideoTimeDisplay = () => {
@@ -471,6 +474,37 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         authShownRef.current = true;
         setAuthPrompt(trigger);
     }, [isAnonymous]);
+
+    // ── Plan/quota upgrade prompt ────────────────────────────────────────────
+    // MediaExecutionEngine and TranscriptionManager both emit QUOTA_EXCEEDED
+    // (EventBus) the moment a free-tier user's AI-ops cap blocks an action.
+    // That event used to go nowhere — the only visible result was a plain
+    // error string in a log/chat panel, with no way to act on it. This
+    // listener is the one place that turns it into a real upgrade modal.
+    const [quotaModal, setQuotaModal] = React.useState(null); // null | { message, upgradeRequired }
+    useEffect(() => {
+        const unsubscribe = EventBus.on(EVENT_TYPES.QUOTA_EXCEEDED, (payload) => {
+            setQuotaModal({ message: payload?.message, upgradeRequired: payload?.upgradeRequired || 'creator' });
+        });
+        return unsubscribe;
+    }, []);
+
+    // ── First-run onboarding tour ─────────────────────────────────────────
+    // Desktop-only spotlight walkthrough of the media panel, AI assistant,
+    // timeline, and export button — shown once (see OnboardingTour.jsx /
+    // vp_onboarding_tour_seen). Mobile has a completely different layout
+    // (these panels live behind bottom sheets, not fixed on screen), so a
+    // fixed-position spotlight tour doesn't translate there; this only
+    // triggers when the page loaded at desktop width. A short delay lets
+    // the panels this points at actually mount before the tour measures
+    // their position, rather than racing first paint.
+    const [showTour, setShowTour] = React.useState(false);
+    useEffect(() => {
+        if (isMobile || !shouldShowOnboardingTour()) return;
+        const timer = setTimeout(() => setShowTour(true), 600);
+        return () => clearTimeout(timer);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Ensure a session exists from the moment they open the editor
     useEffect(() => { getOrCreate(); }, [getOrCreate]);
@@ -1485,6 +1519,18 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 />
             )}
 
+            {/* Plan/quota upgrade prompt — fired via EventBus.QUOTA_EXCEEDED */}
+            {quotaModal && (
+                <UpgradeModal
+                    message={quotaModal.message}
+                    upgradeRequired={quotaModal.upgradeRequired}
+                    onClose={() => setQuotaModal(null)}
+                />
+            )}
+
+            {/* First-run onboarding tour — desktop only, shown once */}
+            {showTour && <OnboardingTour onDone={() => setShowTour(false)} />}
+
             {/* Session countdown — show when < 24 h remain and user is anonymous */}
             {isAnonymous && hoursLeft() !== null && hoursLeft() < 24 && (
                 <div
@@ -1638,6 +1684,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         </button>
 
                         <button
+                            data-tour="export-button"
                             onClick={() => {
                                 if (isAnonymous) { showAuthPrompt('export'); }
                                 else { setShowExportModal(true); }
@@ -1656,6 +1703,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                     {/* Left Sidebar (Media/Effects) — bottom sheet on mobile, static sidebar on desktop */}
                     <aside
+                        data-tour="media-panel"
                         className={classNames(
                             "flex flex-col font-sans shrink-0 transition-transform duration-300 ease-in-out",
                             "border-[var(--line-soft)]",
@@ -2063,6 +2111,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         {/* Timeline — always visible. Mini (h-36) on mobile, full-height on desktop. */}
                         {mode === 'editor' && (
                             <div
+                                data-tour="timeline"
                                 className={classNames(
                                     "border-t flex flex-col overflow-hidden shrink-0",
                                     isMobile ? "h-36" : "h-48 md:h-72"
@@ -2081,6 +2130,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                     {/* Right Sidebar — AI panel. Bottom sheet on mobile, static sidebar on desktop. */}
                     <aside
+                        data-tour="ai-assistant"
                         className={classNames(
                             "flex flex-col font-sans shrink-0 transition-transform duration-300 ease-in-out",
                             "border-[var(--line-soft)]",

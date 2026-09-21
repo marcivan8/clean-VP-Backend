@@ -521,5 +521,33 @@
       "opacity": "Opacité",
       "blur": "Flou"
     }
+  },
+  "quotaModal": {
+    "heading": "Vous avez atteint votre limite IA mensuelle",
+    "bodyFallback": "Passez à un forfait supérieur pour continuer à utiliser les fonctionnalités IA ce mois-ci — sous-titres, commandes de chat, et plus encore.",
+    "cta": "Passer à {{plan}}",
+    "dismiss": "Plus tard"
+  },
+  "onboardingTour": {
+    "media": {
+      "title": "Importez vos rushes",
+      "body": "Glissez vidéo, audio ou images ici — ou cliquez pour importer. Chaque projet commence par les médias."
+    },
+    "assistant": {
+      "title": "Demandez à l'IA de monter pour vous",
+      "body": "Tapez par exemple « ajoute des sous-titres » ou « supprime les silences » — l'assistant modifie directement votre montage."
+    },
+    "timeline": {
+      "title": "Votre montage",
+      "body": "Les clips arrivent ici une fois importés. Coupez, découpez et réorganisez-les librement."
+    },
+    "export": {
+      "title": "Exportez quand vous êtes prêt",
+      "body": "Un clic pour générer votre vidéo finale."
+    },
+    "next": "Suivant",
+    "done": "Terminé",
+    "skip": "Passer la visite",
+    "stepCount": "{{current}} / {{total}}"
   }
 }

@@ -76,6 +76,13 @@ export const EVENT_TYPES = {
     ITERATION_COMPLETE: 'iteration:complete',
     VARIATION_LOADED: 'iteration:variation_loaded',
 
+    // ── Billing / Quota ────────────────────────────────────────────────────────
+    // Emitted whenever a plan-gated action is blocked (AI-ops cap, project cap,
+    // export gate, etc). One channel so any UI surface — IDELayout, dashboard,
+    // mobile — can react with a real upgrade CTA instead of the action just
+    // failing silently or logging a dead-end error string.
+    QUOTA_EXCEEDED: 'quota:exceeded', // { reason, message, upgradeRequired }
+
     // System
     SYSTEM_ERROR: 'system:error',
     DEBUG: 'debug',

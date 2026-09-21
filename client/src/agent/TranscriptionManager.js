@@ -174,6 +174,17 @@ class TranscriptionManagerClass {
                         message: errorData?.message || "You've used all your AI operations this month.",
                         upgradeRequired: errorData?.upgradeRequired,
                     });
+                    // Also fire the generic quota channel — TRANSCRIPTION_PROGRESS
+                    // above is consumed (if at all) by transcription-specific
+                    // progress UI, but nothing actually subscribed to the
+                    // 'quota_exceeded' status on it, so this hit the wall with no
+                    // visible upgrade prompt. QUOTA_EXCEEDED is the shared channel
+                    // IDELayout listens on to show a real upgrade modal.
+                    EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
+                        reason: 'ai_ops',
+                        message: errorData?.message || "You've used all your AI operations this month.",
+                        upgradeRequired: errorData?.upgradeRequired || 'creator',
+                    });
                     return;
                 }
 

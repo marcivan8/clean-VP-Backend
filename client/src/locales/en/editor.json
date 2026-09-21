@@ -521,5 +521,33 @@
       "opacity": "Opacity",
       "blur": "Blur"
     }
+  },
+  "quotaModal": {
+    "heading": "You've hit your monthly AI limit",
+    "bodyFallback": "Upgrade to keep using AI features this month — captions, chat commands, and more.",
+    "cta": "Upgrade to {{plan}}",
+    "dismiss": "Maybe later"
+  },
+  "onboardingTour": {
+    "media": {
+      "title": "Import your footage",
+      "body": "Drag video, audio, or images in here — or click to upload. Every project starts with media."
+    },
+    "assistant": {
+      "title": "Ask the AI to edit for you",
+      "body": "Type things like “add captions” or “remove the pauses” — the assistant edits your timeline directly."
+    },
+    "timeline": {
+      "title": "Your timeline",
+      "body": "Clips land here once imported. Trim, split, and reorder them freely."
+    },
+    "export": {
+      "title": "Export when you're ready",
+      "body": "One click renders your final video."
+    },
+    "next": "Next",
+    "done": "Done",
+    "skip": "Skip tour",
+    "stepCount": "{{current}} / {{total}}"
   }
 }

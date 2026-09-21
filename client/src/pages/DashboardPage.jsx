@@ -665,6 +665,28 @@ export default function DashboardPage() {
         if (user) load();
     }, [user, load, location.key]);
 
+    // ── first-run: land new signups directly in "create a new project" ────────
+    // A brand-new account with zero projects used to land on an empty
+    // dashboard with nothing to do but notice the "+" card — a dead first
+    // impression right after signup. This auto-opens the same New Project
+    // flow the "+" card and the nav button trigger, so the action a new user
+    // actually needs is already in front of them instead of one more click
+    // away. Scoped to accounts created in the last 15 minutes (generous
+    // enough to cover the email-confirmation redirect, which can land here
+    // a minute or two after the original signup) so it can never re-fire for
+    // a returning user who simply deleted all their projects — that account
+    // is always older than 15 minutes by the time it happens.
+    const autoPromptShownRef = useRef(false);
+    useEffect(() => {
+        if (loading || autoPromptShownRef.current) return;
+        if (projects.length > 0 || !user?.created_at) return;
+        const accountAgeMs = Date.now() - new Date(user.created_at).getTime();
+        if (accountAgeMs >= 0 && accountAgeMs < 15 * 60 * 1000) {
+            autoPromptShownRef.current = true;
+            requestNewProject();
+        }
+    }, [loading, projects.length, user]);
+
     // ── actions ───────────────────────────────────────────────────────────────
 
     /** Open the "New project" modal only if the user hasn't hit their plan limit. */
@@ -1119,8 +1141,17 @@ export default function DashboardPage() {
                     limit={getProjectLimit(plan)}
                     onClose={() => setShowLimitModal(false)}
                     onUpgrade={() => {
+                        // FIX: this used to `navigate('/success')` directly —
+                        // that page requires a `checkout_id` query param and
+                        // immediately bounces back to /dashboard when it's
+                        // missing (see SuccessPage.jsx), so clicking "Upgrade"
+                        // here silently did nothing. createCheckout() (defined
+                        // above, already used correctly by HomePage.jsx's
+                        // pricing section) actually starts a checkout session
+                        // and redirects to it; /success is where THAT redirect
+                        // lands after a real purchase completes.
                         setShowLimitModal(false);
-                        navigate('/success');
+                        createCheckout(plan === 'free' ? 'creator' : 'pro');
                     }}
                     modalWidth={modalWidth}
                 />
