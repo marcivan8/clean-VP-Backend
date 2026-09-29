@@ -222,6 +222,8 @@
     "copyAttributes": "Copier les attributs",
     "pasteAttributes": "Coller les attributs",
     "rippleDelete": "Suppression avec décalage",
+    "mainTrackMagnetOn": "Aimant de la piste principale activé : supprimer un clip referme l'espace",
+    "mainTrackMagnetOff": "Aimant de la piste principale désactivé : supprimer un clip laisse un espace",
     "delete": "Supprimer",
     "fadeOut": "Fondu de sortie",
     "crossfade": "Fondu enchaîné",

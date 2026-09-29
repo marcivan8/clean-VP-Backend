@@ -230,7 +230,7 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
                 label={t('timeline.delete')}
                 hint="⌫"
                 danger
-                onClick={() => run(() => store().removeClip(trackId, clip.id))}
+                onClick={() => run(() => store().deleteClipWithMagnet(trackId, clip.id))}
             />
 
             <Separator />

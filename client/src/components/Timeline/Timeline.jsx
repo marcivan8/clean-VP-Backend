@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import Track from './Track';
 import useTimelineStore from '../../store/useTimelineStore';
 import useDeviceType from '../../hooks/useDeviceType';
-import { Scissors, ZoomIn, ZoomOut, Copy, Type, Palette, Undo2, Redo2, ChevronsRight } from 'lucide-react';
+import { Scissors, ZoomIn, ZoomOut, Copy, Type, Palette, Undo2, Redo2, ChevronsRight, Magnet } from 'lucide-react';
 
 const RULER_H    = 24;   // h-6 = 24px (ruler height)
 const LABEL_W         = 128; // w-32 = 128px (track label column) — desktop
@@ -22,7 +22,9 @@ const Timeline = () => {
     const { t } = useTranslation('editor');
     const { isMobile } = useDeviceType();
     const labelW = isMobile ? LABEL_W_MOBILE : LABEL_W;
-    const { tracks, duration, zoomLevel, seek, setZoomLevel, undo, redo, past, future } = useTimelineStore(useShallow(state => ({
+    const { tracks, duration, zoomLevel, seek, setZoomLevel, undo, redo, past, future, mainTrackMagnet, setMainTrackMagnet } = useTimelineStore(useShallow(state => ({
+        mainTrackMagnet:    state.mainTrackMagnet,
+        setMainTrackMagnet: state.setMainTrackMagnet,
         tracks:      state.tracks,
         duration:    state.duration,
         zoomLevel:   state.zoomLevel,
@@ -277,13 +279,13 @@ const Timeline = () => {
     const handleKeyDown = React.useCallback((e) => {
         if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
 
-        const { activeClipId, tracks, removeClip, splitClip, copyClip, pasteClip, currentTime } = useTimelineStore.getState();
+        const { activeClipId, tracks, deleteClipWithMagnet, splitClip, copyClip, pasteClip, currentTime } = useTimelineStore.getState();
 
-        // Delete
+        // Delete — closes the gap on the main video track when the magnet is on
         if (e.key === 'Backspace' || e.key === 'Delete') {
             if (activeClipId) {
                 const track = tracks.find(t => t.clips.find(c => c.id === activeClipId));
-                if (track) removeClip(track.id, activeClipId);
+                if (track) deleteClipWithMagnet(track.id, activeClipId);
             }
         }
 
@@ -396,6 +398,17 @@ const Timeline = () => {
                     >
                         <Redo2 className="w-3 h-3 text-muted-foreground group-hover:text-primary" />
                     </button>
+                    {/* Main-track magnet — desktop only (always on for mobile) */}
+                    {!isMobile && (
+                        <button
+                            className={`p-1 rounded group transition-colors hover:bg-white/5 ${mainTrackMagnet ? 'bg-primary/10' : ''}`}
+                            title={mainTrackMagnet ? t('timeline.mainTrackMagnetOn') : t('timeline.mainTrackMagnetOff')}
+                            aria-pressed={mainTrackMagnet}
+                            onClick={() => setMainTrackMagnet(!mainTrackMagnet)}
+                        >
+                            <Magnet className={`w-3 h-3 ${mainTrackMagnet ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground'}`} />
+                        </button>
+                    )}
                     <div className="h-4 w-px mx-2" style={{ background: "var(--line-soft)" }}></div>
                     <button
                         className="p-1 rounded relative group transition-colors hover:bg-white/5"

@@ -23,6 +23,12 @@ import {
 import { buildComponent } from '../motion/ComponentLibrary.js';
 import { clipsInGroup, computeGroupMoveUpdates, computeGroupDuplicateSpecs } from '../motion/ClipGrouping.js';
 import { deriveSpeakerCrop, deriveTrackingSegments } from '../motion/ObjectLayers.js';
+import { computeRippleDelete, remapTimelineWords } from '../timeline/rippleDelete.js';
+
+// Same breakpoint as hooks/useDeviceType.js (isMobile = width < 768). Used by
+// deleteClipWithMagnet: the main-track magnet is always on for mobile.
+const isMobileViewport = () =>
+    typeof window !== 'undefined' && typeof window.innerWidth === 'number' && window.innerWidth < 768;
 
 // Module-level debounce timer — lives outside React so it survives re-renders
 let _autosaveTimer = null;
@@ -146,6 +152,12 @@ const useTimelineStore = create(
             projectName: localStorage.getItem('vp_project_name') || 'Untitled Project',
             setProjectId:   (id)   => { set({ projectId: id });     try { localStorage.setItem('vp_project_id', id); }   catch (_) {} },
             setProjectName: (name) => { set({ projectName: name }); try { localStorage.setItem('vp_project_name', name); } catch (_) {} },
+
+            // Main-track magnet (CapCut-style): deleting a clip on the main video
+            // track closes the gap. Always on for mobile; desktop can toggle it
+            // from the timeline toolbar. Default ON, persisted per browser.
+            mainTrackMagnet: (() => { try { return localStorage.getItem('vp_main_track_magnet') !== '0'; } catch (_) { return true; } })(),
+            setMainTrackMagnet: (on) => { set({ mainTrackMagnet: !!on }); try { localStorage.setItem('vp_main_track_magnet', on ? '1' : '0'); } catch (_) {} },
 
             // History
             past: [],
@@ -808,6 +820,113 @@ const useTimelineStore = create(
                     activeClipId: null,
                     selectedClipIds: []
                 });
+            },
+
+            /**
+             * Main-track magnet delete (CapCut-style ripple delete).
+             *
+             * Deletes the clip (or the whole selection, if the clip is part of
+             * it — same targeting as removeClip). If any deleted clip was on the
+             * MAIN video track, the gap closes: later main-track clips and
+             * text/caption clips slide left, and the word-level `captions`
+             * array is remapped so preview captions stay in sync. Audio and
+             * overlay tracks never move. Deleting from any other track behaves
+             * exactly like removeClip. One undo step restores everything.
+             *
+             * Deliberately a separate action: removeClip keeps its plain
+             * behaviour because the AI tools (cutSegment, speaker removal,
+             * silence removal) call it in loops using precomputed positions,
+             * and must not have clips shifting underneath them.
+             * The planning logic is pure and lives in timeline/rippleDelete.js.
+             */
+            rippleDeleteClip: (trackId, clipId) => {
+                const state = get();
+                const targetIds = state.selectedClipIds.includes(clipId)
+                    ? state.selectedClipIds
+                    : [clipId];
+                const plan = computeRippleDelete(state.tracks, targetIds);
+
+                // Nothing deleted from the main track → plain delete, nothing moves.
+                if (plan.removedRanges.length === 0) {
+                    get().removeClip(trackId, clipId);
+                    return;
+                }
+
+                const maxEnd = (tracks) => tracks.reduce((m, t) =>
+                    Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
+                const oldMaxEnd = maxEnd(state.tracks);
+
+                get()._saveHistory();
+                // Opt-in: this snapshot also carries the store fields this action
+                // changes outside the timeline engine (word-level captions and
+                // the store's duration). undo/redo restore `_extraState` only for
+                // snapshots that have it, so every other history step behaves
+                // exactly as before.
+                set(s => {
+                    const past = s.past.slice();
+                    const last = past[past.length - 1];
+                    if (last) past[past.length - 1] = { ...last, _extraState: { captions: state.captions, duration: state.duration } };
+                    return { past };
+                });
+
+                timelineManager.beginTransaction();
+                try {
+                    plan.removeIds.forEach(({ clipId: id }) => {
+                        timelineManager.dispatch(TimelineActions.removePlacement(id));
+                    });
+                    plan.moves.forEach(({ clipId: id, start }) => {
+                        timelineManager.dispatch(TimelineActions.updatePlacement(id, { startTime: start }));
+                    });
+                    timelineManager.commitTransaction('Ripple Delete');
+                } catch (err) {
+                    timelineManager.rollbackTransaction();
+                    // Drop the history snapshot taken above — nothing changed.
+                    set(s => ({ past: s.past.slice(0, -1) }));
+                    console.error('[rippleDeleteClip] failed, timeline left unchanged:', err);
+                    return;
+                }
+
+                // Same empty-track cleanup as removeClip.
+                const currentPlacements = Object.values(timelineManager.getState().entities.placements);
+                const currentLayers = Object.values(timelineManager.getState().entities.layers);
+                currentLayers.forEach(layer => {
+                    if (layer.id === 'track-default-video' || layer.id === 'track-default-audio') return;
+                    if (layer.type === 'video' || layer.type === 'audio') return;
+                    const hasClips = currentPlacements.some(p => p.layerId === layer.id);
+                    if (!hasClips) {
+                        timelineManager.dispatch(TimelineActions.removeLayer(layer.id));
+                    }
+                });
+
+                const tracks = timelineManager.toLegacyTracks();
+                set({
+                    tracks,
+                    activeClipId: null,
+                    selectedClipIds: [],
+                    captions: remapTimelineWords(state.captions, plan.removedRanges),
+                });
+
+                // Shrink the timeline end with the content, but only when the
+                // duration was tracking the content end (a manually longer
+                // duration is left alone).
+                const newMaxEnd = maxEnd(tracks);
+                if (newMaxEnd > 0 && Math.abs((Number(state.duration) || 0) - oldMaxEnd) < 0.05) {
+                    get().setDuration(newMaxEnd);
+                }
+            },
+
+            /**
+             * Entry point for deletes the USER triggers by hand (Delete key,
+             * clip ✕ button, Edit menu, context menu, mobile Delete button).
+             * Ripples when the magnet is on — always on mobile, toggle on
+             * desktop — otherwise a plain removeClip.
+             */
+            deleteClipWithMagnet: (trackId, clipId) => {
+                if (get().mainTrackMagnet || isMobileViewport()) {
+                    get().rippleDeleteClip(trackId, clipId);
+                } else {
+                    get().removeClip(trackId, clipId);
+                }
             },
 
             // ==============================================================
@@ -1678,6 +1797,11 @@ const useTimelineStore = create(
                     selectedClipIds: [...state.selectedClipIds]
                 };
 
+                // Only snapshots that opted in (rippleDeleteClip) carry _extraState.
+                if (previous._extraState) {
+                    currentSnapshot._extraState = { captions: state.captions, duration: state.duration };
+                }
+
                 // Restore timeline engine state
                 if (previous._timelineState) {
                     timelineManager.dispatch(
@@ -1692,7 +1816,8 @@ const useTimelineStore = create(
                     selectedClipIds: previous.selectedClipIds,
                     tracks: timelineManager.toLegacyTracks(),
                     past: newPast,
-                    future: [currentSnapshot, ...state.future]
+                    future: [currentSnapshot, ...state.future],
+                    ...(previous._extraState || {}),
                 };
             }),
 
@@ -1709,6 +1834,10 @@ const useTimelineStore = create(
                     selectedClipIds: [...state.selectedClipIds]
                 };
 
+                if (next._extraState) {
+                    currentSnapshot._extraState = { captions: state.captions, duration: state.duration };
+                }
+
                 if (next._timelineState) {
                     timelineManager.dispatch(
                         { type: ACTION_TYPES.LOAD_STATE, payload: { state: next._timelineState } },
@@ -1722,7 +1851,8 @@ const useTimelineStore = create(
                     selectedClipIds: next.selectedClipIds,
                     tracks: timelineManager.toLegacyTracks(),
                     past: [...state.past, currentSnapshot],
-                    future: newFuture
+                    future: newFuture,
+                    ...(next._extraState || {}),
                 };
             }),
 

@@ -567,9 +567,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     }, [setActiveClip]);
 
     // Called when user taps Delete in the mobile clip context toolbar.
+    // Mobile always uses the main-track magnet (CapCut behaviour).
     const handleDeleteClip = useCallback(() => {
         if (activeTrackId && activeClipId) {
-            useTimelineStore.getState().removeClip(activeTrackId, activeClipId);
+            useTimelineStore.getState().rippleDeleteClip(activeTrackId, activeClipId);
         }
         handleDeselect();
     }, [activeTrackId, activeClipId, handleDeselect]);
@@ -1688,7 +1689,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         <div className="h-px bg-border my-1" />
                                         <button onClick={() => { useTimelineStore.getState().copyClip(activeClipId); setOpenMenu(null); }} disabled={!activeClip} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors disabled:opacity-50">{t('ideLayout.menu.copy')}</button>
                                         <button onClick={() => { useTimelineStore.getState().pasteClip(useTimelineStore.getState().currentTime); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.paste')}</button>
-                                        <button onClick={() => { if (activeClip && activeTrackId) { useTimelineStore.getState().removeClip(activeTrackId, activeClip.id); } setOpenMenu(null); }} disabled={!activeClip} className="px-4 py-2 text-xs text-left hover:bg-red-500/10 text-red-400 transition-colors disabled:opacity-50">{t('ideLayout.menu.delete')}</button>
+                                        <button onClick={() => { if (activeClip && activeTrackId) { useTimelineStore.getState().deleteClipWithMagnet(activeTrackId, activeClip.id); } setOpenMenu(null); }} disabled={!activeClip} className="px-4 py-2 text-xs text-left hover:bg-red-500/10 text-red-400 transition-colors disabled:opacity-50">{t('ideLayout.menu.delete')}</button>
                                     </div>
                                 </>
                             )}

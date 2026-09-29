@@ -222,6 +222,8 @@
     "copyAttributes": "Copy Attributes",
     "pasteAttributes": "Paste Attributes",
     "rippleDelete": "Ripple Delete",
+    "mainTrackMagnetOn": "Main track magnet on: deleting a clip closes the gap",
+    "mainTrackMagnetOff": "Main track magnet off: deleting a clip leaves a gap",
     "delete": "Delete",
     "fadeOut": "Fade Out",
     "crossfade": "Crossfade",
