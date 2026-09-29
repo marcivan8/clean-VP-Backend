@@ -221,6 +221,20 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             const target = e.target;
             if (isTextInputFocusedRef.current || isTypingTarget(active) || isTypingTarget(target)) return;
 
+            // ←/→ = step the playhead one frame; Shift+←/→ = one second.
+            // Desktop only (same < 768px mobile breakpoint as useDeviceType);
+            // Cmd/Ctrl/Alt+arrows are left to the browser/OS.
+            if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight')
+                && !e.metaKey && !e.ctrlKey && !e.altKey
+                && window.innerWidth >= 768) {
+                e.preventDefault(); // don't scroll the timeline/page
+                const st  = useTimelineStore.getState();
+                const fps = Number(st.playerRef?.playback?.fps) || 30;
+                const dir = e.key === 'ArrowRight' ? 1 : -1;
+                st.stepFrames(dir * (e.shiftKey ? Math.round(fps) : 1));
+                return;
+            }
+
             if (e.code === 'Space') {
                 e.preventDefault();
                 useTimelineStore.getState().togglePlay();

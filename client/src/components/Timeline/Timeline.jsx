@@ -338,7 +338,9 @@ const Timeline = () => {
         const rect = e.currentTarget.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const clickedTime = x / zoomLevel;
-        seek(clickedTime);
+        // Land on an exact frame so clicking and ←/→ frame-stepping agree.
+        const fps = Number(useTimelineStore.getState().playerRef?.playback?.fps) || 30;
+        seek(Math.round(clickedTime * fps) / fps);
     };
 
     // Touch-seek: tap or drag a single finger on the ruler to scrub

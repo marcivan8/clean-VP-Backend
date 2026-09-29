@@ -120,6 +120,39 @@ export const ACTION_TYPES = {
 // TIMELINE STATE MANAGER CLASS
 // ============================================================================
 
+
+// ── Caption word timing follows its clip ───────────────────────────────────
+// A caption clip's `words` ([{text,start,end}]) are stored on the CLIP entity
+// in ABSOLUTE timeline seconds (see useTimelineStore's caption creation, R58),
+// and TextOverlay / CaptionCompiler compare them straight against the
+// playhead. Moving a placement only changed its startTime, so after any move
+// (drag, swap, ripple delete) the words stayed at their old times: captions
+// showed late, briefly, or not at all. The clip entity can be shared by
+// several placements (splitPlacement reuses it), so the words themselves are
+// never rewritten; instead each placement carries `wordShift`, the total time
+// it has been moved, and toLegacyTracks applies it.
+//
+// Only a MOVE shifts words: startTime changes while duration does not. A
+// left-edge trim changes both (the end stays put) and must keep the words
+// where they are, since the remaining words did not move in time.
+function withWordShift(placement, updates) {
+    if (!placement || !updates || updates.startTime === undefined) return updates;
+    if (updates.duration !== undefined && Math.abs(updates.duration - placement.duration) > 1e-6) return updates;
+    const delta = (Number(updates.startTime) || 0) - (Number(placement.startTime) || 0);
+    if (Math.abs(delta) < 1e-9) return updates;
+    return { ...updates, wordShift: (Number(placement.wordShift) || 0) + delta };
+}
+
+function shiftWords(words, shift) {
+    const d = Number(shift) || 0;
+    if (!Array.isArray(words) || words.length === 0 || Math.abs(d) < 1e-9) return words;
+    return words.map(w => ({
+        ...w,
+        start: Number.isFinite(w?.start) ? w.start + d : w?.start,
+        end: Number.isFinite(w?.end) ? w.end + d : w?.end,
+    }));
+}
+
 export class TimelineStateManager {
     constructor(initialState = null, options = {}) {
         // Initialize state
@@ -380,7 +413,8 @@ export class TimelineStateManager {
             }
 
             case ACTION_TYPES.PLACEMENT_UPDATE: {
-                return updateEntity(state, ENTITY_TYPES.PLACEMENT, payload.placementId, payload.updates);
+                return updateEntity(state, ENTITY_TYPES.PLACEMENT, payload.placementId,
+                    withWordShift(state.entities.placements[payload.placementId], payload.updates));
             }
 
             case ACTION_TYPES.PLACEMENT_REMOVE: {
@@ -388,10 +422,11 @@ export class TimelineStateManager {
             }
 
             case ACTION_TYPES.PLACEMENT_MOVE: {
-                return updateEntity(state, ENTITY_TYPES.PLACEMENT, payload.placementId, {
-                    startTime: payload.startTime,
-                    layerId: payload.layerId || state.entities.placements[payload.placementId]?.layerId
-                });
+                return updateEntity(state, ENTITY_TYPES.PLACEMENT, payload.placementId,
+                    withWordShift(state.entities.placements[payload.placementId], {
+                        startTime: payload.startTime,
+                        layerId: payload.layerId || state.entities.placements[payload.placementId]?.layerId
+                    }));
             }
 
             case ACTION_TYPES.PLACEMENT_TRIM: {
@@ -432,6 +467,9 @@ export class TimelineStateManager {
                 const newPlacement = createPlacement({
                     clipId: placement.clipId,
                     layerId: placement.layerId,
+                    // The right half shares the clip entity (and its words),
+                    // so it must inherit the same word-time shift.
+                    wordShift: placement.wordShift || 0,
                     startTime: splitTime,
                     duration: placement.duration - relativeSplit,
                     offset: (placement.offset || 0) + relativeSplit,
@@ -919,7 +957,10 @@ export class TimelineStateManager {
                         // vanishes on project reload, which is exactly what was
                         // happening to `animation` before R58.
                         animations: clip.animations,
-                        words: clip.words,
+                        // clip.words are ABSOLUTE timeline times recorded when the
+                        // caption was created; wordShift is how far this placement
+                        // has been MOVED since (see withWordShift).
+                        words: shiftWords(clip.words, placement.wordShift),
                         captionStyle: clip.captionStyle,
                         // R66 — clip grouping (see client/src/motion/ClipGrouping.js).
                         // Same persistence-contract rule as the three fields above:

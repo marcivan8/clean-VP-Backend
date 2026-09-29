@@ -244,6 +244,19 @@ const useTimelineStore = create(
                     playerRef.togglePlayback(newIsPlaying);
                 }
             },
+            /**
+             * Move the playhead by a whole number of frames (desktop ←/→ keys).
+             * Pauses playback first, like any editor's frame step, and lands on
+             * an exact frame boundary so repeated steps never drift.
+             */
+            stepFrames: (frames) => {
+                const { currentTime, playerRef, isPlaying } = get();
+                const fps = Number(playerRef?.playback?.fps) || 30;
+                if (isPlaying) get().togglePlay();
+                const frame = Math.round((Number(currentTime) || 0) * fps) + Math.round(Number(frames) || 0);
+                get().seek(Math.max(0, frame / fps));
+            },
+
             setIsPlaying: (isPlaying) => {
                 set({ isPlaying });
                 const { playerRef } = get();
@@ -1051,7 +1064,12 @@ const useTimelineStore = create(
                 const collides = !!target && target.clips.some(c =>
                     start < c.start + c.duration - 1e-3 && start + dur > c.start + 1e-3);
 
-                const clip = { ...clipboard, id: `clip-paste-${Date.now()}`, start };
+                // Caption word timings are absolute: carry them to the paste spot.
+                const wordDelta = start - (Number(clipboard.start) || 0);
+                const words = Array.isArray(clipboard.words)
+                    ? clipboard.words.map(w => ({ ...w, start: (Number(w.start) || 0) + wordDelta, end: (Number(w.end) || 0) + wordDelta }))
+                    : clipboard.words;
+                const clip = { ...clipboard, id: `clip-paste-${Date.now()}`, start, words };
                 if (!target || collides) {
                     const newTrackId = get().addTrack(wantType); // saves the history step
                     get().addClip(newTrackId, clip, { skipHistory: true });
