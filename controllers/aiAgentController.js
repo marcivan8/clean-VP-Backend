@@ -1314,7 +1314,15 @@ Keep steps atomic and ordered. Include all necessary parameters.`;
                 { role: "system", content: systemPrompt },
                 { role: "user", content: JSON.stringify({ intent, context }) }
             ],
-            model: "gpt-3.5-turbo-1106",
+            // FIX: was a hardcoded "gpt-3.5-turbo-1106" — the one literal
+            // model string in this file that skipped resolveModel(), so a
+            // team running AI_PROVIDER=groq/gemini to use the free tier
+            // would have this specific endpoint fail with "model not
+            // found" (Groq/Gemini don't serve that name) while every other
+            // AI route correctly re-routed. resolveModel() returns the
+            // requested string unchanged for the real openai provider, so
+            // this is a no-op behavior change there — same model as before.
+            model: resolveModel('gpt-3.5-turbo-1106', 'chat'),
             response_format: { type: "json_object" },
             temperature: 0.1
         });
@@ -1537,7 +1545,11 @@ USER PROMPT:
                 { role: "system", content: systemPrompt },
                 { role: "user", content: userMsg }
             ],
-            model: "gpt-3.5-turbo-1106",
+            // Same fix as generatePlanHandler above — was hardcoded to
+            // "gpt-3.5-turbo-1106", bypassing resolveModel(), which broke
+            // this endpoint specifically whenever AI_PROVIDER was set to
+            // groq/gemini. No-op for the default openai provider.
+            model: resolveModel('gpt-3.5-turbo-1106', 'chat'),
             response_format: { type: "json_object" },
             temperature: 0.2 // Low temperature for precision
         }, { timeout: 15000 });

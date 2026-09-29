@@ -34,10 +34,12 @@ export const exportTimeline = async (tracks, settings, onProgress, onComplete, o
             throw new Error('Export response missing jobId');
         }
 
-        // 2. Poll until done (jobPoller backs off from 1.5s → 5s, 5-min timeout)
+        // 2. Poll until done (jobPoller backs off from 1.5s → 5s; 8-min timeout —
+        //    same override MediaExecutionEngine.js already uses for other long jobs,
+        //    the bare 5-min default was cutting off exports that were still rendering)
         if (onProgress) onProgress({ status: 'rendering', progress: 0 });
 
-        const result = await pollJobResult(data.jobId);
+        const result = await pollJobResult(data.jobId, null, 8 * 60 * 1000);
 
         if (result?.url) {
             onComplete(result.url);

@@ -253,7 +253,14 @@ function resolveModel(requestedModel, capability) {
 
     if (provider === 'groq') {
         if (capability === 'audio') return process.env.GROQ_AUDIO_MODEL || 'whisper-large-v3';
-        return process.env.GROQ_CHAT_MODEL || 'openai/gpt-oss-20b';
+        // gpt-oss-120b (not the smaller -20b) — OpenAI's own open-weight
+        // flagship, still served free by Groq: 117B params, Apache 2.0,
+        // 128K context, built for structured outputs/agentic/function-
+        // calling use, which is exactly what chatAgentHandler's intent
+        // extraction and the edit/agent planners below need. -20b remains
+        // available via GROQ_CHAT_MODEL for anyone who wants the lighter,
+        // lower-latency model instead.
+        return process.env.GROQ_CHAT_MODEL || 'openai/gpt-oss-120b';
     }
 
     if (provider === 'gemini') {

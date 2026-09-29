@@ -64,6 +64,25 @@ if (SENTRY_DSN) {
     });
 }
 
+// Recover from a stale client bundle: if the browser loaded this app before
+// a newer deploy replaced client/dist, a lazy-loaded chunk (Compositor,
+// CaptionCompiler, CameraMotionCompiler, etc.) will 404 against the new
+// build's different content-hashed filenames. Vite emits 'vite:preloadError'
+// on window when that happens — reload once to pick up the current build
+// instead of leaving the user stuck on a broken shell.
+window.addEventListener('vite:preloadError', () => {
+    if (sessionStorage.getItem('vibed_stale_reload')) {
+        // Already tried once this session — don't loop forever if the
+        // fresh build also fails to load for some unrelated reason.
+        return;
+    }
+    sessionStorage.setItem('vibed_stale_reload', '1');
+    if (SENTRY_DSN) {
+        Sentry.captureMessage('Stale bundle reload (vite:preloadError)', 'info');
+    }
+    window.location.reload();
+});
+
 createRoot(document.getElementById('root')).render(
     <StrictMode>
         <App />
