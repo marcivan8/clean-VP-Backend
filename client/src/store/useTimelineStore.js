@@ -23,7 +23,7 @@ import {
 import { buildComponent } from '../motion/ComponentLibrary.js';
 import { clipsInGroup, computeGroupMoveUpdates, computeGroupDuplicateSpecs } from '../motion/ClipGrouping.js';
 import { deriveSpeakerCrop, deriveTrackingSegments } from '../motion/ObjectLayers.js';
-import { computeRippleDelete, remapTimelineWords } from '../timeline/rippleDelete.js';
+import { computeRippleDelete, computeGapRipple, remapTimelineWords } from '../timeline/rippleDelete.js';
 import { computeMultiMove } from '../timeline/multiMove.js';
 
 // Same breakpoint as hooks/useDeviceType.js (isMobile = width < 768). Used by
@@ -914,6 +914,61 @@ const useTimelineStore = create(
                 if (newMaxEnd > 0 && Math.abs((Number(state.duration) || 0) - oldMaxEnd) < 0.05) {
                     get().setDuration(newMaxEnd);
                 }
+            },
+
+            /**
+             * Ripple-delete an empty GAP (right-click on empty timeline space →
+             * Ripple Delete): the clips after the gap slide left to close it.
+             * On the main video track captions/text follow and the word-level
+             * captions are remapped, exactly like rippleDeleteClip; on any other
+             * track only that track moves. One undo step. Planning is pure:
+             * timeline/rippleDelete.js computeGapRipple.
+             * @returns {boolean} true when a gap was closed
+             */
+            rippleDeleteGap: (trackId, time) => {
+                const state = get();
+                const plan = computeGapRipple(state.tracks, trackId, time);
+                if (!plan.gap || plan.moves.length === 0) return false;
+
+                const maxEnd = (tracks) => tracks.reduce((m, t) =>
+                    Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
+                const oldMaxEnd = maxEnd(state.tracks);
+
+                get()._saveHistory();
+                // Same opt-in snapshot as rippleDeleteClip: undo also restores
+                // the word-level captions and the store duration.
+                set(s => {
+                    const past = s.past.slice();
+                    const last = past[past.length - 1];
+                    if (last) past[past.length - 1] = { ...last, _extraState: { captions: state.captions, duration: state.duration } };
+                    return { past };
+                });
+
+                timelineManager.beginTransaction();
+                try {
+                    plan.moves.forEach(({ clipId: id, start }) => {
+                        timelineManager.dispatch(TimelineActions.updatePlacement(id, { startTime: start }));
+                    });
+                    timelineManager.commitTransaction('Ripple Delete Gap');
+                } catch (err) {
+                    timelineManager.rollbackTransaction();
+                    set(s => ({ past: s.past.slice(0, -1) }));
+                    console.error('[rippleDeleteGap] failed, timeline left unchanged:', err);
+                    return false;
+                }
+
+                const tracks = timelineManager.toLegacyTracks();
+                set({
+                    tracks,
+                    ...(plan.removedRanges.length > 0
+                        ? { captions: remapTimelineWords(state.captions, plan.removedRanges) }
+                        : {}),
+                });
+                const newMaxEnd = maxEnd(tracks);
+                if (newMaxEnd > 0 && Math.abs((Number(state.duration) || 0) - oldMaxEnd) < 0.05) {
+                    get().setDuration(newMaxEnd);
+                }
+                return true;
             },
 
             /**

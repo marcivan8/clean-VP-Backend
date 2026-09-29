@@ -123,3 +123,61 @@ export function remapTimelineWords(words, removedRanges) {
     }
     return out;
 }
+
+/**
+ * The empty gap on a track at timeline time `time`: from the end of the clip
+ * before it (or 0) to the start of the clip after it. Returns null when
+ * `time` is on a clip, when there is no clip after it (nothing to pull in),
+ * or when the gap is ~0.
+ */
+export function findGapAt(tracks, trackId, time) {
+    const track = (Array.isArray(tracks) ? tracks : []).find(t => t?.id === trackId);
+    if (!track) return null;
+    const t = Number(time) || 0;
+    let prevEnd = 0;
+    let nextStart = null;
+    for (const c of track.clips || []) {
+        const s = Number(c.start) || 0;
+        const e = s + (Number(c.duration) || 0);
+        if (s < t - EPS && e > t + EPS) return null; // right-clicked on a clip
+        if (e <= t + EPS) prevEnd = Math.max(prevEnd, e);
+        if (s >= t - EPS) nextStart = nextStart === null ? s : Math.min(nextStart, s);
+    }
+    if (nextStart === null || nextStart - prevEnd <= EPS) return null;
+    return [prevEnd, nextStart];
+}
+
+/**
+ * Plan a ripple delete of the GAP at `time` on `trackId` (right-click on
+ * empty timeline space → Ripple Delete).
+ *  - Main video track: same remap as deleting a main-track clip — later
+ *    main-track clips and text/caption clips slide left by the gap length
+ *    (captions stay synced; `removedRanges` lets the store remap the
+ *    word-level captions too).
+ *  - Any other track: only that track's clips after the gap slide left.
+ */
+export function computeGapRipple(tracks, trackId, time) {
+    const list = Array.isArray(tracks) ? tracks : [];
+    const mainTrackId = getMainVideoTrackId(list);
+    const isMainTrack = trackId === mainTrackId;
+    const gap = findGapAt(list, trackId, time);
+    if (!gap) return { gap: null, isMainTrack, removedRanges: [], moves: [] };
+
+    const [a, b] = gap;
+    const length = b - a;
+    const moves = [];
+    for (const track of list) {
+        const shifts = isMainTrack
+            ? (track?.id === mainTrackId || track?.type === 'text')
+            : track?.id === trackId;
+        if (!shifts) continue;
+        for (const clip of track.clips || []) {
+            const from = Number(clip.start) || 0;
+            const shift = isMainTrack
+                ? deletedTimeBefore(from, [gap])
+                : (from >= b - EPS ? length : 0);
+            if (shift > EPS) moves.push({ trackId: track.id, clipId: clip.id, from, start: Math.max(0, from - shift) });
+        }
+    }
+    return { gap, isMainTrack, removedRanges: isMainTrack ? [gap] : [], moves };
+}

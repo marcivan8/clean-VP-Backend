@@ -38,6 +38,8 @@ import { ClarificationDialog } from '../components/ClarificationDialog';
 import { ApprovalDialog } from '../components/ApprovalDialog';
 import { trackEvent } from '../utils/trackEvent';
 import { countMetric, distributionMetric, nowMs, timelineBucket, timelineSecondsFromTracks } from '../utils/metrics';
+import { computeDragSnap } from '../timeline/dragSnap.js';
+
 import { probeMedia } from '../utils/mediaProbe';
 import ProxyService from '../services/proxyService';
 import useAIStore from '../store/useAIStore';
@@ -47,6 +49,10 @@ import UpgradeModal from '../components/UpgradeModal';
 import OnboardingTour, { shouldShowOnboardingTour } from '../components/OnboardingTour';
 import { EventBus, EVENT_TYPES } from '../agent/EventBus';
 import { useSupabasePersistence } from '../hooks/useSupabasePersistence';
+
+// Screen distance (px) within which a dragged clip clicks onto a neighbour's
+// edge, the playhead or 0. Zoom-independent: converted to seconds per drag.
+const CLIP_SNAP_PX = 12;
 
 const VideoTimeDisplay = () => {
     const timeRef = useRef(null);
@@ -418,6 +424,30 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             activationConstraint: { distance: 5 },
         })
     );
+
+    // In-place magnet (CapCut-style): while a timeline clip is dragged, its
+    // horizontal offset clicks onto the nearest clip edge / playhead / 0 when
+    // within CLIP_SNAP_PX. dnd-kit feeds this adjusted offset to the clip's
+    // transform, to the companion clips of a multi-selection (via the active
+    // rect) and to onDragEnd's `delta`, so the drop lands exactly where the
+    // clips were shown. Asset drags from the media bin are left untouched.
+    const clipSnapModifier = React.useCallback(({ transform, active }) => {
+        const data = active?.data?.current;
+        if (!data?.clip || !transform) return transform;
+        const st = useTimelineStore.getState();
+        const zoom = st.zoomLevel || 1;
+        const movingIds = (st.selectedClipIds.length > 1 && st.selectedClipIds.includes(active.id))
+            ? st.selectedClipIds
+            : [active.id];
+        const { deltaSec } = computeDragSnap({
+            tracks: st.tracks,
+            movingIds,
+            deltaSec: transform.x / zoom,
+            thresholdSec: CLIP_SNAP_PX / zoom,
+            currentTime: st.currentTime,
+        });
+        return { ...transform, x: deltaSec * zoom };
+    }, []);
     const [showSidebar, setShowSidebar] = React.useState(false);
     const [showAI, setShowAI] = React.useState(false);
     
@@ -1493,44 +1523,21 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             let targetTrackId = targetData.trackId;
             const currentClip = activeData.clip;
 
-            const deltaSeconds = delta.x / state.zoomLevel;
-            let newStart = Math.max(0, currentClip.start + deltaSeconds);
-
             // Several clips selected and the dragged one is among them → move
             // them all together (see moveSelectedClips / timeline/multiMove.js).
             const isMultiMove = state.selectedClipIds.length > 1 && state.selectedClipIds.includes(activeClipId);
 
-            // Snapping
-            const SNAP_THRESHOLD_PX = 10;
-            const snapThresholdTime = SNAP_THRESHOLD_PX / state.zoomLevel;
-            let closestSnap = null;
-            let minDist = Infinity;
-            const snapPoints = [0, state.currentTime];
-
-            state.tracks.forEach(t => {
-                t.clips.forEach(c => {
-                    if (c.id === activeClipId) return;
-                    if (isMultiMove && state.selectedClipIds.includes(c.id)) return;
-                    snapPoints.push(c.start);
-                    snapPoints.push(c.start + c.duration);
-                });
+            // Snapping — the same in-place magnet the live drag used
+            // (clipSnapModifier), so the drop matches what was on screen.
+            // `delta` is normally already snapped; re-running it is a no-op then.
+            const { deltaSec } = computeDragSnap({
+                tracks: state.tracks,
+                movingIds: isMultiMove ? state.selectedClipIds : [activeClipId],
+                deltaSec: delta.x / state.zoomLevel,
+                thresholdSec: CLIP_SNAP_PX / state.zoomLevel,
+                currentTime: state.currentTime,
             });
-
-            snapPoints.forEach(point => {
-                const distStart = Math.abs(newStart - point);
-                if (distStart < snapThresholdTime && distStart < minDist) {
-                    minDist = distStart;
-                    closestSnap = point;
-                }
-                const newEnd = newStart + currentClip.duration;
-                const distEnd = Math.abs(newEnd - point);
-                if (distEnd < snapThresholdTime && distEnd < minDist) {
-                    minDist = distEnd;
-                    closestSnap = point - currentClip.duration;
-                }
-            });
-
-            if (closestSnap !== null) newStart = closestSnap;
+            const newStart = Math.max(0, currentClip.start + deltaSec);
 
             // Same-track single drags swap too (CapCut-style) instead of
             // spawning a new track on overlap. Dropping onto a DIFFERENT track
@@ -1573,7 +1580,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     };
 
     return (
-        <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <DndContext sensors={sensors} modifiers={[clipSnapModifier]} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
 
             <ExportModal
                 isOpen={showExportModal}

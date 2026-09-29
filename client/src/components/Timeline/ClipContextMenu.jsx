@@ -7,6 +7,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../../store/useTimelineStore';
 import { audioEngineAPI } from '../../audio-engine/AudioEngineAPI.js';
+import { findGapAt } from '../../timeline/rippleDelete.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -97,16 +98,19 @@ const SpeedRow = ({ clip, trackId, onClose }) => {
 /**
  * `clip` may be null when the menu is opened by right-clicking empty timeline
  * space with nothing selected: every clip action is then shown greyed out.
- * `pasteAt` ({ trackId, time }) is passed only for empty-space right-clicks
- * and adds "Paste here" at the clicked time.
+ * `spot` ({ trackId, time }) is passed only for empty-space right-clicks. It
+ * adds "Paste here" at the clicked time, and makes "Ripple Delete" close the
+ * empty gap that was right-clicked (whatever is selected) — the clicked spot
+ * is what the user is pointing at. Right-click a clip to ripple-delete a clip.
  */
-const ClipContextMenu = ({ clip, trackId, position, onClose, pasteAt = null }) => {
+const ClipContextMenu = ({ clip, trackId, position, onClose, spot = null }) => {
     const { t } = useTranslation('editor');
     const menuRef = React.useRef(null);
     const [pos, setPos] = React.useState(position);
     const copiedAttributes = useTimelineStore(s => s.copiedAttributes);
     const clipboard = useTimelineStore(s => s.clipboard);
     const noClip = !clip;
+    const gap = spot ? findGapAt(useTimelineStore.getState().tracks, spot.trackId, spot.time) : null;
     const [favoritedTransitions, setFavoritedTransitions] = React.useState(() => new Set());
 
     // Load favorited transition types once per menu open — cheap, and keeps the
@@ -206,12 +210,12 @@ const ClipContextMenu = ({ clip, trackId, position, onClose, pasteAt = null }) =
                 disabled={noClip}
                 onClick={() => run(() => store().copyClip(clip.id))}
             />
-            {pasteAt && (
+            {spot && (
                 <Item
                     icon={ClipboardPaste}
                     label={t('timeline.pasteHere')}
                     disabled={!clipboard}
-                    onClick={() => run(() => store().pasteClipAt(pasteAt.trackId, pasteAt.time))}
+                    onClick={() => run(() => store().pasteClipAt(spot.trackId, spot.time))}
                 />
             )}
             <Separator />
@@ -249,13 +253,25 @@ const ClipContextMenu = ({ clip, trackId, position, onClose, pasteAt = null }) =
             <Separator />
 
             {/* Delete group */}
-            <Item
-                icon={Zap}
-                label={t('timeline.rippleDelete')}
-                danger
-                disabled={noClip}
-                onClick={() => run(() => store().rippleDeleteClip(trackId, clip.id))}
-            />
+            {spot ? (
+                // Empty-space menu: ripple-delete the gap that was right-clicked.
+                <Item
+                    icon={Zap}
+                    label={t('timeline.rippleDelete')}
+                    hint={gap ? `${(gap[1] - gap[0]).toFixed(1)}s` : undefined}
+                    danger
+                    disabled={!gap}
+                    onClick={() => run(() => store().rippleDeleteGap(spot.trackId, spot.time))}
+                />
+            ) : (
+                <Item
+                    icon={Zap}
+                    label={t('timeline.rippleDelete')}
+                    danger
+                    disabled={noClip}
+                    onClick={() => run(() => store().rippleDeleteClip(trackId, clip.id))}
+                />
+            )}
             <Item
                 icon={Trash2}
                 label={t('timeline.delete')}

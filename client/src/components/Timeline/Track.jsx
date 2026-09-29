@@ -159,7 +159,7 @@ const Track = ({ track, labelWidth = 128, compact = false }) => {
                     clip={emptyMenu.target?.clip || null}
                     trackId={emptyMenu.target?.trackId || track.id}
                     position={{ x: emptyMenu.x, y: emptyMenu.y }}
-                    pasteAt={{ trackId: track.id, time: emptyMenu.time }}
+                    spot={{ trackId: track.id, time: emptyMenu.time }}
                     onClose={() => setEmptyMenu(null)}
                 />
             )}
