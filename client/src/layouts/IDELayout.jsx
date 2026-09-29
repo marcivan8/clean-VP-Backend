@@ -1176,12 +1176,35 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     // docblock + CLAUDE.md's note on why that one must never be shrunk back
     // to 300s). Keyed on resolution only — a platform preset (tiktok/reels/
     // shorts/youtube) is always ~1080p-equivalent, so it stays on the default.
+    //
+    // UPDATE: 300s also proved too short for ordinary 1080p exports. A
+    // 2-minute 1080p project with animated captions (32 segments, 548
+    // drawtext filters) took 353.6s server-side and SUCCEEDED, while the
+    // client had already shown "timed out after 300s" (job
+    // export-1790699787273-13nbev). Render time scales with timeline length
+    // and caption density, not only resolution, so the budget is now derived
+    // from the timeline duration with a per-resolution floor. The floors keep
+    // 2k/4k at exactly their previous values, so no budget ever got shorter.
     const EXPORT_POLL_TIMEOUT_MS_BY_RESOLUTION = {
-        '2k': 10 * 60 * 1000,
-        '4k': 20 * 60 * 1000,
+        '720p':  10 * 60 * 1000,
+        '1080p': 10 * 60 * 1000,
+        '2k':    10 * 60 * 1000,
+        '4k':    20 * 60 * 1000,
     };
-    const getExportPollTimeoutMs = (settings) =>
-        (!settings.platform && EXPORT_POLL_TIMEOUT_MS_BY_RESOLUTION[settings.resolution]) || undefined; // undefined -> pollJobResult's own default
+    // Seconds of server-side render budgeted per second of timeline. Measured
+    // 1080p was ~3x real time; these leave roughly 2x headroom on top.
+    const EXPORT_RENDER_SECONDS_PER_TIMELINE_SECOND = {
+        '720p': 6, '1080p': 6, '2k': 12, '4k': 18,
+    };
+    const EXPORT_POLL_TIMEOUT_MAX_MS = 60 * 60 * 1000;
+    const getExportPollTimeoutMs = (settings, timelineSeconds = 0) => {
+        // A platform preset (tiktok/reels/shorts/youtube) is ~1080p-equivalent.
+        const res    = settings.platform ? '1080p' : (settings.resolution || '1080p');
+        const floor  = EXPORT_POLL_TIMEOUT_MS_BY_RESOLUTION[res] ?? EXPORT_POLL_TIMEOUT_MS_BY_RESOLUTION['1080p'];
+        const factor = EXPORT_RENDER_SECONDS_PER_TIMELINE_SECOND[res] ?? EXPORT_RENDER_SECONDS_PER_TIMELINE_SECOND['1080p'];
+        const scaled = (Number(timelineSeconds) || 0) * factor * 1000;
+        return Math.min(Math.max(floor, scaled), EXPORT_POLL_TIMEOUT_MAX_MS);
+    };
 
     // Standard export path: FFmpeg + drawtext via BullMQ (jobs/exportProcessor.js).
     // Fast, stable, the default for every user.
@@ -1311,9 +1334,14 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         if (!data.jobId)   throw new Error('Export response missing jobId');
 
         // Poll until the worker finishes (handles Railway timeouts gracefully).
-        // 2k/4k get a longer budget than the 300s default — see
-        // getExportPollTimeoutMs's comment above for why.
-        const result = await pollJobResult(data.jobId, null, getExportPollTimeoutMs(settings));
+        // Budget scales with timeline length and resolution — see
+        // getExportPollTimeoutMs's comment above for why 300s was not enough.
+        const timelineSeconds = Math.max(
+            Number(duration) || 0,
+            ...(tracksForExport || []).flatMap(t => (t.clips || []).map(c =>
+                (Number(c.start) || 0) + (Number(c.duration) || 0))),
+        );
+        const result = await pollJobResult(data.jobId, null, getExportPollTimeoutMs(settings, timelineSeconds));
         if (!result?.url) throw new Error('Export completed but no URL returned');
 
         // FIX: this used to return only {url, filename, metadata} — silently
