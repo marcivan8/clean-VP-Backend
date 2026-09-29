@@ -37,6 +37,7 @@ import { Type } from 'lucide-react';
 import { ClarificationDialog } from '../components/ClarificationDialog';
 import { ApprovalDialog } from '../components/ApprovalDialog';
 import { trackEvent } from '../utils/trackEvent';
+import { countMetric, distributionMetric, nowMs, timelineBucket, timelineSecondsFromTracks } from '../utils/metrics';
 import { probeMedia } from '../utils/mediaProbe';
 import ProxyService from '../services/proxyService';
 import useAIStore from '../store/useAIStore';
@@ -1374,6 +1375,20 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         setExportError(null);
         setExportUrl(null);
 
+        // Sentry export-health metrics. Attributes are low-cardinality only.
+        const exportStartedAt = nowMs();
+        const exportAttrs = {
+            resolution: settings?.resolution || '1080p',
+            platform: settings?.platform || 'none',
+            timeline: timelineBucket(timelineSecondsFromTracks(useTimelineStore.getState().tracks)),
+        };
+        countMetric('export.started', exportAttrs);
+        const finishExportMetric = (outcome) => {
+            const attrs = { ...exportAttrs, outcome };
+            countMetric('export.finished', attrs);
+            distributionMetric('export.duration', nowMs() - exportStartedAt, 'millisecond', attrs);
+        };
+
         try {
             // Only one export path. The "cinematic" Revideo/Lambda renderer was
             // removed: it needed AWS credentials, a font layer and a webhook to
@@ -1397,9 +1412,18 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 revideoWarning: result.revideoWarning,
             });
             setExportUrl(result.url);
+
+            finishExportMetric('success');
+            // A "successful" export can still be degraded (captions/overlays
+            // silently missing) — count each warning kind separately.
+            [['caption', result.captionWarning], ['compositor', result.compositorWarning],
+             ['caption_program', result.captionProgramWarning], ['revideo', result.revideoWarning]]
+                .forEach(([kind, warning]) => { if (warning) countMetric('export.warning', { ...exportAttrs, kind }); });
         } catch (err) {
             console.error('Export Failed:', err);
             setExportError(err.message);
+            // pollJobResult's own timeout message: "Job <id> timed out after <n>s"
+            finishExportMetric(/timed out after/i.test(err?.message || '') ? 'client_timeout' : 'error');
         } finally {
             setIsExporting(false);
         }
@@ -1472,6 +1496,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             const deltaSeconds = delta.x / state.zoomLevel;
             let newStart = Math.max(0, currentClip.start + deltaSeconds);
 
+            // Several clips selected and the dragged one is among them → move
+            // them all together (see moveSelectedClips / timeline/multiMove.js).
+            const isMultiMove = state.selectedClipIds.length > 1 && state.selectedClipIds.includes(activeClipId);
+
             // Snapping
             const SNAP_THRESHOLD_PX = 10;
             const snapThresholdTime = SNAP_THRESHOLD_PX / state.zoomLevel;
@@ -1482,6 +1510,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             state.tracks.forEach(t => {
                 t.clips.forEach(c => {
                     if (c.id === activeClipId) return;
+                    if (isMultiMove && state.selectedClipIds.includes(c.id)) return;
                     snapPoints.push(c.start);
                     snapPoints.push(c.start + c.duration);
                 });
@@ -1502,6 +1531,28 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             });
 
             if (closestSnap !== null) newStart = closestSnap;
+
+            // Same-track single drags swap too (CapCut-style) instead of
+            // spawning a new track on overlap. Dropping onto a DIFFERENT track
+            // keeps the existing behaviour below.
+            const isSameTrackMove = !isMultiMove && targetTrackId === activeData.trackId;
+
+            if (isMultiMove || isSameTrackMove) {
+                // Time only — every moved clip keeps its own track.
+                const moved = state.moveSelectedClips(
+                    newStart - currentClip.start,
+                    isMultiMove ? null : [activeClipId],
+                );
+                if (!moved.ok && moved.reason === 'interleaved') {
+                    useAIStore.getState().addLog({
+                        id: 'multi-move-' + Date.now(),
+                        type: 'warning',
+                        message: t('timeline.multiMoveInterleaved'),
+                        timestamp: new Date().toLocaleTimeString(),
+                    });
+                }
+                return;
+            }
 
             if (checkOverlap(targetTrackId, newStart, currentClip.duration, activeClipId)) {
                 targetTrackId = state.addTrack(currentClip.type === 'audio' ? 'audio' : 'video');

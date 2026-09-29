@@ -24,6 +24,7 @@ import { buildComponent } from '../motion/ComponentLibrary.js';
 import { clipsInGroup, computeGroupMoveUpdates, computeGroupDuplicateSpecs } from '../motion/ClipGrouping.js';
 import { deriveSpeakerCrop, deriveTrackingSegments } from '../motion/ObjectLayers.js';
 import { computeRippleDelete, remapTimelineWords } from '../timeline/rippleDelete.js';
+import { computeMultiMove } from '../timeline/multiMove.js';
 
 // Same breakpoint as hooks/useDeviceType.js (isMobile = width < 768). Used by
 // deleteClipWithMagnet: the main-track magnet is always on for mobile.
@@ -926,6 +927,81 @@ const useTimelineStore = create(
                     get().rippleDeleteClip(trackId, clipId);
                 } else {
                     get().removeClip(trackId, clipId);
+                }
+            },
+
+            /**
+             * Move every selected clip (or the given clipIds) by the same time
+             * delta — desktop multi-drag, and single-clip drags within a track.
+             * Time only: clips keep their tracks. When the moved
+             * clips land on other clips, those slide into the space the
+             * selection left (CapCut-style swap). Planning is pure and lives in
+             * timeline/multiMove.js. One undo step. Selection is kept.
+             *
+             * @returns {{ok: boolean, reason?: string}} ok:false with
+             *   reason 'interleaved' when an unselected clip sits between
+             *   selected clips on a track — nothing is changed in that case.
+             */
+            moveSelectedClips: (delta, clipIds = null) => {
+                const { selectedClipIds, tracks } = get();
+                // clipIds lets a single-clip drag reuse the same swap logic
+                // without touching (or depending on) the current selection.
+                const ids = Array.isArray(clipIds) ? clipIds : selectedClipIds;
+                const result = computeMultiMove(tracks, ids, delta);
+                if (!result.ok || result.updates.length === 0) return result;
+
+                get()._saveHistory();
+                timelineManager.beginTransaction();
+                try {
+                    result.updates.forEach(u => {
+                        timelineManager.dispatch(TimelineActions.updatePlacement(u.clipId, { startTime: u.start }));
+                    });
+                    timelineManager.commitTransaction('Move Clips');
+                } catch (err) {
+                    timelineManager.rollbackTransaction();
+                    set(st => ({ past: st.past.slice(0, -1) }));
+                    console.error('[moveSelectedClips] failed, timeline left unchanged:', err);
+                    return { ok: false, reason: 'error' };
+                }
+
+                const newTracks = timelineManager.toLegacyTracks();
+                set({ tracks: newTracks });
+                const newEnd = newTracks.reduce((m, t) =>
+                    Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
+                if (newEnd > (Number(get().duration) || 0)) get().setDuration(newEnd);
+                return result;
+            },
+
+            /**
+             * Paste the copied clip at a given time, preferring the given
+             * track when its type fits the clip (video/image → video, audio →
+             * audio, text → text, sticker/overlay → overlay), otherwise the
+             * first track that fits. If the spot is occupied, a new track of
+             * the right type is created instead — same rule as dragging a
+             * clip onto another. The older pasteClip(time) is unchanged.
+             */
+            pasteClipAt: (trackId, time) => {
+                const { clipboard, tracks } = get();
+                if (!clipboard) return;
+                const wantType = clipboard.type === 'audio' ? 'audio'
+                    : clipboard.type === 'text' ? 'text'
+                    : (clipboard.type === 'sticker' || clipboard.type === 'overlay') ? 'overlay'
+                    : 'video';
+                const fits = (t) => !!t && (t.type === wantType || (wantType === 'video' && t.type === 'image'));
+                let target = tracks.find(t => t.id === trackId);
+                if (!fits(target)) target = tracks.find(fits);
+
+                const start = Math.max(0, Number(time) || 0);
+                const dur = Number(clipboard.duration) || 5;
+                const collides = !!target && target.clips.some(c =>
+                    start < c.start + c.duration - 1e-3 && start + dur > c.start + 1e-3);
+
+                const clip = { ...clipboard, id: `clip-paste-${Date.now()}`, start };
+                if (!target || collides) {
+                    const newTrackId = get().addTrack(wantType); // saves the history step
+                    get().addClip(newTrackId, clip, { skipHistory: true });
+                } else {
+                    get().addClip(target.id, clip);
                 }
             },
 

@@ -5,6 +5,7 @@ import useJobStore, { JOB_STATES, TERMINAL_STATES } from '../store/useJobStore.j
 import { EventBus, EVENT_TYPES } from './EventBus.js';
 import useTimelineStore from '../store/useTimelineStore.js';
 import { trackEvent } from '../utils/trackEvent.js';
+import { countMetric, distributionMetric, nowMs } from '../utils/metrics.js';
 import { getNextAction, getQuickChips } from './SuggestionEngine.js';
 
 // Per-operation editorial descriptions and next-step suggestions.
@@ -76,6 +77,30 @@ function getOperationMeta(operation) {
 // Silence + filler on a 12-min video takes ~5 min combined; 15 min gives ample margin.
 const PROCESSING_TIMEOUT_MS = 15 * 60 * 1000;
 
+/**
+ * Sentry metrics for AI commands: latency from prompt to applied edit and a
+ * finished counter, both tagged with the operation (IntentParser's fixed
+ * vocabulary, so low-cardinality) and the outcome. Never alters the result
+ * or the error — it only observes, then returns/rethrows unchanged.
+ */
+async function measureAICommand(phase, run) {
+    const t0 = nowMs();
+    try {
+        const result = await run();
+        const outcome = result?.requiresClarification ? 'clarification'
+            : (result?.success ? 'success' : 'failed');
+        const attrs = { phase, operation: result?.operation || 'unknown', outcome };
+        distributionMetric('ai.command.duration', nowMs() - t0, 'millisecond', attrs);
+        countMetric('ai.command.finished', attrs);
+        return result;
+    } catch (err) {
+        const attrs = { phase, operation: 'unknown', outcome: 'error' };
+        distributionMetric('ai.command.duration', nowMs() - t0, 'millisecond', attrs);
+        countMetric('ai.command.finished', attrs);
+        throw err;
+    }
+}
+
 const workflowMachine = createMachine({
     id: 'videoAgent',
     initial: 'idle',
@@ -110,7 +135,8 @@ const workflowMachine = createMachine({
                     console.log('[Workflow] Processing via EditJobManager...');
 
                     // Use the new pipeline
-                    const result = await editJobManager.processEditRequest(userPrompt);
+                    const result = await measureAICommand('prompt',
+                        () => editJobManager.processEditRequest(userPrompt));
 
                     console.log('[Workflow] Job completed:', result);
                     return result;
@@ -326,6 +352,7 @@ const workflowMachine = createMachine({
                 [PROCESSING_TIMEOUT_MS]: {
                     target: 'idle',
                     actions: () => {
+                        countMetric('ai.command.timeout', { phase: 'prompt' });
                         console.error('[Workflow] Processing timed out after 15 minutes');
                         useAIStore.getState().setIsAnalyzing(false);
                         useAIStore.getState().addLog({
@@ -368,7 +395,8 @@ const workflowMachine = createMachine({
             invoke: {
                 src: fromPromise(async ({ input }) => {
                     const { jobId, originalIntent, answers } = input;
-                    return await editJobManager.resumeJob(jobId, originalIntent, answers);
+                    return await measureAICommand('clarification_answer',
+                        () => editJobManager.resumeJob(jobId, originalIntent, answers));
                 }),
                 input: ({ context, event }) => ({
                     jobId: context.currentJobId,
@@ -437,6 +465,7 @@ const workflowMachine = createMachine({
                 [PROCESSING_TIMEOUT_MS]: {
                     target: 'idle',
                     actions: () => {
+                        countMetric('ai.command.timeout', { phase: 'clarification_answer' });
                         useAIStore.getState().setIsAnalyzing(false);
                         useAIStore.getState().addLog({
                             id: 'timeout-' + Date.now(),

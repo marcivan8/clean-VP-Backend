@@ -20,7 +20,7 @@
     "@revideo/player-react": "^0.10.4",
     "@revideo/ui": "^0.10.4",
     "@revideo/vite-plugin": "^0.10.4",
-    "@sentry/react": "^8.55.2",
+    "@sentry/react": "^10.75.3",
     "@supabase/supabase-js": "^2.49.8",
     "classnames": "^2.5.1",
     "compromise": "^14.15.0",

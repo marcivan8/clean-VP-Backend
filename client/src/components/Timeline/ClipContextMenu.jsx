@@ -2,7 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import {
     Scissors, Copy, Trash2, Zap, Volume2, VolumeX,
-    FastForward, ChevronRight, Sparkles, Wind, Heart
+    FastForward, ChevronRight, Sparkles, Wind, Heart, ClipboardPaste
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../../store/useTimelineStore';
@@ -63,9 +63,10 @@ const FavoriteTransitionToggle = ({ transitionType, favorited, onToggle }) => {
 const SpeedRow = ({ clip, trackId, onClose }) => {
     const { t } = useTranslation('editor');
     const speeds = [0.25, 0.5, 1, 1.5, 2];
-    const current = clip.speed ?? 1;
+    const current = clip?.speed ?? 1;
+    const disabled = !clip;
     return (
-        <div className="px-3 py-1.5 flex items-center gap-1.5">
+        <div className={`px-3 py-1.5 flex items-center gap-1.5 ${disabled ? 'opacity-30 pointer-events-none' : ''}`}>
             <FastForward className="w-3.5 h-3.5 shrink-0 opacity-70" />
             <span className="text-[12px] flex-1">{t('timeline.speed')}</span>
             <div className="flex gap-1">
@@ -93,11 +94,19 @@ const SpeedRow = ({ clip, trackId, onClose }) => {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
+/**
+ * `clip` may be null when the menu is opened by right-clicking empty timeline
+ * space with nothing selected: every clip action is then shown greyed out.
+ * `pasteAt` ({ trackId, time }) is passed only for empty-space right-clicks
+ * and adds "Paste here" at the clicked time.
+ */
+const ClipContextMenu = ({ clip, trackId, position, onClose, pasteAt = null }) => {
     const { t } = useTranslation('editor');
     const menuRef = React.useRef(null);
     const [pos, setPos] = React.useState(position);
     const copiedAttributes = useTimelineStore(s => s.copiedAttributes);
+    const clipboard = useTimelineStore(s => s.clipboard);
+    const noClip = !clip;
     const [favoritedTransitions, setFavoritedTransitions] = React.useState(() => new Set());
 
     // Load favorited transition types once per menu open — cheap, and keeps the
@@ -160,12 +169,12 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
 
     const store = () => useTimelineStore.getState();
     const currentTime = useTimelineStore.getState().currentTime;
-    const canSplit =
+    const canSplit = !noClip &&
         currentTime > clip.start + 0.1 &&
         currentTime < clip.start + clip.duration - 0.1;
 
-    const isMuted = (clip.volume ?? 1) === 0;
-    const hasTransition = !!clip.transition;
+    const isMuted = !noClip && (clip.volume ?? 1) === 0;
+    const hasTransition = !noClip && !!clip.transition;
 
     const run = (fn) => { fn(); onClose(); };
 
@@ -185,8 +194,26 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
         >
             {/* Clip name header */}
             <div className="px-3 pb-1 pt-0.5">
-                <p className="text-[10px] font-mono opacity-40 truncate">{clip.name}</p>
+                <p className="text-[10px] font-mono opacity-40 truncate">{noClip ? t('timeline.noClipSelected') : clip.name}</p>
             </div>
+            <Separator />
+
+            {/* Clipboard group */}
+            <Item
+                icon={Copy}
+                label={t('timeline.copy')}
+                hint="⌘C"
+                disabled={noClip}
+                onClick={() => run(() => store().copyClip(clip.id))}
+            />
+            {pasteAt && (
+                <Item
+                    icon={ClipboardPaste}
+                    label={t('timeline.pasteHere')}
+                    disabled={!clipboard}
+                    onClick={() => run(() => store().pasteClipAt(pasteAt.trackId, pasteAt.time))}
+                />
+            )}
             <Separator />
 
             {/* Edit group */}
@@ -201,17 +228,20 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
                 icon={Copy}
                 label={t('timeline.duplicate')}
                 hint="⌘D"
+                disabled={noClip}
                 onClick={() => run(() => store().duplicateClip(trackId, clip.id))}
             />
             <Item
                 icon={Copy}
                 label={t('timeline.copyAttributes')}
+                disabled={noClip}
                 onClick={() => run(() => store().copyAttributes(clip.id))}
             />
             {copiedAttributes && (
                 <Item
                     icon={Copy}
                     label={t('timeline.pasteAttributes')}
+                    disabled={noClip}
                     onClick={() => run(() => store().pasteAttributes(trackId, clip.id))}
                 />
             )}
@@ -223,6 +253,7 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
                 icon={Zap}
                 label={t('timeline.rippleDelete')}
                 danger
+                disabled={noClip}
                 onClick={() => run(() => store().rippleDeleteClip(trackId, clip.id))}
             />
             <Item
@@ -230,6 +261,7 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
                 label={t('timeline.delete')}
                 hint="⌫"
                 danger
+                disabled={noClip}
                 onClick={() => run(() => store().deleteClipWithMagnet(trackId, clip.id))}
             />
 
@@ -239,6 +271,7 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
             <Item
                 icon={Wind}
                 label={t('timeline.fadeOut')}
+                disabled={noClip}
                 onClick={() => run(() => store().addTransition(clip.id, 'fade', 1.0))}
                 trailing={
                     <FavoriteTransitionToggle
@@ -251,6 +284,7 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
             <Item
                 icon={Wind}
                 label={t('timeline.crossfade')}
+                disabled={noClip}
                 onClick={() => run(() => store().addTransition(clip.id, 'crossfade', 1.0))}
                 trailing={
                     <FavoriteTransitionToggle
@@ -277,6 +311,7 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
             <Item
                 icon={isMuted ? Volume2 : VolumeX}
                 label={isMuted ? t('timeline.unmuteClip') : t('timeline.muteClip')}
+                disabled={noClip}
                 onClick={() => run(() =>
                     store().updateClip(trackId, clip.id, { volume: isMuted ? 1 : 0 })
                 )}
@@ -288,6 +323,7 @@ const ClipContextMenu = ({ clip, trackId, position, onClose }) => {
             <Item
                 icon={Sparkles}
                 label={t('timeline.cinematicFilter')}
+                disabled={noClip}
                 onClick={() => run(() => store().addFilter(clip.id, 'cinematic', 0.8))}
             />
         </div>

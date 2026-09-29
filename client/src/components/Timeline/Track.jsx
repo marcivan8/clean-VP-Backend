@@ -3,6 +3,7 @@ import { useDroppable } from '@dnd-kit/core';
 import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
 import Clip from './Clip';
+import ClipContextMenu from './ClipContextMenu';
 import { Video, Music, Type, Volume2, VolumeX, Headphones, X } from 'lucide-react';
 import classNames from 'classnames';
 import useTimelineStore from '../../store/useTimelineStore';
@@ -37,6 +38,27 @@ const Track = ({ track, labelWidth = 128, compact = false }) => {
         id: track.id,
         data: { trackId: track.id }
     });
+
+    // Right-click on empty lane space (desktop): the clip menu for the current
+    // selection, plus "Paste here" at the clicked time. Clip.jsx's own
+    // onContextMenu stops propagation, so this only fires off-clip.
+    const [emptyMenu, setEmptyMenu] = React.useState(null);
+    const handleLaneContextMenu = (e) => {
+        if (compact) return; // mobile has its own clip toolbar
+        e.preventDefault();
+        const rect = e.currentTarget.getBoundingClientRect();
+        const time = Math.max(0, (e.clientX - rect.left) / (zoomLevel || 1));
+        const st = useTimelineStore.getState();
+        const selId = st.activeClipId || st.selectedClipIds[st.selectedClipIds.length - 1] || null;
+        let target = null;
+        if (selId) {
+            for (const tr of st.tracks) {
+                const c = tr.clips.find(cl => cl.id === selId);
+                if (c) { target = { clip: c, trackId: tr.id }; break; }
+            }
+        }
+        setEmptyMenu({ x: e.clientX, y: e.clientY, time, target });
+    };
 
     const isText = track.type === 'text';
     const trackHeight = isText
@@ -123,6 +145,7 @@ const Track = ({ track, labelWidth = 128, compact = false }) => {
                     isOver ? "bg-white/5" : "bg-black/20 group-hover:bg-black/30"
                 )}
                 style={{ width: `${duration * zoomLevel}px`, minWidth: '100%', height: `${trackHeight}px` }}
+                onContextMenu={handleLaneContextMenu}
             >
                 {/* Grid Lines (Optional) */}
                 <div className="absolute inset-0 pointer-events-none opacity-10 bg-[linear-gradient(90deg,transparent_99%,#fff_100%)] bg-[length:100px_100%]"></div>
@@ -131,6 +154,15 @@ const Track = ({ track, labelWidth = 128, compact = false }) => {
                     <Clip key={clip.id} clip={clip} trackId={track.id} />
                 ))}
             </div>
+            {emptyMenu && (
+                <ClipContextMenu
+                    clip={emptyMenu.target?.clip || null}
+                    trackId={emptyMenu.target?.trackId || track.id}
+                    position={{ x: emptyMenu.x, y: emptyMenu.y }}
+                    pasteAt={{ trackId: track.id, time: emptyMenu.time }}
+                    onClose={() => setEmptyMenu(null)}
+                />
+            )}
         </div>
     );
 };
