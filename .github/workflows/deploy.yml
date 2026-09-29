@@ -107,9 +107,21 @@ jobs:
             echo "::error::Add it under Settings → Environments → ${{ github.ref_name == 'main' && 'production' || 'staging' }} → Secrets."
             exit 1
           fi
+          # Serialize migration runs that hit the SAME database. main and
+          # staging deploy in parallel (separate concurrency groups), so when
+          # both branches are pushed together two runs applied the same files
+          # at once and Postgres failed a CREATE OR REPLACE FUNCTION with
+          # "tuple concurrently updated". Each psql session first takes a
+          # session-level advisory lock (released when psql exits), so only
+          # one file is ever being applied per database at a time; a second
+          # run simply waits. Runs against different databases don't block
+          # each other. Requires a session-mode connection (direct :5432 or
+          # the session pooler), which is what SUPABASE_DB_URL documents.
           for f in $(ls supabase/migrations/*.sql | sort) $(ls migrations/*.sql | sort); do
             echo "Applying $f …"
-            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "$f"
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 \
+              -c "DO \$\$ BEGIN PERFORM pg_advisory_lock(727274); END \$\$;" \
+              -f "$f"
           done
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
