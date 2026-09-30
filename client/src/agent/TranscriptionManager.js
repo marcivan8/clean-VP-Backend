@@ -109,6 +109,11 @@ class TranscriptionManagerClass {
         }
     }
 
+    /** True while a background transcription of `filename` is in flight. */
+    isTranscribing(filename) {
+        return !!filename && this._controllers.has(filename);
+    }
+
     cancel() {
         // Cancel all in-flight transcriptions
         this._controllers.forEach((ctrl) => ctrl.abort());

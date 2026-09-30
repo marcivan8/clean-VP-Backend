@@ -25,6 +25,8 @@ import { clipsInGroup, computeGroupMoveUpdates, computeGroupDuplicateSpecs } fro
 import { deriveSpeakerCrop, deriveTrackingSegments } from '../motion/ObjectLayers.js';
 import { computeRippleDelete, computeGapRipple, remapTimelineWords } from '../timeline/rippleDelete.js';
 import { computeMultiMove } from '../timeline/multiMove.js';
+import { computeRangeCut } from '../timeline/rangeCut.js';
+import { mapTranscriptToTimeline } from '../timeline/transcriptMap.js';
 
 // Same breakpoint as hooks/useDeviceType.js (isMobile = width < 768). Used by
 // deleteClipWithMagnet: the main-track magnet is always on for mobile.
@@ -180,6 +182,11 @@ const useTimelineStore = create(
             // Per-file transcript map: { [basename]: Word[] }
             // Accumulates across all uploaded clips so the AI can understand the full timeline.
             transcripts: _preRestoredProject?.transcripts || {},
+            // basename → true for transcripts KNOWN to be in source time (written
+            // by setCaptions with a file path after the timeline-mapping fix).
+            // Older entries may hold timeline-time words and are not reused for
+            // caption mapping — the next caption run re-transcribes that file.
+            transcriptVerified: _preRestoredProject?.transcriptVerified || {},
 
             // Long-Form Intelligence Engine — stores ContentAnalyzer result
             contentAnalysis: _preRestoredProject?.contentAnalysis || null,
@@ -536,8 +543,12 @@ const useTimelineStore = create(
             setCaptions: (captions, filePath) => {
                 const basename = filePath ? filePath.split(/[\\/]/).pop() : null;
                 const newTranscripts = { ...get().transcripts };
-                if (basename && captions?.length > 0) newTranscripts[basename] = captions;
-                set({ captions, captionsFilePath: filePath ?? null, transcriptionAttempted: true, transcripts: newTranscripts });
+                const newVerified = { ...(get().transcriptVerified || {}) };
+                if (basename && captions?.length > 0) {
+                    newTranscripts[basename] = captions;
+                    newVerified[basename] = true; // every setCaptions(words, file) caller passes SOURCE-time words
+                }
+                set({ captions, captionsFilePath: filePath ?? null, transcriptionAttempted: true, transcripts: newTranscripts, transcriptVerified: newVerified });
             },
             // Store timeline-derived words without touching the per-file transcripts index.
             // Use this after segment operations so store.transcripts[file] keeps original
@@ -981,6 +992,113 @@ const useTimelineStore = create(
                 if (newMaxEnd > 0 && Math.abs((Number(state.duration) || 0) - oldMaxEnd) < 0.05) {
                     get().setDuration(newMaxEnd);
                 }
+                return true;
+            },
+
+            /**
+             * Cut a TIMELINE range [start, end) out of the edit (transcript panel
+             * "cut selected words"). The range comes from words already mapped
+             * onto the timeline, so only the clip(s) that actually play those
+             * words are cut, whatever file they come from; everything after
+             * slides left, captions lose the cut words and stay in sync, b-roll
+             * and audio are left alone (same rules as rippleDeleteClip).
+             * One undo step, restoring word-level captions and duration too.
+             * Planning is pure: timeline/rangeCut.js computeRangeCut.
+             * @returns {boolean} true when something was cut
+             */
+            cutTimelineRange: (start, end) => {
+                const state = get();
+                const a = Math.max(0, Number(start) || 0);
+                const b = Number(end);
+                const plan = computeRangeCut(state.tracks, a, b);
+                if (!plan.changed) return false;
+
+                const maxEnd = (tracks) => tracks.reduce((m, t) =>
+                    Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
+                const oldMaxEnd = maxEnd(state.tracks);
+                // Placements as they were before the cut: the right-hand piece of
+                // a split clip is a copy of its original placement, and caption
+                // words are stored minus the placement's wordShift.
+                const before = timelineManager.getState().entities.placements || {};
+
+                get()._saveHistory();
+                set(s => {
+                    const past = s.past.slice();
+                    const last = past[past.length - 1];
+                    if (last) past[past.length - 1] = { ...last, _extraState: { captions: state.captions, duration: state.duration } };
+                    return { past };
+                });
+
+                timelineManager.beginTransaction();
+                try {
+                    plan.removeIds.forEach(id => {
+                        timelineManager.dispatch(TimelineActions.removePlacement(id));
+                    });
+                    plan.updates.forEach(({ id, updates }) => {
+                        timelineManager.dispatch(TimelineActions.updatePlacement(id, updates));
+                    });
+                    plan.adds.forEach(({ fromId, overrides }) => {
+                        const src = before[fromId];
+                        if (!src) return;
+                        const { id: _id, createdAt: _c, ...rest } = src;
+                        timelineManager.dispatch(TimelineActions.addPlacement({ ...rest, ...overrides }));
+                    });
+                    plan.wordEdits.forEach(({ id, words, content }) => {
+                        const p = before[id];
+                        if (!p?.clipId) return;
+                        const shift = Number(p.wordShift) || 0;
+                        const stored = words.map(w => ({
+                            ...w,
+                            start: Number.isFinite(w?.start) ? w.start - shift : w?.start,
+                            end: Number.isFinite(w?.end) ? w.end - shift : w?.end,
+                        }));
+                        timelineManager.dispatch(TimelineActions.updateClip(p.clipId,
+                            content !== undefined ? { words: stored, content, name: content } : { words: stored }));
+                    });
+                    timelineManager.commitTransaction('Cut From Transcript');
+                } catch (err) {
+                    timelineManager.rollbackTransaction();
+                    set(s => ({ past: s.past.slice(0, -1) }));
+                    console.error('[cutTimelineRange] failed, timeline left unchanged:', err);
+                    return false;
+                }
+
+                // Same empty-track cleanup as rippleDeleteClip (a caption track
+                // whose captions were all cut).
+                const currentPlacements = Object.values(timelineManager.getState().entities.placements);
+                const currentLayers = Object.values(timelineManager.getState().entities.layers);
+                currentLayers.forEach(layer => {
+                    if (layer.id === 'track-default-video' || layer.id === 'track-default-audio') return;
+                    if (layer.type === 'video' || layer.type === 'audio') return;
+                    if (!currentPlacements.some(p => p.layerId === layer.id)) {
+                        timelineManager.dispatch(TimelineActions.removeLayer(layer.id));
+                    }
+                });
+
+                const tracks = timelineManager.toLegacyTracks();
+
+                // Word-level transcript on the timeline clock: re-derive from the
+                // source-time transcripts when we have them (exact), otherwise
+                // shift the existing words through the cut.
+                let captions = remapTimelineWords(state.captions, [[a, b]]);
+                const verified = {};
+                for (const [k, v] of Object.entries(state.transcripts || {})) {
+                    if (state.transcriptVerified?.[k]) verified[k] = v;
+                }
+                if (Object.keys(verified).length > 0) {
+                    const mapped = mapTranscriptToTimeline({ tracks, assets: state.assets, transcripts: verified });
+                    if (mapped.length > 0) captions = mapped;
+                }
+
+                set({ tracks, activeClipId: null, selectedClipIds: [], captions });
+
+                const newMaxEnd = maxEnd(tracks);
+                if (newMaxEnd > 0 && Math.abs((Number(state.duration) || 0) - oldMaxEnd) < 0.05) {
+                    get().setDuration(newMaxEnd);
+                }
+                // Keep the playhead on the same moment of the edit.
+                const ct = Number(get().currentTime) || 0;
+                if (ct > a) get().seek?.(ct >= b ? ct - (b - a) : a);
                 return true;
             },
 
@@ -2052,6 +2170,7 @@ const useTimelineStore = create(
                     // as four separate-looking bugs. They are one bug.
                     captionsFilePath:     state.captionsFilePath || null,
                     transcripts:          state.transcripts || {},
+                    transcriptVerified:   state.transcriptVerified || {},
                     contentAnalysis:      state.contentAnalysis || null,
                     speakerMap:           state.speakerMap || {},
                     diarizationByAsset:   state.diarizationByAsset || {},
@@ -2133,6 +2252,7 @@ const useTimelineStore = create(
                     // generated would reintroduce the exact bug being fixed.
                     captionsFilePath:     projectData.captionsFilePath     ?? get().captionsFilePath,
                     transcripts:          projectData.transcripts          ?? get().transcripts,
+                    transcriptVerified:   projectData.transcriptVerified   ?? get().transcriptVerified,
                     contentAnalysis:      projectData.contentAnalysis      ?? get().contentAnalysis,
                     speakerMap:           projectData.speakerMap           ?? get().speakerMap,
                     diarizationByAsset:   projectData.diarizationByAsset   ?? get().diarizationByAsset,

@@ -37,6 +37,8 @@ import { EventBus, EVENT_TYPES } from './EventBus.js';
 // timings instead of collapsing them to a line of text; see
 // groupWordsIntoCaptions below and client/src/motion/CaptionModel.js.
 import { groupWordsIntoSegments } from '../motion/CaptionModel.js';
+import { mapTranscriptToTimeline, listMainTrackSources } from '../timeline/transcriptMap.js';
+import { transcriptionManager } from './TranscriptionManager.js';
 // R68 — AI Animation Intelligence. `animate_automatically` applies the
 // server's resolved plan (AnimationKnowledgeGraph.js) the exact same way
 // the manual Motion tab does, so a brain-picked preset and a hand-picked one
@@ -194,34 +196,22 @@ function groupWordsIntoCaptions(words, maxWords = 6, pauseThreshold = 0.4) {
  * Words that were cut are dropped.
  */
 function deriveTimelineTranscript(tracks, originalWords) {
-    if (!originalWords?.length) return null;
-    const videoTrack = tracks?.find(t => t.type === 'video');
-    if (!videoTrack?.clips?.length) return null;
-
-    const clips = [...videoTrack.clips]
-        .sort((a, b) => a.start - b.start)
-        .filter(c => c.duration > 0);
-
-    const timelineWords = [];
-    for (const clip of clips) {
-        const srcStart = clip.offset || 0;
-        const srcEnd   = srcStart + clip.duration;
-        const tlBase   = clip.start;
-        const speed    = clip.speed || 1;
-
-        for (const w of originalWords) {
-            const wStart = w.start ?? 0;
-            const wEnd   = w.end   ?? wStart;
-            if (wStart >= srcStart - 0.01 && wEnd <= srcEnd + 0.01) {
-                timelineWords.push({
-                    word:  w.word || w.content || w.text || '',
-                    start: tlBase + (wStart - srcStart) / speed,
-                    end:   tlBase + (wEnd   - srcStart) / speed,
-                });
-            }
-        }
+    // Delegates to timeline/transcriptMap.js. The old version here applied ONE
+    // file's transcript to every clip of the first video track and ignored
+    // clip speed, so on a multi-file or reordered edit, clips received words
+    // from the wrong file / wrong moment. Now every main-track clip is mapped
+    // through ITS OWN source file's transcript (clip.assetId → store.assets →
+    // store.transcripts). `originalWords` is only used as a fallback for
+    // single-source timelines whose file isn't in the transcripts map yet.
+    // Only transcripts known to be in SOURCE time are used — entries written
+    // before the setCaptions fix below may hold timeline-time words.
+    const { assets, transcripts, transcriptVerified } = useTimelineStore.getState();
+    const verified = {};
+    for (const [k, v] of Object.entries(transcripts || {})) {
+        if (transcriptVerified?.[k]) verified[k] = v;
     }
-    return timelineWords.length > 0 ? timelineWords : null;
+    const mapped = mapTranscriptToTimeline({ tracks, assets, transcripts: verified, fallbackWords: originalWords || null });
+    return mapped.length > 0 ? mapped : null;
 }
 
 // ─── MediaExecutionEngine ────────────────────────────────────────────────────
@@ -920,6 +910,17 @@ export class MediaExecutionEngine {
                 const srcEnd   = command.src_end   ?? args.src_end   ?? args.srcEnd;
                 if (typeof srcStart !== 'number' || typeof srcEnd !== 'number' || srcEnd <= srcStart) {
                     return { action, success: false, message: `cut_source_range: invalid range ${srcStart}–${srcEnd}` };
+                }
+                // The server finds the phrase in the captions the client sent
+                // (store.captions). Once captions have been placed on an edited
+                // timeline those words are in TIMELINE time (each carries
+                // srcStart from transcriptMap.js), so cut the timeline range,
+                // same as the transcript panel. Raw source-time captions keep
+                // the old source-range cut.
+                const timelineWords = Array.isArray(store.captions) && store.captions.some(w => w && w.srcStart !== undefined);
+                if (timelineWords && typeof store.cutTimelineRange === 'function') {
+                    store.cutTimelineRange(srcStart, srcEnd);
+                    return { action, success: true, message: `Cut ${srcStart.toFixed(1)}s–${srcEnd.toFixed(1)}s` };
                 }
                 if (typeof store.cutSourceRange === 'function') {
                     store.cutSourceRange(srcStart, srcEnd);
@@ -2453,6 +2454,138 @@ export class MediaExecutionEngine {
     }
 
     /**
+     * Captions for a timeline built from one or more source files.
+     * 1. Each main-track source without a verified (source-time) transcript is
+     *    transcribed, one at a time (the audio worker runs one job at a time,
+     *    and a queued job must not sit out its own poll timeout). A file the
+     *    background upload transcription is still working on is waited for
+     *    instead of being transcribed twice. Each finished transcript is saved
+     *    right away, so an interrupted run resumes where it stopped.
+     * 2. All transcripts are mapped through the clips that play them
+     *    (timeline/transcriptMap.js) and replace the caption clips.
+     * Files that fail are skipped; captions still go on the clips that have
+     * words. Running out of AI operations stops the loop and shows the
+     * upgrade prompt, like every other quota hit.
+     */
+    async _captionMainTrackSources(sources, resolvedPayload, job, endpoint) {
+        const isDone = (key) => {
+            const s = useTimelineStore.getState();
+            return !!s.transcriptVerified?.[key] && Array.isArray(s.transcripts?.[key]) && s.transcripts[key].length > 0;
+        };
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        const failed = [];
+        let quotaHit = false;
+        let transcribed = 0;
+        let noSpeech = 0;
+
+        // The whole job has a single 5-min budget (runJob), sized for ONE
+        // Whisper run. With several files to transcribe, give it one budget per
+        // file so a 3-file edit isn't cancelled halfway. Never shortens it.
+        const pending = sources.filter(s => !isDone(s.key)).length;
+        if (pending > 1 && job.timeoutHandle) {
+            clearTimeout(job.timeoutHandle);
+            job.timeoutHandle = setTimeout(() => {
+                console.warn(`[MediaExecutionEngine] Job ${job.id} timed out`);
+                job.cancel();
+                job.setState(EXECUTION_STATES.TIMEOUT);
+                job.error = 'Execution timed out';
+            }, pending * TIMEOUTS.API_CALL);
+        }
+
+        for (const { key, path } of sources) {
+            if (job.signal.aborted) throw new Error('API call cancelled');
+            if (isDone(key)) continue;
+
+            // Upload-time background transcription of this same file still
+            // running → wait for it (bounded) rather than paying for it twice.
+            const waitUntil = Date.now() + 330_000;
+            while (transcriptionManager.isTranscribing(path) && Date.now() < waitUntil) {
+                if (job.signal.aborted) throw new Error('API call cancelled');
+                await sleep(1000);
+            }
+            if (isDone(key)) continue;
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.API_CALL);
+            const onAbort = () => controller.abort();
+            job.signal.addEventListener('abort', onAbort, { once: true });
+            try {
+                console.log(`[MediaExecutionEngine] 💬 captions: transcribing "${path}"`);
+                const response = await authFetch(endpoint, {
+                    method: 'POST',
+                    body: JSON.stringify({ ...resolvedPayload, filename: path }),
+                    signal: controller.signal,
+                });
+                if (!response.ok) {
+                    const body = await response.json().catch(() => ({}));
+                    if (response.status === 402 || body?.error === 'AI_OPS_LIMIT') {
+                        EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
+                            reason: 'ai_ops',
+                            message: body?.message || "You've used all your AI operations this month.",
+                            upgradeRequired: body?.upgradeRequired || 'creator',
+                        });
+                        quotaHit = true;
+                        break;
+                    }
+                    throw new Error(`API error ${response.status}: ${body?.error || body?.message || response.statusText}`);
+                }
+                let result = await response.json();
+                if (result?.jobId) result = await pollJobResult(result.jobId, job.signal);
+                const words = Array.isArray(result?.words) ? result.words : [];
+                if (words.length > 0) {
+                    // Source-time words for THIS file → transcripts[key], marked verified.
+                    useTimelineStore.getState().setCaptions(words, path);
+                    transcribed++;
+                } else {
+                    noSpeech++;
+                    console.warn(`[MediaExecutionEngine] captions: no words for "${path}" (no speech?)`);
+                }
+            } catch (err) {
+                if (job.signal.aborted || err?.message === 'Polling cancelled') throw new Error('API call cancelled');
+                console.error(`[MediaExecutionEngine] captions: transcription failed for "${path}":`, err);
+                failed.push(key);
+            } finally {
+                clearTimeout(timeoutId);
+                job.signal.removeEventListener('abort', onAbort);
+            }
+        }
+
+        if (job.signal.aborted) throw new Error('API call cancelled');
+
+        const store = useTimelineStore.getState();
+        const verified = {};
+        for (const [k, v] of Object.entries(store.transcripts || {})) {
+            if (store.transcriptVerified?.[k]) verified[k] = v;
+        }
+        const words = mapTranscriptToTimeline({ tracks: store.tracks, assets: store.assets, transcripts: verified });
+        console.log(`[MediaExecutionEngine] 💬 captions: ${sources.length} source file(s), ${transcribed} transcribed now, ${failed.length} failed, ${words.length} words on the timeline`);
+
+        if (words.length === 0) {
+            return {
+                engine: 'api', success: false, endpoint,
+                error: quotaHit
+                    ? "You've used all your AI operations this month."
+                    : failed.length > 0
+                        ? 'Transcription failed, so no captions could be placed. Try again in a moment.'
+                        : 'No speech was found in this video, so there are no captions to add.',
+            };
+        }
+
+        store.setTimelineTranscript?.(words);
+        const captions = groupWordsIntoCaptions(words);
+        console.log(`[MediaExecutionEngine] 💬 captions: adding ${captions.length} caption clips`);
+        store.addCaptionClips(captions);
+
+        // Files still without words, not counting ones that simply have no speech.
+        const missing = Math.max(0, sources.filter(s => !isDone(s.key)).length - noSpeech);
+        return {
+            engine: 'api', success: true, endpoint,
+            result: { text: words.map(w => w.word).join(' '), words },
+            ...(missing > 0 ? { message: `Captions added. ${missing} of ${sources.length} video files couldn't be transcribed, so their clips have no captions yet.` } : {}),
+        };
+    }
+
+    /**
      * executeApiCall — PATCHED
      *
      * Changes vs original:
@@ -2550,14 +2683,28 @@ export class MediaExecutionEngine {
         // timestamps match 1:1) and edited timelines (silence/filler removed,
         // timestamps re-mapped through clip offsets so captions land correctly).
         if (endpoint === '/api/captions/generate') {
+            // Every source file heard on the main track gets its own
+            // transcript (one Whisper run per file that doesn't have a verified
+            // one yet), then all of them are mapped through the clips. This
+            // used to transcribe only $uploaded_file, so clips from any other
+            // file got no captions at all.
+            const sources = listMainTrackSources(store.tracks, store.assets);
+            if (sources.length > 0) {
+                return await this._captionMainTrackSources(sources, resolvedPayload, job, endpoint);
+            }
+
             const bname = (p) => (p || '').split(/[\\/]/).pop();
             const processedFile = Object.entries(resolvedPayload).find(([, v]) => typeof v === 'string' && (v.startsWith('raw/') || v.startsWith('temp/')));
             const processedBase = processedFile ? bname(processedFile[1]) : bname(store.uploadedFilePath);
 
-            const originalWords = (store.transcripts && processedBase && store.transcripts[processedBase])
+            // Only reuse a transcript known to be in SOURCE time. `store.captions`
+            // is no longer a fallback: after any edit it holds TIMELINE-time
+            // words, and re-mapping those through clip offsets a second time is
+            // exactly what desynced captions. Unknown → fresh Whisper below.
+            const originalWords = (processedBase && store.transcriptVerified?.[processedBase]
+                && store.transcripts?.[processedBase]?.length > 0)
                 ? store.transcripts[processedBase]
-                : (processedBase && bname(store.captionsFilePath) === processedBase ? store.captions : null)
-                ?? (store.captions?.length > 0 ? store.captions : null);
+                : null;
 
             if (originalWords?.length > 0) {
                 // Re-map word timestamps through the current clip positions so captions
@@ -2569,7 +2716,11 @@ export class MediaExecutionEngine {
                 // Apply captions inline — the normal autoCaptions handler at the bottom
                 // of this function is never reached when we return early, so we must
                 // call setCaptions and addCaptionClips here before returning.
-                if (store.setCaptions) store.setCaptions(words, processedBase || null);
+                // TIMELINE-time words → store.captions only. This used to be
+                // setCaptions(words, processedBase), which OVERWROTE the file's
+                // source-time transcript with timeline-time words, so every later
+                // caption run / transcript view re-mapped already-mapped times.
+                if (store.setTimelineTranscript) store.setTimelineTranscript(words);
                 if (words.length > 0) {
                     const captions = groupWordsIntoCaptions(words);
                     console.log(`[MediaExecutionEngine] 💬 autoCaptions (short-circuit): adding ${captions.length} caption clips`);
@@ -2814,8 +2965,11 @@ export class MediaExecutionEngine {
                     // Re-map Whisper's source-file timestamps through the current clip offsets
                     // so captions land on the correct timeline positions after any trimming or
                     // silence removal. Same remapping the short-circuit path already applies.
-                    const timelineWords = deriveTimelineTranscript(store.tracks, result.words);
+                    const timelineWords = deriveTimelineTranscript(useTimelineStore.getState().tracks, result.words);
                     const words = timelineWords || result.words;
+                    // Keep store.captions on the timeline clock too (setCaptions
+                    // above left it holding the raw source-time words).
+                    if (timelineWords) useTimelineStore.getState().setTimelineTranscript?.(timelineWords);
                     const captions = groupWordsIntoCaptions(words);
                     console.log(`[MediaExecutionEngine] 💬 autoCaptions: adding ${captions.length} caption clips`);
                     store.addCaptionClips(captions);

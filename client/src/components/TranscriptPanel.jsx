@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../store/useTimelineStore';
 import { Scissors } from 'lucide-react';
 import classNames from 'classnames';
+import { mapTranscriptToTimeline } from '../timeline/transcriptMap.js';
 
 function fmtTime(s) {
     const m = Math.floor(s / 60);
@@ -23,15 +24,16 @@ const SPEAKER_PALETTE = [
 
 const TranscriptPanel = () => {
     const { t } = useTranslation('editor');
-    const { captions, tracks, assets, transcripts, currentTime, seek, cutSourceRange } =
+    const { captions, tracks, assets, transcripts, transcriptVerified, currentTime, seek, cutTimelineRange } =
         useTimelineStore(useShallow(s => ({
             captions:       s.captions,
             tracks:         s.tracks,
             assets:         s.assets,
             transcripts:    s.transcripts,
+            transcriptVerified: s.transcriptVerified,
             currentTime:    s.currentTime,
             seek:           s.seek,
-            cutSourceRange: s.cutSourceRange,
+            cutTimelineRange: s.cutTimelineRange,
         })));
 
     // Re-derive timeline-mapped words from raw per-file transcripts + current
@@ -41,37 +43,21 @@ const TranscriptPanel = () => {
     const displayWords = useMemo(() => {
         const hasRawTranscripts = transcripts && Object.keys(transcripts).length > 0;
         if (!hasRawTranscripts) return captions;
-
-        const videoTracks = (tracks || []).filter(t => t.type === 'video');
-        const derived = [];
-
-        for (const track of videoTracks) {
-            for (const clip of (track.clips || [])) {
-                const asset = (assets || []).find(a => a.id === clip.assetId);
-                if (!asset) continue;
-                const rawWords = transcripts[asset.name];
-                if (!rawWords?.length) continue;
-
-                const clipDuration = clip.end - clip.start;
-                const srcStart = clip.offset ?? 0;
-                const srcEnd   = srcStart + clipDuration;
-
-                for (const w of rawWords) {
-                    if (w.start >= srcStart && w.start < srcEnd) {
-                        const tlStart = clip.start + (w.start - srcStart);
-                        const tlEnd   = Math.min(clip.end, clip.start + (w.end - srcStart));
-                        // Preserve source timestamps so cutSourceRange (which
-                        // filters by clip.offset, a source-time property) works
-                        // correctly when the user cuts from the transcript panel.
-                        derived.push({ ...w, start: tlStart, end: tlEnd, srcStart: w.start, srcEnd: w.end });
-                    }
-                }
-            }
-        }
-
-        derived.sort((a, b) => a.start - b.start);
+        // Same mapping the captions use (timeline/transcriptMap.js): each
+        // main-track clip shows the words of ITS OWN source file, shifted to
+        // where the clip sits on the timeline, speed-adjusted. The previous
+        // inline version read `clip.end`, which timeline clips don't have
+        // (NaN → nothing derived → fell back to stale captions), and looked
+        // transcripts up by the asset's display name instead of the uploaded
+        // file key. Each word is in TIMELINE time (start/end), which is what
+        // cutTimelineRange takes.
+        // Prefer transcripts known to be in source time; projects saved before
+        // that marker existed have none marked, so they use every entry.
+        const verified = Object.fromEntries(Object.entries(transcripts).filter(([k]) => transcriptVerified?.[k]));
+        const source = Object.keys(verified).length > 0 ? verified : transcripts;
+        const derived = mapTranscriptToTimeline({ tracks, assets, transcripts: source });
         return derived.length > 0 ? derived : captions;
-    }, [transcripts, tracks, assets, captions]);
+    }, [transcripts, transcriptVerified, tracks, assets, captions]);
 
     const [selection, setSelection] = useState(null);
     const isSelecting = useRef(false);
@@ -126,19 +112,20 @@ const TranscriptPanel = () => {
     }, []);
 
     // ── Cut selected words ────────────────────────────────────────────────────
-    // cutSourceRange expects SOURCE timestamps (it filters by clip.offset).
-    // Derived displayWords carry both timeline time (.start/.end) and the
-    // original Whisper source time (.srcStart/.srcEnd). Fall back to .start
-    // when srcStart is absent (captions are source-time already).
+    // Cut in TIMELINE time: displayWords are already placed on the edited
+    // timeline, so [first word start, last word end] is exactly the stretch
+    // of the edit to remove. The old cutSourceRange(srcStart, srcEnd) removed
+    // that span of SOURCE time from every main-track clip, whatever file it
+    // came from, and re-packed the track, so on multi-file or reordered edits
+    // it cut the wrong clips and captions drifted.
     const cutRange = useCallback(() => {
         if (!selRange || !displayWords.length) return;
         const w0 = displayWords[selRange[0]];
         const w1 = displayWords[selRange[1]];
-        const srcStart = w0.srcStart ?? w0.start;
-        const srcEnd   = w1.srcEnd   ?? w1.end;
-        cutSourceRange(srcStart, srcEnd);
+        if (!w0 || !w1) return;
+        cutTimelineRange?.(w0.start, w1.end);
         setSelection(null);
-    }, [selRange, displayWords, cutSourceRange]);
+    }, [selRange, displayWords, cutTimelineRange]);
 
     // ── Empty state ───────────────────────────────────────────────────────────
     if (!displayWords || displayWords.length === 0) {
