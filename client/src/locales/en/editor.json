@@ -680,7 +680,15 @@
     "apply": "Apply",
     "notNow": "Not now",
     "outOfOps": "Out of AI operations this month",
-    "seePlans": "See plans"
+    "seePlans": "See plans",
+    "readyTitle": "Your video is ready. What should I do with it?",
+    "footnote": "Roka answers in your language. Every edit can be undone.",
+    "stripReady": "ready",
+    "stripPreparing": "preparing",
+    "stripFailed": "upload failed",
+    "play": "Play",
+    "pause": "Pause",
+    "collapse": "Back to the editor"
   },
   "mobileCaptions": {
     "panel": "All",

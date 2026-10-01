@@ -1,4 +1,5 @@
 import React, { useEffect, useId } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -7,6 +8,12 @@ import { useTranslation } from 'react-i18next';
  * speed, editor menu). Fixed above the bottom toolbar (z-60 > its z-50),
  * closes on backdrop tap, the close button or Escape. Renders nothing when
  * closed. Mobile-only callers; uses the app's design tokens.
+ *
+ * Portaled to <body>: a `position: fixed` element is positioned against the
+ * nearest ancestor with a transform / filter / backdrop-filter, not the
+ * screen. The editor header (backdrop-filter) and the timeline (dnd-kit
+ * transforms) are such ancestors, so a sheet opened from there (the ☰ menu)
+ * was squeezed into the 44 px header instead of rising from the bottom.
  */
 export default function MobileSheet({ open, title, onClose, children }) {
     const titleId = useId();
@@ -19,7 +26,7 @@ export default function MobileSheet({ open, title, onClose, children }) {
     }, [open, onClose]);
 
     if (!open) return null;
-    return (
+    const sheet = (
         <>
             <div
                 aria-hidden="true"
@@ -56,6 +63,7 @@ export default function MobileSheet({ open, title, onClose, children }) {
             </section>
         </>
     );
+    return typeof document !== 'undefined' ? createPortal(sheet, document.body) : sheet;
 }
 
 /** Section label used inside sheets. */

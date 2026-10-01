@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react';
-import { Send, ChevronUp, Loader2, Check, Undo2, Clock, Zap } from 'lucide-react';
+import { Send, ChevronUp, ChevronDown, Loader2, Check, Undo2, Clock, Zap, Play, Pause } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
 import useAIStore from '../store/useAIStore';
 import useTimelineStore from '../store/useTimelineStore';
@@ -9,6 +10,63 @@ import { enqueueIfVideoNotReady, runPromptNow, drainPromptQueue, aiWaitReason } 
 import { undoTaskEdits } from '../agent/undoTask.js';
 import { CaptionStyleCallout } from './MobileCaptionSheets';
 import { EventBus, EVENT_TYPES } from '../agent/EventBus.js';
+import { getMainVideoTrackId } from '../timeline/rippleDelete.js';
+
+function formatLength(secs) {
+    const n = Math.max(0, Math.round(Number(secs) || 0));
+    return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Top of the full Roka screen (mockup "Ask Roka"): the video as a strip,
+ * thumbnail, name, length · format · status, and Play, so the conversation
+ * gets the room the preview had.
+ */
+function PreviewStrip({ uploadHeadline }) {
+    const { t } = useTranslation('editor');
+    const { projectName, duration, aspectRatio, isPlaying, thumb, firstName } = useTimelineStore(useShallow(s => {
+        const mainId = getMainVideoTrackId(s.tracks || []);
+        const main = (s.tracks || []).find(tr => tr.id === mainId);
+        const firstClip = main?.clips?.[0];
+        const asset = firstClip ? (s.assets || []).find(a => a.id === firstClip.assetId) : null;
+        return {
+            projectName: s.projectName,
+            duration: s.duration,
+            aspectRatio: s.aspectRatio,
+            isPlaying: s.isPlaying,
+            thumb: asset?.thumbnail || null,
+            firstName: asset?.name || firstClip?.name || '',
+        };
+    }));
+    const status = uploadHeadline === 'failed'
+        ? t('mobileRoka.stripFailed')
+        : uploadHeadline === 'waiting' ? t('mobileRoka.stripPreparing') : t('mobileRoka.stripReady');
+    const portrait = aspectRatio === '9:16';
+    return (
+        <div className="shrink-0 flex items-center gap-3 px-3" style={{ height: 96, background: '#000', borderBottom: '1px solid var(--line-soft)' }}>
+            <span aria-hidden="true" style={{ width: portrait ? 44 : 112, height: portrait ? 78 : 63, borderRadius: 6, overflow: 'hidden', flexShrink: 0, background: 'var(--bg-3)', border: '1px solid var(--line)' }}>
+                {thumb && <img src={thumb} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+            </span>
+            <span className="flex-1 min-w-0 flex flex-col gap-1">
+                <span style={{ fontFamily: 'var(--f-sans)', fontSize: 14, fontWeight: 600, color: 'var(--fg)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {projectName || firstName}
+                </span>
+                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 11.5, color: uploadHeadline === 'failed' ? 'var(--coral)' : 'var(--fg-2)' }}>
+                    {formatLength(duration)} · {aspectRatio || '16:9'} · {status}
+                </span>
+            </span>
+            <button
+                type="button"
+                onClick={() => useTimelineStore.getState().togglePlay()}
+                aria-label={isPlaying ? t('mobileRoka.pause') : t('mobileRoka.play')}
+                className="shrink-0 rounded-full inline-flex items-center justify-center"
+                style={{ width: 44, height: 44, border: 0, background: 'var(--fg)', color: 'var(--bg)' }}
+            >
+                {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
+            </button>
+        </div>
+    );
+}
 
 // Inline SVG sparkles (avoids re-importing from lucide just for this)
 const SparklesIcon = ({ style }) => (
@@ -108,9 +166,14 @@ function CaptionProgressCard({ files }) {
  * card with Undo / Keep; suggestion chips follow the project (useAIStore
  * quickChips); 44px send button.
  *
- * @param {function} onExpand   Opens the full AI bottom sheet.
+ * @param {function} onExpand   Opens the full Roka screen (AI tab).
+ * @param {boolean}  expanded   Full Roka screen (mockup "Ask Roka"): fixed
+ *                              between the header and the bottom toolbar,
+ *                              video strip on top, room for the conversation.
+ *                              Replaces the desktop chat panel on phones.
+ * @param {function} onCollapse Back to the editor.
  */
-export default function MobileAIBar({ onExpand }) {
+export default function MobileAIBar({ onExpand, expanded = false, onCollapse }) {
     const { t } = useTranslation('editor');
     const inputRef      = useRef(null);
     const logEndRef     = useRef(null);
@@ -210,17 +273,25 @@ export default function MobileAIBar({ onExpand }) {
 
     return (
         <div
-            className="md:hidden w-full flex-1 flex flex-col border-t min-h-0"
+            className={expanded
+                ? "md:hidden fixed inset-x-0 z-40 flex flex-col"
+                : "md:hidden w-full flex-1 flex flex-col border-t min-h-0"}
+            role={expanded ? 'dialog' : undefined}
+            aria-label={expanded ? t('mobileRoka.inputLabel') : undefined}
             style={{
-                background:   'var(--bg-2)',
+                background:   expanded ? 'var(--bg)' : 'var(--bg-2)',
                 borderColor:  'var(--line-soft)',
                 touchAction:  'manipulation',
+                ...(expanded ? { top: '2.75rem', bottom: 'calc(3.5rem + env(safe-area-inset-bottom))' } : {}),
             }}
         >
-            {/* ── Header row — tap to open full panel ── */}
+            {expanded && <PreviewStrip uploadHeadline={uploadHeadline} />}
+
+            {/* ── Header row — tap to open / close the full Roka screen ── */}
             <button
                 type="button"
-                onClick={onExpand}
+                onClick={expanded ? onCollapse : onExpand}
+                aria-expanded={expanded}
                 className="w-full shrink-0 flex items-center gap-2 px-3 active:opacity-70 transition-opacity"
                 style={{ borderBottom: '0.5px solid var(--line-soft)', minHeight: 36 }}
             >
@@ -250,7 +321,9 @@ export default function MobileAIBar({ onExpand }) {
                 >
                     {headerText}
                 </span>
-                <ChevronUp className="w-4 h-4 shrink-0" style={{ color: 'var(--fg-3)' }} />
+                {expanded
+                    ? <ChevronDown className="w-4 h-4 shrink-0" style={{ color: 'var(--fg-3)' }} aria-label={t('mobileRoka.collapse')} />
+                    : <ChevronUp className="w-4 h-4 shrink-0" style={{ color: 'var(--fg-3)' }} />}
             </button>
 
             {/* ── Chat log / empty state — fills available space ── */}
@@ -259,11 +332,11 @@ export default function MobileAIBar({ onExpand }) {
                     <div className="h-full flex flex-col items-center justify-center gap-3 pb-2">
                         <SparklesIcon style={{ color: 'var(--accent)', opacity: 0.45 }} />
                         <p style={{ margin: 0, fontFamily: 'var(--f-sans)', fontSize: 14, color: 'var(--fg-2)', textAlign: 'center' }}>
-                            {t('mobileRoka.emptyTitle')}
+                            {expanded && !uploadHeadline ? t('mobileRoka.readyTitle') : t('mobileRoka.emptyTitle')}
                         </p>
                         {/* Suggestion chips — follow the project (SuggestionEngine) */}
                         <div className="flex flex-wrap gap-2 justify-center">
-                            {(quickChips || []).slice(0, 4).map(s => (
+                            {(quickChips || []).slice(0, expanded ? 6 : 4).map(s => (
                                 <button
                                     key={s}
                                     type="button"
@@ -283,6 +356,11 @@ export default function MobileAIBar({ onExpand }) {
                                 </button>
                             ))}
                         </div>
+                        {expanded && (
+                            <p style={{ margin: '8px 0 0', fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg-3)', textAlign: 'center' }}>
+                                {t('mobileRoka.footnote')}
+                            </p>
+                        )}
                     </div>
                 ) : (
                     <>

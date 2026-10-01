@@ -680,7 +680,15 @@
     "apply": "Appliquer",
     "notNow": "Pas maintenant",
     "outOfOps": "Plus d'opérations IA ce mois-ci",
-    "seePlans": "Voir les plans"
+    "seePlans": "Voir les plans",
+    "readyTitle": "Votre vidéo est prête. Que dois-je en faire ?",
+    "footnote": "Roka répond dans votre langue. Chaque modification peut être annulée.",
+    "stripReady": "prête",
+    "stripPreparing": "en préparation",
+    "stripFailed": "échec de l'envoi",
+    "play": "Lire",
+    "pause": "Pause",
+    "collapse": "Retour à l'éditeur"
   },
   "mobileCaptions": {
     "panel": "Tous",

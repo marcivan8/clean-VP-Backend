@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap } from 'lucide-react';
 import classNames from 'classnames';
 import { Player } from '@revideo/player-react';
+import { Video as RevideoVideo, Audio as RevideoAudio, Media as RevideoMedia } from '@revideo/2d';
+import { installIosMediaUnlock } from '../utils/iosMediaUnlock.js';
 import project from '../revideo/project';
 import SettingsPanel from '../components/SettingsPanel';
 import useTimelineStore from '../store/useTimelineStore';
@@ -662,6 +664,16 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
     const projectLoaderRef = useRef(null);
     const playerRef = useRef(null);
+
+    // iPhone / iPad Safari: Revideo's media elements need playsinline and a
+    // user-gesture unlock, or the preview stays black (utils/iosMediaUnlock.js).
+    useEffect(() => installIosMediaUnlock({
+        Video: RevideoVideo,
+        Audio: RevideoAudio,
+        Media: RevideoMedia,
+        isPlaying: () => useTimelineStore.getState().isPlaying,
+        onPrimed: () => { try { playerRef.current?.requestRender?.(); } catch { /* player not ready */ } },
+    }), []);
 
     const handlePlayerReady = (revideoPlayer) => {
         playerRef.current = revideoPlayer;
@@ -2402,7 +2414,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                         {/* Compact AI bar — always visible on mobile, between timeline and toolbar */}
                         {isMobile && (
-                            <MobileAIBar onExpand={() => setMobileSheet('ai')} />
+                            <MobileAIBar
+                                expanded={mobileSheet === 'ai'}
+                                onExpand={() => setMobileSheet('ai')}
+                                onCollapse={() => setMobileSheet(null)}
+                            />
                         )}
                     </main>
 
@@ -2416,8 +2432,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             "fixed inset-x-0 bottom-14 z-40 h-[80vh] max-h-[80vh] rounded-t-2xl border-t overflow-hidden",
                             // Desktop: revert to static right sidebar (always visible)
                             "md:static md:inset-auto md:bottom-auto md:z-30 md:h-full md:max-h-none md:rounded-none md:border-t-0 md:border-l md:w-80 md:shadow-none md:overflow-hidden md:translate-y-0",
-                            // Mobile visibility + disable pointer events when hidden
-                            mobileSheet === 'ai' ? "translate-y-0" : "translate-y-full pointer-events-none md:pointer-events-auto"
+                            // Phones use the full Roka screen (MobileAIBar expanded) for the AI tab;
+                            // this panel stays mounted off-screen so ReasoningPanel's listeners
+                            // (project analysis, suggestions) keep running.
+                            (mobileSheet === 'ai' && !isMobile) ? "translate-y-0" : "translate-y-full pointer-events-none md:pointer-events-auto"
                         )}
                         style={{ background: "linear-gradient(180deg, var(--glass), transparent)" }}
                     >
