@@ -11,6 +11,11 @@ import { transcriptionManager } from './TranscriptionManager.js';
 import { editSessionMemory } from './EditSessionMemory.js';
 import useAIStore from '../store/useAIStore.js';
 import { EventBus, EVENT_TYPES } from './EventBus.js';
+import { shouldPlanFirst, timelineLength } from './planFirst.js';
+
+// Same breakpoint as hooks/useDeviceType.js (mobile < 768px).
+const isMobileViewport = () =>
+    typeof window !== 'undefined' && typeof window.innerWidth === 'number' && window.innerWidth < 768;
 
 const logStep = (message) => useAIStore.getState().addLog({
     id: `step-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -292,7 +297,12 @@ export class EditJobManager {
         // If the plan is marked requiresApproval, pause and wait for the user to
         // confirm before executing. The ApprovalDialog component in IDELayout
         // listens for APPROVAL_REQUIRED on the EventBus and shows Approve/Cancel.
-        if (planResult.plan?.requiresApproval) {
+        // Mobile also pauses before edits that REMOVE content (planFirst.js),
+        // so the user sees what Roka will do and taps Apply. On mobile the
+        // MobileRokaApproval sheet answers this event instead of ApprovalDialog.
+        const planFirst = !planResult.plan?.requiresApproval
+            && shouldPlanFirst(intentResult.operation, isMobileViewport());
+        if (planResult.plan?.requiresApproval || planFirst) {
             logStep('Waiting for your approval…');
             useAIStore.getState().setIsAnalyzing(false); // stop spinner while waiting
 
@@ -304,6 +314,9 @@ export class EditJobManager {
 
             EventBus.emit(EVENT_TYPES.APPROVAL_REQUIRED, {
                 jobId,
+                kind: planFirst ? 'plan_first' : 'plan_approval',
+                operation: intentResult.operation || null,
+                currentLength: timelineLength(useTimelineStore.getState().tracks),
                 title: 'Approve AI Edit Plan',
                 description: planResult.plan.approvalMessage ||
                     `The AI wants to make ${planResult.plan.step_count} edit(s) to your timeline.`,
@@ -312,16 +325,20 @@ export class EditJobManager {
             });
 
             const approved = await new Promise((resolve) => {
-                const unsubGrant = EventBus.on(EVENT_TYPES.APPROVAL_GRANTED, ({ jobId: id }) => {
-                    if (id !== jobId) return;
+                const done = (value) => {
                     unsubGrant(); unsubDeny();
-                    resolve(true);
+                    abortController.signal.removeEventListener('abort', onAbort);
+                    resolve(value);
+                };
+                const unsubGrant = EventBus.on(EVENT_TYPES.APPROVAL_GRANTED, ({ jobId: id }) => {
+                    if (id === jobId) done(true);
                 });
                 const unsubDeny = EventBus.on(EVENT_TYPES.APPROVAL_DENIED, ({ jobId: id }) => {
-                    if (id !== jobId) return;
-                    unsubGrant(); unsubDeny();
-                    resolve(false);
+                    if (id === jobId) done(false);
                 });
+                // Stop pressed while the plan is on screen: don't wait forever.
+                const onAbort = () => done(false);
+                abortController.signal.addEventListener('abort', onAbort);
             });
 
             useAIStore.getState().setIsAnalyzing(true); // resume spinner after decision

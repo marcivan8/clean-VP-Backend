@@ -1,41 +1,116 @@
 import React, { useRef, useEffect } from 'react';
-import { Send, ChevronUp, Loader2 } from 'lucide-react';
+import { Send, ChevronUp, Loader2, Check, Undo2, Clock } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import useAIStore from '../store/useAIStore';
 import useTimelineStore from '../store/useTimelineStore';
 import { workflowController } from '../agent/WorkflowController.js';
+import { summarizeUploads } from '../utils/uploadStatus.js';
+import { enqueueIfVideoNotReady, runPromptNow, drainPromptQueue, aiWaitReason } from '../agent/rokaPromptQueue.js';
+import { undoTaskEdits } from '../agent/undoTask.js';
+import { CaptionStyleCallout } from './MobileCaptionSheets';
 
 // Inline SVG sparkles (avoids re-importing from lucide just for this)
 const SparklesIcon = ({ style }) => (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-        strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={style}>
+        strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={style} aria-hidden="true">
         <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>
     </svg>
 );
 
 // Log types shown in the inline chat log
-const LOG_TYPES = new Set(['assistant', 'success', 'step', 'warning', 'task_complete', 'info']);
+const LOG_TYPES = new Set(['assistant', 'success', 'step', 'warning', 'task_complete', 'info', 'caption_styles']);
 
-// Suggestion chips shown in the empty state
-const SUGGESTIONS = ['Add captions', 'Color grade', 'Trim silence', 'Add music'];
-
-// Color per log type
+// Color per log type (non-bubble lines)
 const LOG_COLOR = {
-    info:          'var(--fg-3)',
-    step:          'var(--fg-2)',
-    assistant:     'var(--fg)',
-    success:       '#4ade80',
-    warning:       '#fb923c',
-    task_complete: 'var(--accent)',
+    info:    'var(--fg-3)',
+    step:    'var(--fg-3)',
+    success: 'var(--mint)',
+    warning: 'var(--coral)',
 };
+
+const bubbleBase = { fontFamily: 'var(--f-sans)', fontSize: 14, lineHeight: 1.45, wordBreak: 'break-word', maxWidth: '86%' };
+
+/** An applied AI edit: what changed, plus Undo / Keep (mobile). */
+function AppliedCard({ log }) {
+    const { t } = useTranslation('editor');
+    const outcome = useAIStore(s => s.taskOutcomes[log.id]);
+    const setTaskOutcome = useAIStore(s => s.setTaskOutcome);
+    const steps = log.data?.stepsApplied ?? 0;
+    return (
+        <div className="mb-2" style={{ borderRadius: 'var(--r-sm)', border: '1px solid color-mix(in oklch, var(--mint) 35%, transparent)', background: 'color-mix(in oklch, var(--mint) 7%, transparent)', padding: '10px 12px' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                <Check size={16} style={{ color: 'var(--mint)', flexShrink: 0, marginTop: 2 }} />
+                <span style={{ ...bubbleBase, maxWidth: 'none', fontWeight: 600, color: 'var(--fg)' }}>{log.message}</span>
+            </div>
+            {steps > 0 && !outcome && (
+                <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    <button
+                        type="button"
+                        onClick={() => { undoTaskEdits(log.data?.preTaskHistoryLen); setTaskOutcome(log.id, 'undone'); }}
+                        style={{ height: 40, padding: '0 14px', borderRadius: 10, border: '1px solid var(--line-strong)', background: 'transparent', color: 'var(--fg)', fontFamily: 'var(--f-sans)', fontSize: 13.5, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                    >
+                        <Undo2 size={15} /> {t('mobileRoka.undo')}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setTaskOutcome(log.id, 'kept')}
+                        style={{ height: 40, padding: '0 14px', borderRadius: 10, border: 0, background: 'var(--accent-soft)', color: 'var(--accent)', fontFamily: 'var(--f-sans)', fontSize: 13.5, fontWeight: 600 }}
+                    >
+                        {t('mobileRoka.keep')}
+                    </button>
+                </div>
+            )}
+            {outcome && (
+                <div style={{ marginTop: 6, fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--fg-3)' }}>
+                    {outcome === 'undone' ? t('mobileRoka.undone') : t('mobileRoka.kept')}
+                </div>
+            )}
+        </div>
+    );
+}
+
+/** Captions for several videos: one line per video (MediaExecutionEngine progress). */
+function CaptionProgressCard({ files }) {
+    const { t } = useTranslation('editor');
+    const done = files.filter(f => f.state === 'done').length;
+    return (
+        <div className="mb-2" role="status" style={{ borderRadius: 'var(--r-sm)', border: '1px solid var(--line-strong)', background: 'var(--bg-3)', padding: '10px 12px' }}>
+            <div style={{ fontFamily: 'var(--f-sans)', fontSize: 14, fontWeight: 600, marginBottom: 6 }}>
+                {t('mobileCaptions.progressTitle', { count: files.length })}
+            </div>
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {files.map(f => (
+                    <li key={f.key} style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 26 }}>
+                        {f.state === 'done' && <Check size={15} style={{ color: 'var(--mint)', flexShrink: 0 }} />}
+                        {f.state === 'running' && <Loader2 size={15} className="animate-spin" style={{ color: 'var(--accent)', flexShrink: 0 }} />}
+                        {f.state === 'waiting' && <span style={{ width: 15, height: 15, borderRadius: 8, border: '2px solid var(--line-strong)', boxSizing: 'border-box', flexShrink: 0 }} />}
+                        {f.state === 'failed' && <span style={{ width: 15, height: 15, borderRadius: 8, background: 'var(--coral)', flexShrink: 0 }} />}
+                        <span style={{ flex: 1, minWidth: 0, fontFamily: 'var(--f-mono)', fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
+                        <span style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: f.state === 'failed' ? 'var(--coral)' : 'var(--fg-3)' }}>
+                            {t(`mobileCaptions.file_${f.state}`)}
+                        </span>
+                    </li>
+                ))}
+            </ul>
+            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--fg-3)' }}>{t('mobileCaptions.progressNote', { done, total: files.length })}</div>
+        </div>
+    );
+}
 
 /**
  * Persistent AI panel — fills all available space between the timeline and the
  * bottom toolbar on mobile. Shows an inline chat log + quick-command input.
  * Tapping the header row opens the full AI bottom sheet.
  *
+ * Mobile additions (phase 3): requests sent while the video uploads are queued
+ * and run once it's ready (agent/rokaPromptQueue.js); applied edits show as a
+ * card with Undo / Keep; suggestion chips follow the project (useAIStore
+ * quickChips); 44px send button.
+ *
  * @param {function} onExpand   Opens the full AI bottom sheet.
  */
 export default function MobileAIBar({ onExpand }) {
+    const { t } = useTranslation('editor');
     const inputRef      = useRef(null);
     const logEndRef     = useRef(null);
     const lastSubmitRef = useRef(0);
@@ -44,6 +119,13 @@ export default function MobileAIBar({ onExpand }) {
     const isAnalyzing    = useAIStore(s => s.isAnalyzing);
     const addLog         = useAIStore(s => s.addLog);
     const setIsAnalyzing = useAIStore(s => s.setIsAnalyzing);
+    const quickChips     = useAIStore(s => s.quickChips);
+    const queuedCount    = useAIStore(s => s.queuedPrompts.length);
+    const captionProgress = useAIStore(s => s.captionProgress);
+    const clearQueued    = useAIStore(s => s.clearQueuedPrompts);
+    // 'waiting' | 'failed' | null — a string, so progress ticks don't re-render.
+    const uploadHeadline = useTimelineStore(s => summarizeUploads(s.assets, s.tracks).headline);
+    const waitReason     = useTimelineStore(s => aiWaitReason(s.assets, s.tracks));
 
     // Filtered log entries for inline display (most recent 30)
     const visibleLogs = logs.filter(l => LOG_TYPES.has(l.type)).slice(-30);
@@ -52,7 +134,16 @@ export default function MobileAIBar({ onExpand }) {
     // Auto-scroll to newest message
     useEffect(() => {
         logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [logs]);
+    }, [logs, queuedCount]);
+
+    // Run queued requests once the video is ready and Roka is free.
+    useEffect(() => {
+        const run = () => { drainPromptQueue(t); };
+        const offTimeline = useTimelineStore.subscribe(run);
+        const offAI = useAIStore.subscribe(run);
+        run();
+        return () => { offTimeline(); offAI(); };
+    }, [t]);
 
     const handleSubmit = async (command) => {
         const input = inputRef.current;
@@ -80,32 +171,24 @@ export default function MobileAIBar({ onExpand }) {
             return;
         }
 
-        setIsAnalyzing(true);
         const { uploadedFile, tracks } = useTimelineStore.getState();
-        const hasClips = tracks?.some(t => t.clips?.length > 0);
+        const hasClips = tracks?.some(tr => tr.clips?.length > 0);
 
         if (!uploadedFile && !hasClips && !text.toLowerCase().includes('sample')) {
             addLog({
                 id:        'agent-err-' + now,
                 timestamp: new Date().toLocaleTimeString(),
                 type:      'warning',
-                message:   'ROKA: No file selected. Please import a file first.',
+                message:   t('assistant.noFileSelected'),
             });
             setIsAnalyzing(false);
             return;
         }
 
-        try {
-            workflowController.processUserPrompt(text);
-        } catch (err) {
-            setIsAnalyzing(false);
-            addLog({
-                id:        'agent-crash-' + now,
-                timestamp: new Date().toLocaleTimeString(),
-                type:      'warning',
-                message:   `ROKA error: ${err.message}`,
-            });
-        }
+        // Video still uploading / preparing → wait for it instead of running now.
+        if (enqueueIfVideoNotReady(text, t)) return;
+
+        runPromptNow(text);
     };
 
     const handleKeyDown = (e) => {
@@ -114,6 +197,14 @@ export default function MobileAIBar({ onExpand }) {
             handleSubmit();
         }
     };
+
+    const headerText = isAnalyzing
+        ? t('assistant.rokaWorking')
+        : uploadHeadline === 'failed'
+            ? t('mobileUpload.rokaPaused')
+            : uploadHeadline === 'waiting'
+                ? t('mobileUpload.rokaWaiting')
+                : 'ROKA';
 
     return (
         <div
@@ -126,9 +217,10 @@ export default function MobileAIBar({ onExpand }) {
         >
             {/* ── Header row — tap to open full panel ── */}
             <button
+                type="button"
                 onClick={onExpand}
-                className="w-full shrink-0 flex items-center gap-2 px-3 py-2 active:opacity-70 transition-opacity"
-                style={{ borderBottom: '0.5px solid var(--line-soft)' }}
+                className="w-full shrink-0 flex items-center gap-2 px-3 active:opacity-70 transition-opacity"
+                style={{ borderBottom: '0.5px solid var(--line-soft)', minHeight: 36 }}
             >
                 {isAnalyzing ? (
                     <Loader2
@@ -139,7 +231,7 @@ export default function MobileAIBar({ onExpand }) {
                     <span
                         className="w-2 h-2 shrink-0 rounded-full"
                         style={{
-                            background: isEmpty ? 'var(--line-strong)' : 'var(--accent)',
+                            background: uploadHeadline === 'failed' ? 'var(--coral)' : (uploadHeadline === 'waiting' || !isEmpty) ? 'var(--accent)' : 'var(--line-strong)',
                             opacity: 0.8,
                         }}
                     />
@@ -148,44 +240,41 @@ export default function MobileAIBar({ onExpand }) {
                     className="flex-1 text-left"
                     style={{
                         fontFamily: 'var(--f-mono)',
-                        fontSize:   10,
+                        fontSize:   10.5,
                         letterSpacing: '0.06em',
                         color:      'var(--fg-3)',
                         textTransform: 'uppercase',
                     }}
                 >
-                    {isAnalyzing ? 'ROKA is working…' : 'ROKA'}
+                    {headerText}
                 </span>
-                <ChevronUp className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--fg-3)' }} />
+                <ChevronUp className="w-4 h-4 shrink-0" style={{ color: 'var(--fg-3)' }} />
             </button>
 
             {/* ── Chat log / empty state — fills available space ── */}
             <div className="flex-1 overflow-y-auto min-h-0 px-3 py-2">
-                {isEmpty ? (
-                    /* Empty state */
+                {isEmpty && queuedCount === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center gap-3 pb-2">
-                        <SparklesIcon style={{ color: 'var(--accent)', opacity: 0.35 }} />
-                        <p style={{
-                            fontFamily: 'var(--f-sans)',
-                            fontSize:   12,
-                            color:      'var(--fg-3)',
-                            textAlign:  'center',
-                        }}>
-                            Ask AI to edit your video
+                        <SparklesIcon style={{ color: 'var(--accent)', opacity: 0.45 }} />
+                        <p style={{ margin: 0, fontFamily: 'var(--f-sans)', fontSize: 14, color: 'var(--fg-2)', textAlign: 'center' }}>
+                            {t('mobileRoka.emptyTitle')}
                         </p>
-                        {/* Suggestion chips */}
+                        {/* Suggestion chips — follow the project (SuggestionEngine) */}
                         <div className="flex flex-wrap gap-2 justify-center">
-                            {SUGGESTIONS.map(s => (
+                            {(quickChips || []).slice(0, 4).map(s => (
                                 <button
                                     key={s}
+                                    type="button"
                                     onClick={() => handleSubmit(s)}
-                                    className="px-3 py-1 rounded-full transition-opacity active:opacity-60"
+                                    className="rounded-full transition-opacity active:opacity-60"
                                     style={{
-                                        border:     '0.5px solid var(--line-strong)',
-                                        background: 'rgba(255,255,255,0.04)',
+                                        minHeight:  36,
+                                        padding:    '0 14px',
+                                        border:     '1px solid var(--line-strong)',
+                                        background: 'var(--bg-3)',
                                         fontFamily: 'var(--f-sans)',
-                                        fontSize:   11,
-                                        color:      'var(--fg-2)',
+                                        fontSize:   13,
+                                        color:      'var(--fg)',
                                     }}
                                 >
                                     {s}
@@ -194,49 +283,70 @@ export default function MobileAIBar({ onExpand }) {
                         </div>
                     </div>
                 ) : (
-                    /* Message list */
                     <>
                         {visibleLogs.map(log => {
+                            if (log.type === 'task_complete') return <AppliedCard key={log.id} log={log} />;
+                            if (log.type === 'caption_styles') return <CaptionStyleCallout key={log.id} />;
+
                             const isUser = log.type === 'info' && log.message.startsWith('You:');
                             const text   = isUser
                                 ? log.message.replace(/^You:\s*/, '')
                                 : log.message.replace(/^(ROKA:|Agent:|Assistant:)\s*/i, '');
 
+                            if (isUser) {
+                                return (
+                                    <div key={log.id} className="mb-2 flex justify-end">
+                                        <span className="rounded-2xl px-3 py-2" style={{ ...bubbleBase, color: '#fff', background: 'var(--accent)', borderBottomRightRadius: 6 }}>
+                                            {text}
+                                        </span>
+                                    </div>
+                                );
+                            }
+                            if (log.type === 'assistant') {
+                                return (
+                                    <div key={log.id} className="mb-2 flex justify-start">
+                                        <span className="rounded-2xl px-3 py-2" style={{ ...bubbleBase, color: 'var(--fg)', background: 'var(--bg-3)', borderBottomLeftRadius: 6 }}>
+                                            {text}
+                                        </span>
+                                    </div>
+                                );
+                            }
+                            // step / info / success / warning: a quiet line
                             return (
-                                <div
-                                    key={log.id}
-                                    className={`mb-2 flex ${isUser ? 'justify-end' : 'justify-start'}`}
-                                >
-                                    <span
-                                        className="rounded-xl px-2.5 py-1.5 max-w-[85%]"
-                                        style={{
-                                            fontFamily: 'var(--f-sans)',
-                                            fontSize:   11.5,
-                                            lineHeight: 1.45,
-                                            color:      isUser ? '#000' : LOG_COLOR[log.type] ?? 'var(--fg-2)',
-                                            background: isUser
-                                                ? 'linear-gradient(135deg, var(--accent), var(--violet))'
-                                                : 'rgba(255,255,255,0.06)',
-                                            wordBreak: 'break-word',
-                                        }}
-                                    >
+                                <div key={log.id} className="mb-1.5 flex justify-start">
+                                    <span style={{ ...bubbleBase, fontSize: 12.5, color: LOG_COLOR[log.type] ?? 'var(--fg-3)' }}>
                                         {text}
                                     </span>
                                 </div>
                             );
                         })}
+
+                        {captionProgress?.files?.length > 0 && <CaptionProgressCard files={captionProgress.files} />}
+
+                        {queuedCount > 0 && (
+                            <div className="mb-2 flex items-center gap-2" style={{ padding: '6px 6px 6px 10px', borderRadius: 12, border: `1px solid ${waitReason === 'failed' ? 'var(--coral)' : 'color-mix(in oklch, var(--accent) 40%, transparent)'}`, background: 'var(--accent-soft)' }}>
+                                <Clock size={14} style={{ color: waitReason === 'failed' ? 'var(--coral)' : 'var(--accent)', flexShrink: 0 }} />
+                                <span style={{ flex: 1, fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--fg)' }}>
+                                    {waitReason === 'failed'
+                                        ? t('mobileRoka.queuePaused', { count: queuedCount })
+                                        : t('mobileRoka.queueWaiting', { count: queuedCount })}
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={clearQueued}
+                                    style={{ height: 32, padding: '0 10px', borderRadius: 8, border: 0, background: 'transparent', color: 'var(--fg-2)', fontFamily: 'var(--f-sans)', fontSize: 12.5, fontWeight: 600 }}
+                                >
+                                    {t('mobileRoka.cancel')}
+                                </button>
+                            </div>
+                        )}
+
                         {isAnalyzing && (
                             <div className="flex justify-start mb-2">
-                                <span
-                                    className="rounded-xl px-2.5 py-1.5 flex items-center gap-1.5"
-                                    style={{ background: 'rgba(255,255,255,0.06)' }}
-                                >
-                                    <Loader2
-                                        className="w-3 h-3 animate-spin"
-                                        style={{ color: 'var(--accent)' }}
-                                    />
-                                    <span style={{ fontFamily: 'var(--f-sans)', fontSize: 11, color: 'var(--fg-3)' }}>
-                                        thinking…
+                                <span className="rounded-2xl px-3 py-2 flex items-center gap-2" style={{ background: 'var(--bg-3)' }}>
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: 'var(--accent)' }} />
+                                    <span style={{ fontFamily: 'var(--f-sans)', fontSize: 13, color: 'var(--fg-3)' }}>
+                                        {t('mobileRoka.thinking')}
                                     </span>
                                 </span>
                             </div>
@@ -248,45 +358,44 @@ export default function MobileAIBar({ onExpand }) {
 
             {/* ── Input row ── */}
             <div className="flex items-end gap-2 px-3 pb-3 pt-1 shrink-0">
+                <label htmlFor="mobile-roka-input" className="sr-only">{t('mobileRoka.inputLabel')}</label>
                 <textarea
+                    id="mobile-roka-input"
                     ref={inputRef}
                     rows={1}
-                    placeholder="Ask AI anything…"
+                    placeholder={waitReason ? t('mobileRoka.placeholderWaiting') : t('mobileRoka.placeholder')}
                     onKeyDown={handleKeyDown}
                     onChange={(e) => {
                         e.target.style.height = 'auto';
-                        e.target.style.height = Math.min(e.target.scrollHeight, 80) + 'px';
+                        e.target.style.height = Math.min(e.target.scrollHeight, 88) + 'px';
                     }}
-                    className="flex-1 resize-none rounded-xl outline-none"
+                    className="flex-1 resize-none outline-none"
                     style={{
-                        background:  'rgba(255,255,255,0.07)',
-                        border:      '0.5px solid var(--line-strong)',
+                        background:  'var(--bg-3)',
+                        border:      '1px solid var(--line-strong)',
+                        borderRadius: 22,
                         color:       'var(--fg)',
                         fontFamily:  'var(--f-sans)',
                         // iOS Safari auto-zooms the whole page on focus for any text
-                        // input/textarea whose computed font-size is below 16px — this
-                        // is the "it zooms in" behavior when typing here. 13px tripped
-                        // it. 16px is the documented Safari threshold; the row's own
-                        // layout (minHeight/padding below) already gives it room, so
-                        // this doesn't need a compensating font-size hack elsewhere.
+                        // input/textarea whose computed font-size is below 16px.
+                        // 16px is the documented Safari threshold.
                         fontSize:    16,
                         lineHeight:  1.45,
-                        padding:     '8px 12px',
-                        minHeight:   '36px',
-                        maxHeight:   '80px',
+                        padding:     '10px 16px',
+                        minHeight:   '44px',
+                        maxHeight:   '88px',
                     }}
                 />
                 <button
+                    type="button"
                     onClick={() => handleSubmit()}
-                    className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-opacity active:opacity-70"
-                    style={{
-                        background: 'linear-gradient(135deg, var(--accent), var(--violet))',
-                        boxShadow:  '0 0 10px rgba(0,229,255,0.3)',
-                    }}
+                    aria-label={t('mobileRoka.send')}
+                    className="shrink-0 rounded-full flex items-center justify-center transition-opacity active:opacity-70"
+                    style={{ width: 44, height: 44, background: 'var(--accent)', color: '#fff' }}
                 >
                     {isAnalyzing
-                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: '#000' }} />
-                        : <Send    className="w-3.5 h-3.5"              style={{ color: '#000' }} />
+                        ? <Loader2 className="w-4 h-4 animate-spin" />
+                        : <Send    className="w-4 h-4" />
                     }
                 </button>
             </div>

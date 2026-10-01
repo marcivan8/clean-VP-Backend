@@ -1,6 +1,24 @@
 import React from 'react';
-import { Layers, Plus, Palette, Move, Music2, Type, X, Trash2 } from 'lucide-react';
+import { Layers, Plus, Palette, Move, Music2, Type, X, Trash2, Scissors, Copy, Gauge, Pencil, Paintbrush } from 'lucide-react';
 import classNames from 'classnames';
+import { useTranslation } from 'react-i18next';
+import useTimelineStore from '../store/useTimelineStore';
+import MobileSheet, { SheetChip } from './MobileSheet';
+import useAIStore from '../store/useAIStore';
+import { splitIndexAtTime } from '../motion/captionEdits.js';
+
+const SPEEDS = [0.25, 0.5, 1, 1.5, 2, 4];
+
+/** The selected clip and its track, read at tap time (no subscription). */
+function selectedClip() {
+    const { activeClipId, tracks } = useTimelineStore.getState();
+    if (!activeClipId) return null;
+    for (const track of tracks || []) {
+        const clip = (track.clips || []).find(c => c.id === activeClipId);
+        if (clip) return { clip, track };
+    }
+    return null;
+}
 
 /**
  * Actions available for each track type.
@@ -8,18 +26,19 @@ import classNames from 'classnames';
  */
 const CLIP_ACTIONS = {
     video: [
-        { id: 'color',     icon: Palette, label: 'Color'     },
-        { id: 'transform', icon: Move,    label: 'Transform' },
+        { id: 'color',     icon: Palette, label: 'mobileUi.color'     },
+        { id: 'transform', icon: Move,    label: 'mobileUi.transform' },
     ],
     image: [
-        { id: 'color',     icon: Palette, label: 'Color'     },
-        { id: 'transform', icon: Move,    label: 'Transform' },
+        { id: 'color',     icon: Palette, label: 'mobileUi.color'     },
+        { id: 'transform', icon: Move,    label: 'mobileUi.transform' },
     ],
     audio: [
-        { id: 'audio',     icon: Music2,  label: 'Mixer'     },
+        { id: 'audio',     icon: Music2,  label: 'mobileUi.mixer'     },
     ],
     text: [
-        { id: 'captions',  icon: Type,    label: 'Captions'  },
+        // Full caption list / per-segment styling (TextPanel in the media sheet)
+        { id: 'captions',  icon: Type,    label: 'mobileCaptions.panel' },
     ],
 };
 
@@ -93,10 +112,11 @@ export default function MobileToolbar({
 
 /* ── Default state: Media · AI · Add ──────────────────────────────────────── */
 function DefaultBar({ activeSheet, onSheetChange, onImport }) {
+    const { t } = useTranslation('editor');
     return (
         <>
             <ToolbarBtn
-                label="Media"
+                label={t('mobileUi.media', 'Media')}
                 isActive={activeSheet === 'media'}
                 onClick={() => onSheetChange('media')}
             >
@@ -104,7 +124,7 @@ function DefaultBar({ activeSheet, onSheetChange, onImport }) {
             </ToolbarBtn>
 
             <ToolbarBtn
-                label="AI"
+                label={t('mobileUi.ai', 'AI')}
                 isActive={activeSheet === 'ai'}
                 onClick={() => onSheetChange('ai')}
             >
@@ -126,7 +146,7 @@ function DefaultBar({ activeSheet, onSheetChange, onImport }) {
                     <Plus className="w-4 h-4" style={{ color: '#000' }} />
                 </span>
                 <span className="text-[9px] font-medium tracking-wide" style={{ fontFamily: 'var(--f-mono)', color: 'var(--fg-3)' }}>
-                    Add
+                    {t('mobileUi.add', 'Add')}
                 </span>
             </button>
         </>
@@ -135,8 +155,60 @@ function DefaultBar({ activeSheet, onSheetChange, onImport }) {
 
 /* ── Clip-selected state ──────────────────────────────────────────────────── */
 function ClipContextBar({ trackType, actions, activeSheet, onClipAction, onDeselect, onDeleteClip }) {
-    const typeLabel = { video: 'VIDEO', audio: 'AUDIO', text: 'TEXT', image: 'IMAGE' }[trackType] ?? trackType.toUpperCase();
+    const { t } = useTranslation('editor');
+    const typeLabel = {
+        video: t('mobileUi.typeVideo'), audio: t('mobileUi.typeAudio'), text: t('mobileUi.typeText'), image: t('mobileUi.typeImage'),
+    }[trackType] ?? trackType;
     const [confirmDelete, setConfirmDelete] = React.useState(false);
+    const [speedOpen, setSpeedOpen] = React.useState(false);
+    const currentSpeed = useTimelineStore(s => {
+        if (!s.activeClipId) return 1;
+        for (const tr of s.tracks || []) {
+            const c = (tr.clips || []).find(cl => cl.id === s.activeClipId);
+            if (c) return Number(c.speed) || 1;
+        }
+        return 1;
+    });
+    const isText = trackType === 'text';
+
+    // Same store actions the desktop timeline toolbar uses.
+    const split = () => {
+        const sel = selectedClip();
+        if (!sel) return;
+        const st = useTimelineStore.getState();
+        // A caption with word timings splits between words (each half keeps its
+        // own text and timing); anything else uses the normal clip split.
+        if (sel.track.type === 'text' && Array.isArray(sel.clip.words) && sel.clip.words.length > 1) {
+            const idx = splitIndexAtTime(sel.clip.words, st.currentTime);
+            if (idx >= 1) st.splitCaptionAt(sel.clip.id, idx);
+            return;
+        }
+        st.splitClip(sel.track.id, sel.clip.id, st.currentTime);
+    };
+    const duplicate = () => {
+        const sel = selectedClip();
+        if (sel) useTimelineStore.getState().duplicateClip(sel.track.id, sel.clip.id);
+    };
+    const setSpeed = (speed) => {
+        const sel = selectedClip();
+        if (sel) useTimelineStore.getState().setClipSpeed(sel.track.id, sel.clip.id, speed);
+        setSpeedOpen(false);
+    };
+    const openCaptionSheet = (kind) => {
+        const sel = selectedClip();
+        useAIStore.getState().openMobileCaptionSheet(kind, sel?.clip?.id || null);
+    };
+    const editTools = isText
+        ? [
+            { id: 'edit', icon: <Pencil className="w-5 h-5" />, label: t('mobileCaptions.edit'), onClick: () => openCaptionSheet('edit') },
+            { id: 'style', icon: <Paintbrush className="w-5 h-5" />, label: t('mobileCaptions.style'), onClick: () => openCaptionSheet('style') },
+            { id: 'split', icon: <Scissors className="w-5 h-5" />, label: t('mobileUi.split'), onClick: split },
+        ]
+        : [
+            { id: 'split', icon: <Scissors className="w-5 h-5" />, label: t('mobileUi.split'), onClick: split },
+            { id: 'duplicate', icon: <Copy className="w-5 h-5" />, label: t('mobileUi.duplicate'), onClick: duplicate },
+            { id: 'speed', icon: <Gauge className="w-5 h-5" />, label: t('mobileUi.speed'), onClick: () => setSpeedOpen(true) },
+        ];
 
     const handleDeletePress = () => {
         if (confirmDelete) {
@@ -150,20 +222,21 @@ function ClipContextBar({ trackType, actions, activeSheet, onClipAction, onDesel
 
     return (
         <>
-            {/* Track type chip */}
-            <div
-                className="flex items-center pl-3 pr-1 shrink-0"
-                style={{
-                    fontFamily: 'var(--f-mono)',
-                    fontSize: 8,
-                    letterSpacing: '0.1em',
-                    color: 'var(--accent)',
-                    opacity: 0.7,
-                    textTransform: 'uppercase',
-                }}
-            >
-                {typeLabel}
-            </div>
+            {/* Track type, for screen readers (no room for a visible chip next to 7 actions) */}
+            <span className="sr-only">{typeLabel}</span>
+
+            {editTools.map(({ id, icon, label, onClick }) => (
+                <button
+                    key={id}
+                    type="button"
+                    onClick={onClick}
+                    className="flex-1 flex flex-col items-center justify-center gap-0.5 transition-all duration-150 active:opacity-70"
+                    style={{ color: 'var(--fg)', minWidth: 48 }}
+                >
+                    {icon}
+                    <span className="text-[9px] font-medium tracking-wide" style={{ fontFamily: 'var(--f-mono)' }}>{label}</span>
+                </button>
+            ))}
 
             {/* Clip-specific action buttons */}
             {actions.map(({ id, icon: Icon, label }) => {
@@ -186,38 +259,46 @@ function ClipContextBar({ trackType, actions, activeSheet, onClipAction, onDesel
                         )}
                         <Icon className="w-5 h-5" />
                         <span className="text-[9px] font-medium tracking-wide" style={{ fontFamily: 'var(--f-mono)' }}>
-                            {label}
+                            {t(label)}
                         </span>
                     </button>
                 );
             })}
 
             {/* Push right-side buttons to the right */}
-            <div className="flex-1" />
+            <div className="flex-1" style={{ minWidth: 0 }} />
 
             {/* Delete — tap once to arm (turns red), tap again to confirm */}
             <button
                 onClick={handleDeletePress}
-                className="flex flex-col items-center justify-center gap-0.5 px-4 transition-all duration-150 active:scale-95"
+                className="flex flex-col items-center justify-center gap-0.5 px-3 transition-all duration-150 active:scale-95"
                 style={{ color: confirmDelete ? '#FF5A5A' : 'var(--fg-3)' }}
             >
                 <Trash2 className="w-5 h-5" />
                 <span className="text-[9px] font-medium tracking-wide" style={{ fontFamily: 'var(--f-mono)' }}>
-                    {confirmDelete ? 'Confirm' : 'Delete'}
+                    {confirmDelete ? t('mobileUi.confirm') : t('mobileUi.delete')}
                 </span>
             </button>
 
             {/* Done / Deselect */}
             <button
                 onClick={onDeselect}
-                className="flex flex-col items-center justify-center gap-0.5 px-4 transition-all duration-150 active:opacity-70"
+                className="flex flex-col items-center justify-center gap-0.5 px-3 transition-all duration-150 active:opacity-70"
                 style={{ color: 'var(--fg-3)' }}
             >
                 <X className="w-5 h-5" />
                 <span className="text-[9px] font-medium tracking-wide" style={{ fontFamily: 'var(--f-mono)' }}>
-                    Done
+                    {t('mobileUi.done')}
                 </span>
             </button>
+
+            <MobileSheet open={speedOpen} title={t('mobileUi.speedTitle')} onClose={() => setSpeedOpen(false)}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {SPEEDS.map(sp => (
+                        <SheetChip key={sp} active={Math.abs(currentSpeed - sp) < 1e-6} onClick={() => setSpeed(sp)}>{sp}x</SheetChip>
+                    ))}
+                </div>
+            </MobileSheet>
         </>
     );
 }

@@ -11,6 +11,7 @@ import Waveform from './Waveform';
 import ClipContextMenu from './ClipContextMenu';
 import ClipWaveform from '../ClipWaveform';
 import { usePeaks } from '../../hooks/usePeaks';
+import { getAssetUploadStatus, UPLOAD_PHASES, isProblemPhase } from '../../utils/uploadStatus.js';
 
 const AUDIO_EXTENSIONS = /\.(mp3|wav|m4a|aac|ogg|flac)$/i;
 
@@ -52,6 +53,10 @@ const Clip = ({ clip, trackId }) => {
     // Text/caption clips never have audio — never render a waveform on them.
     const isTextClip = clip.type === 'text' || clip.type === 'caption';
     const asset = assets?.find(a => a.id === clip.assetId);
+    // Mobile only: show this clip's upload / prepare state on the clip itself
+    // (see components/MobileUploadStatus.jsx for the preview side).
+    const uploadStatus = isMobile && !isTextClip ? getAssetUploadStatus(asset) : null;
+    const showUploadState = !!uploadStatus && uploadStatus.phase !== UPLOAD_PHASES.READY;
 
     // NOTE — a SECOND waveform pipeline used to live here: it derived a
     // `waveform.json` URL next to the proxy, fetched it on mount, and wrote the
@@ -348,6 +353,30 @@ const Clip = ({ clip, trackId }) => {
                         loading={wsLoading}
                         error={wsError}
                     />
+                </div>
+            )}
+
+            {showUploadState && (
+                <div
+                    aria-hidden="true"
+                    style={{
+                        position: 'absolute', inset: 0, zIndex: 5, pointerEvents: 'none', overflow: 'hidden',
+                        background: isProblemPhase(uploadStatus.phase) ? 'rgba(40,16,20,0.82)' : 'rgba(14,15,17,0.62)',
+                        border: isProblemPhase(uploadStatus.phase) ? '1px solid var(--coral)' : '1px dashed var(--accent)',
+                        borderRadius: 'inherit', display: 'flex', alignItems: 'center', padding: '0 6px',
+                    }}
+                >
+                    {uploadStatus.phase === UPLOAD_PHASES.UPLOADING && (
+                        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${uploadStatus.progress || 0}%`, background: 'var(--accent-soft)', transition: 'width .3s ease' }} />
+                    )}
+                    {uploadStatus.phase === UPLOAD_PHASES.PREPARING && (
+                        <div className="animate-pulse" style={{ position: 'absolute', inset: 0, background: 'var(--accent-soft)' }} />
+                    )}
+                    <span style={{ position: 'relative', fontFamily: 'var(--f-mono)', fontSize: 9.5, color: isProblemPhase(uploadStatus.phase) ? 'var(--coral)' : 'var(--fg)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {uploadStatus.phase === UPLOAD_PHASES.UPLOADING && t('mobileUpload.clipUploading', { pct: uploadStatus.progress || 0 })}
+                        {uploadStatus.phase === UPLOAD_PHASES.PREPARING && t('mobileUpload.clipPreparing')}
+                        {isProblemPhase(uploadStatus.phase) && t('mobileUpload.clipFailed')}
+                    </span>
                 </div>
             )}
 

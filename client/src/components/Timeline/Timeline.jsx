@@ -14,7 +14,7 @@ const LABEL_W         = 128; // w-32 = 128px (track label column) — desktop
 // place that used to assume the fixed 128px (ruler placeholder, playhead math,
 // content width, and Track's own header column via a prop) — changing it here
 // alone is not enough, see the `labelW` usages below and in Track.jsx.
-const LABEL_W_MOBILE  = 80;
+const LABEL_W_MOBILE  = 36; // icon strip only (Track.jsx TrackStrip); track options open from the icon
 const EDGE_ZONE  = 60;   // px from edge that triggers auto-scroll
 const SCROLL_SPD = 10;   // base px/frame; scales with proximity to edge
 
@@ -36,6 +36,9 @@ const Timeline = () => {
         future:      state.future,
     })));
 
+    // Hoisted out of the toolbar JSX: that row is not rendered on mobile, and a
+    // hook inside conditionally-rendered JSX would change the hook order.
+    const aspectRatio = useTimelineStore(state => state.aspectRatio);
     const timeDisplayRef = React.useRef(null);
     const playheadLineRef = React.useRef(null);
     const playheadHandleRef = React.useRef(null);
@@ -376,6 +379,10 @@ const Timeline = () => {
                 width was invisible and unreachable with no indication anything
                 was missing. On desktop this scrolls only if the window is
                 genuinely narrower than the content, so nothing changes there. */}
+            {/* Mobile: this row is replaced by MobileTransportBar (undo/redo,
+                time, More: aspect ratio, zoom, text, transition, filter) and the
+                clip toolbar (split, duplicate, speed) — see IDELayout. */}
+            {!isMobile && (
             <div
                 className="h-10 border-b flex items-center px-4 justify-between z-20 shrink-0 overflow-x-auto custom-scrollbar"
                 style={{ background: "var(--glass)", borderColor: "var(--line-soft)", WebkitOverflowScrolling: 'touch' }}
@@ -489,7 +496,7 @@ const Timeline = () => {
                         className="text-[10px] text-muted-foreground rounded px-1 py-0.5 border-none outline-none cursor-pointer hover:bg-white/10"
                         style={{ background: "var(--glass-2)", fontFamily: "var(--f-mono)" }}
                         title={t('timeline.aspectRatio')}
-                        value={useTimelineStore(state => state.aspectRatio)}
+                        value={aspectRatio}
                         onChange={(e) => useTimelineStore.getState().setAspectRatio(e.target.value)}
                     >
                         <option value="16:9">16:9</option>
@@ -537,6 +544,8 @@ const Timeline = () => {
                     <button onClick={() => setZoomLevel(zoomLevel * 1.2)} className="group"><ZoomIn className="w-3 h-3 text-muted-foreground group-hover:text-foreground" /></button>
                 </div>
             </div>
+
+            )}
 
             {/* Tracks Area */}
             <div

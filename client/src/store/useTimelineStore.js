@@ -27,6 +27,8 @@ import { computeRippleDelete, computeGapRipple, remapTimelineWords } from '../ti
 import { computeMultiMove } from '../timeline/multiMove.js';
 import { computeRangeCut } from '../timeline/rangeCut.js';
 import { mapTranscriptToTimeline } from '../timeline/transcriptMap.js';
+import { LEGACY_PACK_MOTION } from '../motion/CaptionModel.js';
+import { retimeWordsForText, splitCaption, mergeCaptions, shiftWords as shiftCaptionWords } from '../motion/captionEdits.js';
 
 // Same breakpoint as hooks/useDeviceType.js (isMobile = width < 768). Used by
 // deleteClipWithMagnet: the main-track magnet is always on for mobile.
@@ -753,6 +755,11 @@ const useTimelineStore = create(
                 if (updates.opacity !== undefined) clipUpdates.opacity = updates.opacity;
                 if (updates.keyframes !== undefined) clipUpdates.keyframes = updates.keyframes;
                 if (updates.animation !== undefined) clipUpdates.animation = updates.animation;
+                // Caption style pack motion: uppercase, animation preset and the
+                // spoken-word highlight (motion/CaptionModel.js legacyPackToCaptionStyle),
+                // read by TextOverlay. Was missing here, so the desktop Roka style
+                // card only ever changed fonts and colours.
+                if (updates.captionStyle !== undefined) clipUpdates.captionStyle = updates.captionStyle;
                 // R66 — clip grouping. `null` is a legitimate value (ungroup),
                 // so this checks `!== undefined`, same as every field above —
                 // an explicit `updateClip(..., { groupId: null })` must go
@@ -1099,6 +1106,179 @@ const useTimelineStore = create(
                 // Keep the playhead on the same moment of the edit.
                 const ct = Number(get().currentTime) || 0;
                 if (ct > a) get().seek?.(ct >= b ? ct - (b - a) : a);
+                return true;
+            },
+
+            // ── Caption editing (mobile caption sheets, phase 4) ─────────────────
+            // These write straight to the caption ENTITY through TimelineActions
+            // because the legacy updateClip() does not map `words` or `animations`. Each is one undo step. Word arrays come in as
+            // DISPLAYED timeline times and are stored minus the placement's
+            // wordShift (see TimelineStateManager withWordShift). A caption whose
+            // entity is shared by several placements is left alone for word edits.
+
+            /** Style every caption / text clip (all text tracks). @returns {boolean} */
+            applyCaptionStyleToAll: (fields) => {
+                const textClips = get().tracks.filter(t => t.type === 'text').flatMap(t => t.clips || []);
+                if (textClips.length === 0 || !fields) return false;
+                const placements = timelineManager.getState().entities.placements;
+                const entityIds = [...new Set(textClips.map(c => placements[c.id]?.clipId).filter(Boolean))];
+                get()._saveHistory();
+                timelineManager.beginTransaction();
+                try {
+                    entityIds.forEach(id => timelineManager.dispatch(TimelineActions.updateClip(id, fields)));
+                    timelineManager.commitTransaction('Caption Style');
+                } catch (err) {
+                    timelineManager.rollbackTransaction();
+                    set(s => ({ past: s.past.slice(0, -1) }));
+                    console.error('[applyCaptionStyleToAll] failed:', err);
+                    return false;
+                }
+                set({ tracks: timelineManager.toLegacyTracks() });
+                return true;
+            },
+
+            /** Turn the spoken-word highlight on (each clip's pack default) or off. */
+            setCaptionWordHighlight: (on) => {
+                const textClips = get().tracks.filter(t => t.type === 'text').flatMap(t => t.clips || []);
+                const placements = timelineManager.getState().entities.placements;
+                const entities = timelineManager.getState().entities.clips;
+                const seen = new Set();
+                const updates = [];
+                for (const c of textClips) {
+                    const id = placements[c.id]?.clipId;
+                    if (!id || seen.has(id)) continue;
+                    seen.add(id);
+                    const cs = entities[id]?.captionStyle || {};
+                    const packDefault = LEGACY_PACK_MOTION[cs.packId]?.wordHighlight;
+                    const wordHighlight = on
+                        ? (packDefault && packDefault.mode !== 'none' ? packDefault : { mode: 'color', color: '#FACC15', scale: 1.08 })
+                        : { mode: 'none', scale: 1 };
+                    updates.push([id, { captionStyle: { ...cs, wordHighlight } }]);
+                }
+                if (updates.length === 0) return false;
+                get()._saveHistory();
+                timelineManager.beginTransaction();
+                try {
+                    updates.forEach(([id, u]) => timelineManager.dispatch(TimelineActions.updateClip(id, u)));
+                    timelineManager.commitTransaction('Caption Highlight');
+                } catch (err) {
+                    timelineManager.rollbackTransaction();
+                    set(s => ({ past: s.past.slice(0, -1) }));
+                    console.error('[setCaptionWordHighlight] failed:', err);
+                    return false;
+                }
+                set({ tracks: timelineManager.toLegacyTracks() });
+                return true;
+            },
+
+            /** Change one caption's text; its word timings follow (motion/captionEdits.js). */
+            editCaptionText: (placementId, newText) => {
+                const text = String(newText ?? '').replace(/\s+/g, ' ').trim();
+                if (!text) return false;
+                const st = timelineManager.getState().entities;
+                const p = st.placements[placementId];
+                if (!p?.clipId) return false;
+                const legacy = get().tracks.flatMap(t => t.clips || []).find(c => c.id === placementId);
+                if (!legacy) return false;
+                const shared = Object.values(st.placements).filter(x => x.clipId === p.clipId).length > 1;
+                const words = shared ? null : retimeWordsForText(legacy.words, text);
+                const updates = { content: text, name: text };
+                if (words) updates.words = shiftCaptionWords(words, -(Number(p.wordShift) || 0));
+                get()._saveHistory();
+                timelineManager.dispatch(TimelineActions.updateClip(p.clipId, updates));
+                set({ tracks: timelineManager.toLegacyTracks() });
+                return true;
+            },
+
+            /** Split a caption into two before word `index`. @returns {boolean} */
+            splitCaptionAt: (placementId, index) => {
+                const st = timelineManager.getState().entities;
+                const p = st.placements[placementId];
+                const entity = p?.clipId ? st.clips[p.clipId] : null;
+                if (!p || !entity) return false;
+                if (Object.values(st.placements).filter(x => x.clipId === p.clipId).length > 1) return false;
+                const legacy = get().tracks.flatMap(t => t.clips || []).find(c => c.id === placementId);
+                const parts = legacy ? splitCaption(legacy.words, legacy.content, index) : null;
+                if (!parts) return false;
+                const s0 = Number(p.startTime) || 0;
+                const e0 = s0 + (Number(p.duration) || 0);
+                if (!(parts.splitTime > s0 + 0.05 && parts.splitTime < e0 - 0.05)) return false;
+
+                const shift = Number(p.wordShift) || 0;
+                const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+                const newEntityId = `caption-${stamp}-r`;
+                get()._saveHistory();
+                timelineManager.beginTransaction();
+                try {
+                    timelineManager.dispatch(TimelineActions.updatePlacement(placementId, { duration: parts.splitTime - s0 }));
+                    timelineManager.dispatch(TimelineActions.updateClip(p.clipId, {
+                        content: parts.left.content, name: parts.left.content,
+                        words: shiftCaptionWords(parts.left.words, -shift),
+                    }));
+                    const { id: _oldId, createdAt: _c, updatedAt: _u, ...entityRest } = entity;
+                    timelineManager.dispatch(TimelineActions.addClip({
+                        ...entityRest,
+                        id: newEntityId,
+                        content: parts.right.content,
+                        name: parts.right.content,
+                        words: parts.right.words, // new placement has no wordShift
+                    }));
+                    timelineManager.dispatch(TimelineActions.addPlacement({
+                        id: `caption-${stamp}-p`,
+                        clipId: newEntityId,
+                        layerId: p.layerId,
+                        startTime: parts.splitTime,
+                        duration: e0 - parts.splitTime,
+                        offset: 0,
+                        speed: p.speed ?? 1,
+                        volume: p.volume ?? 1,
+                    }));
+                    timelineManager.commitTransaction('Split Caption');
+                } catch (err) {
+                    timelineManager.rollbackTransaction();
+                    set(s => ({ past: s.past.slice(0, -1) }));
+                    console.error('[splitCaptionAt] failed:', err);
+                    return false;
+                }
+                set({ tracks: timelineManager.toLegacyTracks() });
+                return true;
+            },
+
+            /** Merge a caption with the next one on its track. @returns {boolean} */
+            mergeCaptionWithNext: (placementId) => {
+                const track = get().tracks.find(t => t.type === 'text' && (t.clips || []).some(c => c.id === placementId));
+                if (!track) return false;
+                const sorted = (track.clips || []).slice().sort((a, b) => (Number(a.start) || 0) - (Number(b.start) || 0));
+                const i = sorted.findIndex(c => c.id === placementId);
+                const a = sorted[i];
+                const b = sorted[i + 1];
+                if (!a || !b) return false;
+                const st = timelineManager.getState().entities;
+                const pa = st.placements[a.id];
+                const pb = st.placements[b.id];
+                if (!pa?.clipId || !pb) return false;
+                const count = (cid) => Object.values(st.placements).filter(x => x.clipId === cid).length;
+                if (count(pa.clipId) > 1 || count(pb.clipId) > 1) return false;
+                const merged = mergeCaptions(a, b);
+                const newDuration = (Number(b.start) || 0) + (Number(b.duration) || 0) - (Number(a.start) || 0);
+                if (!(newDuration > 0)) return false;
+                get()._saveHistory();
+                timelineManager.beginTransaction();
+                try {
+                    timelineManager.dispatch(TimelineActions.removePlacement(b.id));
+                    timelineManager.dispatch(TimelineActions.updatePlacement(a.id, { duration: newDuration }));
+                    timelineManager.dispatch(TimelineActions.updateClip(pa.clipId, {
+                        content: merged.content, name: merged.content,
+                        words: shiftCaptionWords(merged.words, -(Number(pa.wordShift) || 0)),
+                    }));
+                    timelineManager.commitTransaction('Merge Captions');
+                } catch (err) {
+                    timelineManager.rollbackTransaction();
+                    set(s => ({ past: s.past.slice(0, -1) }));
+                    console.error('[mergeCaptionWithNext] failed:', err);
+                    return false;
+                }
+                set({ tracks: timelineManager.toLegacyTracks() });
                 return true;
             },
 

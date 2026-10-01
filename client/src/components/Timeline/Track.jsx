@@ -7,6 +7,7 @@ import ClipContextMenu from './ClipContextMenu';
 import { Video, Music, Type, Volume2, VolumeX, Headphones, X } from 'lucide-react';
 import classNames from 'classnames';
 import useTimelineStore from '../../store/useTimelineStore';
+import MobileSheet, { SheetLabel, SheetRow } from '../MobileSheet';
 
 const TrackIcon = ({ type }) => {
     switch (type) {
@@ -27,6 +28,72 @@ const TRACK_H_TEXT        = 32; // h-8
 // proportionate to the rest of the mobile UI.
 const TRACK_H_VIDEO_AUDIO_MOBILE = 52;
 const TRACK_H_TEXT_MOBILE        = 22;
+
+/**
+ * Mobile track header: a slim icon strip instead of the desktop header
+ * (name + mute/solo/volume), which didn't fit a phone ('Vid…'). Tapping the
+ * icon opens the track options sheet: mute, solo, volume, delete. A muted or
+ * solo track shows it on the strip so the state is never hidden.
+ */
+const STRIP_COLORS = { video: 'var(--accent)', audio: 'var(--coral)', text: 'var(--mint)', image: 'var(--accent)' };
+const TrackStrip = ({ track, width }) => {
+    const { t } = useTranslation('editor');
+    const [open, setOpen] = React.useState(false);
+    const isText = track.type === 'text';
+    const color = STRIP_COLORS[track.type] || 'var(--fg-3)';
+    const typeLabel = track.type === 'audio' ? t('mobileUi.trackAudio') : isText ? t('mobileUi.trackText') : t('mobileUi.trackVideo');
+    const Icon = track.type === 'audio' ? Music : isText ? Type : Video;
+    const st = () => useTimelineStore.getState();
+    return (
+        <>
+            <button
+                type="button"
+                onClick={() => setOpen(true)}
+                aria-label={`${t('mobileUi.trackOptions')}: ${track.name || typeLabel}`}
+                aria-haspopup="dialog"
+                className="shrink-0 select-none flex flex-col items-center justify-center relative"
+                style={{
+                    width: `${width}px`, padding: 0, border: 0, borderRight: '1px solid var(--line-soft)',
+                    background: 'var(--bg-2)', color, touchAction: 'manipulation', cursor: 'pointer',
+                }}
+            >
+                <span aria-hidden="true" style={{ position: 'absolute', left: 0, top: 4, bottom: 4, width: 2, borderRadius: 1, background: color, opacity: 0.7 }} />
+                {track.muted ? <VolumeX className="w-3.5 h-3.5" style={{ color: 'var(--coral)' }} /> : <Icon className="w-3.5 h-3.5" />}
+                {track.solo && !isText && <Headphones className="w-2.5 h-2.5 mt-0.5" style={{ color: 'var(--fg)' }} />}
+            </button>
+            <MobileSheet open={open} title={track.name || typeLabel} onClose={() => setOpen(false)}>
+                {!isText && (
+                    <>
+                        <SheetRow
+                            icon={track.muted ? <Volume2 size={20} /> : <VolumeX size={20} />}
+                            label={track.muted ? t('mobileUi.unmute') : t('mobileUi.mute')}
+                            onClick={() => st().toggleTrackMute(track.id)}
+                        />
+                        <SheetRow
+                            icon={<Headphones size={20} />}
+                            label={track.solo ? t('mobileUi.unsolo') : t('mobileUi.solo')}
+                            onClick={() => st().toggleTrackSolo(track.id)}
+                        />
+                        <SheetLabel>{t('mobileUi.volume')}</SheetLabel>
+                        <input
+                            type="range" min="0" max="1" step="0.05"
+                            aria-label={t('mobileUi.volume')}
+                            value={track.volume ?? 1}
+                            onChange={(e) => st().setTrackVolume(track.id, parseFloat(e.target.value))}
+                            style={{ width: '100%', height: 32, accentColor: 'var(--accent)' }}
+                        />
+                    </>
+                )}
+                <SheetRow
+                    icon={<X size={20} />}
+                    label={t('mobileUi.deleteTrack')}
+                    danger
+                    onClick={() => { setOpen(false); st().removeTrack(track.id); }}
+                />
+            </MobileSheet>
+        </>
+    );
+};
 
 const Track = ({ track, labelWidth = 128, compact = false }) => {
     const { t } = useTranslation('editor');
@@ -67,10 +134,12 @@ const Track = ({ track, labelWidth = 128, compact = false }) => {
 
     return (
         <div className="flex w-full mb-1 group">
-            {/* Track Header — width driven by labelWidth (responsive, see
+            {compact && <TrackStrip track={track} width={labelWidth} />}
+            {/* Track Header (desktop) — width driven by labelWidth (responsive, see
                 Timeline.jsx's labelW) rather than a fixed Tailwind class, so it
                 never desyncs from the ruler/playhead math that assumes the same
                 value. */}
+            {!compact && (
             <div
                 className={classNames(
                     "bg-card border-r border-border flex flex-col justify-center px-2 shrink-0 select-none group/header relative",
@@ -132,6 +201,8 @@ const Track = ({ track, labelWidth = 128, compact = false }) => {
                     </div>
                 )}
             </div>
+
+            )}
 
             {/* Track Content Area — text tracks are slimmer (no waveform).
                 Height comes from trackHeight (compact on mobile) rather than a

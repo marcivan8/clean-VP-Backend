@@ -39,6 +39,17 @@ export function useApprovalDialog() {
                 }
             }),
 
+            // Answered elsewhere (MobileRokaApproval on phones): drop it here too,
+            // so a stale dialog never appears if the window later gets wider.
+            EventBus.on(EVENT_TYPES.APPROVAL_GRANTED, (payload) => {
+                if (currentApproval?.jobId === payload?.jobId) setCurrentApproval(null);
+                setApprovalQueue(prev => prev.filter(a => a.jobId !== payload?.jobId));
+            }),
+            EventBus.on(EVENT_TYPES.APPROVAL_DENIED, (payload) => {
+                if (currentApproval?.jobId === payload?.jobId) setCurrentApproval(null);
+                setApprovalQueue(prev => prev.filter(a => a.jobId !== payload?.jobId));
+            }),
+
             // Listen for job cancellation to auto-dismiss
             EventBus.on(EVENT_TYPES.JOB_CANCELLED, (payload) => {
                 if (currentApproval?.jobId === payload.jobId) {

@@ -48,7 +48,8 @@ export function resolveClipSourcePath(clip, assets) {
 
 /**
  * Distinct source files heard on the MAIN track, in timeline order:
- * [{ key, path }] where key is the transcripts-map key (basename of path).
+ * [{ key, path, name }] where key is the transcripts-map key (basename of path)
+ * and name is the asset's display name.
  * Image clips and clips whose file can't be resolved are skipped.
  */
 export function listMainTrackSources(tracks, assets) {
@@ -68,7 +69,7 @@ export function listMainTrackSources(tracks, assets) {
         const key = basename(path);
         if (!path || !key || seen.has(key)) continue;
         seen.add(key);
-        out.push({ key, path });
+        out.push({ key, path, name: asset?.name || key });
     }
     return out;
 }

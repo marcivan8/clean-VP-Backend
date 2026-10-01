@@ -2468,6 +2468,24 @@ export class MediaExecutionEngine {
      * upgrade prompt, like every other quota hit.
      */
     async _captionMainTrackSources(sources, resolvedPayload, job, endpoint) {
+        // Per-file progress for the mobile Roka bar (useAIStore.captionProgress).
+        // Only shown when there is more than one video; always cleared at the end.
+        const showProgress = sources.length > 1;
+        const progress = sources.map(s => ({ key: s.key, name: s.name || s.key, state: 'waiting' }));
+        const setFile = (key, state) => {
+            if (!showProgress) return;
+            const f = progress.find(x => x.key === key);
+            if (f) f.state = state;
+            useAIStore.getState().setCaptionProgress?.({ files: progress.map(x => ({ ...x })) });
+        };
+        try {
+            return await this._captionMainTrackSourcesRun(sources, resolvedPayload, job, endpoint, setFile, progress);
+        } finally {
+            if (showProgress) useAIStore.getState().setCaptionProgress?.(null);
+        }
+    }
+
+    async _captionMainTrackSourcesRun(sources, resolvedPayload, job, endpoint, setFile, progress) {
         const isDone = (key) => {
             const s = useTimelineStore.getState();
             return !!s.transcriptVerified?.[key] && Array.isArray(s.transcripts?.[key]) && s.transcripts[key].length > 0;
@@ -2492,9 +2510,13 @@ export class MediaExecutionEngine {
             }, pending * TIMEOUTS.API_CALL);
         }
 
+        for (const { key } of sources) if (isDone(key)) { const f = progress.find(x => x.key === key); if (f) f.state = 'done'; }
+        setFile(null, null);
+
         for (const { key, path } of sources) {
             if (job.signal.aborted) throw new Error('API call cancelled');
             if (isDone(key)) continue;
+            setFile(key, 'running');
 
             // Upload-time background transcription of this same file still
             // running → wait for it (bounded) rather than paying for it twice.
@@ -2503,7 +2525,7 @@ export class MediaExecutionEngine {
                 if (job.signal.aborted) throw new Error('API call cancelled');
                 await sleep(1000);
             }
-            if (isDone(key)) continue;
+            if (isDone(key)) { setFile(key, 'done'); continue; }
 
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), TIMEOUTS.API_CALL);
@@ -2525,6 +2547,7 @@ export class MediaExecutionEngine {
                             upgradeRequired: body?.upgradeRequired || 'creator',
                         });
                         quotaHit = true;
+                        setFile(key, 'failed');
                         break;
                     }
                     throw new Error(`API error ${response.status}: ${body?.error || body?.message || response.statusText}`);
@@ -2536,14 +2559,17 @@ export class MediaExecutionEngine {
                     // Source-time words for THIS file → transcripts[key], marked verified.
                     useTimelineStore.getState().setCaptions(words, path);
                     transcribed++;
+                    setFile(key, 'done');
                 } else {
                     noSpeech++;
+                    setFile(key, 'done');
                     console.warn(`[MediaExecutionEngine] captions: no words for "${path}" (no speech?)`);
                 }
             } catch (err) {
                 if (job.signal.aborted || err?.message === 'Polling cancelled') throw new Error('API call cancelled');
                 console.error(`[MediaExecutionEngine] captions: transcription failed for "${path}":`, err);
                 failed.push(key);
+                setFile(key, 'failed');
             } finally {
                 clearTimeout(timeoutId);
                 job.signal.removeEventListener('abort', onAbort);

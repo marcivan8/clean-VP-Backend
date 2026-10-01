@@ -15,6 +15,7 @@
 import React, { useState } from 'react';
 import { X, Zap, ArrowRight, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import useDeviceType from '../hooks/useDeviceType';
 import { supabase } from '../lib/supabaseClient';
 
 async function startCheckout(plan) {
@@ -41,6 +42,8 @@ const UpgradeModal = ({ message, upgradeRequired = 'creator', onClose }) => {
     const { t } = useTranslation('editor');
     const [loading, setLoading] = useState(false);
     const nextPlanLabel = upgradeRequired === 'pro' ? 'Pro' : 'Creator';
+    // Mobile: a bottom sheet with full-size buttons instead of a centered card.
+    const { isMobile } = useDeviceType();
 
     const handleUpgrade = async () => {
         setLoading(true);
@@ -53,13 +56,17 @@ const UpgradeModal = ({ message, upgradeRequired = 'creator', onClose }) => {
 
     return (
         <div
-            className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+            className={isMobile ? "fixed inset-0 z-[200] flex items-end justify-center" : "fixed inset-0 z-[200] flex items-center justify-center p-4"}
             style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}
             onClick={(e) => { if (e.target === e.currentTarget) onClose?.(); }}
         >
             <div
-                className="relative w-full max-w-sm rounded-2xl overflow-hidden"
-                style={{ background: 'var(--bg-2)', border: '0.5px solid var(--line-strong)' }}
+                role="dialog"
+                aria-modal="true"
+                className={isMobile ? "relative w-full overflow-hidden" : "relative w-full max-w-sm rounded-2xl overflow-hidden"}
+                style={isMobile
+                    ? { background: 'var(--bg-2)', borderTop: '1px solid var(--line-strong)', borderRadius: '20px 20px 0 0', paddingBottom: 'env(safe-area-inset-bottom)' }
+                    : { background: 'var(--bg-2)', border: '0.5px solid var(--line-strong)' }}
             >
                 {/* Top accent bar — same treatment as AuthPromptModal */}
                 <div className="h-0.5 w-full" style={{ background: 'linear-gradient(90deg, var(--accent), var(--violet))' }} />
@@ -90,9 +97,14 @@ const UpgradeModal = ({ message, upgradeRequired = 'creator', onClose }) => {
                             <h2 style={{ fontFamily: 'var(--f-sans)', fontSize: 15, fontWeight: 700, color: 'var(--fg)', lineHeight: 1.3 }}>
                                 {t('quotaModal.heading')}
                             </h2>
-                            <p className="mt-1" style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg-3)', lineHeight: 1.6 }}>
+                            <p className="mt-1" style={{ fontFamily: 'var(--f-sans)', fontSize: isMobile ? 14 : 12, color: 'var(--fg-3)', lineHeight: 1.6 }}>
                                 {message || t('quotaModal.bodyFallback')}
                             </p>
+                            {isMobile && (
+                                <p className="mt-2" style={{ fontFamily: 'var(--f-sans)', fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.5 }}>
+                                    {t('quotaModal.stillWorks')}
+                                </p>
+                            )}
                         </div>
                     </div>
 
@@ -101,7 +113,7 @@ const UpgradeModal = ({ message, upgradeRequired = 'creator', onClose }) => {
                             onClick={handleUpgrade}
                             disabled={loading}
                             className="w-full rounded-lg py-2.5 flex items-center justify-center gap-2 text-sm font-semibold transition-all disabled:opacity-60"
-                            style={{ background: 'linear-gradient(135deg, var(--accent), var(--violet))', color: '#fff', fontFamily: 'var(--f-sans)' }}
+                            style={{ background: 'linear-gradient(135deg, var(--accent), var(--violet))', color: '#fff', fontFamily: 'var(--f-sans)', ...(isMobile ? { minHeight: 50, fontSize: 16 } : {}) }}
                         >
                             {loading
                                 ? <Loader2 className="w-4 h-4 animate-spin" />
@@ -111,7 +123,7 @@ const UpgradeModal = ({ message, upgradeRequired = 'creator', onClose }) => {
                         <button
                             onClick={onClose}
                             className="w-full rounded-lg py-2 text-center text-sm transition-colors"
-                            style={{ color: 'var(--fg-4)', fontFamily: 'var(--f-sans)' }}
+                            style={{ color: isMobile ? 'var(--fg-2)' : 'var(--fg-4)', fontFamily: 'var(--f-sans)', ...(isMobile ? { minHeight: 46, fontSize: 15, border: '1px solid var(--line-strong)' } : {}) }}
                         >
                             {t('quotaModal.dismiss')}
                         </button>

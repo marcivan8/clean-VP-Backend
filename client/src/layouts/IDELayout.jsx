@@ -1,7 +1,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Menu, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap } from 'lucide-react';
+import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap } from 'lucide-react';
 import classNames from 'classnames';
 import { Player } from '@revideo/player-react';
 import project from '../revideo/project';
@@ -46,6 +46,14 @@ import useAIStore from '../store/useAIStore';
 import useSessionStore from '../store/useSessionStore';
 import AuthPromptModal from '../components/AuthPromptModal';
 import UpgradeModal from '../components/UpgradeModal';
+import MobileUploadStatus from '../components/MobileUploadStatus';
+import MobileTransportBar from '../components/MobileTransportBar';
+import MobileEditorMenu from '../components/MobileEditorMenu';
+import MobileRokaApproval from '../components/MobileRokaApproval';
+import MobileEditToast from '../components/MobileEditToast';
+import MobileCaptionSheets from '../components/MobileCaptionSheets';
+import { Logo } from '../components/Logo.jsx';
+import { summarizeUploads } from '../utils/uploadStatus.js';
 import OnboardingTour, { shouldShowOnboardingTour } from '../components/OnboardingTour';
 import { EventBus, EVENT_TYPES } from '../agent/EventBus';
 import { useSupabasePersistence } from '../hooks/useSupabasePersistence';
@@ -466,6 +474,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const [showAI, setShowAI] = React.useState(false);
     
     const { isMobile } = useDeviceType();
+    // Mobile only: Export stays disabled while a video on the timeline is still
+    // uploading / preparing (or failed). Selector returns a boolean so upload
+    // progress ticks don't re-render this whole layout.
+    const mobileExportBlocked = useTimelineStore(s => isMobile && summarizeUploads(s.assets, s.tracks).exportBlocked);
     // null = nothing open; 'media' | 'ai' | 'audio' | 'more' = bottom sheet open
     const [mobileSheet, setMobileSheet] = React.useState(null);
 
@@ -845,7 +857,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     });
                                     console.warn(`[IDELayout] Falling back to the raw upload for playback: ${fallbackRaw}`);
                                 } else {
-                                    useTimelineStore.getState().updateAsset(assetId, { isProxying: false, uploadPhase: 'ready' });
+                                    // No raw path either: the upload never landed. uploadError
+                                    // lets the mobile upload UI offer Try again (nothing else reads it).
+                                    useTimelineStore.getState().updateAsset(assetId, { isProxying: false, uploadPhase: 'ready', uploadError: 'upload_not_stored' });
                                 }
                                 return;
                             }
@@ -1125,7 +1139,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 console.warn(`[IDELayout] Proxy failed — playing the raw upload instead: ${fallbackRaw}`);
                                 return;
                             }
-                            useTimelineStore.getState().updateAsset(assetId, { isProxying: false, uploadPhase: 'ready' });
+                            // No raw path: the upload itself failed. uploadError lets the
+                            // mobile upload UI offer Try again (nothing else reads it).
+                            useTimelineStore.getState().updateAsset(assetId, { isProxying: false, uploadPhase: 'ready', uploadError: err?.message || 'upload_failed' });
                         });
                 } else if (file.type.startsWith('image')) {
                     // Images never went through any content-analysis pipeline
@@ -1207,6 +1223,27 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
     const triggerImport = () => {
         fileInputRef.current.click();
+    };
+
+    // ── Mobile upload card actions (MobileUploadStatus) ─────────────────────
+    // Try again: the File is still in memory, so drop the failed asset (and its
+    // clip) and run the normal import again on the same file.
+    const handleRetryUpload = (assetId) => {
+        const asset = useTimelineStore.getState().assets?.find(a => a.id === assetId);
+        if (!asset) return;
+        const file = asset.file;
+        useTimelineStore.getState().removeAsset(assetId);
+        if (file) handleFileImport({ target: { files: [file] } });
+        else triggerImport();
+    };
+    const handleRemoveUpload = (assetId) => {
+        useTimelineStore.getState().removeAsset(assetId);
+    };
+    // Interrupted (page reloaded mid-upload): the File is gone, so remove the
+    // stale entry and open the picker.
+    const handleUploadAgain = (assetId) => {
+        useTimelineStore.getState().removeAsset(assetId);
+        triggerImport();
     };
 
     // pollJobResult's own default (300s / 5 min) was sized for typical 1080p-
@@ -1606,6 +1643,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             />
             <ClarificationDialog />
             <ApprovalDialog />
+            {isMobile && <MobileRokaApproval />}
+            {isMobile && <MobileCaptionSheets />}
 
             {/* Progressive auth prompt */}
             {authPrompt && (
@@ -1660,9 +1699,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 <header className="h-11 border-b flex items-center justify-start gap-6 px-4 z-40 shrink-0" style={{ background: "var(--glass)", borderColor: "var(--line-soft)", backdropFilter: "blur(20px) saturate(160%)" }}>
                     <div className="flex items-center gap-3">
 
-                        <button className="md:hidden p-2 -ml-2 text-muted-foreground hover:text-foreground" onClick={() => setShowSidebar(!showSidebar)}>
-                            <Menu className="w-5 h-5" />
-                        </button>
+                        {/* Mobile menu (My projects, Rename, Settings). It used to toggle an
+                            unused showSidebar flag that only dimmed the screen. */}
+                        <MobileEditorMenu onOpenSettings={() => { setActiveTab('settings'); setMobileSheet('media'); }} />
                         <span className="studio-mono-label hidden md:inline">vibed/studio</span>
                     </div>
 
@@ -1709,10 +1748,16 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         <VideoTimeDisplay />
                     </div>
 
-                    {/* Mobile title */}
-                    <h1 className="md:hidden font-bold text-sm tracking-wide truncate max-w-[150px]">
-                        VIBED
-                    </h1>
+                    {/* Mobile title: real logo mark + wordmark + project name */}
+                    <div className="md:hidden flex items-center gap-2 min-w-0 -ml-4">
+                        <Logo size={22} />
+                        <div className="flex flex-col min-w-0" style={{ lineHeight: 1.15 }}>
+                            <h1 className="font-bold text-sm tracking-[0.12em]" style={{ margin: 0, color: 'var(--fg)' }}>VIBED</h1>
+                            <span className="truncate max-w-[150px]" style={{ fontFamily: 'var(--f-mono)', fontSize: 10.5, color: 'var(--fg-3)' }}>
+                                {projectName || t('ideLayout.untitledProject')}
+                            </span>
+                        </div>
+                    </div>
 
                     {/* Menu Bar */}
                     <div className="hidden md:flex items-center gap-1 z-50">
@@ -1790,7 +1835,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 if (isAnonymous) { showAuthPrompt('export'); }
                                 else { setShowExportModal(true); }
                             }}
-                            disabled={isExporting}
+                            disabled={isExporting || mobileExportBlocked}
+                            title={mobileExportBlocked ? t('mobileUpload.exportWhenReady') : undefined}
                             className="glass-button-pro px-4 py-1.5 md:px-5 rounded-md text-[10px] flex items-center gap-2 disabled:opacity-50"
                         >
                             {isExporting ? <span className="animate-spin">⏳</span> : <Share className="w-3 h-3" />}
@@ -2195,7 +2241,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 <GraphicOverlay />
                             </div>
 
-                            {/* Floating Playback Controls */}
+                            {/* Floating Playback Controls (desktop; mobile uses MobileTransportBar) */}
+                            {!isMobile && (
                             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-3 backdrop-blur-xl px-4 py-2 rounded-full shadow-xl z-20 scale-90 md:scale-100 origin-bottom" style={{ background: "rgba(14,15,17,0.85)", border: "0.5px solid var(--line-strong)" }}>
                                 <button className="hover:text-primary transition-colors" onClick={() => useTimelineStore.getState().seek(0)} style={{ color: "var(--fg-3)" }}><SkipBack /></button>
                                 <button className="hover:text-primary transition-colors" onClick={() => useTimelineStore.getState().togglePlay()} style={{ color: "var(--fg)" }}>
@@ -2207,7 +2254,20 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     <VideoTimeDisplay />
                                 </span>
                             </div>
+                            )}
+
+                            {isMobile && (
+                                <MobileUploadStatus
+                                    onRetry={handleRetryUpload}
+                                    onRemove={handleRemoveUpload}
+                                    onUploadAgain={handleUploadAgain}
+                                />
+                            )}
+                            {isMobile && <MobileEditToast />}
                         </div>
+
+                        {/* Mobile playback row: undo/redo, prev/play/next, time, More */}
+                        {isMobile && <MobileTransportBar />}
 
                         {/* Timeline — always visible. Mini (h-36) on mobile, full-height on desktop. */}
                         {mode === 'editor' && (

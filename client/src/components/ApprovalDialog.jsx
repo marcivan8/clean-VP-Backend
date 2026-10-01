@@ -6,6 +6,7 @@
  */
 
 import React from 'react';
+import useDeviceType from '../hooks/useDeviceType';
 import { useTranslation } from 'react-i18next';
 import { useApprovalDialog } from '../hooks/useApprovalDialog.js';
 import { AlertTriangle, CheckCircle, XCircle, Clock } from 'lucide-react';
@@ -29,8 +30,10 @@ export function ApprovalDialog() {
         reasons,
         jobId
     } = useApprovalDialog();
+    const { isMobile } = useDeviceType();
 
-    if (!isOpen) return null;
+    // On mobile, MobileRokaApproval (a bottom sheet) answers approvals instead.
+    if (!isOpen || isMobile) return null;
 
     return (
         <div className="approval-dialog-overlay">

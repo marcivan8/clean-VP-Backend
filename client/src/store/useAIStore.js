@@ -48,6 +48,39 @@ const useAIStore = create((set) => ({
     removeSuggestion: (id) => set((state) => ({
         suggestions: state.suggestions.filter(s => s.id !== id)
     })),
+
+    // Mobile: Roka requests typed while the video is still uploading /
+    // preparing wait here and run once it can play (agent/rokaPromptQueue.js).
+    queuedPrompts: [],
+    enqueuePrompt: (text) => set((state) => ({
+        queuedPrompts: [...state.queuedPrompts, { id: 'q-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), text }],
+    })),
+    shiftQueuedPrompt: () => {
+        let first = null;
+        set((state) => {
+            if (state.queuedPrompts.length === 0) return state;
+            first = state.queuedPrompts[0];
+            return { queuedPrompts: state.queuedPrompts.slice(1) };
+        });
+        return first;
+    },
+    clearQueuedPrompts: () => set({ queuedPrompts: [] }),
+
+    // Mobile: what the user did with an applied AI edit ('kept' | 'undone'),
+    // by its task_complete log id, so the Roka bar card and the preview toast agree.
+    // Caption generation over several videos (MediaExecutionEngine
+    // _captionMainTrackSources): null, or { files: [{ key, name, state }] }
+    // with state 'done' | 'running' | 'waiting' | 'failed'. Mobile Roka bar shows it.
+    captionProgress: null,
+    setCaptionProgress: (captionProgress) => set({ captionProgress }),
+
+    // Mobile caption sheets: null | { kind: 'style' } | { kind: 'edit', placementId }
+    mobileCaptionSheet: null,
+    openMobileCaptionSheet: (kind, placementId = null) => set({ mobileCaptionSheet: { kind, placementId } }),
+    closeMobileCaptionSheet: () => set({ mobileCaptionSheet: null }),
+
+    taskOutcomes: {},
+    setTaskOutcome: (logId, outcome) => set((state) => ({ taskOutcomes: { ...state.taskOutcomes, [logId]: outcome } })),
 }));
 
 export default useAIStore;

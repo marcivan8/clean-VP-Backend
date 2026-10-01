@@ -23,7 +23,7 @@ const src = listMainTrackSources([
   { id:'m', type:'video', clips:[{id:'1',assetId:'a',start:0,duration:1},{id:'2',assetId:'b',start:1,duration:1},{id:'3',assetId:'a',start:2,duration:1},{id:'4',assetId:'img',start:3,duration:1}] },
   { id:'br', type:'video', clips:[{id:'5',assetId:'c',start:0,duration:1}] }],
   [...assets, {id:'img',type:'image',gcsPath:'raw/u/p.png'}, {id:'c',gcsPath:'raw/u/333-C.MOV'}]);
-assert.deepEqual(src, [{key:'111-A.MOV',path:'raw/u/111-A.MOV'},{key:'222-B.MOV',path:'raw/u/222-B.MOV'}]);
+assert.deepEqual(src, [{key:'111-A.MOV',path:'raw/u/111-A.MOV',name:'A.MOV'},{key:'222-B.MOV',path:'raw/u/222-B.MOV',name:'B.MOV'}]);
 assert.deepEqual(listMainTrackSources([], assets), []);
 console.log('ALL TRANSCRIPT-MAP CHECKS PASSED');
 import { computeRangeCut } from '../client/src/timeline/rangeCut.js';

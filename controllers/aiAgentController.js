@@ -93,9 +93,19 @@ function mockParse(cmd) {
  * Parses user prompt into strict JSON intent.
  * NO natural language output - only structured data.
  */
+// Sent by the mobile client (matchUserLanguage: true): Roka answers in the
+// language the user wrote in. Machine-readable fields stay in English so the
+// pipeline (operation names, parameters) is unaffected.
+const LANGUAGE_RULE = `
+
+═══════════════════════════════════════════════════
+🌍 LANGUAGE
+═══════════════════════════════════════════════════
+Write every user-facing text you return (message, questions, explanations) in the same language as the user's latest message. Keep "type", "intent", "operation", parameter names and parameter values in English.`;
+
 const parseIntentHandler = async (req, res) => {
     try {
-        const { prompt, context, conversationHistory = [] } = req.body;
+        const { prompt, context, conversationHistory = [], matchUserLanguage = false } = req.body;
         console.log("📝 [CRL] Parsing intent:", prompt);
 
 
@@ -530,7 +540,7 @@ USER REQUEST:
 
         const completion = await openai.chat.completions.create({
             messages: [
-                { role: "system", content: systemPrompt },
+                { role: "system", content: systemPrompt + (matchUserLanguage === true ? LANGUAGE_RULE : '') },
                 ...safeHistory,
                 { role: "user", content: userMessage }
             ],

@@ -831,7 +831,12 @@ export class IntentParser {
             // FIX: was fetch('/api/ai/parse-intent', ...) — no auth → 401 in production
             const response = await authFetch('/api/ai/parse-intent', {
                 method: 'POST',
-                body: JSON.stringify({ prompt, context, conversationHistory }),
+                // Mobile asks Roka to answer in the language the user wrote in
+                // (server adds a language rule only when this flag is true).
+                body: JSON.stringify({
+                    prompt, context, conversationHistory,
+                    matchUserLanguage: typeof window !== 'undefined' && window.innerWidth < 768,
+                }),
                 signal: controller.signal
             });
             clearTimeout(timeoutId);
