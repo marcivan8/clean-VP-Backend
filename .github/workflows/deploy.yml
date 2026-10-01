@@ -38,7 +38,9 @@ jobs:
         with:
           node-version: '20'
           cache: npm
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
 
       # ── Install server deps ───────────────────────────────────────────────
       - name: Install server dependencies
@@ -61,20 +63,18 @@ jobs:
       # timeline-mutation pipeline. Pure logic / local-storage-mode checks —
       # no network or real credentials needed, verified to pass cleanly
       # standalone before being added here.
-      - name: Run regression scripts
-        run: npm run test:regression
-
-      # ── Install + build client ────────────────────────────────────────────
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: npm
-          cache-dependency-path: client/package-lock.json
-
+      # Several regression scripts (test_roka_mobile, test_caption_edits,
+      # test_transcript_edit, test_manual_edits) import client stores, which
+      # import client-only packages (zustand), so the client deps must be
+      # installed first.
       - name: Install client dependencies
         run: npm ci
         working-directory: client
 
+      - name: Run regression scripts
+        run: npm run test:regression
+
+      # ── Build client ──────────────────────────────────────────────────────
       - name: Build client (with source maps)
         run: npm run build
         working-directory: client
