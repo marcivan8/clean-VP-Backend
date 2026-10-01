@@ -12,6 +12,7 @@ import ClipContextMenu from './ClipContextMenu';
 import ClipWaveform from '../ClipWaveform';
 import { usePeaks } from '../../hooks/usePeaks';
 import { getAssetUploadStatus, UPLOAD_PHASES, isProblemPhase } from '../../utils/uploadStatus.js';
+import { getMainVideoTrackId } from '../../timeline/rippleDelete.js';
 
 const AUDIO_EXTENSIONS = /\.(mp3|wav|m4a|aac|ogg|flac)$/i;
 
@@ -34,6 +35,19 @@ const getTabForClip = (clip, trackId) => {
     return 'transform';
 };
 
+// Mobile: visible trim handles on the selected clip (desktop keeps hover areas).
+const MOBILE_HANDLE_STYLE = {
+    left:  { width: 14, background: 'var(--accent)', borderRadius: '6px 0 0 6px', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+    right: { width: 14, background: 'var(--accent)', borderRadius: '0 6px 6px 0', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+};
+const MOBILE_GRIP = { width: 2, height: '40%', borderRadius: 1, background: 'rgba(255,255,255,0.85)' };
+const fmtLen = (s) => {
+    const v = Math.max(0, Number(s) || 0);
+    const m = Math.floor(v / 60);
+    const r = v - m * 60;
+    return `${m}:${r < 10 ? '0' : ''}${r.toFixed(1)}`;
+};
+
 const Clip = ({ clip, trackId }) => {
     const { t } = useTranslation('editor');
     const { isMobile } = useDeviceType();
@@ -49,6 +63,8 @@ const Clip = ({ clip, trackId }) => {
     const isActive = activeClipId === clip.id;
     const isSelected = selectedClipIds && selectedClipIds.includes(clip.id);
     const [ctxMenu, setCtxMenu] = React.useState(null); // null | { x, y }
+    // Mobile trim: live "old → new length" bubble while a handle is dragged.
+    const [trimLabel, setTrimLabel] = React.useState(null); // null | { from, to }
 
     // Text/caption clips never have audio — never render a waveform on them.
     const isTextClip = clip.type === 'text' || clip.type === 'caption';
@@ -181,11 +197,19 @@ const Clip = ({ clip, trackId }) => {
         const startDuration = clip.duration;
         const startStart = clip.start;
         const startOffset = clip.offset || 0;
+        // Undo snapshot taken NOW, before the live (skipHistory) updates. It
+        // used to be taken on release, when the clip was already trimmed, so
+        // Undo after a trim did nothing (desktop and mobile).
+        // Mobile also closes the gap left by the trim on release (main track).
+        const mobileGesture = isMobile;
+        useTimelineStore.getState().beginEditGesture();
 
         let rafId = null;
         let lastUpdates = null;
 
         const onMove = (moveEvent) => {
+            // Keep the timeline from scrolling under the finger while trimming.
+            if (moveEvent.type.startsWith('touch') && moveEvent.cancelable) moveEvent.preventDefault();
             // Capture clientX immediately — touch arrays may be recycled before RAF fires
             const clientX = moveEvent.type.startsWith('touch') ? moveEvent.touches[0].clientX : moveEvent.clientX;
             if (rafId !== null) return; // already a frame queued — skip this event
@@ -220,6 +244,7 @@ const Clip = ({ clip, trackId }) => {
                     };
                 }
                 lastUpdates = updates;
+                if (mobileGesture) setTrimLabel({ from: startDuration, to: updates.duration });
                 // skipHistory: true — avoids deep-cloning the full timeline state on every frame
                 useTimelineStore.getState().updateClip(trackId, clip.id, updates, { skipHistory: true });
             });
@@ -227,8 +252,24 @@ const Clip = ({ clip, trackId }) => {
 
         const onUp = () => {
             if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
-            // Commit final position to undo history exactly once
-            if (lastUpdates) useTimelineStore.getState().updateClip(trackId, clip.id, lastUpdates);
+            {
+                const st = useTimelineStore.getState();
+                const changed = !!lastUpdates && Math.abs((lastUpdates.duration ?? startDuration) - startDuration) > 1e-3;
+                if (changed) {
+                    st.updateClip(trackId, clip.id, lastUpdates, { skipHistory: true });
+                    // Magnet (always on for mobile): close the gap the trim opened
+                    // on the main track; captions/text after it move along.
+                    if (mobileGesture && getMainVideoTrackId(st.tracks) === trackId) {
+                        if (direction === 'right' && lastUpdates.duration < startDuration - 0.01) {
+                            st.rippleDeleteGap(trackId, startStart + lastUpdates.duration + 0.001, { skipHistory: true });
+                        } else if (direction === 'left' && lastUpdates.start > startStart + 0.01) {
+                            st.rippleDeleteGap(trackId, lastUpdates.start - 0.001, { skipHistory: true });
+                        }
+                    }
+                }
+                st.endEditGesture(changed);
+                if (mobileGesture) setTrimLabel(null);
+            }
             if (isTouch) {
                 document.removeEventListener('touchmove', onMove);
                 document.removeEventListener('touchend', onUp);
@@ -300,7 +341,10 @@ const Clip = ({ clip, trackId }) => {
                     ? (clip.bgColor || 'bg-green-600/80')
                     : (clip.color || 'bg-blue-500'),
                 (isActive || isSelected) ? "border-white ring-2 ring-primary/50 z-20" : "opacity-90 hover:opacity-100",
-                isDragging && "opacity-50 z-30 ring-2 ring-primary"
+                isDragging && (isMobile
+                    // Mobile long-press: the clip lifts instead of fading out
+                    ? "z-30 ring-2 ring-primary shadow-2xl"
+                    : "opacity-50 z-30 ring-2 ring-primary")
             )}
             title={`${clip.name} (${clip.duration.toFixed(2)}s)`}
             onClick={(e) => {
@@ -408,14 +452,26 @@ const Clip = ({ clip, trackId }) => {
 
             <div
                 className="absolute top-0 bottom-0 left-0 w-4 md:w-2 cursor-w-resize z-10 hover:bg-white/20 touch-none pointer-events-auto"
+                style={isMobile && isActive ? MOBILE_HANDLE_STYLE.left : undefined}
                 onMouseDown={(e) => handleResize(e, 'left')}
                 onTouchStart={(e) => handleResize(e, 'left')}
-            ></div>
+            >{isMobile && isActive && <span aria-hidden="true" style={MOBILE_GRIP} />}</div>
             <div
                 className="absolute top-0 bottom-0 right-0 w-4 md:w-2 cursor-e-resize z-10 hover:bg-white/20 touch-none pointer-events-auto"
+                style={isMobile && isActive ? MOBILE_HANDLE_STYLE.right : undefined}
                 onMouseDown={(e) => handleResize(e, 'right')}
                 onTouchStart={(e) => handleResize(e, 'right')}
-            ></div>
+            >{isMobile && isActive && <span aria-hidden="true" style={MOBILE_GRIP} />}</div>
+
+            {trimLabel && (
+                <div aria-live="polite" style={{
+                    position: 'absolute', top: 2, left: '50%', transform: 'translateX(-50%)', zIndex: 30, pointerEvents: 'none',
+                    padding: '1px 6px', borderRadius: 6, background: 'var(--accent)', color: '#fff',
+                    fontFamily: 'var(--f-mono)', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+                }}>
+                    {fmtLen(trimLabel.from)} → {fmtLen(trimLabel.to)}
+                </div>
+            )}
 
             {ctxMenu && (
                 <ClipContextMenu

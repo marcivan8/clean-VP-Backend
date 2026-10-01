@@ -45,9 +45,35 @@
   "limitModal": {
     "title": "Project limit reached",
     "body": "Your <strong>{{plan}}</strong> plan includes up to {{limit}} projects. Upgrade to {{next}} for more.",
-    "creatorProjects": "10 projects",
+    "creatorProjects": "Unlimited",
     "proProjects": "Unlimited",
     "maybeLater": "Maybe later",
     "upgradeTo": "Upgrade to {{plan}}"
+  },
+  "mobileHome": {
+    "newVideo": "New video",
+    "newVideoSub": "Pick a video and start editing",
+    "recent": "Recent",
+    "search": "Search",
+    "closeSearch": "Close search",
+    "account": "Account",
+    "more": "More options for {{name}}",
+    "edited": "edited {{when}}",
+    "emptyTitle": "No videos yet",
+    "emptyBody": "Tap New video to pick one from your phone.",
+    "noMatch": "No project matches \"{{query}}\".",
+    "aiOps": "AI operations this month",
+    "unlimited": "Unlimited",
+    "seePlans": "See plans",
+    "billing": "Billing",
+    "pickTitle": "New video",
+    "pickVideo": "Choose a video",
+    "pickVideoSub": "From your photos or files",
+    "record": "Record",
+    "recordSub": "Film straight into a project",
+    "emptyProject": "Start with an empty project",
+    "creating": "Creating your project…",
+    "createFailed": "Couldn't create the project. Check your connection and try again.",
+    "untitled": "Untitled video"
   }
 }

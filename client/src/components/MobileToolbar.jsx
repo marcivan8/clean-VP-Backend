@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layers, Plus, Palette, Move, Music2, Type, X, Trash2, Scissors, Copy, Gauge, Pencil, Paintbrush } from 'lucide-react';
+import { Layers, Plus, Palette, Move, Music2, Type, X, Trash2, Scissors, Copy, Gauge, Pencil, Paintbrush, ScrollText } from 'lucide-react';
 import classNames from 'classnames';
 import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../store/useTimelineStore';
@@ -113,6 +113,7 @@ export default function MobileToolbar({
 /* ── Default state: Media · AI · Add ──────────────────────────────────────── */
 function DefaultBar({ activeSheet, onSheetChange, onImport }) {
     const { t } = useTranslation('editor');
+    const transcriptOpen = useAIStore(s => s.mobileTranscriptOpen);
     return (
         <>
             <ToolbarBtn
@@ -129,6 +130,15 @@ function DefaultBar({ activeSheet, onSheetChange, onImport }) {
                 onClick={() => onSheetChange('ai')}
             >
                 <SparklesIcon className="w-5 h-5" />
+            </ToolbarBtn>
+
+            {/* Edit by text (MobileTranscriptSheet) */}
+            <ToolbarBtn
+                label={t('mobileTranscript.tab')}
+                isActive={transcriptOpen}
+                onClick={() => useAIStore.getState().setMobileTranscriptOpen(true)}
+            >
+                <ScrollText className="w-5 h-5" />
             </ToolbarBtn>
 
             {/* Add / Import — gradient pill */}
@@ -198,11 +208,27 @@ function ClipContextBar({ trackType, actions, activeSheet, onClipAction, onDesel
         const sel = selectedClip();
         useAIStore.getState().openMobileCaptionSheet(kind, sel?.clip?.id || null);
     };
-    const editTools = isText
+    // A caption (has word timings) edits through the caption sheets; a text
+    // the user added by hand edits through the text sheet (font, colour, animation).
+    const isCaption = useTimelineStore(st => {
+        if (!st.activeClipId) return false;
+        for (const tr of st.tracks || []) {
+            const c = (tr.clips || []).find(cl => cl.id === st.activeClipId);
+            if (c) return Array.isArray(c.words) && c.words.length > 0;
+        }
+        return false;
+    });
+    const editTools = isText && isCaption
         ? [
             { id: 'edit', icon: <Pencil className="w-5 h-5" />, label: t('mobileCaptions.edit'), onClick: () => openCaptionSheet('edit') },
             { id: 'style', icon: <Paintbrush className="w-5 h-5" />, label: t('mobileCaptions.style'), onClick: () => openCaptionSheet('style') },
             { id: 'split', icon: <Scissors className="w-5 h-5" />, label: t('mobileUi.split'), onClick: split },
+        ]
+        : isText
+        ? [
+            { id: 'edit', icon: <Pencil className="w-5 h-5" />, label: t('mobileCaptions.edit'), onClick: () => openCaptionSheet('text') },
+            { id: 'split', icon: <Scissors className="w-5 h-5" />, label: t('mobileUi.split'), onClick: split },
+            { id: 'duplicate', icon: <Copy className="w-5 h-5" />, label: t('mobileUi.duplicate'), onClick: duplicate },
         ]
         : [
             { id: 'split', icon: <Scissors className="w-5 h-5" />, label: t('mobileUi.split'), onClick: split },

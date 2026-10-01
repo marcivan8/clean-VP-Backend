@@ -677,7 +677,9 @@
     "currentLength": "Durée actuelle",
     "undoAfter": "Vous pourrez annuler en un geste ensuite.",
     "apply": "Appliquer",
-    "notNow": "Pas maintenant"
+    "notNow": "Pas maintenant",
+    "outOfOps": "Plus d'opérations IA ce mois-ci",
+    "seePlans": "Voir les plans"
   },
   "mobileCaptions": {
     "panel": "Tous",
@@ -706,5 +708,54 @@
     "file_running": "Transcription…",
     "file_waiting": "En attente",
     "file_failed": "Échec"
+  },
+  "mobileTranscript": {
+    "tab": "Texte",
+    "title": "Transcription",
+    "hint": "Touchez un mot pour y aller · maintenez puis glissez pour sélectionner",
+    "empty": "Il n'y a pas encore de transcription. Roka en crée une quand il ajoute des sous-titres.",
+    "fillersFound_one": "{{count}} mot de remplissage trouvé",
+    "fillersFound_other": "{{count}} mots de remplissage trouvés",
+    "removeAll": "Tout retirer",
+    "selection_one": "{{count}} mot · {{seconds}} s",
+    "selection_other": "{{count}} mots · {{seconds}} s",
+    "cut": "Couper",
+    "clear": "Effacer",
+    "cutDone_one": "{{count}} mot coupé ({{seconds}} s). Vidéo et sous-titres mis à jour.",
+    "cutDone_other": "{{count}} mots coupés ({{seconds}} s). Vidéo et sous-titres mis à jour.",
+    "fillersDone_one": "{{count}} mot de remplissage retiré.",
+    "fillersDone_other": "{{count}} mots de remplissage retirés."
+  },
+  "mobileText": {
+    "title": "Texte",
+    "textLabel": "Texte",
+    "font": "Police",
+    "color": "Couleur",
+    "animation": "Animation",
+    "delete": "Supprimer ce texte",
+    "color_white": "Blanc",
+    "color_yellow": "Jaune",
+    "color_cyan": "Cyan",
+    "color_violet": "Violet",
+    "color_coral": "Corail",
+    "color_black": "Noir"
+  },
+  "mobileExport": {
+    "title": "Exporter",
+    "madeFor": "Pour",
+    "exportVideo": "Exporter la vidéo",
+    "moreOptions": "Plus d'options (audio, fichier de projet)",
+    "exporting": "Export de votre vidéo",
+    "exportingFor": "Export pour {{platform}}",
+    "leaveNote": "Le rendu se fait sur nos serveurs. Vous pouvez quitter cette page : rouvrez ce projet sur ce téléphone et votre vidéo sera là.",
+    "ready": "Votre vidéo est prête",
+    "save": "Enregistrer sur le téléphone",
+    "share": "Partager",
+    "preparingFile": "Préparation du fichier…",
+    "shareUnsupported": "Ce navigateur ne permet pas de partager des fichiers. Utilisez Enregistrer sur le téléphone.",
+    "shareFailed": "Impossible d'ouvrir le menu de partage. Essayez Enregistrer sur le téléphone.",
+    "exportAgain": "Exporter une autre version",
+    "failed": "L'export n'a pas abouti",
+    "tryAgain": "Réessayer"
   }
 }

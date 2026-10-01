@@ -677,7 +677,9 @@
     "currentLength": "Current length",
     "undoAfter": "You can undo it in one tap afterwards.",
     "apply": "Apply",
-    "notNow": "Not now"
+    "notNow": "Not now",
+    "outOfOps": "Out of AI operations this month",
+    "seePlans": "See plans"
   },
   "mobileCaptions": {
     "panel": "All",
@@ -706,5 +708,54 @@
     "file_running": "Transcribing…",
     "file_waiting": "Waiting",
     "file_failed": "Failed"
+  },
+  "mobileTranscript": {
+    "tab": "Text",
+    "title": "Transcript",
+    "hint": "Tap a word to jump · press and hold, then drag to select",
+    "empty": "There is no transcript yet. Roka writes one when it adds captions.",
+    "fillersFound_one": "{{count}} filler word found",
+    "fillersFound_other": "{{count}} filler words found",
+    "removeAll": "Remove all",
+    "selection_one": "{{count}} word · {{seconds}} s",
+    "selection_other": "{{count}} words · {{seconds}} s",
+    "cut": "Cut",
+    "clear": "Clear",
+    "cutDone_one": "Cut {{count}} word ({{seconds}} s). Video and captions updated.",
+    "cutDone_other": "Cut {{count}} words ({{seconds}} s). Video and captions updated.",
+    "fillersDone_one": "Removed {{count}} filler word.",
+    "fillersDone_other": "Removed {{count}} filler words."
+  },
+  "mobileText": {
+    "title": "Text",
+    "textLabel": "Text",
+    "font": "Font",
+    "color": "Colour",
+    "animation": "Animation",
+    "delete": "Delete this text",
+    "color_white": "White",
+    "color_yellow": "Yellow",
+    "color_cyan": "Cyan",
+    "color_violet": "Violet",
+    "color_coral": "Coral",
+    "color_black": "Black"
+  },
+  "mobileExport": {
+    "title": "Export",
+    "madeFor": "Made for",
+    "exportVideo": "Export video",
+    "moreOptions": "More options (audio, project file)",
+    "exporting": "Exporting your video",
+    "exportingFor": "Exporting for {{platform}}",
+    "leaveNote": "It renders on our servers. You can leave this page: open this project again on this phone and your video will be here.",
+    "ready": "Your video is ready",
+    "save": "Save to phone",
+    "share": "Share",
+    "preparingFile": "Preparing the file…",
+    "shareUnsupported": "Sharing files isn't supported on this browser. Use Save to phone.",
+    "shareFailed": "Couldn't open the share menu. Try Save to phone.",
+    "exportAgain": "Export another version",
+    "failed": "The export didn't finish",
+    "tryAgain": "Try again"
   }
 }

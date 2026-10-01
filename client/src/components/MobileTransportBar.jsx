@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 import { Undo2, Redo2, Play, Pause, SkipBack, SkipForward, MoreHorizontal, ZoomIn, ZoomOut, Type, Palette } from 'lucide-react';
 import useTimelineStore from '../store/useTimelineStore';
+import useAIStore from '../store/useAIStore';
 import { prevClipBoundary, nextClipBoundary } from '../timeline/clipNav.js';
 import MobileSheet, { SheetLabel, SheetChip, SheetRow } from './MobileSheet';
 
@@ -149,7 +150,18 @@ export default function MobileTransportBar() {
                     icon={<Type size={20} />}
                     label={t('mobileUi.addText')}
                     sub={t('mobileUi.addTextSub')}
-                    onClick={() => { st().addTextOverlay(t('timeline.newTextDefault'), 'center', 5, 'default'); setMoreOpen(false); }}
+                    onClick={() => {
+                        // Add at the playhead, select it and open the text sheet on it.
+                        const textIds = (s) => new Set(s.tracks.filter(tr => tr.type === 'text').flatMap(tr => (tr.clips || []).map(c => c.id)));
+                        const before = textIds(st());
+                        st().addTextOverlay(t('timeline.newTextDefault'), 'center', 5, 'default');
+                        const added = [...textIds(st())].find(id => !before.has(id));
+                        setMoreOpen(false);
+                        if (added) {
+                            st().setActiveClip?.(added);
+                            useAIStore.getState().openMobileCaptionSheet('text', added);
+                        }
+                    }}
                 />
 
                 <SheetLabel>{t('mobileUi.transition')}</SheetLabel>

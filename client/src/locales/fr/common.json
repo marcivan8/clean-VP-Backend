@@ -45,5 +45,20 @@
     },
     "copyright": "© 2026 Vibed. Tous droits réservés.",
     "madeWith": ""
+  },
+  "planSheet": {
+    "aiOpsTitle": "Vous avez utilisé toutes vos opérations IA",
+    "aiOpsBody": "Roka ne peut pas lancer de nouvelles modifications avant le {{date}}. Vos projets, le montage manuel et l'export continuent de fonctionner.",
+    "projectsTitle": "Vous avez atteint votre limite de projets",
+    "projectsBody_one": "Le plan {{plan}} inclut {{count}} projet actif. Supprimez-en un, ou passez à un plan supérieur pour des projets illimités.",
+    "projectsBody_other": "Le plan {{plan}} inclut {{count}} projets actifs. Supprimez-en un, ou passez à un plan supérieur pour des projets illimités.",
+    "plansTitle": "Votre plan",
+    "plansBody": "Vous êtes sur le plan {{plan}}. Les opérations IA se réinitialisent le {{date}}.",
+    "plansBodyUnlimited": "Vous êtes sur le plan {{plan}}, avec des opérations IA illimitées.",
+    "perMonth": "{{price}} / mois",
+    "upgradeTo": "Passer à {{plan}}",
+    "notNow": "Pas maintenant",
+    "manageBilling": "Gérer la facturation",
+    "checkoutFailed": "Impossible d'ouvrir le paiement. Réessayez dans un instant."
   }
 }

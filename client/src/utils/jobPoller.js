@@ -29,7 +29,9 @@ const DEFAULT_TIMEOUT_MS    = 300_000; // give up after 5 minutes
  *   CLAUDE.md R24) should pass a larger value instead of the default.
  * @returns {Promise<any>}         – resolves with the job's returnValue
  */
-export async function pollJobResult(jobId, signal = null, timeoutMs = DEFAULT_TIMEOUT_MS) {
+// onProgress (optional): called with the job's reported progress (0-100)
+// while it runs. Existing callers pass three arguments and are unaffected.
+export async function pollJobResult(jobId, signal = null, timeoutMs = DEFAULT_TIMEOUT_MS, onProgress = null) {
     const deadline    = Date.now() + timeoutMs;
     let   intervalMs  = MIN_POLL_INTERVAL_MS;
 
@@ -67,6 +69,10 @@ export async function pollJobResult(jobId, signal = null, timeoutMs = DEFAULT_TI
 
         if (state === 'failed') {
             throw new Error(data.error || data.failedReason || `Job ${jobId} failed`);
+        }
+
+        if (typeof onProgress === 'function' && Number.isFinite(Number(data.progress))) {
+            try { onProgress(Number(data.progress)); } catch { /* UI callback must never break polling */ }
         }
 
         // Still running – apply exponential back-off then wait

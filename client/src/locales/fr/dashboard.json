@@ -45,9 +45,35 @@
   "limitModal": {
     "title": "Limite de projets atteinte",
     "body": "Votre plan <strong>{{plan}}</strong> inclut jusqu'à {{limit}} projets. Passez à {{next}} pour en avoir plus.",
-    "creatorProjects": "10 projets",
+    "creatorProjects": "Illimité",
     "proProjects": "Illimité",
     "maybeLater": "Peut-être plus tard",
     "upgradeTo": "Passer à {{plan}}"
+  },
+  "mobileHome": {
+    "newVideo": "Nouvelle vidéo",
+    "newVideoSub": "Choisissez une vidéo et commencez le montage",
+    "recent": "Récents",
+    "search": "Rechercher",
+    "closeSearch": "Fermer la recherche",
+    "account": "Compte",
+    "more": "Plus d'options pour {{name}}",
+    "edited": "modifié {{when}}",
+    "emptyTitle": "Aucune vidéo pour l'instant",
+    "emptyBody": "Touchez Nouvelle vidéo pour en choisir une sur votre téléphone.",
+    "noMatch": "Aucun projet ne correspond à « {{query}} ».",
+    "aiOps": "Opérations IA ce mois-ci",
+    "unlimited": "Illimitées",
+    "seePlans": "Voir les plans",
+    "billing": "Facturation",
+    "pickTitle": "Nouvelle vidéo",
+    "pickVideo": "Choisir une vidéo",
+    "pickVideoSub": "Depuis vos photos ou fichiers",
+    "record": "Filmer",
+    "recordSub": "Filmez directement dans un projet",
+    "emptyProject": "Commencer avec un projet vide",
+    "creating": "Création du projet…",
+    "createFailed": "Impossible de créer le projet. Vérifiez votre connexion et réessayez.",
+    "untitled": "Vidéo sans titre"
   }
 }

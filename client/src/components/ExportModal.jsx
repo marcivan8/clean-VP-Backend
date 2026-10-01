@@ -8,29 +8,11 @@ import { useTranslation } from 'react-i18next';
 import { exportToNLE } from '../services/nleExportService';
 import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../store/useTimelineStore';
+import { PLATFORMS, RESOLUTIONS, QUALITY_PROFILES } from './exportPresets.js';
 import { useAudioEngine } from '../hooks/useAudioEngine.js';
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
-const PLATFORMS = [
-    { id: 'youtube', label: 'YouTube',      icon: Youtube,      ar: '16:9', fps: 30, res: '1920×1080' },
-    { id: 'tiktok',  label: 'TikTok',       icon: Smartphone,   ar: '9:16', fps: 30, res: '1080×1920' },
-    { id: 'reels',   label: 'IG Reels',     icon: Clapperboard, ar: '9:16', fps: 30, res: '1080×1920' },
-    { id: 'shorts',  label: 'YT Shorts',    icon: Tv2,          ar: '9:16', fps: 60, res: '1080×1920' },
-];
-
-const RESOLUTIONS = [
-    { id: '720p',  label: '720p',  sub: 'HD' },
-    { id: '1080p', label: '1080p', sub: 'FHD' },
-    { id: '2k',    label: '2K',    sub: 'QHD' },
-    { id: '4k',    label: '4K',    sub: 'UHD' },
-];
-
-const QUALITY_PROFILES = [
-    { id: 'high',   labelKey: 'exportModal.qualityPro',    bitrate: '8 Mbps',  subKey: 'exportModal.qualityMaxBitrate'  },
-    { id: 'medium', labelKey: 'exportModal.qualitySocial', bitrate: '5 Mbps',  subKey: 'exportModal.qualityBalanced'     },
-    { id: 'low',    labelKey: 'exportModal.qualityDraft',  bitrate: '2 Mbps',  subKey: 'exportModal.qualityFastRender'  },
-];
 
 // ONE render pipeline: jobs/exportProcessor.js via BullMQ.
 // The "cinematic" Revideo/Lambda engine was removed — it never applied the

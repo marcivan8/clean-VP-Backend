@@ -17,6 +17,7 @@ import { X, Zap, ArrowRight, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import useDeviceType from '../hooks/useDeviceType';
 import { supabase } from '../lib/supabaseClient';
+import PlanSheet from './PlanSheet.jsx';
 
 async function startCheckout(plan) {
     try {
@@ -53,6 +54,11 @@ const UpgradeModal = ({ message, upgradeRequired = 'creator', onClose }) => {
         // flash back to the idle button during that navigation.
         setLoading(false);
     };
+
+    // Mobile: the plan sheet from the redesign (reset date, plan card).
+    if (isMobile) {
+        return <PlanSheet open reason="ai_ops" upgradeTo={upgradeRequired} onClose={onClose} />;
+    }
 
     return (
         <div

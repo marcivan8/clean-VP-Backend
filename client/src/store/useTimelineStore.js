@@ -26,6 +26,7 @@ import { deriveSpeakerCrop, deriveTrackingSegments } from '../motion/ObjectLayer
 import { computeRippleDelete, computeGapRipple, remapTimelineWords } from '../timeline/rippleDelete.js';
 import { computeMultiMove } from '../timeline/multiMove.js';
 import { computeRangeCut } from '../timeline/rangeCut.js';
+import { computeCaptionFollow } from '../timeline/captionFollow.js';
 import { mapTranscriptToTimeline } from '../timeline/transcriptMap.js';
 import { LEGACY_PACK_MOTION } from '../motion/CaptionModel.js';
 import { retimeWordsForText, splitCaption, mergeCaptions, shiftWords as shiftCaptionWords } from '../motion/captionEdits.js';
@@ -760,6 +761,10 @@ const useTimelineStore = create(
                 // read by TextOverlay. Was missing here, so the desktop Roka style
                 // card only ever changed fonts and colours.
                 if (updates.captionStyle !== undefined) clipUpdates.captionStyle = updates.captionStyle;
+                // Motion presets (MotionPanel, "animate automatically", style
+                // packs clearing a clip's own animation). Was missing here, so
+                // every preset applied through updateClip stored nothing.
+                if (updates.animations !== undefined) clipUpdates.animations = updates.animations;
                 // R66 — clip grouping. `null` is a legitimate value (ungroup),
                 // so this checks `!== undefined`, same as every field above —
                 // an explicit `updateClip(..., { groupId: null })` must go
@@ -956,7 +961,7 @@ const useTimelineStore = create(
              * timeline/rippleDelete.js computeGapRipple.
              * @returns {boolean} true when a gap was closed
              */
-            rippleDeleteGap: (trackId, time) => {
+            rippleDeleteGap: (trackId, time, opts = {}) => {
                 const state = get();
                 const plan = computeGapRipple(state.tracks, trackId, time);
                 if (!plan.gap || plan.moves.length === 0) return false;
@@ -965,15 +970,19 @@ const useTimelineStore = create(
                     Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
                 const oldMaxEnd = maxEnd(state.tracks);
 
-                get()._saveHistory();
-                // Same opt-in snapshot as rippleDeleteClip: undo also restores
-                // the word-level captions and the store duration.
-                set(s => {
-                    const past = s.past.slice();
-                    const last = past[past.length - 1];
-                    if (last) past[past.length - 1] = { ...last, _extraState: { captions: state.captions, duration: state.duration } };
-                    return { past };
-                });
+                // opts.skipHistory: part of a gesture that already took its
+                // snapshot (mobile trim, beginEditGesture).
+                if (!opts.skipHistory) {
+                    get()._saveHistory();
+                    // Same opt-in snapshot as rippleDeleteClip: undo also restores
+                    // the word-level captions and the store duration.
+                    set(s => {
+                        const past = s.past.slice();
+                        const last = past[past.length - 1];
+                        if (last) past[past.length - 1] = { ...last, _extraState: { captions: state.captions, duration: state.duration } };
+                        return { past };
+                    });
+                }
 
                 timelineManager.beginTransaction();
                 try {
@@ -983,7 +992,7 @@ const useTimelineStore = create(
                     timelineManager.commitTransaction('Ripple Delete Gap');
                 } catch (err) {
                     timelineManager.rollbackTransaction();
-                    set(s => ({ past: s.past.slice(0, -1) }));
+                    if (!opts.skipHistory) set(s => ({ past: s.past.slice(0, -1) }));
                     console.error('[rippleDeleteGap] failed, timeline left unchanged:', err);
                     return false;
                 }
@@ -1013,7 +1022,7 @@ const useTimelineStore = create(
              * Planning is pure: timeline/rangeCut.js computeRangeCut.
              * @returns {boolean} true when something was cut
              */
-            cutTimelineRange: (start, end) => {
+            cutTimelineRange: (start, end, opts = {}) => {
                 const state = get();
                 const a = Math.max(0, Number(start) || 0);
                 const b = Number(end);
@@ -1028,13 +1037,17 @@ const useTimelineStore = create(
                 // words are stored minus the placement's wordShift.
                 const before = timelineManager.getState().entities.placements || {};
 
-                get()._saveHistory();
-                set(s => {
-                    const past = s.past.slice();
-                    const last = past[past.length - 1];
-                    if (last) past[past.length - 1] = { ...last, _extraState: { captions: state.captions, duration: state.duration } };
-                    return { past };
-                });
+                // opts.skipHistory: the caller (cutTimelineRanges) already took
+                // ONE snapshot for a batch of cuts.
+                if (!opts.skipHistory) {
+                    get()._saveHistory();
+                    set(s => {
+                        const past = s.past.slice();
+                        const last = past[past.length - 1];
+                        if (last) past[past.length - 1] = { ...last, _extraState: { captions: state.captions, duration: state.duration } };
+                        return { past };
+                    });
+                }
 
                 timelineManager.beginTransaction();
                 try {
@@ -1065,7 +1078,7 @@ const useTimelineStore = create(
                     timelineManager.commitTransaction('Cut From Transcript');
                 } catch (err) {
                     timelineManager.rollbackTransaction();
-                    set(s => ({ past: s.past.slice(0, -1) }));
+                    if (!opts.skipHistory) set(s => ({ past: s.past.slice(0, -1) }));
                     console.error('[cutTimelineRange] failed, timeline left unchanged:', err);
                     return false;
                 }
@@ -1107,6 +1120,36 @@ const useTimelineStore = create(
                 const ct = Number(get().currentTime) || 0;
                 if (ct > a) get().seek?.(ct >= b ? ct - (b - a) : a);
                 return true;
+            },
+
+            /**
+             * Cut several TIMELINE ranges as ONE undo step (mobile transcript:
+             * "Remove all" filler words). Ranges are cut from the last to the
+             * first so earlier cuts never move the ranges still to come.
+             * @param {Array<[number, number]>} ranges
+             * @returns {number} how many ranges were cut
+             */
+            cutTimelineRanges: (ranges) => {
+                const list = (Array.isArray(ranges) ? ranges : [])
+                    .map(([a, b]) => [Math.max(0, Number(a) || 0), Number(b)])
+                    .filter(([a, b]) => Number.isFinite(b) && b - a > 1e-3)
+                    .sort((x, y) => y[0] - x[0]);
+                if (list.length === 0) return 0;
+                const state = get();
+                get()._saveHistory();
+                set(s => {
+                    const past = s.past.slice();
+                    const last = past[past.length - 1];
+                    if (last) past[past.length - 1] = { ...last, _extraState: { captions: state.captions, duration: state.duration } };
+                    return { past };
+                });
+                let cut = 0;
+                for (const [a, b] of list) {
+                    if (get().cutTimelineRange(a, b, { skipHistory: true })) cut++;
+                }
+                // Nothing changed: drop the snapshot so Undo doesn't do nothing.
+                if (cut === 0) set(s => ({ past: s.past.slice(0, -1) }));
+                return cut;
             },
 
             // ── Caption editing (mobile caption sheets, phase 4) ─────────────────
@@ -1280,6 +1323,69 @@ const useTimelineStore = create(
                 }
                 set({ tracks: timelineManager.toLegacyTracks() });
                 return true;
+            },
+
+            // ── Touch gestures (mobile trim) ──────────────────────────────────
+            // A trim drag updates the clip live with skipHistory, so a snapshot
+            // taken when the finger LIFTS already holds the trimmed clip and
+            // Undo would change nothing. Take it when the gesture STARTS
+            // instead (with captions + duration, like ripple delete), and drop
+            // it again if nothing changed.
+            beginEditGesture: () => {
+                const state = get();
+                const futureBefore = state.future;
+                get()._saveHistory();
+                set(s => {
+                    const past = s.past.slice();
+                    const last = past[past.length - 1];
+                    // _futureBefore: _saveHistory empties the redo stack; a gesture
+                    // that ends up changing nothing (a click on a handle) gives it back.
+                    if (last) past[past.length - 1] = { ...last, _extraState: { captions: state.captions, duration: state.duration }, _gesture: true, _futureBefore: futureBefore };
+                    return { past };
+                });
+            },
+            endEditGesture: (changed) => {
+                if (changed) return;
+                set(s => {
+                    const last = s.past[s.past.length - 1];
+                    return last?._gesture
+                        ? { past: s.past.slice(0, -1), future: last._futureBefore || s.future }
+                        : {};
+                });
+            },
+
+            /**
+             * After a same-track move of main-track clips (mobile long-press
+             * reorder), move the captions / text that sat over each moved clip
+             * by the same amount (timeline/captionFollow.js). Part of the
+             * move's undo step: it adds no history of its own.
+             * @param {Array} prevTracks legacy tracks from before the move
+             * @returns {number} text clips moved
+             */
+            followMainTrackMove: (prevTracks) => {
+                const moves = computeCaptionFollow(prevTracks, get().tracks);
+                if (moves.length === 0) return 0;
+                timelineManager.beginTransaction();
+                try {
+                    // startTime only → withWordShift moves the word timings too
+                    moves.forEach(({ clipId, start }) => timelineManager.dispatch(TimelineActions.updatePlacement(clipId, { startTime: start })));
+                    timelineManager.commitTransaction('Captions Follow Move');
+                } catch (err) {
+                    timelineManager.rollbackTransaction();
+                    console.error('[followMainTrackMove] failed:', err);
+                    return 0;
+                }
+                const tracks = timelineManager.toLegacyTracks();
+                const state = get();
+                const verified = {};
+                for (const [k, v] of Object.entries(state.transcripts || {})) {
+                    if (state.transcriptVerified?.[k]) verified[k] = v;
+                }
+                const mapped = Object.keys(verified).length > 0
+                    ? mapTranscriptToTimeline({ tracks, assets: state.assets, transcripts: verified })
+                    : [];
+                set({ tracks, ...(mapped.length > 0 ? { captions: mapped } : {}) });
+                return moves.length;
             },
 
             /**

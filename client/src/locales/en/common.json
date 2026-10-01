@@ -45,5 +45,20 @@
     },
     "copyright": "© 2026 Vibed. All rights reserved.",
     "madeWith": ""
+  },
+  "planSheet": {
+    "aiOpsTitle": "You've used all your AI operations",
+    "aiOpsBody": "Roka can't start new edits until {{date}}. Your projects, manual editing and export keep working.",
+    "projectsTitle": "You've reached your project limit",
+    "projectsBody_one": "The {{plan}} plan includes {{count}} active project. Delete one, or upgrade for unlimited projects.",
+    "projectsBody_other": "The {{plan}} plan includes {{count}} active projects. Delete one, or upgrade for unlimited projects.",
+    "plansTitle": "Your plan",
+    "plansBody": "You're on {{plan}}. AI operations reset on {{date}}.",
+    "plansBodyUnlimited": "You're on {{plan}}, with unlimited AI operations.",
+    "perMonth": "{{price}} / month",
+    "upgradeTo": "Upgrade to {{plan}}",
+    "notNow": "Not now",
+    "manageBilling": "Manage billing",
+    "checkoutFailed": "Couldn't open checkout. Try again in a moment."
   }
 }

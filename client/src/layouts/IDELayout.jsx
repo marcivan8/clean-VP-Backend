@@ -41,6 +41,7 @@ import { countMetric, distributionMetric, nowMs, timelineBucket, timelineSeconds
 import { computeDragSnap } from '../timeline/dragSnap.js';
 
 import { probeMedia } from '../utils/mediaProbe';
+import { takePendingNewVideo } from '../utils/pendingNewVideo.js';
 import ProxyService from '../services/proxyService';
 import useAIStore from '../store/useAIStore';
 import useSessionStore from '../store/useSessionStore';
@@ -52,6 +53,8 @@ import MobileEditorMenu from '../components/MobileEditorMenu';
 import MobileRokaApproval from '../components/MobileRokaApproval';
 import MobileEditToast from '../components/MobileEditToast';
 import MobileCaptionSheets from '../components/MobileCaptionSheets';
+import MobileTranscriptSheet from '../components/MobileTranscriptSheet';
+import MobileExportSheet from '../components/MobileExportSheet';
 import { Logo } from '../components/Logo.jsx';
 import { summarizeUploads } from '../utils/uploadStatus.js';
 import OnboardingTour, { shouldShowOnboardingTour } from '../components/OnboardingTour';
@@ -441,9 +444,14 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         });
     };
 
+    // Mobile: a clip is picked up by pressing and holding (300 ms) so a normal
+    // swipe still scrolls the timeline and a trim drag never turns into a move.
+    // Desktop keeps the 5 px drag threshold. (Same < 768px breakpoint as
+    // useDeviceType; read directly because isMobile is declared further down.)
+    const narrowViewport = typeof window !== 'undefined' && window.innerWidth < 768;
     const sensors = useSensors(
         useSensor(PointerSensor, {
-            activationConstraint: { distance: 5 },
+            activationConstraint: narrowViewport ? { delay: 300, tolerance: 8 } : { distance: 5 },
         })
     );
 
@@ -518,6 +526,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const [isExporting, setIsExporting] = React.useState(false);
     const [exportUrl, setExportUrl] = React.useState(null);
     const [exportResult, setExportResult] = React.useState(null);
+    // Real render progress (0-100) from the export job; null when unknown.
+    const [exportProgress, setExportProgress] = React.useState(null);
+    // Mobile export sheet (MobileExportSheet); desktop keeps ExportModal.
+    const [showMobileExport, setShowMobileExport] = React.useState(false);
     const [exportError, setExportError] = React.useState(null);
     const [showExportModal, setShowExportModal] = React.useState(false);
 
@@ -542,6 +554,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     useEffect(() => {
         const unsubscribe = EventBus.on(EVENT_TYPES.QUOTA_EXCEEDED, (payload) => {
             setQuotaModal({ message: payload?.message, upgradeRequired: payload?.upgradeRequired || 'creator' });
+            if (!payload?.reason || payload.reason === 'ai_ops') {
+                useAIStore.getState().setAiOpsExhausted({ upgradeRequired: payload?.upgradeRequired || 'creator' });
+            }
         });
         return unsubscribe;
     }, []);
@@ -1246,6 +1261,16 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         triggerImport();
     };
 
+    // Mobile dashboard "New video": the picked file arrives with the new
+    // project; start the normal upload once the session id is known (the
+    // upload path uses it). takePendingNewVideo returns the file only once.
+    useEffect(() => {
+        if (!projectId || !sessionId) return;
+        const file = takePendingNewVideo(projectId);
+        if (file) handleFileImport({ target: { files: [file] } });
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- handleFileImport is recreated every render
+    }, [projectId, sessionId]);
+
     // pollJobResult's own default (300s / 5 min) was sized for typical 1080p-
     // and-under exports. A real ffmpeg encode measured directly (same filter
     // chain + bitrates this job actually uses: scale/pad, drawtext, libx264
@@ -1291,6 +1316,15 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
     // Standard export path: FFmpeg + drawtext via BullMQ (jobs/exportProcessor.js).
     // Fast, stable, the default for every user.
+    // ── Active export, per project (resume after leaving the page) ─────────
+    const activeExportKey = `vibed.activeExport.${projectId || 'local'}`;
+    const saveActiveExport = (value) => {
+        try { localStorage.setItem(activeExportKey, JSON.stringify(value)); } catch { /* storage unavailable */ }
+    };
+    const clearActiveExport = () => {
+        try { localStorage.removeItem(activeExportKey); } catch { /* storage unavailable */ }
+    };
+
     const handleFfmpegExport = async (settings) => {
         const { tracks, duration, assets, projectLUTId, aspectRatio: projectAspectRatio } = useTimelineStore.getState();
         const { authFetch }     = await import('../utils/authFetch.js');
@@ -1415,6 +1449,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || data.message || 'Export failed');
         if (!data.jobId)   throw new Error('Export response missing jobId');
+        // Remember the running job so a page reload / coming back to the
+        // project picks the render up again (the server keeps rendering).
+        saveActiveExport({ jobId: data.jobId, startedAt: Date.now(), settings });
 
         // Poll until the worker finishes (handles Railway timeouts gracefully).
         // Budget scales with timeline length and resolution — see
@@ -1424,7 +1461,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             ...(tracksForExport || []).flatMap(t => (t.clips || []).map(c =>
                 (Number(c.start) || 0) + (Number(c.duration) || 0))),
         );
-        const result = await pollJobResult(data.jobId, null, getExportPollTimeoutMs(settings, timelineSeconds));
+        const result = await pollJobResult(data.jobId, null, getExportPollTimeoutMs(settings, timelineSeconds), setExportProgress);
         if (!result?.url) throw new Error('Export completed but no URL returned');
 
         // FIX: this used to return only {url, filename, metadata} — silently
@@ -1455,6 +1492,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         setExportResult(null);
         setExportError(null);
         setExportUrl(null);
+        setExportProgress(0);
 
         // Sentry export-health metrics. Attributes are low-cardinality only.
         const exportStartedAt = nowMs();
@@ -1507,8 +1545,50 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             finishExportMetric(/timed out after/i.test(err?.message || '') ? 'client_timeout' : 'error');
         } finally {
             setIsExporting(false);
+            clearActiveExport();
         }
     };
+
+    // Mobile: an export that was still rendering when the page closed is picked
+    // up again here (job id saved by handleFfmpegExport). Only resumes a job
+    // younger than 2 h that the server still knows about.
+    useEffect(() => {
+        if (!isMobile) return undefined;
+        let raw = null;
+        try { raw = localStorage.getItem(activeExportKey); } catch { /* storage unavailable */ }
+        if (!raw) return undefined;
+        let saved = null;
+        try { saved = JSON.parse(raw); } catch { clearActiveExport(); return undefined; }
+        if (!saved?.jobId || Date.now() - (saved.startedAt || 0) > 2 * 3600 * 1000) { clearActiveExport(); return undefined; }
+
+        const controller = new AbortController();
+        (async () => {
+            try {
+                const { authFetch } = await import('../utils/authFetch.js');
+                const { pollJobResult } = await import('../utils/jobPoller.js');
+                const head = await authFetch(`/api/jobs/${saved.jobId}/status`, { signal: controller.signal });
+                if (!head.ok) { clearActiveExport(); return; }
+                setIsExporting(true);
+                setExportResult(null);
+                setExportError(null);
+                setExportProgress(0);
+                setShowMobileExport(true);
+                const result = await pollJobResult(saved.jobId, controller.signal, 3600 * 1000, setExportProgress);
+                if (!result?.url) throw new Error('Export completed but no URL returned');
+                setExportResult({ success: true, url: result.url, filename: result.filename, metadata: result.metadata });
+                setExportUrl(result.url);
+                clearActiveExport();
+            } catch (err) {
+                if (controller.signal.aborted || err?.message === 'Polling cancelled') return;
+                console.error('[Export] resume failed:', err);
+                setExportError(err.message);
+                clearActiveExport();
+            } finally {
+                if (!controller.signal.aborted) setIsExporting(false);
+            }
+        })();
+        return () => controller.abort();
+    }, [isMobile, activeExportKey]); // eslint-disable-line react-hooks/exhaustive-deps -- runs once per project on mobile
 
     const [activeDragItem, setActiveDragItem] = React.useState(null);
 
@@ -1597,10 +1677,14 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
             if (isMultiMove || isSameTrackMove) {
                 // Time only — every moved clip keeps its own track.
+                const tracksBeforeMove = state.tracks;
                 const moved = state.moveSelectedClips(
                     newStart - currentClip.start,
                     isMultiMove ? null : [activeClipId],
                 );
+                // Captions / text over the moved main-track clips go with them
+                // (same undo step as the move). Desktop used to leave them behind.
+                if (moved.ok) useTimelineStore.getState().followMainTrackMove(tracksBeforeMove);
                 if (!moved.ok && moved.reason === 'interleaved') {
                     useAIStore.getState().addLog({
                         id: 'multi-move-' + Date.now(),
@@ -1645,6 +1729,19 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             <ApprovalDialog />
             {isMobile && <MobileRokaApproval />}
             {isMobile && <MobileCaptionSheets />}
+            {isMobile && <MobileTranscriptSheet />}
+            {isMobile && (
+                <MobileExportSheet
+                    open={showMobileExport}
+                    onClose={() => setShowMobileExport(false)}
+                    onExport={handleExportConfirm}
+                    isExporting={isExporting}
+                    progress={exportProgress}
+                    result={exportResult}
+                    error={exportError}
+                    onMoreOptions={() => { setShowMobileExport(false); setShowExportModal(true); }}
+                />
+            )}
 
             {/* Progressive auth prompt */}
             {authPrompt && (
@@ -1833,9 +1930,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             data-tour="export-button"
                             onClick={() => {
                                 if (isAnonymous) { showAuthPrompt('export'); }
+                                // Mobile: export sheet (also reopens a running export's progress)
+                                else if (isMobile) { setShowMobileExport(true); }
                                 else { setShowExportModal(true); }
                             }}
-                            disabled={isExporting || mobileExportBlocked}
+                            disabled={(isExporting && !isMobile) || mobileExportBlocked}
                             title={mobileExportBlocked ? t('mobileUpload.exportWhenReady') : undefined}
                             className="glass-button-pro px-4 py-1.5 md:px-5 rounded-md text-[10px] flex items-center gap-2 disabled:opacity-50"
                         >

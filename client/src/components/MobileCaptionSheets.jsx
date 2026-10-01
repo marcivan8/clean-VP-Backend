@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
-import { Scissors, Merge, Play, Type } from 'lucide-react';
+import { Scissors, Merge, Play, Type, Trash2 } from 'lucide-react';
 import useAIStore from '../store/useAIStore';
 import useTimelineStore from '../store/useTimelineStore';
 import { CAPTION_STYLES, FONT_STACK } from './Assistant/captionStylePacks.js';
 import { legacyPackToCaptionStyle } from '../motion/CaptionModel.js';
 import { submitRokaPrompt } from '../agent/rokaPromptQueue.js';
-import MobileSheet, { SheetLabel, SheetRow } from './MobileSheet';
+import MobileSheet, { SheetLabel, SheetRow, SheetChip } from './MobileSheet';
 
 /**
  * Mobile caption sheets (phase 4), opened through
@@ -224,6 +224,92 @@ function EditSheet({ placementId, onClose }) {
     );
 }
 
+// ── Text overlay sheet (phase 6): titles / text the user adds by hand ────────
+const TEXT_FONTS = ['Inter', 'Anton', 'Montserrat', 'Playfair Display', 'Oswald', 'Caveat'];
+const TEXT_COLORS = [
+    { id: 'white', value: '#FFFFFF' }, { id: 'yellow', value: '#FACC15' }, { id: 'cyan', value: '#00E5FF' },
+    { id: 'violet', value: '#8A2BE2' }, { id: 'coral', value: '#FF7A59' }, { id: 'black', value: '#000000' },
+];
+const TEXT_ANIMATIONS = [
+    { id: 'none', key: 'textPanel.animNone' }, { id: 'fade-in', key: 'textPanel.animFadeIn' },
+    { id: 'slide-up', key: 'textPanel.animSlideUp' }, { id: 'pop', key: 'textPanel.animPop' },
+    { id: 'word-by-word', key: 'textPanel.animWordByWord' },
+];
+
+function TextOverlaySheet({ placementId, onClose }) {
+    const { t } = useTranslation('editor');
+    const found = useTimelineStore(useShallow(s => {
+        for (const tr of s.tracks) {
+            const c = (tr.clips || []).find(x => x.id === placementId);
+            if (c) return { clip: c, trackId: tr.id };
+        }
+        return { clip: null, trackId: null };
+    }));
+    const { clip, trackId } = found;
+    const [text, setText] = useState(clip?.content || '');
+    if (!clip) return null;
+
+    // Same store call TextPanel uses; each change is one undo step.
+    const update = (updates) => useTimelineStore.getState().updateClip(trackId, placementId, updates);
+    const save = () => {
+        const v = text.replace(/\s+/g, ' ').trim();
+        if (v && v !== clip.content) update({ content: v, name: v });
+    };
+    const currentAnim = clip.animation || 'none';
+
+    return (
+        <MobileSheet open title={t('mobileText.title')} onClose={() => { save(); onClose(); }}>
+            <label htmlFor="mobile-overlay-text" className="sr-only">{t('mobileText.textLabel')}</label>
+            <input
+                id="mobile-overlay-text"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onBlur={save}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); save(); e.currentTarget.blur(); } }}
+                style={{
+                    height: 48, boxSizing: 'border-box', padding: '0 14px', borderRadius: 'var(--r-sm)',
+                    border: '1px solid var(--accent)', background: 'var(--bg)', color: 'var(--fg)', fontFamily: 'var(--f-sans)', fontSize: 16, outline: 'none',
+                }}
+            />
+            <SheetLabel>{t('mobileText.font')}</SheetLabel>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {TEXT_FONTS.map(f => (
+                    <SheetChip key={f} active={(clip.fontFamily || 'Inter') === f} onClick={() => update({ fontFamily: f })}>
+                        <span style={{ fontFamily: FONT_STACK(f) }}>{f}</span>
+                    </SheetChip>
+                ))}
+            </div>
+            <SheetLabel>{t('mobileText.color')}</SheetLabel>
+            <div style={{ display: 'flex', gap: 10 }}>
+                {TEXT_COLORS.map(c => {
+                    const active = String(clip.color || '#FFFFFF').toLowerCase() === c.value.toLowerCase();
+                    return (
+                        <button
+                            key={c.id} type="button" aria-pressed={active} aria-label={t(`mobileText.color_${c.id}`)}
+                            onClick={() => update({ color: c.value })}
+                            style={{ width: 40, height: 40, borderRadius: 20, background: c.value, cursor: 'pointer', border: active ? '3px solid var(--accent)' : '1px solid var(--line-strong)' }}
+                        />
+                    );
+                })}
+            </div>
+            <SheetLabel>{t('mobileText.animation')}</SheetLabel>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {TEXT_ANIMATIONS.map(a => (
+                    <SheetChip key={a.id} active={currentAnim === a.id} onClick={() => update({ animation: a.id === 'none' ? null : a.id })}>
+                        {t(a.key)}
+                    </SheetChip>
+                ))}
+            </div>
+            <SheetRow
+                icon={<Trash2 size={20} />}
+                label={t('mobileText.delete')}
+                danger
+                onClick={() => { onClose(); useTimelineStore.getState().deleteClipWithMagnet(trackId, placementId); }}
+            />
+        </MobileSheet>
+    );
+}
+
 /** Remounts EditSheet when the caption or its saved text changes (fresh input state). */
 function EditSheetKeyed({ placementId, onClose }) {
     const content = useTimelineStore(s => s.tracks.flatMap(tr => (tr.type === 'text' ? tr.clips || [] : [])).find(c => c.id === placementId)?.content ?? '');
@@ -236,6 +322,7 @@ export default function MobileCaptionSheets() {
     if (!sheet) return null;
     if (sheet.kind === 'style') return <StyleSheet onClose={close} />;
     if (sheet.kind === 'edit' && sheet.placementId) return <EditSheetKeyed placementId={sheet.placementId} onClose={close} />;
+    if (sheet.kind === 'text' && sheet.placementId) return <TextOverlaySheet key={sheet.placementId} placementId={sheet.placementId} onClose={close} />;
     return null;
 }
 

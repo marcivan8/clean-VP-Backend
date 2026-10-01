@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Send, ChevronUp, Loader2, Check, Undo2, Clock } from 'lucide-react';
+import { Send, ChevronUp, Loader2, Check, Undo2, Clock, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import useAIStore from '../store/useAIStore';
 import useTimelineStore from '../store/useTimelineStore';
@@ -8,6 +8,7 @@ import { summarizeUploads } from '../utils/uploadStatus.js';
 import { enqueueIfVideoNotReady, runPromptNow, drainPromptQueue, aiWaitReason } from '../agent/rokaPromptQueue.js';
 import { undoTaskEdits } from '../agent/undoTask.js';
 import { CaptionStyleCallout } from './MobileCaptionSheets';
+import { EventBus, EVENT_TYPES } from '../agent/EventBus.js';
 
 // Inline SVG sparkles (avoids re-importing from lucide just for this)
 const SparklesIcon = ({ style }) => (
@@ -123,6 +124,7 @@ export default function MobileAIBar({ onExpand }) {
     const queuedCount    = useAIStore(s => s.queuedPrompts.length);
     const captionProgress = useAIStore(s => s.captionProgress);
     const clearQueued    = useAIStore(s => s.clearQueuedPrompts);
+    const aiOpsExhausted = useAIStore(s => s.aiOpsExhausted);
     // 'waiting' | 'failed' | null — a string, so progress ticks don't re-render.
     const uploadHeadline = useTimelineStore(s => summarizeUploads(s.assets, s.tracks).headline);
     const waitReason     = useTimelineStore(s => aiWaitReason(s.assets, s.tracks));
@@ -355,6 +357,22 @@ export default function MobileAIBar({ onExpand }) {
                     </>
                 )}
             </div>
+
+            {/* ── Out of AI operations: hint + plan sheet (requests still go through;
+                 the server decides what counts, e.g. trims are unlimited) ── */}
+            {aiOpsExhausted && (
+                <div className="flex items-center gap-2 mx-3 mb-1 shrink-0" style={{ padding: '4px 4px 4px 10px', borderRadius: 12, border: '1px solid color-mix(in oklch, var(--coral) 45%, transparent)' }}>
+                    <Zap size={14} style={{ color: 'var(--coral)', flexShrink: 0 }} aria-hidden="true" />
+                    <span style={{ flex: 1, fontFamily: 'var(--f-sans)', fontSize: 12.5, color: 'var(--fg-2)' }}>{t('mobileRoka.outOfOps')}</span>
+                    <button
+                        type="button"
+                        onClick={() => EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, { reason: 'ai_ops', upgradeRequired: aiOpsExhausted.upgradeRequired })}
+                        style={{ height: 32, padding: '0 10px', borderRadius: 8, border: 0, background: 'transparent', color: 'var(--accent)', fontFamily: 'var(--f-sans)', fontSize: 12.5, fontWeight: 600 }}
+                    >
+                        {t('mobileRoka.seePlans')}
+                    </button>
+                </div>
+            )}
 
             {/* ── Input row ── */}
             <div className="flex items-end gap-2 px-3 pb-3 pt-1 shrink-0">

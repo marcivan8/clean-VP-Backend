@@ -71,6 +71,10 @@ const useAIStore = create((set) => ({
     // Caption generation over several videos (MediaExecutionEngine
     // _captionMainTrackSources): null, or { files: [{ key, name, state }] }
     // with state 'done' | 'running' | 'waiting' | 'failed'. Mobile Roka bar shows it.
+    // Set when the server reports the monthly AI-operations cap ({ upgradeRequired }).
+    // Mobile Roka bar shows a hint; it resets on reload (e.g. after checkout).
+    aiOpsExhausted: null,
+    setAiOpsExhausted: (aiOpsExhausted) => set({ aiOpsExhausted }),
     captionProgress: null,
     setCaptionProgress: (captionProgress) => set({ captionProgress }),
 
@@ -78,6 +82,10 @@ const useAIStore = create((set) => ({
     mobileCaptionSheet: null,
     openMobileCaptionSheet: (kind, placementId = null) => set({ mobileCaptionSheet: { kind, placementId } }),
     closeMobileCaptionSheet: () => set({ mobileCaptionSheet: null }),
+
+    // Mobile transcript sheet (MobileTranscriptSheet)
+    mobileTranscriptOpen: false,
+    setMobileTranscriptOpen: (open) => set({ mobileTranscriptOpen: !!open }),
 
     taskOutcomes: {},
     setTaskOutcome: (logId, outcome) => set((state) => ({ taskOutcomes: { ...state.taskOutcomes, [logId]: outcome } })),

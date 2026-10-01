@@ -35,7 +35,31 @@ import {
 } from '../lib/projectsApi.js';
 import useTimelineStore from '../store/useTimelineStore.js';
 import { useUserPlan } from '../hooks/useUserPlan.js';
-import { atLimit, planLimitLabel, getProjectLimit } from '../lib/planLimits.js';
+import { atLimit, planLimitLabel, getProjectLimit, projectNameFromFile } from '../lib/planLimits.js';
+import MobileHome from '../components/MobileHome.jsx';
+import PlanSheet from '../components/PlanSheet.jsx';
+import { useAiOpsUsage } from '../hooks/useAiOpsUsage.js';
+import { setPendingNewVideo } from '../utils/pendingNewVideo.js';
+
+/** Empty timeline state for a new project (same shape the editor autosaves). */
+function blankProjectSkeleton() {
+    return {
+        version: '1.2',
+        timestamp: Date.now(),
+        tracks: [],
+        duration: 60,
+        aspectRatio: '16:9',
+        zoomLevel: 10,
+        pacingSegments: [],
+        beatMarkers: [],
+        captions: [],
+        transcripts: {},
+        captionsFilePath: null,
+        transcriptionAttempted: false,
+        assets: [],
+        uploadedFilePath: null,
+    };
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -620,7 +644,7 @@ function PlanLimitModal({ plan, limit, onClose, onUpgrade, modalWidth }) {
 export default function DashboardPage() {
     const navigate  = useNavigate();
     const location  = useLocation();
-    const { t }     = useTranslation('dashboard');
+    const { t, i18n } = useTranslation('dashboard');
     const { setProjectId, setProjectName, loadProject } = useTimelineStore();
     const { plan }  = useUserPlan();
 
@@ -634,11 +658,20 @@ export default function DashboardPage() {
     const [deleteModal,   setDeleteModal]   = useState(null); // { id, name }
     const [search,        setSearch]        = useState('');
     const [showMobileSearch, setShowMobileSearch] = useState(false);
+    // Mobile Home: New video sheet, plan sheet ('plans' from the usage meter).
+    const [newVideoOpen,  setNewVideoOpen]  = useState(false);
+    const [creatingVideo, setCreatingVideo] = useState(false);
+    const [createVideoError, setCreateVideoError] = useState(false);
+    const [plansSheetOpen, setPlansSheetOpen] = useState(false);
 
     // ── responsive ────────────────────────────────────────────────────────────
     const [isMobile, setIsMobile] = useState(() => window.innerWidth < 640);
+    // Phones (< 768, the editor's mobile breakpoint) get the mobile Home.
+    const [isPhone, setIsPhone] = useState(() => window.innerWidth < 768);
+    // Usage meter (phones only, so desktop makes no extra request).
+    const { used: aiOpsUsed } = useAiOpsUsage(location.key, isPhone);
     useEffect(() => {
-        const handler = () => setIsMobile(window.innerWidth < 640);
+        const handler = () => { setIsMobile(window.innerWidth < 640); setIsPhone(window.innerWidth < 768); };
         window.addEventListener('resize', handler);
         return () => window.removeEventListener('resize', handler);
     }, []);
@@ -693,8 +726,44 @@ export default function DashboardPage() {
     function requestNewProject() {
         if (atLimit(plan, projects.length)) {
             setShowLimitModal(true);
+        } else if (window.innerWidth < 768) {
+            setCreateVideoError(false);
+            setNewVideoOpen(true);
         } else {
             setShowNew(true);
+        }
+    }
+
+    /**
+     * Mobile "New video": create a project named after the picked file, open
+     * the editor, and let it start the normal upload (pendingNewVideo).
+     */
+    async function handlePickVideo(file) {
+        if (!file || creatingVideo) return;
+        if (atLimit(plan, projects.length)) {
+            setNewVideoOpen(false);
+            setShowLimitModal(true);
+            return;
+        }
+        setCreateVideoError(false);
+        setCreatingVideo(true);
+        try {
+            const name = projectNameFromFile(file.name) || t('mobileHome.untitled');
+            const skeleton = blankProjectSkeleton();
+            const id = await createProject(name, skeleton);
+            if (!id) { setCreateVideoError(true); return; }
+            loadProject(skeleton);
+            setProjectId(id);
+            setProjectName(name);
+            try { localStorage.setItem('vp_autosave', JSON.stringify(skeleton)); } catch { /* storage full */ }
+            setPendingNewVideo(id, file);
+            setNewVideoOpen(false);
+            navigate(`/editor/${id}`);
+        } catch (err) {
+            console.error('[Dashboard] new video failed:', err);
+            setCreateVideoError(true);
+        } finally {
+            setCreatingVideo(false);
         }
     }
 
@@ -707,22 +776,7 @@ export default function DashboardPage() {
         }
 
         // Spin up a blank project skeleton
-        const skeleton = {
-            version: '1.2',
-            timestamp: Date.now(),
-            tracks: [],
-            duration: 60,
-            aspectRatio: '16:9',
-            zoomLevel: 10,
-            pacingSegments: [],
-            beatMarkers: [],
-            captions: [],
-            transcripts: {},
-            captionsFilePath: null,
-            transcriptionAttempted: false,
-            assets: [],
-            uploadedFilePath: null,
-        };
+        const skeleton = blankProjectSkeleton();
 
         const id = await createProject(name, skeleton);
         if (!id) { alert('Failed to create project — please try again.'); return; }
@@ -770,6 +824,97 @@ export default function DashboardPage() {
     // ─────────────────────────────────────────────────────────────────────────
 
     const modalWidth = isMobile ? 'calc(100vw - 32px)' : undefined;
+
+    const modals = (
+        <>
+            {/* ── Modals ── */}
+            {showNew && (
+                <NewProjectModal
+                    onClose={() => setShowNew(false)}
+                    onCreate={handleCreate}
+                    modalWidth={modalWidth}
+                />
+            )}
+            {renameModal && (
+                <RenameModal
+                    projectId={renameModal.id}
+                    currentName={renameModal.name}
+                    onClose={() => setRenameModal(null)}
+                    onSave={handleRename}
+                    modalWidth={modalWidth}
+                />
+            )}
+            {deleteModal && (
+                <DeleteConfirm
+                    projectId={deleteModal.id}
+                    projectName={deleteModal.name}
+                    onClose={() => setDeleteModal(null)}
+                    onConfirm={handleDelete}
+                    modalWidth={modalWidth}
+                />
+            )}
+            {showLimitModal && isPhone && (
+                <PlanSheet open reason="projects" plan={plan} onClose={() => setShowLimitModal(false)} />
+            )}
+            {showLimitModal && !isPhone && (
+                <PlanLimitModal
+                    plan={plan}
+                    limit={getProjectLimit(plan)}
+                    onClose={() => setShowLimitModal(false)}
+                    onUpgrade={() => {
+                        // FIX: this used to `navigate('/success')` directly —
+                        // that page requires a `checkout_id` query param and
+                        // immediately bounces back to /dashboard when it's
+                        // missing (see SuccessPage.jsx), so clicking "Upgrade"
+                        // here silently did nothing. createCheckout() (defined
+                        // above, already used correctly by HomePage.jsx's
+                        // pricing section) actually starts a checkout session
+                        // and redirects to it; /success is where THAT redirect
+                        // lands after a real purchase completes.
+                        setShowLimitModal(false);
+                        createCheckout(plan === 'free' ? 'creator' : 'pro');
+                    }}
+                    modalWidth={modalWidth}
+                />
+            )}
+        </>
+    );
+
+    if (isPhone) {
+        return (
+            <>
+                <MobileHome
+                    projects={projects}
+                    loading={loading}
+                    user={user}
+                    plan={plan}
+                    aiOpsUsed={aiOpsUsed}
+                    formatWhen={(iso) => {
+                        const when = formatDate(iso, t, i18n.language);
+                        // Relative phrases follow "edited": "edited 2 hours ago", not "edited 2 Hours"/"Il y a".
+                        const relative = iso && (Date.now() - new Date(iso)) / 1000 < 604800;
+                        return relative ? when.charAt(0).toLocaleLowerCase(i18n.language) + when.slice(1) : when;
+                    }}
+                    creating={creatingVideo}
+                    createError={createVideoError}
+                    newVideoOpen={newVideoOpen}
+                    onNewVideoOpenChange={(open) => { if (open) requestNewProject(); else setNewVideoOpen(false); }}
+                    onPickVideo={handlePickVideo}
+                    onEmptyProject={() => { setNewVideoOpen(false); setShowNew(true); }}
+                    onOpen={handleOpen}
+                    onRename={(id, name) => setRenameModal({ id, name })}
+                    onDuplicate={handleDuplicate}
+                    onDelete={(id, name) => setDeleteModal({ id, name })}
+                    onStyle={() => navigate('/style')}
+                    onBilling={() => navigate('/account')}
+                    onSignOut={handleSignOut}
+                    onSeePlans={() => setPlansSheetOpen(true)}
+                />
+                <PlanSheet open={plansSheetOpen} reason="plans" plan={plan} used={aiOpsUsed} onClose={() => setPlansSheetOpen(false)} onBilling={() => navigate('/account')} />
+                {modals}
+            </>
+        );
+    }
 
     return (
         <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)', fontFamily: 'var(--f-sans)' }}>
@@ -1109,53 +1254,7 @@ export default function DashboardPage() {
                 )}
             </main>
 
-            {/* ── Modals ── */}
-            {showNew && (
-                <NewProjectModal
-                    onClose={() => setShowNew(false)}
-                    onCreate={handleCreate}
-                    modalWidth={modalWidth}
-                />
-            )}
-            {renameModal && (
-                <RenameModal
-                    projectId={renameModal.id}
-                    currentName={renameModal.name}
-                    onClose={() => setRenameModal(null)}
-                    onSave={handleRename}
-                    modalWidth={modalWidth}
-                />
-            )}
-            {deleteModal && (
-                <DeleteConfirm
-                    projectId={deleteModal.id}
-                    projectName={deleteModal.name}
-                    onClose={() => setDeleteModal(null)}
-                    onConfirm={handleDelete}
-                    modalWidth={modalWidth}
-                />
-            )}
-            {showLimitModal && (
-                <PlanLimitModal
-                    plan={plan}
-                    limit={getProjectLimit(plan)}
-                    onClose={() => setShowLimitModal(false)}
-                    onUpgrade={() => {
-                        // FIX: this used to `navigate('/success')` directly —
-                        // that page requires a `checkout_id` query param and
-                        // immediately bounces back to /dashboard when it's
-                        // missing (see SuccessPage.jsx), so clicking "Upgrade"
-                        // here silently did nothing. createCheckout() (defined
-                        // above, already used correctly by HomePage.jsx's
-                        // pricing section) actually starts a checkout session
-                        // and redirects to it; /success is where THAT redirect
-                        // lands after a real purchase completes.
-                        setShowLimitModal(false);
-                        createCheckout(plan === 'free' ? 'creator' : 'pro');
-                    }}
-                    modalWidth={modalWidth}
-                />
-            )}
+            {modals}
         </div>
     );
 }
