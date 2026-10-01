@@ -579,7 +579,17 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     }, []);
 
     // Ensure a session exists from the moment they open the editor
-    useEffect(() => { getOrCreate(); }, [getOrCreate]);
+    // sessionChecked: the anonymous-session check has finished. Signed-in
+    // users never get a sessionId (getOrCreate returns null for them), so
+    // code that must wait for the session waits for this, not for sessionId.
+    const [sessionChecked, setSessionChecked] = React.useState(false);
+    useEffect(() => {
+        let done = false;
+        const finish = () => { if (!done) { done = true; setSessionChecked(true); } };
+        const timer = setTimeout(finish, 4000); // never block on a hung session request
+        Promise.resolve(getOrCreate()).catch(() => {}).finally(() => { clearTimeout(timer); finish(); });
+        return () => clearTimeout(timer);
+    }, [getOrCreate]);
 
     // Trigger: 20-minute editing timer
     useEffect(() => {
@@ -730,6 +740,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         const files = Array.from(e.target.files);
         if (files.length > 0) {
             console.log("📂 Files Selected:", files.length);
+            // Mobile: show "Opening your video" while the files are probed
+            // (reading metadata can take seconds on a phone before the asset,
+            // and its upload progress, exist).
+            const firstVideo = files.find(f => f.type.startsWith('video'));
+            if (firstVideo) useAIStore.getState().setOpeningFile({ name: firstVideo.name, at: Date.now() });
 
             const processedAssets = [];
             // Always detect aspect ratio from the first video in this batch.
@@ -1201,6 +1216,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 }
             }
 
+            useAIStore.getState().setOpeningFile(null);
             addAssets(processedAssets);
 
             if (processedAssets.length === 1) {
@@ -1262,14 +1278,16 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     };
 
     // Mobile dashboard "New video": the picked file arrives with the new
-    // project; start the normal upload once the session id is known (the
-    // upload path uses it). takePendingNewVideo returns the file only once.
+    // project; start the normal upload once the session check is done (the
+    // upload path uses the anonymous session id when there is one; signed-in
+    // users have none, so this must not wait for sessionId itself).
+    // takePendingNewVideo returns the file only once.
     useEffect(() => {
-        if (!projectId || !sessionId) return;
+        if (!projectId || !sessionChecked) return;
         const file = takePendingNewVideo(projectId);
         if (file) handleFileImport({ target: { files: [file] } });
         // eslint-disable-next-line react-hooks/exhaustive-deps -- handleFileImport is recreated every render
-    }, [projectId, sessionId]);
+    }, [projectId, sessionChecked]);
 
     // pollJobResult's own default (300s / 5 min) was sized for typical 1080p-
     // and-under exports. A real ffmpeg encode measured directly (same filter

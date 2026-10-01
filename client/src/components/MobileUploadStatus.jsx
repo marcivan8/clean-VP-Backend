@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 import { Check, AlertCircle, RotateCw, X } from 'lucide-react';
 import useTimelineStore from '../store/useTimelineStore';
+import useAIStore from '../store/useAIStore';
 import { summarizeUploads, toMB, UPLOAD_PHASES, isProblemPhase } from '../utils/uploadStatus.js';
 
 /**
@@ -189,6 +190,26 @@ function FullCard({ item, onRetry, onRemove, onUploadAgain, onMinimize }) {
     );
 }
 
+// Shown from the moment a video is picked until its asset (and upload
+// progress) exists: probing a large phone video can take seconds.
+function OpeningCard({ name }) {
+    const { t } = useTranslation('editor');
+    return (
+        <div
+            role="status"
+            aria-live="polite"
+            style={{
+                position: 'absolute', inset: 0, zIndex: 25, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                gap: 12, padding: '0 28px', textAlign: 'center', background: 'var(--bg-2)', fontFamily: 'var(--f-sans)', color: 'var(--fg)',
+            }}
+        >
+            <span className="vibed-upload-anim animate-spin" style={{ width: 40, height: 40, borderRadius: 20, boxSizing: 'border-box', border: '4px solid var(--line-strong)', borderTopColor: 'var(--accent)' }} />
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{t('mobileUpload.openingTitle')}</h2>
+            <p style={{ margin: 0, fontFamily: 'var(--f-mono)', fontSize: 11.5, color: 'var(--fg-2)', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</p>
+        </div>
+    );
+}
+
 function Pill({ items, onRetry }) {
     const { t } = useTranslation('editor');
     const problem = items.find(i => isProblemPhase(i.phase));
@@ -252,6 +273,17 @@ export default function MobileUploadStatus({ onRetry, onRemove, onUploadAgain })
         return () => clearTimeout(timer);
     }, [toast]);
 
+    // "Opening your video": cleared by handleFileImport once the asset exists;
+    // the timer only guards against an import that died before that.
+    const openingFile = useAIStore(s => s.openingFile);
+    useEffect(() => {
+        if (!openingFile) return undefined;
+        const timer = setTimeout(() => {
+            if (useAIStore.getState().openingFile === openingFile) useAIStore.getState().setOpeningFile(null);
+        }, 30000);
+        return () => clearTimeout(timer);
+    }, [openingFile]);
+
     // Cards the user collapsed to the pill ("Show the preview meanwhile").
     const [minimized, setMinimized] = useState(() => new Set());
     const showCard = summary.blocking && summary.primary
@@ -261,6 +293,7 @@ export default function MobileUploadStatus({ onRetry, onRemove, onUploadAgain })
     return (
         <>
             <style>{STYLE}</style>
+            {openingFile && !showCard && <OpeningCard name={openingFile.name} />}
             {showCard && (
                 <FullCard
                     item={summary.primary} onRetry={onRetry} onRemove={onRemove} onUploadAgain={onUploadAgain}

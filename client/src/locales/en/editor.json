@@ -585,7 +585,8 @@
     "rokaWaiting": "ROKA · waiting for your video",
     "rokaPaused": "ROKA · upload needs attention",
     "exportWhenReady": "Available once your video is ready",
-    "showPreview": "Show the preview meanwhile"
+    "showPreview": "Show the preview meanwhile",
+    "openingTitle": "Opening your video"
   },
   "mobileUi": {
     "close": "Close",

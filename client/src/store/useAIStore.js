@@ -73,6 +73,10 @@ const useAIStore = create((set) => ({
     // with state 'done' | 'running' | 'waiting' | 'failed'. Mobile Roka bar shows it.
     // Set when the server reports the monthly AI-operations cap ({ upgradeRequired }).
     // Mobile Roka bar shows a hint; it resets on reload (e.g. after checkout).
+    // { name, at } while a picked video is being opened (probed) before its
+    // upload starts; null otherwise. Drives the mobile "Opening" card.
+    openingFile: null,
+    setOpeningFile: (openingFile) => set({ openingFile }),
     aiOpsExhausted: null,
     setAiOpsExhausted: (aiOpsExhausted) => set({ aiOpsExhausted }),
     captionProgress: null,

@@ -44,6 +44,7 @@ const extractVideoMetadata = (url) => {
         video.crossOrigin = 'anonymous';
         video.preload = 'metadata';
         video.muted = true; // Required for unmuted autoplay policies in some browsers
+        video.playsInline = true; // iOS: never hand a probe video to the fullscreen player
 
         // BUG: this promise had no timeout. `onloadedmetadata` failing to fire
         // — with no `onerror` either — is a known iOS Safari failure mode for
@@ -87,8 +88,23 @@ const extractVideoMetadata = (url) => {
 
             // Seek to 25% of the video to avoid black intro frames
             const targetTime = Math.min(duration * 0.25, 2); 
+
+            // iOS Safari often never fires 'seeked' on a detached, unplayed
+            // video, which left this promise pending forever (and the whole
+            // import with it: nothing appeared after picking a video). The
+            // thumbnail is optional, so give up on it after a few seconds.
+            let thumbDone = false;
+            const thumbTimer = setTimeout(() => {
+                if (thumbDone) return;
+                thumbDone = true;
+                console.warn('[mediaProbe] No seek event for the thumbnail (3s), continuing without one.');
+                resolve({ duration, width, height, fps, thumbnail: null });
+            }, 3000);
             
             video.onseeked = () => {
+                if (thumbDone) return;
+                thumbDone = true;
+                clearTimeout(thumbTimer);
                 try {
                     const canvas = document.createElement('canvas');
                     const MAX_WIDTH = 320;
@@ -108,6 +124,9 @@ const extractVideoMetadata = (url) => {
             };
 
             video.onerror = () => {
+                if (thumbDone) return;
+                thumbDone = true;
+                clearTimeout(thumbTimer);
                 console.warn("Failed to seek video for thumbnail");
                 resolve({ duration, width, height, fps, thumbnail: null });
             };

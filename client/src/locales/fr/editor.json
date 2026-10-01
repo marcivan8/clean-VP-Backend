@@ -585,7 +585,8 @@
     "rokaWaiting": "ROKA · en attente de votre vidéo",
     "rokaPaused": "ROKA · l'envoi demande votre attention",
     "exportWhenReady": "Disponible dès que votre vidéo est prête",
-    "showPreview": "Voir l'aperçu en attendant"
+    "showPreview": "Voir l'aperçu en attendant",
+    "openingTitle": "Ouverture de votre vidéo"
   },
   "mobileUi": {
     "close": "Fermer",
