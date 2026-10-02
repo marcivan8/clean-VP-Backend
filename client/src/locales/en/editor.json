@@ -765,6 +765,18 @@
     "shareFailed": "Couldn't open the share menu. Try Save to phone.",
     "exportAgain": "Export another version",
     "failed": "The export didn't finish",
-    "tryAgain": "Try again"
+    "tryAgain": "Try again",
+    "keepsFormat": "Keeps your video's format: {{ratio}}",
+    "formatMismatch": "{{platform}} is {{platformRatio}}. Your video is {{ratio}}, so it will be fitted with black bars."
+  },
+  "retakes": {
+    "title": "Retakes found",
+    "description_one": "Roka found {{count}} line you said more than once. It will keep the best take:",
+    "description_other": "Roka found {{count}} lines you said more than once. It will keep the best take of each:",
+    "groupLine": "{{takes}} takes of “{{text}}”: keeping take {{kept}}, removing {{secs}} s",
+    "kept": "Retakes kept as they are.",
+    "applied_one": "Removed {{count}} retake.",
+    "applied_other": "Removed {{count}} retakes.",
+    "none": "No retakes found."
   }
 }

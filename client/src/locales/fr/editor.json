@@ -765,6 +765,18 @@
     "shareFailed": "Impossible d'ouvrir le menu de partage. Essayez Enregistrer sur le téléphone.",
     "exportAgain": "Exporter une autre version",
     "failed": "L'export n'a pas abouti",
-    "tryAgain": "Réessayer"
+    "tryAgain": "Réessayer",
+    "keepsFormat": "Garde le format de votre vidéo : {{ratio}}",
+    "formatMismatch": "{{platform}} est en {{platformRatio}}. Votre vidéo est en {{ratio}}, elle sera ajustée avec des bandes noires."
+  },
+  "retakes": {
+    "title": "Prises multiples trouvées",
+    "description_one": "Roka a trouvé {{count}} phrase dite plusieurs fois et gardera la meilleure prise :",
+    "description_other": "Roka a trouvé {{count}} phrases dites plusieurs fois et gardera la meilleure prise de chacune :",
+    "groupLine": "{{takes}} prises de « {{text}} » : garde la prise {{kept}}, retire {{secs}} s",
+    "kept": "Prises conservées telles quelles.",
+    "applied_one": "{{count}} prise en trop retirée.",
+    "applied_other": "{{count}} prises en trop retirées.",
+    "none": "Aucune prise multiple trouvée."
   }
 }

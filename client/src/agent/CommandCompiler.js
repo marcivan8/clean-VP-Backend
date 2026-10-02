@@ -421,6 +421,8 @@ function compileRemoveRepeatedTakes(step, ctx) {
                 lookback_window: step.lookback_window || 60,
                 similarity_threshold: step.similarity_threshold || 0.72,
             },
+            // Part of a larger clean-up: "no re-takes found" is not a failure.
+            optional: !!step.optional,
         }, {
             source_step_id: step.step_id,
             symbolic_refs: ['$uploaded_file'],

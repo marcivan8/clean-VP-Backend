@@ -181,6 +181,10 @@ const NLP_MAP = {
         'clean this clip', 'clean the clip', 'clean this video', 'clean the video',
         'clean it up', 'clean it', 'clean up this clip', 'clean up the clip',
         'make it clean', 'clean up my clip', 'clean up the video',
+        // Bare "clean up" used to sit in `improve` below (creative_enhance →
+        // a "TikTok or YouTube?" question) instead of cleaning anything.
+        'clean up', 'clean up my video', 'clean up this video', 'clean my video',
+        'clean up everything', 'tidy it up', 'tidy up the video',
         // Podcast / interview context
         'clean this podcast', 'clean the podcast', 'edit the podcast',
         'clean up the interview', 'edit this interview', 'clean up the recording',
@@ -296,7 +300,7 @@ const NLP_MAP = {
     ],
     improve: [
         'make it better', 'improve', 'enhance', 'polish', 'fix this',
-        'clean up', 'make it look good', 'optimize', 'refine',
+        'make it look good', 'optimize', 'refine',
         'make it professional', 'look more professional', 'upgrade',
         'fix it up', 'tune up', 'tune it',
     ],
@@ -386,6 +390,15 @@ export class IntentParser {
         // veto every cutting command, which is what stops a framing request from
         // silently executing silence removal (see R23). It also refuses to guess:
         // a close call on a destructive command becomes a question, not an edit.
+        // Several clean-up actions in ONE request ("Remove silences and filler
+        // words", a suggestion chip) must run together. The registry resolves a
+        // single command, so it used to pick just one of them (fillers only).
+        const combinedCleanup = this.tryCombinedCleanup(prompt);
+        if (combinedCleanup) {
+            console.log('[IntentParser] Combined clean-up:', combinedCleanup.parameters.actions.join(' + '));
+            return this.validateAndNormalize(combinedCleanup);
+        }
+
         const reg = this.tryRegistry(prompt);
         if (reg) {
             if (reg.needs_clarification) return reg;
@@ -527,10 +540,42 @@ export class IntentParser {
             operation,
             targets: [],
             constraints: extractParams(cmd, prompt),
-            confidence: resolved.confidence,
+            // resolveCommand() reports 'high'/'low'; the pipeline compares
+            // against 'HIGH'. Passing it through unchanged sent EVERY registry
+            // command (silences, captions, split, speed, crop, LUT…) to an
+            // empty "I need a few more details" clarification.
+            confidence: String(resolved.confidence || '').toUpperCase() || 'LOW',
             _confidence: resolved.confidence,
+            originalPrompt: prompt,
             _registry: true,
             _macro: cmd.macro ? expandMacro(cmd.id) : null,
+        };
+    }
+
+    /**
+     * "remove silences and filler words (and repeated takes)" → one CLEAN_EDIT
+     * plan with exactly the named actions. Null unless at least two clean-up
+     * kinds are named and nothing asks for zoom/dynamic (compound_clean_dynamic).
+     */
+    static tryCombinedCleanup(prompt) {
+        const lower = String(prompt || '').toLowerCase().trim();
+        const has = (category) => NLP_MAP[category]?.some(phrase => lower.includes(phrase)) ?? false;
+        const actions = [];
+        if (has('silence') || /\bsilen(ce|ces|t)\b|\bpauses?\b|dead air/.test(lower)) actions.push('silence_removal');
+        if (has('fillerWords') || /\bfillers?\b|\bums?\b|\buhs?\b/.test(lower)) actions.push('remove_filler_words');
+        if (has('removeRepetition') || /\brepeat(s|ed)?\b|\bretakes?\b|\bre-takes?\b|false starts?/.test(lower)) actions.push('remove_repetition');
+        if (actions.length < 2) return null;
+        if (/\b(dynamic|zoom|rhythm|engaging|multicam|angles?)\b/.test(lower)) return null;
+        return {
+            intent: 'long_form_build',
+            operation: 'long_form_edit',
+            parameters: {
+                editMode: 'CLEAN_EDIT',
+                actions,
+                reason: 'Combined clean-up request — only the named clean-up actions',
+            },
+            confidence: 'HIGH',
+            missingParameters: [],
         };
     }
 
@@ -729,8 +774,8 @@ export class IntentParser {
                 operation: 'long_form_edit',
                 parameters: {
                     editMode: 'CLEAN_EDIT',
-                    actions: ['silence_removal', 'remove_filler_words'],
-                    reason: 'Generic "clean" command — removing silences and filler words',
+                    actions: ['silence_removal', 'remove_filler_words', 'remove_repetition'],
+                    reason: 'Generic "clean" command — removing silences, filler words and repeated takes',
                 },
                 confidence: 'HIGH',
                 missingParameters: []
@@ -942,7 +987,7 @@ export class IntentParser {
 
         if (matches('cleanEdit')) {
             return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.LONG_FORM_EDIT, {
-                constraints: { editMode: 'CLEAN_EDIT', platform: this.inferPlatform(lower) || 'podcast' }
+                constraints: { editMode: 'CLEAN_EDIT', actions: ['silence_removal', 'remove_filler_words', 'remove_repetition'], platform: this.inferPlatform(lower) || 'podcast' }
             });
         }
 
@@ -1705,11 +1750,16 @@ export class IntentParser {
             operation: result.operation || null,
             targets: result.targets || [],
             target_track_id: result.target_track_id || null,
-            constraints: result.constraints || {},
+            // Local-first intents put their settings in `parameters` (e.g. the
+            // CLEAN_EDIT actions list); the planner reads `constraints`. They
+            // were silently dropped here. `constraints` wins on a clash.
+            constraints: { ...(result.parameters || {}), ...(result.constraints || {}) },
             needs_clarification: result.needs_clarification || false,
             reason: result.reason || null,
             message: result.message || null,
-            confidence: result.confidence || (result.needs_clarification ? 'LOW' : 'HIGH'),
+            confidence: result.confidence
+                ? String(result.confidence).toUpperCase()
+                : (result.needs_clarification ? 'LOW' : 'HIGH'),
             missingParameters: result.missingParameters || [],
             originalPrompt: result.originalPrompt || null,
             intentDraft: result.intentDraft || null

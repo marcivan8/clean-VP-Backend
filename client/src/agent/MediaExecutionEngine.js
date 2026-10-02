@@ -44,6 +44,8 @@ import { transcriptionManager } from './TranscriptionManager.js';
 // the manual Motion tab does, so a brain-picked preset and a hand-picked one
 // are indistinguishable to every downstream consumer (preview, export).
 import { applyPresetToClip } from '../motion/ClipAdapter.js';
+import i18next from 'i18next';
+import { resolveRetakeSource, retakeReviewLines, makeRetakeT } from './retakeSource.js';
 
 // See _deriveAudioPeaksForClip below.
 const DERIVED_PEAK_DB_FLOOR = -8;
@@ -2806,21 +2808,25 @@ export class MediaExecutionEngine {
         // Inject word list + duration for repeated-take detection.
         // The backend expects { words: [{word, start, end}], totalDuration } rather
         // than a filename — it operates on the pre-existing transcript, not the audio file.
+        // Retakes: ONE video's transcript in SOURCE time (retakeSource.js) —
+        // it used to send timeline-time captions (wrong places once silences
+        // were cut) or every video's words flattened together.
+        let retakeAssetId = null;
         if (endpoint === '/api/ai/detect-repeated-takes') {
-            const allWords = store.captions?.length > 0
-                ? store.captions
-                : Object.values(store.transcripts || {}).flat();
+            const source = resolveRetakeSource(store, {
+                assetId:  command.args?.asset_id || null,
+                filePath: resolvedPayload.filename || store.uploadedFilePath || null,
+            });
 
-            if (allWords?.length > 0) {
-                resolvedPayload.words = allWords.map(w => ({
-                    word:  w.word || w.content || w.text || '',
-                    start: w.start,
-                    end:   w.end,
-                }));
-                resolvedPayload.totalDuration = allWords[allWords.length - 1]?.end || 0;
+            if (!source.error && source.words.length > 0) {
+                retakeAssetId = source.assetId;
+                resolvedPayload.words = source.words;
+                const asset = store.assets?.find(a => a.id === source.assetId);
+                resolvedPayload.totalDuration = Number(asset?.sourceDuration || asset?.duration) || source.words[source.words.length - 1].end;
+                resolvedPayload.language = (typeof navigator !== 'undefined' && navigator.language) ? navigator.language.slice(0, 5) : null;
                 // Remove filename field — endpoint doesn't use it
                 delete resolvedPayload.filename;
-                console.log(`[MediaExecutionEngine] Injected ${resolvedPayload.words.length} words for detect-repeated-takes`);
+                console.log(`[MediaExecutionEngine] Injected ${resolvedPayload.words.length} source-time words (asset ${retakeAssetId}) for detect-repeated-takes`);
             } else {
                 // Bail with an actionable message rather than POSTing a payload
                 // the endpoint is guaranteed to reject (it 400s without `words`).
@@ -2828,6 +2834,10 @@ export class MediaExecutionEngine {
                 // no audio fallback — so "no transcript" is a precondition
                 // failure the user can actually fix, not a server error.
                 console.warn('[MediaExecutionEngine] detect-repeated-takes: no transcript in store — aborting');
+                if (command.args?.optional) {
+                    // Part of a full clean-up: silences/fillers still apply.
+                    return { engine: 'api', success: true, endpoint, skipped: true, message: 'Repeated takes skipped: they need a transcript. Add captions, then say "remove repeated takes".' };
+                }
                 return {
                     engine: 'api',
                     success: false,
@@ -2966,6 +2976,9 @@ export class MediaExecutionEngine {
                 // says "done" over a visually identical timeline is the exact
                 // failure mode this whole path was rewired to eliminate.
                 if (takeSegs.length === 0 || result?.removedCount === 0) {
+                    if (command.args?.optional) {
+                        return { engine: 'api', success: true, endpoint, skipped: true, message: 'No repeated takes found, nothing to remove there.' };
+                    }
                     return {
                         engine: 'api',
                         success: false,
@@ -2973,8 +2986,15 @@ export class MediaExecutionEngine {
                         error: 'No repeated takes found — nothing was changed. The transcript had no segments similar enough to be a re-take.',
                     };
                 }
+                // Show what was found before cutting (approval sheet / dialog).
+                if (Array.isArray(result?.groups) && result.groups.length > 0) {
+                    const approved = await this._reviewRetakes(result.groups, job.signal);
+                    if (!approved) {
+                        return { engine: 'api', success: true, endpoint, skipped: true, message: makeRetakeT(i18next)('retakes.kept', { defaultValue: 'Retakes kept as they are.' }) };
+                    }
+                }
                 console.log(`[MediaExecutionEngine] ✂️  detectRepeatedTakes: ${takeSegs.length} segments, ${result?.removedCount ?? '?'} take(s) cut`);
-                this._applySegmentsToTimeline(takeSegs, 'take');
+                this._applySegmentsToTimeline(takeSegs, 'take', null, retakeAssetId);
             }
 
             // ── 7. Auto captions ─────────────────────────────────────────
@@ -3345,6 +3365,50 @@ export class MediaExecutionEngine {
      *
      * Priority: targetAssetId > targetClipId > single-clip fallback > filename match
      */
+    /**
+     * Retake review: list each group ("3 takes of …: keeping take 3") and wait
+     * for Apply / Cancel on the shared approval channel (desktop
+     * ApprovalDialog, mobile MobileRokaApproval). Cancel, abort or 5 minutes
+     * without an answer → nothing is cut.
+     */
+    _reviewRetakes(groups, signal) {
+        const t = makeRetakeT(i18next);
+        const jobId = `retakes-${Date.now()}`;
+        return new Promise((resolve) => {
+            let settled = false;
+            const done = (value) => {
+                if (settled) return;
+                settled = true;
+                offGrant?.(); offDeny?.();
+                clearTimeout(timer);
+                signal?.removeEventListener?.('abort', onAbort);
+                resolve(value);
+            };
+            const offGrant = EventBus.on(EVENT_TYPES.APPROVAL_GRANTED, (p) => { if (p?.jobId === jobId) done(true); });
+            const offDeny  = EventBus.on(EVENT_TYPES.APPROVAL_DENIED,  (p) => { if (p?.jobId === jobId) done(false); });
+            const onAbort = () => {
+                EventBus.emit(EVENT_TYPES.APPROVAL_DENIED, { jobId, reason: 'cancelled', deniedAt: Date.now() });
+                done(false);
+            };
+            signal?.addEventListener?.('abort', onAbort, { once: true });
+            const timer = setTimeout(() => {
+                EventBus.emit(EVENT_TYPES.APPROVAL_DENIED, { jobId, reason: 'timeout', deniedAt: Date.now() });
+                done(false);
+            }, 5 * 60 * 1000);
+
+            useAIStore.getState().setIsAnalyzing?.(false);
+            EventBus.emit(EVENT_TYPES.APPROVAL_REQUIRED, {
+                jobId,
+                kind: 'take_review',
+                operation: 'remove_repetition',
+                title: t('retakes.title', { defaultValue: 'Retakes found' }),
+                description: t('retakes.description', { count: groups.length, defaultValue: 'Roka found {{count}} line(s) you said more than once. It will keep the best take of each:' }),
+                actions: retakeReviewLines(groups, t).map(l => `• ${l}`).join('\n'),
+                reasons: [],
+            });
+        });
+    }
+
     _applySegmentsToTimeline(segments, prefix = 'seg', targetClipId = null, targetAssetId = null) {
         const timelineStore = useTimelineStore.getState();
 

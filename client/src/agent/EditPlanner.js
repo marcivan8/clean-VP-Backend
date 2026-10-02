@@ -47,6 +47,24 @@ export const ACTIONS = {
     REDO_ACTION: 'redo_action'
 };
 
+// Words that say "grade it" but not WHICH look; what's left is the look.
+const COLOR_FILLER_WORDS = new Set(['color', 'colour', 'colors', 'colours', 'grade', 'grading', 'graded',
+    'apply', 'a', 'an', 'the', 'look', 'make', 'it', 'its', 'my', 'this', 'video', 'clip', 'clips',
+    'footage', 'please', 'give', 'me', 'add', 'some', 'to', 'up', 'down', 'more', 'bit', 'of', 'and',
+    'with', 'style', 'feel', 'vibe', 'lut', 'filter', 'can', 'you', 'go', 'for', 'into', 'like']);
+
+/** The LUT search text for a colour-grade request ("cinematic" when none is given). */
+export function colorLookQuery(constraints, originalPrompt = '') {
+    const lookWords = (text) => (String(text || '').toLowerCase().match(/[a-zà-ÿ-]+/g) || [])
+        .filter(w => !COLOR_FILLER_WORDS.has(w));
+    // The registry's free-text `style` param can be a stray word ("add" from
+    // "add a color grade"), so it is filtered the same way as the prompt.
+    const explicit = lookWords(constraints?.style || constraints?.look || constraints?.query);
+    if (explicit.length) return explicit.join(' ');
+    const rest = lookWords(originalPrompt);
+    return rest.length ? rest.join(' ') : 'cinematic';
+}
+
 export class EditPlanner {
 
     static async generatePlan(intent, signal = null) {
@@ -188,7 +206,7 @@ export class EditPlanner {
             case 'add_transition': return this.planAddTransition(planId, clip, constraints);
             case 'add_filter': return this.planAddFilter(planId, clip, constraints);
             case 'add_text': return this.planAddText(planId, constraints);
-            case 'color_grade': return this.planColorGrade(planId, clip, constraints);
+            case 'color_grade': return this.planColorGrade(planId, clip, constraints, intent.originalPrompt);
             case 'export_video': return this.planExport(planId, constraints);
             case 'compare_versions': return this.planCompare(planId);
             case 'undo_action': return this.planUndo(planId);
@@ -205,7 +223,7 @@ export class EditPlanner {
             case 'organize_clips': return this.planOrganizeClips(planId, state, constraints);
             case 'rhythm_zoom': return this.planRhythmZoom(planId, constraints);
             case 'crop_clip':   return this.planCropClip(planId, constraints);
-            case 'apply_lut':      return this.planApplyLUT(planId, constraints);
+            case 'apply_lut':      return this.planApplyLUT(planId, constraints, intent.originalPrompt);
             case 'clear_lut':      return this.planClearLUT(planId, constraints);
             case 'recommend_luts': return this.planRecommendLUTs(planId, constraints);
             case 'detect_speakers': return this.planSingleStep(planId, 'detect_speakers', 'Detect who is speaking (no timeline changes)');
@@ -448,9 +466,26 @@ export class EditPlanner {
         ]);
     }
 
-    static planColorGrade(planId, clip, constraints) {
+    /**
+     * "color grade", "make it cinematic", "warm it up" → a LUT look from the
+     * LUT library, applied to every video clip. The old step wrote
+     * brightness/contrast/saturation/temperature (all undefined for typed
+     * requests, and `saturation`/`temperature` are keys nothing reads) into
+     * ONE clip's grading, which the export never applies anyway: only the
+     * project LUT reaches the exported video. apply_lut sets per-clip grading
+     * for the preview AND projectLUTId for the export.
+     */
+    static planColorGrade(planId, clip, constraints, originalPrompt = '') {
+        const query = colorLookQuery(constraints, originalPrompt);
         return this.buildPlan(planId, 'color_grade', [
-            { step_id: 'step_1', action: ACTIONS.COLOR_GRADE, clip_id: clip?.id, adjustments: { brightness: constraints.brightness, contrast: constraints.contrast, saturation: constraints.saturation, temperature: constraints.temperature } }
+            {
+                step_id: 'step_1',
+                action: 'apply_lut',
+                lut_id: constraints?.lutId || constraints?.lut_id || null,
+                query,
+                apply_to_all: false,
+                reason: `Apply a "${query}" colour look to the video`,
+            }
         ]);
     }
 
@@ -538,6 +573,25 @@ export class EditPlanner {
                 }
             }
 
+            // Repeated takes / false starts — part of a full "clean up"
+            // (asked explicitly, or no specific action list). Optional: a
+            // video with no re-takes must not fail the whole clean-up.
+            const wantsRepetition = actions.length === 0 || actions.some(a =>
+                a === 'remove_repetition' || a === 'remove_repeated_takes');
+            if (wantsRepetition) {
+                // FIRST: you review the retakes before anything else is cut,
+                // and they are detected on the untouched recording.
+                steps.unshift({
+                    step_id: 'step_0',
+                    action: 'remove_repeated_takes',
+                    lookback_window: 60,
+                    similarity_threshold: 0.72,
+                    optional: true,
+                    reason: 'Remove repeated takes and false starts, keeping the best take',
+                });
+            }
+
+            steps.forEach((st, n) => { st.step_id = `step_${n + 1}`; });
             return {
                 plan_id: planId,
                 operation: 'long_form_edit',
@@ -697,9 +751,11 @@ export class EditPlanner {
         ]);
     }
 
-    static planApplyLUT(planId, constraints) {
+    static planApplyLUT(planId, constraints, originalPrompt = '') {
         const lutId       = constraints?.lutId || constraints?.lut_id || null;
-        const query       = constraints?.query || '';
+        // "apply a lut" with no description used to compile to nothing (a
+        // validation error, no edit). Same default look as colour grade.
+        const query       = constraints?.query || (lutId ? '' : colorLookQuery(constraints, originalPrompt));
         const applyToAll  = constraints?.target === 'all';
         return this.buildPlan(planId, 'apply_lut', [
             {

@@ -2039,160 +2039,51 @@ function levenshteinDuplicates(windows, thresholdSec = 120) {
     return pairs;
 }
 
+// Retake detection v2 (services/retakeDetector.js): the AI reads the whole
+// passage as timestamped lines and returns GROUPS of attempts at the same line
+// (reworded, cut off, false starts) plus the best take; cuts are aligned back
+// onto word boundaries. The old 8-second-window + 0.88-similarity scan above
+// (buildWindows / levenshteinDuplicates) missed reworded takes and kept the
+// earlier take on ties. Body: { words: [{word,start,end}] SOURCE time of ONE
+// video, totalDuration?, language? }.
+// TODO(rate-limit): covered by aiGate (counts one AI operation).
 const detectRepeatedTakesHandler = async (req, res) => {
+    const { words, totalDuration, language } = req.body || {};
+    if (!Array.isArray(words) || words.length === 0) {
+        return res.status(400).json({ error: '"words" array with {word, start, end} objects is required' });
+    }
     try {
-        const { words, totalDuration } = req.body;
-
-        if (!Array.isArray(words) || words.length === 0) {
-            return res.status(400).json({ error: '"words" array with {word, start, end} objects is required' });
-        }
-        if (!openai) {
-            return res.status(503).json({ error: 'OpenAI not configured' });
-        }
-
-        const duration = typeof totalDuration === 'number' ? totalDuration : (words[words.length - 1]?.end || 0);
-        const PADDING  = 0.1;   // 100 ms
-        const SIM_THRESHOLD  = 0.88;
-        const WINDOW_SEC     = 8;
-        const PROXIMITY_SEC  = 120;
-
-        const windows = buildWindows(words, WINDOW_SEC);
-        console.log(`[detectRepeatedTakes] ${windows.length} windows from ${words.length} words`);
-
-        // ── 1. Embed all windows ───────────────────────────────────────────────────────
-        let candidatePairs;
-        let usedEmbeddings = false;
-
-        try {
-            const embeddingRes = await openai.embeddings.create({
-                model: 'text-embedding-3-small',
-                input: windows.map(w => w.text),
-            }, { timeout: 30_000 });
-
-            const embeddings = embeddingRes.data.map(d => d.embedding);
-
-            // ── 2. Cosine similarity scan ─────────────────────────────────────────────
-            candidatePairs = [];
-            for (let i = 0; i < windows.length; i++) {
-                for (let j = i + 1; j < windows.length; j++) {
-                    if (windows[j].start - windows[i].end > PROXIMITY_SEC) break;
-                    const sim = cosineSimilarity(embeddings[i], embeddings[j]);
-                    if (sim >= SIM_THRESHOLD) {
-                        candidatePairs.push({ i, j, similarity: parseFloat(sim.toFixed(4)) });
-                    }
-                }
+        const { detectRetakes } = require('../services/retakeDetector');
+        const complete = openai
+            ? async (prompt) => {
+                const out = await openai.chat.completions.create({
+                    model: resolveModel('gpt-4o', 'chat'),
+                    messages: [{ role: 'user', content: prompt }],
+                    response_format: { type: 'json_object' },
+                    temperature: 0.1,
+                    max_tokens: 3000,
+                }, { timeout: 60_000 });
+                return out.choices?.[0]?.message?.content || '';
             }
-            usedEmbeddings = true;
-            console.log(`[detectRepeatedTakes] 🧠 Embeddings: ${candidatePairs.length} candidate duplicate pairs (sim >= ${SIM_THRESHOLD})`);
-        } catch (embErr) {
-            console.warn('[detectRepeatedTakes] Embedding call failed, using Levenshtein fallback:', embErr.message);
-            candidatePairs = levenshteinDuplicates(windows, PROXIMITY_SEC);
-            console.log(`[detectRepeatedTakes] 📝 Levenshtein fallback: ${candidatePairs.length} candidate pairs`);
-        }
+            : null;
 
-        if (candidatePairs.length === 0) {
-            return res.json({
-                activeSegments: [{ start: 0, end: duration, duration }],
-                removedRanges:  [],
-                removedCount:   0,
-                method: usedEmbeddings ? 'embeddings' : 'levenshtein',
-                message: 'No repeated takes detected.',
-            });
-        }
-
-        // ── 3. GPT-4o arbitration ────────────────────────────────────────────────────
-        // Batch all pairs into a single GPT call to minimise latency + cost.
-        const pairDescriptions = candidatePairs.map((p, idx) => {
-            const wA = windows[p.i];
-            const wB = windows[p.j];
-            return `Pair ${idx}: A=[${wA.start.toFixed(1)}s–${wA.end.toFixed(1)}s] "${wA.text.slice(0, 200)}" | B=[${wB.start.toFixed(1)}s–${wB.end.toFixed(1)}s] "${wB.text.slice(0, 200)}"`;
-        }).join('\n');
-
-        const arbitrationPrompt = `You are an expert video editor. The following pairs of segments from the same video were found to be semantically similar (probable repeated takes).
-
-For each pair, decide which version to KEEP (the more complete, natural, well-phrased take) and which to CUT.
-
-Rules:
-- KEEP the version with fewer hesitations, more complete sentences, or stronger delivery
-- If both are equally good, KEEP A (the earlier one)
-- Only mark as CUT if you are confident this is a true repetition, not an intentional callback
-- If you are unsure, mark keep: "A" and cut: "none" to skip that pair
-
-${pairDescriptions}
-
-Respond ONLY with valid JSON:
-{
-  "decisions": [
-    { "pair": 0, "keep": "A"|"B"|"none", "reason": "<one sentence>" }
-  ]
-}`;
-
-        let cutRanges = [];
-        try {
-            const arbitration = await openai.chat.completions.create({
-                model: resolveModel('gpt-4o', 'chat'),
-                messages: [{ role: 'user', content: arbitrationPrompt }],
-                response_format: { type: 'json_object' },
-                temperature: 0.1,
-                max_tokens: 1024,
-            }, { timeout: 30_000 });
-
-            const decisions = JSON.parse(arbitration.choices[0].message.content).decisions || [];
-
-            for (const dec of decisions) {
-                if (dec.keep === 'none') continue; // skip uncertain pairs
-                const pair = candidatePairs[dec.pair];
-                if (!pair) continue;
-                const cutWindow = dec.keep === 'A' ? windows[pair.j] : windows[pair.i];
-                cutRanges.push({ start: cutWindow.start, end: cutWindow.end, reason: dec.reason });
-                console.log(`[detectRepeatedTakes] ✂️  Cut [${cutWindow.start.toFixed(1)}s–${cutWindow.end.toFixed(1)}s] — ${dec.reason}`);
-            }
-        } catch (gptErr) {
-            // Fallback: cut the later window of every pair
-            console.warn('[detectRepeatedTakes] GPT-4o arbitration failed, cutting later windows:', gptErr.message);
-            for (const pair of candidatePairs) {
-                const cutWindow = windows[pair.j];
-                cutRanges.push({ start: cutWindow.start, end: cutWindow.end, reason: 'auto (fallback)' });
-            }
-        }
-
-        // Deduplicate / merge overlapping cut ranges
-        cutRanges.sort((a, b) => a.start - b.start);
-        const mergedCuts = [];
-        for (const cut of cutRanges) {
-            const last = mergedCuts[mergedCuts.length - 1];
-            if (last && cut.start <= last.end) {
-                last.end = Math.max(last.end, cut.end);
-            } else {
-                mergedCuts.push({ ...cut });
-            }
-        }
-
-        // ── 4. Invert cuts → activeSegments ──────────────────────────────────────────────────
-        const activeSegments = [];
-        let cursor = 0;
-        for (const cut of mergedCuts) {
-            if (cut.start > cursor + 0.01) {
-                const segStart = Math.max(0, cursor - PADDING);
-                const segEnd   = Math.min(duration, cut.start + PADDING);
-                activeSegments.push({ start: segStart, end: segEnd, duration: segEnd - segStart });
-            }
-            cursor = cut.end;
-        }
-        if (cursor < duration - 0.01) {
-            const segStart = Math.max(0, cursor - PADDING);
-            activeSegments.push({ start: segStart, end: duration, duration: duration - segStart });
-        }
-
-        console.log(`[detectRepeatedTakes] ✅ ${mergedCuts.length} ranges cut → ${activeSegments.length} active segments`);
-
-        return res.json({
-            activeSegments,
-            removedRanges: mergedCuts,
-            removedCount:  mergedCuts.length,
-            method: usedEmbeddings ? 'embeddings+gpt4o' : 'levenshtein+gpt4o',
+        const result = await detectRetakes(words, {
+            complete,
+            duration: typeof totalDuration === 'number' ? totalDuration : undefined,
+            language: typeof language === 'string' ? language.slice(0, 12) : null,
         });
 
+        console.log(`[detectRepeatedTakes] ${result.method}: ${result.groups.length} group(s), ${result.cuts.length} cut(s)` +
+            (result.rejected.length ? `, ${result.rejected.length} rejected` : ''));
+
+        return res.json({
+            activeSegments: result.activeSegments,
+            removedRanges:  result.cuts,
+            removedCount:   result.cuts.length,
+            groups:         result.groups,
+            method:         result.method,
+            ...(result.cuts.length === 0 ? { message: 'No repeated takes detected.' } : {}),
+        });
     } catch (err) {
         console.error('[aiAgentController] detectRepeatedTakes error:', err);
         return res.status(500).json({ error: err.message });

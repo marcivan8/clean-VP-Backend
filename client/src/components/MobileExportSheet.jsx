@@ -43,10 +43,13 @@ function downloadFile(file) {
 export default function MobileExportSheet({ open, onClose, onExport, isExporting, progress, result, error, onMoreOptions }) {
     const { t } = useTranslation('editor');
     const aspectRatio = useTimelineStore(s => s.aspectRatio);
-    const [settings, setSettings] = useState(() => {
-        const p = aspectRatio === '9:16' ? 'tiktok' : (aspectRatio === '16:9' ? 'youtube' : null);
-        return { platform: p, resolution: '1080p', fps: PLATFORMS.find(x => x.id === p)?.fps || 30, format: 'mp4', quality: 'high', engine: 'ffmpeg' };
-    });
+    // No platform by default: the export then follows the PROJECT's aspect
+    // ratio (server: getResolutionDimensions). A platform preset overrides
+    // the frame size on the server, and this used to be pre-picked from the
+    // aspect ratio at the editor's first render (always the '16:9' default,
+    // before the video's real ratio is known), so every export came out
+    // 1920×1080 as "YouTube" whatever the video's format.
+    const [settings, setSettings] = useState({ platform: null, resolution: '1080p', fps: 30, format: 'mp4', quality: 'high', engine: 'ffmpeg' });
     // "Export again" / "Try again" show the options even though the last
     // result or error is still set in IDELayout.
     const [showOptions, setShowOptions] = useState(false);
@@ -116,6 +119,17 @@ export default function MobileExportSheet({ open, onClose, onExport, isExporting
                             );
                         })}
                     </div>
+
+                    {platform && platform.ar !== (aspectRatio || '16:9') && (
+                        <p role="note" style={{ margin: 0, fontSize: 12.5, lineHeight: 1.45, color: 'var(--coral)' }}>
+                            {t('mobileExport.formatMismatch', { platform: platform.label, platformRatio: platform.ar, ratio: aspectRatio || '16:9' })}
+                        </p>
+                    )}
+                    {!platform && (
+                        <p style={{ margin: 0, fontFamily: 'var(--f-mono)', fontSize: 11.5, color: 'var(--fg-2)' }}>
+                            {t('mobileExport.keepsFormat', { ratio: aspectRatio || '16:9' })}
+                        </p>
+                    )}
 
                     <SheetLabel>{t('exportModal.labelResolution')}</SheetLabel>
                     <div style={{ display: 'grid', gridTemplateColumns: `repeat(${RESOLUTIONS.length}, minmax(0, 1fr))`, gap: 4, padding: 4, borderRadius: 12, background: 'var(--bg)' }}>
