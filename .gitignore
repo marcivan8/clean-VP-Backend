@@ -6,8 +6,12 @@ ML_Dataset/
 *.json
 !package.json
 !package-lock.json
+!client/package.json
+!client/package-lock.json
 !client/src/locales/**/*.json
 !scripts/sticker-library-src/manifest.json
+!scripts/fixtures/**/*.json
+!scripts/**/*.json
 ML_Models/
 
 # Python

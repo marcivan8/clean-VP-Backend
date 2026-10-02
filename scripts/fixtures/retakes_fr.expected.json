@@ -1,0 +1,12 @@
+{
+  "source": "Marc's French recording (Tony Robbins / Vibed), subtitles from the editor, 2026-10-02",
+  "duration": 129,
+  "cuts": [
+    { "from": 4.62,   "to": 25.06,  "what": "5 attempts at \"Tony Robbins a dit…\", keep \"Tony Robbins, qui est une personne…\"" },
+    { "from": 52.85,  "to": 57.54,  "what": "\"Le pourquoi pour moi, c'était de créer quelque chose...\" (cut off)" },
+    { "from": 82.22,  "to": 90.38,  "what": "\"Et de cet ensemble-là, elle est Vibed.\" said twice (+ the pause)" },
+    { "from": 104.43, "to": 108.09, "what": "\"Et voilà, aujourd'hui, tout le monde a Vibed disponible.\", fuller reworded take kept" },
+    { "from": 117.41, "to": 118.93, "what": "false start \"Alors focalise...\"" },
+    { "from": 122.82, "to": 125.02, "what": "\"Et le comment se chargera du reste.\", \"Et le comment viendra tout seul.\" kept" }
+  ]
+}
