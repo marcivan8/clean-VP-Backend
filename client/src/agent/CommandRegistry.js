@@ -184,7 +184,11 @@ export const COMMANDS = [
                   'add motion graphics', 'add animations and motion graphics', 'add some motion graphics',
                   'animate the interesting parts', 'animate the best moments', 'animate the highlights',
                   'bring it to life', 'bring this to life', 'make it come alive',
-                  'illustrate this', 'illustrate the video', 'add some animation', 'add animation'],
+                  'illustrate this', 'illustrate the video', 'add some animation', 'add animation',
+                  'animate', 'animate it', 'animate my video', 'add animations', 'add some animations',
+                  // French (the tokenizer drops accents, so phrases avoid them)
+                  'anime', 'anime la', 'animer', 'ajoute des animations', 'ajouter des animations',
+                  'mets des animations', 'rajoute des animations', 'ajoute de l animation'],
         negative: ['crop', 'silence', 'filler'],
         destructive: false,
     },

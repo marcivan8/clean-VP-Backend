@@ -986,6 +986,10 @@ export class TimelineStateManager {
                         // hit R58/R66 times before for new clip fields.
                         layerMask: clip.layerMask ?? null,
                         layerTarget: clip.layerTarget ?? null,
+                        // A sound effect the "animate" command added (so running it
+                        // again replaces it). Same persistence contract: also read
+                        // back in fromLegacyTracks.
+                        autoAnimate: clip.autoAnimate || undefined,
                         // Transform
                         x: clip.x,
                         y: clip.y,
@@ -1069,6 +1073,7 @@ export class TimelineStateManager {
                                 // projection in toLegacyTracks above. Keep the
                                 // two lists in sync.
                                 animations: legacyClip.animations,
+                                autoAnimate: legacyClip.autoAnimate || undefined,
                                 words: legacyClip.words,
                                 captionStyle: legacyClip.captionStyle,
                                 // R66 — clip grouping. Mirrors toLegacyTracks above.

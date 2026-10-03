@@ -67,6 +67,18 @@ function clipLocalTime(playbackTime: number, clipStart: number): number {
  * Scaling about a point A = scaling about the centre, then moving by A*(1-s).
  */
 const RHYTHM_ANCHOR_Y = 0.28;
+/**
+ * Total zoom of a VIDEO clip: its motion-engine animation (camera zoom/push/
+ * shake…) × its own scale keyframes (zoom rhythm). Both play together, as in
+ * the export (CameraMotionCompiler multiplies them). It used to be either/or:
+ * with an animation on the clip, the zoom rhythm vanished from the preview.
+ */
+function videoCameraScale(kf: any, localTime: number, animScale: number | null, baseScale: number): number {
+    const own = kf?.scaleX ?? kf?.scale;
+    if (animScale === null) return evaluateKF(own, localTime, baseScale);
+    return animScale * evaluateKF(own, localTime, 1);
+}
+
 function rhythmAnchorDy(kf: any, localTime: number, canvasHeight: number): number {
     const scaleKfs = kf?.scaleY ?? kf?.scale;
     if (!Array.isArray(scaleKfs) || scaleKfs.length === 0) return 0;
@@ -246,9 +258,13 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             volume={(clip.volume ?? 1) * (clip.globalVolume ?? 1)}
                             allowVolumeAmplificationInPreview={true}
                             x={() => motionLayer ? (clip.x || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dx : evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0)}
-                            y={() => motionLayer ? (clip.y || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dy : evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0) + rhythmAnchorDy(kf, clipLocalTime(playback.time, clip.start), canvasHeight)}
-                            scaleX={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
-                            scaleY={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
+                            y={() => motionLayer
+                                // Anchor the WHOLE camera zoom 28% from the top, like the export.
+                                ? (clip.y || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dy
+                                    + (0.5 - RHYTHM_ANCHOR_Y) * canvasHeight * (videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale, 1) - 1)
+                                : evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0) + rhythmAnchorDy(kf, clipLocalTime(playback.time, clip.start), canvasHeight)}
+                            scaleX={() => videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : null, clip.scaleX ?? clip.scale ?? 1)}
+                            scaleY={() => videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : null, clip.scaleY ?? clip.scale ?? 1)}
                             rotation={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).rotation : evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
                             opacity={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).opacity : evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
                             filters={g ? [

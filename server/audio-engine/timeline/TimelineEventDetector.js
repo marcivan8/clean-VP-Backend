@@ -55,8 +55,34 @@ const EMPHASIS_PEAK_DB        = -4;   // standalone peak this loud reads as emph
 const REVEAL_ZOOM_THRESHOLD   = 1.3;  // a push bigger than plain ZOOM_IN's 1.05 reads as a reveal
 const EMOTIONAL_SILENCE_S     = 1.0;  // a pause this long, near matching wording, reads as a beat
 
-const REVEAL_KEYWORDS = /\b(reveal(?:ing|ed)?|introduc(?:e|ing)|here'?s|check (?:this|it) out|behold|unveil(?:ing|ed)?|presenting|meet the|watch this)\b/i;
-const EMOTIONAL_KEYWORDS = /\b(love|miss(?:ed|ing)?|sorry|goodbye|remember|thank you|proud|hurts?|heart|cry(?:ing)?)\b/i;
+// A pause in the SPEECH this long (from word timings) counts as a silence.
+// Gaps between clips are rare once a video has been cleaned up (clips are
+// packed back to back), so without the words no pause, and therefore no
+// punchline or emotional beat, could ever be found.
+const SPEECH_PAUSE_S = 0.5;
+
+// Whole-word match that works with accented letters (\b treats "é" as a
+// non-word character, so /\bdécouvrez\b/ never matched French).
+const wordsRegex = (alternatives) =>
+    new RegExp(`(?<![\\p{L}\\p{N}])(?:${alternatives.join('|')})(?![\\p{L}\\p{N}])`, 'iu');
+
+// English + French. Apostrophes are normalised to ' before matching.
+const REVEAL_KEYWORDS = wordsRegex([
+    "reveal(?:ing|ed)?", 'introduc(?:e|ing)', "here'?s", 'check (?:this|it) out', 'behold',
+    'unveil(?:ing|ed)?', 'presenting', 'meet the', 'watch this', 'the secret', 'the truth is',
+    'voici', 'je vous présente', 'découvr(?:ez|ir|e)', 'regardez(?: bien| ça)?', 'le secret',
+    'la vérité', 'révél(?:er|e|é|ation)', 'dévoil(?:er|e|é)', 'vous allez voir',
+]);
+const EMOTIONAL_KEYWORDS = wordsRegex([
+    'love', 'miss(?:ed|ing)?', 'sorry', 'goodbye', 'remember', 'thank you', 'proud', 'hurts?', 'heart', 'cry(?:ing)?',
+    "je t'aime", 'aime(?:r|z)?', 'amour', 'manque(?:s|r)?', 'désolée?', 'pardon', 'au revoir', 'adieu',
+    'souviens', 'souvenirs?', 'merci', 'fière?', 'cœur', 'coeur', 'pleur(?:e|er|é|s)?', 'larmes?', 'triste',
+]);
+
+/** The words of a text/caption clip, whichever field holds them (captions made by the app use `content`). */
+function clipText(clip) {
+    return String(clip?.text || clip?.content || clip?.caption || clip?.name || '').replace(/[’‘]/g, "'");
+}
 
 class TimelineEventDetector {
     /**
@@ -84,6 +110,10 @@ class TimelineEventDetector {
             }
         }
 
+        // Pauses in the speech itself (timeline-time words, sent by the
+        // animate command as projectState.words).
+        this._detectSpeechPauses(projectState?.words, events);
+
         // R68 — semantic events derive from the structural events + clip
         // wording above, so they run as a second pass once those exist.
         this._detectSemanticEvents(tracks, events);
@@ -99,6 +129,25 @@ class TimelineEventDetector {
         // Sort by timeline position
         events.sort((a, b) => a.timelineTime - b.timelineTime);
         return events;
+    }
+
+    /**
+     * SILENCE_START / SILENCE_END for every pause of SPEECH_PAUSE_S or more
+     * between consecutive words. Words are timeline time. No-op without words.
+     * @private
+     */
+    _detectSpeechPauses(words, events) {
+        if (!Array.isArray(words) || words.length < 2) return;
+        const ws = words
+            .map(w => ({ start: Number(w?.start), end: Number(w?.end) }))
+            .filter(w => Number.isFinite(w.start) && Number.isFinite(w.end))
+            .sort((a, b) => a.start - b.start);
+        for (let i = 0; i < ws.length - 1; i++) {
+            const gap = ws[i + 1].start - ws[i].end;
+            if (gap < SPEECH_PAUSE_S) continue;
+            events.push({ eventType: TimelineEventType.SILENCE_START, timelineTime: ws[i].end, clipId: null, trackId: null, metadata: { durationS: gap, via: 'speech' } });
+            events.push({ eventType: TimelineEventType.SILENCE_END, timelineTime: ws[i + 1].start, clipId: null, trackId: null, metadata: { durationS: gap, via: 'speech' } });
+        }
     }
 
     // ── Semantic events (R68 — AI Animation Intelligence) ─────────────────────
@@ -126,7 +175,7 @@ class TimelineEventDetector {
                 if (!clip) continue;
                 const start = clip.startTime || clip.start || 0;
                 const end   = clip.endTime || clip.end || (start + (clip.duration || 0));
-                const text  = clip.text || clip.caption || '';
+                const text  = clipText(clip);
                 textClips.push({ clip, start, end, text });
             }
         }
@@ -352,6 +401,19 @@ class TimelineEventDetector {
                 }
             }
 
+            // Loudness peaks of the clip's own sound. The editor attaches them to
+            // the VIDEO clip (the video carries the speech); only audio tracks
+            // were read before, so punchlines/emphasis never fired.
+            for (const peak of (clip.peaks || clip.audioPeaks || [])) {
+                events.push({
+                    eventType:    TimelineEventType.AUDIO_PEAK,
+                    timelineTime: startTime + (Number(peak?.offset) || 0),
+                    clipId:       clip.id || null,
+                    trackId:      track.id || null,
+                    metadata:     { db: peak?.db ?? peak?.level ?? null },
+                });
+            }
+
             // Silence gap (gap after this clip, before next)
             if (i < clips.length - 1) {
                 const next     = clips[i + 1];
@@ -429,7 +491,7 @@ class TimelineEventDetector {
                 clipId:       clip.id || null,
                 trackId:      track.id || null,
                 metadata:     {
-                    text: (clip.text || clip.caption || '').slice(0, 100),
+                    text: clipText(clip).slice(0, 100),
                 },
             });
         }

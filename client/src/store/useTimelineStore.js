@@ -2218,7 +2218,11 @@ const useTimelineStore = create(
                 // clip carrying the user's actual current font choice. Captured
                 // once, up front, it unambiguously reflects the batch that was
                 // on the timeline the moment this call started.
-                const priorCaptionClips = (textTrack.clips || []).filter(c => c.id.startsWith('caption-'));
+                // A legacy clip's `id` is its PLACEMENT id ("placement-…"); the
+                // "caption-" prefix is on the clip entity (`clipId`). Matching
+                // `id` found nothing, so regenerating never removed the old
+                // batch and captions stacked up.
+                const priorCaptionClips = (textTrack.clips || []).filter(c => String(c.clipId || c.id).startsWith('caption-'));
                 const existingTextClip = priorCaptionClips[0] || textTrack?.clips?.[0];
 
                 // ── ONE transaction → ONE timeline event → ONE React render ──
@@ -2273,7 +2277,11 @@ const useTimelineStore = create(
                             // Times are ABSOLUTE, same clock as start/duration.
                             words:         Array.isArray(cap.words) ? cap.words : undefined,
                             captionStyle:  existingTextClip?.captionStyle,
-                            animations:    existingTextClip?.animations,
+                            // Style inheritance only: never copy the "animate"
+                            // command's per-moment animations onto every caption.
+                            animations:    Array.isArray(existingTextClip?.animations)
+                                ? existingTextClip.animations.filter(a => a?.source !== 'auto-animate')
+                                : existingTextClip?.animations,
                             sourceUrl: null,
                             sourceDuration: duration,
                             metadata: {},

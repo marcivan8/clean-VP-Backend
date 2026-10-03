@@ -43,7 +43,8 @@ import { transcriptionManager } from './TranscriptionManager.js';
 // server's resolved plan (AnimationKnowledgeGraph.js) the exact same way
 // the manual Motion tab does, so a brain-picked preset and a hand-picked one
 // are indistinguishable to every downstream consumer (preview, export).
-import { applyPresetToClip } from '../motion/ClipAdapter.js';
+import { applyPresetToClip, AUTO_ANIMATE } from '../motion/ClipAdapter.js';
+import { selectAnimateMoments, sfxPlayableUrl, countMoments, CLUSTER_S } from './animateMoments.js';
 import i18next from 'i18next';
 import { resolveRetakeSource, retakeReviewLines, makeRetakeT, findTranscript } from './retakeSource.js';
 import { clipSourceWords, buildRhythmRequest, shotsToKeyframes } from './rhythmShots.js';
@@ -531,35 +532,49 @@ export class MediaExecutionEngine {
         if (!Array.isArray(samples) || samples.length === 0) return [];
 
         const SAMPLE_RATE_HZ = 50; // matches routes/waveformRoutes.js SAMPLES_PER_WIN extraction rate
+        const speed = Number(clip.speed) > 0 ? Number(clip.speed) : 1;
         const sourceStart = Number(clip.offset) || 0;
         const duration     = Number(clip.duration) || 0;
         if (duration <= 0) return [];
-        const sourceEnd = sourceStart + duration;
+        // The clip shows duration × speed seconds of source (timeline/speedChange.js).
+        const sourceEnd = sourceStart + duration * speed;
 
         const firstIdx = Math.max(0, Math.floor(sourceStart * SAMPLE_RATE_HZ));
         const lastIdx  = Math.min(samples.length - 1, Math.ceil(sourceEnd * SAMPLE_RATE_HZ));
+        if (lastIdx <= firstIdx) return [];
 
-        const peaks = [];
+        // Only PROMINENT peaks: the loudest point within ±1 s, at least 60% of
+        // the loudest sound in this clip, and at least 2.5 s apart. Every
+        // local maximum of normal speech used to count (dozens per sentence),
+        // which would have flooded the detector with "emphasis" moments.
+        // dB is relative to the clip's loudest point (0 dB), the scale
+        // TimelineEventDetector's -4 / -8 dB thresholds read.
+        let maxA = 0;
+        for (let i = firstIdx; i <= lastIdx; i++) if (samples[i] > maxA) maxA = samples[i];
+        if (!(maxA > 0)) return [];
+        const WIN = SAMPLE_RATE_HZ; // ±1 s
+        const candidates = [];
         for (let i = firstIdx; i <= lastIdx; i++) {
-            const amplitude = samples[i];
-            if (typeof amplitude !== 'number' || amplitude <= 0) continue;
-            // Local maximum only — strictly louder than both neighbours —
-            // so a sustained loud stretch reads as one peak, not fifty.
-            const prev = samples[i - 1] ?? 0;
-            const next = samples[i + 1] ?? 0;
-            if (amplitude < prev || amplitude < next) continue;
-
-            const db = 20 * Math.log10(Math.min(amplitude, 1));
-            // -8dB matches TimelineEventDetector's PUNCHLINE_PEAK_DB — the more
-            // permissive of its two thresholds; the detector applies its own
-            // exact PUNCHLINE/EMPHASIS cutoffs downstream, this is just a floor
-            // so quiet room-tone samples never get pushed through as "peaks".
+            const a = samples[i];
+            if (typeof a !== 'number' || a < maxA * 0.6) continue;
+            let isMax = true;
+            for (let j = Math.max(firstIdx, i - WIN); j <= Math.min(lastIdx, i + WIN); j++) {
+                if (samples[j] > a || (samples[j] === a && j < i)) { isMax = false; break; }
+            }
+            if (!isMax) continue;
+            const db = 20 * Math.log10(a / maxA);
             if (db < DERIVED_PEAK_DB_FLOOR) continue;
-
-            const sourceTimeS = i / SAMPLE_RATE_HZ;
-            peaks.push({ offset: sourceTimeS - sourceStart, db });
+            candidates.push({ i, a, db });
         }
-        return peaks;
+        candidates.sort((x, y) => y.a - x.a);
+        const kept = [];
+        for (const c of candidates) {
+            if (kept.every(k => Math.abs(k.i - c.i) >= 2.5 * SAMPLE_RATE_HZ)) kept.push(c);
+        }
+        return kept
+            .sort((x, y) => x.i - y.i)
+            // offset = TIMELINE seconds from the clip start
+            .map(c => ({ offset: (c.i / SAMPLE_RATE_HZ - sourceStart) / speed, db: c.db }));
     }
 
     /**
@@ -579,6 +594,29 @@ export class MediaExecutionEngine {
                 }),
             };
         });
+    }
+
+    /**
+     * Undo what the previous "animate" run added, so running it again
+     * REPLACES its result: animations tagged AUTO_ANIMATE come off every clip
+     * (animations the user picked stay), and its sound effects (autoAnimate)
+     * are removed. No history entry: the caller saved one.
+     */
+    _clearAutoAnimate() {
+        const store = useTimelineStore.getState();
+        for (const track of (store.tracks || [])) {
+            for (const clip of (track.clips || [])) {
+                if (track.type === 'audio' && clip.autoAnimate) {
+                    useTimelineStore.getState().removeClip(track.id, clip.id, { skipHistory: true });
+                    continue;
+                }
+                const anims = Array.isArray(clip.animations) ? clip.animations : null;
+                if (anims && anims.some(a => a?.source === AUTO_ANIMATE)) {
+                    useTimelineStore.getState().updateClip(track.id, clip.id,
+                        { animations: anims.filter(a => a?.source !== AUTO_ANIMATE) }, { skipHistory: true });
+                }
+            }
+        }
     }
 
     /**
@@ -766,6 +804,12 @@ export class MediaExecutionEngine {
                     // never carry the peak markers PUNCHLINE_DETECTED/EMPHASIS_MOMENT
                     // need, so the brain could only ever animate text.
                     const aaTracks = this._tracksWithDerivedAudioPeaks(aaStore);
+                    // Timeline-time words: the detector reads pauses in the
+                    // speech from them (gaps between clips are gone once a
+                    // video is cleaned up).
+                    const aaWords = (aaStore.captions || [])
+                        .map(w => ({ start: Number(w?.start), end: Number(w?.end) }))
+                        .filter(w => Number.isFinite(w.start) && Number.isFinite(w.end));
                     // R82 — projectId lets the route do a READ-ONLY lookup of
                     // this project's already-cached tone (ProjectIntelligence
                     // .getMap(), never a fresh/paid computation) to flavour
@@ -773,14 +817,15 @@ export class MediaExecutionEngine {
                     // (no project open yet) just means no tone signal.
                     const aaRes = await authFetch('/api/audio/animate-automatically', {
                         method: 'POST',
-                        body: JSON.stringify({ projectState: { tracks: aaTracks }, projectId: aaStore.projectId || null }),
+                        body: JSON.stringify({ projectState: { tracks: aaTracks, words: aaWords }, projectId: aaStore.projectId || null }),
                     });
                     const aaData = await aaRes.json();
                     if (!aaRes.ok) {
                         return { action, success: false, error: aaData.error || 'animate-automatically failed' };
                     }
 
-                    const plan = aaData.plan || [];
+                    // The strongest moments, spaced out (animateMoments.js).
+                    const plan = selectAnimateMoments(aaData.plan || [], aaStore.duration);
                     if (plan.length === 0) {
                         return {
                             action, success: true,
@@ -788,57 +833,69 @@ export class MediaExecutionEngine {
                         };
                     }
 
+                    // ONE undo step: clearing the previous run + this run.
                     aaStore._saveHistory?.();
+                    this._clearAutoAnimate();
 
                     let animatedCount = 0, sfxCount = 0, sfxTrackId = null;
+                    let lastSfxAt = -Infinity; // one sound effect per moment
 
                     for (const item of plan) {
                         if (item.presetId && item.clipId) {
-                            const { trackId, clipId } = this._findClipAndTrack(aaStore, item.clipId);
+                            // Always the LIVE clip: two moments on one clip must
+                            // both land (the second used to overwrite the first
+                            // from a stale copy).
+                            const live = useTimelineStore.getState();
+                            const { trackId, clipId } = this._findClipAndTrack(live, item.clipId);
                             const clip = clipId
-                                ? (aaStore.tracks || []).find(t => t.id === trackId)?.clips?.find(c => c.id === clipId)
+                                ? (live.tracks || []).find(t => t.id === trackId)?.clips?.find(c => c.id === clipId)
                                 : null;
                             if (clip) {
-                                // R81 — item.intensity (AnimationIntensity.js,
-                                // computed server-side from this specific
-                                // event's own metadata) scales the preset's
-                                // keyframes so two moments of the same
-                                // semantic type don't land identically.
-                                // R82 — item.secondaryPresetId (AnimationCombiner.js)
-                                // layers one complementary preset on top, so
-                                // the resulting motion is a considered
-                                // combination, not always a single preset alone.
+                                // Play AT the detected moment, not at the clip's
+                                // first frame (presets are authored at 0).
+                                const at = Math.max(0, (Number(item.timelineTime) || 0) - (Number(clip.start) || 0));
+                                // R81 intensity / R82 secondary preset, as before.
                                 const updates = applyPresetToClip(clip, item.presetId, {
                                     intensity: item.intensity,
                                     secondaryPresetId: item.secondaryPresetId,
+                                    source: AUTO_ANIMATE,
+                                    at,
                                 });
-                                if (Object.keys(updates).length > 0) {
-                                    aaStore.updateClip(trackId, clipId, updates, { skipHistory: true });
+                                if (updates.animations) {
+                                    live.updateClip(trackId, clipId, updates, { skipHistory: true });
                                     animatedCount++;
                                 }
                             }
                         }
 
-                        // Top SFX pick only — this is autonomous execution, not a
-                        // picker; ranking (use_count desc) already comes from
+                        // Top SFX pick only — ranking (use_count desc) comes from
                         // TaxonomyService, so index 0 is the best match.
                         const topSfx = item.sfx?.[0];
-                        if (topSfx) {
+                        const sfxUrl = sfxPlayableUrl(topSfx);
+                        if (topSfx && sfxUrl && Number(item.timelineTime) - lastSfxAt > CLUSTER_S) {
+                            lastSfxAt = Number(item.timelineTime);
+                            const live = useTimelineStore.getState();
                             if (!sfxTrackId) {
-                                const existingSfxTrack = aaStore.tracks?.find(t => t.type === 'audio' && t.name === 'SFX');
-                                sfxTrackId = existingSfxTrack?.id || aaStore.addTrack('audio');
-                                if (sfxTrackId && !existingSfxTrack) aaStore.renameTrack(sfxTrackId, 'SFX');
+                                const existingSfxTrack = live.tracks?.find(t => t.type === 'audio' && t.name === 'SFX');
+                                sfxTrackId = existingSfxTrack?.id || live.addTrack('audio');
+                                if (sfxTrackId && !existingSfxTrack) useTimelineStore.getState().renameTrack(sfxTrackId, 'SFX');
                             }
                             if (sfxTrackId) {
-                                const sfxUrl = topSfx.previewUrl || topSfx.preview_url || topSfx.gcsPath || topSfx.gcs_path;
-                                aaStore.addClip(sfxTrackId, {
-                                    id:        `sfx-${item.eventType}-${Math.round(item.timelineTime * 1000)}-${Date.now()}`,
-                                    type:      'audio',
-                                    name:      topSfx.name || topSfx.displayName || topSfx.display_name || 'SFX',
-                                    url:       sfxUrl,
-                                    sourceUrl: sfxUrl,
-                                    start:     Math.max(0, item.timelineTime),
-                                    duration:  topSfx.duration || 1,
+                                useTimelineStore.getState().addClip(sfxTrackId, {
+                                    id:          `sfx-${item.eventType}-${Math.round(item.timelineTime * 1000)}-${Date.now()}`,
+                                    type:        'audio',
+                                    name:        topSfx.display_name || topSfx.displayName || topSfx.name || 'SFX',
+                                    url:         sfxUrl,
+                                    src:         sfxUrl,
+                                    sourceUrl:   sfxUrl,
+                                    assetId:     topSfx.id || null,
+                                    start:       Math.max(0, item.timelineTime),
+                                    duration:    Number(topSfx.duration) > 0 ? Number(topSfx.duration) : 1,
+                                    volume:      Number(topSfx.recommended_volume) > 0 ? Number(topSfx.recommended_volume) : 0.8,
+                                    isSFX:       true,
+                                    // Marks it as this command's own, so a re-run
+                                    // replaces it instead of stacking another.
+                                    autoAnimate: true,
                                 }, { skipHistory: true });
                                 sfxCount++;
                             }
@@ -847,7 +904,7 @@ export class MediaExecutionEngine {
 
                     return {
                         action, success: true,
-                        message: `Animated ${animatedCount} moment${animatedCount !== 1 ? 's' : ''}` +
+                        message: `Animated ${countMoments(plan)} moment${countMoments(plan) !== 1 ? 's' : ''} (${animatedCount} layer${animatedCount !== 1 ? 's' : ''})` +
                             (sfxCount > 0 ? ` and added ${sfxCount} sound effect${sfxCount !== 1 ? 's' : ''}` : '') +
                             ` — brain-detected reveal/punchline/emphasis/emotional-beat moments, zero manual picks.`,
                     };

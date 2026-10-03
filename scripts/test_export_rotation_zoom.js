@@ -34,9 +34,9 @@ function extract(name, sig) {
     const m = src.match(new RegExp(`function ${name}\\(${sig}[\\s\\S]*?\\n}\\n`));
     return m ? m[0] : null;
 }
-const parts = [extract('rotationFromProbeStream', 'vStream'), extract('zoomEaseExpr', 'easing, u'), extract('buildSmoothZoomFilter', 'kfs')];
+const parts = [extract('rotationFromProbeStream', 'vStream'), extract('zoomEaseExpr', 'easing, u'), extract('keyframeExpr', 'pts, T'), extract('buildSmoothZoomFilter', 'kfs')];
 section('0 · helpers found in jobs/exportProcessor.js');
-check('rotationFromProbeStream, zoomEaseExpr and buildSmoothZoomFilter extracted', parts.every(Boolean));
+check('rotationFromProbeStream, zoomEaseExpr, keyframeExpr and buildSmoothZoomFilter extracted', parts.every(Boolean));
 if (!parts.every(Boolean)) { console.log(`\n${passed} passed, ${failed} failed`); process.exit(1); }
 // eslint-disable-next-line no-new-func
 const { rotationFromProbeStream, buildSmoothZoomFilter } = new Function(`${parts.join('\n')}\nreturn { rotationFromProbeStream, buildSmoothZoomFilter };`)();

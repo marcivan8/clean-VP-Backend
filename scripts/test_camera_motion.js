@@ -69,10 +69,11 @@ const CLIENT = loadClientModules();
 function loadZoomFilter() {
     const src = read('jobs/exportProcessor.js');
     const ease = src.match(/function zoomEaseExpr\(easing, u\)[\s\S]*?\n}\n/);
+    const kfe = src.match(/function keyframeExpr\(pts, T[\s\S]*?\n}\n/);
     const m = src.match(/function buildSmoothZoomFilter\(kfs[\s\S]*?\n}\n/);
-    if (!ease || !m) return null;
+    if (!ease || !kfe || !m) return null;
     // eslint-disable-next-line no-new-func
-    return new Function(`${ease[0]}\n${m[0]}\nreturn buildSmoothZoomFilter;`)();
+    return new Function(`${ease[0]}\n${kfe[0]}\n${m[0]}\nreturn buildSmoothZoomFilter;`)();
 }
 const buildSmoothZoomFilter = loadZoomFilter();
 

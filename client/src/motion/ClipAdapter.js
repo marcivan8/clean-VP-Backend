@@ -64,10 +64,18 @@ function inferKind(clip, trackType) {
  * Returns [] when none apply, which resolves to a completely static layer.
  */
 function resolveAnimations(clip) {
-    if (Array.isArray(clip?.animations) && clip.animations.length > 0) {
-        return clip.animations;
-    }
+    const own = Array.isArray(clip?.animations) ? clip.animations : [];
+    // Animations the user picked override the clip's legacy/pack animation,
+    // as before. Animations the "animate" command added (source AUTO_ANIMATE)
+    // only ADD to it: a caption keeps its style pack's word animation and
+    // gets the punch on top, instead of losing it.
+    if (own.some(a => a && a.source !== AUTO_ANIMATE)) return own;
+    const base = baseAnimations(clip);
+    return own.length ? [...base, ...own] : base;
+}
 
+/** The clip's legacy-string or caption-pack animation (no clip.animations). */
+function baseAnimations(clip) {
     const duration = Number(clip?.duration) || 0;
 
     // Legacy single-string animation — keeps existing projects animating.
@@ -80,6 +88,55 @@ function resolveAnimations(clip) {
     if (packPreset) return buildPreset(packPreset, { duration });
 
     return [];
+}
+
+/** Tag on animations added by the "animate" command (MediaExecutionEngine animate_automatically). */
+export const AUTO_ANIMATE = 'auto-animate';
+
+const RELEASE_NEUTRAL = { scale: 1, x: 0, y: 0, rotation: 0 };
+const RELEASE_HOLD_S = 1.2;
+const RELEASE_OUT_S = 0.4;
+
+/**
+ * Re-time one preset animation to play at a moment INSIDE the clip.
+ *  - starts `at` seconds after the clip starts (presets are authored at 0);
+ *  - mid-clip (at > 0.05): exit animations are dropped and the entrance
+ *    opacity/reveal channels removed, so an already-visible layer does not
+ *    blink out and fade back in;
+ *  - release: a camera punch (scale/x/y/rotation ending away from neutral)
+ *    holds RELEASE_HOLD_S then eases back, when the clip continues long
+ *    enough, so several moments in one long clip don't stack into an ever
+ *    tighter zoom.
+ * Returns null when nothing of the animation is left.
+ */
+function animationAtMoment(anim, { at, clipDuration, release }) {
+    if (!anim) return null;
+    const mid = at > 0.05;
+    if (mid && anim.anchor === 'out') return null;
+    let keyframes = (anim.keyframes || []).map(k => ({ ...k, properties: { ...(k.properties || {}) } }));
+    if (mid) {
+        keyframes = keyframes
+            .map(k => { delete k.properties.opacity; delete k.properties.reveal; return k; })
+            .filter(k => Object.keys(k.properties).length > 0);
+        if (keyframes.length === 0) return null;
+    }
+    const startTime = (Number(anim.startTime) || 0) + at;
+    let duration = Number(anim.duration) || 0;
+    if (release && keyframes.length > 0) {
+        const last = keyframes[keyframes.length - 1];
+        const held = Object.keys(RELEASE_NEUTRAL)
+            .filter(p => Number.isFinite(Number(last.properties[p])) && Math.abs(Number(last.properties[p]) - RELEASE_NEUTRAL[p]) > 1e-3);
+        const lastT = Number(last.time) || 0;
+        const releaseEnd = lastT + RELEASE_HOLD_S + RELEASE_OUT_S;
+        if (held.length > 0 && startTime + releaseEnd < clipDuration - 0.5) {
+            const back = { ...last.properties };
+            held.forEach(p => { back[p] = RELEASE_NEUTRAL[p]; });
+            keyframes.push({ time: lastT + RELEASE_HOLD_S, properties: { ...last.properties } });
+            keyframes.push({ time: releaseEnd, properties: back, easing: 'easeInOutCubic' });
+            duration = Math.max(duration, releaseEnd);
+        }
+    }
+    return { ...anim, startTime, duration, keyframes };
 }
 
 /**
@@ -215,6 +272,21 @@ export function applyPresetToClip(clip, presetId, opts = {}) {
         if (builtSecondary.length > 0) {
             animations = animations.concat(scaleAnimations(builtSecondary, opts?.intensity));
         }
+    }
+
+    // The "animate" command: play at the detected moment, tag as its own,
+    // and add to what the clip already has instead of replacing it.
+    if (opts?.source) {
+        const at = Math.max(0, Math.min(Math.max(0, duration - 0.1), Number(opts.at) || 0));
+        animations = animations
+            .map(a => animationAtMoment(a, { at, clipDuration: duration, release: opts.release !== false }))
+            .filter(Boolean)
+            .map(a => ({ ...a, source: opts.source }));
+        if (animations.length === 0) return {};
+        const existing = Array.isArray(clip.animations) ? clip.animations : [];
+        // The legacy string stays: resolveAnimations still plays it under
+        // auto-added animations.
+        return { animations: [...existing, ...animations] };
     }
 
     return {

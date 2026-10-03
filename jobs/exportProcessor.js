@@ -125,30 +125,40 @@ function zoomEaseExpr(easing, u) {
     }
 }
 
-function buildSmoothZoomFilter(kfs, { fps = 30, anchor = { mode: 'fixed', x: 0.5, y: 0.28 }, multiplier = 1, minZoom = 1.0, maxZoom = 2.0 } = {}) {
-    const pts = (kfs || [])
-        .filter(k => k && Number.isFinite(Number(k.time)) && Number.isFinite(Number(k.value)))
-        .map(k => ({ t: Math.max(0, Number(k.time)), v: Math.min(maxZoom, Math.max(minZoom, Number(k.value) * multiplier)), e: k.easing }))
-        .sort((a, b) => a.t - b.t);
+/** Piecewise expression of a `[{time,value,easing}]` track over T, or null. */
+function keyframeExpr(pts, T, digits = 4) {
     if (!pts.length) return null;
-    if (!pts.some(p => p.v > 1.0005)) return null; // never zoomed in: nothing to draw
+    if (pts.length === 1) return pts[0].v.toFixed(digits);
+    let e = pts[pts.length - 1].v.toFixed(digits);
+    for (let i = pts.length - 2; i >= 0; i--) {
+        const a = pts[i], b = pts[i + 1];
+        const span = b.t - a.t;
+        const seg = span > 0.001
+            ? `(${a.v.toFixed(digits)}+(${(b.v - a.v).toFixed(digits)})*${zoomEaseExpr(b.e, `((${T}-${a.t.toFixed(3)})/${span.toFixed(3)})`)})`
+            : b.v.toFixed(digits);
+        e = `if(lt(${T},${b.t.toFixed(3)}),${seg},${e})`;
+    }
+    return `if(lt(${T},${pts[0].t.toFixed(3)}),${pts[0].v.toFixed(digits)},${e})`;
+}
+
+function buildSmoothZoomFilter(kfs, { fps = 30, anchor = { mode: 'fixed', x: 0.5, y: 0.28 }, multiplier = 1, minZoom = 1.0, maxZoom = 2.0, panX = null, panY = null } = {}) {
+    const clean = (arr, map) => (arr || [])
+        .filter(k => k && Number.isFinite(Number(k.time)) && Number.isFinite(Number(k.value)))
+        .map(k => ({ t: Math.max(0, Number(k.time)), v: map(Number(k.value)), e: k.easing }))
+        .sort((a, b) => a.t - b.t);
+    const pts = clean(kfs, v => Math.min(maxZoom, Math.max(minZoom, v * multiplier)));
+    // Camera pan (shake / whip / pan), fraction of the frame: the picture
+    // moves right by panX × width. Fed by CameraMotionCompiler.
+    const px = clean(panX, v => Math.max(-0.5, Math.min(0.5, v)));
+    const py = clean(panY, v => Math.max(-0.5, Math.min(0.5, v)));
+    const pans = px.some(p => Math.abs(p.v) > 1e-4) || py.some(p => Math.abs(p.v) > 1e-4);
+    if (!pts.length && !pans) return null;
+    if (!pans && !pts.some(p => p.v > 1.0005)) return null; // never zoomed in: nothing to draw
 
     const T = `(in/${fps})`;
-    let z;
-    if (pts.length === 1) {
-        z = pts[0].v.toFixed(4);
-    } else {
-        z = pts[pts.length - 1].v.toFixed(4);
-        for (let i = pts.length - 2; i >= 0; i--) {
-            const a = pts[i], b = pts[i + 1];
-            const span = b.t - a.t;
-            const seg = span > 0.001
-                ? `(${a.v.toFixed(4)}+(${(b.v - a.v).toFixed(4)})*${zoomEaseExpr(b.e, `((${T}-${a.t.toFixed(3)})/${span.toFixed(3)})`)})`
-                : b.v.toFixed(4);
-            z = `if(lt(${T},${b.t.toFixed(3)}),${seg},${z})`;
-        }
-        z = `if(lt(${T},${pts[0].t.toFixed(3)}),${pts[0].v.toFixed(4)},${z})`;
-    }
+    const z = keyframeExpr(pts, T) || '1';
+    const dx = pans ? keyframeExpr(px, T, 5) : null;
+    const dy = pans ? keyframeExpr(py, T, 5) : null;
 
     const ax = Math.max(0, Math.min(1, Number(anchor?.x ?? 0.5)));
     const ay = Math.max(0, Math.min(1, Number(anchor?.y ?? 0.28)));
@@ -160,6 +170,9 @@ function buildSmoothZoomFilter(kfs, { fps = 30, anchor = { mode: 'fixed', x: 0.5
         L  = `(W*${ax.toFixed(4)}*(1-1/(${z})))`;
         Tp = `(H*${ay.toFixed(4)}*(1-1/(${z})))`;
     }
+    // Moving the picture right by dx·W = moving the sampled window left.
+    if (dx) L  = `(${L}-(${dx})*W/(${z}))`;
+    if (dy) Tp = `(${Tp}-(${dy})*H/(${z}))`;
     const R = `(${L}+W/(${z}))`;
     const B = `(${Tp}+H/(${z}))`;
     return `fps=${fps},perspective=x0='${L}':y0='${Tp}':x1='${R}':y1='${Tp}':x2='${L}':y2='${B}':x3='${R}':y3='${B}':interpolation=linear:eval=frame`;
@@ -957,16 +970,22 @@ module.exports = async function processExportJob(job) {
             const vc = clip.virtualCam;
             const hasCrop = vc && typeof vc.cropW === 'number' && typeof vc.cropH === 'number'
                 && (vc.cropW < 0.999 || vc.cropH < 0.999);
-            const scaleKfs = !isImage && clip.keyframes && Array.isArray(clip.keyframes.scale)
+            // Camera track: scale keyframes (zoom rhythm, KeyframeEditor, camera
+            // presets) plus panX/panY (camera shake/whip/pan, from
+            // CameraMotionCompiler). Images get it too: a base-track photo
+            // with a Ken Burns / zoom animation now moves in the export.
+            const scaleKfs = clip.keyframes && Array.isArray(clip.keyframes.scale) && clip.keyframes.scale.length
                 ? clip.keyframes.scale
                 : null;
+            const panX = Array.isArray(clip.keyframes?.panX) && clip.keyframes.panX.length ? clip.keyframes.panX : null;
+            const panY = Array.isArray(clip.keyframes?.panY) && clip.keyframes.panY.length ? clip.keyframes.panY : null;
 
             const vFilters = [];
             const aFilters = [];
             // Scale keyframes animate on clip-local TIMELINE time, so the speed
             // change runs first whenever a zoom follows (spatial filters do not
             // care about timestamps, so this order changes nothing else).
-            const hasZoomKfs = !!(scaleKfs && scaleKfs.length);
+            const hasZoomKfs = !!(scaleKfs || panX || panY);
             const speedFirst = !isImage && speed !== 1.0 && hasZoomKfs;
             if (speedFirst) vFilters.push(`setpts=${(1 / speed).toFixed(4)}*PTS`);
 
@@ -979,7 +998,7 @@ module.exports = async function processExportJob(job) {
                 const cy0 = Math.max(0, Math.min(1, (vc.cropY ?? 0) + (vc.cropH ?? 1) / 2));
                 const baseZoom = vc.scale || (1 / Math.min(vc.cropW, vc.cropH));
                 const anchor = { mode: 'center', x: cx0, y: cy0 };
-                const zoom = buildSmoothZoomFilter(scaleKfs, { fps: targetFps, anchor, multiplier: baseZoom, maxZoom: 8.0 })
+                const zoom = buildSmoothZoomFilter(scaleKfs || [{ time: 0, value: 1 }], { fps: targetFps, anchor, multiplier: baseZoom, maxZoom: 8.0, panX, panY })
                     || buildSmoothZoomFilter([{ time: 0, value: baseZoom }], { fps: targetFps, anchor, maxZoom: 8.0 });
                 if (zoom) vFilters.push(zoom);
                 vFilters.push(scaleFilter);
@@ -1012,10 +1031,10 @@ module.exports = async function processExportJob(job) {
             // speaker's face). The editor preview uses the same anchor
             // (RHYTHM_ANCHOR_Y in client/src/revideo/project.tsx).
             if (!hasCrop && hasZoomKfs) {
-                const zoom = buildSmoothZoomFilter(scaleKfs, { fps: targetFps, anchor: { mode: 'fixed', x: 0.5, y: 0.28 } });
+                const zoom = buildSmoothZoomFilter(scaleKfs, { fps: targetFps, anchor: { mode: 'fixed', x: 0.5, y: 0.28 }, panX, panY });
                 if (zoom) {
                     vFilters.push(zoom);
-                    console.log(`  [rhythm] clip "${clip.name}": animated zoom (${scaleKfs.length} scale keyframes)`);
+                    console.log(`  [camera] clip "${clip.name}": animated zoom/pan (${scaleKfs?.length || 0} scale, ${(panX?.length || 0) + (panY?.length || 0)} pan keyframes)`);
                 }
             }
 

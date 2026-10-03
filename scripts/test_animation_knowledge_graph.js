@@ -257,11 +257,11 @@ section('6 · AI-tool switch wiring (client/src/agent/MediaExecutionEngine.js)')
 {
     const mee = read('client/src/agent/MediaExecutionEngine.js');
     check("case 'animate_automatically' exists", /case 'animate_automatically':/.test(mee));
-    check('imports applyPresetToClip from ClipAdapter', /import \{ applyPresetToClip \} from '\.\.\/motion\/ClipAdapter\.js'/.test(mee));
+    check('imports applyPresetToClip from ClipAdapter', /import \{ applyPresetToClip(, AUTO_ANIMATE)? \} from '\.\.\/motion\/ClipAdapter\.js'/.test(mee));
     check('posts to /api/audio/animate-automatically', /\/api\/audio\/animate-automatically/.test(mee));
     check('saves history ONCE before applying the plan (one undoable action)', /aaStore\._saveHistory\?\.\(\)/.test(mee));
-    check('applies clip updates with skipHistory (fans out under the one saved snapshot)', /aaStore\.updateClip\(trackId, clipId, updates, \{ skipHistory: true \}\)/.test(mee));
-    check('inserts SFX clips with skipHistory too', /aaStore\.addClip\(sfxTrackId,[\s\S]{0,800}skipHistory: true/.test(mee));
+    check('applies clip updates with skipHistory (fans out under the one saved snapshot)', /(aaStore|live)\.updateClip\(trackId, clipId, updates, \{ skipHistory: true \}\)/.test(mee));
+    check('inserts SFX clips with skipHistory too', /(aaStore|useTimelineStore\.getState\(\))\.addClip\(sfxTrackId,[\s\S]{0,1400}skipHistory: true/.test(mee));
     check('reuses an existing "SFX" track instead of creating one per event', /t\.type === 'audio' && t\.name === 'SFX'/.test(mee));
 }
 
