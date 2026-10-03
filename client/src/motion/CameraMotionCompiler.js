@@ -19,13 +19,12 @@
  * text branch, R63's caption gap, and now this).
  *
  * SCOPE: scale only. `jobs/exportProcessor.js` already knows how to animate
- * a piecewise `z=` zoompan expression from `clip.keyframes.scale` — that is
- * the exact mechanism a hand-authored zoom rhythm (KeyframeEditor) already
- * uses via `buildZoomKeyframeExpr`. Rather than teach the server a second,
- * parallel scale-animation format, this derives an EQUIVALENT
- * `keyframes.scale` array from `clip.animations` by sampling the same
- * `resolveMotionAt` the preview uses, and ships it inside the existing,
- * well-tested zoompan path unchanged.
+ * `clip.keyframes.scale` (buildSmoothZoomFilter; it used zoompan until zoompan
+ * was found to shake) — the same mechanism a hand-authored or zoom-rhythm
+ * scale track uses. Rather than teach the server a second, parallel
+ * scale-animation format, this derives an EQUIVALENT `keyframes.scale` array
+ * from `clip.animations` by sampling the same `resolveMotionAt` the preview
+ * uses, and ships it through that existing path unchanged.
  *
  * translate-type camera presets (camera-whip, camera-shake) are NOT derived
  * here. They are short (<=0.6s), sub-percent-of-frame pans meant to read as

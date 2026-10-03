@@ -70,7 +70,7 @@ function decimate(samples, max) {
 /**
  * Build a piecewise-linear FFmpeg expression for one geometry property.
  *
- * Deliberately the same nested-`if(lt(t,..))` shape as `buildZoomKeyframeExpr()`
+ * Deliberately the same nested-`if(lt(t,..))` shape as `buildSmoothZoomFilter()`
  * in jobs/exportProcessor.js. That pattern is already proven in this pipeline
  * for zoom keyframes; a second, different expression style would be one more
  * thing to get subtly wrong.

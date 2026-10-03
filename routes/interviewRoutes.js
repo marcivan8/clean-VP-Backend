@@ -549,8 +549,11 @@ async function _extractClipFrames(filePath, offset, duration) {
 // inside a clip — one static scale per clip, applied at time=0.
 //
 // Body:
-//   clips  – Array<{ id, offset, duration }>  (video track clips from the store)
-//   words  – Array<{ word, start, end }>       (original Whisper transcript)
+//   clips  – Array<{ id, offset, duration, assetName?, words? }>  one per SHOT:
+//            a timeline clip, or a virtual shot of a long clip. offset/duration
+//            and words are SOURCE time.
+//   words  – Array<{ word, start, end }>  flat SOURCE-time transcript (older
+//            clients; used when a clip has no `words`)
 //   style  – 'subtle' | 'dynamic' | 'cinematic'
 //
 // Returns synchronously (typically < 5 s — one GPT-4o-mini call):
@@ -564,14 +567,12 @@ router.post('/rhythm-zoom', ...authAndGate, async (req, res) => {
         if (!clips.length) {
             return res.status(400).json({ error: 'No clips provided. Add video clips to the timeline first.' });
         }
-        if (!words.length) {
+        const hasClipWords = clips.some(c => Array.isArray(c.words) && c.words.length);
+        if (!words.length && !hasClipWords) {
             return res.status(400).json({ error: 'No transcript provided. Run Auto-Captions first.' });
         }
-        if (clips.length < 2) {
-            return res.status(400).json({
-                error: 'Only one clip found. Run Silence Removal first to create segments — each cut becomes a camera shot.',
-            });
-        }
+        // One clip is fine: the client splits long clips into virtual shots
+        // (client/src/agent/rhythmShots.js), so there is no need to cut first.
 
         // ── Style config ────────────────────────────────────────────────────────
         const STYLES = {
@@ -584,7 +585,13 @@ router.post('/rhythm-zoom', ...authAndGate, async (req, res) => {
         // ── Per-clip word extraction ────────────────────────────────────────────
         // clipWordArrs keeps the timestamped words per clip so emphasis words can
         // be located precisely for punch-in placement (see buildMotion below).
+        // Words are SOURCE time (the clip's offset range). The client now sends
+        // each shot's own words (`clip.words`); older clients send one flat
+        // list, filtered here by the shot's source range.
         const clipWordArrs = clips.map(clip => {
+            if (Array.isArray(clip.words)) {
+                return clip.words.filter(w => w && Number.isFinite(Number(w.start)) && Number.isFinite(Number(w.end)));
+            }
             const ofs = clip.offset ?? 0;
             const end = ofs + (clip.duration ?? 0);
             return words.filter(w => w.start >= ofs - 0.05 && w.end <= end + 0.05);

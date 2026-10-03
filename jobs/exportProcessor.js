@@ -76,47 +76,93 @@ function buildScaleFilter(width, height) {
 }
 
 /**
- * Build a piecewise-linear zoompan `z` expression from clip.keyframes.scale.
- *
- * The editor preview animates scale keyframes via CSS transform interpolation
- * (VideoPlayer.jsx); the export must mirror that motion or zoom-rhythm push-ins
- * and punch-ins silently disappear from the rendered MP4 (same preview-vs-export
- * trap as R14's multicam crop — check BOTH paths for any render-time effect).
- *
- * `it` is zoompan's input-timestamp variable (seconds). The filter is placed
- * AFTER the setpts speed filter, so `it` runs on the same clip-local time axis
- * the keyframes use. easeOutCubic segments are approximated linearly — over the
- * ≤0.15s punch-in snap the difference is imperceptible.
- *
- * Returns null when there is nothing to animate (no keyframes, or all ≈1.0).
+ * Audio tempo for a clip speed, as a chain of atempo filters. One atempo
+ * only accepts 0.5-2.0 (older ffmpeg), so 4x is atempo=2,atempo=2 and 0.25x
+ * is atempo=0.5,atempo=0.5. It used to clamp to 0.5-2.0, so a 4x clip's
+ * audio ran at 2x and drifted out of sync with its picture.
  */
-function buildZoomKeyframeExpr(kfs, { multiplier = 1, minZoom = 1.0, maxZoom = 2.0 } = {}) {
+function atempoChain(speed) {
+    let s = Number(speed) > 0 ? Number(speed) : 1;
+    const parts = [];
+    while (s > 2.0 + 1e-9) { parts.push(2.0); s /= 2.0; }
+    while (s < 0.5 - 1e-9) { parts.push(0.5); s /= 0.5; }
+    parts.push(s);
+    return parts.map(x => `atempo=${x.toFixed(4)}`);
+}
+
+/**
+ * Smooth, sub-pixel zoom for scale keyframes (zoom rhythm push-ins and
+ * punch-ins), as an ffmpeg filter string: `fps=N,perspective=...`.
+ *
+ * Replaces zoompan, which snaps its crop window to whole pixels: on a slow
+ * push-in the picture stepped back and forth by up to 2 px per frame (visible
+ * shake). `perspective` samples the window with (bilinear) interpolation, so
+ * the motion is smooth and only ever moves one way. Measured on a 5 s
+ * 1.05 -> 1.10 push-in: zoompan 25 backward steps, this 0. Cost: about +55%
+ * encode time on the zoomed clips only (bicubic was +90% for no visible gain
+ * at these zoom levels).
+ *
+ * Time is the frame index over `fps` (the filter starts with `fps=N`), i.e.
+ * clip-local timeline seconds when placed after the speed `setpts`, the same
+ * axis the keyframes use. Each segment uses the DESTINATION keyframe's easing,
+ * like the preview's evaluateKF (client/src/revideo/project.tsx).
+ *
+ * anchor:
+ *   { mode: 'fixed', x, y }   the point at (x, y) (fractions of the frame)
+ *                             stays put, e.g. the talking-head anchor (0.5, 0.28)
+ *   { mode: 'center', x, y }  the window is centred on (x, y) and kept inside
+ *                             the frame (multicam angle centre)
+ * Returns null when there is nothing visible to animate.
+ */
+function zoomEaseExpr(easing, u) {
+    switch (easing) {
+        case 'easeOutCubic': return `(1-pow(1-${u},3))`;
+        case 'easeInCubic': return `pow(${u},3)`;
+        case 'easeIn': case 'ease-in': return `(${u}*${u})`;
+        case 'easeOut': case 'ease-out': return `(${u}*(2-${u}))`;
+        case 'easeInOut': case 'ease-in-out': return `if(lt(${u},0.5),2*${u}*${u},-1+(4-2*${u})*${u})`;
+        default: return u;
+    }
+}
+
+function buildSmoothZoomFilter(kfs, { fps = 30, anchor = { mode: 'fixed', x: 0.5, y: 0.28 }, multiplier = 1, minZoom = 1.0, maxZoom = 2.0 } = {}) {
     const pts = (kfs || [])
-        .filter(k => typeof k.time === 'number' && typeof k.value === 'number')
-        .map(k => ({ t: Math.max(0, k.time), v: Math.min(maxZoom, Math.max(minZoom, k.value * multiplier)) }))
+        .filter(k => k && Number.isFinite(Number(k.time)) && Number.isFinite(Number(k.value)))
+        .map(k => ({ t: Math.max(0, Number(k.time)), v: Math.min(maxZoom, Math.max(minZoom, Number(k.value) * multiplier)), e: k.easing }))
         .sort((a, b) => a.t - b.t);
-
     if (!pts.length) return null;
-    if (!pts.some(p => p.v > minZoom + 0.001)) return null; // nothing visible to animate beyond the base zoom
+    if (!pts.some(p => p.v > 1.0005)) return null; // never zoomed in: nothing to draw
 
-    if (pts.length === 1) return pts[0].v.toFixed(4);
-
-    // Innermost value: hold the last keyframe after its time
-    let expr = pts[pts.length - 1].v.toFixed(4);
-
-    // Wrap segments back-to-front: if(lt(it,t_{i+1}), lerp_i, rest)
-    for (let i = pts.length - 2; i >= 0; i--) {
-        const a = pts[i], b = pts[i + 1];
-        const span = b.t - a.t;
-        const seg  = span > 0.001
-            ? `${a.v.toFixed(4)}+(${(b.v - a.v).toFixed(4)})*(it-${a.t.toFixed(3)})/${span.toFixed(3)}`
-            : b.v.toFixed(4);
-        expr = `if(lt(it,${b.t.toFixed(3)}),${seg},${expr})`;
+    const T = `(in/${fps})`;
+    let z;
+    if (pts.length === 1) {
+        z = pts[0].v.toFixed(4);
+    } else {
+        z = pts[pts.length - 1].v.toFixed(4);
+        for (let i = pts.length - 2; i >= 0; i--) {
+            const a = pts[i], b = pts[i + 1];
+            const span = b.t - a.t;
+            const seg = span > 0.001
+                ? `(${a.v.toFixed(4)}+(${(b.v - a.v).toFixed(4)})*${zoomEaseExpr(b.e, `((${T}-${a.t.toFixed(3)})/${span.toFixed(3)})`)})`
+                : b.v.toFixed(4);
+            z = `if(lt(${T},${b.t.toFixed(3)}),${seg},${z})`;
+        }
+        z = `if(lt(${T},${pts[0].t.toFixed(3)}),${pts[0].v.toFixed(4)},${z})`;
     }
 
-    // Before the first keyframe: hold its value (avoids extrapolation)
-    expr = `if(lt(it,${pts[0].t.toFixed(3)}),${pts[0].v.toFixed(4)},${expr})`;
-    return expr;
+    const ax = Math.max(0, Math.min(1, Number(anchor?.x ?? 0.5)));
+    const ay = Math.max(0, Math.min(1, Number(anchor?.y ?? 0.28)));
+    let L, Tp;
+    if (anchor?.mode === 'center') {
+        L  = `clip(W*${ax.toFixed(4)}-W/(2*(${z})),0,W-W/(${z}))`;
+        Tp = `clip(H*${ay.toFixed(4)}-H/(2*(${z})),0,H-H/(${z}))`;
+    } else {
+        L  = `(W*${ax.toFixed(4)}*(1-1/(${z})))`;
+        Tp = `(H*${ay.toFixed(4)}*(1-1/(${z})))`;
+    }
+    const R = `(${L}+W/(${z}))`;
+    const B = `(${Tp}+H/(${z}))`;
+    return `fps=${fps},perspective=x0='${L}':y0='${Tp}':x1='${R}':y1='${Tp}':x2='${L}':y2='${B}':x3='${R}':y3='${B}':interpolation=linear:eval=frame`;
 }
 
 /**
@@ -264,36 +310,43 @@ function renderBackgroundBlurSegment(clip, src, segPath, opts) {
  * metadata tag. We need to correct for this before applying the scale filter,
  * otherwise the dimensions are swapped and the video ends up tiny with black bars.
  */
+/**
+ * Rotation (0/90/180/270, clockwise) from one ffprobe video stream, in any of
+ * the three shapes it can arrive in:
+ *   - `stream.rotation`        fluent-ffmpeg's parser flattens the Display
+ *                              Matrix side data onto the stream (ffprobe >= 5).
+ *                              This is what a modern iPhone .MOV reports, and
+ *                              the one the old code never read: every phone
+ *                              portrait clip probed as 0.
+ *   - `stream.side_data_list`  ffprobe's own JSON output.
+ *   - `stream.tags.rotate`     ffmpeg <= 4.
+ * ffprobe reports the matrix as a negative angle (-90 = 90 deg clockwise).
+ */
+function rotationFromProbeStream(vStream) {
+    if (!vStream) return 0;
+    const norm = (deg) => ((Math.round(deg / 90) * 90) % 360 + 360) % 360;
+    const has = (v) => v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v));
+    const sd = (Array.isArray(vStream.side_data_list) ? vStream.side_data_list : []).find(d => d && has(d.rotation));
+    if (sd) return norm(-Number(sd.rotation));
+    if (has(vStream.rotation)) return norm(-Number(vStream.rotation));
+    const tag = parseInt(vStream?.tags?.rotate || 0, 10);
+    return Number.isFinite(tag) ? norm(tag) : 0;
+}
+
 function getVideoRotation(filePath) {
     return new Promise((resolve) => {
         ffmpeg.ffprobe(filePath, (err, metadata) => {
             if (err) { resolve(0); return; }
             const vStream = (metadata?.streams || []).find(s => s.codec_type === 'video');
-            if (!vStream) { resolve(0); return; }
-            // Old-style: stream.tags.rotate (e.g. "90")
-            const tagRotate = parseInt(vStream?.tags?.rotate || 0, 10);
-            if (tagRotate) { resolve(tagRotate); return; }
-            // New-style: side_data_list with a Display Matrix entry
-            const sd = (vStream?.side_data_list || []).find(d =>
-                d.side_data_type === 'Display Matrix' || d.rotation !== undefined
-            );
-            if (sd?.rotation !== undefined) {
-                // FFmpeg reports the stored rotation as a negative angle (e.g. -90 for CW 90°)
-                resolve(((-sd.rotation) % 360 + 360) % 360);
-            } else {
-                resolve(0);
-            }
+            resolve(rotationFromProbeStream(vStream));
         });
     });
 }
 
 /**
- * Probe a video file's coded width/height (pre-rotation-correction). Used only
- * when a clip needs a COMBINED multicam-crop + zoom-rhythm zoompan filter
- * (see the "composed" branch in the per-clip loop below) — zoompan needs an
- * explicit `s=WxH` output size, and giving it the source's own resolution
- * keeps quality high through to the later scale/pad filter that follows it.
- * Returns null on any probe failure (caller falls back to separate filters).
+ * Probe a video file's width/height as stored. Used to report the RENDERED
+ * size of the finished export (metadata.resolution). Returns null on any
+ * probe failure.
  */
 function getVideoDimensions(filePath) {
     return new Promise((resolve) => {
@@ -819,6 +872,13 @@ module.exports = async function processExportJob(job) {
 
         const segPath = path.join(tmpDir, `seg-${i}.mp4`);
         const inPoint = clip.offset || 0;
+        // `duration` is TIMELINE length (= output length); the clip shows
+        // duration × speed seconds of SOURCE from `offset` (the store's model,
+        // client/src/timeline/speedChange.js). fluent's setDuration() is an
+        // OUTPUT -t, so it is `dur`: -ss seeks the source, setpts/atempo play
+        // it at `speed`, -t stops after the clip's timeline length. It used to
+        // be dur / speed, so a 2x clip exported at half its length (0.25x at
+        // 4x its length) and every later caption drifted.
         const dur     = clip.duration;
         const vol     = (clip.volume ?? 1.0) * (clip.trackVolume ?? 1.0);
         const speed   = clip.speed || 1.0;
@@ -841,7 +901,10 @@ module.exports = async function processExportJob(job) {
                 segments.push(segPath);
                 segOutputStarts.push(cumulativeOut);
                 segClips.push(clip);
-                cumulativeOut += dur / speed;
+                // renderBackgroundBlurSegment reads `duration` seconds at 1x,
+                // so the segment lasts exactly `dur` (speed is not applied on
+                // this path).
+                cumulativeOut += dur;
                 console.log(`  [blur-background] clip "${clip.name}": composited via SAM2 mask`);
             } catch (err) {
                 console.error(`[ExportJob] blur-background failed for clip "${clip.name}", falling back to unblurred: ${err.message}`);
@@ -855,59 +918,35 @@ module.exports = async function processExportJob(job) {
             if (segments[segments.length - 1] === segPath) continue;
         }
 
-        // Probe rotation BEFORE we build the filter chain.
-        // Phones store portrait clips as landscape + rotate=90 metadata. When
-        // we add a -vf filter chain, FFmpeg's automatic display-matrix rotation
-        // can be suppressed, so we detect and correct it explicitly.
+        // Phones store portrait clips as landscape + a rotation matrix. FFmpeg's
+        // own autorotation (left ON, see below) turns them upright before our
+        // filters run and leaves the matrix out of the output. Probed only for
+        // the log line.
+        //
+        // It used to be the other way round: -noautorotate plus a manual
+        // transpose chosen from this probe. The probe read the wrong field (see
+        // rotationFromProbeStream), so every iPhone clip came back as 0 and got
+        // no transpose, and -noautorotate copied the rotation matrix onto the
+        // segment: a 1080x1920 file that players turned into a 1920x1080 frame
+        // with the speaker pillarboxed in the middle. The caption pass then
+        // burned the captions onto that landscape frame. That was "the exported
+        // size isn't right / captions are the wrong size", even with a 9:16
+        // platform preset.
         const rotation = isImage ? 0 : await getVideoRotation(src);
-
-        // Does this clip need the COMPOSED multicam-crop + zoom-rhythm path?
-        // (See R16 in CLAUDE.md — the two effects must combine into one
-        // dynamic crop, not stack as independent filters, or faces end up
-        // over-zoomed/cropped out.) Only probe dimensions when actually needed.
-        const vcForComposition = clip.virtualCam;
-        const scaleKfsForComposition = !isImage && clip.keyframes && Array.isArray(clip.keyframes.scale)
-            ? clip.keyframes.scale
-            : null;
-        const needsComposedZoom = !isImage
-            && vcForComposition && typeof vcForComposition.cropW === 'number' && typeof vcForComposition.cropH === 'number'
-            && (vcForComposition.cropW < 0.999 || vcForComposition.cropH < 0.999)
-            && scaleKfsForComposition && scaleKfsForComposition.length > 0;
-
-        let composedDims = null;
-        if (needsComposedZoom) {
-            const raw = await getVideoDimensions(src);
-            if (raw) {
-                // correctionFilters below swap width/height for 90°/270° rotation —
-                // zoompan runs AFTER that correction, so its `s=` must use the
-                // POST-rotation dimensions.
-                composedDims = (rotation === 90 || rotation === 270 || rotation === -90)
-                    ? { width: raw.height, height: raw.width }
-                    : raw;
-            }
-        }
+        if (rotation) console.log(`  [rotate] clip "${clip.name}": stored at ${rotation}°, auto-rotated upright`);
 
         await new Promise((resolve, reject) => {
             let cmd;
             if (isImage) {
-                cmd = ffmpeg().input(src).inputOptions(['-loop', '1']).setDuration(dur / speed);
+                cmd = ffmpeg().input(src).inputOptions(['-loop', '1']).setDuration(dur);
             } else {
-                // -noautorotate disables FFmpeg's implicit rotation so we can
-                // handle it ourselves in the filter chain (avoids double-rotate).
+                // FFmpeg autorotates by default (rotation matrix applied before
+                // the filters, and not copied to the output). Never pass
+                // -noautorotate here: see the rotation note above.
                 cmd = ffmpeg(src)
-                    .inputOptions(['-noautorotate'])
                     .setStartTime(inPoint)
-                    .setDuration(dur / speed);
+                    .setDuration(dur);
             }
-
-            // Build rotation-correction filter.
-            // rotate=90 (phone portrait stored as landscape CW) → transpose=1 (CW 90°)
-            // rotate=270 (stored landscape CCW)                 → transpose=2 (CCW 90°)
-            // rotate=180                                        → hflip,vflip
-            let correctionFilters = [];
-            if      (rotation === 90)                  correctionFilters = ['transpose=1'];
-            else if (rotation === 270 || rotation === -90) correctionFilters = ['transpose=2'];
-            else if (rotation === 180)                 correctionFilters = ['hflip', 'vflip'];
 
             // Virtual multicam crop (clip.virtualCam) — the editor preview applies
             // this via PlaybackEngine's UV sub-region sampling (u_cropOffset /
@@ -922,37 +961,31 @@ module.exports = async function processExportJob(job) {
                 ? clip.keyframes.scale
                 : null;
 
-            const vFilters = [...correctionFilters];
+            const vFilters = [];
             const aFilters = [];
+            // Scale keyframes animate on clip-local TIMELINE time, so the speed
+            // change runs first whenever a zoom follows (spatial filters do not
+            // care about timestamps, so this order changes nothing else).
+            const hasZoomKfs = !!(scaleKfs && scaleKfs.length);
+            const speedFirst = !isImage && speed !== 1.0 && hasZoomKfs;
+            if (speedFirst) vFilters.push(`setpts=${(1 / speed).toFixed(4)}*PTS`);
 
-            if (hasCrop && scaleKfs && composedDims) {
+            if (hasCrop && hasZoomKfs) {
                 // ── COMPOSED: multicam crop + zoom-rhythm on the SAME clip ──────
-                // Instead of a static crop filter followed by an independent
-                // zoompan (which stacks two zooms and re-centers on a generic
-                // anchor, over-cropping faces — see R16), render ONE zoompan
-                // whose zoom level is vc.scale * the rhythm scale, anchored on
-                // the SAME point the multicam angle detected. Runs on the raw
-                // (rotation-corrected) source frame — the ordinary scale/pad
-                // filter still follows it to fit the target output aspect ratio.
+                // ONE zoom whose level is vc.scale * the rhythm scale, centred on
+                // the multicam angle (R16: never stack a static crop and a second
+                // zoom). Runs on the upright source frame; scale/pad follows.
                 const cx0 = Math.max(0, Math.min(1, (vc.cropX ?? 0) + (vc.cropW ?? 1) / 2));
                 const cy0 = Math.max(0, Math.min(1, (vc.cropY ?? 0) + (vc.cropH ?? 1) / 2));
-                const combinedExpr = buildZoomKeyframeExpr(scaleKfs, {
-                    multiplier: vc.scale || (1 / Math.min(vc.cropW, vc.cropH)),
-                    minZoom: 1.0,
-                    maxZoom: 8.0,
-                });
                 const baseZoom = vc.scale || (1 / Math.min(vc.cropW, vc.cropH));
-                const zExprComposed = combinedExpr || baseZoom.toFixed(4);
-                vFilters.push(
-                    `zoompan=z='${zExprComposed}'` +
-                    `:x='iw*${cx0.toFixed(4)}-(iw/zoom/2)'` +
-                    `:y='ih*${cy0.toFixed(4)}-(ih/zoom/2)'` +
-                    `:d=1:s=${composedDims.width}x${composedDims.height}:fps=${targetFps}`
-                );
+                const anchor = { mode: 'center', x: cx0, y: cy0 };
+                const zoom = buildSmoothZoomFilter(scaleKfs, { fps: targetFps, anchor, multiplier: baseZoom, maxZoom: 8.0 })
+                    || buildSmoothZoomFilter([{ time: 0, value: baseZoom }], { fps: targetFps, anchor, maxZoom: 8.0 });
+                if (zoom) vFilters.push(zoom);
                 vFilters.push(scaleFilter);
                 console.log(
                     `  [multicam+rhythm] clip "${clip.name}" angle=${vc.angle || '?'}: composed zoom ` +
-                    `anchored @(${cx0.toFixed(2)},${cy0.toFixed(2)}), base=${baseZoom.toFixed(2)}x`
+                    `centred @(${cx0.toFixed(2)},${cy0.toFixed(2)}), base=${baseZoom.toFixed(2)}x`
                 );
             } else {
                 if (hasCrop) {
@@ -966,31 +999,22 @@ module.exports = async function processExportJob(job) {
                 vFilters.push(scaleFilter);
             }
 
-            if (speed !== 1.0) {
-                vFilters.push(`setpts=${(1 / speed).toFixed(4)}*PTS`);
-                if (!isImage) {
-                    const aTempo = Math.min(Math.max(speed, 0.5), 2.0);
-                    aFilters.push(`atempo=${aTempo.toFixed(4)}`);
-                }
+            // A still image just lasts `dur`; speed means nothing for it.
+            if (!isImage && speed !== 1.0) {
+                if (!speedFirst) vFilters.push(`setpts=${(1 / speed).toFixed(4)}*PTS`);
+                aFilters.push(...atempoChain(speed));
             }
             if (!isImage && vol !== 1.0) aFilters.push(`volume=${vol.toFixed(4)}`);
 
-            // Zoom-rhythm scale keyframes, NO multicam crop on this clip → animated
-            // zoompan alone (push-ins / punch-ins). Placed AFTER setpts so `it`
-            // matches clip-local timeline time. Anchor: horizontally centered,
-            // focus at 28% from the top — matches VideoPlayer's talking-head
-            // transform-origin so the export frames the speaker the same way
-            // the preview does. Skipped when the composed branch above already
-            // folded the rhythm scale into its own zoompan.
-            if (!hasCrop && scaleKfs) {
-                const zExpr = buildZoomKeyframeExpr(scaleKfs);
-                if (zExpr) {
-                    vFilters.push(
-                        `zoompan=z='${zExpr}'` +
-                        `:x='iw/2-(iw/zoom/2)'` +
-                        `:y='(ih-ih/zoom)*0.28'` +
-                        `:d=1:s=${targetWidth}x${targetHeight}:fps=${targetFps}`
-                    );
+            // Zoom-rhythm scale keyframes, NO multicam crop on this clip → smooth
+            // animated zoom (push-ins / punch-ins) on the output frame. Anchor:
+            // horizontally centred, the point 28% from the top stays put (the
+            // speaker's face). The editor preview uses the same anchor
+            // (RHYTHM_ANCHOR_Y in client/src/revideo/project.tsx).
+            if (!hasCrop && hasZoomKfs) {
+                const zoom = buildSmoothZoomFilter(scaleKfs, { fps: targetFps, anchor: { mode: 'fixed', x: 0.5, y: 0.28 } });
+                if (zoom) {
+                    vFilters.push(zoom);
                     console.log(`  [rhythm] clip "${clip.name}": animated zoom (${scaleKfs.length} scale keyframes)`);
                 }
             }
@@ -1023,7 +1047,7 @@ module.exports = async function processExportJob(job) {
                     // Record this clip's output start time BEFORE incrementing.
                     segOutputStarts.push(cumulativeOut);
                     segClips.push(clip);
-                    cumulativeOut += dur / speed;
+                    cumulativeOut += dur;
                     resolve();
                 })
                 .on('error', (err, _stdout, stderr) => {
@@ -1207,10 +1231,11 @@ module.exports = async function processExportJob(job) {
                 const vol      = (clip.volume ?? 1.0) * (track.volume ?? 1.0);
 
                 await new Promise((resolve, reject) => {
+                    const aSpeed = Number(clip.speed) > 0 ? Number(clip.speed) : 1;
                     ffmpeg(src)
                         .setStartTime(clip.offset || 0)
-                        .setDuration(clip.duration)
-                        .audioFilters(`volume=${vol.toFixed(4)}`)
+                        .setDuration(clip.duration || 0) // output -t: the clip's timeline length
+                        .audioFilters([...(aSpeed !== 1 ? atempoChain(aSpeed) : []), `volume=${vol.toFixed(4)}`].join(','))
                         .audioBitrate(audioBitrate)
                         .output(aSegPath)
                         .on('end', () => { audioSegments.push({ path: aSegPath, startTime: clip.start }); resolve(); })
@@ -1390,8 +1415,9 @@ module.exports = async function processExportJob(job) {
                     const sc = segClips[si];
                     const clipEnd = sc.start + sc.duration;
                     if (vibedTime >= sc.start && vibedTime < clipEnd) {
-                        // Linear interpolation within the clip, corrected for speed.
-                        return segOutputStarts[si] + (vibedTime - sc.start) / (sc.speed || 1.0);
+                        // A clip lasts its timeline duration in the output, so
+                        // time inside it maps 1:1 (speed is already in it).
+                        return segOutputStarts[si] + (vibedTime - sc.start);
                     }
                 }
                 // Before the first clip → clamp to output t=0
@@ -1681,6 +1707,14 @@ module.exports = async function processExportJob(job) {
         fs.renameSync(finalVideoPath, outputPath);
     }
 
+    // Report what was actually rendered, not what was asked for. The old
+    // metadata echoed targetWidth x targetHeight, so a 1920x1080 file came
+    // back labelled "1080x1920" and the wrong-shape bug was invisible.
+    const renderedDims = await getVideoDimensions(outputPath);
+    if (renderedDims && (renderedDims.width !== targetWidth || renderedDims.height !== targetHeight)) {
+        console.warn(`  ⚠️  [ExportJob ${job.id}] rendered ${renderedDims.width}x${renderedDims.height}, expected ${targetWidth}x${targetHeight}`);
+    }
+
     await job.updateProgress(90);
 
     // ── Upload to GCS or keep local ────────────────────────────────────────
@@ -1756,7 +1790,7 @@ module.exports = async function processExportJob(job) {
         metadata: {
             duration:   `${duration}s render time`,
             sizeMB:     parseFloat(sizeMB) || 0,
-            resolution: `${targetWidth}x${targetHeight}`,
+            resolution: renderedDims ? `${renderedDims.width}x${renderedDims.height}` : `${targetWidth}x${targetHeight}`,
             fps:        targetFps,
             codec,
             segments:   allClips.length,
@@ -1766,6 +1800,10 @@ module.exports = async function processExportJob(job) {
 };
 
 module.exports.FONT_SPECS = FONT_SPECS;
+// Pure helpers, exported for scripts/test_export_rotation_zoom.js.
+module.exports.rotationFromProbeStream = rotationFromProbeStream;
+module.exports.buildSmoothZoomFilter = buildSmoothZoomFilter;
+module.exports.atempoChain = atempoChain;
 
 
 

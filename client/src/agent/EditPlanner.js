@@ -143,7 +143,9 @@ export class EditPlanner {
         if (!activeClip) return null;
 
         const clipDuration = activeClip.duration || 0;
-        const sourceDuration = activeClip.sourceDuration || clipDuration;
+        // Source this clip shows: its timeline length × its speed (NOT the
+        // asset's sourceDuration, which is the whole file).
+        const sourceDuration = clipDuration * (Number(activeClip.speed) || 1);
         const params = intent.parameters || intent.args || {};
 
         if (intent.operation === 'trim_clip' || intent.operation === 'set_duration') {

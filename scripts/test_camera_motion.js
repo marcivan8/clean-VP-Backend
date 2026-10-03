@@ -62,17 +62,19 @@ function loadClientModules() {
 }
 const CLIENT = loadClientModules();
 
-// Extract the REAL buildZoomKeyframeExpr straight out of exportProcessor.js
-// (it isn't exported — this is the same worker code the export job runs,
-// not a copy that could quietly diverge from it).
-function loadZoomExpr() {
+// Extract the REAL smooth-zoom builder straight out of exportProcessor.js
+// (the same worker code the export job runs, not a copy that could quietly
+// diverge from it). It replaced the old zoompan expression: zoompan snapped
+// its window to whole pixels, so slow push-ins shook.
+function loadZoomFilter() {
     const src = read('jobs/exportProcessor.js');
-    const m = src.match(/function buildZoomKeyframeExpr\(kfs[\s\S]*?\n}\n/);
-    if (!m) return null;
+    const ease = src.match(/function zoomEaseExpr\(easing, u\)[\s\S]*?\n}\n/);
+    const m = src.match(/function buildSmoothZoomFilter\(kfs[\s\S]*?\n}\n/);
+    if (!ease || !m) return null;
     // eslint-disable-next-line no-new-func
-    return new Function(`${m[0]}\nreturn buildZoomKeyframeExpr;`)();
+    return new Function(`${ease[0]}\n${m[0]}\nreturn buildSmoothZoomFilter;`)();
 }
-const buildZoomKeyframeExpr = loadZoomExpr();
+const buildSmoothZoomFilter = loadZoomFilter();
 
 function ffmpegBin() {
     for (const bin of ['ffmpeg', '/usr/bin/ffmpeg']) {
@@ -88,9 +90,9 @@ const baseTrack = (clips) => ({ id: 'v1', type: 'video', order: 0, clips });
 const overlayTrack = (clips) => ({ id: 'o1', type: 'overlay', order: 0, clips });
 const audioTrack = (clips) => ({ id: 'a1', type: 'audio', order: 0, clips });
 
-section('1 · buildZoomKeyframeExpr was found and extracted from the real worker file');
+section('1 · buildSmoothZoomFilter was found and extracted from the real worker file');
 {
-    check('extraction succeeded', typeof buildZoomKeyframeExpr === 'function');
+    check('extraction succeeded', typeof buildSmoothZoomFilter === 'function');
 }
 
 section('2 · deriveZoomKeyframes — the non-effect cases');
@@ -186,19 +188,19 @@ section('5 · MotionPanel really does offer "camera" presets for a plain video c
 }
 
 if (!FFMPEG) {
-    skip('§6 real FFmpeg — zoompan expression genuinely changes frame size over time', 'no ffmpeg binary found');
+    skip('§6 real FFmpeg — the zoom genuinely changes over time', 'no ffmpeg binary found');
     skip('§7 real FFmpeg — a hand-authored rhythm survives untouched alongside a derived one', 'no ffmpeg binary found');
 } else {
     section('6 · REAL FFMPEG — the derived expression genuinely animates the zoom');
     {
         const clip = { id: 'c1', type: 'video', duration: 2, scale: 1, ...CLIENT.applyPresetToClip({ duration: 2 }, 'camera-push') };
         const derived = CLIENT.deriveZoomKeyframes(clip, { type: 'video' });
-        const zExpr = buildZoomKeyframeExpr(derived.map(p => ({ time: p.time, value: p.value })));
+        const zoom = buildSmoothZoomFilter(derived.map(p => ({ time: p.time, value: p.value })), { fps: 10 });
 
-        check('buildZoomKeyframeExpr accepted the derived points and produced a real expression',
-            typeof zExpr === 'string' && zExpr.length > 0);
-        check('the expression is piecewise (references `it`, zoompan\'s per-frame time var), not a bare constant',
-            /it/.test(zExpr));
+        check('buildSmoothZoomFilter accepted the derived points and produced a real filter',
+            typeof zoom === 'string' && zoom.length > 0);
+        check('the zoom is piecewise over time (frame index / fps), not a bare constant',
+            /\(in\/10\)/.test(zoom || ''));
 
         const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'camzoom-'));
         const outPattern = path.join(tmp, 'f%02d.png');
@@ -210,11 +212,11 @@ if (!FFMPEG) {
         // one variable: does the CROP WINDOW change over time.
         const args = [
             '-y', '-f', 'lavfi', '-i', `smptebars=s=${W}x${H}:d=2:r=10`,
-            '-vf', `zoompan=z='${zExpr}':d=1:s=${W}x${H}:fps=10`,
+            '-vf', zoom,
             '-frames:v', '20', outPattern,
         ];
         const r = spawnSync(FFMPEG, args, { encoding: 'utf8' });
-        check('ffmpeg accepted the derived zoompan filter and rendered frames',
+        check('ffmpeg accepted the derived zoom filter and rendered frames',
             r.status === 0 && fs.existsSync(path.join(tmp, 'f01.png')),
             r.status !== 0 ? (r.stderr || '').split('\n').slice(-6).join('\n') : undefined);
 
@@ -258,16 +260,16 @@ if (!FFMPEG) {
         // here is the pre-existing hand-authored one, completely unaffected
         // by anything this file added.
         const handAuthored = [{ time: 0, value: 1 }, { time: 1.5, value: 1.3 }];
-        const zExpr = buildZoomKeyframeExpr(handAuthored);
+        const zoom = buildSmoothZoomFilter(handAuthored, { fps: 10 });
         const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'camzoom-legacy-'));
         const out = path.join(tmp, 'out.mp4');
         const args = [
             '-y', '-f', 'lavfi', '-i', `color=c=red:s=${W}x${H}:d=1.5:r=10`,
-            '-vf', `zoompan=z='${zExpr}':d=1:s=${W}x${H}:fps=10`,
+            '-vf', zoom,
             '-frames:v', '15', out,
         ];
         const r = spawnSync(FFMPEG, args, { encoding: 'utf8' });
-        check('the pre-existing hand-authored zoompan path still renders exactly as before',
+        check('a hand-authored scale rhythm still renders through the same zoom path',
             r.status === 0 && fs.existsSync(out),
             r.status !== 0 ? (r.stderr || '').split('\n').slice(-6).join('\n') : undefined);
         fs.rmSync(tmp, { recursive: true, force: true });

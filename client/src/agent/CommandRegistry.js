@@ -165,7 +165,7 @@ export const COMMANDS = [
         phrases: ['make it more dynamic', 'add dynamic zoom', 'zoom rhythm', 'add movement',
                   'make it punchy', 'add energy', 'dynamic zooms'],
         destructive: false,
-        requires: ['transcript', 'multiple_clips'],
+        requires: ['transcript'],
     },
 
     // ── AI Animation Intelligence (R68) ─────────────────────────────────────

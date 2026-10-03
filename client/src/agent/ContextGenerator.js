@@ -80,7 +80,7 @@ export class ContextGenerator {
         // --- Find active/selected clip ---
         const activeClip = allClips.find(c => c.id === activeClipId) || null;
         const selectedClipDuration = activeClip ? activeClip.duration : 0;
-        const sourceDuration = activeClip?.sourceDuration || (activeClip ? activeClip.duration * (activeClip.speed || 1) : 0);
+        const sourceDuration = activeClip ? activeClip.duration * (activeClip.speed || 1) : 0;
 
         // --- Editing Mode Detection ---
         const videoClips = allClips.filter(c => c.trackType === 'video');
@@ -119,7 +119,7 @@ export class ContextGenerator {
                 const key   = basename(asset?.name || clip.name || '');
                 const orig  = state.transcripts?.[key] || [];
                 const offset = clip.offset || 0;
-                orig.filter(w => w.start >= offset - 0.05 && w.end <= offset + clip.duration + 0.05)
+                orig.filter(w => w.start >= offset - 0.05 && w.end <= offset + clip.duration * (clip.speed || 1) + 0.05)
                     .forEach(w => words.push(w));
             });
             return words;

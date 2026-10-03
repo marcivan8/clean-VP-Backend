@@ -114,7 +114,10 @@ function sortedVisualTracks(tracks) {
  * Build the timeline→output time map from the BASE track's clips.
  *
  * Mirrors the concatenation the exporter performs: segments are emitted in
- * start order, back-to-back, each shortened by its own speed factor.
+ * start order, back-to-back, gaps removed. A clip's `duration` is already its
+ * TIMELINE length (speed is applied to the source it reads, see
+ * timeline/speedChange.js), so a clip lasts exactly `duration` in the output
+ * too. This used to divide by speed a second time.
  *
  * @returns {{segments: Array, totalDuration: number}}
  */
@@ -127,12 +130,11 @@ export function buildTimeMap(baseClips) {
     let cursor = 0;
     for (const c of clips) {
         const speed = Number(c.speed) > 0 ? Number(c.speed) : 1;
-        const srcDuration = Number(c.duration);
-        const outDuration = srcDuration / speed;
+        const outDuration = Number(c.duration);
         segments.push({
             clipId: c.id,
             timelineStart: Number(c.start),
-            timelineEnd: Number(c.start) + srcDuration,
+            timelineEnd: Number(c.start) + outDuration,
             speed,
             outputStart: cursor,
             outputEnd: cursor + outDuration,
@@ -166,7 +168,7 @@ export function timelineToOutputTime(timeMap, timelineTime) {
     for (let i = 0; i < segs.length; i++) {
         const s = segs[i];
         if (t >= s.timelineStart && t <= s.timelineEnd) {
-            return s.outputStart + (t - s.timelineStart) / s.speed;
+            return s.outputStart + (t - s.timelineStart);
         }
         // Fell into the gap before this segment.
         if (t < s.timelineStart) return s.outputStart;
@@ -260,7 +262,7 @@ function sameGeometry(a, b) {
  * A static overlay collapses to ONE sample — worth the check, because a static
  * overlay compiles to a plain `overlay=x=N:y=M`, while an animated one needs
  * piecewise-linear `x='if(lt(t,..),..)'` expressions. That is the same shape as
- * the existing `buildZoomKeyframeExpr()` in the exporter, deliberately: it is a
+ * the exporter's scale-keyframe zoom (buildSmoothZoomFilter), deliberately: it is a
  * proven pattern in this pipeline rather than a new one.
  */
 function sampleGeometry(layer, frame, timeMap) {

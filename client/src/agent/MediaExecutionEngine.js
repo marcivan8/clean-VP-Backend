@@ -45,7 +45,8 @@ import { transcriptionManager } from './TranscriptionManager.js';
 // are indistinguishable to every downstream consumer (preview, export).
 import { applyPresetToClip } from '../motion/ClipAdapter.js';
 import i18next from 'i18next';
-import { resolveRetakeSource, retakeReviewLines, makeRetakeT } from './retakeSource.js';
+import { resolveRetakeSource, retakeReviewLines, makeRetakeT, findTranscript } from './retakeSource.js';
+import { clipSourceWords, buildRhythmRequest, shotsToKeyframes } from './rhythmShots.js';
 
 // See _deriveAudioPeaksForClip below.
 const DERIVED_PEAK_DB_FLOOR = -8;
@@ -1390,114 +1391,62 @@ export class MediaExecutionEngine {
             }
 
             // ── Zoom rhythm — "make it feel multi-camera" ─────────────────────
-            // Calls the synchronous /api/interview/rhythm-zoom endpoint, then
-            // applies one static scale keyframe at t=0 per clip.
-            // Requires: ≥2 clips on the video track + captions in the store.
+            // Each clip is a shot; a long clip is split into virtual shots at
+            // sentence ends and pauses (rhythmShots.js), so a single uncut
+            // recording works too and nothing is cut. The server picks a shot
+            // type and motion per shot from that shot's SOURCE-time words; the
+            // result becomes one scale-keyframe track per clip, written as ONE
+            // undo step.
             case 'rhythm_zoom': {
                 const rzStore = useTimelineStore.getState();
                 // MULTI-TRACK: after split_speakers there is one video track per
-                // speaker. This used to read only the FIRST video track, so the
-                // second speaker's clips silently got no zoom rhythm at all.
-                // Clips carry _trackId so keyframes are written back to the right
-                // track, and shot assignment sees the whole conversation in
-                // timeline order rather than one speaker's half of it.
+                // speaker; every video track's clips take part, in timeline order.
                 const rzVideoTracks = (rzStore.tracks ?? []).filter(t => t.type === 'video');
-                const rzVideoTrack  = rzVideoTracks[0]; // legacy anchor
                 const rzClips = rzVideoTracks
                     .flatMap(t => (t.clips ?? []).map(c => ({ ...c, _trackId: t.id })))
+                    .filter(c => (Number(c.duration) || 0) > 0)
                     .sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
-                const rzWords      = rzStore.captions ?? [];
-                const rzStyle      = args.style || 'dynamic';
+                const rzStyle = args.style || 'dynamic';
 
-                if (rzClips.length < 2) {
-                    // This should not normally be reached — IntentParser auto-upgrades
-                    // "make it more dynamic" to compound_clean_dynamic when clips < 2.
-                    // This is a safety net for the GPT-routed path.
-                    return {
-                        action, success: false,
-                        message: `I need to split your clip into segments first before applying zoom rhythm. Try: "clean this clip then make it dynamic" — that removes silences to create segments, then applies the zoom effect in one go.`,
-                    };
+                if (rzClips.length === 0) {
+                    return { action, success: false, message: 'Add a video to the timeline first, then try "add zoom rhythm" again.' };
                 }
+
+                const rzAssetById = new Map((rzStore.assets || []).map(a => [a.id, a]));
+                const rzWordsFor = (clip) => clipSourceWords(
+                    clip,
+                    findTranscript(rzStore, rzAssetById.get(clip.assetId) || null),
+                    rzStore.captions,
+                );
+                const { shots, payloadClips, words: rzWords } = buildRhythmRequest(
+                    rzClips, rzWordsFor, (clip) => rzAssetById.get(clip.assetId)?.name || null,
+                );
+
                 if (rzWords.length === 0) {
                     return {
                         action, success: false,
-                        message: `Zoom rhythm syncs with your speech to decide when to zoom in or out, so it needs a transcript.\n\nRun "add captions" to generate one, then try "make it more dynamic" again.`,
+                        message: `Zoom rhythm syncs with your speech to decide when to zoom in or out, so it needs a transcript.\n\nRun "add captions" to generate one, then try "add zoom rhythm" again.`,
                     };
                 }
 
-                const rzPayload = {
-                    clips: rzClips.map(c => {
-                        // Pass assetName so the server can resolve the file path for
-                        // ML frame extraction (CLIP + MediaPipe).  Falls back gracefully
-                        // to transcript-only GPT scoring if assetName is unavailable.
-                        const asset = rzStore.assets?.find(a => a.id === c.assetId);
-                        return {
-                            id:        c.id,
-                            offset:    c.offset   ?? 0,
-                            duration:  c.duration ?? 0,
-                            assetName: asset?.name || null,
-                        };
-                    }),
-                    words: rzWords,
-                    style: rzStyle,
-                };
-                console.log(`[MediaExecutionEngine] rhythm_zoom: ${rzClips.length} clips, ${rzWords.length} words, style=${rzStyle}`);
+                console.log(`[MediaExecutionEngine] rhythm_zoom: ${rzClips.length} clips → ${shots.length} shots, ${rzWords.length} words, style=${rzStyle}`);
 
-                const rzRes  = await authFetch('/api/interview/rhythm-zoom', { method: 'POST', body: JSON.stringify(rzPayload) });
+                const rzRes  = await authFetch('/api/interview/rhythm-zoom', {
+                    method: 'POST',
+                    body: JSON.stringify({ clips: payloadClips, words: rzWords, style: rzStyle }),
+                });
                 const rzData = await rzRes.json();
                 if (!rzRes.ok) throw new Error(rzData.error || `rhythm-zoom error ${rzRes.status}`);
 
                 const { clipZooms, summary } = rzData;
+                const rzDurById = new Map(rzClips.map(c => [c.id, Number(c.duration) || 0]));
+                const rzKeyframes = shotsToKeyframes(shots, clipZooms, (id) => rzDurById.get(id));
 
-                // Clear existing scale keyframes, then apply the motion plan.
-                // Three motion kinds (see /rhythm-zoom's buildMotion):
-                //   static   → one keyframe at t=0
-                //   push_in  → slow zoom across the clip (2 keyframes, easeOutCubic)
-                //   punch_in → hold, then snap to target ON the emphasized word
-                //              (keyframe pair 80ms before / 60ms after the word start)
-                // Clear on each clip's OWN track — using the first track's id for
-                // every clip silently no-oped for clips on other video tracks.
-                // (addTransformKeyframe below resolves the track from the clip id
-                // itself, so it was already multi-track safe.)
-                rzClips.forEach(clip => {
-                    if (clip.keyframes?.scale?.length) {
-                        rzStore.updateClip(clip._trackId || rzVideoTrack.id, clip.id, {
-                            keyframes: { ...(clip.keyframes || {}), scale: [] },
-                        });
-                    }
-                });
-
-                const rzDurById = {};
-                rzClips.forEach(c => { rzDurById[c.id] = c.duration ?? 0; });
-
-                // Count the clips that actually receive keyframes. A clipZooms
-                // entry whose clipId isn't on the timeline (stale plan, clip
-                // deleted or re-segmented between detect and apply) silently
-                // applies to nothing — and the summary counts below come from
-                // the SERVER's response, not from what landed, so the old
-                // unconditional `success: true` could report a full
-                // "3W / 2M / 4C" breakdown over a timeline where zero keyframes
-                // were written.
-                let rzApplied = 0;
-
-                clipZooms.forEach(({ clipId, scale, motion }) => {
-                    const m   = motion || { kind: 'static', from: scale, to: scale };
-                    const dur = rzDurById[clipId] ?? 0;
-                    if (!(clipId in rzDurById)) return; // not on the timeline — skip
-                    rzApplied++;
-
-                    if (m.kind === 'push_in' && dur > 0.5) {
-                        rzStore.addTransformKeyframe(clipId, 'scale', 0, m.from, 'linear');
-                        rzStore.addTransformKeyframe(clipId, 'scale', dur, m.to, 'easeOutCubic');
-                    } else if (m.kind === 'punch_in' && typeof m.at === 'number') {
-                        rzStore.addTransformKeyframe(clipId, 'scale', 0, m.from, 'linear');
-                        rzStore.addTransformKeyframe(clipId, 'scale', Math.max(0.01, m.at - 0.08), m.from, 'linear');
-                        rzStore.addTransformKeyframe(clipId, 'scale', Math.min(dur, m.at + 0.06), m.to, 'easeOutCubic');
-                    } else {
-                        rzStore.addTransformKeyframe(clipId, 'scale', 0, m.to ?? scale, 'linear');
-                    }
-                });
-
+                // A plan that matches no clip on the timeline (deleted or
+                // re-segmented between request and answer) changes nothing, and
+                // must not report the server's counts as if it had.
+                const rzTargets = rzClips.filter(c => (rzKeyframes.get(c.id) || []).length > 0);
+                const rzApplied = rzTargets.length; // clips that actually receive keyframes
                 if (rzApplied === 0) {
                     return {
                         action,
@@ -1505,6 +1454,15 @@ export class MediaExecutionEngine {
                         message: "The zoom plan didn't match any clips currently on the timeline — nothing was changed. Try re-running it.",
                     };
                 }
+
+                // One undo step for the whole rhythm (it used to be one per
+                // keyframe: about three undos per shot).
+                rzStore._saveHistory?.();
+                rzTargets.forEach(clip => {
+                    useTimelineStore.getState().updateClip(clip._trackId, clip.id, {
+                        keyframes: { ...(clip.keyframes || {}), scale: rzKeyframes.get(clip.id) },
+                    }, { skipHistory: true });
+                });
 
                 const { counts = {}, motions = {} } = summary || {};
                 const punchNote = (motions.punch_in || 0) > 0
@@ -1515,7 +1473,7 @@ export class MediaExecutionEngine {
                     success: true,
                     message:
                         `Zoom rhythm applied — ${counts.wide ?? 0}W / ${counts.medium ?? 0}M / ${counts.close ?? 0}C ` +
-                        `across ${rzApplied} shots, with ${motions.push_in ?? 0} slow push-ins.${punchNote}`,
+                        `across ${shots.length} shots, with ${motions.push_in ?? 0} slow push-ins.${punchNote}`,
                 };
             }
 
@@ -2361,7 +2319,7 @@ export class MediaExecutionEngine {
 
                 const overlapsSpeaker = (clip) => {
                     if (!wantNorm) return true;
-                    const s = clip.offset ?? 0, e = s + (clip.duration ?? 0);
+                    const s = clip.offset ?? 0, e = s + (clip.duration ?? 0) * (clip.speed || 1);
                     return speakerRanges.some(r => r.end > s && r.start < e);
                 };
 
@@ -3626,7 +3584,7 @@ export class MediaExecutionEngine {
             .filter(c => c.virtualCam)
             .map(c => ({
                 start:     c.offset ?? 0,
-                end:       (c.offset ?? 0) + (c.duration ?? 0),
+                end:       (c.offset ?? 0) + (c.duration ?? 0) * (c.speed || 1),
                 virtualCam: c.virtualCam,
             }));
 
@@ -3642,12 +3600,23 @@ export class MediaExecutionEngine {
         // by every track. This is what keeps multiple video tracks in sync after
         // time is removed: previously each track was packed independently from
         // its own cursor, so two speaker tracks drifted apart (or stacked).
+        // Segments are SOURCE time. A clip shows duration × speed seconds of
+        // source, so on a sped-up/slowed clip a kept segment lasts
+        // srcDuration / speed on the timeline (speed of the clip it falls in).
         const orderedSegs = [...validSegs].sort((a, b) => a.start - b.start);
+        const speedAtSource = (t) => {
+            const c = baseClips.find(bc => {
+                const from = bc.offset ?? 0;
+                return t >= from - 0.01 && t < from + (bc.duration ?? 0) * (bc.speed || 1);
+            });
+            return (c && Number(c.speed) > 0) ? Number(c.speed) : 1;
+        };
         let acc = effectiveRangeStart;
         const segOut = orderedSegs.map(seg => {
             const out = acc;
-            acc += seg.duration;
-            return { ...seg, outStart: out, srcEnd: seg.start + seg.duration };
+            const segSpeed = speedAtSource(seg.start);
+            acc += seg.duration / segSpeed;
+            return { ...seg, outStart: out, srcEnd: seg.start + seg.duration, speed: segSpeed };
         });
         const timelineEnd = acc;
 
@@ -3660,8 +3629,9 @@ export class MediaExecutionEngine {
         // clip on track 2 stays aligned with the matching moment on track 1.
         baseClips.forEach((srcClip, clipIdx) => {
             const trackId     = srcClip._trackId || videoTrack.id;
+            const clipSpeed   = Number(srcClip.speed) > 0 ? Number(srcClip.speed) : 1;
             const clipSrcFrom = srcClip.offset ?? 0;
-            const clipSrcTo   = clipSrcFrom + (srcClip.duration ?? 0);
+            const clipSrcTo   = clipSrcFrom + (srcClip.duration ?? 0) * clipSpeed;
             const persistentUrl = srcClip.sourceUrl || srcClip.url || '';
 
             if (srcClip.keyframes?.scale?.length) droppedZoomKfCount++;
@@ -3690,8 +3660,8 @@ export class MediaExecutionEngine {
                 const newClip = {
                     ...srcClip,
                     id:           `clip_${prefix}_${ts}_${clipIdx}_${segIdx}`,
-                    start:        seg.outStart + (from - seg.start),
-                    duration:     dur,
+                    start:        seg.outStart + (from - seg.start) / seg.speed,
+                    duration:     dur / clipSpeed,
                     offset:       from,
                     name:         `Segment ${inserted + 1}`,
                     originalName: srcClip.originalName || srcClip.name,

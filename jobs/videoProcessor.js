@@ -5,6 +5,29 @@ const fs = require('fs');
 const storageConfig = require('../config/storage');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
+try {
+    ffmpeg.setFfprobePath(require('@ffprobe-installer/ffprobe').path);
+} catch (err) {
+    console.warn('[videoProcessor] ffprobe-installer unavailable, using ffprobe from PATH:', err.message);
+}
+
+/**
+ * Width/height of the finished proxy. ffmpeg autorotates while encoding it,
+ * so this is the UPRIGHT size the viewer sees (a phone portrait clip stored
+ * as 1920x1080 + rotation comes out 304x540). The editor uses it to set the
+ * project's shape when its own in-browser probe gave up (iPhone Safari can
+ * time out reading a large clip's metadata, which left new projects at 16:9).
+ * Never throws: null when the probe fails.
+ */
+function probeDimensions(filePath) {
+    return new Promise((resolve) => {
+        ffmpeg.ffprobe(filePath, (err, metadata) => {
+            if (err) { resolve(null); return; }
+            const v = (metadata?.streams || []).find(s => s.codec_type === 'video');
+            resolve(v?.width && v?.height ? { width: v.width, height: v.height } : null);
+        });
+    });
+}
 
 // NOTE: this file used to also have a generateWaveform() step that ran a full
 // ffmpeg astats pass over the ENTIRE raw input (no -vn, so it decoded every
@@ -110,6 +133,8 @@ module.exports = async function processVideoJob(job) {
 
         await job.updateProgress(90);
 
+        const dims = await probeDimensions(mp4Path);
+
         // 2. Upload to GCS / Storage
         console.log(`[Job ${job.id}] Uploading files to storage...`);
         const files = fs.readdirSync(tempDir);
@@ -142,6 +167,9 @@ module.exports = async function processVideoJob(job) {
             // proxyPath = uploads-relative raw file path; audioRoutes resolves from uploads/ dir
             proxyPath: inputPath,
             rawGcsPath,
+            // Upright proxy size (see probeDimensions); null when unknown.
+            width:  dims?.width  || null,
+            height: dims?.height || null,
         };
 
     } finally {

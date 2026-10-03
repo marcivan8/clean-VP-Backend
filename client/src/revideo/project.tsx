@@ -42,6 +42,10 @@ function evaluateKF(keyframes: any[], time: number, defaultValue: number): numbe
         'ease-in': t => t * t,
         'ease-out': t => t * (2 - t),
         'ease-in-out': t => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t,
+        // Zoom rhythm punch-ins snap with easeOutCubic (MediaExecutionEngine
+        // rhythm_zoom); without these they fell back to linear in the preview.
+        easeOutCubic: t => 1 - Math.pow(1 - t, 3),
+        easeInCubic: t => t * t * t,
         bounce: t => { const n1 = 7.5625, d1 = 2.75; if (t < 1/d1) return n1*t*t; if (t < 2/d1) return n1*(t-=1.5/d1)*t+0.75; if (t < 2.5/d1) return n1*(t-=2.25/d1)*t+0.9375; return n1*(t-=2.625/d1)*t+0.984375; },
         elastic: t => t === 0 || t === 1 ? t : Math.pow(2, -10*t) * Math.sin((t-0.1)*5*Math.PI) + 1,
     };
@@ -52,6 +56,22 @@ function evaluateKF(keyframes: any[], time: number, defaultValue: number): numbe
 /** Helper: get clip-local time relative to clip start (for keyframe evaluation) */
 function clipLocalTime(playbackTime: number, clipStart: number): number {
     return Math.max(0, playbackTime - clipStart);
+}
+
+/**
+ * Scale keyframes (zoom rhythm push-ins / punch-ins) zoom around the point 28%
+ * from the top of the FRAME, the speaker's face, not the frame centre. The
+ * export does exactly this (buildSmoothZoomFilter in jobs/exportProcessor.js,
+ * anchor 0.5 / 0.28); without this offset the preview zoomed on the centre and
+ * framed every push-in differently from the exported video.
+ * Scaling about a point A = scaling about the centre, then moving by A*(1-s).
+ */
+const RHYTHM_ANCHOR_Y = 0.28;
+function rhythmAnchorDy(kf: any, localTime: number, canvasHeight: number): number {
+    const scaleKfs = kf?.scaleY ?? kf?.scale;
+    if (!Array.isArray(scaleKfs) || scaleKfs.length === 0) return 0;
+    const s = evaluateKF(scaleKfs, localTime, 1);
+    return (0.5 - RHYTHM_ANCHOR_Y) * canvasHeight * (s - 1);
 }
 
 /**
@@ -153,22 +173,19 @@ const timelineScene = makeScene2D('timeline', function* (view) {
     });
 
     /**
-     * FIX: Cover-mode scaling — video fills the canvas completely.
-     * Uses max scale so the media covers every pixel (cropping overflow
-     * rather than leaving letterbox/pillarbox bars).
+     * Contain fit: the whole picture is visible inside the project frame, with
+     * black bars where the shapes differ. This is what the export renders
+     * (buildScaleFilter in jobs/exportProcessor.js: scale ...decrease + pad),
+     * so the editor now shows what will be exported (R53). It used to "cover"
+     * (scale up and crop), which showed a portrait clip in a 16:9 project
+     * filling the frame while the export had bars, and made captions look a
+     * different size next to the speaker.
      *
-     * When source dimensions are unknown we fall back to the canvas size
-     * directly (1:1 mapping) instead of the old 1920×1080 hard-code which
-     * was wrong for 9:16 canvases and caused the squeeze bug.
+     * Unknown source dimensions → assume the media already matches the canvas.
      */
     function fitSize(mediaW: number, mediaH: number): { w: number; h: number } {
-        // Unknown dimensions → assume the media already matches the canvas
         if (!mediaW || !mediaH) return { w: canvasWidth, h: canvasHeight };
-        const scaleW = canvasWidth / mediaW;
-        const scaleH = canvasHeight / mediaH;
-        // "cover" — scale up so the smaller dimension fills its canvas axis;
-        // the larger dimension overflows and is cropped by the node boundary.
-        const s = Math.max(scaleW, scaleH);
+        const s = Math.min(canvasWidth / mediaW, canvasHeight / mediaH);
         return { w: Math.round(mediaW * s), h: Math.round(mediaH * s) };
     }
 
@@ -221,12 +238,15 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             src={resolvedUrl}
                             width={fitted.w}
                             height={fitted.h}
-                            time={() => playback.time - clip.start + (clip.offset || 0)}
+                            // Speed: the clip shows duration × speed seconds of
+                            // source from \`offset\` (timeline/speedChange.js).
+                            time={() => (playback.time - clip.start) * (clip.speed || 1) + (clip.offset || 0)}
+                            playbackRate={clip.speed || 1}
                             play={true}
                             volume={(clip.volume ?? 1) * (clip.globalVolume ?? 1)}
                             allowVolumeAmplificationInPreview={true}
                             x={() => motionLayer ? (clip.x || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dx : evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0)}
-                            y={() => motionLayer ? (clip.y || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dy : evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0)}
+                            y={() => motionLayer ? (clip.y || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dy : evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0) + rhythmAnchorDy(kf, clipLocalTime(playback.time, clip.start), canvasHeight)}
                             scaleX={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
                             scaleY={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
                             rotation={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).rotation : evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
@@ -251,7 +271,10 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             <Audio
                                 ref={mediaRef}
                             src={resolvedUrl}
-                            time={() => playback.time - clip.start + (clip.offset || 0)}
+                            // Speed: the clip shows duration × speed seconds of
+                            // source from \`offset\` (timeline/speedChange.js).
+                            time={() => (playback.time - clip.start) * (clip.speed || 1) + (clip.offset || 0)}
+                            playbackRate={clip.speed || 1}
                             play={true}
                             volume={(clip.volume ?? 1) * (clip.globalVolume ?? 1)}
                             allowVolumeAmplificationInPreview={true}

@@ -42,7 +42,7 @@ import { trackEvent } from '../utils/trackEvent';
 import { countMetric, distributionMetric, nowMs, timelineBucket, timelineSecondsFromTracks } from '../utils/metrics';
 import { computeDragSnap } from '../timeline/dragSnap.js';
 
-import { probeMedia } from '../utils/mediaProbe';
+import { probeMedia, probeVideoUrlDimensions } from '../utils/mediaProbe';
 import { takePendingNewVideo } from '../utils/pendingNewVideo.js';
 import ProxyService from '../services/proxyService';
 import useAIStore from '../store/useAIStore';
@@ -748,6 +748,32 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         return closest;
     };
 
+    // Shape of an imported video from its proxy, for when the in-browser probe
+    // of the original file gave up. Prefers the size the proxy job measured
+    // (server ffprobe, upright); falls back to reading the proxy here.
+    const applyProxyDimensions = async (assetId, data, ratioBefore) => {
+        try {
+            let dims = Number(data?.width) > 0 && Number(data?.height) > 0
+                ? { width: Number(data.width), height: Number(data.height) } : null;
+            if (!dims && data?.proxyUrl) {
+                dims = await probeVideoUrlDimensions(new URL(data.proxyUrl, window.location.origin).href);
+            }
+            if (!dims) return;
+            const st = useTimelineStore.getState();
+            const asset = (st.assets || []).find(a => a.id === assetId);
+            if (asset && !(asset.resolution?.w && asset.resolution?.h)) {
+                st.updateAsset(assetId, { resolution: { w: dims.width, h: dims.height } });
+            }
+            const detected = detectAspectRatio(dims.width, dims.height);
+            if (detected && st.aspectRatio === ratioBefore && detected !== st.aspectRatio) {
+                st.setAspectRatio(detected);
+                console.log(`[IDELayout] Aspect ratio from the proxy (the file probe gave up): ${detected}`);
+            }
+        } catch (err) {
+            console.warn('[IDELayout] could not read the proxy size:', err.message);
+        }
+    };
+
     const handleFileImport = async (e) => {
         const files = Array.from(e.target.files);
         if (files.length > 0) {
@@ -788,6 +814,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         console.log(`[IDELayout] Auto-detected aspect ratio: ${detected}`);
                     }
                 }
+                // The probe gave up (iPhone Safari can time out on a large clip):
+                // detect the shape from the proxy once it exists instead of
+                // leaving the project at its 16:9 default. Only applied if the
+                // ratio is still what it is now (nobody changed it meanwhile).
+                const ratioFromProxy = isVideo && !ratioSet && !(metadata.width && metadata.height);
+                const ratioBeforeProxy = ratioFromProxy ? useTimelineStore.getState().aspectRatio : null;
 
                 const assetId = `asset-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -920,6 +952,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 isProxying: false,
                                 uploadPhase: 'ready'
                             });
+                            if (ratioFromProxy) applyProxyDimensions(assetId, data, ratioBeforeProxy);
 
                             // Backfill sourceUrl on any clips already placed on the
                             // timeline that belong to this asset — they were added

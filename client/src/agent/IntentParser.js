@@ -19,7 +19,6 @@ import { IntentValidator } from './IntentValidator.js';
 import { INTENT_TYPES, OPERATIONS } from './CommandConstants.js';
 import { extractEditIntent } from '../utils/nlpFallback.js';
 import useAIStore from '../store/useAIStore.js';
-import useTimelineStore from '../store/useTimelineStore.js';
 
 export { INTENT_TYPES, OPERATIONS };
 
@@ -754,13 +753,13 @@ export class IntentParser {
         }
 
         // ── Rhythm zoom / multi-camera feel (unambiguous dynamic commands) ────
+        // One uncut clip works too: it is split into virtual shots, nothing is
+        // cut (rhythmShots.js). It used to switch to compound_clean_dynamic,
+        // so "rhythm zoom" on one clip also removed the silences.
         if (matches('rhythmZoom')) {
-            const { tracks } = useTimelineStore.getState();
-            const clipCount = (tracks ?? []).flatMap(t => t.clips ?? []).length;
-            const operation = clipCount < 2 ? 'compound_clean_dynamic' : 'rhythm_zoom';
             return {
                 intent: 'edit',
-                operation,
+                operation: 'rhythm_zoom',
                 parameters: { style: 'dynamic' },
                 confidence: 'HIGH',
                 missingParameters: []
@@ -1072,12 +1071,9 @@ export class IntentParser {
 
         // ── Rhythm zoom / dynamic multi-camera feel ────────────────────────────
         if (matches('rhythmZoom')) {
-            const { tracks: _rzTracks } = useTimelineStore.getState();
-            const _rzClipCount = (_rzTracks ?? []).flatMap(t => t.clips ?? []).length;
-            const _rzOp = _rzClipCount < 2 ? 'compound_clean_dynamic' : 'rhythm_zoom';
             return {
                 intent: 'edit',
-                operation: _rzOp,
+                operation: 'rhythm_zoom',
                 parameters: { style: 'dynamic' },
                 targets: [],
                 constraints: { style: 'dynamic' },

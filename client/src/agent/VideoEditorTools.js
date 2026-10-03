@@ -1671,7 +1671,7 @@ if (matches.length === 0 && titleCardsCreated === 0) {
                 const offset = clip.offset || 0;
                 words = origWords.filter(w =>
                     (w.start ?? 0) >= offset - 0.05 &&
-                    (w.end   ?? 0) <= offset + clip.duration + 0.05
+                    (w.end   ?? 0) <= offset + clip.duration * (clip.speed || 1) + 0.05
                 );
             } else {
                 words = (store.captions || []).filter(w =>
@@ -1788,7 +1788,7 @@ if (matches.length === 0 && titleCardsCreated === 0) {
             let words;
             if (origWords?.length > 0) {
                 const offset = clip.offset || 0;
-                words = origWords.filter(w => (w.start ?? 0) >= offset - 0.05 && (w.end ?? 0) <= offset + clip.duration + 0.05);
+                words = origWords.filter(w => (w.start ?? 0) >= offset - 0.05 && (w.end ?? 0) <= offset + clip.duration * (clip.speed || 1) + 0.05);
             } else {
                 words = (store.captions || []).filter(w => (w.start ?? 0) >= clip.start - 0.05 && (w.end ?? 0) <= clip.start + clip.duration + 0.05);
             }

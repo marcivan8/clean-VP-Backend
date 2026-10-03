@@ -435,7 +435,9 @@ export class TimelineStateManager {
 
                 const updates = {};
                 if (payload.trimStart !== undefined) {
-                    updates.offset = (placement.offset || 0) + payload.trimStart;
+                    // trimStart is TIMELINE seconds; the source in-point moves
+                    // by that much source time, i.e. × speed.
+                    updates.offset = (placement.offset || 0) + payload.trimStart * (placement.speed || 1);
                     updates.startTime = placement.startTime + payload.trimStart;
                     updates.duration = placement.duration - payload.trimStart;
                 }
@@ -472,7 +474,9 @@ export class TimelineStateManager {
                     wordShift: placement.wordShift || 0,
                     startTime: splitTime,
                     duration: placement.duration - relativeSplit,
-                    offset: (placement.offset || 0) + relativeSplit,
+                    // relativeSplit is TIMELINE seconds; on a sped-up/slowed
+                    // clip that is relativeSplit × speed seconds of source.
+                    offset: (placement.offset || 0) + relativeSplit * (placement.speed || 1),
                     speed: placement.speed,
                     volume: placement.volume
                 });
@@ -486,12 +490,18 @@ export class TimelineStateManager {
                 const placement = state.entities.placements[payload.placementId];
                 if (!placement) return state;
 
-                const clip = state.entities.clips[placement.clipId];
-                const sourceDuration = clip?.sourceDuration || placement.duration;
-                const newDuration = sourceDuration / payload.speed;
+                // placement.duration is TIMELINE length; the clip covers
+                // duration × speed seconds of source. A speed change keeps that
+                // same piece of source and only changes how long it lasts.
+                // (It used to divide the WHOLE asset's sourceDuration by the
+                // speed, so an 8 s segment of a 20 s video set to 0.5x became
+                // 40 s long and ran over the next clip.)
+                const oldSpeed = placement.speed || 1;
+                const newSpeed = Number(payload.speed) > 0 ? Number(payload.speed) : 1;
+                const newDuration = placement.duration * oldSpeed / newSpeed;
 
                 return updateEntity(state, ENTITY_TYPES.PLACEMENT, payload.placementId, {
-                    speed: payload.speed,
+                    speed: newSpeed,
                     duration: newDuration
                 });
             }

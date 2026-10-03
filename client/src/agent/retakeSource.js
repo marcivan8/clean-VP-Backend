@@ -36,18 +36,27 @@ export function pickRetakeAsset(store, { assetId = null, filePath = null } = {})
 }
 
 /**
+ * The SOURCE-time transcript of one asset (store.transcripts is keyed by file
+ * basename, sometimes with an upload timestamp prefix). `firstKeys` are tried
+ * before the asset's own names, `lastKeys` after them. Returns the word array,
+ * or null.
+ */
+export function findTranscript(store, asset, firstKeys = [], lastKeys = []) {
+    const transcripts = store?.transcripts || {};
+    const keys = [...firstKeys, basename(asset?.gcsPath), basename(asset?.name), basename(asset?.path), ...lastKeys].filter(Boolean);
+    for (const k of keys) {
+        const hit = transcripts[k] || Object.entries(transcripts).find(([name]) => stripStamp(name) === stripStamp(k))?.[1];
+        if (Array.isArray(hit) && hit.length) return hit;
+    }
+    return null;
+}
+
+/**
  * @returns {{ assetId, words: [{word,start,end}] } | { error }}
  */
 export function resolveRetakeSource(store, opts = {}) {
     const asset = pickRetakeAsset(store, opts);
-    const transcripts = store.transcripts || {};
-    const keys = [basename(opts.filePath), basename(asset?.gcsPath), basename(asset?.name), basename(store.uploadedFilePath)]
-        .filter(Boolean);
-    let words = null;
-    for (const k of keys) {
-        const hit = transcripts[k] || Object.entries(transcripts).find(([name]) => stripStamp(name) === stripStamp(k))?.[1];
-        if (Array.isArray(hit) && hit.length) { words = hit; break; }
-    }
+    let words = findTranscript(store, asset, [basename(opts.filePath)], [basename(store.uploadedFilePath)]);
     if (!words) {
         // Captions are TIMELINE time; they equal source time only while the
         // video is one untouched clip starting at 0.

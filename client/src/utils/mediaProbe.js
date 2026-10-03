@@ -194,3 +194,31 @@ const extractImageMetadata = (url) => {
         img.src = url;
     });
 };
+
+/**
+ * Width/height of a video by URL (the small proxy), or null. Used when the
+ * first in-browser probe of the picked file gave up (iPhone Safari can time
+ * out reading a large clip's metadata), so the project's shape can still be
+ * detected once the proxy exists. Never rejects.
+ */
+export const probeVideoUrlDimensions = (url, timeoutMs = 15000) => new Promise((resolve) => {
+    if (typeof document === 'undefined' || !url) { resolve(null); return; }
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+    let done = false;
+    const finish = (result) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        video.removeAttribute('src');
+        try { video.load(); } catch { /* element already released */ }
+        resolve(result);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    video.onloadedmetadata = () => finish(video.videoWidth && video.videoHeight
+        ? { width: video.videoWidth, height: video.videoHeight } : null);
+    video.onerror = () => finish(null);
+    video.src = url;
+});

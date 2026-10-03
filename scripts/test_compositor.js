@@ -159,10 +159,11 @@ section('3 · OUTPUT TIME ≠ TIMELINE TIME (the silent-failure trap)');
     check('before the start clamps to 0', near(M.timelineToOutputTime(map, -3), 0));
     check('past the end clamps to the total', near(M.timelineToOutputTime(map, 99), 8));
 
-    // Speed compresses output time.
-    const fast = M.buildTimeMap([vclip({ id: 'f', start: 0, duration: 10, speed: 2 })]);
-    check('a 2× clip occupies half the output duration', near(fast.totalDuration, 5));
-    check('and times inside it are compressed', near(M.timelineToOutputTime(fast, 10), 5));
+    // A clip's duration is already its TIMELINE length (setClipSpeed made a
+    // 10 s clip 5 s long at 2×), so speed must not shorten it a second time.
+    const fast = M.buildTimeMap([vclip({ id: 'f', start: 0, duration: 5, speed: 2 })]);
+    check('a 2× clip lasts its timeline duration in the output (no double speed-up)', near(fast.totalDuration, 5));
+    check('and timeline times inside it map 1:1', near(M.timelineToOutputTime(fast, 4), 4));
 
     // End to end: the overlay window must be expressed in OUTPUT time.
     const tracks = [

@@ -27,6 +27,7 @@ import { computeRippleDelete, computeGapRipple, remapTimelineWords } from '../ti
 import { computeMultiMove } from '../timeline/multiMove.js';
 import { computeRangeCut } from '../timeline/rangeCut.js';
 import { computeCaptionFollow } from '../timeline/captionFollow.js';
+import { computeSpeedChange, remapWordsForSpeed } from '../timeline/speedChange.js';
 import { mapTranscriptToTimeline } from '../timeline/transcriptMap.js';
 import { LEGACY_PACK_MOTION } from '../motion/CaptionModel.js';
 import { retimeWordsForText, splitCaption, mergeCaptions, shiftWords as shiftCaptionWords } from '../motion/captionEdits.js';
@@ -1564,12 +1565,52 @@ const useTimelineStore = create(
                 }
             },
 
+            // The clip keeps the same piece of source and gets longer/shorter;
+            // later clips on its track (and, on the main track, the captions)
+            // move with it. Planning is pure: timeline/speedChange.js.
             setClipSpeed: (trackId, clipId, speed) => {
+                const state = get();
+                const plan = computeSpeedChange(state.tracks, trackId, clipId, speed);
+                if (!plan) return;
+
+                const maxEnd = (tracks) => tracks.reduce((m, t) =>
+                    Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
+                const oldMaxEnd = maxEnd(state.tracks);
+
                 get()._saveHistory();
-                timelineManager.dispatch(
-                    TimelineActions.setPlacementSpeed(clipId, speed)
-                );
-                set({ tracks: timelineManager.toLegacyTracks() });
+                // Word-level captions and duration live outside the timeline
+                // engine; carry them on this snapshot so undo restores them
+                // (same opt-in as rippleDeleteClip).
+                set(s => {
+                    const past = s.past.slice();
+                    const last = past[past.length - 1];
+                    if (last) past[past.length - 1] = { ...last, _extraState: { captions: state.captions, duration: state.duration } };
+                    return { past };
+                });
+
+                timelineManager.beginTransaction();
+                try {
+                    timelineManager.dispatch(TimelineActions.setPlacementSpeed(clipId, plan.newSpeed));
+                    plan.moves.forEach(({ clipId: id, start, duration }) => {
+                        timelineManager.dispatch(TimelineActions.updatePlacement(id,
+                            duration !== undefined ? { startTime: start, duration } : { startTime: start }));
+                    });
+                    timelineManager.commitTransaction('Clip Speed');
+                } catch (err) {
+                    timelineManager.rollbackTransaction();
+                    set(s => ({ past: s.past.slice(0, -1) }));
+                    console.error('[setClipSpeed] failed, timeline left unchanged:', err);
+                    return;
+                }
+
+                const tracks = timelineManager.toLegacyTracks();
+                set({ tracks, captions: remapWordsForSpeed(state.captions, plan) });
+
+                // Follow the content end when the duration was tracking it.
+                const newMaxEnd = maxEnd(tracks);
+                if (newMaxEnd > 0 && Math.abs((Number(state.duration) || 0) - oldMaxEnd) < 0.05) {
+                    get().setDuration(newMaxEnd);
+                }
             },
 
             // ==============================================================
