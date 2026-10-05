@@ -302,6 +302,162 @@ export function stylePackToClipFields(packId) {
     };
 }
 
+// ─── Keyword emphasis (R88, to-do A2) ───────────────────────────────────────
+//
+// One or two words per caption are EMPHASISED for the whole time the caption
+// is on screen (the creator-style "key word in yellow"). This is separate from
+// `wordHighlight`, which follows the word being spoken right now.
+//
+// Data: `clip.emphasis = { indices: number[], source: 'auto'|'assistant'|'user' }`.
+// Indices point into the caption text split on single spaces, the same tokens
+// CaptionWords renders and CaptionCompiler ships. The LOOK is not stored on the
+// clip: it follows the caption's style pack (EMPHASIS_BY_PACK), so switching
+// pack restyles the keywords too.
+
+/** Emphasis look per style pack id (new packs and the legacy picker ids). */
+export const EMPHASIS_BY_PACK = {
+    // CAPTION_STYLE_PACKS
+    'mrbeast':       { mode: 'color', color: '#FFE500', scale: 1.15 },
+    'hormozi':       { mode: 'color', color: '#FFE500', scale: 1.08 },
+    'ali-abdaal':    { mode: 'color', color: '#4ADE80', scale: 1.06 },
+    'apple':         { mode: 'scale', scale: 1.12 },
+    'documentary':   { mode: 'color', color: '#E8C27A', scale: 1.0 },
+    'podcast':       { mode: 'color', color: '#00E5FF', scale: 1.06 },
+    'luxury':        { mode: 'color', color: '#D4AF6A', scale: 1.0 },
+    'gaming':        { mode: 'color', color: '#FF3D7F', scale: 1.12 },
+    // LEGACY_PACK_MOTION ids (the Text panel's original picker)
+    'bold-impact':   { mode: 'color', color: '#FFE500', scale: 1.12 },
+    'clean-modern':  { mode: 'box',   color: '#000000', background: '#FFE500', scale: 1.04 },
+    'soft-rounded':  { mode: 'color', color: '#4ADE80', scale: 1.04 },
+    'cinematic':     { mode: 'color', color: '#E8C27A', scale: 1.0 },
+    'handwritten':   { mode: 'color', color: '#FDE68A', scale: 1.05 },
+    'motivational':  { mode: 'color', color: '#FACC15', scale: 1.12 },
+    'modern-tech':   { mode: 'color', color: '#00E5FF', scale: 1.06 },
+    'extended-bold': { mode: 'box',   color: '#0A0A0E', background: '#FFFFFF', scale: 1.04 },
+    'platform-sans': { mode: 'scale', scale: 1.1 },
+    'editorial':     { mode: 'color', color: '#E8C27A', scale: 1.0 },
+};
+
+const DEFAULT_EMPHASIS = { mode: 'color', color: '#FACC15', scale: 1.12 };
+
+function isYellowish(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+    if (!m) return false;
+    const n = parseInt(m[1], 16);
+    const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    return r > 200 && g > 170 && b < 120;
+}
+
+/** The emphasis look for a clip: its pack's, else a default that contrasts with the text colour. */
+export function emphasisStyleFor(clip) {
+    const packId = clip?.captionStyle?.packId;
+    if (packId && EMPHASIS_BY_PACK[packId]) return EMPHASIS_BY_PACK[packId];
+    // No pack: default yellow, or white when the caption itself is already yellow.
+    if (isYellowish(clip?.color || '#FACC15')) return { mode: 'color', color: '#FFFFFF', scale: 1.12 };
+    return DEFAULT_EMPHASIS;
+}
+
+/**
+ * The emphasis to render for a clip, or null when there is none.
+ * Indices out of range (text edited after picking) are dropped, not clamped.
+ *
+ * @param {object} clip
+ * @param {number} [tokenCount] number of space-separated tokens in the text
+ * @returns {{indices:number[], style:object}|null}
+ */
+export function resolveEmphasis(clip, tokenCount) {
+    const raw = clip?.emphasis;
+    if (!raw || !Array.isArray(raw.indices) || raw.indices.length === 0) return null;
+    const n = Number.isFinite(tokenCount)
+        ? tokenCount
+        : String(clip.content || clip.name || '').split(' ').filter(Boolean).length;
+    const indices = [...new Set(raw.indices.map(Number))]
+        .filter(i => Number.isInteger(i) && i >= 0 && i < n)
+        .sort((a, b) => a - b);
+    if (indices.length === 0) return null;
+    return { indices, style: emphasisStyleFor(clip) };
+}
+
+// Function words that are never the keyword (FR + EN). Lowercase, no accents
+// stripped: tokens are compared after the same normalisation.
+const STOPWORDS = new Set((
+    'a an the and or but so if then than that this these those there here is are was were be been being am ' +
+    'i me my we our you your he him his she her it its they them their what which who whom whose when where why how ' +
+    'of to in on at by for with from about as into over under up down out off just also too very really ' +
+    'do does did done have has had will would can could should may might must shall not no yes all any some ' +
+    'get got go going gonna wanna like one yeah yep ok okay um uh hmm well guys ' +
+    'le la les l un une des du de d et ou mais donc or ni car si que qu qui quoi dont ou ce cet cette ces c ' +
+    'je j tu il elle on nous vous ils elles me m te t se s lui leur leurs mon ma mes ton ta tes son sa ses ' +
+    'notre nos votre vos au aux en dans sur sous par pour avec sans chez vers entre est sont etait ete etre ' +
+    'ai as a avons avez ont fait faire va vais vas allez vont pas plus ne n y tres bien alors comme aussi ' +
+    'tout tous toute toutes ca cela ceci voila voici quand comment pourquoi oui non juste deja encore ' +
+    'euh bah ben bon genre ouais enfin quoi'
+).split(/\s+/));
+
+// Words that carry the punch of a sentence even though they are short.
+const EMPHATIC = new Set((
+    'never always only every nothing everything nobody best worst free secret mistake huge massive instantly ' +
+    'jamais toujours seul seule seulement rien tout gratuit secret erreur enorme meilleur pire incroyable vraiment'
+).split(/\s+/));
+
+function normaliseToken(tok) {
+    return String(tok || '')
+        .toLowerCase()
+        .normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/^[^a-z0-9%€$£]+|[^a-z0-9%€$£]+$/g, '');
+}
+
+/**
+ * Score every token of a caption as a keyword candidate. Zero cost, no API:
+ * numbers and prices first, then emphatic words, then long content words,
+ * with a small bonus for the last content word (the punchline position).
+ *
+ * @param {string} text
+ * @returns {Array<{index:number, token:string, score:number}>} best first
+ */
+export function scoreKeywordCandidates(text) {
+    const tokens = String(text || '').split(' ').filter(Boolean);
+    const scored = [];
+    let lastContent = -1;
+    tokens.forEach((tok, i) => {
+        const norm = normaliseToken(tok);
+        if (!norm || STOPWORDS.has(norm)) return;
+        let score = 0;
+        if (/\d/.test(norm)) score += 6;
+        if (/[%€$£]/.test(tok)) score += 2;
+        if (EMPHATIC.has(norm)) score += 3.5;
+        const core = norm.replace(/[^a-z]/g, '');
+        if (core.length >= 3) score += Math.min(core.length, 10) * 0.45;
+        if (/^[A-Z0-9]{2,6}$/.test(tok.replace(/[^A-Za-z0-9]/g, '')) && tok !== tok.toLowerCase() && /[A-Z]/.test(tok)) score += 1.5;
+        if (/[!?]$/.test(tok)) score += 0.8;
+        if (score <= 0) return;
+        scored.push({ index: i, token: tok, score });
+        lastContent = i;
+    });
+    // Punchline bonus — not for numbers, where the first one usually leads ("day 14 of 30").
+    for (const c of scored) if (c.index === lastContent && !/\d/.test(c.token)) c.score += 0.6;
+    return scored.sort((a, b) => b.score - a.score || a.index - b.index);
+}
+
+/**
+ * Pick the keyword(s) for one caption.
+ *
+ * @param {string} text
+ * @param {{max?:number}} [opts] max keywords (default: 1, or 2 for 8+ words)
+ * @returns {{indices:number[], confident:boolean}} `confident` false means the
+ *   top candidates are too close to call; the caller may ask the LLM to decide.
+ */
+export function pickKeywords(text, opts = {}) {
+    const tokens = String(text || '').split(' ').filter(Boolean);
+    const candidates = scoreKeywordCandidates(text);
+    if (candidates.length === 0) return { indices: [], confident: true };
+    const max = Number.isInteger(opts.max) ? opts.max : (tokens.length >= 8 ? 2 : 1);
+    const picked = candidates.slice(0, Math.max(1, max)).map(c => c.index).sort((a, b) => a - b);
+    const [a, b] = candidates;
+    const confident = !b || a.score >= 6 || (a.score - b.score) >= 0.9;
+    return { indices: picked, confident };
+}
+
 export default {
     groupWordsIntoSegments,
     activeWordIndex,
@@ -309,4 +465,9 @@ export default {
     CAPTION_STYLE_PACKS,
     listStylePacks,
     stylePackToClipFields,
+    EMPHASIS_BY_PACK,
+    emphasisStyleFor,
+    resolveEmphasis,
+    scoreKeywordCandidates,
+    pickKeywords,
 };

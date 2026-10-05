@@ -1002,6 +1002,11 @@ export class MediaExecutionEngine {
             case 'place_contextual_broll':
             case 'apply_lut':
             case 'clear_lut':
+            case 'emphasize_keywords':
+            case 'clear_keywords':
+            case 'layout_split_screen':
+            case 'layout_picture_in_picture':
+            case 'layout_fullscreen':
             case 'smart_cleanup':
             case 'longFormEdit': {
                 let VideoEditorTools;

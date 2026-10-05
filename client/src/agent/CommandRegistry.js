@@ -204,6 +204,63 @@ export const COMMANDS = [
         destructive: false,
     },
     {
+        // R88 (to-do A2) — keyword emphasis. Free JS rules first, LLM only for
+        // the captions the rules cannot settle (utils/captionEmphasis.js).
+        id: 'emphasize_keywords',
+        category: 'text',
+        label: 'Highlight key words',
+        summary: 'Picks the key word of each caption and emphasises it in the caption style.',
+        phrases: ['highlight key words', 'highlight the key words', 'highlight keywords', 'emphasize key words',
+                  'emphasise key words', 'emphasize keywords', 'emphasise keywords', 'highlight important words',
+                  'make the key words pop', 'color the key words', 'colour the key words',
+                  'mets en valeur les mots cles', 'mettre en valeur les mots cles', 'surligne les mots cles',
+                  'mots cles en couleur', 'mets les mots cles en avant'],
+        negative: ['remove', 'clear', 'enleve', 'retire', 'supprime'],
+        destructive: false,
+    },
+    {
+        id: 'clear_keywords',
+        category: 'text',
+        label: 'Remove key word highlights',
+        summary: 'Removes keyword emphasis from every caption.',
+        phrases: ['remove key word highlights', 'remove keyword highlights', 'clear key words', 'clear keywords',
+                  'remove the key word highlights', 'stop highlighting key words',
+                  'enleve les mots cles', 'retire les mots cles', 'supprime les mots cles'],
+        destructive: false,
+    },
+    {
+        // R88 (to-do A1) — layout presets for the overlay clip under the
+        // playhead (or the selected one). Geometry: motion/LayoutPresets.js.
+        id: 'layout_split_screen',
+        category: 'transform',
+        label: 'Split screen',
+        summary: 'Speaker in the top half, the b-roll or screen recording in the bottom half.',
+        phrases: ['split screen', 'split the screen', 'split screen layout', 'speaker on top', 'face on top',
+                  'ecran partage', 'ecran scinde', 'coupe l ecran en deux'],
+        negative: ['remove', 'undo', 'enleve', 'retire'],
+        destructive: false,
+    },
+    {
+        id: 'layout_picture_in_picture',
+        category: 'transform',
+        label: 'Picture in picture',
+        summary: 'Puts the b-roll small in a corner over the speaker.',
+        phrases: ['picture in picture', 'pip', 'in a corner', 'small in the corner', 'incrustation', 'dans un coin'],
+        negative: ['remove', 'undo', 'enleve', 'retire'],
+        destructive: false,
+    },
+    {
+        id: 'layout_fullscreen',
+        category: 'transform',
+        label: 'Full-screen cutaway',
+        summary: 'Makes the b-roll cover the whole frame.',
+        // No hyphens: the matcher tokenizes "b-roll" as "b" + "roll".
+        phrases: ['full screen b roll', 'full screen broll', 'fullscreen b roll', 'make the b roll full screen',
+                  'full screen cutaway', 'b roll plein ecran', 'broll plein ecran', 'mets le b roll en plein ecran'],
+        negative: ['remove', 'undo', 'enleve', 'retire'],
+        destructive: false,
+    },
+    {
         id: 'add_text_overlay',
         category: 'text',
         label: 'Add text',
@@ -447,7 +504,10 @@ export function findCollisions() {
  * @returns {number} 0 = no match
  */
 export function scoreCommand(cmd, text) {
-    const raw = String(text || '').toLowerCase().trim();
+    // Accents are folded (R88): the tokenizer below splits on anything outside
+    // a-z, so "clés" used to become "cl" + "s" and French requests missed
+    // phrases written without accents. ASCII text is unchanged by this.
+    const raw = String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
     if (!raw) return 0;
 
     const tokens = raw.split(/[^a-z0-9%:]+/).filter(Boolean);

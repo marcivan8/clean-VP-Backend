@@ -11,12 +11,13 @@ import useTimelineStore from '../../store/useTimelineStore';
 // export call, so the three cannot drift apart the way R14/R16/R53 did.
 import { clipToMotionLayer } from '../../motion/ClipAdapter.js';
 import { resolveMotionAt }   from '../../motion/MotionResolver.js';
-import { revealedWordCount, activeWordIndex } from '../../motion/CaptionModel.js';
+import { revealedWordCount, activeWordIndex, resolveEmphasis } from '../../motion/CaptionModel.js';
 // R66 — clip grouping. See the identical import in GraphicOverlay.jsx: a
 // LowerThird's title (this component) and its background bar (GraphicOverlay,
 // a different track) share a `groupId`; dragging either one must move both.
 import { clipsInGroup } from '../../motion/ClipGrouping.js';
 import { getPlayerDimensions } from '../../utils/playerDimensions.js';
+import RotateHandle from './RotateHandle.jsx';
 
 // Map preset names to actual font families
 const FONT_MAP = {
@@ -103,17 +104,28 @@ const FONT_MAP = {
  * @param {number} reveal    0..1 from a reveal animation (typewriter / word-reveal)
  * @param {object} highlight the style pack's wordHighlight config, or null
  */
-const CaptionWords = ({ content, words, time, reveal, highlight }) => {
+const CaptionWords = ({ content, words, time, reveal, highlight, emphasis }) => {
     const tokens = (content || '').split(' ').filter(Boolean);
     if (tokens.length === 0) return null;
 
-    const shown = revealedWordCount(words, time, reveal, tokens.length);
+    // Words appear one by one only when a reveal animation is running or the
+    // active-word highlight is on (the behaviour before R88). Keyword emphasis
+    // alone renders per word but shows the whole caption at once.
+    const hasWords = Array.isArray(words) && words.length > 0;
+    const revealing = reveal < 1 || (hasWords && !!highlight && highlight.mode && highlight.mode !== 'none');
+    const shown = revealing ? revealedWordCount(words, time, reveal, tokens.length) : tokens.length;
     // Only meaningful when real word timings exist; -1 disables highlighting.
     const activeIdx = Array.isArray(words) && words.length > 0
         ? activeWordIndex(words, time)
         : -1;
 
     const mode = highlight?.mode || 'none';
+    // Keyword emphasis (R88): a fixed set of word indices styled for the whole
+    // caption, separate from the active-word highlight. The look comes from the
+    // style pack (resolveEmphasis → emphasisStyleFor). Applied first so the
+    // active-word highlight, when it lands on the same word, wins on colour.
+    const emphasised = new Set(emphasis?.indices || []);
+    const emStyle = emphasis?.style || null;
 
     return (
         <span>
@@ -130,9 +142,20 @@ const CaptionWords = ({ content, words, time, reveal, highlight }) => {
                     transition: 'opacity 0.1s linear',
                 };
 
+                let scale = 1;
+                if (emStyle && emphasised.has(i)) {
+                    if (emStyle.scale && emStyle.scale !== 1) scale = emStyle.scale;
+                    if ((emStyle.mode === 'color' || emStyle.mode === 'box') && emStyle.color) style.color = emStyle.color;
+                    if (emStyle.mode === 'box') {
+                        if (emStyle.background) style.background = emStyle.background;
+                        style.padding = '0 0.12em';
+                        style.borderRadius = '0.08em';
+                    }
+                }
+
                 if (isActive) {
                     if (highlight.scale && highlight.scale !== 1) {
-                        style.transform = `scale(${highlight.scale})`;
+                        scale = Math.max(scale, highlight.scale);
                     }
                     if (mode === 'color' && highlight.color) {
                         style.color = highlight.color;
@@ -148,6 +171,8 @@ const CaptionWords = ({ content, words, time, reveal, highlight }) => {
                 } else if (visible && mode === 'opacity' && activeIdx >= 0) {
                     style.opacity = 0.55;
                 }
+
+                if (scale !== 1) style.transform = `scale(${scale})`;
 
                 return <span key={i} style={style}>{word}</span>;
             })}
@@ -165,6 +190,9 @@ const TextOverlay = () => {
 
     // Per-clip gesture state: { pointerId→{clientX,clientY}, initialScale, initialDist }
     const gestureRef = React.useRef({});
+    // Caption DOM nodes by clip id — the rotate handle needs the element's
+    // on-screen centre to measure the drag angle around.
+    const clipElRefs = React.useRef({});
 
     // applyCaptionUpdate is THE path for caption style/position changes — see its
     // definition in useTimelineStore. This component used to call updateClip()
@@ -451,9 +479,11 @@ const TextOverlay = () => {
                 // when a reveal animation is mid-flight. Otherwise emit the
                 // plain string — one text node is cheaper than N spans, and
                 // most captions are static most of the time.
+                const emphasis = resolveEmphasis(clip);
                 const needsWordRender =
                     (Array.isArray(clip.words) && clip.words.length > 0 && highlight && highlight.mode !== 'none')
-                    || motion.reveal < 1;
+                    || motion.reveal < 1
+                    || !!emphasis;
 
                 const content = clip.content || t('timeline.newTextDefault');
 
@@ -471,6 +501,7 @@ const TextOverlay = () => {
                         // needs no remount, and remounting mid-gesture used to
                         // drop the pointer capture on a drag.
                         key={clip.id}
+                        ref={(el) => { if (el) clipElRefs.current[clip.id] = el; else delete clipElRefs.current[clip.id]; }}
                         onPointerDown={(e) => handlePointerDown(e, clip)}
                         onPointerMove={(e) => handlePointerMove(e, clip)}
                         onPointerUp={(e)   => handlePointerUp(e, clip)}
@@ -512,6 +543,7 @@ const TextOverlay = () => {
                                   time={currentTime}
                                   reveal={motion.reveal}
                                   highlight={highlight}
+                                  emphasis={emphasis}
                               />
                             : content
                         }
@@ -560,6 +592,20 @@ const TextOverlay = () => {
                                     </svg>
                                 </div>
                             </div>
+                        )}
+
+                        {/* Rotate handle (A3) — edits clip.rotation, the layer's base
+                            rotation; animated presets still add on top of it. Same
+                            two-phase commit as resize: live on the dragged clip,
+                            real scope (global/individual) on release. */}
+                        {isActive && (
+                            <RotateHandle
+                                getElement={() => clipElRefs.current[clip.id]}
+                                rotation={Number(clip.rotation) || 0}
+                                onStart={() => saveToHistory()}
+                                onLive={(deg) => applyCaptionUpdate({ rotation: deg }, { clipId: clip.id, skipHistory: true, liveOnly: true })}
+                                onCommit={(deg) => applyCaptionUpdate({ rotation: deg }, { clipId: clip.id, skipHistory: true })}
+                            />
                         )}
 
                         {/* Pinch hint — shown briefly when clip is first selected on mobile */}

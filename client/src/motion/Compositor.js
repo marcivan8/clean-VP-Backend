@@ -59,6 +59,17 @@ import { clipToMotionLayer } from './ClipAdapter.js';
 import { resolveMotionAt } from './MotionResolver.js';
 import { LAYER_KINDS } from './MotionSchema.js';
 
+// Same test as LayoutPresets.hasLayoutFrame (R88). Inlined rather than
+// imported: the regression suites load this file by concatenating a fixed list
+// of motion modules, and scripts/test_layout_presets.mjs checks the two stay
+// identical.
+const LAYOUT_FRAME_PRESETS = ['split', 'fullscreen', 'pip'];
+function hasLayoutFrame(clip) {
+    const f = clip?.frame;
+    return !!(f && LAYOUT_FRAME_PRESETS.includes(f.preset)
+        && [f.x, f.y, f.w, f.h].every(Number.isFinite) && f.w > 0 && f.h > 0);
+}
+
 /** Bump when the plan shape changes so a worker can reject one it can't execute. */
 export const COMPOSITION_PLAN_VERSION = 1;
 
@@ -301,7 +312,7 @@ function sampleGeometry(layer, frame, timeMap) {
 // samples with the SAME Douglas-Peucker logic that fixed the curve-flattening
 // bug here (see the comment below) — a second copy could silently regress
 // independently of this one.
-export function simplifySamples(samples, tolerance = 0.0015, keys = ['x', 'y', 'w', 'h', 'opacity']) {
+export function simplifySamples(samples, tolerance = 0.0015, keys = ['x', 'y', 'w', 'h', 'opacity', 'rotation']) {
     if (!Array.isArray(samples) || samples.length <= 2) return samples;
 
     const KEYS = keys;
@@ -409,7 +420,24 @@ export function buildCompositionPlan(tracks, opts = {}) {
             // while still costing a full pass.
             if (!(endOut > startOut)) continue;
 
-            const geometry = sampleGeometry(layer, frame, timeMap);
+            let geometry = sampleGeometry(layer, frame, timeMap);
+
+            // R88 layout presets: the clip sits in a fixed box (frame
+            // fractions) and its media COVERS it, cropped around the focus
+            // point. Opacity/blur still come from the motion samples.
+            let fit = null;
+            if (hasLayoutFrame(clip)) {
+                const f = clip.frame;
+                const boxed = geometry.map(g => ({ ...g, x: f.x, y: f.y, w: f.w, h: f.h, rotation: 0 }));
+                geometry = boxed.filter((g, i) => i === 0 || i === boxed.length - 1
+                    || Math.abs(g.opacity - boxed[i - 1].opacity) > 1e-3 || Math.abs((g.blur || 0) - (boxed[i - 1].blur || 0)) > 1e-3);
+                fit = {
+                    mode: 'cover',
+                    focusX: Math.max(0, Math.min(1, Number(f.focusX ?? 0.5))),
+                    focusY: Math.max(0, Math.min(1, Number(f.focusY ?? 0.5))),
+                    preset: f.preset,
+                };
+            }
 
             overlays.push({
                 id: `ov-${clip.id}`,
@@ -430,6 +458,7 @@ export function buildCompositionPlan(tracks, opts = {}) {
                 outputEnd: Number(endOut.toFixed(4)),
                 animated: geometry.length > 1,
                 geometry,
+                ...(fit ? { fit } : {}),
             });
         }
     }

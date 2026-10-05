@@ -3,6 +3,7 @@ import { performSilenceRemoval, performFillerRemoval, performAudioDenoise, perfo
 import { ContentAnalyzer } from './ContentAnalyzer.js';
 import { LongFormEditPlanner } from './LongFormEditPlanner.js';
 import { authFetch } from '../utils/authFetch.js';
+import { autoEmphasizeCaptions, clearAllEmphasis } from '../utils/captionEmphasis.js';
 
 /**
  * VideoEditorTools
@@ -288,6 +289,16 @@ export const TOOL_DEFINITIONS = [
             },
             required: ["lutId"]
         }
+    },
+    {
+        name: "emphasize_keywords",
+        description: "Highlight the key word of each caption (numbers, outcomes, emphatic words) in the caption style's emphasis look.",
+        parameters: { type: "object", properties: { overwrite: { type: "boolean", description: "Also replace key words the user picked by hand" } } }
+    },
+    {
+        name: "clear_keywords",
+        description: "Remove key word emphasis from every caption.",
+        parameters: { type: "object", properties: {} }
     },
     {
         name: "clear_lut",
@@ -835,6 +846,11 @@ export class VideoEditorTools {
             case 'search_presets':    return await this.searchPresets(action.args);
             case 'apply_lut':         return await this.applyLUT(action.args);
             case 'clear_lut':         return this.clearLUT(action.args);
+            case 'emphasize_keywords': return await this.emphasizeKeywords(action.args);
+            case 'layout_split_screen':       return this.applyLayoutPreset('split', action.args);
+            case 'layout_picture_in_picture': return this.applyLayoutPreset('pip', action.args);
+            case 'layout_fullscreen':         return this.applyLayoutPreset('fullscreen', action.args);
+            case 'clear_keywords':     return this.clearKeywords(action.args);
             case 'add_sfx':           return this.addSFX(action.args);
             case 'apply_preset':      return await this.applyPreset(action.args);
             case 'export_audio':      return await this.exportAudio(action.args);
@@ -2018,6 +2034,72 @@ if (matches.length === 0 && titleCardsCreated === 0) {
      * @param {object}  args
      * @param {boolean} [args.applyToAll=false] — same manually-adjusted guard as applyLUT().
      */
+    /**
+     * R88 — keyword emphasis on every caption (rules, then LLM for unsure ones).
+     * R30: reports failure when nothing changed instead of claiming success.
+     */
+    async emphasizeKeywords({ overwrite = false } = {}) {
+        try {
+            const hasCaptions = (this.store.tracks || []).some(t => t.type === 'text' && (t.clips || []).length > 0);
+            if (!hasCaptions) return { success: false, message: 'There are no captions to highlight yet. Add captions first.' };
+            const r = await autoEmphasizeCaptions({ useLLM: true, overwrite: !!overwrite, source: 'assistant' });
+            if (r.updated === 0) {
+                const why = r.skippedUser > 0
+                    ? `the captions already have key words you picked by hand (${r.skippedUser})`
+                    : 'every caption already has its key words, or none had a clear one';
+                return { success: false, message: `No caption changed: ${why}.` };
+            }
+            const llm = r.llmPicked > 0 ? ` (${r.llmPicked} decided by the assistant)` : '';
+            return { success: true, message: `Key words highlighted on ${r.updated} caption(s)${llm}.`, updated: r.updated };
+        } catch (error) {
+            console.error('[VideoEditorTools] emphasizeKeywords error:', error);
+            return { success: false, message: `Could not highlight key words: ${error.message}` };
+        }
+    }
+
+    /**
+     * R88 — apply a layout preset to an overlay video/image: the selected one
+     * if it is on the overlay track, otherwise the one under the playhead.
+     */
+    applyLayoutPreset(preset) {
+        try {
+            const state = useTimelineStore.getState();
+            const overlays = (state.tracks || []).filter(t => t.type === 'overlay')
+                .flatMap(t => (t.clips || []).filter(c => c.type === 'video' || c.type === 'image').map(c => ({ track: t, clip: c })));
+            if (overlays.length === 0) {
+                return { success: false, message: 'There is no b-roll or image on the overlay track to lay out. Add one first.' };
+            }
+            const t = state.currentTime || 0;
+            const target = overlays.find(o => o.clip.id === state.activeClipId)
+                || overlays.find(o => t >= o.clip.start && t < o.clip.start + o.clip.duration)
+                || null;
+            if (!target) {
+                return { success: false, message: 'Select the b-roll clip (or move the playhead over it) to choose which one to lay out.' };
+            }
+            const r = state.applyLayout(target.track.id, target.clip.id, preset);
+            if (!r?.success) return { success: false, message: r?.error || 'Layout could not be applied.' };
+            const names = { split: 'Split screen', pip: 'Picture in picture', fullscreen: 'Full-screen cutaway' };
+            const face = preset === 'split'
+                ? (r.faceAware ? ' The speaker is framed from the speaker detection.' : ' The speaker is framed from the centre; run "separate speaker" first for face-aware framing.')
+                : '';
+            return { success: true, message: `${names[preset]} applied to "${target.clip.name || 'the clip'}".${face}` };
+        } catch (error) {
+            console.error('[VideoEditorTools] applyLayoutPreset error:', error);
+            return { success: false, message: `Could not apply the layout: ${error.message}` };
+        }
+    }
+
+    clearKeywords() {
+        try {
+            const n = clearAllEmphasis();
+            if (n === 0) return { success: false, message: 'No caption has highlighted key words.' };
+            return { success: true, message: `Key word highlights removed from ${n} caption(s).`, cleared: n };
+        } catch (error) {
+            console.error('[VideoEditorTools] clearKeywords error:', error);
+            return { success: false, message: `Could not remove key word highlights: ${error.message}` };
+        }
+    }
+
     clearLUT({ applyToAll = false } = {}) {
         try {
             const state = this.store;

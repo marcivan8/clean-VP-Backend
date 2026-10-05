@@ -121,7 +121,15 @@ function compileOverlaySource(ov, inputIdx, label, frame) {
     const parts = [];
 
     // 1. Shift onto output time FIRST so every later filter shares one clock.
-    parts.push(`setpts=PTS-STARTPTS+${n4(ov.outputStart)}/TB`);
+    // A sped-up/slowed video overlay plays at its own speed (R88; it used to
+    // play at 1x whatever the clip said). Its in-point is applied as an input
+    // seek by exportProcessor (`-ss sourceOffset`), so PTS starts at 0 here.
+    const ovSpeed = Number(ov.speed) > 0 ? Number(ov.speed) : 1;
+    if (ov.source?.type === 'video' && Math.abs(ovSpeed - 1) > 0.001) {
+        parts.push(`setpts=(PTS-STARTPTS)/${n4(ovSpeed)}+${n4(ov.outputStart)}/TB`);
+    } else {
+        parts.push(`setpts=PTS-STARTPTS+${n4(ov.outputStart)}/TB`);
+    }
 
     // 2. Size. `eval=frame` re-evaluates per frame, which is what makes an
     //    animated scale (a sticker "pop") possible at all — verified against a
@@ -133,26 +141,60 @@ function compileOverlaySource(ov, inputIdx, label, frame) {
     // width fails the encode with a message that names neither the overlay nor
     // the cause.
     const even = (px) => Math.max(2, Math.round(px / 2) * 2);
-    if (isAnimated(samples, 'w') || isAnimated(samples, 'h')) {
-        parts.push(
-            `scale=w='2*floor((${buildPiecewiseExpr(samples, 'w', W)})/2)'` +
-            `:h='2*floor((${buildPiecewiseExpr(samples, 'h', H)})/2)':eval=frame`
-        );
-    } else {
-        parts.push(`scale=${even(first.w * W)}:${even(first.h * H)}`);
-    }
-
-    // 3. Alpha must exist before rotate/opacity, or rotation fills the corners
-    //    with black instead of leaving them transparent.
-    parts.push('format=yuva420p');
-
-    // 4. Rotation. Static only in v1 — `rotate` accepts a per-frame expression
-    //    but also resizes its own output box, which would fight the geometry
-    //    already computed by the plan. Animated rotation is therefore pinned to
-    //    the first sample rather than silently drifting out of position.
+    const sizeAnimated = isAnimated(samples, 'w') || isAnimated(samples, 'h');
     const rot = Number(first.rotation) || 0;
-    if (Math.abs(rot) > 0.01) {
-        parts.push(`rotate=${n4(rot * Math.PI / 180)}:c=none:ow=rotw(${n4(rot * Math.PI / 180)}):oh=roth(${n4(rot * Math.PI / 180)})`);
+    const rotAnimated = isAnimated(samples, 'rotation');
+    const rotated = rotAnimated || Math.abs(rot) > 0.01;
+
+    if (ov.fit && ov.fit.mode === 'cover') {
+        // R88 layout presets: COVER the box, crop around the focus point —
+        // the export twin of CSS object-fit: cover; object-position: fx fy.
+        // A framed layer never rotates or resizes (LayoutPresets.js).
+        const bw = even(first.w * W);
+        const bh = even(first.h * H);
+        const fx = Math.max(0, Math.min(1, Number(ov.fit.focusX ?? 0.5)));
+        const fy = Math.max(0, Math.min(1, Number(ov.fit.focusY ?? 0.5)));
+        parts.push(`scale=${bw}:${bh}:force_original_aspect_ratio=increase`);
+        parts.push(`crop=${bw}:${bh}:'(iw-${bw})*${n4(fx)}':'(ih-${bh})*${n4(fy)}'`);
+        parts.push('format=yuva420p');
+    } else if (!rotated) {
+        // Unrotated layers: exactly the chain they have always had.
+        if (sizeAnimated) {
+            parts.push(
+                `scale=w='2*floor((${buildPiecewiseExpr(samples, 'w', W)})/2)'` +
+                `:h='2*floor((${buildPiecewiseExpr(samples, 'h', H)})/2)':eval=frame`
+            );
+        } else {
+            parts.push(`scale=${even(first.w * W)}:${even(first.h * H)}`);
+        }
+
+        // 3. Alpha must exist before rotate/opacity, or rotation fills the corners
+        //    with black instead of leaving them transparent.
+        parts.push('format=yuva420p');
+    } else {
+        // R88 — rotated layers (the rotate handle on stickers, animated spins).
+        // Size first to the FIRST sample (constant), rotate (constant output
+        // box: the diagonal for an animated angle, the exact rotated bounds for
+        // a fixed one), THEN apply any size animation as a factor on that box.
+        // Rotating after a per-frame resize would hand `rotate` a changing input
+        // size, which it does not support. Uniform scale and rotation commute,
+        // so the picture is the same. The overlay below centres the result on
+        // the layer's centre (overlay_w/overlay_h), which also fixes the old
+        // static-rotation chain placing the larger rotated box by its top-left.
+        const w0 = even(first.w * W);
+        const h0 = even(first.h * H);
+        parts.push(`scale=${w0}:${h0}`);
+        parts.push('format=yuva420p');
+        if (rotAnimated) {
+            parts.push(`rotate=a='${buildPiecewiseExpr(samples, 'rotation', Math.PI / 180)}':c=none:ow='hypot(iw,ih)':oh='hypot(iw,ih)'`);
+        } else {
+            const a = n4(rot * Math.PI / 180);
+            parts.push(`rotate=${a}:c=none:ow=rotw(${a}):oh=roth(${a})`);
+        }
+        if (sizeAnimated) {
+            const f = `(${buildPiecewiseExpr(samples, 'w', W)})/${w0}`;
+            parts.push(`scale=w='max(2,2*floor(iw*${f}/2))':h='max(2,2*floor(ih*${f}/2))':eval=frame`);
+        }
     }
 
     // 5. Opacity. A constant is a cheap channel mix; a changing one becomes
@@ -241,8 +283,15 @@ function compileCompositionPlan(plan, inputs) {
     let current = '0:v';
     drawable.forEach((ov, i) => {
         const samples = decimate(ov.geometry, MAX_GEOMETRY_SAMPLES);
-        const xExpr = buildPiecewiseExpr(samples, 'x', frame.width);
-        const yExpr = buildPiecewiseExpr(samples, 'y', frame.height);
+        let xExpr = buildPiecewiseExpr(samples, 'x', frame.width);
+        let yExpr = buildPiecewiseExpr(samples, 'y', frame.height);
+        // A rotated layer is bigger than its geometry box: place it by its
+        // CENTRE (x + w/2) instead of its top-left. Unrotated layers keep the
+        // exact expression they always had.
+        if (isAnimated(samples, 'rotation') || Math.abs(Number(samples[0]?.rotation) || 0) > 0.01) {
+            xExpr = `(${xExpr})+(${buildPiecewiseExpr(samples, 'w', frame.width)})/2-overlay_w/2`;
+            yExpr = `(${yExpr})+(${buildPiecewiseExpr(samples, 'h', frame.height)})/2-overlay_h/2`;
+        }
         const outLabel = (i === drawable.length - 1) ? 'vout' : `bg${i}`;
 
         // `enable` gates the overlay to its window; without it the last frame of

@@ -321,7 +321,9 @@
     "pacingAlert": "Pacing Alert",
     "sceneIsDragging": "Scene is dragging ({{seconds}}s)",
     "dragPinchToScale": "drag · pinch to scale",
-    "generatingPreview": "Generating preview…"
+    "generatingPreview": "Generating preview…",
+    "rotate": "Rotate",
+    "rotateHint": "Drag to rotate (Shift: 15° steps)"
   },
   "approvalDialog": {
     "whyNeedsApproval": "Why this needs approval:",
@@ -416,7 +418,17 @@
     "expandCaptionHint": "Expand a caption to edit its style",
     "customCount_one": "{{count}} custom",
     "customCount_other": "{{count}} custom",
-    "myCaptionStyle": "My Caption Style"
+    "myCaptionStyle": "My Caption Style",
+    "rotation": "Rotation",
+    "resetRotation": "Reset rotation",
+    "keywords": "Key words",
+    "keywordsAuto": "Auto-pick key words",
+    "keywordsWorking": "Picking…",
+    "keywordsClear": "Clear",
+    "keywordsDone": "Key words set on {{count}} caption(s).",
+    "keywordsFailed": "Could not pick key words. Try again.",
+    "keywordsCleared": "Removed from {{count}} caption(s).",
+    "keywordsWordsHint": "Tap a word to emphasise it"
   },
   "interviewPanel": {
     "styleSubtle": "Subtle",
@@ -778,5 +790,16 @@
     "applied_one": "Removed {{count}} retake.",
     "applied_other": "Removed {{count}} retakes.",
     "none": "No retakes found."
+  },
+  "layout": {
+    "title": "Layout",
+    "split": "Split screen",
+    "fullscreen": "Full screen",
+    "pip": "Picture in picture",
+    "reset": "Remove layout",
+    "panHint": "Drag the picture in the preview to reframe it.",
+    "splitFace": "Speaker framed from the speaker detection.",
+    "splitNoFace": "Speaker framed from the centre. Run \"separate speaker\" first for face-aware framing.",
+    "failed": "Could not apply this layout."
   }
 }

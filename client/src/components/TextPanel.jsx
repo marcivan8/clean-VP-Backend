@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../store/useTimelineStore';
 import { AlignLeft, AlignCenter, AlignRight, Plus, Bold, Italic, Underline, RotateCcw, Type } from 'lucide-react';
 import SaveAsPresetButton from './SaveAsPresetButton.jsx';
+import { autoEmphasizeCaptions, clearAllEmphasis, toggleEmphasisWord } from '../utils/captionEmphasis.js';
+import { resolveEmphasis } from '../motion/CaptionModel.js';
 
 const FONT_GROUPS = [
     { group: 'Talking Head',       groupKey: 'textPanel.fontGroupTalkingHead',    fonts: ['Anton', 'Bebas Neue', 'Montserrat', 'Inter', 'Barlow Condensed'] },
@@ -50,6 +52,65 @@ const S = {
 // onUpdate       — commit change to history (buttons, select, etc.)
 // onLiveUpdate   — skipHistory drag preview; onUpdate fires on pointerUp to commit
 // livePos        — { x, y } override from parent's drag state (avoids reading stale clip)
+// ── Keyword emphasis (R88, to-do A2) ─────────────────────────────────────────
+// Auto-pick runs free JS rules first and asks the LLM only about the captions
+// the rules could not settle. With a caption selected, its words are shown as
+// chips: tapping one toggles it (and marks the caption as hand-picked, so a
+// later auto-pick leaves it alone).
+const KeywordSection = ({ clip, showWords }) => {
+    const { t } = useTranslation('editor');
+    const [busy, setBusy] = useState(false);
+    const [note, setNote] = useState(null);
+    const tokens = String(clip?.content || '').split(' ').filter(Boolean);
+    const emphasis = clip ? resolveEmphasis(clip, tokens.length) : null;
+    const picked = new Set(emphasis?.indices || []);
+
+    const runAuto = async () => {
+        if (busy) return;
+        setBusy(true);
+        setNote(null);
+        try {
+            const r = await autoEmphasizeCaptions({ useLLM: true });
+            setNote(t('textPanel.keywordsDone', { count: r.updated }));
+        } catch (err) {
+            console.error('[TextPanel] auto keywords failed:', err);
+            setNote(t('textPanel.keywordsFailed'));
+        } finally {
+            setBusy(false);
+        }
+    };
+    const clearAll = () => {
+        const n = clearAllEmphasis();
+        setNote(t('textPanel.keywordsCleared', { count: n }));
+    };
+
+    return (
+        <div style={S.section}>
+            <div style={{ ...S.label, marginBottom: 8 }}>{t('textPanel.keywords')}</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: showWords && tokens.length > 0 ? 10 : 0 }}>
+                <button type="button" onClick={runAuto} disabled={busy} style={{ ...S.pill(false), opacity: busy ? 0.6 : 1 }}>
+                    {busy ? t('textPanel.keywordsWorking') : t('textPanel.keywordsAuto')}
+                </button>
+                <button type="button" onClick={clearAll} disabled={busy} style={S.pill(false)}>
+                    {t('textPanel.keywordsClear')}
+                </button>
+            </div>
+            {showWords && tokens.length > 0 && (
+                <div role="group" aria-label={t('textPanel.keywordsWordsHint')} style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {tokens.map((w, i) => (
+                        <button key={`${i}-${w}`} type="button" aria-pressed={picked.has(i)}
+                            onClick={() => toggleEmphasisWord(clip.id, i)}
+                            style={S.pill(picked.has(i))}>
+                            {w}
+                        </button>
+                    ))}
+                </div>
+            )}
+            {note && <div style={{ marginTop: 8, fontFamily: 'var(--f-sans)', fontSize: 10, color: 'var(--fg-4)' }}>{note}</div>}
+        </div>
+    );
+};
+
 const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true, showReset = false, onReset }) => {
     const { t } = useTranslation('editor');
     // Fall back to onUpdate if no live variant provided
@@ -205,7 +266,33 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true
                             style={{ width: '100%', accentColor: 'var(--accent)', height: 3, cursor: 'pointer' }} />
                     </div>
                 ))}
+                {/* Rotation (A3) — base rotation in degrees; the on-canvas rotate
+                    handle edits the same field. Presets animate on top of it. */}
+                <div style={{ marginBottom: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                        <span style={{ fontFamily: 'var(--f-sans)', fontSize: 11, color: 'var(--fg-3)' }}>{t('textPanel.rotation')}</span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)' }}>{Math.round(Number(clip.rotation) || 0)}°</span>
+                            {Number(clip.rotation) ? (
+                                <button type="button" onClick={() => onUpdate({ rotation: 0 })}
+                                    title={t('textPanel.resetRotation')}
+                                    aria-label={t('textPanel.resetRotation')}
+                                    style={{ background: 'none', border: 'none', color: 'var(--fg-4)', cursor: 'pointer', padding: 0, display: 'flex' }}>
+                                    <RotateCcw size={10} />
+                                </button>
+                            ) : null}
+                        </span>
+                    </div>
+                    <input type="range" min="-180" max="180" step="1" value={Math.round(Number(clip.rotation) || 0)}
+                        onChange={(e) => live({ rotation: parseInt(e.target.value, 10) || 0 })}
+                        onPointerUp={(e) => onUpdate({ rotation: parseInt(e.target.value, 10) || 0 })}
+                        onKeyUp={(e) => onUpdate({ rotation: parseInt(e.target.value, 10) || 0 })}
+                        aria-label={t('textPanel.rotation')}
+                        style={{ width: '100%', accentColor: 'var(--accent)', height: 3, cursor: 'pointer' }} />
+                </div>
             </div>
+
+            <KeywordSection clip={clip} showWords={showContent} />
 
             {/* Animation */}
             <div style={S.section}>
@@ -584,6 +671,7 @@ const TextPanel = () => {
         animation:      displayClip.animation      || null,
         x:              displayClip.x,
         y:              displayClip.y,
+        rotation:       Number(displayClip.rotation) || 0,
     });
 
     return (

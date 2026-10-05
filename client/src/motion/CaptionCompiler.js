@@ -37,16 +37,15 @@
  * see `parseTextShadow`), glow (approximated as a soft multi-pass stroke
  * halo, not a true Gaussian blur — see the server compiler), uppercase, and
  * word-by-word reveal (typewriter / real word timings).
- * Does NOT ship: per-word HIGHLIGHT colour (the "active word" recolouring
- * TextOverlay does live) — that needs per-word pixel positions, which needs
- * server-side font metrics this codebase does not have. Left for a follow-up
- * rather than approximated badly. Rotation is also not animated (drawtext has
- * no native rotation; R60's compositor made the same call for overlays).
+ * Per-word HIGHLIGHT colour, keyword EMPHASIS and ROTATION (R88) are not
+ * drawtext features. Entries that need them carry a `raster` block and are
+ * drawn as pre-rendered images by server/compositor/RasterCaptionCompiler.js
+ * (node-canvas measures the real font, so per-word positions are exact).
  */
 
 import { clipToMotionLayer } from './ClipAdapter.js';
 import { resolveMotionAt } from './MotionResolver.js';
-import { revealedWordCount } from './CaptionModel.js';
+import { revealedWordCount, activeWordIndex, resolveEmphasis } from './CaptionModel.js';
 import { buildTimeMap, timelineToOutputTime, simplifySamples, GEOMETRY_SAMPLE_STEP } from './Compositor.js';
 
 export const CAPTION_PROGRAM_VERSION = 1;
@@ -98,7 +97,73 @@ function needsCaptionProgram(clip, layer) {
     if (Array.isArray(layer?.animations) && layer.animations.length > 0) return true;
     if (parseTextShadow(clip.textShadow)) return true;
     if (clip.captionStyle?.uppercase) return true;
+    if (Math.abs(Number(clip.rotation) || 0) > 0.05) return true;
+    if (activeHighlight(clip)) return true;
+    if (resolveEmphasis(clip)) return true;
     return false;
+}
+
+/**
+ * The style pack's active-word highlight, when the preview would actually
+ * draw it: TextOverlay only renders per word when real word timings exist and
+ * the mode is not 'none' (`needsWordRender`). Same gate here, nothing broader.
+ */
+function activeHighlight(clip) {
+    const h = clip?.captionStyle?.wordHighlight;
+    if (!h || !h.mode || h.mode === 'none') return null;
+    if (!Array.isArray(clip.words) || clip.words.length === 0) return null;
+    return h;
+}
+
+/**
+ * Per-word display states over a clip's lifetime, in OUTPUT time, computed
+ * with the SAME functions CaptionWords (TextOverlay.jsx) calls for the preview:
+ * `revealedWordCount` for how many words are visible and `activeWordIndex`
+ * for the highlighted one. Sampled at every word boundary plus the geometry
+ * cadence (for reveal animations without word timings), then collapsed into
+ * runs. Each run becomes one pre-rendered image on the server.
+ *
+ * @returns {Array<{from:number,to:number,shown:number,active:number}>}
+ */
+function buildWordStates(clip, layer, timeMap, tokenCount, highlight) {
+    const start = Number(layer.startTime) || 0;
+    const end = start + (Number(layer.duration) || 0);
+    const words = Array.isArray(clip.words) && clip.words.length > 0 ? clip.words : null;
+
+    const times = new Set([start]);
+    for (let t = start + GEOMETRY_SAMPLE_STEP; t < end; t += GEOMETRY_SAMPLE_STEP) times.add(Number(t.toFixed(4)));
+    if (words) {
+        for (const w of words) {
+            for (const edge of [w?.start, w?.end]) {
+                if (!Number.isFinite(edge)) continue;
+                // A word boundary is sampled exactly and just after (activeWordIndex
+                // uses an inclusive end, so `end` itself still shows that word).
+                for (const tt of [edge, edge + 0.0005]) if (tt >= start && tt < end) times.add(Number(tt.toFixed(4)));
+            }
+        }
+    }
+
+    const sorted = [...times].sort((a, b) => a - b);
+    const runs = [];
+    for (const t of sorted) {
+        const m = resolveMotionAt(layer, t);
+        // Same rule as CaptionWords: emphasis alone shows the whole caption.
+        const revealing = m.reveal < 1 || (!!highlight && !!words);
+        const shown = revealing ? revealedWordCount(words, t, m.reveal, tokenCount) : tokenCount;
+        const active = highlight && words ? activeWordIndex(words, t) : -1;
+        const prev = runs[runs.length - 1];
+        if (prev && prev.shown === shown && prev.active === active) continue;
+        runs.push({ fromTimeline: t, shown, active });
+    }
+
+    const out = [];
+    for (let i = 0; i < runs.length; i++) {
+        const from = timelineToOutputTime(timeMap, runs[i].fromTimeline);
+        const to = i + 1 < runs.length ? timelineToOutputTime(timeMap, runs[i + 1].fromTimeline) : timelineToOutputTime(timeMap, end);
+        if (!(to > from)) continue;
+        out.push({ from: Number(from.toFixed(4)), to: Number(to.toFixed(4)), shown: runs[i].shown, active: runs[i].active });
+    }
+    return out;
 }
 
 /**
@@ -224,7 +289,7 @@ export function buildCaptionProgram(tracks, baseClips) {
             const text = clip.captionStyle?.uppercase ? rawText.toUpperCase() : rawText;
             const tokens = text.split(' ').filter(Boolean);
 
-            const geometry = sampleChannel(layer, timeMap, ['x', 'y', 'scale', 'opacity', 'glow']);
+            const geometry = sampleChannel(layer, timeMap, ['x', 'y', 'scale', 'opacity', 'glow', 'rotation']);
 
             // Gate on a genuine reveal-type ANIMATION (e.g. the `word-reveal`
             // preset), not merely on `clip.words` being present. TextOverlay
@@ -240,6 +305,20 @@ export function buildCaptionProgram(tracks, baseClips) {
 
             const revealSteps = needsReveal ? buildRevealSteps(clip, layer, timeMap, tokens) : null;
 
+            // ── Raster entries (A2/A3) ─────────────────────────────────────
+            // Rotation, the active-word highlight and keyword emphasis all need
+            // per-word positions or a rotated glyph run — things drawtext cannot
+            // do. Those clips are flagged `raster` and drawn server-side as
+            // pre-rendered images (server/compositor/RasterCaptionCompiler.js).
+            // Everything else in the entry is unchanged, so an older worker, or
+            // the raster pass failing, still renders the text through the R63
+            // drawtext path: the caption appears, only without those effects.
+            const highlight = activeHighlight(clip);
+            const emphasis = resolveEmphasis(clip, tokens.length);
+            const rotated = geometry.some(g => Math.abs(Number(g.rotation) || 0) > 0.05);
+            const wordRender = !!highlight || !!emphasis || needsReveal;
+            const raster = rotated || !!highlight || !!emphasis;
+
             entries.push({
                 clipId: clip.id,
                 trackId: track.id,
@@ -254,8 +333,32 @@ export function buildCaptionProgram(tracks, baseClips) {
                     stroke: clip.stroke || null,
                     shadow: parseTextShadow(clip.textShadow),
                 },
-                geometry,       // [{t, x, y, scale, opacity, glow}] in OUTPUT time
+                geometry,       // [{t, x, y, scale, opacity, glow, rotation}] in OUTPUT time
                 revealSteps,    // [{prefixCount, fromOutput, toOutput}] | null — null means render `text` whole
+                ...(raster ? {
+                    raster: {
+                        // The preview box: 80% of the frame wide, pre-wrap,
+                        // centred on (x, y) — TextOverlay.jsx's caption <div>.
+                        layout: {
+                            widthFrac: 0.8,
+                            align: clip.textAlign || 'center',
+                            lineHeight: 1.2,
+                            // Per-word spans use a 0.25em right margin instead
+                            // of a space (CaptionWords); plain text uses spaces.
+                            wordGap: wordRender ? 'margin' : 'space',
+                        },
+                        font: {
+                            weight: clip.fontWeight || 'normal',
+                            style: clip.fontStyle || 'normal',
+                        },
+                        // Every layer of the CSS shadow (style packs stack
+                        // several); the drawtext path keeps only one.
+                        textShadow: typeof clip.textShadow === 'string' ? clip.textShadow : null,
+                        highlight: highlight || null,
+                        emphasis: emphasis || null,
+                        wordStates: wordRender ? buildWordStates(clip, layer, timeMap, tokens.length, highlight) : null,
+                    },
+                } : {}),
             });
         }
     }

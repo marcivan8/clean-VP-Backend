@@ -972,6 +972,13 @@ export class TimelineStateManager {
                         // has been MOVED since (see withWordShift).
                         words: shiftWords(clip.words, placement.wordShift),
                         captionStyle: clip.captionStyle,
+                        // R88 — keyword emphasis. Same persistence contract:
+                        // also read back in fromLegacyTracks below.
+                        emphasis: clip.emphasis ?? null,
+                        // R88 — layout presets (overlay box + split speaker reframe).
+                        // Same persistence contract: read back in fromLegacyTracks.
+                        frame: clip.frame ?? null,
+                        layoutBase: clip.layoutBase ?? null,
                         // R66 — clip grouping (see client/src/motion/ClipGrouping.js).
                         // Same persistence-contract rule as the three fields above:
                         // MUST also appear in fromLegacyTracks below, or a group
@@ -1076,6 +1083,11 @@ export class TimelineStateManager {
                                 autoAnimate: legacyClip.autoAnimate || undefined,
                                 words: legacyClip.words,
                                 captionStyle: legacyClip.captionStyle,
+                                // R88 — keyword emphasis. Mirrors toLegacyTracks above.
+                                emphasis: legacyClip.emphasis ?? null,
+                                // R88 — layout presets. Mirrors toLegacyTracks above.
+                                frame: legacyClip.frame ?? null,
+                                layoutBase: legacyClip.layoutBase ?? null,
                                 // R66 — clip grouping. Mirrors toLegacyTracks above.
                                 groupId: legacyClip.groupId ?? null,
                                 // R67 — Object Intelligence. Mirrors toLegacyTracks above.

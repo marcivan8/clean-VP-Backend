@@ -1060,6 +1060,11 @@ const COMMAND_REGISTRY = new Map([
     ['rhythm_zoom',      { compiler: compileRhythmZoom }],
     ['crop_clip',        { compiler: compileCropClip }],
     ['detect_speakers',  { compiler: compileAtomicStore('detect_speakers', 'Detect speakers (analysis only)') }],
+    ['emphasize_keywords', { compiler: compileAtomicStore('emphasize_keywords', 'Highlight the key word of each caption') }],
+    ['layout_split_screen',       { compiler: compileAtomicStore('layout_split_screen', 'Split screen layout') }],
+    ['layout_picture_in_picture', { compiler: compileAtomicStore('layout_picture_in_picture', 'Picture-in-picture layout') }],
+    ['layout_fullscreen',         { compiler: compileAtomicStore('layout_fullscreen', 'Full-screen cutaway layout') }],
+    ['clear_keywords',     { compiler: compileAtomicStore('clear_keywords', 'Remove key word highlights') }],
     ['detect_scene',     { compiler: compileAtomicStore('detect_scene', 'Analyse framing (analysis only)') }],
     ['apply_angle',      { compiler: compileAtomicStore('apply_angle', 'Apply planned camera angles') }],
     // R68 — AI Animation Intelligence. No params: MediaExecutionEngine's

@@ -33,6 +33,7 @@ import InterviewEditPanel from '../components/InterviewEditPanel';
 // ReferenceError if it ever were. Add both halves or the panel is dead on
 // arrival.
 import MotionPanel from '../components/MotionPanel';
+import LayoutPresetPicker from '../components/LayoutPresetPicker.jsx';
 import AssetPanel from '../components/AssetPanel';
 import ExportModal from '../components/ExportModal';
 import { Type } from 'lucide-react';
@@ -2238,6 +2239,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                             <div className="p-4 rounded-md border border-dashed border-border text-center"><p className="text-xs text-muted-foreground">{t('ideLayout.transform.selectClip')}</p></div>
                                         ) : (
                                             <>
+                                                {activeTrackType === 'overlay' && (activeClip.type === 'video' || activeClip.type === 'image') && (
+                                                    <div className="pb-4 border-b border-border">
+                                                        <LayoutPresetPicker trackId={activeTrackId} clip={activeClip} />
+                                                    </div>
+                                                )}
                                                 {[
                                                     { key: 'scale', label: t('ideLayout.transform.scale'), min: 10, max: 300, toDisplay: v => Math.round((v || 1) * 100), unit: '%', fromDisplay: v => v / 100 },
                                                     { key: 'x', label: t('ideLayout.transform.positionX'), min: -1920, max: 1920, toDisplay: v => v || 0, unit: 'px', fromDisplay: v => v },

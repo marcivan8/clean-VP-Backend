@@ -225,6 +225,11 @@ export class EditPlanner {
             case 'organize_clips': return this.planOrganizeClips(planId, state, constraints);
             case 'rhythm_zoom': return this.planRhythmZoom(planId, constraints);
             case 'crop_clip':   return this.planCropClip(planId, constraints);
+            case 'layout_split_screen':       return this.planSingleStep(planId, 'layout_split_screen', 'Split screen: speaker top, b-roll bottom');
+            case 'layout_picture_in_picture': return this.planSingleStep(planId, 'layout_picture_in_picture', 'Picture in picture');
+            case 'layout_fullscreen':         return this.planSingleStep(planId, 'layout_fullscreen', 'Full-screen cutaway');
+            case 'emphasize_keywords': return this.planSingleStep(planId, 'emphasize_keywords', 'Highlight the key word of each caption');
+            case 'clear_keywords':     return this.planSingleStep(planId, 'clear_keywords', 'Remove key word highlights from the captions');
             case 'apply_lut':      return this.planApplyLUT(planId, constraints, intent.originalPrompt);
             case 'clear_lut':      return this.planClearLUT(planId, constraints);
             case 'recommend_luts': return this.planRecommendLUTs(planId, constraints);

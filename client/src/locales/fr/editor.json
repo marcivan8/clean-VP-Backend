@@ -321,7 +321,9 @@
     "pacingAlert": "Alerte de rythme",
     "sceneIsDragging": "La scène traîne en longueur ({{seconds}}s)",
     "dragPinchToScale": "glisser · pincer pour redimensionner",
-    "generatingPreview": "Génération de l'aperçu…"
+    "generatingPreview": "Génération de l'aperçu…",
+    "rotate": "Pivoter",
+    "rotateHint": "Glissez pour pivoter (Maj : pas de 15°)"
   },
   "approvalDialog": {
     "whyNeedsApproval": "Pourquoi cela nécessite une approbation :",
@@ -416,7 +418,17 @@
     "expandCaptionHint": "Développez un sous-titre pour modifier son style",
     "customCount_one": "{{count}} personnalisé",
     "customCount_other": "{{count}} personnalisés",
-    "myCaptionStyle": "Mon style de sous-titres"
+    "myCaptionStyle": "Mon style de sous-titres",
+    "rotation": "Rotation",
+    "resetRotation": "Réinitialiser la rotation",
+    "keywords": "Mots clés",
+    "keywordsAuto": "Choisir les mots clés",
+    "keywordsWorking": "Sélection…",
+    "keywordsClear": "Effacer",
+    "keywordsDone": "Mots clés appliqués à {{count}} sous-titre(s).",
+    "keywordsFailed": "Impossible de choisir les mots clés. Réessayez.",
+    "keywordsCleared": "Retirés de {{count}} sous-titre(s).",
+    "keywordsWordsHint": "Touchez un mot pour le mettre en valeur"
   },
   "interviewPanel": {
     "styleSubtle": "Subtil",
@@ -778,5 +790,16 @@
     "applied_one": "{{count}} prise en trop retirée.",
     "applied_other": "{{count}} prises en trop retirées.",
     "none": "Aucune prise multiple trouvée."
+  },
+  "layout": {
+    "title": "Mise en page",
+    "split": "Écran partagé",
+    "fullscreen": "Plein écran",
+    "pip": "Incrustation",
+    "reset": "Retirer la mise en page",
+    "panHint": "Faites glisser l’image dans l’aperçu pour la recadrer.",
+    "splitFace": "Cadrage du locuteur à partir de la détection.",
+    "splitNoFace": "Locuteur cadré au centre. Lancez « séparer le locuteur » pour un cadrage sur le visage.",
+    "failed": "Impossible d’appliquer cette mise en page."
   }
 }

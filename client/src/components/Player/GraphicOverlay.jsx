@@ -15,6 +15,53 @@ import { resolveMotionAt }   from '../../motion/MotionResolver.js';
 // drags its grouped text along with it. See ClipGrouping.js's header for
 // why a group is just clips sharing `clip.groupId`, not a new entity type.
 import { clipsInGroup } from '../../motion/ClipGrouping.js';
+import RotateHandle from './RotateHandle.jsx';
+import { hasLayoutFrame, frameToCss } from '../../motion/LayoutPresets.js';
+
+/**
+ * A video on the overlay track (b-roll cutaway, screen recording, PiP). Before
+ * R88 every overlay was drawn as an <img>, so a video overlay showed a broken
+ * image in the preview while the export composited it correctly. Muted: the
+ * export does not mix overlay audio either (CompositorCompiler, STEP 2.5).
+ * Kept in step with the playhead: seeks when paused, plays along when the
+ * editor plays and re-syncs if it drifts.
+ */
+const OverlayVideo = ({ clip, currentTime, isPlaying, style }) => {
+    const ref = React.useRef(null);
+    const src = clip.proxyUrl || clip.url || clip.sourceUrl;
+    const speed = Number(clip.speed) > 0 ? Number(clip.speed) : 1;
+    const target = (Number(clip.offset) || 0) + Math.max(0, currentTime - (Number(clip.start) || 0)) * speed;
+
+    React.useEffect(() => {
+        const v = ref.current;
+        if (!v) return;
+        try {
+            v.playbackRate = speed;
+            const drift = Math.abs((v.currentTime || 0) - target);
+            if (isPlaying) {
+                if (drift > 0.25) v.currentTime = target;
+                if (v.paused) v.play().catch(() => { /* autoplay refusal: stays on the seeked frame */ });
+            } else {
+                if (!v.paused) v.pause();
+                if (drift > 0.04) v.currentTime = target;
+            }
+        } catch (err) {
+            console.warn('[GraphicOverlay] overlay video sync failed:', err?.message);
+        }
+    }, [target, isPlaying, speed]);
+
+    return (
+        <video
+            ref={ref}
+            src={src}
+            muted
+            playsInline
+            preload="auto"
+            style={style}
+        />
+    );
+};
+
 
 // Must match DEFAULT_WIDTH_FRACTION in motion/Compositor.js's resolveGeometry.
 // The export computes an overlay's on-screen size as 25% of frame width times
@@ -29,9 +76,11 @@ const pointerDist = (a, b) =>
 const GraphicOverlay = () => {
     const containerRef = React.useRef(null);
     const gestureRef = React.useRef({});
+    const clipElRefs = React.useRef({});
 
-    const { currentTime, tracks, activeClipId, updateClip, setActiveClip, saveToHistory } = useTimelineStore(useShallow(state => ({
+    const { currentTime, tracks, activeClipId, updateClip, setActiveClip, saveToHistory, isPlaying } = useTimelineStore(useShallow(state => ({
         currentTime:   state.currentTime,
+        isPlaying:     state.isPlaying,
         tracks:        state.tracks,
         activeClipId:  state.activeClipId,
         updateClip:    state.updateClip,
@@ -60,7 +109,20 @@ const GraphicOverlay = () => {
         state.pointers[e.pointerId] = { clientX: e.clientX, clientY: e.clientY };
         const pointerCount = Object.keys(state.pointers).length;
 
-        if (pointerCount === 1) {
+        if (pointerCount === 1 && hasLayoutFrame(clip)) {
+            // A clip in a layout preset stays in its box; dragging pans the
+            // picture inside the box (the crop focus) instead.
+            saveToHistory();
+            const box = clipElRefs.current[clip.id]?.getBoundingClientRect();
+            state.dragStartX = e.clientX;
+            state.dragStartY = e.clientY;
+            state.boxW = box?.width || 1;
+            state.boxH = box?.height || 1;
+            state.initialFocusX = Number(clip.frame.focusX ?? 0.5);
+            state.initialFocusY = Number(clip.frame.focusY ?? 0.5);
+            state.mode = 'focus';
+            state.trackId = trackId;
+        } else if (pointerCount === 1) {
             saveToHistory();
             state.dragStartX   = e.clientX;
             state.dragStartY   = e.clientY;
@@ -100,6 +162,15 @@ const GraphicOverlay = () => {
 
         const rect = containerRef.current?.getBoundingClientRect();
         if (!rect) return;
+
+        if (state.mode === 'focus') {
+            const clamp01 = (v) => Math.max(0, Math.min(1, v));
+            // Dragging the picture right reveals more of its left side.
+            const focusX = clamp01(state.initialFocusX - (e.clientX - state.dragStartX) / state.boxW);
+            const focusY = clamp01(state.initialFocusY - (e.clientY - state.dragStartY) / state.boxH);
+            updateClip(state.trackId, clip.id, { frame: { ...clip.frame, focusX, focusY } }, { skipHistory: true });
+            return;
+        }
 
         if (state.mode === 'pinch' && Object.keys(state.pointers).length === 2) {
             const pts = Object.values(state.pointers);
@@ -158,30 +229,80 @@ const GraphicOverlay = () => {
                     motion.rotation ? `rotate(${motion.rotation}deg)` : '',
                 ].filter(Boolean).join(' ');
 
+                const isVideo = clip.type === 'video';
+                const handlers = {
+                    onPointerDown: (e) => handlePointerDown(e, clip, trackId),
+                    onPointerMove: (e) => handlePointerMove(e, clip),
+                    onPointerUp: (e) => handlePointerUp(e, clip),
+                    onPointerCancel: (e) => handlePointerUp(e, clip),
+                };
+                const setRef = (el) => { if (el) clipElRefs.current[clip.id] = el; else delete clipElRefs.current[clip.id]; };
+
+                // R88 layout presets: a fixed box, the media covering it
+                // (object-fit: cover around the focus point). Same arithmetic
+                // as the export's scale+crop (CompositorCompiler, `fit`).
+                if (hasLayoutFrame(clip)) {
+                    const css = frameToCss(clip.frame);
+                    const mediaStyle = {
+                        ...css.media,
+                        opacity: motion.opacity,
+                        pointerEvents: 'none',
+                    };
+                    return (
+                        <div
+                            key={clip.id}
+                            ref={setRef}
+                            {...handlers}
+                            className={`absolute select-none ${isActive ? 'ring-1 ring-primary ring-inset' : ''}`}
+                            style={{ ...css.box, pointerEvents: 'auto', touchAction: 'none', cursor: isActive ? 'grab' : 'pointer' }}
+                        >
+                            {isVideo
+                                ? <OverlayVideo clip={clip} currentTime={currentTime} isPlaying={isPlaying} style={mediaStyle} />
+                                : <img src={src} alt={clip.name || 'overlay'} draggable={false} style={mediaStyle} />}
+                        </div>
+                    );
+                }
+
+                // The wrapper carries position/size/rotation so the rotate
+                // handle (a child) can sit on the sticker's corner; opacity and
+                // blur stay on the media so the handle itself never fades.
+                const mediaStyle = {
+                    display: 'block',
+                    width: '100%',
+                    height: 'auto',
+                    opacity: motion.opacity,
+                    ...(motion.blur > 0 ? { filter: `blur(${motion.blur}px)` } : {}),
+                    pointerEvents: 'none',
+                };
                 return (
-                    <img
+                    <div
                         key={clip.id}
-                        src={src}
-                        alt={clip.name || 'overlay'}
-                        draggable={false}
-                        onPointerDown={(e) => handlePointerDown(e, clip, trackId)}
-                        onPointerMove={(e) => handlePointerMove(e, clip)}
-                        onPointerUp={(e)   => handlePointerUp(e, clip)}
-                        onPointerCancel={(e) => handlePointerUp(e, clip)}
+                        ref={setRef}
+                        {...handlers}
                         className={`absolute select-none origin-center ${isActive ? 'ring-1 ring-primary ring-offset-1 ring-offset-transparent' : ''}`}
                         style={{
                             left: `${motion.x}%`,
                             top: `${motion.y}%`,
                             width: `${DEFAULT_WIDTH_FRACTION * (Number.isFinite(motion.scale) ? motion.scale : 1)}%`,
-                            height: 'auto',
                             transform,
-                            opacity: motion.opacity,
-                            ...(motion.blur > 0 ? { filter: `blur(${motion.blur}px)` } : {}),
                             pointerEvents: 'auto',
                             touchAction: 'none',
                             cursor: 'move',
                         }}
-                    />
+                    >
+                        {isVideo
+                            ? <OverlayVideo clip={clip} currentTime={currentTime} isPlaying={isPlaying} style={mediaStyle} />
+                            : <img src={src} alt={clip.name || 'overlay'} draggable={false} style={mediaStyle} />}
+                        {isActive && (
+                            <RotateHandle
+                                getElement={() => clipElRefs.current[clip.id]}
+                                rotation={Number(clip.rotation) || 0}
+                                onStart={() => saveToHistory()}
+                                onLive={(deg) => updateClip(trackId, clip.id, { rotation: deg }, { skipHistory: true })}
+                                onCommit={(deg) => updateClip(trackId, clip.id, { rotation: deg }, { skipHistory: true })}
+                            />
+                        )}
+                    </div>
                 );
             })}
         </div>

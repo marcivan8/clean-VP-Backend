@@ -208,7 +208,8 @@ console.log('\n── 7. Every caption surface routes through the shared action 
     // The model above is only meaningful if the real action still has these branches.
     check('store action exists', /applyCaptionUpdate:\s*\(/.test(store));
     check('store action honours liveOnly', /liveOnly/.test(store));
-    check('store action separates content from style', /const \{ content, \.\.\.styleOnly \}/.test(store));
+    // R88: `emphasis` (word indices) is per-clip too, so it is pulled out beside `content`.
+    check('store action separates content from style', /const \{ content,(?: emphasis,)? \.\.\.styleOnly \}/.test(store));
     check('store exposes the scope setter', /setCaptionEditScope:/.test(store));
 }
 

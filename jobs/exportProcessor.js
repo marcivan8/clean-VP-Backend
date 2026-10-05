@@ -45,6 +45,21 @@ const DRAWTEXT_BIN  =
     (fs.existsSync(SYSTEM_FFMPEG) && _probeDrawtext(SYSTEM_FFMPEG)) ? SYSTEM_FFMPEG :
     ffmpegPath; // last resort — drawtext will still fail but at least logs why
 console.log(`[exportProcessor] drawtext ffmpeg: ${DRAWTEXT_BIN === ffmpegPath ? 'static' : 'system ('+SYSTEM_FFMPEG+')'}`);
+
+/** Run an ffmpeg binary with argv, rejecting with the stderr tail on failure. */
+function runFfmpegArgs(bin, args) {
+    return new Promise((resolve, reject) => {
+        const proc = spawn(bin, args);
+        const stderrChunks = [];
+        proc.stderr.on('data', chunk => stderrChunks.push(chunk));
+        proc.on('error', reject);
+        proc.on('close', code => {
+            if (code === 0) return resolve();
+            const errTail = Buffer.concat(stderrChunks).toString('utf-8').slice(-1200);
+            reject(new Error(`ffmpeg exited ${code}:\n${errTail}`));
+        });
+    });
+}
 // ─────────────────────────────────────────────────────────────────────────────
 
 const gcsBucket = storageConfig.bucket;
@@ -1199,7 +1214,14 @@ module.exports = async function processExportJob(job) {
                 }
                 // Input 0 is the base video, so overlay inputs start at 1.
                 inputs.push({ overlayId: ov.id, inputIndex: inputFiles.length + 1 });
-                inputFiles.push({ path: src, isImage: ov.source?.type === 'image', outputEnd: ov.outputEnd });
+                inputFiles.push({
+                    path: src,
+                    isImage: ov.source?.type === 'image',
+                    outputEnd: ov.outputEnd,
+                    // R88: a video overlay starts at its own in-point (clip.offset),
+                    // not at the top of the file. Images/stickers have none.
+                    seek: ov.source?.type === 'video' ? Math.max(0, Number(ov.sourceOffset) || 0) : 0,
+                });
             }
 
             const compiled = compileCompositionPlan(rawPlan, inputs);
@@ -1212,6 +1234,7 @@ module.exports = async function processExportJob(job) {
                     // A still image has no duration of its own; -loop 1 gives it
                     // one, and -t stops it running past its window forever.
                     if (f.isImage) cmd = cmd.input(f.path).inputOptions(['-loop', '1', '-t', String(Math.max(0.1, f.outputEnd))]);
+                    else if (f.seek > 0) cmd = cmd.input(f.path).inputOptions(['-ss', String(f.seek)]);
                     else           cmd = cmd.input(f.path);
                 }
                 cmd
@@ -1472,6 +1495,10 @@ module.exports = async function processExportJob(job) {
             // here, never re-declared, so the final return statement can see it.
             const programClipIds = new Set();
             let compiledCaptionProgram = { filters: [], tempFiles: [], skipped: [] };
+            // R88 raster captions: prepared images + the program entries they
+            // replace (kept for the drawtext fallback if the overlay pass fails).
+            let rasterPrepared = null;
+            let rasterProgramEntries = [];
             const rawCaptionProgram = settings.captionProgram || null;
 
             if (rawCaptionProgram && process.env.CAPTION_PROGRAM_DISABLED !== '1') {
@@ -1509,7 +1536,43 @@ module.exports = async function processExportJob(job) {
                             })),
                         };
 
-                    compiledCaptionProgram = compileCaptionProgram(scaledCaptionProgram, {
+                    // R88 — captions with rotation, per-word highlight or keyword
+                    // emphasis are drawn as images (RasterCaptionCompiler), not
+                    // drawtext. Prepared FIRST: an entry is only taken off the
+                    // drawtext program once its images actually exist. If
+                    // preparation fails, the entry stays below and renders as
+                    // plain animated text, exactly as it did before R88.
+                    if (process.env.RASTER_CAPTIONS_DISABLED !== '1') {
+                        try {
+                            const { prepareRasterCaptions, rasterEntries } = require('../server/compositor/RasterCaptionCompiler.js');
+                            const wanted = rasterEntries(scaledCaptionProgram);
+                            if (wanted.length > 0) {
+                                rasterPrepared = prepareRasterCaptions(wanted, {
+                                    tmpDir,
+                                    frameWidth: targetWidth,
+                                    frameHeight: targetHeight,
+                                    pxScale: captionScaleFactor,
+                                    fallbackFontPath,
+                                    resolveFont: (family) => (family && FAMILY_PATHS[family]) ? FAMILY_PATHS[family] : null,
+                                });
+                                if (rasterPrepared.skipped.length > 0) {
+                                    console.warn(`  ⚠️  ${rasterPrepared.skipped.length} raster caption(s) fell back to text:`, rasterPrepared.skipped.slice(0, 3));
+                                }
+                                console.log(`🖼️  [ExportJob ${job.id}] raster captions: ${rasterPrepared.items.length}/${wanted.length} prepared`);
+                            }
+                        } catch (rasterErr) {
+                            rasterPrepared = null;
+                            captionProgramWarning = `Rotated/highlighted captions were exported as plain text: ${rasterErr.message}`;
+                            console.warn(`[ExportJob ${job.id}] raster caption preparation failed (plain text instead):`, rasterErr.message);
+                        }
+                    }
+                    const rasterIds = new Set((rasterPrepared?.items || []).map(it => it.clipId));
+                    rasterProgramEntries = scaledCaptionProgram.entries.filter(e => rasterIds.has(e.clipId));
+                    const drawtextProgram = rasterIds.size === 0
+                        ? scaledCaptionProgram
+                        : { ...scaledCaptionProgram, entries: scaledCaptionProgram.entries.filter(e => !rasterIds.has(e.clipId)) };
+
+                    compiledCaptionProgram = compileCaptionProgram(drawtextProgram, {
                         tmpDir,
                         escapePath: (p) => p.replace(/\\/g, '/').replace(/:/g, '\\:'),
                         fallbackFontPath,
@@ -1540,6 +1603,8 @@ module.exports = async function processExportJob(job) {
                     console.warn(`[ExportJob ${job.id}] caption program failed (falling back to static captions):`, progErr.message);
                     programClipIds.clear();
                     compiledCaptionProgram = { filters: [], tempFiles: [], skipped: [] };
+                    rasterPrepared = null;
+                    rasterProgramEntries = [];
                 }
             }
 
@@ -1720,6 +1785,69 @@ module.exports = async function processExportJob(job) {
                     // Deliver the video without captions rather than failing the
                     // whole job.  The error is surfaced in the job result so the
                     // client can show a toast ("Video exported, but captions failed").
+                }
+            }
+
+            // ── R88: raster captions (rotation / word highlight / emphasis) ──
+            // One extra pass, only when such captions exist, so every other
+            // project renders exactly as before. FAILS OPEN: if the overlay
+            // pass fails, the same entries are drawn as plain animated text
+            // with the R63 drawtext compiler, so the words are never lost.
+            if (rasterPrepared && rasterPrepared.items.length > 0) {
+                const { compileRasterOverlays } = require('../server/compositor/RasterCaptionCompiler.js');
+                const rasterOutPath = path.join(tmpDir, 'with_raster_captions.mp4');
+                try {
+                    const graph = compileRasterOverlays(rasterPrepared.items, {
+                        frameWidth: targetWidth, frameHeight: targetHeight, fps: targetFps,
+                    });
+                    if (!graph) throw new Error('nothing to draw');
+                    const graphPath = path.join(tmpDir, 'raster_caption_graph.txt');
+                    fs.writeFileSync(graphPath, graph.filterComplex, 'utf-8');
+                    const args = ['-i', finalVideoPath];
+                    for (const inp of graph.inputs) args.push(...inp.inputOptions, '-i', inp.path);
+                    args.push(
+                        '-filter_complex_script', graphPath,
+                        '-map', `[${graph.outputLabel}]`,
+                        '-map', '0:a?',
+                        '-c:v', codec,
+                        '-b:v', videoBitrate,
+                        '-profile:v', profile,
+                        '-pix_fmt', 'yuv420p',
+                        '-c:a', 'copy',
+                        '-y',
+                        rasterOutPath,
+                    );
+                    console.log(`  🖼️  Drawing ${rasterPrepared.items.length} raster caption(s)`);
+                    await runFfmpegArgs(DRAWTEXT_BIN, args);
+                    finalVideoPath = rasterOutPath;
+                    console.log('  ✅ Raster captions applied');
+                } catch (rasterErr) {
+                    console.warn(`[ExportJob ${job.id}] raster caption pass failed, drawing them as text:`, rasterErr.message.slice(0, 600));
+                    captionProgramWarning = 'Rotated/highlighted captions were exported as plain text.';
+                    try {
+                        const { compileCaptionProgram } = require('../server/compositor/CaptionCompiler.js');
+                        const fallback = compileCaptionProgram({ version: rawCaptionProgram.version, entries: rasterProgramEntries }, {
+                            tmpDir,
+                            escapePath: (p) => p.replace(/\\/g, '/').replace(/:/g, '\\:'),
+                            fallbackFontPath,
+                            resolveFont: (family) => (family && FAMILY_PATHS[family]) ? FAMILY_PATHS[family] : null,
+                        });
+                        if (fallback.filters.length > 0) {
+                            const fbScript = path.join(tmpDir, 'raster_fallback_filters.txt');
+                            fs.writeFileSync(fbScript, fallback.filters.join(','), 'utf-8');
+                            const fbOut = path.join(tmpDir, 'with_raster_fallback.mp4');
+                            await runFfmpegArgs(DRAWTEXT_BIN, [
+                                '-i', finalVideoPath, '-filter_script:v', fbScript,
+                                '-map', '0:v', '-map', '0:a?',
+                                '-c:v', codec, '-b:v', videoBitrate, '-profile:v', profile,
+                                '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-y', fbOut,
+                            ]);
+                            finalVideoPath = fbOut;
+                        }
+                    } catch (fbErr) {
+                        captionError = `Some captions could not be drawn: ${fbErr.message.slice(0, 400)}`;
+                        console.error(`  ❌ Raster caption fallback failed:`, fbErr.message.slice(0, 600));
+                    }
                 }
             }
         }

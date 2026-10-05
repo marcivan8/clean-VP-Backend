@@ -23,6 +23,8 @@ import {
 import { buildComponent } from '../motion/ComponentLibrary.js';
 import { clipsInGroup, computeGroupMoveUpdates, computeGroupDuplicateSpecs } from '../motion/ClipGrouping.js';
 import { deriveSpeakerCrop, deriveTrackingSegments } from '../motion/ObjectLayers.js';
+import { frameForPreset, splitSpeakerCrop, LAYOUT_PRESETS } from '../motion/LayoutPresets.js';
+import { getPlayerDimensions } from '../utils/playerDimensions.js';
 import { computeRippleDelete, computeGapRipple, remapTimelineWords } from '../timeline/rippleDelete.js';
 import { computeMultiMove } from '../timeline/multiMove.js';
 import { computeRangeCut } from '../timeline/rangeCut.js';
@@ -494,8 +496,11 @@ const useTimelineStore = create(
                 // definition — fanning it out would overwrite every caption in
                 // the project with the same words — so it is always applied to
                 // the edited clip alone, regardless of scope.
-                const { content, ...styleOnly } = updates || {};
+                // `emphasis` (R88 keyword emphasis) holds word INDICES into this
+                // caption's own text, so it is per-segment for the same reason.
+                const { content, emphasis, ...styleOnly } = updates || {};
                 const hasStyle = Object.keys(styleOnly).length > 0;
+                const hasEmphasis = emphasis !== undefined;
 
                 const textTracks = (state.tracks || []).filter(t => t.type === 'text');
                 if (textTracks.length === 0) return 0;
@@ -525,8 +530,11 @@ const useTimelineStore = create(
                     }
                 }
 
-                if (content !== undefined && clipId && ownerTrack) {
-                    get().updateClip(ownerTrack.id, clipId, { content }, { skipHistory: true });
+                if ((content !== undefined || hasEmphasis) && clipId && ownerTrack) {
+                    const perClip = {};
+                    if (content !== undefined) perClip.content = content;
+                    if (hasEmphasis) perClip.emphasis = emphasis;
+                    get().updateClip(ownerTrack.id, clipId, perClip, { skipHistory: true });
                     if (!hasStyle) updated++;
                 }
 
@@ -762,6 +770,12 @@ const useTimelineStore = create(
                 // read by TextOverlay. Was missing here, so the desktop Roka style
                 // card only ever changed fonts and colours.
                 if (updates.captionStyle !== undefined) clipUpdates.captionStyle = updates.captionStyle;
+                // R88 keyword emphasis: word indices into this caption's text.
+                if (updates.emphasis !== undefined) clipUpdates.emphasis = updates.emphasis;
+                // R88 layout presets: an overlay's cover box, and the speaker
+                // reframe the split layout puts on the base clip under it.
+                if (updates.frame !== undefined) clipUpdates.frame = updates.frame;
+                if (updates.layoutBase !== undefined) clipUpdates.layoutBase = updates.layoutBase;
                 // Motion presets (MotionPanel, "animate automatically", style
                 // packs clearing a clip's own animation). Was missing here, so
                 // every preset applied through updateClip stored nothing.
@@ -1985,6 +1999,139 @@ const useTimelineStore = create(
                 }
 
                 return { success: true, segments: created };
+            },
+
+            /**
+             * R88 (to-do A1) — layout presets for a visual on the overlay track:
+             * 'split' (speaker top, this clip bottom), 'fullscreen' (cutaway)
+             * or 'pip' (small, in a corner). Geometry and the face-aware speaker
+             * crop come from the pure motion/LayoutPresets.js.
+             *
+             * Split reframes the speaker ONLY under the overlay: each base clip
+             * overlapping it is cut into before / during / after pieces (new
+             * clip entities, like trackSpeaker — a split placement shares its
+             * entity, so per-piece virtualCam needs real pieces), and the
+             * "during" piece gets the split crop. The during/after pieces drop
+             * their own zoom keyframes and camera presets: those are timed from
+             * the original clip start and would replay at the wrong moment.
+             * One undo step for the whole operation.
+             *
+             * @returns {{success:boolean, error?:string, faceAware?:boolean, reframed?:number}}
+             */
+            applyLayout: (trackId, clipId, preset, opts = {}) => {
+                if (!LAYOUT_PRESETS.includes(preset)) return { success: false, error: `unknown layout "${preset}"` };
+                const state = get();
+                const track = state.tracks.find(t => t.id === trackId);
+                const clip = track?.clips?.find(c => c.id === clipId);
+                if (!clip) return { success: false, error: `clip "${clipId}" not found` };
+                if (track.type !== 'overlay') return { success: false, error: 'Layouts apply to a clip on the overlay track (b-roll, screen recording, image).' };
+
+                const dims = getPlayerDimensions(state.aspectRatio);
+                const frameAspect = dims.width / dims.height;
+                const assetOf = (c) => (state.assets || []).find(a => a.id === c?.assetId) || null;
+                const resOf = (c) => {
+                    const r = c?.metadata?.resolution || assetOf(c)?.resolution || null;
+                    if (r && r.w > 0 && r.h > 0) return r.w / r.h;
+                    const lm = c?.layerMask;
+                    if (lm && lm.sourceWidth > 0 && lm.sourceHeight > 0) return lm.sourceWidth / lm.sourceHeight;
+                    return null;
+                };
+
+                get()._saveHistory();
+                // Undo any split reframe this overlay made before (switching preset).
+                get()._restoreLayoutBase(clip.id);
+
+                const frame = frameForPreset(preset, { frameAspect, sourceAspect: resOf(clip), corner: opts.corner || 'tr' });
+                get().updateClip(trackId, clipId, { frame }, { skipHistory: true });
+
+                if (preset !== 'split') return { success: true, preset };
+
+                // ── Reframe the speaker under the overlay ──────────────────
+                const s0 = Number(clip.start) || 0;
+                const s1 = s0 + (Number(clip.duration) || 0);
+                const fresh = get();
+                const baseTrack = fresh.tracks.find(t => t.type === 'video' && (t.clips || []).length > 0);
+                if (!baseTrack) return { success: true, preset, reframed: 0, faceAware: false };
+
+                let reframed = 0;
+                let faceAware = false;
+                const overlapping = baseTrack.clips.filter(b => b.start < s1 - 0.01 && b.start + b.duration > s0 + 0.01);
+                for (const b of overlapping) {
+                    const bStart = Number(b.start) || 0;
+                    const bEnd = bStart + (Number(b.duration) || 0);
+                    const speed = Number(b.speed) > 0 ? Number(b.speed) : 1;
+                    const offset = Number(b.offset) || 0;
+                    const pieces = [];
+                    const dStart = Math.max(bStart, s0);
+                    const dEnd = Math.min(bEnd, s1);
+                    if (dStart - bStart > 0.05) pieces.push({ kind: 'before', start: bStart, end: dStart });
+                    pieces.push({ kind: 'during', start: dStart, end: dEnd });
+                    if (bEnd - dEnd > 0.05) pieces.push({ kind: 'after', start: dEnd, end: bEnd });
+
+                    const { crop, faceAware: fa } = splitSpeakerCrop({
+                        bboxTrack: b.layerMask?.bboxTrack || null,
+                        sourceStart: offset + (dStart - bStart) * speed,
+                        duration: (dEnd - dStart) * speed,
+                        sourceAspect: resOf(b) || frameAspect,
+                        frameAspect,
+                    });
+                    faceAware = faceAware || fa;
+                    const layoutBase = { preset: 'split', overlayClipId: clip.id, previousVirtualCam: b.virtualCam ?? null };
+
+                    if (pieces.length === 1) {
+                        // The base clip lies entirely under the overlay: no cut needed.
+                        get().updateClip(baseTrack.id, b.id, { virtualCam: crop, layoutBase }, { skipHistory: true });
+                        reframed++;
+                        continue;
+                    }
+                    get().removeClip(baseTrack.id, b.id, { skipHistory: true });
+                    for (const pc of pieces) {
+                        const isFirst = pc.start === bStart;
+                        const piece = {
+                            ...b,
+                            id: isFirst ? b.id : `${b.id}-lay-${Math.round(pc.start * 1000)}`,
+                            start: pc.start,
+                            duration: pc.end - pc.start,
+                            offset: offset + (pc.start - bStart) * speed,
+                        };
+                        if (!isFirst) { piece.keyframes = null; piece.animations = undefined; }
+                        if (pc.kind === 'during') {
+                            piece.virtualCam = crop;
+                            piece.layoutBase = layoutBase;
+                            piece.keyframes = null;
+                            piece.animations = undefined;
+                        }
+                        get().addClip(baseTrack.id, piece, { skipHistory: true });
+                    }
+                    reframed++;
+                }
+                return { success: true, preset, reframed, faceAware };
+            },
+
+            /** Remove an overlay's layout: back to a free sticker, speaker framing restored. */
+            clearLayout: (trackId, clipId) => {
+                const track = get().tracks.find(t => t.id === trackId);
+                const clip = track?.clips?.find(c => c.id === clipId);
+                if (!clip) return { success: false, error: `clip "${clipId}" not found` };
+                if (!clip.frame) return { success: false, error: 'This clip has no layout.' };
+                get()._saveHistory();
+                get()._restoreLayoutBase(clip.id);
+                get().updateClip(trackId, clipId, { frame: null }, { skipHistory: true });
+                return { success: true };
+            },
+
+            /** Internal: put back the speaker framing a split layout replaced. No history. */
+            _restoreLayoutBase: (overlayClipId) => {
+                for (const t of (get().tracks || [])) {
+                    if (t.type !== 'video') continue;
+                    for (const c of (t.clips || [])) {
+                        if (c.layoutBase?.overlayClipId !== overlayClipId) continue;
+                        get().updateClip(t.id, c.id, {
+                            virtualCam: c.layoutBase.previousVirtualCam ?? null,
+                            layoutBase: null,
+                        }, { skipHistory: true });
+                    }
+                }
             },
 
             /**
