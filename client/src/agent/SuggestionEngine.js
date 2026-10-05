@@ -28,6 +28,7 @@
  */
 
 import useTimelineStore from '../store/useTimelineStore';
+import { getEditingStyle } from './EditingStyles.js';
 
 /**
  * Derive the facts the rules reason over.
@@ -95,6 +96,10 @@ export function deriveFacts(state = null) {
         unusedAssets,
         assetCount:    videoAssets.length,
         duration:      s.duration || 0,
+        // R91: the editing style picked under the chat box (null = none).
+        style:         getEditingStyle(s.editingStyle)?.id || null,
+        aspectRatio:   s.aspectRatio || '16:9',
+        recipeApplied: didOp('apply_style_recipe', 'auto_edit'),
         opsApplied,
         editHistory,
     };
@@ -141,11 +146,29 @@ const RULES = [
         reason: 'A transcript unlocks silence removal, angles and zoom rhythm.',
     },
     {
+        // R91: Reel. A long take first becomes a short, then goes vertical.
+        id: 'reel_short',
+        priority: 85,
+        when: f => f.style === 'reel' && f.clipCount > 0 && f.hasTranscript && f.duration > 75 && !f.opsApplied.has('extract_short'),
+        label: 'Extract a short',
+        prompt: 'Extract a short of 60 seconds',
+        reason: 'Reel style: keep the strongest 15 to 60 seconds, starting on its hook.',
+    },
+    {
+        id: 'reel_vertical',
+        priority: 75,
+        when: f => f.style === 'reel' && f.clipCount > 0 && f.aspectRatio !== '9:16',
+        label: 'Make it vertical',
+        prompt: 'Set the aspect ratio to 9:16',
+        reason: 'Reel style: 9:16, framed on the speaker.',
+    },
+    {
         id: 'cleanup',
         priority: 80,
         when: f => f.clipCount > 0 && f.hasTranscript && !f.cleanupDone,
         label: 'Clean it up',
-        prompt: 'Remove silences and filler words',
+        // A vlog keeps its natural speech: silences only (same as its Auto playbook).
+        prompt: f => (f.style === 'vlog' ? 'Remove silences' : 'Remove silences and filler words'),
         reason: 'Tightening the cut first means every later effect lands on the final structure.',
     },
     {
@@ -165,9 +188,22 @@ const RULES = [
         // Rhythm goes last of the motion effects: it's the most fragile to
         // re-segmentation, so anything that re-cuts clips should already be done.
         when: f => f.clipCount >= 2 && f.hasTranscript && f.cleanupDone && f.rhythmCoverage < 0.5,
-        label: 'Make it more dynamic',
+        // The planner applies the style's zoom preset (subtle for podcast,
+        // interview, vlog), so the label says what will actually happen.
+        label: f => (['podcast', 'interview', 'vlog'].includes(f.style) ? 'Add gentle zooms' : 'Make it more dynamic'),
         prompt: 'Make it more dynamic',
-        reason: 'Adds push-ins and punch-ins on your emphasised words.',
+        reason: f => (['podcast', 'interview', 'vlog'].includes(f.style)
+            ? 'Slow push-ins at sentence changes keep a long take alive without distracting.'
+            : 'Adds push-ins and punch-ins on your emphasised words.'),
+    },
+    {
+        // R91: the look of the chosen style, once the cut and captions exist.
+        id: 'style_recipe',
+        priority: 60,
+        when: f => !!f.style && f.cleanupDone && f.hasCaptionClips && !f.recipeApplied,
+        label: 'Apply my style',
+        prompt: f => `Apply the ${getEditingStyle(f.style).recipeId} style recipe`,
+        reason: 'Caption look, key words, transitions and zooms matching your editing style.',
     },
     {
         id: 'style_captions',
@@ -190,7 +226,8 @@ const RULES = [
     {
         id: 'music',
         priority: 35,
-        when: f => f.clipCount > 0 && !f.hasMusic && f.cleanupDone,
+        // Not for styles that are complete without a music bed.
+        when: f => f.clipCount > 0 && !f.hasMusic && f.cleanupDone && !['podcast', 'interview', 'talking_head'].includes(f.style),
         label: 'Add background music',
         prompt: 'Add background music',
         reason: 'Music ducked under your voice adds energy.',
@@ -201,7 +238,7 @@ const RULES = [
         // Only propose exporting once the core edit is actually in good shape.
         when: f => f.clipCount > 0 && f.hasTranscript && f.cleanupDone && !f.exported,
         label: 'Export',
-        prompt: 'Export for YouTube',
+        prompt: f => (f.style === 'reel' ? 'Export for TikTok' : 'Export for YouTube'),
         reason: 'The edit looks complete — render it out.',
     },
     {
@@ -253,6 +290,7 @@ export function getNextActions({ justCompleted = null, brainSuggestions = [], li
         .map(normalizeBrainSuggestion)
         .filter(Boolean)
         .filter(a => !isAlreadySatisfied(a, facts))
+        .filter(a => !contradictsStyle(a, facts))
         .filter(a => !(justCompleted && ruleMatchesOperation(a.id, justCompleted)));
 
     // Brain first (it reasons about content), then rules, de-duplicated by id/label.
@@ -294,10 +332,30 @@ const RULE_OPS = {
     export:          ['export', 'nle_export'],
     place_assets:    ['organize_clips'],
     place_remaining: ['organize_clips'],
+    reel_short:      ['extract_short'],
+    reel_vertical:   ['set_aspect_ratio'],
+    style_recipe:    ['apply_style_recipe', 'auto_edit'],
 };
 
 function ruleMatchesOperation(ruleId, operation) {
     return (RULE_OPS[ruleId] || []).includes(operation);
+}
+
+/**
+ * R91: last guard for Brain suggestions against the chosen editing style (the
+ * server prompt already says so; a stale or stubborn answer must not reach a
+ * chip). Podcast / interview: no b-roll, music, sound effects or reaction
+ * shots. Vlog / interview / podcast: no hook-first reordering.
+ */
+export function contradictsStyle(action, facts) {
+    const style = facts?.style;
+    if (!style || !action) return false;
+    const text = `${action.label || ''} ${action.prompt || ''}`.toLowerCase();
+    if ((style === 'podcast' || style === 'interview')
+        && /b[- ]?roll|music|sfx|sound effect|reaction shot|impact/.test(text)) return true;
+    if ((style === 'vlog' || style === 'interview' || style === 'podcast')
+        && /(hook|best moment|strongest).{0,30}(front|first|start)|reorder|move .{0,20}to the (front|start|beginning)/.test(text)) return true;
+    return false;
 }
 
 /** Normalise the various shapes the Brain may return into an action. */

@@ -6,7 +6,8 @@
  *
  * A step that fails or needs a question answered is skipped and reported;
  * the rest still runs. Stop (cancelCurrentJob) aborts the step in progress
- * and the remaining ones.
+ * and the remaining ones. New prompts wait until the run ends
+ * (WorkflowController), so they never fold into its undo step.
  */
 import useTimelineStore from '../store/useTimelineStore.js';
 import useAIStore from '../store/useAIStore.js';
@@ -14,13 +15,16 @@ import { editJobManager } from './EditJobManager.js';
 import { buildAutopilotSteps, getEditingStyle } from './EditingStyles.js';
 
 const STEP_LABEL = {
-    captions: 'captions', short: 'best moment kept', vertical: 'vertical 9:16', request: 'your request',
+    captions: 'captions', transcript: 'transcript', short: 'best moment kept', vertical: 'vertical 9:16', request: 'your request',
     silences: 'silences removed', fillers: 'filler words removed', audio: 'audio levelled', recipe: 'style recipe',
 };
 const STYLE_NAME = { vlog: 'Vlog', talking_head: 'Talking head', interview: 'Interview', podcast: 'Podcast', reel: 'Reel' };
 
 let stopRequested = false;
+let running = false;
 export function stopAutopilot() { stopRequested = true; }
+/** True while an Auto run (and its undo group) is open. */
+export function isAutopilotRunning() { return running; }
 
 function progress(message) {
     try {
@@ -40,11 +44,15 @@ export async function runAutopilot(request, opts = {}) {
     const chosen = opts.styleId || store.editingStyle;
     const styleId = getEditingStyle(chosen) ? chosen : 'talking_head';
     const run = opts.run || ((p) => editJobManager.processEditRequest(p, { autoApprove: true }));
-    const hasCaptions = Array.isArray(store.captions) && store.captions.length > 0;
-    const steps = buildAutopilotSteps(styleId, request, { hasCaptions });
+    // store.captions holds the transcript words (filled by the background
+    // transcription on upload), not caption clips: it is what Reel needs to
+    // pick its moment. Caption clips are always (re)placed after the cuts.
+    const hasTranscript = Array.isArray(store.captions) && store.captions.length > 0;
+    const steps = buildAutopilotSteps(styleId, request, { hasTranscript });
     const intro = getEditingStyle(chosen) ? '' : 'No style picked, so Talking head was used. ';
 
     stopRequested = false;
+    running = true;
     const done = [];
     const skipped = [];
     let lastJobId = null;
@@ -76,6 +84,7 @@ export async function runAutopilot(request, opts = {}) {
         }
     } finally {
         useTimelineStore.getState().endHistoryGroup();
+        running = false;
     }
 
     const name = STYLE_NAME[styleId];
@@ -92,4 +101,4 @@ export async function runAutopilot(request, opts = {}) {
     };
 }
 
-export default { runAutopilot, stopAutopilot };
+export default { runAutopilot, stopAutopilot, isAutopilotRunning };

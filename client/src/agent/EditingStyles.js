@@ -19,6 +19,8 @@ export const EDITING_MODES = ['normal', 'auto'];
 export const EDITING_STYLES = {
     vlog: {
         id: 'vlog',
+        // Silence removal: shortest pause that gets cut, and breathing room kept around speech.
+        pacing: { minSilence: 0.6, padding: 0.1 },
         recipeId: 'travel',
         rhythmZoom: 'subtle',
         transition: 'speed-lines',
@@ -27,6 +29,8 @@ export const EDITING_STYLES = {
     },
     talking_head: {
         id: 'talking_head',
+        // Silence removal: shortest pause that gets cut, and breathing room kept around speech.
+        pacing: { minSilence: 0.35, padding: 0.05 },
         recipeId: 'punchy',
         rhythmZoom: 'dynamic',
         transition: 'flash',
@@ -35,6 +39,8 @@ export const EDITING_STYLES = {
     },
     interview: {
         id: 'interview',
+        // Silence removal: shortest pause that gets cut, and breathing room kept around speech.
+        pacing: { minSilence: 0.7, padding: 0.15 },
         recipeId: 'explainer',
         rhythmZoom: 'subtle',
         transition: 'dip',
@@ -43,6 +49,8 @@ export const EDITING_STYLES = {
     },
     podcast: {
         id: 'podcast',
+        // Silence removal: shortest pause that gets cut, and breathing room kept around speech.
+        pacing: { minSilence: 0.8, padding: 0.15 },
         recipeId: 'podcast',
         rhythmZoom: 'subtle',
         transition: 'dip',
@@ -51,6 +59,8 @@ export const EDITING_STYLES = {
     },
     reel: {
         id: 'reel',
+        // Silence removal: shortest pause that gets cut, and breathing room kept around speech.
+        pacing: { minSilence: 0.3, padding: 0.05 },
         recipeId: 'punchy',
         rhythmZoom: 'dynamic',
         transition: 'whip-left',
@@ -61,6 +71,20 @@ export const EDITING_STYLES = {
 
 export function getEditingStyle(id) {
     return EDITING_STYLES[id] || null;
+}
+
+/** Silence removal defaults for the style, or null (planner keeps its own). */
+export function stylePacing(styleId) {
+    return getEditingStyle(styleId)?.pacing || null;
+}
+
+/** Zoom preset named in a request ('subtle' | 'cinematic' | 'dynamic'), or null. */
+export function zoomStyleFromText(text) {
+    const t = String(text || '').toLowerCase();
+    if (/\b(subtle|gentle|soft|calm|doux|douce|l[ée]ger|l[ée]g[eè]re)\b/.test(t)) return 'subtle';
+    if (/\b(cinematic|cin[ée]matique)\b/.test(t)) return 'cinematic';
+    if (/\b(punchy|aggressive|intense|percutant)\b/.test(t)) return 'dynamic';
+    return null;
 }
 
 export function normalizeEditingMode(mode) {
@@ -85,9 +109,18 @@ export function isQuestion(text) {
 
 /**
  * The Auto playbook: plain prompts, each run through the normal pipeline.
+ * Order matters:
+ *  - cuts first, captions AFTER them: caption clips are placed on the
+ *    timeline as it is, and a later cut does not move them;
+ *  - "Add captions" always runs after the cuts (it replaces earlier caption
+ *    clips, keeping their font), so existing captions are re-synced too;
+ *  - audio levelling after the cuts (a cut rebuilds clips from the source
+ *    file, which would drop the levelled audio);
+ *  - Reel picks its moment from the transcript; with no transcript yet it
+ *    transcribes first.
  * @param {string} styleId
  * @param {string} request what the user typed
- * @param {{hasCaptions?: boolean}} facts
+ * @param {{hasTranscript?: boolean}} facts
  * @returns {Array<{key: string, prompt: string}>}
  */
 export function buildAutopilotSteps(styleId, request, facts = {}) {
@@ -96,21 +129,15 @@ export function buildAutopilotSteps(styleId, request, facts = {}) {
     const custom = isGenericEditRequest(request) ? null : String(request).trim();
     const steps = [];
     if (style.id === 'reel') {
-        // The best moment is picked from the transcript, so captions come first.
-        if (!facts.hasCaptions) steps.push({ key: 'captions', prompt: 'Add captions' });
+        if (!facts.hasTranscript) steps.push({ key: 'transcript', prompt: 'Add captions' });
         steps.push({ key: 'short', prompt: `Extract a short of ${style.targetDuration} seconds` });
         steps.push({ key: 'vertical', prompt: 'Set the aspect ratio to 9:16' });
-        if (custom) steps.push({ key: 'request', prompt: custom });
-        steps.push({ key: 'silences', prompt: 'Remove silences' });
-        steps.push({ key: 'fillers', prompt: 'Remove filler words' });
-        steps.push({ key: 'recipe', prompt: `Apply the ${style.recipeId} style recipe` });
-        return steps;
     }
     if (custom) steps.push({ key: 'request', prompt: custom });
     steps.push({ key: 'silences', prompt: 'Remove silences' });
     if (style.id !== 'vlog') steps.push({ key: 'fillers', prompt: 'Remove filler words' });
     if (style.id === 'podcast') steps.push({ key: 'audio', prompt: 'Normalize the audio' });
-    if (!facts.hasCaptions) steps.push({ key: 'captions', prompt: 'Add captions' });
+    steps.push({ key: 'captions', prompt: 'Add captions' });
     steps.push({ key: 'recipe', prompt: `Apply the ${style.recipeId} style recipe` });
     return steps;
 }
@@ -122,4 +149,4 @@ export function styleContext(styleId, mode) {
     return { id: style.id, mode: normalizeEditingMode(mode), guidance: style.guidance, recipe: style.recipeId, targetDurationSec: style.targetDuration };
 }
 
-export default { EDITING_STYLES, EDITING_STYLE_IDS, EDITING_MODES, getEditingStyle, normalizeEditingMode, isGenericEditRequest, isQuestion, buildAutopilotSteps, styleContext };
+export default { EDITING_STYLES, EDITING_STYLE_IDS, EDITING_MODES, getEditingStyle, stylePacing, zoomStyleFromText, normalizeEditingMode, isGenericEditRequest, isQuestion, buildAutopilotSteps, styleContext };

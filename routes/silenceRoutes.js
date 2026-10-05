@@ -23,6 +23,9 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 router.post('/detect', optionalAuth, async (req, res) => {
     try {
         const { filename, threshold = '-30dB', duration = '0.5', transcript } = req.body;
+        // R91: breathing room around speech (editing style pacing), 0-500 ms.
+        const paddingMs = Number(req.body?.padding_ms);
+        const padding_ms = Number.isFinite(paddingMs) ? Math.min(500, Math.max(0, Math.round(paddingMs))) : 100;
 
         if (!filename || typeof filename !== 'string') {
             return res.status(400).json({ error: 'Filename is required and must be a string' });
@@ -80,6 +83,7 @@ router.post('/detect', optionalAuth, async (req, res) => {
             userId,
             threshold,
             duration,
+            padding_ms,
             transcript
         }, {
             jobId:   uniqueJobId,   // ← prevents collision with videoQueue integer IDs

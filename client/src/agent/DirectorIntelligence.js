@@ -129,8 +129,14 @@ export function rankProposals(list) {
         .map(({ p }) => p);
 }
 
-export function buildProposals({ storyMap = null, projectMap = null } = {}) {
+// R91: editing styles whose story is the recorded order (agent/EditingStyles.js).
+// A "move the hook to the front" reorder breaks them, so it is not proposed.
+const KEEPS_RECORDED_ORDER = new Set(['vlog', 'interview', 'podcast']);
+const CALM_STYLES = new Set(['interview', 'podcast']);
+
+export function buildProposals({ storyMap = null, projectMap = null, editingStyle = null } = {}) {
     const out = [];
+    const keepOrder = KEEPS_RECORDED_ORDER.has(editingStyle);
 
     const storyReadable = storyMap && storyMap.status === 'ok';
     const projectReadable = projectMap && projectMap.status === 'ok';
@@ -146,7 +152,22 @@ export function buildProposals({ storyMap = null, projectMap = null } = {}) {
         //    handling) turns this from permanently-advisory into a real,
         //    executable fix instead of a repeat of the context-free ordering
         //    pass organize already ran once.
-        if (typeof storyMap.hook_at_sec === 'number' && storyMap.hook_at_sec > 3) {
+        if (keepOrder) {
+            // Vlog / interview / podcast: the order is the story. A late hook is
+            // not fixed by reordering; an on-screen hook line still helps a vlog.
+            if (editingStyle === 'vlog' && (storyMap.hook_strength === 'absent' || storyMap.hook_strength === 'weak')) {
+                out.push(proposal({
+                    id: 'hook_weak',
+                    title: 'The opening does not hook',
+                    why: storyMap.hook_note || 'Nothing in the first seconds gives a reason to keep watching.',
+                    priority: 'medium',
+                    command: 'add_text_overlay',
+                    params: { position: 'start' },
+                    atSec: 0,
+                    source: 'story',
+                }));
+            }
+        } else if (typeof storyMap.hook_at_sec === 'number' && storyMap.hook_at_sec > 3) {
             out.push(proposal({
                 id: 'hook_buried',
                 title: `Your hook lands at ${storyMap.hook_at_sec}s — move it to the front`,
@@ -177,7 +198,7 @@ export function buildProposals({ storyMap = null, projectMap = null } = {}) {
 
         // 2. Through-line buried. Outranks everything except the hook — the cut
         //    contains every piece and still misses the point.
-        if (storyMap.delivers_through_line === false) {
+        if (storyMap.delivers_through_line === false && !keepOrder) {
             out.push(proposal({
                 id: 'through_line_buried',
                 title: 'This order does not deliver the point',
@@ -254,6 +275,9 @@ export function buildProposals({ storyMap = null, projectMap = null } = {}) {
         }
 
         for (const gap of (projectMap.coverage_gaps || [])) {
+            // Calm styles: a missing cutaway / music / b-roll is not a gap (the
+            // server prompt says so too; this covers maps derived before R91).
+            if (CALM_STYLES.has(editingStyle) && /b[- ]?roll|cutaway|music|reaction shot|establishing/i.test(`${gap.gap} ${gap.suggestion || ''}`)) continue;
             out.push(proposal({
                 id: `gap_${(gap.gap || '').slice(0, 24).replace(/\W+/g, '_')}`,
                 title: gap.gap,

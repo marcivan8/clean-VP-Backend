@@ -148,7 +148,7 @@ export class EditJobManager {
                     }],
                 };
                 actor.send({ type: 'PLAN_GENERATED', plan: syntheticPlan });
-                return this.runPipeline(jobId, { ...intentResult, _syntheticPlan: syntheticPlan }, abortController, actor);
+                return await this.runPipeline(jobId, { ...intentResult, _syntheticPlan: syntheticPlan }, abortController, actor);
             }
 
             // ── virtual_multicam — bypass EditPlanner ──────────────────────────
@@ -169,11 +169,11 @@ export class EditJobManager {
                     }],
                 };
                 actor.send({ type: 'PLAN_GENERATED', plan: syntheticPlan });
-                return this.runPipeline(jobId, { ...intentResult, _syntheticPlan: syntheticPlan }, abortController, actor);
+                return await this.runPipeline(jobId, { ...intentResult, _syntheticPlan: syntheticPlan }, abortController, actor);
             }
 
             actor.send({ type: 'INTENT_PARSED', intent: intentResult });
-            return this.runPipeline(jobId, intentResult, abortController, actor);
+            return await this.runPipeline(jobId, intentResult, abortController, actor);
 
         } catch (error) {
             console.error(`[EditJobManager] Job ${jobId} failed:`, error);
@@ -246,7 +246,7 @@ export class EditJobManager {
         try {
             actor.send({ type: 'START', jobId, userPrompt: updatedIntent.intent });
             actor.send({ type: 'INTENT_PARSED', intent: updatedIntent });
-            return this.runPipeline(jobId, updatedIntent, abortController, actor);
+            return await this.runPipeline(jobId, updatedIntent, abortController, actor);
         } catch (error) {
             console.error(`[EditJobManager] Resumed job ${jobId} failed:`, error);
             return { success: false, jobId, message: error.message };
@@ -497,9 +497,14 @@ export class EditJobManager {
         }
     }
 
+    // R91: callers now `return await this.runPipeline(...)`. Without the
+    // await, their finally ran this cleanup as soon as the promise was
+    // returned and removed the abort controller while the pipeline was still
+    // running, so Stop (cancelJob) could not abort a running silence or
+    // caption job.
     cleanup(jobId) {
         // NOTE: deliberately does NOT stop the actor. Both call sites sit in a
-        // `finally` that guards `return this.runPipeline(...)` — in an async
+        // `finally` that guards `return await this.runPipeline(...)` — in an async
         // function that finally executes as soon as the promise is RETURNED, not
         // when it settles, so the pipeline is typically still running here.
         // Stopping the actor at this point would silently drop every event the

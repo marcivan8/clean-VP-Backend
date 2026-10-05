@@ -31,6 +31,35 @@ export const EDIT_MODES = {
     YOUTUBE_OPTIMIZED: 'YOUTUBE_OPTIMIZED',
 };
 
+/**
+ * R91: the editing style the user picked decides the content type and edit
+ * mode; detection only guesses from clip count and duration (a 40 min podcast
+ * came out as "long_form_raw" → FULL_BUILD, an aggressive rebuild). Vlog keeps
+ * detection: a pile of vlog rushes really is a full build.
+ */
+const STYLE_ANALYSIS = {
+    podcast:      { contentType: 'podcast',      editMode: EDIT_MODES.CLEAN_EDIT },
+    interview:    { contentType: 'interview',    editMode: EDIT_MODES.CLEAN_EDIT },
+    talking_head: { contentType: 'talking_head', editMode: EDIT_MODES.CLEAN_EDIT },
+    reel:         { contentType: 'short_form',   editMode: EDIT_MODES.CLEAN_EDIT },
+};
+
+/** Apply the editing style to an analysis result (keeps what was detected). */
+export function applyStyleToAnalysis(result, styleId) {
+    const o = STYLE_ANALYSIS[styleId];
+    if (!result || !o) return result;
+    return {
+        ...result,
+        detectedContentType: result.contentType ?? null,
+        detectedEditMode: result.editMode ?? null,
+        contentType: o.contentType,
+        editMode: o.editMode,
+        editingStyle: styleId,
+        ...(result.editPlan ? { editPlan: { ...result.editPlan, videoType: o.contentType, editMode: o.editMode } } : {}),
+        ...(result.summary ? { summary: { ...result.summary, contentType: o.contentType, editMode: o.editMode } } : {}),
+    };
+}
+
 export class ContentAnalyzer {
     /**
      * Main entry point: Analyze video content for long-form editing.
@@ -61,14 +90,14 @@ export class ContentAnalyzer {
 
         if (!backendResult.success) {
             console.warn('[ContentAnalyzer] Backend unavailable, using local analysis');
-            return this._localAnalysis(context, platform, targetDuration);
+            return applyStyleToAnalysis(this._localAnalysis(context, platform, targetDuration), state.editingStyle);
         }
 
-        const result = {
+        const result = applyStyleToAnalysis({
             ...backendResult,
             requiresApproval: true,
             timestamp: Date.now(),
-        };
+        }, state.editingStyle);
 
         useTimelineStore.getState().setContentAnalysis(result);
 
@@ -282,7 +311,8 @@ export class ContentAnalyzer {
 
     static _selectEditModeLocal(contentType, duration, platform) {
         if (contentType === 'rushes' || contentType === 'long_form_raw') return EDIT_MODES.FULL_BUILD;
-        if (platform === 'podcast') return EDIT_MODES.CLEAN_EDIT;
+        // inferPlatform returns 'Podcast' (capitalised): this never matched.
+        if (String(platform || '').toLowerCase() === 'podcast') return EDIT_MODES.CLEAN_EDIT;
         if (platform === 'youtube' || duration > 300) return EDIT_MODES.YOUTUBE_OPTIMIZED;
         return EDIT_MODES.CLEAN_EDIT;
     }
@@ -301,7 +331,9 @@ export class ContentAnalyzer {
     }
 
     static getCachedAnalysis() {
-        return useTimelineStore.getState().contentAnalysis || null;
+        const st = useTimelineStore.getState();
+        // R91: an analysis cached before the style was picked follows it too.
+        return applyStyleToAnalysis(st.contentAnalysis || null, st.editingStyle);
     }
 
     static formatSummaryForChat(analysis) {

@@ -135,6 +135,32 @@ export function splitSpeakerCrop({ bboxTrack = null, sourceStart = 0, duration =
 }
 
 /**
+ * R91 — full-frame reframe when the project frame is narrower than the video
+ * (a 16:9 talk set to 9:16 for a reel): the crop keeps the full height and is
+ * centred on the speaker's head (SAM2 samples over the clip's span), or on
+ * the centre when there is no face data. Null when no crop is needed (the
+ * video is already as narrow as the frame).
+ *
+ * @returns {{crop:{cropX,cropY,cropW,cropH}, faceAware:boolean}|null}
+ */
+export function fillFrameCrop({ bboxTrack = null, sourceStart = 0, duration = Infinity, sourceAspect, frameAspect } = {}) {
+    const sa = Number(sourceAspect);
+    const fa = Number(frameAspect);
+    if (!(sa > 0) || !(fa > 0)) return null;
+    const cropW = fa / sa;
+    if (cropW >= 0.999) return null;
+    const end = sourceStart + (Number.isFinite(duration) ? duration : Infinity);
+    const samples = Array.isArray(bboxTrack)
+        ? bboxTrack.filter(s => s && s.t >= sourceStart && s.t <= end && Number.isFinite(s.cx))
+        : [];
+    const cx = samples.length > 0 ? median(samples.map(s => s.cx)) : null;
+    const headX = cx != null ? cx : FALLBACK_HEAD.x;
+    const cropX = clamp(headX - cropW / 2, 0, 1 - cropW);
+    const r = (v) => Math.round(v * 10000) / 10000;
+    return { crop: { cropX: r(cropX), cropY: 0, cropW: r(cropW), cropH: 1 }, faceAware: cx != null };
+}
+
+/**
  * CSS for a framed overlay (preview). Returns the box style and the media
  * style; GraphicOverlay renders <div style=box><img|video style=media/></div>.
  */

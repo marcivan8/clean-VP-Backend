@@ -16,7 +16,7 @@ import { ClarificationGenerator } from './ClarificationGenerator.js';
 import { normalizeTransitionType, transitionFromText } from '../motion/TransitionFX.js';
 import { templateFromText } from '../motion/TemplateGraphics.js';
 import { recipeFromText } from '../motion/StyleRecipes.js';
-import { getEditingStyle } from './EditingStyles.js';
+import { getEditingStyle, stylePacing, zoomStyleFromText } from './EditingStyles.js';
 
 export const ACTIONS = {
     COMPUTE_SPLIT_TIMESTAMP: 'compute_split_timestamp',
@@ -227,7 +227,7 @@ export class EditPlanner {
             case 'reorder_segment': return this.planReorderSegment(planId, constraints);
             case 'reorder_clips': return this.planReorderClips(planId, constraints);
             case 'organize_clips': return this.planOrganizeClips(planId, state, constraints);
-            case 'rhythm_zoom': return this.planRhythmZoom(planId, constraints);
+            case 'rhythm_zoom': return this.planRhythmZoom(planId, constraints, intent.originalPrompt);
             case 'crop_clip':   return this.planCropClip(planId, constraints);
             case 'sync_cutaways': {
                 const txt = String(intent.originalPrompt || '').toLowerCase();
@@ -277,7 +277,7 @@ export class EditPlanner {
             case 'animate_automatically': return this.planSingleStep(planId, 'animate_automatically', 'Detect and animate the most interesting moments — reveals, punchlines, emphasis, and emotional beats');
             case 'reset_crop':  return this.planResetCrop(planId);
             case 'split_speakers': return this.planSplitSpeakers(planId);
-            case 'compound_clean_dynamic': return this.planCompoundCleanDynamic(planId, constraints);
+            case 'compound_clean_dynamic': return this.planCompoundCleanDynamic(planId, constraints, intent.originalPrompt);
             case 'compound_clean_virtual_multicam': return this.planCompoundCleanVirtualMulticam(planId);
             case 'compound_split_speakers_virtual_multicam': return this.planSplitSpeakersVirtualMulticam(planId);
             default:
@@ -382,7 +382,10 @@ export class EditPlanner {
 
     static planAspectRatio(planId, constraints) {
         return this.buildPlan(planId, 'set_aspect_ratio', [
-            { step_id: 'step_1', action: ACTIONS.SET_ASPECT_RATIO, ratio: constraints.ratio || '16:9', reframe_mode: 'auto_center' }
+            // R91: Reel style → 9:16 by default, filled with a crop on the speaker.
+            { step_id: 'step_1', action: ACTIONS.SET_ASPECT_RATIO,
+              ratio: constraints.ratio || (useTimelineStore.getState().editingStyle === 'reel' ? '9:16' : '16:9'),
+              reframe_mode: useTimelineStore.getState().editingStyle === 'reel' ? 'face' : 'auto_center' }
         ]);
     }
 
@@ -439,17 +442,31 @@ export class EditPlanner {
         });
     }
 
+    /**
+     * R91: silence-removal pacing. An explicit value wins, then the editing
+     * style's pacing (podcast cuts only long pauses, reel cuts tight), then
+     * the long-standing default.
+     */
+    static _silencePacing(constraints = {}) {
+        const pace = stylePacing(useTimelineStore.getState().editingStyle);
+        return {
+            min_duration: constraints.min_duration || pace?.minSilence || 0.5,
+            padding:      constraints.padding      || pace?.padding    || 0.1,
+        };
+    }
+
     static planSilenceRemoval(planId, constraints) {
         const state = useTimelineStore.getState();
+        const pace = this._silencePacing(constraints);
         const steps = this._buildPerAssetSteps(state, ACTIONS.SILENCE_REMOVAL, {
             threshold:    constraints.threshold    || '-30dB',
-            min_duration: constraints.min_duration || 0.5,
-            padding:      constraints.padding      || 0.1,
+            min_duration: pace.min_duration,
+            padding:      pace.padding,
         });
 
         if (steps.length === 0) {
             return this.buildPlan(planId, 'silence_removal', [
-                { step_id: 'step_1', action: ACTIONS.SILENCE_REMOVAL, threshold: constraints.threshold || '-30dB', min_duration: constraints.min_duration || 0.5, padding: constraints.padding || 0.1 }
+                { step_id: 'step_1', action: ACTIONS.SILENCE_REMOVAL, threshold: constraints.threshold || '-30dB', min_duration: pace.min_duration, padding: pace.padding }
             ]);
         }
 
@@ -457,7 +474,7 @@ export class EditPlanner {
         // simpler $uploaded_file path (avoids issues with missing proxy URLs).
         if (steps.length === 1) {
             return this.buildPlan(planId, 'silence_removal', [
-                { step_id: 'step_1', action: ACTIONS.SILENCE_REMOVAL, threshold: constraints.threshold || '-30dB', min_duration: constraints.min_duration || 0.5, padding: constraints.padding || 0.1 }
+                { step_id: 'step_1', action: ACTIONS.SILENCE_REMOVAL, threshold: constraints.threshold || '-30dB', min_duration: pace.min_duration, padding: pace.padding }
             ]);
         }
 
@@ -594,13 +611,14 @@ export class EditPlanner {
             const wantsSilence = actions.length === 0 || actions.some(a =>
                 a === 'silence_removal' || a === 'remove_silences');
             if (wantsSilence) {
+                const pace = this._silencePacing(constraints);
                 const silenceSteps = this._buildPerAssetSteps(state, 'silence_removal', {
-                    threshold: '-30dB', min_duration: 0.5, padding: 0.1,
+                    threshold: '-30dB', min_duration: pace.min_duration, padding: pace.padding,
                     reason: 'Remove dead air and long pauses',
                 });
                 // Single asset: omit asset_id / file_path (use $uploaded_file fallback)
                 if (silenceSteps.length <= 1) {
-                    steps.push({ step_id: `step_${steps.length + 1}`, action: 'silence_removal', threshold: '-30dB', min_duration: 0.5, padding: 0.1, reason: 'Remove dead air and long pauses' });
+                    steps.push({ step_id: `step_${steps.length + 1}`, action: 'silence_removal', threshold: '-30dB', min_duration: pace.min_duration, padding: pace.padding, reason: 'Remove dead air and long pauses' });
                 } else {
                     silenceSteps.forEach(s => { s.step_id = `step_${steps.length + 1}`; steps.push(s); });
                 }
@@ -842,9 +860,10 @@ export class EditPlanner {
         ]);
     }
 
-    static planRhythmZoom(planId, constraints) {
-        // R91: the editing style's zoom rhythm when the request names none.
-        const style = constraints?.style || getEditingStyle(useTimelineStore.getState().editingStyle)?.rhythmZoom || 'dynamic';
+    static planRhythmZoom(planId, constraints, originalPrompt = '') {
+        // R91: a preset named in the request wins, then the editing style's, then 'dynamic'.
+        const style = constraints?.style || zoomStyleFromText(originalPrompt)
+            || getEditingStyle(useTimelineStore.getState().editingStyle)?.rhythmZoom || 'dynamic';
         return this.buildPlan(planId, 'rhythm_zoom', [
             {
                 step_id: 'step_1',
@@ -870,15 +889,18 @@ export class EditPlanner {
      * Compound: clean up silences + filler words, then add zoom rhythm.
      * Runs as a two-step plan so both execute sequentially.
      */
-    static planCompoundCleanDynamic(planId, constraints) {
-        const style = constraints?.style || 'dynamic';
+    static planCompoundCleanDynamic(planId, constraints, originalPrompt = '') {
+        // R91: the editing style's zoom preset and pacing when none is named.
+        const style = constraints?.style || zoomStyleFromText(originalPrompt)
+            || getEditingStyle(useTimelineStore.getState().editingStyle)?.rhythmZoom || 'dynamic';
+        const pace = this._silencePacing(constraints || {});
         return this.buildPlan(planId, 'compound_clean_dynamic', [
             {
                 step_id: 'step_1',
                 action: 'silence_removal',
                 threshold: '-30dB',
-                min_duration: 0.5,
-                padding: 0.1,
+                min_duration: pace.min_duration,
+                padding: pace.padding,
                 reason: 'Remove silences',
             },
             {
@@ -894,13 +916,14 @@ export class EditPlanner {
      * Compound: remove silences first, then apply virtual multicam close-up angles.
      */
     static planCompoundCleanVirtualMulticam(planId) {
+        const pace = this._silencePacing({});
         return this.buildPlan(planId, 'compound_clean_virtual_multicam', [
             {
                 step_id: 'step_1',
                 action: 'silence_removal',
                 threshold: '-30dB',
-                min_duration: 0.5,
-                padding: 0.1,
+                min_duration: pace.min_duration,
+                padding: pace.padding,
                 reason: 'Remove silences to create clean clip segments',
             },
             {

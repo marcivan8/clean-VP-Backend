@@ -15,6 +15,7 @@
  */
 
 const express = require('express');
+const { sanitizeEditingStyle, isCalmStyle } = require('../brain/editingStyles');
 const router  = express.Router();
 
 const { authenticateUser }       = require('../../middleware/auth.js');
@@ -145,6 +146,9 @@ router.post('/recommend/sfx', authenticateUser, async (req, res) => {
 // this app is required to go through the store's own history/undo path.
 router.post('/animate-automatically', authenticateUser, async (req, res) => {
     const { projectState, projectId } = req.body || {};
+    // R91: calm editing styles (podcast, interview) get softer motion and no
+    // impact / comedy sound effects.
+    const calm = isCalmStyle(sanitizeEditingStyle(req.body?.editingStyle ?? projectState?.editingStyle));
 
     if (!projectState || !Array.isArray(projectState.tracks)) {
         return res.status(400).json({ error: 'projectState.tracks is required' });
@@ -205,15 +209,16 @@ router.post('/animate-automatically', authenticateUser, async (req, res) => {
             // now resolve to genuinely different keyframes downstream
             // (ClipAdapter.applyPresetToClip → AnimationSynthesizer.js), not
             // just the same fixed preset replayed twice.
-            const intensity = computeIntensity(event.eventType, event.metadata);
+            const rawIntensity = computeIntensity(event.eventType, event.metadata);
+            const intensity = calm ? Math.round(rawIntensity * 0.5 * 1000) / 1000 : rawIntensity;
             const presetId  = pickPresetForIntensity(candidates, intensity);
             // R82 — layer a complementary secondary preset (a different
             // animation-type channel, e.g. scale+glow) on top of the primary,
             // deterministically chosen from this event's own text/label plus
             // the project's cached tone (both free — see AnimationCombiner.js).
-            const secondaryPresetId = pickSecondaryPreset(presetId, computeStyleSeed(event, projectTone));
+            const secondaryPresetId = calm ? null : pickSecondaryPreset(presetId, computeStyleSeed(event, projectTone));
 
-            const intents = sfxIntentsForEventType(event.eventType);
+            const intents = calm ? [] : sfxIntentsForEventType(event.eventType);
             let sfx = [];
             if (intents.length) {
                 if (!sfxCache.has(event.eventType)) {

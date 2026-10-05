@@ -328,7 +328,9 @@ function compileSilenceRemoval(step, ctx) {
         cmd(ENGINE.API, 'silenceDetect', {
             endpoint: '/api/silence/detect',
             method: 'POST',
-            payload:  { filename, threshold: step.threshold || '-30dB', duration: step.min_duration || 0.5 },
+            // R91: padding reaches the worker (it always used its 100 ms default).
+            payload:  { filename, threshold: step.threshold || '-30dB', duration: step.min_duration || 0.5,
+                        ...(Number(step.padding) >= 0 ? { padding_ms: Math.round(Number(step.padding) * 1000) } : {}) },
             clip_id:  step.clip_id  || null, // single-clip target (legacy)
             asset_id: step.asset_id || null, // replace ALL clips of this asset
         }, {

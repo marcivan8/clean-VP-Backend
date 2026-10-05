@@ -10,6 +10,7 @@
 'use strict';
 
 const { getPlatform, evaluateAgainstPlatform } = require('./PlatformKnowledge');
+const { sanitizeEditingStyle, expectsMusic } = require('./editingStyles');
 // Dependency-free constant module — safe to import here despite this file being
 // documented as pure/synchronous (no DB, no AI). See analysisStatus.js.
 const { ASSET_ANALYSIS_DONE } = require('./media/analysisStatus');
@@ -38,6 +39,8 @@ class ContextEngine {
         const editHistory = Array.isArray(state.editHistory) ? state.editHistory : [];
         const duration    = typeof state.duration === 'number' ? state.duration  : this._computeDuration(tracks);
         const platform    = state.platform || null;
+        // R91: the editing style picked by the user (brainRoutes sanitises it).
+        const editingStyle = sanitizeEditingStyle(state.editingStyle);
 
         // ── Timeline analysis ─────────────────────────────────────────────────
         const clips = this._getAllClips(tracks);
@@ -66,7 +69,8 @@ class ContextEngine {
         // ── Completion score ──────────────────────────────────────────────────
         const completionScore = this._computeCompletionScore({
             hasCaptions,
-            hasMusic,
+            // A podcast / interview / talking head is complete without a music bed.
+            hasMusic: hasMusic || !expectsMusic(editingStyle),
             editHistory,
             clipCount,
             duration,
@@ -95,6 +99,7 @@ class ContextEngine {
             hasCaptions,
             aspectRatio,
             platform,
+            editingStyle,
             editsDone:      editHistory,
 
             // Captions

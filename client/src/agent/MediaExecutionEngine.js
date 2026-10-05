@@ -37,7 +37,7 @@ import { EventBus, EVENT_TYPES } from './EventBus.js';
 // timings instead of collapsing them to a line of text; see
 // groupWordsIntoCaptions below and client/src/motion/CaptionModel.js.
 import { groupWordsIntoSegments, stylePackToClipFields } from '../motion/CaptionModel.js';
-import { STYLE_RECIPES, recipeTransitionForCut } from '../motion/StyleRecipes.js';
+import { STYLE_RECIPES, recipeTransitionForCut, pickTransitionCuts } from '../motion/StyleRecipes.js';
 import { TRANSITION_DEFAULT_DURATION } from '../motion/TransitionFX.js';
 import { autoEmphasizeCaptions } from '../utils/captionEmphasis.js';
 import { mapTranscriptToTimeline, listMainTrackSources } from '../timeline/transcriptMap.js';
@@ -52,6 +52,7 @@ import i18next from 'i18next';
 import { resolveRetakeSource, retakeReviewLines, makeRetakeT, findTranscript } from './retakeSource.js';
 import { clipSourceWords, buildRhythmRequest, shotsToKeyframes } from './rhythmShots.js';
 import { findBestShortWindow, rangesOutside } from './shortPicker.js';
+import { packSegments } from './segmentPacking.js';
 
 // See _deriveAudioPeaksForClip below.
 const DERIVED_PEAK_DB_FLOOR = -8;
@@ -223,6 +224,18 @@ function deriveTimelineTranscript(tracks, originalWords) {
 }
 
 // ─── MediaExecutionEngine ────────────────────────────────────────────────────
+
+
+/** R91: AbortSignal that fires after `ms` (undefined where unsupported). */
+function timeoutSignal(ms) {
+    try {
+        return typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(ms) : undefined;
+    } catch (err) {
+        console.warn('[MediaExecutionEngine] timeoutSignal unavailable:', err.message);
+        return undefined;
+    }
+}
+
 
 export class MediaExecutionEngine {
     constructor() {
@@ -601,7 +614,8 @@ export class MediaExecutionEngine {
                 .filter(w => Number.isFinite(w.start) && Number.isFinite(w.end));
             const res = await authFetch('/api/audio/animate-automatically', {
                 method: 'POST',
-                body: JSON.stringify({ projectState: { tracks, words }, projectId: st.projectId || null }),
+                body: JSON.stringify({ projectState: { tracks, words }, projectId: st.projectId || null, editingStyle: st.editingStyle || null }),
+                signal: timeoutSignal(45_000), // R91: placements still run without events
             });
             if (!res.ok) return [];
             const data = await res.json();
@@ -680,7 +694,21 @@ export class MediaExecutionEngine {
             case 'splitClip':      { this._callStore(store, 'splitClip', args.trackId, args.clipId, args.splitTime); return { action, success: true, message: `Split at ${args.splitTime}s` }; }
             case 'removeClip':     this._callStore(store, 'removeClip', args.trackId, args.clipId); return { action, success: true, message: `Removed clip ${args.clipId}` };
             case 'setClipSpeed':   this._callStore(store, 'setClipSpeed', args.trackId, args.clipId, args.speed); return { action, success: true };
-            case 'setAspectRatio': this._callStore(store, 'setAspectRatio', args.ratio); return { action, success: true };
+            case 'setAspectRatio': {
+                this._callStore(store, 'setAspectRatio', args.ratio);
+                // R91: a reel fills 9:16 with a crop on the speaker, not bars; going
+                // back to a wider frame removes that crop again.
+                const fresh = useTimelineStore.getState();
+                const hasOurCrop = (fresh.tracks || []).some(t => (t.clips || []).some(c => c.virtualCam?.reframe));
+                if ((args.reframeMode === 'face' || hasOurCrop) && typeof fresh.reframeToFrame === 'function') {
+                    const r = fresh.reframeToFrame();
+                    if (r.reframed > 0) {
+                        const face = r.faceAware > 0 ? `, ${r.faceAware} centred on the detected speaker` : ', centred (no face data yet)';
+                        return { action, success: true, message: `Set to ${args.ratio}. Reframed ${r.reframed} clip(s) to fill the frame${face}.` };
+                    }
+                }
+                return { action, success: true };
+            }
             case 'updateClip': {
                 if (args.clipId === '$ALL_CLIPS') {
                     // Fan out to every clip on every video track — one history snapshot total
@@ -910,18 +938,19 @@ export class MediaExecutionEngine {
                         const r = await autoEmphasizeCaptions({ useLLM: true, source: 'assistant' });
                         if (r.updated > 0) done.push(`key words on ${r.updated} caption(s)`);
                     }
-                    // 3. Transitions on every cut of the base track.
+                    // 3. Transitions on the cuts that are scene changes, plus spaced
+                    // jump cuts for punchy recipes (R91: not one on every jump cut).
                     const live = useTimelineStore.getState();
                     const base = (live.tracks || []).find(t => t.type === 'video' && (t.clips || []).length > 0);
-                    const cuts = base ? [...base.clips].sort((a, b) => a.start - b.start).slice(0, -1) : [];
-                    if (cuts.length > 0 && recipe.transitions) {
-                        cuts.forEach((clip, i) => {
+                    const picked = base ? pickTransitionCuts(base.clips, recipe) : [];
+                    if (picked.length > 0) {
+                        picked.forEach((clipId, i) => {
                             const tr = recipeTransitionForCut(recipe, i);
-                            if (tr) useTimelineStore.getState().addTransition(clip.id, tr.type, tr.duration || TRANSITION_DEFAULT_DURATION[tr.type]);
+                            if (tr) useTimelineStore.getState().addTransition(clipId, tr.type, tr.duration || TRANSITION_DEFAULT_DURATION[tr.type]);
                         });
-                        done.push(`transitions on ${cuts.length} cut(s)`);
+                        done.push(`transitions on ${picked.length} cut(s)`);
                     } else if (recipe.transitions) {
-                        skipped.push('transitions (only one clip, no cut)');
+                        skipped.push(base && base.clips.length > 1 ? 'transitions (no scene change to mark)' : 'transitions (only one clip, no cut)');
                     }
                     // 4. Zoom rhythm (needs a transcript; reported if it cannot run).
                     if (recipe.rhythmZoom) {
@@ -989,7 +1018,8 @@ export class MediaExecutionEngine {
                     // (no project open yet) just means no tone signal.
                     const aaRes = await authFetch('/api/audio/animate-automatically', {
                         method: 'POST',
-                        body: JSON.stringify({ projectState: { tracks: aaTracks, words: aaWords }, projectId: aaStore.projectId || null }),
+                        // R91: podcast / interview get softer motion and no impact SFX (server side).
+                        body: JSON.stringify({ projectState: { tracks: aaTracks, words: aaWords }, projectId: aaStore.projectId || null, editingStyle: aaStore.editingStyle || null }),
                     });
                     const aaData = await aaRes.json();
                     if (!aaRes.ok) {
@@ -1668,7 +1698,9 @@ export class MediaExecutionEngine {
 
                 const rzRes  = await authFetch('/api/interview/rhythm-zoom', {
                     method: 'POST',
-                    body: JSON.stringify({ clips: payloadClips, words: rzWords, style: rzStyle }),
+                    body: JSON.stringify({ clips: payloadClips, words: rzWords, style: rzStyle, editingStyle: useTimelineStore.getState().editingStyle || null }),
+                    // R91: a stalled request must not hold a recipe / Auto run open.
+                    signal: timeoutSignal(120_000),
                 });
                 const rzData = await rzRes.json();
                 if (!rzRes.ok) throw new Error(rzData.error || `rhythm-zoom error ${rzRes.status}`);
@@ -1837,6 +1869,8 @@ export class MediaExecutionEngine {
                             clips: clipPayload,
                             projectId: ocStore.projectId || null,
                             storyHints,
+                            // R91: vlog / interview / podcast keep the recorded order.
+                            editingStyle: ocStore.editingStyle || null,
                         }),
                     });
                     const ocData = await ocRes.json();
@@ -3838,22 +3872,11 @@ export class MediaExecutionEngine {
         // Segments are SOURCE time. A clip shows duration × speed seconds of
         // source, so on a sped-up/slowed clip a kept segment lasts
         // srcDuration / speed on the timeline (speed of the clip it falls in).
-        const orderedSegs = [...validSegs].sort((a, b) => a.start - b.start);
-        const speedAtSource = (t) => {
-            const c = baseClips.find(bc => {
-                const from = bc.offset ?? 0;
-                return t >= from - 0.01 && t < from + (bc.duration ?? 0) * (bc.speed || 1);
-            });
-            return (c && Number(c.speed) > 0) ? Number(c.speed) : 1;
-        };
-        let acc = effectiveRangeStart;
-        const segOut = orderedSegs.map(seg => {
-            const out = acc;
-            const segSpeed = speedAtSource(seg.start);
-            acc += seg.duration / segSpeed;
-            return { ...seg, outStart: out, srcEnd: seg.start + seg.duration, speed: segSpeed };
-        });
-        const timelineEnd = acc;
+        // R91 fix (agent/segmentPacking.js): only the parts of a segment the
+        // clips still show take timeline space. Packing whole segments re-opened
+        // every range an earlier cut removed as a gap ("remove filler words"
+        // after "remove silences"). Uncut clips give the same result as before.
+        const { pieces: segOut, end: timelineEnd } = packSegments(validSegs, baseClips, effectiveRangeStart);
 
         let droppedZoomKfCount = 0; // clips whose stale zoom-rhythm keyframes had to be cleared (see below)
         let inserted = 0;

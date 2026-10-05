@@ -3,7 +3,7 @@ const { getAIClient, isAIConfigured, resolveModel } = require('../services/AIPro
 const { analyzeStructure } = require('../viralEngine/structure.js');
 
 // R91 — editing styles accepted in ProjectContext.editingStyle (client: agent/EditingStyles.js).
-const EDITING_STYLE_IDS = ['vlog', 'talking_head', 'interview', 'podcast', 'reel'];
+const { EDITING_STYLE_IDS } = require('../server/brain/editingStyles');
 
 const openai = getAIClient();
 

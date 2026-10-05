@@ -623,7 +623,12 @@ export class ValidationService {
         } else {
             // Fallback: attempt store rollback
             const store = useTimelineStore.getState();
-            if (store.undo) {
+            // R91: inside an undo group (Auto mode, style recipe) the last history
+            // entry is not this step's: undo() would revert another edit, or one
+            // made before Auto started. The group's single undo covers it.
+            if (store._historyGroupDepth > 0) {
+                console.warn('[ValidationService] Validation failed inside an undo group: no automatic rollback');
+            } else if (store.undo) {
                 console.log('[ValidationService] Triggering automatic rollback');
                 store.undo();
             }

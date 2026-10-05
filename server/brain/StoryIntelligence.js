@@ -37,6 +37,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { storyMapStyleNote } = require('./editingStyles');
 
 const { supabaseAdmin } = require('../../config/database');
 const { getAIClient, isAIConfigured, resolveModel, resolveProvider } = require('../../services/AIProvider');
@@ -155,7 +156,7 @@ class StoryIntelligence {
      *
      * PURE. Executed directly by the regression.
      */
-    computeCutFingerprint(clips = []) {
+    computeCutFingerprint(clips = [], editingStyle = null) {
         // NOTE the absence of .sort() — deliberate, and the key difference from
         // ProjectIntelligence.computeFingerprint(), which sorts because a bin is
         // a SET. A cut is a SEQUENCE: reordering the same clips is a different
@@ -169,6 +170,8 @@ class StoryIntelligence {
                 Math.round((c.duration || 0) * 10),  // 100ms resolution
                 (c.transcript || '').length > 0 ? 't' : '-',
             ].join(':'));
+        // R91: the hook rules depend on the editing style; no style keeps the old hash.
+        if (editingStyle) parts.push(`style:${editingStyle}`);
         return crypto.createHash('sha1').update(parts.join('|')).digest('hex');
     }
 
@@ -203,14 +206,14 @@ class StoryIntelligence {
      * @param {Object}  [args.projectMap] - the project_intelligence row, for through-line
      * @returns {Promise<Object|null>}
      */
-    async ensureMap({ projectId, userId, clips = [], projectMap = null, platform = null }) {
+    async ensureMap({ projectId, userId, clips = [], projectMap = null, platform = null, editingStyle = null }) {
         if (!projectId || !userId) return null;
 
         const ordered = [...(clips || [])]
             .filter(c => c && c.id)
             .sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
 
-        const fingerprint = this.computeCutFingerprint(ordered);
+        const fingerprint = this.computeCutFingerprint(ordered, editingStyle);
         const existing    = await this.getMap(projectId, userId);
 
         if (existing && existing.fingerprint === fingerprint && existing.status === 'ok') {
@@ -231,7 +234,7 @@ class StoryIntelligence {
         }
 
         try {
-            const derived = await this.deriveMap({ clips: ordered, projectMap, platform });
+            const derived = await this.deriveMap({ clips: ordered, projectMap, platform, editingStyle });
             if (!derived) return existing || null;
 
             return await this._persist({
@@ -277,7 +280,7 @@ class StoryIntelligence {
     }
 
     /** One GPT call over the cut. Separated from persistence for testability. */
-    async deriveMap({ clips = [], projectMap = null, platform = null }) {
+    async deriveMap({ clips = [], projectMap = null, platform = null, editingStyle = null }) {
         if (!clips.length) return null;
         if (!isAIConfigured()) {
             throw new Error('no AI provider configured — cannot derive a story map');
@@ -286,7 +289,7 @@ class StoryIntelligence {
         const openai = getAIClient({ timeout: 60_000 });
         if (!openai) throw new Error('AI client unavailable');
 
-        const prompt = this.buildDerivationPrompt({ clips, projectMap, platform });
+        const prompt = this.buildDerivationPrompt({ clips, projectMap, platform, editingStyle });
 
         const completion = await openai.chat.completions.create({
             // R84 missed this call site (same bug as ProjectIntelligence.js) —
@@ -331,7 +334,8 @@ class StoryIntelligence {
      * actually asked — including that it must not invent beats for clips whose
      * content it cannot see.
      */
-    buildDerivationPrompt({ clips = [], projectMap = null, platform = null }) {
+    buildDerivationPrompt({ clips = [], projectMap = null, platform = null, editingStyle = null }) {
+        const styleNote = storyMapStyleNote(editingStyle);
         const shown   = clips.slice(0, MAX_CLIPS_IN_PROMPT);
         const omitted = clips.length - shown.length;
 
@@ -362,7 +366,8 @@ this SEQUENCE works as a story, and where it doesn't.
 ━━━ THE PROJECT ━━━
 Type:         ${projectType}
 Through-line: ${throughLine}
-Platform:     ${platform || 'not specified'}
+Platform:     ${platform || 'not specified'}${styleNote ? `
+${styleNote}` : ''}
 Total length: ${this._totalDuration(clips)}s across ${clips.length} clip(s)${omitted > 0 ? ` (showing first ${shown.length})` : ''}
 
 ━━━ THE CUT, IN ORDER ━━━

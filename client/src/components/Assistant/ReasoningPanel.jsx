@@ -691,8 +691,10 @@ const CaptionStylesCard = ({ log }) => {
 const ReasoningPanel = ({ className }) => {
     const { t } = useTranslation('editor');
     const { logs, suggestions, isAnalyzing, setIsAnalyzing, addLog, addSuggestion, removeSuggestion, contextualSuggestion, quickChips, setActiveTab } = useAIStore();
-    // R91: Auto mode changes the input hint (EditingStylePicker below the box).
+    // R91: Auto mode changes the input hint (EditingStylePicker below the box);
+    // a style change re-reads the project for the Brain (effect below).
     const editingMode = useTimelineStore(s => s.editingMode);
+    const editingStyle = useTimelineStore(s => s.editingStyle);
     const { uploadedFile, performAction, assets, tracks, projectId } = useTimelineStore(useShallow(state => ({
         uploadedFile:  state.uploadedFile,
         performAction: state.performAction,
@@ -811,6 +813,28 @@ const ReasoningPanel = ({ className }) => {
         analyzeProject('project_opened');
     }, [projectId, analyzeProject, assets]);
 
+    // R91: picking another editing style changes what the Brain should advise
+    // (no b-roll push for a podcast, no hook-first reorder for a vlog). Re-read
+    // the project once the choice settles; the first value (project load) is
+    // skipped, the project_opened analysis above already covers it.
+    const lastStyleRef = useRef(undefined);
+    const styleTimerRef = useRef(null);
+    useEffect(() => {
+        if (lastStyleRef.current === undefined) { lastStyleRef.current = editingStyle; return undefined; }
+        if (lastStyleRef.current === editingStyle) return undefined;
+        lastStyleRef.current = editingStyle;
+        if (!projectId || analyzedProjectRef.current !== projectId) return undefined;
+        if (styleTimerRef.current) clearTimeout(styleTimerRef.current);
+        styleTimerRef.current = setTimeout(() => {
+            styleTimerRef.current = null;
+            Promise.resolve(analyzeProject('edit_applied')).catch(err => console.warn('[ReasoningPanel] style re-analysis failed:', err?.message));
+        }, 1500);
+        // No cleanup on purpose: analyzeProject's identity can change while the
+        // timer runs, which must not cancel the pending re-read.
+        return undefined;
+    }, [editingStyle, projectId, analyzeProject]);
+    useEffect(() => () => { if (styleTimerRef.current) clearTimeout(styleTimerRef.current); }, []);
+
     // Advisory trigger: analyze when a new asset finishes uploading ("asset_added").
     // Tracks the count of non-proxying assets so it only fires once per new asset,
     // not on every proxy-progress re-render. Seeded with the CURRENT count (not 0)
@@ -913,6 +937,8 @@ const ReasoningPanel = ({ className }) => {
         const directorProposals = buildProposals({
             storyMap:   brainLastResponse.storyMap   || null,
             projectMap: brainLastResponse.projectMap || null,
+            // R91: no "move the hook to the front" for vlog / interview / podcast.
+            editingStyle: useTimelineStore.getState().editingStyle || null,
         });
 
         const hasContent = !!(

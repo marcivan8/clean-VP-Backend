@@ -15,7 +15,7 @@ export const STYLE_RECIPES = {
         id: 'punchy',
         captionPack: 'hormozi',          // CaptionModel CAPTION_STYLE_PACKS
         keywords: true,                  // keyword emphasis (R88)
-        transitions: { cycle: ['flash', 'whip-left', 'zoom-punch', 'whip-right'] },
+        transitions: { cycle: ['flash', 'whip-left', 'zoom-punch', 'whip-right'], jumpCuts: true },
         rhythmZoom: 'dynamic',           // /api/interview/rhythm-zoom styles
         broll: { layout: 'fullscreen' }, // word-synced cutaways (A6)
         numberPops: true,
@@ -25,7 +25,7 @@ export const STYLE_RECIPES = {
         id: 'travel',
         captionPack: 'mrbeast',
         keywords: true,
-        transitions: { cycle: ['speed-lines', 'whip-left', 'whip-right'] },
+        transitions: { cycle: ['speed-lines', 'whip-left', 'whip-right'], jumpCuts: true },
         rhythmZoom: 'subtle',
         broll: { layout: 'fullscreen' },
         numberPops: true,
@@ -78,4 +78,43 @@ export function recipeTransitionForCut(recipe, i) {
     return { type: c[i % c.length], duration: Number(recipe.transitions.duration) > 0 ? Number(recipe.transitions.duration) : null };
 }
 
-export default { STYLE_RECIPES, STYLE_RECIPE_IDS, recipeFromText, recipeTransitionForCut };
+/** Seconds between two transitions on jump cuts of the same take. */
+export const JUMP_CUT_TRANSITION_SPACING_S = 8;
+export const MAX_RECIPE_TRANSITIONS = 40;
+
+/**
+ * R91: which cuts of the base track get a transition. Silence and filler
+ * removal leave a jump cut every few seconds; a flash on each of them (often
+ * hundreds) reads as a glitch, not a style. So:
+ *  - a scene change always gets one: another file, a jump of more than 10 s
+ *    in the source, or footage put out of order;
+ *  - a jump cut inside one take only when the recipe allows it (punchy,
+ *    travel) and at least 8 s after the previous transition;
+ *  - at most 40 in total.
+ * @param {Array} clips base-track clips
+ * @returns {string[]} ids of the clips whose END gets a transition
+ */
+export function pickTransitionCuts(clips, recipe) {
+    if (!recipe?.transitions) return [];
+    const sorted = (Array.isArray(clips) ? clips : []).filter(Boolean)
+        .slice().sort((a, b) => (Number(a.start) || 0) - (Number(b.start) || 0));
+    const ids = [];
+    let lastAt = -Infinity;
+    for (let i = 0; i < sorted.length - 1; i++) {
+        const c = sorted[i];
+        const n = sorted[i + 1];
+        const speed = Number(c.speed) > 0 ? Number(c.speed) : 1;
+        const srcEnd = (Number(c.offset) || 0) + (Number(c.duration) || 0) * speed;
+        const nOff = Number(n.offset) || 0;
+        const scene = (c.assetId || null) !== (n.assetId || null) || nOff < srcEnd - 0.05 || nOff - srcEnd > 10;
+        const at = (Number(c.start) || 0) + (Number(c.duration) || 0);
+        if (scene || (recipe.transitions.jumpCuts && at - lastAt >= JUMP_CUT_TRANSITION_SPACING_S)) {
+            ids.push(c.id);
+            lastAt = at;
+            if (ids.length >= MAX_RECIPE_TRANSITIONS) break;
+        }
+    }
+    return ids;
+}
+
+export default { STYLE_RECIPES, STYLE_RECIPE_IDS, recipeFromText, recipeTransitionForCut, pickTransitionCuts };

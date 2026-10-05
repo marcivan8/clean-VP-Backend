@@ -7,7 +7,7 @@ import useTimelineStore from '../store/useTimelineStore.js';
 import { trackEvent } from '../utils/trackEvent.js';
 import { countMetric, distributionMetric, nowMs } from '../utils/metrics.js';
 import { getNextAction, getQuickChips } from './SuggestionEngine.js';
-import { runAutopilot, stopAutopilot } from './StyleAutopilot.js';
+import { runAutopilot, stopAutopilot, isAutopilotRunning } from './StyleAutopilot.js';
 import { isQuestion } from './EditingStyles.js';
 
 // Per-operation editorial descriptions and next-step suggestions.
@@ -537,6 +537,18 @@ export class WorkflowController {
             console.warn('[Workflow] processUserPrompt called while clarifying — cancelling stale job');
             this.cancelCurrentJob();
             this.actor.send({ type: 'CANCEL' }); // transition clarifying → idle
+        }
+
+        // R91: an Auto run can outlive the 15 min UI limit (long podcast). A
+        // prompt sent meanwhile would land inside its single undo step.
+        if (isAutopilotRunning()) {
+            useAIStore.getState().addLog({
+                id: 'auto-busy-' + Date.now(),
+                type: 'warning',
+                message: 'Auto edit is still finishing its current step. Send this again when it is done.',
+                timestamp: new Date().toLocaleTimeString(),
+            });
+            return;
         }
 
         // Prevent double-tap / double-call duplicates while already running.

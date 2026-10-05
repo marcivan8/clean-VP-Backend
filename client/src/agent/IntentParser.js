@@ -12,6 +12,7 @@
 
 import { authFetch } from '../utils/authFetch.js';
 import { ContextGenerator } from './ContextGenerator.js';
+import { zoomStyleFromText } from './EditingStyles.js';
 import { resolveCommand, expandMacro, extractParams, COMMAND_BY_ID } from './CommandRegistry.js';
 import { FallbackParser } from './FallbackParser.js';
 import { EventBus, EVENT_TYPES } from './EventBus.js';
@@ -19,6 +20,16 @@ import { IntentValidator } from './IntentValidator.js';
 import { INTENT_TYPES, OPERATIONS } from './CommandConstants.js';
 import { extractEditIntent } from '../utils/nlpFallback.js';
 import useAIStore from '../store/useAIStore.js';
+
+/**
+ * R91: zoom preset named in the request, or nothing, so the planner falls back
+ * to the editing style's preset (podcast/vlog: subtle) and then to 'dynamic'.
+ * It used to be hardcoded to 'dynamic', overriding the style.
+ */
+function zoomStyleParams(lower) {
+    const style = zoomStyleFromText(lower);
+    return style ? { style } : {};
+}
 
 export { INTENT_TYPES, OPERATIONS };
 
@@ -746,7 +757,7 @@ export class IntentParser {
             return {
                 intent: 'edit',
                 operation: 'compound_clean_dynamic',
-                parameters: { style: 'dynamic' },
+                parameters: zoomStyleParams(lower),
                 confidence: 'HIGH',
                 missingParameters: []
             };
@@ -760,7 +771,7 @@ export class IntentParser {
             return {
                 intent: 'edit',
                 operation: 'rhythm_zoom',
-                parameters: { style: 'dynamic' },
+                parameters: zoomStyleParams(lower),
                 confidence: 'HIGH',
                 missingParameters: []
             };
@@ -1074,9 +1085,9 @@ export class IntentParser {
             return {
                 intent: 'edit',
                 operation: 'rhythm_zoom',
-                parameters: { style: 'dynamic' },
+                parameters: zoomStyleParams(lower),
                 targets: [],
-                constraints: { style: 'dynamic' },
+                constraints: zoomStyleParams(lower),
                 confidence: 'HIGH',
                 missingParameters: [],
                 needs_clarification: false,
@@ -1092,9 +1103,9 @@ export class IntentParser {
                 return {
                     intent: 'edit',
                     operation: 'compound_clean_dynamic',
-                    parameters: { style: 'dynamic' },
+                    parameters: zoomStyleParams(lower),
                     targets: [],
-                    constraints: { style: 'dynamic' },
+                    constraints: zoomStyleParams(lower),
                     confidence: 'HIGH',
                     missingParameters: [],
                     needs_clarification: false,

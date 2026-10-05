@@ -24,6 +24,7 @@
 'use strict';
 
 const express = require('express');
+const { sanitizeEditingStyle, platformForStyle } = require('../brain/editingStyles');
 const router  = express.Router();
 
 const { authenticateUser }      = require('../../middleware/auth');
@@ -112,6 +113,10 @@ router.post('/command', authenticateUser, async (req, res) => {
 router.post('/analyze', authenticateUser, async (req, res) => {
     try {
         const { projectState = {}, trigger = 'project_opened' } = req.body || {};
+        // R91: the editing style picked under the chat box overrides the format
+        // the brain detects; a reel or podcast also implies its platform.
+        const editingStyle = sanitizeEditingStyle(projectState.editingStyle);
+        const platform = projectState.platform || platformForStyle(editingStyle) || null;
 
         // ── Enrich with MEDIA INTELLIGENCE ────────────────────────────────────
         // The client can only describe the timeline (durations, counts). What the
@@ -153,7 +158,8 @@ router.post('/analyze', authenticateUser, async (req, res) => {
                     userId:    req.user.id,
                     assets:    assetIntelligence,
                     clipCount: projectState.clipCount || 0,
-                    platform:  projectState.platform || null,
+                    platform,
+                    editingStyle,
                 });
             }
         } catch (pmErr) {
@@ -178,7 +184,8 @@ router.post('/analyze', authenticateUser, async (req, res) => {
                     userId:     req.user.id,
                     clips:      projectState.cut,
                     projectMap,
-                    platform:   projectState.platform || null,
+                    platform,
+                    editingStyle,
                 });
             }
         } catch (smErr) {
@@ -195,6 +202,8 @@ router.post('/analyze', authenticateUser, async (req, res) => {
             adviceOnly: true,
             context: {
                 ...projectState,
+                editingStyle,
+                platform,
                 assetIntelligence,
                 projectMap,
                 storyMap,

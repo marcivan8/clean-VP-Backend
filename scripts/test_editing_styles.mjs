@@ -60,22 +60,27 @@ await check('generic requests and questions', () => {
     for (const t of ['what is this video about?', 'why did you cut that', 'pourquoi tu as coupé']) assert.ok(ES.isQuestion(t), t);
     assert.ok(!ES.isQuestion('remove silences'));
 });
-await check('playbooks', () => {
-    const keys = (id, req = 'edit it', facts = {}) => ES.buildAutopilotSteps(id, req, facts).map(s => s.key);
+await check('playbooks: cuts first, captions after them, levelling after cuts', () => {
+    const keys = (id, req = 'edit it', facts = { hasTranscript: true }) => ES.buildAutopilotSteps(id, req, facts).map(s => s.key);
     assert.deepEqual(keys('talking_head'), ['silences', 'fillers', 'captions', 'recipe']);
     assert.deepEqual(keys('vlog'), ['silences', 'captions', 'recipe']);
-    assert.deepEqual(keys('podcast', 'go', { hasCaptions: true }), ['silences', 'fillers', 'audio', 'recipe']);
+    assert.deepEqual(keys('podcast'), ['silences', 'fillers', 'audio', 'captions', 'recipe']);
     assert.deepEqual(keys('interview', 'cut the intro'), ['request', 'silences', 'fillers', 'captions', 'recipe']);
-    assert.deepEqual(keys('reel'), ['captions', 'short', 'vertical', 'silences', 'fillers', 'recipe']);
-    assert.deepEqual(keys('reel', 'go', { hasCaptions: true }), ['short', 'vertical', 'silences', 'fillers', 'recipe']);
+    assert.deepEqual(keys('reel'), ['short', 'vertical', 'silences', 'fillers', 'captions', 'recipe']);
+    assert.deepEqual(keys('reel', 'go', {}), ['transcript', 'short', 'vertical', 'silences', 'fillers', 'captions', 'recipe']);
     assert.deepEqual(keys('nope'), []);
+});
+await check('pacing per style', () => {
+    assert.ok(ES.stylePacing('podcast').minSilence > ES.stylePacing('talking_head').minSilence);
+    assert.ok(ES.stylePacing('reel').minSilence <= 0.35);
+    assert.equal(ES.stylePacing(null), null);
 });
 
 log('every playbook prompt reaches its command');
 setTimeline();
 const EXPECT = { captions: 'auto_captions', short: 'extract_short', vertical: 'set_aspect_ratio', silences: 'silence_removal', fillers: 'remove_filler_words', audio: 'normalize_audio', recipe: 'apply_style_recipe' };
 const seen = new Map();
-for (const id of ES.EDITING_STYLE_IDS) for (const s of ES.buildAutopilotSteps(id, 'go', {})) if (EXPECT[s.key]) seen.set(s.prompt, EXPECT[s.key]);
+for (const id of ES.EDITING_STYLE_IDS) for (const s of ES.buildAutopilotSteps(id, 'go', {})) if (EXPECT[s.key === 'transcript' ? 'captions' : s.key]) seen.set(s.prompt, EXPECT[s.key === 'transcript' ? 'captions' : s.key]);
 for (const [prompt, op] of seen) {
     await check(`"${prompt}" → ${op}`, async () => {
         const r = await plan(prompt);
@@ -187,8 +192,10 @@ await check('defaults follow the style, explicit requests win', async () => {
     r = await plan('apply the podcast style recipe');
     assert.equal(r.steps[0].args.recipeId, 'podcast');
     S.getState().setEditingStyle('podcast');
+    r = await plan('make it more dynamic');
+    assert.equal(r.steps[0].style, 'subtle', 'generic zoom request: the style decides');
     r = await plan('make it punchy');
-    assert.equal(r.steps[0].style, 'subtle');
+    assert.equal(r.steps[0].style, 'dynamic', 'named preset wins over the style');
     r = await plan('add a transition between all the clips');
     assert.equal(r.steps[0].type, 'dip');
     r = await plan('add a whip transition between all the clips');
@@ -219,7 +226,7 @@ await check('runs the playbook in order as ONE undo step and reports skips', asy
         S.getState().addTemplateClip('counter', {}, { start: 2, select: false });
         return { success: true, jobId: 'j2' };
     } });
-    assert.deepEqual(prompts, ['Remove silences', 'Remove filler words', 'Apply the punchy style recipe']);
+    assert.deepEqual(prompts, ['Remove silences', 'Remove filler words', 'Add captions', 'Apply the punchy style recipe']);
     assert.equal(r.success, true); assert.equal(r.operation, 'auto_edit');
     assert.match(r.message, /Talking head/); assert.match(r.message, /no fillers found/);
     assert.equal(S.getState().past.length, before + 1);
@@ -249,6 +256,118 @@ await check('stop ends the run after the current step', async () => {
 await check('nothing applied → success false', async () => {
     const r = await runAutopilot('go', { styleId: 'vlog', run: async () => ({ success: false, message: 'nope' }) });
     assert.equal(r.success, false);
+});
+
+log('round 1 fixes');
+const { sourceCoverage, packSegments } = await import('../client/src/agent/segmentPacking.js');
+const { pickTransitionCuts } = await import('../client/src/motion/StyleRecipes.js');
+const { fillFrameCrop } = await import('../client/src/motion/LayoutPresets.js');
+await check('a second cut no longer re-opens the first one as gaps', () => {
+    // After silence removal the clips show source 0-10, 15-30, 40-60 (35 s).
+    const clips = [{ offset: 0, duration: 10 }, { offset: 15, duration: 15 }, { offset: 40, duration: 20 }];
+    assert.deepEqual(sourceCoverage(clips), [[0, 10], [15, 30], [40, 60]]);
+    // Filler pass: the server keeps the whole file minus a filler at 20-21.
+    const { pieces, end } = packSegments([{ start: 0, duration: 20 }, { start: 21, duration: 39 }], clips, 0);
+    assert.ok(Math.abs(end - 44) < 1e-9, `45 s shown minus the 1 s filler, got ${end}`);
+    assert.ok(pieces.every((p, i) => i === 0 || Math.abs(p.outStart - (pieces[i - 1].outStart + pieces[i - 1].duration)) < 1e-9), 'no gaps');
+    // Uncut clip: same as the old packing.
+    const one = packSegments([{ start: 0, duration: 5 }, { start: 8, duration: 4 }], [{ offset: 0, duration: 12 }], 2);
+    assert.deepEqual(one.pieces.map(p => p.outStart), [2, 7]);
+    assert.equal(one.end, 11);
+    // A reel cut to source 300-360: a later pass starts at 0, not at 250.
+    const reel = packSegments([{ start: 0, duration: 100 }, { start: 101, duration: 400 }], [{ offset: 300, duration: 60 }], 0);
+    assert.equal(reel.pieces[0].outStart, 0);
+    assert.ok(Math.abs(reel.end - 60) < 1e-9);
+});
+await check('recipe transitions: scene changes, spaced jump cuts, capped', () => {
+    const jump = Array.from({ length: 100 }, (_, i) => ({ id: 'c' + i, assetId: 'a', start: i * 3, duration: 3, offset: i * 3.4 }));
+    const punchy = pickTransitionCuts(jump, STYLE_RECIPES.punchy);
+    assert.ok(punchy.length > 5 && punchy.length <= 40, `punchy ${punchy.length}`);
+    assert.equal(pickTransitionCuts(jump, STYLE_RECIPES.podcast).length, 0, 'podcast: no transition on jump cuts');
+    const scenes = [{ id: 'a', assetId: 'x', start: 0, duration: 5, offset: 0 }, { id: 'b', assetId: 'y', start: 5, duration: 5, offset: 0 }, { id: 'c', assetId: 'y', start: 10, duration: 5, offset: 50 }];
+    assert.deepEqual(pickTransitionCuts(scenes, STYLE_RECIPES.podcast), ['a', 'b']);
+    assert.deepEqual(pickTransitionCuts(scenes, {}), []);
+});
+await check('9:16 crop is full height and follows the speaker', () => {
+    const r = fillFrameCrop({ sourceAspect: 16 / 9, frameAspect: 9 / 16, bboxTrack: [{ t: 1, cx: 0.7, cy: 0.4, w: 0.2, h: 0.6 }], sourceStart: 0, duration: 5 });
+    assert.equal(r.faceAware, true); assert.equal(r.crop.cropH, 1);
+    assert.ok(Math.abs(r.crop.cropW - (9 / 16) / (16 / 9)) < 1e-3);
+    assert.ok(Math.abs(r.crop.cropX + r.crop.cropW / 2 - 0.7) < 1e-3, 'centred on the face');
+    const c = fillFrameCrop({ sourceAspect: 16 / 9, frameAspect: 9 / 16 });
+    assert.equal(c.faceAware, false); assert.ok(Math.abs(c.crop.cropX + c.crop.cropW / 2 - 0.5) < 1e-3);
+    assert.equal(fillFrameCrop({ sourceAspect: 9 / 16, frameAspect: 9 / 16 }), null, 'vertical video: nothing to crop');
+});
+await check('reframeToFrame crops on 9:16 and removes the crop on 16:9, one undo each', () => {
+    setTimeline(30);
+    S.setState({ assets: [{ id: 'a', type: 'video', name: 'IMG.MOV', duration: 30, resolution: { w: 1920, h: 1080 } }] });
+    S.setState({ aspectRatio: '9:16' });
+    const before = S.getState().past.length;
+    const r = S.getState().reframeToFrame();
+    assert.equal(r.reframed, 1);
+    const cam = () => S.getState().tracks.find(t => t.type === 'video').clips[0].virtualCam;
+    assert.equal(cam().reframe, '9:16'); assert.equal(cam().cropH, 1);
+    assert.equal(S.getState().past.length, before + 1);
+    S.setState({ aspectRatio: '16:9' });
+    S.getState().reframeToFrame();
+    assert.ok(!cam(), 'crop removed');
+});
+await check('undo restores the aspect ratio', () => {
+    setTimeline(30);
+    S.setState({ aspectRatio: '16:9' });
+    S.getState().beginHistoryGroup();
+    try { S.getState().setAspectRatio('9:16'); S.getState().addTemplateClip('counter', {}, { start: 1, select: false }); }
+    finally { S.getState().endHistoryGroup(); }
+    assert.equal(S.getState().aspectRatio, '9:16');
+    S.getState().undo();
+    assert.equal(S.getState().aspectRatio, '16:9');
+    S.getState().redo();
+    assert.equal(S.getState().aspectRatio, '9:16');
+});
+await check('silence pacing and zoom follow the style; explicit values win', async () => {
+    setTimeline();
+    S.getState().setEditingStyle('podcast');
+    let r = await plan('Remove silences');
+    assert.equal(r.steps[0].min_duration, 0.8); assert.equal(r.steps[0].padding, 0.15);
+    r = await plan('clean it up and make it dynamic');
+    assert.equal(r.steps.find(s => s.action === 'rhythm_zoom').style, 'subtle');
+    assert.equal(r.steps.find(s => s.action === 'silence_removal').min_duration, 0.8);
+    r = await plan('make it more dynamic');
+    assert.equal(r.steps[0].style, 'subtle');
+    r = await plan('add a cinematic zoom rhythm');
+    assert.equal(r.steps[0].style, 'cinematic');
+    S.getState().setEditingStyle('reel');
+    r = await plan('Remove silences');
+    assert.equal(r.steps[0].min_duration, 0.3);
+    r = await plan('Set the aspect ratio to 9:16');
+    assert.equal(r.steps[0].reframe_mode, 'face');
+    S.getState().setEditingStyle(null);
+    r = await plan('Remove silences');
+    assert.equal(r.steps[0].min_duration, 0.5); assert.equal(r.steps[0].padding, 0.1);
+    r = await plan('make it more dynamic');
+    assert.equal(r.steps[0].style, 'dynamic');
+    r = await plan('Set the aspect ratio to 9:16');
+    assert.notEqual(r.steps[0].reframe_mode, 'face', 'no reframe outside the reel style');
+});
+await check('silence padding reaches the worker', () => {
+    const cc = read('../client/src/agent/CommandCompiler.js');
+    assert.ok(/padding_ms: Math\.round\(Number\(step\.padding\) \* 1000\)/.test(cc));
+    const route = read('../routes/silenceRoutes.js');
+    assert.ok(/Math\.min\(500, Math\.max\(0, Math\.round\(paddingMs\)\)\)/.test(route) && /duration,\s*padding_ms,/.test(route));
+});
+await check('no automatic rollback inside an undo group; Stop can abort; prompts wait during Auto', () => {
+    assert.ok(/_historyGroupDepth > 0\) \{\s*console\.warn\('\[ValidationService\] Validation failed inside an undo group/.test(read('../client/src/agent/ValidationService.js')));
+    const ej = read('../client/src/agent/EditJobManager.js');
+    assert.equal((ej.match(/return this\.runPipeline\(/g) || []).length, 0);
+    assert.ok((ej.match(/return await this\.runPipeline\(/g) || []).length >= 5);
+    assert.ok(/if \(isAutopilotRunning\(\)\) \{/.test(read('../client/src/agent/WorkflowController.js')));
+    const eng = read('../client/src/agent/MediaExecutionEngine.js');
+    assert.ok(/rhythm-zoom'[\s\S]{0,400}signal: timeoutSignal\(/.test(eng));
+    assert.ok(/animate-automatically'[\s\S]{0,300}signal: timeoutSignal\(/.test(eng));
+    assert.ok(/packSegments\(validSegs, baseClips, effectiveRangeStart\)/.test(eng));
+});
+await check('talking styles anchor zoom on the face in preview', () => {
+    assert.ok(/TALKING_STYLES\.has\(useTimelineStore\.getState\(\)\.editingStyle\)/.test(read('../client/src/agent/ZoomAnalyzer.js')));
+    assert.ok(/\['talking_head', 'interview', 'podcast', 'reel'\]\.includes\(editingStyle\)/.test(read('../client/src/components/Player/VideoPlayer.jsx')));
 });
 
 log('wiring (static: these need the browser or the server)');

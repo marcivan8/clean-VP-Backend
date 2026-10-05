@@ -677,7 +677,10 @@ const VideoPlayer = () => {
     // upper-center third so the speaker's face stays in frame rather than the bottom
     // of the frame drifting in. Landscape B-roll keeps the default center-center anchor.
     const contentType = useTimelineStore(state => state.contentAnalysis?.contentType);
-    const isTalkingHead = ['long_form_raw', 'podcast', 'interview', 'youtube_long'].includes(contentType);
+    // R91: a talking editing style counts too (export always anchors here).
+    const editingStyle = useTimelineStore(state => state.editingStyle);
+    const isTalkingHead = ['long_form_raw', 'podcast', 'interview', 'youtube_long'].includes(contentType)
+        || ['talking_head', 'interview', 'podcast', 'reel'].includes(editingStyle);
     const transformOrigin = isTalkingHead ? '50% 28%' : 'center center';
 
     // When activeClip.virtualCam is present, any zoom-rhythm scale keyframes are

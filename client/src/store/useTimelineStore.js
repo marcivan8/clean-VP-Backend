@@ -23,7 +23,7 @@ import {
 import { buildComponent } from '../motion/ComponentLibrary.js';
 import { clipsInGroup, computeGroupMoveUpdates, computeGroupDuplicateSpecs } from '../motion/ClipGrouping.js';
 import { deriveSpeakerCrop, deriveTrackingSegments } from '../motion/ObjectLayers.js';
-import { frameForPreset, splitSpeakerCrop, LAYOUT_PRESETS } from '../motion/LayoutPresets.js';
+import { frameForPreset, splitSpeakerCrop, fillFrameCrop, LAYOUT_PRESETS } from '../motion/LayoutPresets.js';
 import { TEMPLATE_KINDS, TEMPLATE_WIDTH_FRACTION, templateParams, templateSize } from '../motion/TemplateGraphics.js';
 import { getPlayerDimensions } from '../utils/playerDimensions.js';
 import { computeRippleDelete, computeGapRipple, remapTimelineWords } from '../timeline/rippleDelete.js';
@@ -2087,6 +2087,63 @@ const useTimelineStore = create(
              *
              * @returns {{success:boolean, error?:string, faceAware?:boolean, reframed?:number}}
              */
+            /**
+             * R91 — fill a narrower frame (9:16 reel from a 16:9 talk) with a
+             * crop centred on the speaker instead of bars. Each base video clip
+             * without its own crop gets a full-height crop (motion/LayoutPresets.js
+             * fillFrameCrop), face-centred from its SAM2 samples when it has
+             * them. Clips whose source shape is unknown, or that already carry
+             * a crop (multicam angle, split layout), are left as they are.
+             * One undo step.
+             * @returns {{reframed:number, faceAware:number, skipped:number}}
+             */
+            reframeToFrame: () => {
+                const state = get();
+                const dims = getPlayerDimensions(state.aspectRatio);
+                const frameAspect = dims.width / dims.height;
+                const assetOf = (c) => (state.assets || []).find(a => a.id === c?.assetId) || null;
+                const aspectOf = (c) => {
+                    const r = c?.metadata?.resolution || assetOf(c)?.resolution || null;
+                    if (r && r.w > 0 && r.h > 0) return r.w / r.h;
+                    const a = assetOf(c);
+                    if (a && a.width > 0 && a.height > 0) return a.width / a.height;
+                    const lm = c?.layerMask;
+                    if (lm && lm.sourceWidth > 0 && lm.sourceHeight > 0) return lm.sourceWidth / lm.sourceHeight;
+                    return null;
+                };
+                const result = { reframed: 0, faceAware: 0, skipped: 0 };
+                const work = [];
+                for (const t of (state.tracks || []).filter(tr => tr.type === 'video')) {
+                    for (const c of (t.clips || [])) {
+                        if (c.type && c.type !== 'video') continue;
+                        if (c.virtualCam && !c.virtualCam.reframe) { result.skipped++; continue; }
+                        const speed = Number(c.speed) > 0 ? Number(c.speed) : 1;
+                        const fit = fillFrameCrop({
+                            bboxTrack: c.layerMask?.bboxTrack || null,
+                            sourceStart: Number(c.offset) || 0,
+                            duration: (Number(c.duration) || 0) * speed,
+                            sourceAspect: aspectOf(c),
+                            frameAspect,
+                        });
+                        if (!fit) {
+                            // Back to a frame the video fills (16:9 again): drop our crop.
+                            if (c.virtualCam?.reframe) work.push({ trackId: t.id, clipId: c.id, crop: null });
+                            else if (aspectOf(c) == null) result.skipped++;
+                            continue;
+                        }
+                        work.push({ trackId: t.id, clipId: c.id, crop: { ...fit.crop, reframe: state.aspectRatio } });
+                        if (fit.faceAware) result.faceAware++;
+                    }
+                }
+                if (work.length === 0) return result;
+                get()._saveHistory();
+                for (const w of work) {
+                    get().updateClip(w.trackId, w.clipId, { virtualCam: w.crop }, { skipHistory: true });
+                    if (w.crop) result.reframed++;
+                }
+                return result;
+            },
+
             applyLayout: (trackId, clipId, preset, opts = {}) => {
                 if (!LAYOUT_PRESETS.includes(preset)) return { success: false, error: `unknown layout "${preset}"` };
                 const state = get();
@@ -2592,7 +2649,8 @@ const useTimelineStore = create(
                     _timelineState: timelineManager.getState(),
                     currentTime: state.currentTime,
                     activeClipId: state.activeClipId,
-                    selectedClipIds: [...state.selectedClipIds]
+                    selectedClipIds: [...state.selectedClipIds],
+                    aspectRatio: state.aspectRatio,
                 };
                 const newPast = [...state.past, snapshot].slice(-50);
                 set({ past: newPast, future: [] });
@@ -2625,6 +2683,7 @@ const useTimelineStore = create(
                             currentTime: st.currentTime,
                             activeClipId: st.activeClipId,
                             selectedClipIds: [...(st.selectedClipIds || [])],
+                            aspectRatio: st.aspectRatio,
                             _extraState: { captions: st.captions, duration: st.duration },
                         },
                         _historyGroupPast: st.past,
@@ -2642,7 +2701,8 @@ const useTimelineStore = create(
                     st.past !== before
                     || timelineManager.getState() !== base._timelineState
                     || st.captions !== base._extraState.captions
-                    || st.duration !== base._extraState.duration);
+                    || st.duration !== base._extraState.duration
+                    || st.aspectRatio !== base.aspectRatio);
                 if (base && changed) {
                     set({ _historyGroupDepth: 0, _historyGroupBase: null, _historyGroupPast: null,
                         past: [...(before || []), base].slice(-50), future: [] });
@@ -2662,7 +2722,8 @@ const useTimelineStore = create(
                     _timelineState: timelineManager.getState(),
                     currentTime: state.currentTime,
                     activeClipId: state.activeClipId,
-                    selectedClipIds: [...state.selectedClipIds]
+                    selectedClipIds: [...state.selectedClipIds],
+                    aspectRatio: state.aspectRatio,
                 };
 
                 // Only snapshots that opted in (rippleDeleteClip) carry _extraState.
@@ -2683,6 +2744,9 @@ const useTimelineStore = create(
                     activeClipId: previous.activeClipId,
                     selectedClipIds: previous.selectedClipIds,
                     tracks: timelineManager.toLegacyTracks(),
+                    // R91: snapshots carry the frame shape (9:16 for a reel), so
+                    // undo puts the player back too. Older snapshots have none.
+                    aspectRatio: previous.aspectRatio || state.aspectRatio,
                     past: newPast,
                     future: [currentSnapshot, ...state.future],
                     ...(previous._extraState || {}),
@@ -2699,7 +2763,8 @@ const useTimelineStore = create(
                     _timelineState: timelineManager.getState(),
                     currentTime: state.currentTime,
                     activeClipId: state.activeClipId,
-                    selectedClipIds: [...state.selectedClipIds]
+                    selectedClipIds: [...state.selectedClipIds],
+                    aspectRatio: state.aspectRatio,
                 };
 
                 if (next._extraState) {
@@ -2718,6 +2783,7 @@ const useTimelineStore = create(
                     activeClipId: next.activeClipId,
                     selectedClipIds: next.selectedClipIds,
                     tracks: timelineManager.toLegacyTracks(),
+                    aspectRatio: next.aspectRatio || state.aspectRatio,
                     past: [...state.past, currentSnapshot],
                     future: newFuture,
                     ...(next._extraState || {}),

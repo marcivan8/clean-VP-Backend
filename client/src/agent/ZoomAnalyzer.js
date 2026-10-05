@@ -2,6 +2,8 @@ import ContentAnalyzer, { SEGMENT_TYPES, ENERGY_LEVELS } from './ContentAnalyzer
 import useTimelineStore from '../store/useTimelineStore.js';
 
 const TALKING_HEAD_TYPES = new Set(['long_form_raw', 'podcast', 'interview', 'youtube_long']);
+// R91: editing styles (agent/EditingStyles.js) where one or two people talk to camera.
+export const TALKING_STYLES = new Set(['talking_head', 'interview', 'podcast', 'reel']);
 
 /**
  * ZoomAnalyzer
@@ -34,7 +36,11 @@ export class ZoomAnalyzer {
 
         const segments = analysis.segments;
         const contentType = analysis.contentType;
-        const isTalkingHead = TALKING_HEAD_TYPES.has(contentType);
+        // R91: a talking style picked under the chat box counts too; the
+        // local detector only guesses from clip count and duration (a 2 min
+        // talking head came out as "short_form" and got the flat zoom).
+        const isTalkingHead = TALKING_HEAD_TYPES.has(contentType)
+            || TALKING_STYLES.has(useTimelineStore.getState().editingStyle);
 
         // Word-level timestamps from Whisper (may be empty for unprocessed videos)
         const words = useTimelineStore.getState().captions || [];

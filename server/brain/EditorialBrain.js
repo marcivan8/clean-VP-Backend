@@ -21,6 +21,7 @@
 'use strict';
 
 const OpenAI = require('openai');
+const { brainStyleSection } = require('./editingStyles');
 const { getAIClient, isAIConfigured, resolveModel, resolveProvider } = require('../../services/AIProvider');
 const { ContextEngine } = require('./ContextEngine');
 const { UserProfileEngine } = require('./UserProfileEngine');
@@ -457,7 +458,7 @@ Permanently hidden: ${hiddenNote}
 ═══════════════════════════════════════════════
 PLATFORM RULES (${platform})
 ═══════════════════════════════════════════════
-${_platformRulesText(platformKey)}
+${!platformKey && ctx.editingStyle ? '(no platform set — follow the EDITING STYLE section; do not ask the user to choose a platform)' : _platformRulesText(platformKey)}
 
 ═══════════════════════════════════════════════
 CONTENT FORMAT (derived from transcript + media)
@@ -475,6 +476,8 @@ IMPORTANT — use the detected format to drive your assessment and suggestions:
     keep attention, and energy pacing — treat it as a talking-head or tutorial.
   • unknown (no transcript yet): acknowledge the format is unclear and ask the user
     to generate captions first so you can give a proper assessment.
+
+${brainStyleSection(ctx.editingStyle)}
 
 Transcript preview (speaker-labelled if multiple speakers):
 ${transcriptSnippet}
@@ -617,10 +620,10 @@ edit history — treat it as evidence about THIS person, not a generic persona):
 - Limit suggestions array to 3 items max
 - Warnings should only surface issues that affect the final output
 - ASSET ENGINE: If hasColorGrade=false and completionScore>60, include recommend_luts in suggestions
-- ASSET ENGINE: If hasSFX=false and cutRate>4, include search_sfx "impact" in suggestions
+- ASSET ENGINE: If hasSFX=false and cutRate>4, include search_sfx "impact" in suggestions (never when the EDITING STYLE is podcast or interview)
 - ASSET ENGINE: Never invent a lutId — only suggest apply_lut if you received a specific id from a prior search_luts result
 
-CONTENT FORMAT RULES (critical — do not override with generic assessment):
+CONTENT FORMAT RULES (critical — do not override with generic assessment; an EDITING STYLE section above, when present, takes precedence over these):
 - NEVER describe an interview/2-speaker video as a "talking head" or "vlog"
 - When detected format is "interview": your response.message MUST acknowledge it's a conversation between ${ctx.detectedSpeakers || 'multiple'} people, and your suggestions MUST be interview-appropriate (extract highlights, clean dialogue pacing, Shorts-ready Q&A clips)
 - When detected format is "monologue": your response.message may classify as talking head, tutorial, or vlog based on content and duration

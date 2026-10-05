@@ -1,5 +1,6 @@
 import useTimelineStore from '../store/useTimelineStore.js';
 import { styleContext } from './EditingStyles.js';
+import { applyStyleToAnalysis } from './ContentAnalyzer.js';
 
 export class ContextGenerator {
     static getTimelineContext() {
@@ -215,9 +216,11 @@ export class ContextGenerator {
             } : {}),
 
             // Long-Form Intelligence Engine context (populated after ContentAnalyzer runs)
+            // R91: through ContentAnalyzer's style rule, so the LLM never gets a
+            // detected "long_form_raw / FULL_BUILD" next to a chosen podcast style.
             LongFormContext: state.contentAnalysis ? {
-                contentType: state.contentAnalysis.contentType,
-                editMode: state.contentAnalysis.editMode,
+                contentType: applyStyleToAnalysis(state.contentAnalysis, state.editingStyle).contentType,
+                editMode: applyStyleToAnalysis(state.contentAnalysis, state.editingStyle).editMode,
                 totalSegments: state.contentAnalysis.segments?.length || 0,
                 hookFound: !!state.contentAnalysis.structure?.hookCandidate,
                 hookTimestamp: state.contentAnalysis.structure?.hookCandidate?.start ?? null,

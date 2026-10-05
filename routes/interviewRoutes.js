@@ -24,6 +24,7 @@
 
 const express        = require('express');
 const { getAIClient, isAIConfigured, resolveModel } = require('../services/AIProvider');
+const { sanitizeEditingStyle, rhythmZoomStyle, keepsRecordedOrder } = require('../server/brain/editingStyles');
 const router         = express.Router();
 const path           = require('path');
 const fs             = require('fs');
@@ -562,6 +563,9 @@ async function _extractClipFrames(filePath, offset, duration) {
 router.post('/rhythm-zoom', ...authAndGate, async (req, res) => {
     try {
         const { clips = [], words = [], style = 'dynamic' } = req.body;
+        // R91: the editing style changes how the shot planner paces the cut
+        // (podcast / interview: calm, no punch-ins on single words).
+        const zoomStyle = rhythmZoomStyle(sanitizeEditingStyle(req.body?.editingStyle));
         const requestUserId = resolveRequestUserId(req);
 
         if (!clips.length) {
@@ -734,7 +738,8 @@ Each clip is already edited and cut. Assign each a shot type:
   "medium" – conversational tone, background explanation
   "close"  – key statement, emotion, emphasis, surprise, strong assertion
 ${mlInstructions}
-Rhythm rules (always apply):
+${zoomStyle.promptLine ? `STYLE OVERRIDE: ${zoomStyle.promptLine} This takes precedence over the social pacing rules below.
+` : ''}Rhythm rules (always apply):
 - RETENTION HOOK: clip 0 is the hook — assign "medium" or "close", NEVER "wide". Viewers decide to stay in the first 3 seconds.
 - Vary shots aggressively — no more than 2 in a row of the same type
 - Never jump directly wide → close (bridge with medium)
@@ -857,7 +862,7 @@ Clips: ${JSON.stringify(compact)}`,
                 return { kind: 'static', from: scale, to: scale, at: null };
             }
 
-            if (emphasisWord) {
+            if (emphasisWord && zoomStyle.allowPunchIns) {
                 // Locate the emphasis word inside this clip (case/punct-insensitive)
                 const norm = s => String(s).toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
                 const target = norm(emphasisWord);
@@ -1676,7 +1681,10 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
         // `storyHints` in the request body (e.g. from a future direct-invoke
         // path) still wins when both are present.
         let storyHints = bodyStoryHints;
-        if (!storyHints && projectId && UUID_RE.test(String(requestUserId || ''))) {
+        // R91: for styles whose story is the recorded order (vlog, interview,
+        // podcast) the stored "hook is buried" finding must not reorder the cut.
+        const keepOrder = keepsRecordedOrder(sanitizeEditingStyle(req.body?.editingStyle));
+        if (!storyHints && !keepOrder && projectId && UUID_RE.test(String(requestUserId || ''))) {
             try {
                 const { StoryIntelligence } = require('../server/brain/StoryIntelligence');
                 const storyMap = await new StoryIntelligence().getMap(projectId, requestUserId);

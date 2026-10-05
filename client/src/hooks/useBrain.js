@@ -104,6 +104,9 @@ function buildProjectState() {
     return {
         projectId:        state.projectId    || null,
         platform:         state.platform     || null,
+        // R91: the editing style picked under the chat box. The server derives
+        // the platform from it (reel, podcast) and every brain reads it.
+        editingStyle:     state.editingStyle || null,
         aspectRatio:      state.aspectRatio  || '16:9',
         duration,
         clipCount,

@@ -37,6 +37,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { projectMapStyleNote } = require('./editingStyles');
 
 const { getAIClient, isAIConfigured, resolveModel } = require('../../services/AIProvider');
 const { supabaseAdmin } = require('../../config/database');
@@ -76,12 +77,15 @@ class ProjectIntelligence {
      *
      * PURE — no I/O. Exported behaviour, executed directly by the regression.
      */
-    computeFingerprint(assets = [], clipCount = 0) {
+    computeFingerprint(assets = [], clipCount = 0, editingStyle = null) {
         const parts = (assets || [])
             .filter(a => a && a.id)
             .map(a => `${a.id}:${a.analysis_status || 'none'}`)
             .sort();
         parts.push(`clips:${clipCount}`);
+        // R91: a new editing style re-derives the map (gaps depend on it). No
+        // style keeps the old hash, so existing maps are not re-paid for.
+        if (editingStyle) parts.push(`style:${editingStyle}`);
         return crypto.createHash('sha1').update(parts.join('|')).digest('hex');
     }
 
@@ -117,11 +121,11 @@ class ProjectIntelligence {
      *
      * @returns {Promise<Object|null>} the map row, or null when there isn't one
      */
-    async ensureMap({ projectId, userId, assets = [], clipCount = 0, platform = null }) {
+    async ensureMap({ projectId, userId, assets = [], clipCount = 0, platform = null, editingStyle = null }) {
         if (!projectId || !userId) return null;
 
         const analysed = (assets || []).filter(a => a && a.analysis_status === ASSET_ANALYSIS_DONE);
-        const fingerprint = this.computeFingerprint(assets, clipCount);
+        const fingerprint = this.computeFingerprint(assets, clipCount, editingStyle);
 
         const existing = await this.getMap(projectId, userId);
         if (existing && existing.fingerprint === fingerprint && existing.status === 'ok') {
@@ -139,7 +143,7 @@ class ProjectIntelligence {
         }
 
         try {
-            const derived = await this.deriveMap({ assets: analysed, clipCount, platform });
+            const derived = await this.deriveMap({ assets: analysed, clipCount, platform, editingStyle });
             if (!derived) return existing || null;
 
             return await this._persist({
@@ -165,7 +169,7 @@ class ProjectIntelligence {
      * One GPT call over the analysed bin. Returns the raw map fields.
      * Separated from persistence so it can be tested without a database.
      */
-    async deriveMap({ assets = [], clipCount = 0, platform = null }) {
+    async deriveMap({ assets = [], clipCount = 0, platform = null, editingStyle = null }) {
         if (!assets.length) return null;
 
         const openai = this._resolveOpenAI();
@@ -173,7 +177,7 @@ class ProjectIntelligence {
             throw new Error('OPENAI_API_KEY not configured — cannot derive a project map');
         }
 
-        const prompt = this.buildDerivationPrompt({ assets, clipCount, platform });
+        const prompt = this.buildDerivationPrompt({ assets, clipCount, platform, editingStyle });
 
         const completion = await openai.chat.completions.create({
             // R84 missed this call site — hardcoded 'gpt-4o' worked fine while
@@ -203,7 +207,8 @@ class ProjectIntelligence {
      * on what the model is actually asked (including that it is told not to
      * invent detail for assets it has no description of).
      */
-    buildDerivationPrompt({ assets = [], clipCount = 0, platform = null }) {
+    buildDerivationPrompt({ assets = [], clipCount = 0, platform = null, editingStyle = null }) {
+        const styleNote = projectMapStyleNote(editingStyle);
         const shown = assets.slice(0, MAX_ASSETS_IN_PROMPT);
         const omitted = assets.length - shown.length;
 
@@ -240,7 +245,8 @@ ${assetLines}
 
 ━━━ TIMELINE ━━━
 Clips currently placed: ${clipCount}
-Target platform: ${platform || 'not specified'}
+Target platform: ${platform || 'not specified'}${styleNote ? `
+${styleNote}` : ''}
 
 ━━━ RULES ━━━
 • Reason about the assets TOGETHER. The point is the relationship between them:
