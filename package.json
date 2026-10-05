@@ -10,7 +10,7 @@
     "dev": "nodemon index.js",
     "test": "jest --forceExit --detectOpenHandles",
     "test:ai": "node scripts/test_agent.js",
-    "test:regression": "node scripts/test_command_registry.js && node scripts/test_waveform_pipeline.js && node scripts/test_timeline_pipeline.js && node scripts/test_project_persistence.js && node scripts/test_no_silent_noop.js && node scripts/test_waveform_engine.js && node scripts/test_caption_scope.js && node scripts/test_clip_waveform_routing.js && node scripts/test_no_duplicate_transcription.js && node scripts/test_creator_memory.js && node scripts/test_data_health.js && node scripts/test_organize_v2.js && node scripts/test_project_intelligence.js && node scripts/test_ai_provider.js && node scripts/test_subscription_cancel.js && node scripts/test_queue_health.js && node scripts/test_story_intelligence.js && node scripts/test_director_intelligence.js && node scripts/test_aspect_fit.js && node scripts/test_lut_export.js && node scripts/test_animation_knowledge_graph.js && node scripts/test_animation_intensity.js && node scripts/test_animation_synthesizer.js && node scripts/test_animation_combiner.js && node scripts/test_overlay_animation_intelligence.js && node scripts/test_hook_and_chapter_markers.js && node scripts/test_contextual_broll.js && node scripts/test_sticker_library.js && node scripts/test_transcript_sync.mjs && node scripts/test_upload_status.mjs && node scripts/test_clip_nav.mjs && node scripts/test_roka_mobile.mjs && node scripts/test_caption_edits.mjs && node scripts/test_transcript_edit.mjs && node scripts/test_manual_edits.mjs && node scripts/test_mobile_home.mjs && node scripts/test_import_handoff.mjs && node scripts/test_ios_media_unlock.mjs && node scripts/test_mobile_export.mjs && node scripts/test_command_pipeline.mjs && node scripts/test_retake_detector.js && node scripts/test_retake_flow.mjs && node scripts/test_rhythm_zoom.mjs && node scripts/test_export_rotation_zoom.js && node scripts/test_clip_speed.mjs && node scripts/test_animate_command.mjs && node scripts/test_privacy_data.js && node scripts/test_raster_captions.js && node scripts/test_keyword_emphasis_exec.mjs && node scripts/test_layout_presets.mjs",
+    "test:regression": "node scripts/test_command_registry.js && node scripts/test_waveform_pipeline.js && node scripts/test_timeline_pipeline.js && node scripts/test_project_persistence.js && node scripts/test_no_silent_noop.js && node scripts/test_waveform_engine.js && node scripts/test_caption_scope.js && node scripts/test_clip_waveform_routing.js && node scripts/test_no_duplicate_transcription.js && node scripts/test_creator_memory.js && node scripts/test_data_health.js && node scripts/test_organize_v2.js && node scripts/test_project_intelligence.js && node scripts/test_ai_provider.js && node scripts/test_subscription_cancel.js && node scripts/test_queue_health.js && node scripts/test_story_intelligence.js && node scripts/test_director_intelligence.js && node scripts/test_aspect_fit.js && node scripts/test_lut_export.js && node scripts/test_animation_knowledge_graph.js && node scripts/test_animation_intensity.js && node scripts/test_animation_synthesizer.js && node scripts/test_animation_combiner.js && node scripts/test_overlay_animation_intelligence.js && node scripts/test_hook_and_chapter_markers.js && node scripts/test_contextual_broll.js && node scripts/test_sticker_library.js && node scripts/test_transcript_sync.mjs && node scripts/test_upload_status.mjs && node scripts/test_clip_nav.mjs && node scripts/test_roka_mobile.mjs && node scripts/test_caption_edits.mjs && node scripts/test_transcript_edit.mjs && node scripts/test_manual_edits.mjs && node scripts/test_mobile_home.mjs && node scripts/test_import_handoff.mjs && node scripts/test_ios_media_unlock.mjs && node scripts/test_mobile_export.mjs && node scripts/test_command_pipeline.mjs && node scripts/test_retake_detector.js && node scripts/test_retake_flow.mjs && node scripts/test_rhythm_zoom.mjs && node scripts/test_export_rotation_zoom.js && node scripts/test_clip_speed.mjs && node scripts/test_animate_command.mjs && node scripts/test_privacy_data.js && node scripts/test_raster_captions.js && node scripts/test_keyword_emphasis_exec.mjs && node scripts/test_layout_presets.mjs && node scripts/test_transitions_templates.mjs && node scripts/test_sync_recipes.mjs",
     "setup:supabase": "node scripts/setup-database.js",
     "cleanup:expired": "node scripts/cleanup-expired-videos.js"
   },
@@ -22,11 +22,6 @@
     "@napi-rs/canvas": "^1.0.10",
     "@paddle/paddle-node-sdk": "^3.2.0",
     "@polar-sh/sdk": "^0.48.1",
-    "@revideo/2d": "^0.10.4",
-    "@revideo/core": "^0.10.4",
-    "@revideo/renderer": "^0.10.4",
-    "@revideo/ui": "^0.10.4",
-    "@revideo/vite-plugin": "^0.10.4",
     "@sentry/node": "^10.57.0",
     "@supabase/storage-js": "^2.10.4",
     "@supabase/supabase-js": "^2.55.0",
@@ -37,7 +32,7 @@
     "assemblyai": "^4.35.3",
     "axios": "^1.16.1",
     "bullmq": "^5.76.8",
-    "canvas": "^2.11.2",
+    "canvas": "^3.2.3",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
     "csv-parser": "^3.2.0",
@@ -53,15 +48,20 @@
     "node-cron": "^3.0.2",
     "openai": "^4.20.1",
     "paddle-sdk": "^2.1.1",
-    "path": "^0.12.7",
-    "puppeteer": "^24.37.4",
-    "sharp": "^0.33.2",
-    "vite": "^5.4.21"
+    "path": "^0.12.7"
   },
   "devDependencies": {
+    "@revideo/2d": "^0.10.4",
+    "@revideo/core": "^0.10.4",
+    "@revideo/renderer": "^0.10.4",
+    "@revideo/ui": "^0.10.4",
+    "@revideo/vite-plugin": "^0.10.4",
     "jest": "^29.7.0",
     "nodemon": "^3.0.1",
-    "supertest": "^7.2.2"
+    "puppeteer": "^24.37.4",
+    "sharp": "^0.33.2",
+    "supertest": "^7.2.2",
+    "vite": "^5.4.21"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -97,5 +97,14 @@
       "/revideo/",
       "/render-lambda/"
     ]
+  },
+  "overrides": {
+    "@tensorflow/tfjs-node": {
+      "tar": "^7.5.21",
+      "adm-zip": "^0.6.1"
+    },
+    "@mapbox/node-pre-gyp": {
+      "tar": "^7.5.21"
+    }
   }
 }

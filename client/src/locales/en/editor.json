@@ -801,5 +801,55 @@
     "splitFace": "Speaker framed from the speaker detection.",
     "splitNoFace": "Speaker framed from the centre. Run \"separate speaker\" first for face-aware framing.",
     "failed": "Could not apply this layout."
+  },
+  "transitions": {
+    "flash": "Flash",
+    "dip": "Dip to black",
+    "whip-left": "Whip left",
+    "whip-right": "Whip right",
+    "zoom-punch": "Zoom punch",
+    "glitch": "Glitch",
+    "speed-lines": "Speed lines"
+  },
+  "templates": {
+    "title": "Templates",
+    "noLogo": "No image (initial letter)",
+    "kinds": {
+      "counter": "Flip counter",
+      "price-pop": "Number pop",
+      "logo-card": "Logo card",
+      "code-window": "Code window"
+    },
+    "fields": {
+      "label": "Label",
+      "from": "From",
+      "value": "Value",
+      "total": "Total",
+      "accent": "Accent",
+      "text": "Text",
+      "sub": "Subtitle",
+      "color": "Colour",
+      "logo": "Logo image",
+      "title": "Title",
+      "code": "Code",
+      "cps": "Characters per second"
+    }
+  },
+  "styleRecipes": {
+    "title": "Style recipes",
+    "names": {
+      "punchy": "Punchy creator",
+      "travel": "Travel vlog",
+      "explainer": "Explainer",
+      "podcast": "Podcast clip"
+    },
+    "hints": {
+      "punchy": "Bold captions, key words, fast cuts, dynamic zooms, b-roll and number pops",
+      "travel": "Vlog captions, speed-line and whip cuts, gentle zooms, b-roll and number pops",
+      "explainer": "Clean captions, soft dips, gentle zooms, split-screen b-roll and number pops",
+      "podcast": "Readable captions, soft dips and gentle zooms"
+    },
+    "syncCutaways": "Sync b-roll and number pops to speech",
+    "note": "Needs captions. One undo reverts the whole recipe."
   }
 }

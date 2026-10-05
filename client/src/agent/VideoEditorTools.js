@@ -291,6 +291,14 @@ export const TOOL_DEFINITIONS = [
         }
     },
     {
+        name: "add_template",
+        description: "Add an animated template at the playhead: a flip counter (\"DAY 14/30\"), a number or price pop (\"15-20€\"), a logo card, or a code-typing window.",
+        parameters: { type: "object", properties: {
+            kind: { type: "string", enum: ["counter", "price-pop", "logo-card", "code-window"] },
+            params: { type: "object", description: "counter: label, value, total; price-pop: text, sub; logo-card: label, sub; code-window: title, code" }
+        }, required: ["kind"] }
+    },
+    {
         name: "emphasize_keywords",
         description: "Highlight the key word of each caption (numbers, outcomes, emphatic words) in the caption style's emphasis look.",
         parameters: { type: "object", properties: { overwrite: { type: "boolean", description: "Also replace key words the user picked by hand" } } }
@@ -519,8 +527,98 @@ const BROLL_TRANSITION_CUTAWAY_S  = 3.5;
  * @returns {Set<string>}
  */
 export function tokenizeForBrollMatch(text) {
-    const words = (text || '').toLowerCase().split(/[^a-z0-9']+/).filter(w => w.length > 4 && !BROLL_STOPWORDS.has(w));
+    // R89: accents folded first, so French words ("journée", "été") are no
+    // longer cut in two by the a-z split. Applied to both sides of the match.
+    const folded = (text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const words = folded.split(/[^a-z0-9']+/).filter(w => w.length > 4 && !BROLL_STOPWORDS.has(w));
     return new Set(words);
+}
+
+// ─── R90 (to-do A6): beat-synced cutaways ───────────────────────────────────
+// A cutaway used to start at the first word of its 6-second window, often a
+// few seconds before the word it illustrates. With `wordSync`, it starts on
+// the spoken word itself (a hair before, so the picture is there when the word
+// lands). With `events` (reveal / punchline / emphasis moments from
+// TimelineEventDetector, via the animate route), a match whose word sits on
+// such a moment wins ties — never below the keyword bar, like the chapter bonus.
+const BROLL_WORD_LEAD_S        = 0.08;
+const BROLL_EVENT_SCORE_BONUS  = 1.5;
+const BROLL_EVENT_BEFORE_S     = 0.4;   // event may land a little before the word
+const BROLL_EVENT_AFTER_S      = 1.5;   // ...or shortly after it (peak after onset)
+
+/** Events of interest for cutaways and pops. */
+export const SYNC_EVENT_TYPES = ['REVEAL', 'PUNCHLINE_DETECTED', 'EMPHASIS_MOMENT'];
+
+function eventNear(events, t) {
+    if (!Array.isArray(events)) return null;
+    for (const e of events) {
+        const et = Number(e?.timelineTime);
+        if (!Number.isFinite(et) || !SYNC_EVENT_TYPES.includes(e.eventType)) continue;
+        if (et >= t - BROLL_EVENT_BEFORE_S && et <= t + BROLL_EVENT_AFTER_S) return e;
+    }
+    return null;
+}
+
+/**
+ * Spoken numbers worth popping on screen: prices, percentages, counts with a
+ * unit, and any number said on an emphasis/punchline/reveal moment.
+ * Joins "15 to 20 euros" / "15 à 20 €" into one "15-20€".
+ *
+ * @param {Array<{word?:string,text?:string,start:number,end:number}>} words timeline time
+ * @param {{events?:Array, minSpacing?:number, max?:number}} opts
+ * @returns {Array<{start:number,end:number,text:string,event:string|null}>}
+ */
+export function findSpokenNumbers(words, opts = {}) {
+    const ws = (Array.isArray(words) ? words : [])
+        .map(w => ({ t: String(w?.word ?? w?.text ?? '').trim(), start: Number(w?.start), end: Number(w?.end) }))
+        .filter(w => w.t && Number.isFinite(w.start));
+    const CUR = { '€': '€', 'euro': '€', 'euros': '€', '$': '$', 'dollar': '$', 'dollars': '$', '£': '£', 'pound': '£', 'pounds': '£', '%': '%', 'percent': '%', 'pourcent': '%', 'pour-cent': '%' };
+    const MAG = { 'k': 'K', 'mille': 'K', 'thousand': 'K', 'million': 'M', 'millions': 'M', 'm': 'M', 'billion': 'B', 'milliards': 'B', 'milliard': 'B' };
+    const RANGE = new Set(['to', 'a', 'à', '-', 'et', 'and', 'or', 'ou']);
+    const clean = (t) => t.toLowerCase().replace(/[.,!?;:"«»()]+$/g, '').replace(/^[("«]+/, '');
+    const numOf = (t) => {
+        const m = clean(t).match(/^([$€£]?)(\d[\d\s.,]*)(k|m|%|€|\$|£)?$/i);
+        return m ? { pre: m[1] || '', n: m[2].replace(/[.,]$/, ''), post: (m[3] || '').toLowerCase() } : null;
+    };
+    const out = [];
+    for (let i = 0; i < ws.length; i++) {
+        const a = numOf(ws[i].t);
+        if (!a) continue;
+        let text = `${a.pre}${a.n}`;
+        let unit = a.post === 'k' ? 'K' : a.post === 'm' ? 'M' : (a.post || a.pre || '');
+        let end = ws[i].end;
+        let j = i + 1;
+        // Range: "15 to 20", "15-20"
+        if (j + 1 < ws.length && RANGE.has(clean(ws[j].t)) && numOf(ws[j + 1].t) && ws[j + 1].start - ws[i].end < 1) {
+            const b = numOf(ws[j + 1].t);
+            text = `${text}-${b.n}`;
+            unit = unit || (b.post === 'k' ? 'K' : b.post === 'm' ? 'M' : (b.post || b.pre || ''));
+            end = ws[j + 1].end;
+            j += 2;
+        }
+        // Following unit words: "euros", "percent", "thousand"
+        for (let k = 0; k < 2 && j < ws.length && ws[j].start - end < 0.8; k++) {
+            const w = clean(ws[j].t);
+            if (MAG[w] && !/[KMB]$/.test(text)) { text += MAG[w]; end = ws[j].end; j++; continue; }
+            if (CUR[w]) { unit = CUR[w]; end = ws[j].end; j++; continue; }
+            break;
+        }
+        if (unit && !text.startsWith(unit) && !text.endsWith(unit)) text = ['$', '£'].includes(unit) ? `${unit}${text}` : `${text}${unit}`;
+        const value = Number(String(a.n).replace(/[\s,]/g, ''));
+        const ev = eventNear(opts.events, ws[i].start);
+        const meaningful = !!unit || /[KMB]$/.test(text) || text.includes('-') || (Number.isFinite(value) && value >= 10 && !!ev);
+        if (meaningful) out.push({ start: ws[i].start, end, text: text.replace(/\s+/g, ''), event: ev?.eventType || null });
+        i = j - 1;
+    }
+    // Spacing: keep the strongest of any cluster (event first, then order).
+    const minSpacing = Number(opts.minSpacing) > 0 ? Number(opts.minSpacing) : 4;
+    const max = Number(opts.max) > 0 ? Number(opts.max) : 6;
+    const picked = [];
+    for (const n of [...out].sort((x, y) => (y.event ? 1 : 0) - (x.event ? 1 : 0) || x.start - y.start)) {
+        if (picked.every(p => Math.abs(p.start - n.start) >= minSpacing)) picked.push(n);
+        if (picked.length >= max) break;
+    }
+    return picked.sort((x, y) => x.start - y.start);
 }
 
 /**
@@ -674,7 +772,9 @@ export function buildChapterTitleCardPayload(marker) {
  * @param {number[]} [chapterBoundaries] — extractChapterBoundaries(state.tracks)
  * @returns {Array<{timelineTime:number,duration:number,assetId:string,name:string|null,matchedKeywords:string[],isChapterTransition:boolean}>}
  */
-export function matchTranscriptToBroll(words, candidates, chapterBoundaries = []) {
+export function matchTranscriptToBroll(words, candidates, chapterBoundaries = [], opts = {}) {
+    const wordSync = !!opts.wordSync;
+    const events = Array.isArray(opts.events) ? opts.events : null;
     if (!Array.isArray(words) || words.length === 0) return [];
     if (!Array.isArray(candidates) || candidates.length === 0) return [];
 
@@ -690,8 +790,10 @@ export function matchTranscriptToBroll(words, candidates, chapterBoundaries = []
         const windowStart = words[i]?.start ?? 0;
         let j = i;
         const windowWords = [];
+        const windowEntries = [];
         while (j < words.length && (words[j]?.start ?? 0) < windowStart + BROLL_WINDOW_SECONDS) {
             windowWords.push(words[j]?.word || words[j]?.text || '');
+            windowEntries.push(words[j]);
             j++;
         }
         if (windowWords.length === 0) { i = j + 1; continue; }
@@ -704,6 +806,8 @@ export function matchTranscriptToBroll(words, candidates, chapterBoundaries = []
                 let best = null;
                 let bestOverlap = [];
                 let bestScore = -1;
+                let bestAnchor = windowStart;
+                let bestEvent = null;
                 for (const candidate of candidates) {
                     const lastUse = lastPlacedAt.get(candidate.assetId);
                     if (lastUse !== undefined && windowStart - lastUse < BROLL_COOLDOWN_S) continue; // still cooling down
@@ -711,26 +815,41 @@ export function matchTranscriptToBroll(words, candidates, chapterBoundaries = []
                     const shared = [...windowKeywords].filter(w => candidate.keywords.has(w));
                     if (shared.length < BROLL_MIN_SHARED_KEYWORDS) continue; // never placed on the boundary bonus alone
 
-                    const score = shared.length + (nearBoundary ? BROLL_CHAPTER_SCORE_BONUS : 0);
+                    // R90: the spoken word that carries the match, and
+                    // whether it sits on a reveal/punchline/emphasis moment.
+                    let anchor = null;
+                    if (wordSync || events) {
+                        const sharedSet = new Set(shared);
+                        anchor = windowEntries.find(w => [...tokenizeForBrollMatch(w?.word || w?.text || '')].some(k => sharedSet.has(k))) || null;
+                    }
+                    const anchorTime = Number.isFinite(Number(anchor?.start)) ? Number(anchor.start) : windowStart;
+                    const ev = events ? eventNear(events, anchorTime) : null;
+
+                    const score = shared.length + (nearBoundary ? BROLL_CHAPTER_SCORE_BONUS : 0) + (ev ? BROLL_EVENT_SCORE_BONUS : 0);
                     if (score > bestScore) {
                         best = candidate;
                         bestOverlap = shared;
                         bestScore = score;
+                        bestAnchor = anchorTime;
+                        bestEvent = ev;
                     }
                 }
 
                 if (best) {
                     const duration = nearBoundary ? BROLL_TRANSITION_CUTAWAY_S : BROLL_DEFAULT_CUTAWAY_S;
+                    const at = wordSync ? Math.max(windowStart, bestAnchor - BROLL_WORD_LEAD_S) : windowStart;
                     placements.push({
-                        timelineTime: windowStart,
+                        timelineTime: at,
                         duration,
                         assetId: best.assetId,
                         name: best.name,
                         matchedKeywords: bestOverlap,
                         isChapterTransition: nearBoundary,
+                        ...(wordSync ? { wordTime: bestAnchor } : {}),
+                        ...(bestEvent ? { event: bestEvent.eventType } : {}),
                     });
-                    lastPlacedAt.set(best.assetId, windowStart);
-                    lastPlacementEnd = windowStart + duration;
+                    lastPlacedAt.set(best.assetId, at);
+                    lastPlacementEnd = at + duration;
                     if (placements.length >= BROLL_MAX_PLACEMENTS) break;
                 }
             }
@@ -847,6 +966,7 @@ export class VideoEditorTools {
             case 'apply_lut':         return await this.applyLUT(action.args);
             case 'clear_lut':         return this.clearLUT(action.args);
             case 'emphasize_keywords': return await this.emphasizeKeywords(action.args);
+            case 'add_template':              return this.addTemplate(action.args);
             case 'layout_split_screen':       return this.applyLayoutPreset('split', action.args);
             case 'layout_picture_in_picture': return this.applyLayoutPreset('pip', action.args);
             case 'layout_fullscreen':         return this.applyLayoutPreset('fullscreen', action.args);
@@ -1476,13 +1596,24 @@ export class VideoEditorTools {
             (state.tracks || []).forEach(t => (t.clips || []).forEach(c => { if (c?.assetId) alreadyOnTimeline.add(c.assetId); }));
 
             const chapterBoundaries = extractChapterBoundaries(state.tracks);
-            const matches = matchTranscriptToBroll(words, candidates, chapterBoundaries);
+            // R90 (A6): `wordSync` starts each cutaway on the word it
+            // illustrates; `events` favours reveal/punchline/emphasis moments;
+            // `layout` ('fullscreen' | 'split' | 'pip') frames it (R88 presets).
+            const matches = matchTranscriptToBroll(words, candidates, chapterBoundaries, {
+                wordSync: !!args.wordSync,
+                events: Array.isArray(args.events) ? args.events : null,
+            });
 
             for (const match of matches) {
                 const asset = (state.assets || []).find(a => a.id === match.assetId);
                 if (!asset) continue;
+                const live = useTimelineStore.getState();
+                // Re-running must not stack a second copy of the same cutaway.
+                const dup = (live.tracks || []).some(t => t.type === 'overlay' && (t.clips || []).some(c =>
+                    c.assetId === asset.id && Math.abs((Number(c.start) || 0) - match.timelineTime) < 0.5));
+                if (dup) continue;
                 const duration = Math.min(match.duration, asset.duration || match.duration);
-                state.addOverlayClip(asset, {
+                const trackId = live.addOverlayClip(asset, {
                     start: match.timelineTime,
                     duration,
                     kind: asset.type === 'image' ? 'image' : 'video',
@@ -1490,6 +1621,11 @@ export class VideoEditorTools {
                     y: 50,
                     scale: 4,
                 });
+                if (args.layout && trackId) {
+                    const placed = (useTimelineStore.getState().tracks.find(t => t.id === trackId)?.clips || [])
+                        .find(c => c.assetId === asset.id && Math.abs((Number(c.start) || 0) - match.timelineTime) < 0.01);
+                    if (placed) useTimelineStore.getState().applyLayout(trackId, placed.id, args.layout);
+                }
             }
 
             // ── Chapter-transition title cards ──────────────────────────────
@@ -2054,6 +2190,45 @@ if (matches.length === 0 && titleCardsCreated === 0) {
         } catch (error) {
             console.error('[VideoEditorTools] emphasizeKeywords error:', error);
             return { success: false, message: `Could not highlight key words: ${error.message}` };
+        }
+    }
+
+    /**
+     * R90 (A6) — a number/price pop on each spoken number worth showing
+     * (findSpokenNumbers), starting on the word. Skips numbers that already
+     * have a pop within a second, so re-running adds only what is new.
+     */
+    placeNumberPops({ events = null, max = 6 } = {}) {
+        try {
+            const state = useTimelineStore.getState();
+            const numbers = findSpokenNumbers(state.captions, { events, max });
+            if (numbers.length === 0) return { success: true, placed: 0, message: 'No prices, percentages or key numbers were spoken.' };
+            let placed = 0;
+            for (const n of numbers) {
+                const live = useTimelineStore.getState();
+                const dup = (live.tracks || []).some(t => t.type === 'overlay' && (t.clips || []).some(c =>
+                    c.type === 'template' && c.template?.kind === 'price-pop' && Math.abs((Number(c.start) || 0) - n.start) < 1));
+                if (dup) continue;
+                const r = live.addTemplateClip('price-pop', { text: n.text }, { start: Math.max(0, n.start - 0.1), duration: 1.6, y: 30, select: false });
+                if (r?.success) placed++;
+            }
+            return { success: true, placed, message: placed > 0 ? `${placed} number pop(s) placed on the spoken numbers.` : 'Every spoken number already has a pop.' };
+        } catch (error) {
+            console.error('[VideoEditorTools] placeNumberPops error:', error);
+            return { success: false, placed: 0, message: `Could not place number pops: ${error.message}` };
+        }
+    }
+
+    /** R89 — drop an animated template (counter, price pop, logo card, code window) at the playhead. */
+    addTemplate({ kind, params = {} } = {}) {
+        try {
+            const r = useTimelineStore.getState().addTemplateClip(kind, params);
+            if (!r?.success) return { success: false, message: r?.error || 'The template could not be added.' };
+            const names = { 'counter': 'Flip counter', 'price-pop': 'Number pop', 'logo-card': 'Logo card', 'code-window': 'Code window' };
+            return { success: true, message: `${names[kind] || 'Template'} added at the playhead. Edit its text in the Motion panel.`, clipId: r.clipId };
+        } catch (error) {
+            console.error('[VideoEditorTools] addTemplate error:', error);
+            return { success: false, message: `Could not add the template: ${error.message}` };
         }
     }
 

@@ -24,6 +24,7 @@ import { buildComponent } from '../motion/ComponentLibrary.js';
 import { clipsInGroup, computeGroupMoveUpdates, computeGroupDuplicateSpecs } from '../motion/ClipGrouping.js';
 import { deriveSpeakerCrop, deriveTrackingSegments } from '../motion/ObjectLayers.js';
 import { frameForPreset, splitSpeakerCrop, LAYOUT_PRESETS } from '../motion/LayoutPresets.js';
+import { TEMPLATE_KINDS, TEMPLATE_WIDTH_FRACTION, templateParams, templateSize } from '../motion/TemplateGraphics.js';
 import { getPlayerDimensions } from '../utils/playerDimensions.js';
 import { computeRippleDelete, computeGapRipple, remapTimelineWords } from '../timeline/rippleDelete.js';
 import { computeMultiMove } from '../timeline/multiMove.js';
@@ -775,6 +776,9 @@ const useTimelineStore = create(
                 // R88 layout presets: an overlay's cover box, and the speaker
                 // reframe the split layout puts on the base clip under it.
                 if (updates.frame !== undefined) clipUpdates.frame = updates.frame;
+                // R89 template components (counter, price pop, logo card, code window).
+                if (updates.template !== undefined) clipUpdates.template = updates.template;
+                if (updates.metadata !== undefined && updates.template !== undefined) clipUpdates.metadata = updates.metadata;
                 if (updates.layoutBase !== undefined) clipUpdates.layoutBase = updates.layoutBase;
                 // Motion presets (MotionPanel, "animate automatically", style
                 // packs clearing a clip's own animation). Was missing here, so
@@ -2002,6 +2006,60 @@ const useTimelineStore = create(
             },
 
             /**
+             * R89 (to-do A5) — drop an animated template (flip counter, price
+             * pop, logo card, code window) on the overlay track at the playhead.
+             * It is an ordinary overlay clip (`type: 'template'`), so moving,
+             * scaling, rotating and motion presets work exactly as for stickers;
+             * `template = {kind, params}` is what both renderers draw
+             * (motion/TemplateGraphics.js). `metadata.resolution` carries the
+             * template's natural shape so the export box has the right aspect.
+             */
+            addTemplateClip: (kind, params = {}, opts = {}) => {
+                if (!TEMPLATE_KINDS.includes(kind)) return { success: false, error: `unknown template "${kind}"` };
+                const p = templateParams(kind, params);
+                const size = templateSize(kind, p);
+                let track = get().tracks.find(t => t.type === 'overlay');
+                const trackId = track ? track.id : get().addTrack('overlay');
+                const start = Number.isFinite(Number(opts.start)) ? Number(opts.start) : get().currentTime;
+                const duration = Number(opts.duration) > 0 ? Number(opts.duration) : (kind === 'code-window' ? 5 : 3);
+                const defaultY = { 'counter': 20, 'price-pop': 42, 'logo-card': 78, 'code-window': 50 }[kind];
+                const id = `tpl-${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+                get().addClip(trackId, {
+                    id,
+                    type: 'template',
+                    name: kind === 'counter' ? `${p.label} ${p.value}` : kind === 'price-pop' ? String(p.text) : kind === 'logo-card' ? String(p.label) : String(p.title),
+                    template: { kind, params: p },
+                    metadata: { resolution: { w: size.w, h: size.h } },
+                    start,
+                    duration,
+                    x: Number.isFinite(Number(opts.x)) ? Number(opts.x) : 50,
+                    y: Number.isFinite(Number(opts.y)) ? Number(opts.y) : defaultY,
+                    // GraphicOverlay/Compositor draw an overlay at 25% of the
+                    // frame width × scale; this lands each template at its own width.
+                    scale: (TEMPLATE_WIDTH_FRACTION[kind] || 0.5) / 0.25,
+                    rotation: 0,
+                    opacity: 1,
+                });
+                const placed = get().tracks.find(t => t.id === trackId)?.clips?.find(c => c.clipId === id || c.id === id) || null;
+                if (placed && opts.select !== false) get().setActiveClip?.(placed.id);
+                return { success: true, trackId, clipId: placed?.id || id };
+            },
+
+            /** Change a template's parameters (keeps its kind; refreshes its natural shape). */
+            updateTemplateParams: (trackId, clipId, patch = {}) => {
+                const clip = get().tracks.find(t => t.id === trackId)?.clips?.find(c => c.id === clipId);
+                if (!clip?.template) return { success: false, error: 'not a template clip' };
+                const kind = clip.template.kind;
+                const params = templateParams(kind, { ...clip.template.params, ...patch });
+                const size = templateSize(kind, params);
+                get().updateClip(trackId, clipId, {
+                    template: { kind, params },
+                    metadata: { ...(clip.metadata || {}), resolution: { w: size.w, h: size.h } },
+                });
+                return { success: true };
+            },
+
+            /**
              * R88 (to-do A1) — layout presets for a visual on the overlay track:
              * 'split' (speaker top, this clip bottom), 'fullscreen' (cutaway)
              * or 'pip' (small, in a corner). Geometry and the face-aware speaker
@@ -2519,6 +2577,10 @@ const useTimelineStore = create(
 
             _saveHistory: () => {
                 const state = get();
+                // R89: inside a history group (a style recipe runs many store
+                // actions), only the snapshot taken when the group opened
+                // counts, so one undo reverts the whole operation.
+                if (state._historyGroupDepth > 0) return;
                 const snapshot = {
                     _timelineState: timelineManager.getState(),
                     currentTime: state.currentTime,
@@ -2531,6 +2593,20 @@ const useTimelineStore = create(
 
             // Public alias used by TextOverlay and other UI components
             saveToHistory: () => get()._saveHistory(),
+
+            /**
+             * R89 — group several actions into ONE undo step. Saves one
+             * snapshot, then every _saveHistory() inside is ignored until the
+             * matching endHistoryGroup(). Always pair them in try/finally.
+             */
+            _historyGroupDepth: 0,
+            beginHistoryGroup: () => {
+                if (get()._historyGroupDepth === 0) get()._saveHistory();
+                set({ _historyGroupDepth: get()._historyGroupDepth + 1 });
+            },
+            endHistoryGroup: () => {
+                set({ _historyGroupDepth: Math.max(0, get()._historyGroupDepth - 1) });
+            },
 
             undo: () => set((state) => {
                 if (state.past.length === 0) return state;

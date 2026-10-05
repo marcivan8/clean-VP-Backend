@@ -38,6 +38,8 @@ import {
     CUSTOM_ANIMATION_ID,
 } from '../motion/KeyframeBridge.js';
 import KeyframeEditor from './Effects/KeyframeEditor.jsx';
+import TemplatePanel from './TemplatePanel.jsx';
+import StyleRecipePanel from './StyleRecipePanel.jsx';
 
 export default function MotionPanel() {
     const { t } = useTranslation('editor');
@@ -167,6 +169,8 @@ export default function MotionPanel() {
                         {t('motionPanel.title')}
                     </div>
                 </div>
+                <StyleRecipePanel />
+                <TemplatePanel selectedClip={null} selectedTrackId={null} />
                 <div className="p-4 rounded-md border border-dashed border-border text-center">
                     <p className="text-xs text-muted-foreground">{t('motionPanel.selectClip')}</p>
                 </div>
@@ -182,6 +186,9 @@ export default function MotionPanel() {
                 </div>
                 <div className="text-[10px] text-green-400 font-mono">{t('ideLayout.active')}</div>
             </div>
+
+            <StyleRecipePanel />
+            <TemplatePanel selectedClip={clip} selectedTrackId={trackId} />
 
             {/* Presets — grouped by what the selected layer actually is */}
             {presetIds.map(({ group, ids }) => (

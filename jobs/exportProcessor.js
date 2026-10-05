@@ -1129,6 +1129,52 @@ module.exports = async function processExportJob(job) {
 
     await job.updateProgress(70);
 
+    // ── STEP 2.2: Transitions (R89, to-do A4) ──────────────────────────────
+    // Cut effects (flash, dip, whip, zoom punch, glitch, speed lines) centred
+    // on each cut of the concatenated base video, BEFORE overlays and
+    // captions, so nothing changes length and captions are never shaken.
+    // Curves come from client/src/motion/TransitionFX.js, the file the preview
+    // uses. Runs only when a base clip carries a transition; FAILS OPEN (the
+    // video ships without transitions, with a warning) like STEP 2.5 and 4.
+    // TRANSITIONS_DISABLED=1 is the kill switch.
+    let transitionWarning = null;
+    if (process.env.TRANSITIONS_DISABLED !== '1' && segClips.some(c => c && c.transition && c.transition.type)) {
+        try {
+            const { loadTransitionFX, outputWindows, compileTransitions } = require('../server/compositor/TransitionCompiler.js');
+            const FX = await loadTransitionFX();
+            const windows = outputWindows(FX, segClips, segOutputStarts, cumulativeOut);
+            const graph = windows.length > 0
+                ? compileTransitions(windows, { FX, width: targetWidth, height: targetHeight, fps: targetFps, tmpDir })
+                : null;
+            if (graph) {
+                const graphPath = path.join(tmpDir, 'transition_graph.txt');
+                fs.writeFileSync(graphPath, graph.filterComplex, 'utf-8');
+                const transOut = path.join(tmpDir, 'with_transitions.mp4');
+                const args = ['-i', finalVideoPath];
+                for (const inp of graph.inputs) args.push(...inp.inputOptions, '-i', inp.path);
+                args.push(
+                    '-filter_complex_script', graphPath,
+                    '-map', `[${graph.outputLabel}]`,
+                    '-map', '0:a?',
+                    '-c:v', codec,
+                    '-b:v', videoBitrate,
+                    '-profile:v', profile,
+                    '-pix_fmt', 'yuv420p',
+                    '-c:a', 'copy',
+                    '-y',
+                    transOut,
+                );
+                console.log(`  🎞️  Applying ${windows.length} transition(s)`);
+                await runFfmpegArgs(DRAWTEXT_BIN, args);
+                finalVideoPath = transOut;
+                console.log('  ✅ Transitions applied');
+            }
+        } catch (transErr) {
+            transitionWarning = `Transitions could not be rendered and were left out: ${String(transErr.message).slice(0, 300)}`;
+            console.warn(`[ExportJob ${job.id}] transitions failed (exporting without them):`, String(transErr.message).slice(0, 600));
+        }
+    }
+
     // ── STEP 2.5: Composite overlay layers (R60) ───────────────────────────
     // The layered-graphics pass. Everything above this line composites NOTHING:
     // `allClips` flattens every clip from every video track into one array
@@ -1198,6 +1244,37 @@ module.exports = async function processExportJob(job) {
             const inputFiles = [];
             for (let i = 0; i < overlays.length; i++) {
                 const ov = overlays[i];
+
+                // R89: template components are DRAWN here (same drawing code as
+                // the preview), not downloaded. One PNG per output frame, sized
+                // to the largest box the layer reaches.
+                if (ov.source?.type === 'template' && ov.source.template) {
+                    try {
+                        const { renderTemplateFrames } = require('../server/compositor/TemplateRenderer.js');
+                        const maxW = Math.max(...(ov.geometry || []).map(g => Number(g.w) || 0), 0.05);
+                        const imageFiles = {};
+                        const imgUrl = ov.source.template?.params?.imageUrl;
+                        if (imgUrl) {
+                            const imgPath = path.join(tmpDir, `tplimg-${i}${path.extname(String(imgUrl).split('?')[0]) || '.png'}`);
+                            const got = await fetchClipSource({ id: `${ov.clipId}-img`, name: path.basename(imgPath), assetId: ov.source.template?.params?.imageAssetId || undefined, url: imgUrl, sourceUrl: imgUrl, proxyUrl: imgUrl }, imgPath);
+                            if (got) imageFiles[imgUrl] = got;
+                        }
+                        const seq = await renderTemplateFrames(ov.source.template, {
+                            durationSec: Math.max(0.2, Number(ov.outputEnd) - Number(ov.outputStart)),
+                            fps: targetFps,
+                            widthPx: Math.round(maxW * targetWidth),
+                            tmpDir,
+                            name: String(i),
+                            imageFiles,
+                        });
+                        inputs.push({ overlayId: ov.id, inputIndex: inputFiles.length + 1 });
+                        inputFiles.push({ path: seq.pattern, isImage: false, outputEnd: ov.outputEnd, sequenceFps: targetFps });
+                    } catch (tplErr) {
+                        console.warn(`  ⚠️  template ${ov.id}: could not be drawn — layer skipped:`, tplErr.message);
+                    }
+                    continue;
+                }
+
                 const srcClip = {
                     id: ov.clipId,
                     name: `overlay-${i}${path.extname(ov.source?.url || '') || '.mp4'}`,
@@ -1234,6 +1311,7 @@ module.exports = async function processExportJob(job) {
                     // A still image has no duration of its own; -loop 1 gives it
                     // one, and -t stops it running past its window forever.
                     if (f.isImage) cmd = cmd.input(f.path).inputOptions(['-loop', '1', '-t', String(Math.max(0.1, f.outputEnd))]);
+                    else if (f.sequenceFps) cmd = cmd.input(f.path).inputOptions(['-framerate', String(f.sequenceFps), '-start_number', '0']);
                     else if (f.seek > 0) cmd = cmd.input(f.path).inputOptions(['-ss', String(f.seek)]);
                     else           cmd = cmd.input(f.path);
                 }
@@ -1928,6 +2006,9 @@ module.exports = async function processExportJob(job) {
         // silently shipping a video missing its graphics is the failure mode
         // this codebase keeps rediscovering.
         compositorWarning: compositorWarning || undefined,
+        // R89 — set when the transition pass (STEP 2.2) failed; the video
+        // shipped with plain cuts instead.
+        transitionWarning: transitionWarning || undefined,
         // Populated when animated captions (R63) couldn't render — the export
         // still has captions (the static path never ran for those clips'
         // siblings, and on failure `programClipIds` is cleared so EVERY

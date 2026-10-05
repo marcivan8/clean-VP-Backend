@@ -36,7 +36,10 @@ import { EventBus, EVENT_TYPES } from './EventBus.js';
 // R58 — Motion Graphics engine. Caption grouping now preserves per-word
 // timings instead of collapsing them to a line of text; see
 // groupWordsIntoCaptions below and client/src/motion/CaptionModel.js.
-import { groupWordsIntoSegments } from '../motion/CaptionModel.js';
+import { groupWordsIntoSegments, stylePackToClipFields } from '../motion/CaptionModel.js';
+import { STYLE_RECIPES, recipeTransitionForCut } from '../motion/StyleRecipes.js';
+import { TRANSITION_DEFAULT_DURATION } from '../motion/TransitionFX.js';
+import { autoEmphasizeCaptions } from '../utils/captionEmphasis.js';
 import { mapTranscriptToTimeline, listMainTrackSources } from '../timeline/transcriptMap.js';
 import { transcriptionManager } from './TranscriptionManager.js';
 // R68 — AI Animation Intelligence. `animate_automatically` applies the
@@ -582,6 +585,34 @@ export class MediaExecutionEngine {
      * clip (see `_deriveAudioPeaksForClip` above) for the ONE
      * `animate_automatically` request body. Does not touch the store.
      */
+    /**
+     * R90 — reveal / punchline / emphasis moments for word-synced placements,
+     * from the same detector the "animate" command uses (the animate route
+     * detects and resolves only; it never writes). Empty on any failure: the
+     * placements then still land on their words, just without the moment bonus.
+     */
+    async _fetchSemanticEvents() {
+        try {
+            const st = useTimelineStore.getState();
+            const tracks = this._tracksWithDerivedAudioPeaks(st);
+            const words = (st.captions || [])
+                .map(w => ({ start: Number(w?.start), end: Number(w?.end) }))
+                .filter(w => Number.isFinite(w.start) && Number.isFinite(w.end));
+            const res = await authFetch('/api/audio/animate-automatically', {
+                method: 'POST',
+                body: JSON.stringify({ projectState: { tracks, words }, projectId: st.projectId || null }),
+            });
+            if (!res.ok) return [];
+            const data = await res.json();
+            return (Array.isArray(data?.plan) ? data.plan : [])
+                .filter(p => p && Number.isFinite(Number(p.timelineTime)))
+                .map(p => ({ eventType: p.eventType, timelineTime: Number(p.timelineTime) }));
+        } catch (err) {
+            console.warn('[MediaExecutionEngine] semantic events unavailable:', err.message);
+            return [];
+        }
+    }
+
     _tracksWithDerivedAudioPeaks(store) {
         return (store.tracks || []).map(track => {
             if (track.type !== 'video') return track;
@@ -669,9 +700,13 @@ export class MediaExecutionEngine {
             case 'rippleDelete':   this._callStore(store, 'rippleDelete', args.atTime); return { action, success: true };
             case 'addTransition': {
                 if (args.clipId === '$ALL_CLIPS') {
+                    // Every CUT: a transition sits at a clip's end, so the last
+                    // clip of each track is skipped (R89 — it would otherwise
+                    // fade the whole video out).
                     const videoTracks = (store.tracks || []).filter(t => t.type === 'video');
                     for (const track of videoTracks) {
-                        for (const clip of (track.clips || [])) {
+                        const ordered = [...(track.clips || [])].sort((a, b) => a.start - b.start);
+                        for (const clip of ordered.slice(0, -1)) {
                             this._callStore(store, 'addTransition', clip.id, args.type, args.duration);
                         }
                     }
@@ -789,6 +824,113 @@ export class MediaExecutionEngine {
                 const result = this._callStore(store, 'setLayerTarget', trackId, clipId, 'background');
                 return { action, success: !!result?.success, error: result?.error };
             }
+            // ── R90 (A6): beat-synced cutaways + number pops ──────────────────
+            // B-roll starts on the word it illustrates, favouring reveal /
+            // punchline / emphasis moments; spoken prices and key numbers get a
+            // pop on the word. One undo step. Reports what it could not do.
+            case 'sync_cutaways': {
+                const events = await this._fetchSemanticEvents();
+                const { VideoEditorTools } = await import('./VideoEditorTools.js');
+                const tools = new VideoEditorTools();
+                const st = useTimelineStore.getState();
+                if (!Array.isArray(st.captions) || st.captions.length === 0) {
+                    return { action, success: false, message: 'Cutaways are placed on the spoken words, so they need a transcript. Run "add captions" first.' };
+                }
+                let broll = null, pops = null;
+                st.beginHistoryGroup();
+                try {
+                    if (args.broll !== false) broll = await tools.placeContextualBroll({ wordSync: true, events, layout: args.layout || 'fullscreen' }, job?.signal ?? null);
+                    if (args.numberPops !== false) pops = tools.placeNumberPops({ events });
+                } finally {
+                    useTimelineStore.getState().endHistoryGroup();
+                }
+                const nBroll = Array.isArray(broll?.placements) ? broll.placements.length : 0;
+                const nPops = pops?.placed || 0;
+                const onMoments = (broll?.placements || []).filter(p => p.event).length;
+                if (nBroll === 0 && nPops === 0) {
+                    return { action, success: false, message: [broll?.message, pops?.message].filter(Boolean).join(' ') || 'Nothing to place.' };
+                }
+                const parts = [];
+                if (nBroll > 0) parts.push(`${nBroll} b-roll cutaway(s) on the words they illustrate${onMoments ? ` (${onMoments} on key moments)` : ''}`);
+                if (nPops > 0) parts.push(`${nPops} number pop(s)`);
+                return { action, success: true, message: `Placed ${parts.join(' and ')}.` };
+            }
+
+            // ── R90 (A7): one-click style recipes ────────────────────────────
+            case 'apply_style_recipe': {
+                const recipe = STYLE_RECIPES[args.recipeId];
+                if (!recipe) return { action, success: false, message: `Which style recipe? Choose one: ${Object.keys(STYLE_RECIPES).join(', ')} (for example "apply the punchy recipe").` };
+                const done = [];
+                const skipped = [];
+                const st0 = useTimelineStore.getState();
+                st0.beginHistoryGroup();
+                try {
+                    // 1. Caption look (global), from the style pack.
+                    const textTracks = (useTimelineStore.getState().tracks || []).filter(t => t.type === 'text' && (t.clips || []).length > 0);
+                    const fields = recipe.captionPack ? stylePackToClipFields(recipe.captionPack) : null;
+                    if (fields && textTracks.length > 0) {
+                        const first = textTracks[0].clips[0];
+                        useTimelineStore.getState().applyCaptionUpdate(fields, { clipId: first.id, scope: 'global', skipHistory: true });
+                        done.push('caption style');
+                    } else if (fields) {
+                        skipped.push('caption style (no captions yet)');
+                    }
+                    // 2. Keyword emphasis.
+                    if (recipe.keywords && textTracks.length > 0) {
+                        const r = await autoEmphasizeCaptions({ useLLM: true, source: 'assistant' });
+                        if (r.updated > 0) done.push(`key words on ${r.updated} caption(s)`);
+                    }
+                    // 3. Transitions on every cut of the base track.
+                    const live = useTimelineStore.getState();
+                    const base = (live.tracks || []).find(t => t.type === 'video' && (t.clips || []).length > 0);
+                    const cuts = base ? [...base.clips].sort((a, b) => a.start - b.start).slice(0, -1) : [];
+                    if (cuts.length > 0 && recipe.transitions) {
+                        cuts.forEach((clip, i) => {
+                            const tr = recipeTransitionForCut(recipe, i);
+                            if (tr) useTimelineStore.getState().addTransition(clip.id, tr.type, tr.duration || TRANSITION_DEFAULT_DURATION[tr.type]);
+                        });
+                        done.push(`transitions on ${cuts.length} cut(s)`);
+                    } else if (recipe.transitions) {
+                        skipped.push('transitions (only one clip, no cut)');
+                    }
+                    // 4. Zoom rhythm (needs a transcript; reported if it cannot run).
+                    if (recipe.rhythmZoom) {
+                        try {
+                            const rz = await this.executeStoreAction({ action: 'rhythm_zoom', args: { style: recipe.rhythmZoom } }, job);
+                            if (rz?.success) done.push('zoom rhythm'); else skipped.push('zoom rhythm (needs captions)');
+                        } catch (rzErr) {
+                            console.warn('[apply_style_recipe] rhythm zoom failed:', rzErr.message);
+                            skipped.push('zoom rhythm (service unavailable)');
+                        }
+                    }
+                    // 5. Automatic placements on the words (A6).
+                    const hasWords = Array.isArray(useTimelineStore.getState().captions) && useTimelineStore.getState().captions.length > 0;
+                    if ((recipe.broll || recipe.numberPops) && hasWords) {
+                        const events = await this._fetchSemanticEvents();
+                        const { VideoEditorTools } = await import('./VideoEditorTools.js');
+                        const tools = new VideoEditorTools();
+                        if (recipe.broll) {
+                            const br = await tools.placeContextualBroll({ wordSync: true, events, layout: recipe.broll.layout }, job?.signal ?? null);
+                            const n = Array.isArray(br?.placements) ? br.placements.length : 0;
+                            if (n > 0) done.push(`${n} b-roll cutaway(s)`); else skipped.push('b-roll (none matched the dialogue)');
+                        }
+                        if (recipe.numberPops) {
+                            const pp = tools.placeNumberPops({ events });
+                            if (pp.placed > 0) done.push(`${pp.placed} number pop(s)`);
+                        }
+                    } else if (recipe.broll || recipe.numberPops) {
+                        skipped.push('b-roll and number pops (need captions)');
+                    }
+                } finally {
+                    useTimelineStore.getState().endHistoryGroup();
+                }
+                if (done.length === 0) {
+                    return { action, success: false, message: `Nothing could be applied yet: ${skipped.join(', ')}.` };
+                }
+                const skippedText = skipped.length ? ` Skipped: ${skipped.join(', ')}.` : '';
+                return { action, success: true, message: `Style recipe applied: ${done.join(', ')}. One undo reverts it.${skippedText}` };
+            }
+
             // R68 — AI Animation Intelligence. "Brain chooses animations.
             // Users don't." Explicit command, autonomous execution: one call
             // detects reveal/punchline/emphasis/emotional-beat moments on the
@@ -1004,6 +1146,7 @@ export class MediaExecutionEngine {
             case 'clear_lut':
             case 'emphasize_keywords':
             case 'clear_keywords':
+            case 'add_template':
             case 'layout_split_screen':
             case 'layout_picture_in_picture':
             case 'layout_fullscreen':

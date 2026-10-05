@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import Track from './Track';
 import useTimelineStore from '../../store/useTimelineStore';
 import useDeviceType from '../../hooks/useDeviceType';
+import { TRANSITION_TYPES, TRANSITION_DEFAULT_DURATION } from '../../motion/TransitionFX.js';
 import { Scissors, ZoomIn, ZoomOut, Copy, Type, Palette, Undo2, Redo2, ChevronsRight, Magnet } from 'lucide-react';
 
 const RULER_H    = 24;   // h-6 = 24px (ruler height)
@@ -468,15 +469,14 @@ const Timeline = () => {
                             const type = e.target.value;
                             if (!type) return;
                             const { activeClipId, addTransition } = useTimelineStore.getState();
-                            if (activeClipId) addTransition(activeClipId, type, 1.0);
+                            if (activeClipId) addTransition(activeClipId, type, TRANSITION_DEFAULT_DURATION[type] || 0.4);
                             e.target.value = "";
                         }}
                     >
                         <option value="">+ {t('timeline.transition')}</option>
-                        <option value="fade">{t('timeline.fadeOut')}</option>
-                        <option value="crossfade">{t('timeline.crossfade')}</option>
-                        <option value="slide">{t('timeline.slideLeft')}</option>
-                        <option value="zoom">{t('timeline.zoomOut')}</option>
+                        {TRANSITION_TYPES.map(type => (
+                            <option key={type} value={type}>{t(`transitions.${type}`)}</option>
+                        ))}
                     </select>
 
                     <button

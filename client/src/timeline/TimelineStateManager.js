@@ -978,6 +978,8 @@ export class TimelineStateManager {
                         // R88 — layout presets (overlay box + split speaker reframe).
                         // Same persistence contract: read back in fromLegacyTracks.
                         frame: clip.frame ?? null,
+                        // R89 — template components. Same persistence contract.
+                        template: clip.template ?? null,
                         layoutBase: clip.layoutBase ?? null,
                         // R66 — clip grouping (see client/src/motion/ClipGrouping.js).
                         // Same persistence-contract rule as the three fields above:
@@ -1056,6 +1058,11 @@ export class TimelineStateManager {
                                 sourceDuration: legacyClip.sourceDuration || legacyClip.duration,
                                 assetId: legacyClip.assetId,
                                 thumbnail: legacyClip.thumbnail,
+                                // R89: projected by toLegacyTracks but never read
+                                // back, so an overlay's source shape
+                                // (metadata.resolution) was lost on reload and its
+                                // export box fell back to the frame's aspect.
+                                metadata: legacyClip.metadata || {},
                                 // Text / overlay
                                 content: legacyClip.content,
                                 color: legacyClip.color,
@@ -1087,6 +1094,8 @@ export class TimelineStateManager {
                                 emphasis: legacyClip.emphasis ?? null,
                                 // R88 — layout presets. Mirrors toLegacyTracks above.
                                 frame: legacyClip.frame ?? null,
+                                // R89 — template components. Mirrors toLegacyTracks above.
+                                template: legacyClip.template ?? null,
                                 layoutBase: legacyClip.layoutBase ?? null,
                                 // R66 — clip grouping. Mirrors toLegacyTracks above.
                                 groupId: legacyClip.groupId ?? null,

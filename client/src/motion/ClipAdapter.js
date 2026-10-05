@@ -46,6 +46,8 @@ function inferKind(clip, trackType) {
     if (t === 'image')   return LAYER_KINDS.IMAGE;
     if (t === 'video')   return LAYER_KINDS.VIDEO;
     if (t === 'sticker') return LAYER_KINDS.STICKER;
+    // R89: template components (counter, price pop…) animate like stickers.
+    if (t === 'template') return LAYER_KINDS.STICKER;
     if (t === 'shape')   return LAYER_KINDS.SHAPE;
     // R62: an 'overlay' TRACK holds clips typed 'sticker'/'image'/'shape'
     // individually (handled above). This is only reached when a clip on an

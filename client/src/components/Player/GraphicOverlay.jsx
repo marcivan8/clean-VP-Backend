@@ -17,6 +17,7 @@ import { resolveMotionAt }   from '../../motion/MotionResolver.js';
 import { clipsInGroup } from '../../motion/ClipGrouping.js';
 import RotateHandle from './RotateHandle.jsx';
 import { hasLayoutFrame, frameToCss } from '../../motion/LayoutPresets.js';
+import TemplateCanvas from './TemplateCanvas.jsx';
 
 /**
  * A video on the overlay track (b-roll cutaway, screen recording, PiP). Before
@@ -221,8 +222,9 @@ const GraphicOverlay = () => {
                     ? resolveMotionAt(layer, currentTime)
                     : { x: clip.x ?? 78, y: clip.y ?? 18, scale: clip.scale || 1, rotation: 0, opacity: clip.opacity ?? 1, blur: 0 };
 
+                const isTemplate = clip.type === 'template' && !!clip.template;
                 const src = clip.url || clip.sourceUrl;
-                if (!src) return null;
+                if (!src && !isTemplate) return null;
 
                 const transform = [
                     'translate(-50%, -50%)',
@@ -290,9 +292,11 @@ const GraphicOverlay = () => {
                             cursor: 'move',
                         }}
                     >
-                        {isVideo
-                            ? <OverlayVideo clip={clip} currentTime={currentTime} isPlaying={isPlaying} style={mediaStyle} />
-                            : <img src={src} alt={clip.name || 'overlay'} draggable={false} style={mediaStyle} />}
+                        {isTemplate
+                            ? <TemplateCanvas clip={clip} currentTime={currentTime} style={{ opacity: motion.opacity, pointerEvents: 'none', ...(motion.blur > 0 ? { filter: `blur(${motion.blur}px)` } : {}) }} />
+                            : isVideo
+                                ? <OverlayVideo clip={clip} currentTime={currentTime} isPlaying={isPlaying} style={mediaStyle} />
+                                : <img src={src} alt={clip.name || 'overlay'} draggable={false} style={mediaStyle} />}
                         {isActive && (
                             <RotateHandle
                                 getElement={() => clipElRefs.current[clip.id]}

@@ -201,6 +201,8 @@ function layerKindForClip(clip, trackType) {
     if (t === 'image')   return 'image';
     if (t === 'video')   return 'video';
     if (t === 'sticker') return 'sticker';
+    // R89: template components animate like stickers (mirrors ClipAdapter).
+    if (t === 'template') return 'sticker';
     if (t === 'shape')   return 'shape';
     // An 'overlay' TRACK holds clips typed 'sticker'/'image'/'shape' individually
     // (handled above); only reached when a clip on that track has no clip.type

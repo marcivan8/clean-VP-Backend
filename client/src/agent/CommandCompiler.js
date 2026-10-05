@@ -472,13 +472,26 @@ function compileIdentifyQuotableMoments(step, ctx) {
 
 // ── Effect commands ────────────────────────────────────────────────────────────
 
+// R89 transition pack. Mirrors TRANSITION_DEFAULT_DURATION / LEGACY_TRANSITIONS
+// in motion/TransitionFX.js (this file stays import-free; the regression suite
+// checks the two tables agree). EditPlanner resolves free text ("whip",
+// "speed lines") before it gets here.
+const TRANSITION_PACK_DURATIONS = {
+    'flash': 0.3, 'dip': 0.6, 'whip-left': 0.36, 'whip-right': 0.36,
+    'zoom-punch': 0.4, 'glitch': 0.32, 'speed-lines': 0.5,
+};
+const TRANSITION_LEGACY = { fade: 'dip', crossfade: 'dip', dissolve: 'dip', slide: 'whip-left', wipe: 'whip-left', zoom: 'zoom-punch' };
+
 function compileAddTransition(step, ctx) {
-    const validTypes = ['fade', 'dissolve', 'wipe', 'slide', 'zoom'];
-    const enumErr = requireEnum(step.type, validTypes, 'transition type');
-    if (enumErr) return validationError(step.step_id, enumErr, VALIDATION_ERRORS.INVALID_ENUM);
+    const raw = step.type || 'dip';
+    const type = TRANSITION_PACK_DURATIONS[raw] ? raw : TRANSITION_LEGACY[raw];
+    if (!type) {
+        return validationError(step.step_id, `Unknown transition type "${raw}". Use one of: ${Object.keys(TRANSITION_PACK_DURATIONS).join(', ')}`, VALIDATION_ERRORS.INVALID_ENUM);
+    }
+    const duration = Number(step.duration) > 0 ? Number(step.duration) : TRANSITION_PACK_DURATIONS[type];
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'addTransition', { clipId: step.clip_id || '$first_clip', type: step.type || 'fade', duration: step.duration || 0.5 },
-            { source_step_id: step.step_id, description: `Add ${step.type || 'fade'} transition` }),
+        cmd(ENGINE.STORE, 'addTransition', { clipId: step.clip_id || '$first_clip', type, duration },
+            { source_step_id: step.step_id, description: `Add ${type} transition` }),
     ]);
 }
 
@@ -1061,6 +1074,9 @@ const COMMAND_REGISTRY = new Map([
     ['crop_clip',        { compiler: compileCropClip }],
     ['detect_speakers',  { compiler: compileAtomicStore('detect_speakers', 'Detect speakers (analysis only)') }],
     ['emphasize_keywords', { compiler: compileAtomicStore('emphasize_keywords', 'Highlight the key word of each caption') }],
+    ['add_template',              { compiler: compileAtomicStore('add_template', 'Add an animated template') }],
+    ['sync_cutaways',             { compiler: compileAtomicStore('sync_cutaways', 'Place cutaways and number pops on the words') }],
+    ['apply_style_recipe',        { compiler: compileAtomicStore('apply_style_recipe', 'Apply a style recipe') }],
     ['layout_split_screen',       { compiler: compileAtomicStore('layout_split_screen', 'Split screen layout') }],
     ['layout_picture_in_picture', { compiler: compileAtomicStore('layout_picture_in_picture', 'Picture-in-picture layout') }],
     ['layout_fullscreen',         { compiler: compileAtomicStore('layout_fullscreen', 'Full-screen cutaway layout') }],

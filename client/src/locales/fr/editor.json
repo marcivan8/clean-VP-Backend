@@ -801,5 +801,55 @@
     "splitFace": "Cadrage du locuteur à partir de la détection.",
     "splitNoFace": "Locuteur cadré au centre. Lancez « séparer le locuteur » pour un cadrage sur le visage.",
     "failed": "Impossible d’appliquer cette mise en page."
+  },
+  "transitions": {
+    "flash": "Flash",
+    "dip": "Fondu au noir",
+    "whip-left": "Filé gauche",
+    "whip-right": "Filé droite",
+    "zoom-punch": "Zoom choc",
+    "glitch": "Glitch",
+    "speed-lines": "Lignes de vitesse"
+  },
+  "templates": {
+    "title": "Modèles",
+    "noLogo": "Aucune image (initiale)",
+    "kinds": {
+      "counter": "Compteur",
+      "price-pop": "Chiffre animé",
+      "logo-card": "Carte logo",
+      "code-window": "Fenêtre de code"
+    },
+    "fields": {
+      "label": "Libellé",
+      "from": "De",
+      "value": "Valeur",
+      "total": "Total",
+      "accent": "Accent",
+      "text": "Texte",
+      "sub": "Sous-titre",
+      "color": "Couleur",
+      "logo": "Image du logo",
+      "title": "Titre",
+      "code": "Code",
+      "cps": "Caractères par seconde"
+    }
+  },
+  "styleRecipes": {
+    "title": "Recettes de style",
+    "names": {
+      "punchy": "Créateur percutant",
+      "travel": "Vlog voyage",
+      "explainer": "Explication",
+      "podcast": "Extrait podcast"
+    },
+    "hints": {
+      "punchy": "Sous-titres marqués, mots clés, coupes rapides, zooms dynamiques, b-roll et chiffres animés",
+      "travel": "Sous-titres vlog, transitions rapides, zooms doux, b-roll et chiffres animés",
+      "explainer": "Sous-titres sobres, fondus, zooms doux, b-roll en écran partagé et chiffres animés",
+      "podcast": "Sous-titres lisibles, fondus et zooms doux"
+    },
+    "syncCutaways": "Caler le b-roll et les chiffres sur la parole",
+    "note": "Nécessite des sous-titres. Une seule annulation retire toute la recette."
   }
 }

@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../../store/useTimelineStore';
 import { audioEngineAPI } from '../../audio-engine/AudioEngineAPI.js';
 import { findGapAt } from '../../timeline/rippleDelete.js';
+import { TRANSITION_TYPES, TRANSITION_DEFAULT_DURATION, normalizeTransitionType } from '../../motion/TransitionFX.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -283,33 +284,25 @@ const ClipContextMenu = ({ clip, trackId, position, onClose, spot = null }) => {
 
             <Separator />
 
-            {/* Transitions */}
-            <Item
-                icon={Wind}
-                label={t('timeline.fadeOut')}
-                disabled={noClip}
-                onClick={() => run(() => store().addTransition(clip.id, 'fade', 1.0))}
-                trailing={
-                    <FavoriteTransitionToggle
-                        transitionType="fade"
-                        favorited={favoritedTransitions.has('fade')}
-                        onToggle={toggleTransitionFavorite}
-                    />
-                }
-            />
-            <Item
-                icon={Wind}
-                label={t('timeline.crossfade')}
-                disabled={noClip}
-                onClick={() => run(() => store().addTransition(clip.id, 'crossfade', 1.0))}
-                trailing={
-                    <FavoriteTransitionToggle
-                        transitionType="crossfade"
-                        favorited={favoritedTransitions.has('crossfade')}
-                        onToggle={toggleTransitionFavorite}
-                    />
-                }
-            />
+            {/* Transitions (R89 pack). Set on this clip = played at its END,
+                centred on the cut into the next clip. */}
+            {TRANSITION_TYPES.map(type => (
+                <Item
+                    key={type}
+                    icon={Wind}
+                    label={t(`transitions.${type}`)}
+                    disabled={noClip}
+                    hint={!noClip && normalizeTransitionType(clip.transition?.type) === type ? '✓' : undefined}
+                    onClick={() => run(() => store().addTransition(clip.id, type, TRANSITION_DEFAULT_DURATION[type]))}
+                    trailing={
+                        <FavoriteTransitionToggle
+                            transitionType={type}
+                            favorited={favoritedTransitions.has(type)}
+                            onToggle={toggleTransitionFavorite}
+                        />
+                    }
+                />
+            ))}
             {hasTransition && (
                 <Item
                     icon={Wind}

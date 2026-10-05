@@ -8,6 +8,9 @@ import FatigueAlert from './FatigueAlert';
 import DebugOverlay from './DebugOverlay';
 import PlaybackEngine from '../../engine/PlaybackEngine';
 import ObjectLayerOverlay from './ObjectLayerOverlay'; // R67 — Object Intelligence "blur background"
+import TransitionLayer from './TransitionLayer.jsx';
+import { transitionTransform, transitionFilter } from './transitionStyle.js';
+import { transitionWindows, fxAtTime } from '../../motion/TransitionFX.js';
 
 /**
  * Interpolates a keyframe track at `localTime` (clip-local seconds).
@@ -706,6 +709,21 @@ const VideoPlayer = () => {
         }
     }
 
+    // ── R89 transitions (to-do A4) ──────────────────────────────────────────
+    // Cut effects centred on each base-track cut, from motion/TransitionFX.js —
+    // the same description the export samples. Applied to the base video only;
+    // captions and stickers (separate layers) are not shaken or blurred, which
+    // is also the export's order (transitions run before overlays/captions).
+    const baseTransitionClips = React.useMemo(() => {
+        const base = (tracks || []).find(t => t.type === 'video' && (t.clips || []).length > 0);
+        return base ? base.clips : [];
+    }, [tracks]);
+    const transitionWins = React.useMemo(() => transitionWindows(baseTransitionClips), [baseTransitionClips]);
+    const tfx = transitionWins.length > 0 ? fxAtTime(transitionWins, currentTime) : null;
+    const baseTransform = transitionTransform(tfx, transformStyle, transformOrigin);
+    const baseFilter = transitionFilter(tfx, projectLUTFilter);
+    const frameWidthPx = containerRef.current?.clientWidth || 0;
+
     // Show overlay when user presses play but no proxy exists yet.
     // Computed here (not in the effect) so it stays reactive to the store subscription.
     const proxyGenerating = (() => {
@@ -735,7 +753,7 @@ const VideoPlayer = () => {
                     width: '100%',
                     height: '100%',
                     objectFit: 'contain',
-                    transform: transformStyle,
+                    transform: baseTransform,
                     transformOrigin,
                     // Project colour grade. `applyLUT` has always stored a CSS
                     // filter alongside the LUT id — its own comment says "CSS
@@ -744,7 +762,7 @@ const VideoPlayer = () => {
                     // a LUT changed the store and nothing else. See R55.
                     // 'none' (the cleared state) is a valid CSS filter value and
                     // costs nothing, so the ungraded path is unchanged.
-                    filter: projectLUTFilter || 'none',
+                    filter: baseFilter,
                     display: useFallbackPlayer ? 'none' : 'block',
                 }}
             />
@@ -770,9 +788,9 @@ const VideoPlayer = () => {
                         width: '100%',
                         height: '100%',
                         objectFit: 'contain',
-                        transform: transformStyle,
+                        transform: baseTransform,
                         transformOrigin,
-                        filter: projectLUTFilter || 'none',
+                        filter: baseFilter,
                     }}
                     onTimeUpdate={(e) => {
                         // Mirrors the primary engine's onTick → seek() wiring.
@@ -827,8 +845,10 @@ const VideoPlayer = () => {
                 })()}
                 currentTime={currentTime}
                 isPlaying={isPlaying}
-                containerStyle={{ transform: transformStyle, transformOrigin }}
+                containerStyle={{ transform: baseTransform, transformOrigin }}
             />
+
+            {transitionWins.length > 0 && <TransitionLayer fx={tfx} frameWidth={frameWidthPx} />}
 
             {/* Proxy still generating — shown when user presses play before the
                 background proxy job finishes. Engine is NOT started in this state. */}

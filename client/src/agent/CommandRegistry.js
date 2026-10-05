@@ -261,6 +261,41 @@ export const COMMANDS = [
         destructive: false,
     },
     {
+        // R90 (to-do A6) — b-roll on the exact word it illustrates, number pops on spoken numbers.
+        id: 'sync_cutaways',
+        category: 'edit',
+        label: 'Sync cutaways to the words',
+        summary: 'Places b-roll on the words it illustrates and number pops on spoken prices and figures.',
+        phrases: ['sync the b roll', 'sync b roll to the words', 'cutaways on the words', 'place b roll on the words',
+                  'beat sync', 'add number pops', 'pop the numbers', 'show the prices', 'b roll on key moments',
+                  'synchronise les plans de coupe', 'plans de coupe sur les mots', 'affiche les prix', 'affiche les chiffres'],
+        negative: ['remove', 'clear', 'enleve', 'retire', 'supprime'],
+        destructive: false,
+    },
+    {
+        // R90 (to-do A7) — style recipes (motion/StyleRecipes.js).
+        id: 'apply_style_recipe',
+        category: 'macro',
+        label: 'Apply a style recipe',
+        summary: 'Applies a bundled style: captions, key words, transitions, zoom rhythm and automatic placements.',
+        phrases: ['style recipe', 'apply the recipe', 'punchy style', 'punchy creator', 'travel vlog style', 'explainer style',
+                  'podcast style', 'make it look like a travel vlog', 'make it an explainer',
+                  'make it a podcast clip', 'recette de style', 'style vlog voyage', 'style podcast', 'style tutoriel', 'style percutant'],
+        destructive: false,
+    },
+    {
+        // R89 (to-do A5) — animated templates (motion/TemplateGraphics.js).
+        id: 'add_template',
+        category: 'text',
+        label: 'Add an animated template',
+        summary: 'Adds a flip counter, a number/price pop, a logo card or a code window at the playhead.',
+        phrases: ['add a counter', 'day counter', 'flip counter', 'add a price pop', 'price pop', 'number pop',
+                  'pop the price', 'add a code window', 'code window', 'typing code', 'add a logo card', 'logo card',
+                  'ajoute un compteur', 'compteur de jours', 'fenetre de code', 'carte logo', 'prix anime'],
+        negative: ['remove', 'clear', 'enleve', 'retire', 'supprime'],
+        destructive: false,
+    },
+    {
         id: 'add_text_overlay',
         category: 'text',
         label: 'Add text',
@@ -402,11 +437,20 @@ export const COMMANDS = [
         id: 'add_transition',
         category: 'timeline',
         label: 'Add transition',
-        summary: 'Adds a fade or crossfade between clips.',
-        phrases: ['add a transition', 'add a fade', 'crossfade', 'fade between', 'fade out'],
+        summary: 'Adds a transition at a cut: flash, dip to black, whip, zoom punch, glitch or speed lines.',
+        phrases: ['add a transition', 'add transitions', 'add a fade', 'crossfade', 'fade between', 'fade out',
+                  'add a whip', 'whip transition', 'whip pan', 'flash transition', 'add a flash', 'glitch transition',
+                  'add a glitch', 'speed lines', 'zoom transition', 'zoom punch', 'transitions between',
+                  'ajoute une transition', 'ajoute des transitions', 'transition entre', 'mets une transition',
+                  'mets des transitions', 'transition flash', 'transition glitch'],
+        // "remove the transitions" is not an add.
+        negative: ['remove', 'clear', 'enleve', 'retire', 'supprime'],
         params: [
-            { name: 'type',     type: 'enum', values: ['fade', 'crossfade', 'slide', 'zoom'], default: 'fade' },
-            { name: 'duration', type: 'seconds', default: 1.0 },
+            // Matched in this order (first hit wins), longest names first;
+            // EditPlanner maps them onto the pack (motion/TransitionFX.js).
+            { name: 'type',     type: 'enum', values: ['speed lines', 'whip right', 'whip left', 'zoom punch', 'whip', 'glitch', 'flash', 'dip', 'zoom', 'crossfade', 'fade', 'slide'] },
+            { name: 'duration', type: 'seconds' },
+            { name: 'target',   type: 'target', description: 'all → every cut' },
         ],
         destructive: false,
     },
@@ -609,7 +653,8 @@ export function extractParams(cmd, prompt) {
             const m = text.match(/speaker[\s_]*(\d+)/);
             if (m) value = `SPEAKER_${m[1].padStart(2, '0')}`;
         } else if (p.type === 'target') {
-            if (/\ball\b|\bevery\b|\bwhole\b/.test(text)) value = 'all';
+            // R89: French too ("toutes les coupes", "chaque plan").
+            if (/\ball\b|\bevery\b|\bwhole\b|\btous\b|\btoutes\b|\bchaque\b/.test(text)) value = 'all';
             else if (/\bthis\b|\bselected\b|\bhere\b/.test(text)) value = 'clip';
         } else if (p.type === 'enum') {
             value = (p.values || []).find(v => text.includes(String(v).toLowerCase()));

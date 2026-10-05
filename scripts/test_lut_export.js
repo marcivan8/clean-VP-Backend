@@ -160,11 +160,16 @@ section('6 · The PREVIEW is graded too, not just the export');
     check('the player subscribes to it',
         /useTimelineStore\(state => state\.projectLUTFilter\)/.test(player),
         'getState() would not re-render on apply — the immediacy is the point');
+    // R89: the canvas filter is now the LUT composed with the transition
+    // filter (TransitionLayer.transitionFilter), which returns the LUT alone
+    // outside transitions and 'none' when there is neither.
+    const tlayer = read('client/src/components/Player/transitionStyle.js');
     check('the canvas actually applies it',
-        /filter: projectLUTFilter \|\| 'none'/.test(player),
+        (/filter: projectLUTFilter \|\| 'none'/.test(player))
+            || (/const baseFilter = transitionFilter\(tfx, projectLUTFilter\)/.test(player) && /filter: baseFilter/.test(player)),
         'the filter was stored and never used — clicking a LUT changed nothing visible');
     check('the ungraded path stays neutral',
-        /\|\| 'none'/.test(player),
+        /\|\| 'none'/.test(player) || /parts\.length \? parts\.join\(' '\) : 'none'/.test(tlayer),
         "'none' is a valid CSS filter and costs nothing");
 }
 

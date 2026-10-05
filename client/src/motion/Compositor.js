@@ -449,6 +449,9 @@ export function buildCompositionPlan(tracks, opts = {}) {
                     url: clip.proxyUrl || clip.url || clip.sourceUrl || null,
                     assetId: clip.assetId || null,
                     type: clip.type || track.type,
+                    // R89: a template is drawn by the worker from this
+                    // description (TemplateRenderer), not fetched.
+                    ...(clip.type === 'template' && clip.template ? { template: clip.template } : {}),
                 },
                 // Where in the SOURCE file this clip starts, and how fast it runs.
                 sourceOffset: Number(clip.offset) || 0,

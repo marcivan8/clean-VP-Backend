@@ -13,6 +13,9 @@ import { authFetch } from '../utils/authFetch.js';
 import { ContextGenerator } from './ContextGenerator.js';
 import useTimelineStore from '../store/useTimelineStore.js';
 import { ClarificationGenerator } from './ClarificationGenerator.js';
+import { normalizeTransitionType, transitionFromText } from '../motion/TransitionFX.js';
+import { templateFromText } from '../motion/TemplateGraphics.js';
+import { recipeFromText } from '../motion/StyleRecipes.js';
 
 export const ACTIONS = {
     COMPUTE_SPLIT_TIMESTAMP: 'compute_split_timestamp',
@@ -205,7 +208,7 @@ export class EditPlanner {
             case 'normalize_audio': return this.planNormalizeAudio(planId, constraints);
             case 'auto_captions': return this.planAutoCaptions(planId, constraints);
             case 'adjust_volume': return this.planVolumeAdjust(planId, clip, constraints);
-            case 'add_transition': return this.planAddTransition(planId, clip, constraints);
+            case 'add_transition': return this.planAddTransition(planId, clip, constraints, intent.originalPrompt);
             case 'add_filter': return this.planAddFilter(planId, clip, constraints);
             case 'add_text': return this.planAddText(planId, constraints);
             case 'color_grade': return this.planColorGrade(planId, clip, constraints, intent.originalPrompt);
@@ -225,6 +228,28 @@ export class EditPlanner {
             case 'organize_clips': return this.planOrganizeClips(planId, state, constraints);
             case 'rhythm_zoom': return this.planRhythmZoom(planId, constraints);
             case 'crop_clip':   return this.planCropClip(planId, constraints);
+            case 'sync_cutaways': {
+                const txt = String(intent.originalPrompt || '').toLowerCase();
+                const layout = /split|partag/.test(txt) ? 'split' : /picture in picture|\bpip\b|incrust|corner|coin/.test(txt) ? 'pip' : 'fullscreen';
+                const numbersOnly = /number|price|prix|chiffre/.test(txt) && !/b ?roll|cutaway|plan de coupe|plans de coupe/.test(txt);
+                return this.buildPlan(planId, 'sync_cutaways', [
+                    { step_id: 'step_1', action: 'sync_cutaways', args: { layout, broll: !numbersOnly, numberPops: true }, reason: 'Place cutaways and number pops on the words' },
+                ]);
+            }
+            case 'apply_style_recipe': {
+                const recipeId = recipeFromText(intent.originalPrompt);
+                return this.buildPlan(planId, 'apply_style_recipe', [
+                    { step_id: 'step_1', action: 'apply_style_recipe', args: { recipeId }, reason: recipeId ? `Apply the ${recipeId} style recipe` : 'Apply a style recipe' },
+                ]);
+            }
+            case 'add_template': {
+                // R89: kind and values come from the request ("day 14 of 30",
+                // "15-20€", quoted code); defaults fill the rest.
+                const tpl = templateFromText(intent.originalPrompt) || { kind: 'counter', params: {} };
+                return this.buildPlan(planId, 'add_template', [
+                    { step_id: 'step_1', action: 'add_template', args: tpl, reason: `Add a ${tpl.kind} template` },
+                ]);
+            }
             case 'layout_split_screen':       return this.planSingleStep(planId, 'layout_split_screen', 'Split screen: speaker top, b-roll bottom');
             case 'layout_picture_in_picture': return this.planSingleStep(planId, 'layout_picture_in_picture', 'Picture in picture');
             case 'layout_fullscreen':         return this.planSingleStep(planId, 'layout_fullscreen', 'Full-screen cutaway');
@@ -455,9 +480,11 @@ export class EditPlanner {
         ]);
     }
 
-    static planAddTransition(planId, clip, constraints) {
+    static planAddTransition(planId, clip, constraints, originalPrompt = '') {
         return this.buildPlan(planId, 'add_transition', [
-            { step_id: 'step_1', action: ACTIONS.ADD_TRANSITION, clip_id: clip?.id, type: constraints.type || 'fade', duration: constraints.duration || 0.5, position: 'between_clips' }
+            // R89: the type is resolved onto the pack here (free text → pack
+            // name); "between all the clips" → every cut, else the selected clip's end.
+            { step_id: 'step_1', action: ACTIONS.ADD_TRANSITION, clip_id: constraints.target === 'all' ? '$ALL_CLIPS' : clip?.id, type: normalizeTransitionType(constraints.type) || transitionFromText(constraints.type) || transitionFromText(originalPrompt) || 'dip', duration: constraints.duration || null, position: 'between_clips' }
         ]);
     }
 

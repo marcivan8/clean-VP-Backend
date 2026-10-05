@@ -284,7 +284,7 @@ section('6 · Static wiring — placeContextualBroll uses the boundary-aware cal
     check('placeContextualBroll computes chapterBoundaries via extractChapterBoundaries(state.tracks)',
         /const chapterBoundaries = extractChapterBoundaries\(state\.tracks\)/.test(vetSrcRaw));
     check('placeContextualBroll passes chapterBoundaries into matchTranscriptToBroll',
-        /matchTranscriptToBroll\(words,\s*candidates,\s*chapterBoundaries\)/.test(vetSrcRaw));
+        /matchTranscriptToBroll\(words,\s*candidates,\s*chapterBoundaries\s*[,)]/.test(vetSrcRaw));
     check('placeContextualBroll picks overlay kind from the asset\'s own type (video vs image)',
         /kind:\s*asset\.type === 'image' \? 'image' : 'video'/.test(vetSrcRaw));
     check('the execute() switch still routes place_contextual_broll to placeContextualBroll',

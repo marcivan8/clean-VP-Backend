@@ -1547,6 +1547,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             metadata: result.metadata,
             captionWarning: result.captionWarning,
             compositorWarning: result.compositorWarning,
+            transitionWarning: result.transitionWarning,
             captionProgramWarning: result.captionProgramWarning,
             revideoWarning: result.revideoWarning,
         };

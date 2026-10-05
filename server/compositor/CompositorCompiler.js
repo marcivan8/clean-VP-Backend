@@ -361,7 +361,7 @@ function validateCompositionPlanShape(plan, frameWidth, frameHeight) {
     plan.overlays.forEach((ov, i) => {
         if (!ov || typeof ov !== 'object') { errors.push(`overlays[${i}] is not an object`); return; }
         if (!ov.id) errors.push(`overlays[${i}] has no id`);
-        if (!ov.source || (!ov.source.url && !ov.source.assetId)) errors.push(`overlays[${i}] has no resolvable source`);
+        if (!ov.source || (!ov.source.url && !ov.source.assetId && !(ov.source.type === 'template' && ov.source.template))) errors.push(`overlays[${i}] has no resolvable source`);
         if (!(Number(ov.outputEnd) > Number(ov.outputStart))) errors.push(`overlays[${i}] has a non-positive time window`);
         if (seenZ.has(ov.zIndex)) errors.push(`overlays[${i}] has a duplicate zIndex ${ov.zIndex}`);
         seenZ.add(ov.zIndex);

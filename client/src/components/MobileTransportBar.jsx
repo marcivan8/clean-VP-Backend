@@ -6,6 +6,7 @@ import useTimelineStore from '../store/useTimelineStore';
 import useAIStore from '../store/useAIStore';
 import { prevClipBoundary, nextClipBoundary } from '../timeline/clipNav.js';
 import MobileSheet, { SheetLabel, SheetChip, SheetRow } from './MobileSheet';
+import { TRANSITION_TYPES, TRANSITION_DEFAULT_DURATION } from '../motion/TransitionFX.js';
 
 /**
  * MobileTransportBar — the mobile editor's playback row, under the preview.
@@ -21,12 +22,8 @@ import MobileSheet, { SheetLabel, SheetChip, SheetRow } from './MobileSheet';
  */
 
 const ASPECTS = ['9:16', '16:9', '1:1', '4:5', '4:3', '21:9'];
-const TRANSITIONS = [
-    { id: 'fade', key: 'timeline.fadeOut' },
-    { id: 'crossfade', key: 'timeline.crossfade' },
-    { id: 'slide', key: 'timeline.slideLeft' },
-    { id: 'zoom', key: 'timeline.zoomOut' },
-];
+// R89 transition pack (motion/TransitionFX.js).
+const TRANSITIONS = TRANSITION_TYPES.map(id => ({ id, key: `transitions.${id}` }));
 
 function fmt(sec) {
     const s = Math.max(0, Number(sec) || 0);
@@ -170,7 +167,7 @@ export default function MobileTransportBar() {
                 </p>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                     {TRANSITIONS.map(tr => (
-                        <SheetChip key={tr.id} disabled={!activeClipId} onClick={() => { st().addTransition(activeClipId, tr.id, 1.0); setMoreOpen(false); }}>
+                        <SheetChip key={tr.id} disabled={!activeClipId} onClick={() => { st().addTransition(activeClipId, tr.id, TRANSITION_DEFAULT_DURATION[tr.id] || 0.4); setMoreOpen(false); }}>
                             {t(tr.key)}
                         </SheetChip>
                     ))}

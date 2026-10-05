@@ -29,7 +29,9 @@ const favoritesLimiter = rateLimit({
     message: { error: 'Too many favorite requests. Please slow down.' },
 });
 
-const ALLOWED_TRANSITION_TYPES = ['fade', 'crossfade', 'slide', 'zoom'];
+// R89: the transition pack (client/src/motion/TransitionFX.js) plus the old
+// values, which existing favorites rows may still hold.
+const ALLOWED_TRANSITION_TYPES = ['flash', 'dip', 'whip-left', 'whip-right', 'zoom-punch', 'glitch', 'speed-lines', 'fade', 'crossfade', 'slide', 'zoom'];
 
 function validateTarget(body) {
     const { assetId, transitionType } = body || {};
