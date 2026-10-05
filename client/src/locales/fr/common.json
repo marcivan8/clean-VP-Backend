@@ -34,14 +34,18 @@
   },
   "footer": {
     "tagline": "Le système d'exploitation créatif pour les créateurs, monteurs et studios modernes.",
-    "gdpr": "Conforme RGPD · Processeur de données GCS · Rétention 30 jours",
+    "gdpr": "Projets et comptes hébergés en Suisse et dans l'UE",
     "company": "Entreprise",
     "legal": "Légal",
     "links": {
       "about": "À propos",
       "privacyPolicy": "Politique de confidentialité",
       "cookiePolicy": "Politique des cookies",
-      "yourData": "Vos données"
+      "yourData": "Vos données",
+      "terms": "Conditions d'utilisation",
+      "legalNotice": "Mentions légales",
+      "gdpr": "Droits RGPD",
+      "cookieSettings": "Gestion des cookies"
     },
     "copyright": "© 2026 Vibed. Tous droits réservés.",
     "madeWith": ""
@@ -60,5 +64,23 @@
     "notNow": "Pas maintenant",
     "manageBilling": "Gérer la facturation",
     "checkoutFailed": "Impossible d'ouvrir le paiement. Réessayez dans un instant."
+  },
+  "consent": {
+    "title": "Cookies et relecture d'erreurs",
+    "body": "Nous utilisons uniquement ce qui est nécessaire au fonctionnement de Vibed, ainsi qu'un outil facultatif : lorsque l'éditeur rencontre une erreur, une courte relecture de l'écran nous aide à la corriger. Les textes, images et vidéos y sont masqués.",
+    "accept": "Accepter",
+    "refuse": "Refuser",
+    "learnMore": "Politique des cookies",
+    "close": "Fermer",
+    "saved": "Votre choix a été enregistré."
+  },
+  "unsubscribe": {
+    "title": "Préférences e-mail",
+    "body": "Ne plus recevoir le récapitulatif hebdomadaire ni les actualités produit de Vibed. Vous continuerez à recevoir les e-mails liés à votre compte, comme les reçus de paiement et les avis avant suppression de projets.",
+    "button": "Se désabonner",
+    "working": "Mise à jour...",
+    "done": "Votre désabonnement est pris en compte. Plus aucun récapitulatif ni actualité ne sera envoyé à cette adresse.",
+    "invalid": "Ce lien n'est pas valide. Utilisez le lien d'un e-mail récent, ou écrivez-nous et nous vous désabonnerons.",
+    "error": "Une erreur est survenue. Réessayez dans un instant."
   }
 }

@@ -1,25 +1,133 @@
 {
-  "eyebrow": "Compliance",
-  "title": "GDPR & EU Rights",
-  "subtitle": "VIBED respects your privacy and complies strictly with the General Data Protection Regulation (GDPR). Here is how you can exercise your EU data rights.",
-  "cards": [
-    { "title": "Data Controller", "value": "Vibed SAS", "detail": "Determines the purposes of processing" },
-    { "title": "Data Processor", "value": "Google Cloud Storage", "detail": "Provides secure hosting infrastructure" },
-    { "title": "Data Location", "value": "us-central1", "detail": "With valid transfer mechanisms (SCCs)" }
+  "eyebrow": "GDPR",
+  "title": "Your rights and how to use them",
+  "lastUpdated": "Last updated: {{date}}",
+  "intro": [
+    "The General Data Protection Regulation gives you control over your personal data. This page explains each right in plain terms and the quickest way to use it with Vibed. Our [Privacy Policy](/privacy) describes the processing itself."
   ],
-  "rights": {
-    "sectionTitle": "Your Rights Under GDPR",
-    "intro": "Under the General Data Protection Regulation (GDPR), you possess specific fundamental rights regarding your personal data:",
-    "items": [
-      { "title": "Right to Access", "text": "You can request a complete copy of the personal data we hold about you." },
-      { "title": "Right to Erasure (Right to be Forgotten)", "text": "You can ask us to delete all your personal data, project files, and account information permanently." },
-      { "title": "Right to Rectification", "text": "You have the right to request that we correct any inaccurate or incomplete personal data." },
-      { "title": "Right to Object & Restrict Processing", "text": "You can object to our processing of your data, including processing for direct marketing or analytics." }
-    ]
-  },
-  "exercise": {
-    "sectionTitle": "How to Exercise Your Rights",
-    "p1": "To exercise any of these rights, simply email us from the address associated with your VIBED account. We process all Data Subject Access Requests (DSARs) within 30 days, entirely free of charge.",
-    "ctaPrompt": "Submit a GDPR Data Request"
-  }
+  "sections": [
+    {
+      "id": "how",
+      "title": "Where to go",
+      "blocks": [
+        {
+          "table": {
+            "head": [
+              "You want to",
+              "How"
+            ],
+            "rows": [
+              [
+                "See or download your style profile",
+                "[Your style](/style), export button"
+              ],
+              [
+                "Reset your style profile",
+                "[Your style](/style), reset button"
+              ],
+              [
+                "Delete a project and its files",
+                "Dashboard, project menu, Delete"
+              ],
+              [
+                "Delete your account and all its data",
+                "[Account page](/auth), Delete account"
+              ],
+              [
+                "Stop the weekly summary and product updates",
+                "The unsubscribe link at the bottom of those emails"
+              ],
+              [
+                "Accept or refuse the error replay",
+                "Cookie settings, in the footer of the home page or on the [Cookie Policy](/cookie-policy)"
+              ],
+              [
+                "Anything else (copy of your data, correction, objection...)",
+                "Email [{{email}}](mailto:{{email}})"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "rights",
+      "title": "Your rights in detail",
+      "blocks": [
+        {
+          "defs": [
+            {
+              "term": "Access",
+              "desc": "Know whether we process your data and get a copy of it, with the purposes, recipients and retention periods."
+            },
+            {
+              "term": "Rectification",
+              "desc": "Have inaccurate or incomplete data corrected."
+            },
+            {
+              "term": "Erasure",
+              "desc": "Have your data deleted, unless we must keep it by law (billing records, for example)."
+            },
+            {
+              "term": "Restriction",
+              "desc": "Ask us to pause the use of your data while a dispute about it is examined."
+            },
+            {
+              "term": "Objection",
+              "desc": "Object to processing based on our legitimate interest, such as your style profile or product emails. For product emails, objection is always granted."
+            },
+            {
+              "term": "Portability",
+              "desc": "Receive the data you provided, in a structured and machine-readable format, or have it sent to another service where technically possible."
+            },
+            {
+              "term": "Consent",
+              "desc": "Withdraw your consent at any time. This does not affect what was done before."
+            },
+            {
+              "term": "After death",
+              "desc": "Give instructions on how your data should be kept, deleted or passed on after your death (French Data Protection Act, article 85)."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "process",
+      "title": "How we handle a request",
+      "blocks": [
+        "Send your request from the email address linked to your account if you can, so we can match it quickly. We answer within one month. For complex requests, this can be extended by two more months, in which case we tell you why within the first month. Requests are free, unless they are clearly unfounded or excessive.",
+        "We only ask for proof of identity when we have a reasonable doubt that the request comes from you."
+      ]
+    },
+    {
+      "id": "complaint",
+      "title": "Complaints",
+      "blocks": [
+        "If you are not satisfied with our answer, you can lodge a complaint with the CNIL (Commission nationale de l'informatique et des libertés), 3 place de Fontenoy, TSA 80715, 75334 Paris Cedex 07, or online at [www.cnil.fr](https://www.cnil.fr). If you live in another EU country, you can also contact the authority of that country."
+      ]
+    },
+    {
+      "id": "contact",
+      "title": "Contact",
+      "blocks": [
+        {
+          "defs": [
+            {
+              "term": "Data controller",
+              "desc": "{{ownerName}}, {{legalForm}}, trading as {{tradeName}}"
+            },
+            {
+              "term": "Address",
+              "desc": "{{address}}"
+            },
+            {
+              "term": "Email",
+              "desc": "[{{email}}](mailto:{{email}})"
+            }
+          ]
+        }
+      ]
+    }
+  ]
 }

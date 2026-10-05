@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const rateLimit = require('express-rate-limit');
 const { authenticateUser, optionalAuth } = require('../middleware/auth');
+const mediaAccess = require('../services/mediaAccess');
 
 // Upload + transcode trigger endpoints only — 10 req/min per IP.
 // Scoped here (rather than mounted router-wide in index.js) so it never touches
@@ -318,7 +319,33 @@ router.post('/process-direct', uploadLimiter, authMiddleware, async (req, res) =
 // Works for both .m3u8 playlist files and .ts HLS segment files; relative segment
 // URLs in a playlist resolve back to this route automatically.
 // ─────────────────────────────────────────────────────────────────────────────
-router.get('/gcs-media/*', async (req, res) => {
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/proxy/media-session — sets the signed, HttpOnly media cookie that
+// lets this browser stream the signed-in user's own files (a <video> element
+// cannot send an Authorization header). DELETE clears it (sign-out).
+// See services/mediaAccess.js.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/media-session', authMiddleware, (req, res) => {
+    const userId = resolveUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Sign in required' });
+    try {
+        const token = mediaAccess.issueToken(userId);
+        res.setHeader('Set-Cookie', mediaAccess.cookieHeader(token, { secure: process.env.NODE_ENV === 'production' }));
+        return res.json({ ok: true, expiresInS: mediaAccess.COOKIE_TTL_S });
+    } catch (err) {
+        console.error('[proxy/media-session] could not issue cookie:', err.message);
+        return res.status(500).json({ error: 'Could not start a media session' });
+    }
+});
+
+router.delete('/media-session', (req, res) => {
+    res.setHeader('Set-Cookie', mediaAccess.clearCookieHeader({ secure: process.env.NODE_ENV === 'production' }));
+    return res.json({ ok: true });
+});
+
+// Only the owner (media cookie) or a trusted server call (X-Worker-Secret)
+// may read a user's file; shared library prefixes stay public.
+router.get('/gcs-media/*', mediaAccess.requireMediaAccess(req => req.params[0]), async (req, res) => {
     const gcsPath = req.params[0];
     if (!gcsPath) return res.status(400).end();
 
@@ -351,8 +378,10 @@ router.get('/gcs-media/*', async (req, res) => {
 
     try {
         res.setHeader('Content-Type', contentType);
-        res.setHeader('Cache-Control', 'public, max-age=31536000');
-        res.setHeader('Access-Control-Allow-Origin', '*');
+        // Private: a user's video must never sit in a shared cache. It used
+        // to be "public, max-age=31536000" with ACAO *, readable by anyone.
+        res.setHeader('Cache-Control', 'private, max-age=3600');
+        res.setHeader('Vary', 'Cookie');
         // Always advertise range support — required for video seeking in browsers
         // and to prevent HTTP/2 ERR_HTTP2_PROTOCOL_ERROR when the browser retries.
         res.setHeader('Accept-Ranges', 'bytes');

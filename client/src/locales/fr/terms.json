@@ -1,0 +1,169 @@
+{
+  "eyebrow": "Mentions juridiques",
+  "title": "Conditions d'utilisation",
+  "lastUpdated": "Dernière mise à jour : {{date}}",
+  "toc": "Sommaire",
+  "intro": [
+    "Les présentes conditions encadrent l'utilisation de Vibed, un éditeur vidéo en ligne doté de fonctions assistées par l'IA. En créant un compte ou en souscrivant une offre, vous les acceptez. Prenez le temps de les lire : elles se veulent courtes et claires."
+  ],
+  "sections": [
+    {
+      "id": "provider",
+      "title": "1. Éditeur du service",
+      "blocks": [
+        "Vibed est exploité par {{ownerName}}, {{legalForm}}, {{address}} (SIREN : {{siren}}), joignable à l'adresse [{{email}}](mailto:{{email}}). Dans ces conditions, « nous » désigne Vibed et « vous » la personne qui utilise le service."
+      ]
+    },
+    {
+      "id": "service",
+      "title": "2. Le service",
+      "blocks": [
+        "Vibed vous permet d'importer des vidéos, de les monter dans le navigateur, de donner des instructions à un assistant IA (suppression des silences, sous-titres, recadrage, animations, etc.) et d'exporter le résultat. Les fonctionnalités évoluent. Nous pouvons en ajouter, en modifier ou en retirer, mais nous ne retirerons pas une fonction essentielle d'une offre payante pendant une période déjà réglée."
+      ]
+    },
+    {
+      "id": "account",
+      "title": "3. Votre compte",
+      "blocks": [
+        "Il faut avoir au moins 16 ans pour créer un compte. Vous vous engagez à fournir une adresse e-mail valide et à garder votre mot de passe confidentiel. Vous êtes responsable de l'utilisation de votre compte ; prévenez-nous sans attendre si vous pensez qu'un tiers l'a utilisé.",
+        "Vous pouvez essayer l'éditeur sans compte. Votre travail reste alors dans votre navigateur et peut être perdu si vous effacez ses données."
+      ]
+    },
+    {
+      "id": "plans",
+      "title": "4. Offres, prix et paiement",
+      "blocks": [
+        {
+          "table": {
+            "head": [
+              "Offre",
+              "Prix",
+              "Comprend"
+            ],
+            "rows": [
+              [
+                "Free",
+                "0 €",
+                "2 projets, 10 opérations IA par mois, projets conservés {{freeDays}} jours après la dernière modification"
+              ],
+              [
+                "Creator",
+                "{{creatorPrice}} par mois",
+                "Projets illimités, 100 opérations IA par mois, export vers les logiciels de montage, projets conservés {{creatorDays}} jours après la dernière modification"
+              ],
+              [
+                "Pro",
+                "{{proPrice}} par mois",
+                "Projets illimités, opérations IA illimitées dans le cadre d'un usage raisonnable, projets conservés pendant toute la durée de l'abonnement"
+              ]
+            ]
+          }
+        },
+        "Les taxes, dont la TVA, sont calculées lors du paiement selon votre pays, et le total affiché avant validation correspond au montant débité. Les compteurs d'opérations IA sont remis à zéro le premier jour de chaque mois ; les opérations non utilisées ne sont pas reportées.",
+        "Les paiements sont gérés par Polar Software Inc., qui agit en tant que marchand officiel (merchant of record) : Polar vous vend l'abonnement pour notre compte, encaisse le paiement (via Stripe), émet la facture et gère les taxes. Les conditions d'achat de Polar s'appliquent également au paiement.",
+        "Les abonnements sont renouvelés automatiquement chaque mois jusqu'à résiliation. Vous pouvez résilier à tout moment depuis le portail de facturation accessible dans votre compte ; l'offre reste active jusqu'à la fin de la période réglée, puis votre compte passe à l'offre Free. Les mois entamés ne sont pas remboursés, sauf obligation légale ou dans le cas prévu à l'article 5.",
+        "Nous pouvons faire évoluer nos prix. Un nouveau prix ne s'applique à un abonnement en cours qu'à partir de la période suivant un préavis d'au moins 30 jours par e-mail, et vous pouvez résilier avant son entrée en vigueur."
+      ]
+    },
+    {
+      "id": "withdrawal",
+      "title": "5. Droit de rétractation (consommateurs)",
+      "blocks": [
+        "Si vous êtes un consommateur résidant dans l'Union européenne, vous disposez de 14 jours à compter de la souscription d'un abonnement payant pour vous rétracter, sans avoir à vous justifier. Pour cela, écrivez à [{{email}}](mailto:{{email}}) en exprimant clairement votre décision ; vous pouvez utiliser le modèle de formulaire ci-dessous, sans obligation.",
+        "En souscrivant, vous demandez que le service commence immédiatement. Si vous vous rétractez dans les 14 jours, vous êtes remboursé du montant payé, déduction faite d'une somme proportionnelle au service fourni jusqu'à votre demande. Le remboursement intervient sous 14 jours, par le même moyen de paiement.",
+        {
+          "note": "Modèle de formulaire de rétractation. À l'attention de {{tradeName}}, {{address}}, {{email}} : je vous notifie par la présente ma rétractation du contrat portant sur le service suivant : [offre], souscrit le [date]. Nom : [nom]. Adresse e-mail du compte : [e-mail]. Date : [date]."
+        }
+      ]
+    },
+    {
+      "id": "content",
+      "title": "6. Vos contenus",
+      "blocks": [
+        "Vous conservez l'ensemble des droits sur les vidéos, sons, images et textes que vous importez, ainsi que sur les vidéos que vous exportez. Nous n'en revendiquons aucune propriété.",
+        "Pour faire fonctionner le service, vous nous accordez une licence limitée, non exclusive, mondiale et gratuite pour héberger, copier, traiter, transformer et afficher vos contenus, uniquement pendant la durée nécessaire et dans le seul but de vous fournir Vibed. Elle couvre la transmission de certaines parties aux prestataires d'IA mentionnés dans notre [Politique de confidentialité](/privacy). Cette licence prend fin à la suppression de vos contenus.",
+        "Vous garantissez disposer des droits nécessaires sur tout ce que vous importez : les images elles-mêmes, la musique, les logos, et l'accord des personnes reconnaissables. Vous êtes responsable de l'utilisation et de la diffusion de vos exports.",
+        "Nous n'utilisons pas vos contenus pour entraîner des modèles d'IA."
+      ]
+    },
+    {
+      "id": "ai",
+      "title": "7. Résultats générés par l'IA",
+      "blocks": [
+        "Les transcriptions, sous-titres, coupes, recadrages et autres suggestions sont produits automatiquement. Ils peuvent comporter des erreurs, comme un mot mal compris ou une coupe mal placée. Vérifiez le résultat avant de le publier.",
+        "Sous réserve des droits des tiers sur vos contenus sources, vous pouvez utiliser librement les résultats générés pour vous, y compris à des fins commerciales. Des demandes similaires d'autres utilisateurs peuvent aboutir à des résultats similaires."
+      ]
+    },
+    {
+      "id": "use",
+      "title": "8. Règles d'utilisation",
+      "blocks": [
+        "Vous vous engagez à ne pas utiliser Vibed pour :",
+        {
+          "list": [
+            "importer ou créer des contenus illicites, notamment pédopornographiques, incitant à la haine ou à la violence, ou portant atteinte aux droits d'autrui ;",
+            "créer des contenus trompeurs imitant une personne réelle sans son accord, en particulier pour induire en erreur, escroquer ou harceler ;",
+            "attaquer ou surcharger le service, ou tenter de contourner ses mesures de sécurité ou ses limites d'utilisation, y compris par des moyens automatisés ;",
+            "revendre le service ou y donner accès à des tiers sans notre accord écrit."
+          ]
+        },
+        "Nous pouvons retirer un contenu manifestement contraire à ces règles ou dont le retrait nous est imposé par la loi. Pour signaler un contenu, écrivez à [{{email}}](mailto:{{email}}) en indiquant le motif et les éléments permettant de le retrouver."
+      ]
+    },
+    {
+      "id": "storage",
+      "title": "9. Conservation et suppression",
+      "blocks": [
+        "Les projets sont conservés selon votre offre, comme indiqué à l'article 4. Avant qu'un projet soit supprimé pour inactivité, nous vous prévenons par e-mail au moins 24 heures à l'avance ; l'ouvrir ou le modifier suffit à le conserver. Vibed est un outil de montage, pas un service d'archivage : gardez votre propre copie des vidéos que vous souhaitez conserver.",
+        "Vous pouvez supprimer un projet ou votre compte à tout moment. La suppression est définitive."
+      ]
+    },
+    {
+      "id": "availability",
+      "title": "10. Disponibilité",
+      "blocks": [
+        "Nous faisons de notre mieux pour que Vibed reste disponible et fonctionne bien, sans pouvoir garantir un service ininterrompu. Les opérations de maintenance, les mises à jour ou un incident chez nos hébergeurs peuvent entraîner des interruptions. Nous nous efforçons d'annoncer à l'avance les maintenances importantes."
+      ]
+    },
+    {
+      "id": "liability",
+      "title": "11. Responsabilité",
+      "blocks": [
+        "Si vous êtes un consommateur, vous bénéficiez de la garantie légale de conformité des contenus et services numériques (articles L224-25-12 et suivants du Code de la consommation). Rien dans ces conditions ne limite vos droits légaux.",
+        "Si vous utilisez Vibed dans le cadre de votre activité professionnelle, notre responsabilité totale au titre du service est limitée aux sommes que vous nous avez versées au cours des 12 mois précédant le fait générateur. Nous ne sommes pas responsables des préjudices indirects, tels qu'une perte de chiffre d'affaires, d'audience, ou de données que vous auriez pu sauvegarder.",
+        "Dans tous les cas, nous ne sommes pas responsables des contenus que vous importez ou publiez, ni des événements échappant à notre contrôle raisonnable."
+      ]
+    },
+    {
+      "id": "termination",
+      "title": "12. Suspension et fermeture",
+      "blocks": [
+        "Vous pouvez cesser d'utiliser Vibed et supprimer votre compte à tout moment.",
+        "Nous pouvons suspendre ou fermer un compte en cas de manquement grave ou répété aux présentes conditions. Sauf urgence (contenu illicite, menace pour la sécurité du service), nous vous prévenons d'abord et vous permettons de vous expliquer. Si nous fermons un compte payant sans faute de votre part, nous remboursons la partie non utilisée de la période en cours."
+      ]
+    },
+    {
+      "id": "ip",
+      "title": "13. Notre propriété intellectuelle",
+      "blocks": [
+        "Le logiciel Vibed, la marque, le logo, l'interface et les éléments de notre bibliothèque de médias sont protégés. Vous pouvez utiliser les éléments de la bibliothèque dans vos projets et exports, mais pas les extraire pour les diffuser séparément."
+      ]
+    },
+    {
+      "id": "changes",
+      "title": "14. Modification des conditions",
+      "blocks": [
+        "Nous pouvons mettre à jour ces conditions. Toute modification affectant vos droits ou obligations vous sera notifiée par e-mail ou dans l'application au moins 30 jours avant son entrée en vigueur. Si vous ne l'acceptez pas, vous pouvez résilier votre abonnement et fermer votre compte avant cette date."
+      ]
+    },
+    {
+      "id": "law",
+      "title": "15. Droit applicable et litiges",
+      "blocks": [
+        "Les présentes conditions sont soumises au droit français. Si vous êtes un consommateur, vous conservez en outre la protection des règles impératives du pays où vous résidez.",
+        "En cas de difficulté, contactez-nous d'abord à [{{email}}](mailto:{{email}}) ; la plupart des problèmes se règlent rapidement ainsi. Si vous êtes un consommateur et qu'aucun accord n'est trouvé, vous pouvez recourir gratuitement à un médiateur de la consommation. Notre médiateur : {{mediator}}.",
+        "À défaut de solution amiable, les litiges relèvent des tribunaux français compétents, dont, pour les consommateurs, ceux de leur lieu de résidence."
+      ]
+    }
+  ]
+}

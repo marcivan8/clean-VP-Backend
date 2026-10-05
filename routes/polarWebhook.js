@@ -19,25 +19,12 @@ const { authenticateUser } = require('../middleware/auth');
 
 const polar = new Polar({ accessToken: process.env.POLAR_ACCESS_TOKEN });
 
-const SUPABASE_URL  = process.env.SUPABASE_URL;
-const SUPABASE_ANON = process.env.SUPABASE_ANON_KEY;
 const PUBLIC_URL    = process.env.PUBLIC_URL || 'https://www.viralpilot.fr';
+const { sendTransactionalEmail } = require('../services/emailClient');
 
-// Fire-and-forget call to the send-email edge function.
+// Fire-and-forget call to the send-email edge function (service role auth).
 async function sendEmail(type, to, data) {
-    if (!SUPABASE_URL || !SUPABASE_ANON) return;
-    try {
-        await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
-            method:  'POST',
-            headers: {
-                'Content-Type':  'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON}`,
-            },
-            body: JSON.stringify({ type, to, data }),
-        });
-    } catch (err) {
-        console.warn('[PolarWebhook] sendEmail failed (non-blocking):', err.message);
-    }
+    await sendTransactionalEmail(type, to, data);
 }
 
 const PLAN_TO_PRODUCT = {
@@ -437,7 +424,12 @@ router.post(
     async (req, res) => {
         const secret = process.env.POLAR_WEBHOOK_SECRET;
         if (!secret) {
-            console.warn('[PolarWebhook] POLAR_WEBHOOK_SECRET not set — skipping signature check');
+            // Never accept unsigned plan changes in production.
+            if (process.env.NODE_ENV === 'production') {
+                console.error('[PolarWebhook] POLAR_WEBHOOK_SECRET not set: webhook refused');
+                return res.status(503).json({ error: 'Webhook not configured' });
+            }
+            console.warn('[PolarWebhook] POLAR_WEBHOOK_SECRET not set: skipping signature check (dev only)');
         } else {
             try {
                 validateEvent(req.body, req.headers, secret);

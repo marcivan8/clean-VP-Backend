@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabaseClient';
 import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import Logo from '../components/Logo';
+import { openConsentSettings } from '../lib/consent';
 
 const renderHighlightedText = (text, accent, bold, mint, boldFg) => {
     if (!text) return null;
@@ -1115,9 +1116,13 @@ const Footer = () => {
             key: 'legal',
             label: t('footer.legal'),
             items: [
+                { label: t('footer.links.terms'), href: '/terms' },
                 { label: t('footer.links.privacyPolicy'), href: '/privacy' },
                 { label: t('footer.links.cookiePolicy'), href: '/cookie-policy' },
                 { label: t('footer.links.yourData'), href: '/data' },
+                { label: t('footer.links.gdpr'), href: '/gdpr' },
+                { label: t('footer.links.legalNotice'), href: '/legal' },
+                { label: t('footer.links.cookieSettings'), href: '#cookie-settings', onClick: openConsentSettings },
             ],
         },
     ];
@@ -1142,7 +1147,11 @@ const Footer = () => {
                     <div key={col.key} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                         <div className="mono" style={{ color: "var(--fg-4)" }}>{col.label.toUpperCase()}</div>
                         {col.items.map(item => (
-                            <a key={item.href} href={item.href} style={{ fontSize: 13.5, color: "var(--fg-2)" }} className="hover:text-foreground transition-colors">{item.label}</a>
+                            item.onClick ? (
+                                <button key={item.href} type="button" onClick={item.onClick} style={{ font: "inherit", fontSize: 13.5, color: "var(--fg-2)", background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer" }} className="hover:text-foreground transition-colors">{item.label}</button>
+                            ) : (
+                                <a key={item.href} href={item.href} style={{ fontSize: 13.5, color: "var(--fg-2)" }} className="hover:text-foreground transition-colors">{item.label}</a>
+                            )
                         ))}
                     </div>
                 ))}

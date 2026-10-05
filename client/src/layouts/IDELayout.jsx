@@ -1498,6 +1498,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     // chosen — one half of why selecting a LUT changed no pixel
                     // (see CLAUDE.md R55). Null is the normal, ungraded case.
                     projectLUTId: projectLUTId || null,
+                    // Exports are stored per project, so deleting the project
+                    // deletes them too (services/projectFiles.js).
+                    projectId: useTimelineStore.getState().projectId || null,
                     // Null for every project with nothing to composite, which is
                     // what keeps the worker's original path byte-for-byte intact.
                     compositionPlan,

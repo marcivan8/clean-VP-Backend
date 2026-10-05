@@ -53,8 +53,8 @@ const gcsBucket = storageConfig.bucket;
 
 const isServerUsableUrl = (u) => u && !u.startsWith('blob:');
 
-async function downloadToTemp(url, destPath) {
-    const response = await axios({ url, method: 'GET', responseType: 'stream', timeout: 120_000 });
+async function downloadToTemp(url, destPath, headers = undefined) {
+    const response = await axios({ url, method: 'GET', responseType: 'stream', timeout: 120_000, headers });
     await new Promise((resolve, reject) => {
         const writer = fs.createWriteStream(destPath);
         response.data.pipe(writer);
@@ -811,7 +811,10 @@ module.exports = async function processExportJob(job) {
             const fullUrl = `${serverBase.replace(/\/$/, '')}${proxyRelUrl}`;
             try {
                 console.log(`[ExportJob] Internal proxy download: ${fullUrl}`);
-                await downloadToTemp(fullUrl, localPath);
+                // Server-to-server: the media route is owner-only, so the
+                // worker identifies itself (services/mediaAccess.js).
+                await downloadToTemp(fullUrl, localPath,
+                    process.env.WORKER_SECRET ? { 'X-Worker-Secret': process.env.WORKER_SECRET } : undefined);
                 return localPath;
             } catch (err) {
                 console.warn(`[ExportJob] Internal proxy download failed: ${err.message}`);
@@ -1741,7 +1744,10 @@ module.exports = async function processExportJob(job) {
     let resultUrl;
 
     if (gcsBucket) {
-        const gcsDestPath = `exports/${userId}/${filename}`;
+        // exports/<userId>/<projectId>/<file>: deleting the project (or the
+        // retention job) can then remove its exports too (services/projectFiles.js).
+        const projectFolder = /^[0-9a-f-]{8,64}$/i.test(String(settings.projectId || '')) ? `${settings.projectId}/` : '';
+        const gcsDestPath = `exports/${userId}/${projectFolder}${filename}`;
         try {
             await gcsBucket.upload(outputPath, {
                 destination: gcsDestPath,

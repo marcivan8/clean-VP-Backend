@@ -1,0 +1,85 @@
+{
+  "eyebrow": "Legal",
+  "title": "Legal notice",
+  "lastUpdated": "Last updated: {{date}}",
+  "intro": [
+    "Information required by French law (Act no. 2004-575 of 21 June 2004 on confidence in the digital economy, article 6)."
+  ],
+  "sections": [
+    {
+      "id": "publisher",
+      "title": "Publisher",
+      "blocks": [
+        {
+          "defs": [
+            {
+              "term": "Name",
+              "desc": "{{ownerName}}, {{legalForm}}"
+            },
+            {
+              "term": "Trade name",
+              "desc": "{{tradeName}}"
+            },
+            {
+              "term": "Address",
+              "desc": "{{address}}"
+            },
+            {
+              "term": "SIREN",
+              "desc": "{{siren}}"
+            },
+            {
+              "term": "Email",
+              "desc": "[{{email}}](mailto:{{email}})"
+            },
+            {
+              "term": "Phone",
+              "desc": "{{phone}}",
+              "requires": "phone"
+            },
+            {
+              "term": "Publication director",
+              "desc": "{{ownerName}}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hosting",
+      "title": "Hosting",
+      "blocks": [
+        {
+          "defs": [
+            {
+              "term": "Website and application",
+              "desc": "Railway Corporation, 548 Market St Suite 68956, San Francisco, CA 94104, United States, [railway.com](https://railway.com)"
+            },
+            {
+              "term": "Database",
+              "desc": "Supabase Inc., data hosted in Zurich, Switzerland, [supabase.com](https://supabase.com)"
+            },
+            {
+              "term": "Files",
+              "desc": "Google Cloud (Google Cloud EMEA Limited), data hosted in the European Union, [cloud.google.com](https://cloud.google.com)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ip",
+      "title": "Intellectual property",
+      "blocks": [
+        "The Vibed name and logo, the website, the software and its content are protected by intellectual property law. Any reproduction or use without permission is prohibited, except where the law allows it. Content uploaded by users remains their property."
+      ]
+    },
+    {
+      "id": "data",
+      "title": "Personal data",
+      "blocks": [
+        "How we process personal data is explained in the [Privacy Policy](/privacy) and the [Cookie Policy](/cookie-policy). Use of the service is governed by the [Terms of Service](/terms)."
+      ]
+    }
+  ]
+}

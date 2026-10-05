@@ -1,9 +1,17 @@
 // supabase/functions/send-email/templates.ts
-// All 4 VIBED brand email templates.
+// VIBED brand email templates (welcome, plan, feature, weekly, deletion warning).
 // Variables follow the {{snake_case}} convention from the design files.
 
 const BASE_URL = Deno.env.get('PUBLIC_URL') || 'https://www.viralpilot.fr';
 const LOGO_URL = Deno.env.get('LOGO_URL') || `${BASE_URL}/logo.png`;
+
+// Escape values that come from user data (names, project titles) before they
+// are placed in HTML.
+export function esc(v: unknown): string {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 
 function footer(accountUrl: string, unsubscribeUrl: string) {
   return `
@@ -33,7 +41,7 @@ function wrap(inner: string) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap');</style>
+<style>@import url('https://fonts.bunny.net/css?family=instrument-serif:400,400i|jetbrains-mono:400,500&display=swap');</style>
 </head>
 <body style="margin:0;padding:0;background:#F0F0F4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F0F0F4;">
@@ -63,7 +71,7 @@ export function welcomeEmail(data: {
       <p style="color:rgba(250,250,250,0.55);font-size:15px;line-height:1.65;margin:0;">Conversational video editing is now yours.</p>
     </td></tr>
     <tr><td style="background:#FFFFFF;padding:40px;">
-      <p style="font-size:16px;color:#16181B;line-height:1.8;margin:0 0 28px;">Hi <strong>${data.first_name}</strong>, your studio is ready. Edit video by describing what you want — no timeline scrubbing, no manual trimming. Just talk.</p>
+      <p style="font-size:16px;color:#16181B;line-height:1.8;margin:0 0 28px;">Hi <strong>${esc(data.first_name)}</strong>, your studio is ready. Edit video by describing what you want — no timeline scrubbing, no manual trimming. Just talk.</p>
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-left:2px solid #00E5FF;margin:0 0 32px;">
         <tr><td style="padding:0 0 0 20px;">
           <p style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#00E5FF;margin:0 0 16px;">Get started in 3 steps</p>
@@ -108,7 +116,7 @@ export function planEmail(data: {
       { title: 'Unlimited AI edits',        desc: 'No monthly cap — edit as much as you need.' },
       { title: 'Unlimited projects',        desc: 'No limit on project count.' },
       { title: 'Priority render queue',     desc: 'Your exports go first, every time.' },
-      { title: '90-day project storage',   desc: 'Extended storage for long-running productions.' },
+      { title: 'Projects kept while subscribed', desc: 'No automatic deletion for as long as your plan is active.' },
     ],
   };
 
@@ -122,7 +130,7 @@ export function planEmail(data: {
       <p style="color:rgba(250,250,250,0.52);font-size:15px;line-height:1.65;margin:0;">Everything that comes with your plan, ready now.</p>
     </td></tr>
     <tr><td style="background:#FFFFFF;padding:40px;">
-      <p style="font-size:16px;color:#16181B;line-height:1.8;margin:0 0 28px;">Hi <strong>${data.first_name}</strong>, your <strong>${data.plan_name}</strong> subscription is confirmed. Here's what you've unlocked:</p>
+      <p style="font-size:16px;color:#16181B;line-height:1.8;margin:0 0 28px;">Hi <strong>${esc(data.first_name)}</strong>, your <strong>${data.plan_name}</strong> subscription is confirmed. Here's what you've unlocked:</p>
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 32px;">
         ${features.map((f, i) => `
         <tr><td style="padding:12px 0;${i < features.length - 1 ? 'border-bottom:1px solid #F3F4F6;' : ''}">
@@ -168,7 +176,7 @@ export function featureEmail(data: {
       <p style="color:rgba(250,250,250,0.55);font-size:15px;line-height:1.65;margin:0 auto;max-width:440px;">${data.feature_description}</p>
     </td></tr>
     <tr><td style="background:#FFFFFF;padding:40px;">
-      <p style="font-size:16px;color:#16181B;line-height:1.8;margin:0 0 28px;">Hi <strong>${data.first_name}</strong>, we just shipped something we think will change how you work. Here's what you can do with ${data.feature_name} starting today:</p>
+      <p style="font-size:16px;color:#16181B;line-height:1.8;margin:0 0 28px;">Hi <strong>${esc(data.first_name)}</strong>, we just shipped something we think will change how you work. Here's what you can do with ${data.feature_name} starting today:</p>
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 32px;">
         ${data.benefits.map((b, i) => `
         <tr><td style="padding:14px 0;${i < data.benefits.length - 1 ? 'border-bottom:1px solid #F3F4F6;' : ''}">
@@ -221,11 +229,11 @@ export function weeklyEmail(data: {
       </table>
     </td></tr>
     <tr><td style="background:#FFFFFF;padding:40px;">
-      <p style="font-size:16px;color:#16181B;line-height:1.8;margin:0 0 24px;">Good week, <strong>${data.first_name}</strong>. You saved ${data.time_saved} that would have gone to manual trimming and captioning. Keep the momentum going.</p>
+      <p style="font-size:16px;color:#16181B;line-height:1.8;margin:0 0 24px;">Good week, <strong>${esc(data.first_name)}</strong>. You saved ${data.time_saved} that would have gone to manual trimming and captioning. Keep the momentum going.</p>
       <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F9F9FB;border:1px solid #EBEBEF;border-radius:6px;margin:0 0 20px;">
         <tr><td style="padding:20px 24px;">
           <p style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#9CA3AF;margin:0 0 10px;">Pick up where you left off</p>
-          <p style="font-size:15px;font-weight:600;color:#16181B;margin:0 0 4px;">${data.last_project_name}</p>
+          <p style="font-size:15px;font-weight:600;color:#16181B;margin:0 0 4px;">${esc(data.last_project_name)}</p>
           <p style="font-size:13px;color:#6B7280;margin:0;">Last edited ${data.last_edited_time} ago &middot; <a href="${ctaUrl}" style="color:#00E5FF;text-decoration:none;">Continue &#8594;</a></p>
         </td></tr>
       </table>
@@ -240,5 +248,107 @@ export function weeklyEmail(data: {
       </td></tr></table>
     </td></tr>
     ${footer(accountUrl, unsubUrl)}
+  `);
+}
+
+// ── 5. PROJECT DELETION NOTICE ────────────────────────────────────────────────
+// Service message sent by the backend retention job at least 24 hours before
+// inactive projects are deleted. Plain and factual on purpose: no marketing,
+// no unsubscribe link (it is a notice about the user's own data).
+type DeletionLocale = 'fr' | 'en';
+
+const DELETION_COPY: Record<DeletionLocale, {
+  subject: (n: number) => string;
+  eyebrow: string;
+  title: string;
+  greeting: (name: string) => string;
+  intro: (n: number, days: number, date: string) => string;
+  keep: string;
+  cta: string;
+  plan: string;
+  footer: string;
+}> = {
+  en: {
+    subject: (n) => n === 1 ? 'One of your Vibed projects will be deleted soon' : `${n} of your Vibed projects will be deleted soon`,
+    eyebrow: 'Storage notice',
+    title: 'Projects scheduled for deletion',
+    greeting: (name) => name ? `Hello ${name},` : 'Hello,',
+    intro: (n, days, date) => `${n === 1 ? 'The project below has' : 'The projects below have'} not been opened for ${days} days. Under the storage rules of your plan, ${n === 1 ? 'it' : 'they'} and the related media files will be permanently deleted on <strong>${date}</strong>.`,
+    keep: 'To keep a project, open it in Vibed before that date. Any change resets the storage period.',
+    cta: 'Open my projects',
+    plan: 'Paid plans keep projects longer. Pro projects are kept for as long as the subscription is active.',
+    footer: 'You receive this message because you have projects stored on Vibed. It is a one-time notice about your data, not a marketing email.',
+  },
+  fr: {
+    subject: (n) => n === 1 ? 'Un de vos projets Vibed sera bientôt supprimé' : `${n} de vos projets Vibed seront bientôt supprimés`,
+    eyebrow: 'Avis de stockage',
+    title: 'Projets bientôt supprimés',
+    greeting: (name) => name ? `Bonjour ${name},` : 'Bonjour,',
+    intro: (n, days, date) => `${n === 1 ? "Le projet ci-dessous n'a pas été ouvert" : "Les projets ci-dessous n'ont pas été ouverts"} depuis ${days} jours. Conformément aux règles de conservation de votre offre, ${n === 1 ? 'il sera supprimé' : 'ils seront supprimés'} définitivement, avec les fichiers associés, le <strong>${date}</strong>.`,
+    keep: "Pour conserver un projet, ouvrez-le dans Vibed avant cette date. Toute modification relance la durée de conservation.",
+    cta: 'Ouvrir mes projets',
+    plan: "Les offres payantes conservent les projets plus longtemps. Avec l'offre Pro, les projets sont conservés tant que l'abonnement est actif.",
+    footer: "Vous recevez ce message car des projets sont stockés sur votre compte Vibed. Il s'agit d'un avis ponctuel concernant vos données, et non d'un e-mail commercial.",
+  },
+};
+
+function formatDate(iso: string, locale: DeletionLocale): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return esc(iso);
+  return d.toLocaleDateString(locale === 'fr' ? 'fr-FR' : 'en-GB', {
+    day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Paris',
+  });
+}
+
+export function deletionWarningSubject(data: { projects?: unknown[]; locale?: string }) {
+  const n = Array.isArray(data.projects) ? data.projects.length : 1;
+  if (data.locale === 'en' || data.locale === 'fr') return DELETION_COPY[data.locale].subject(n);
+  return `${DELETION_COPY.fr.subject(n)} / ${DELETION_COPY.en.subject(n)}`;
+}
+
+export function deletionWarningEmail(data: {
+  first_name?: string;
+  projects: { name: string }[];
+  deletion_date: string;     // ISO timestamp
+  inactive_days: number;     // 7 or 30
+  locale?: string;           // 'fr' | 'en'; omitted → both languages
+  cta_url?: string;
+  account_url?: string;
+}) {
+  const ctaUrl     = data.cta_url     || `${BASE_URL}/dashboard`;
+  const accountUrl = data.account_url || `${BASE_URL}/account`;
+  const projects   = (Array.isArray(data.projects) ? data.projects : []).slice(0, 50);
+  const n          = Math.max(1, projects.length);
+  const locales: DeletionLocale[] = data.locale === 'en' ? ['en'] : data.locale === 'fr' ? ['fr'] : ['fr', 'en'];
+
+  const list = projects.map((p) =>
+    `<tr><td style="padding:9px 0;border-bottom:1px solid #F3F4F6;font-size:14px;color:#16181B;">${esc(p?.name || 'Untitled Project')}</td></tr>`
+  ).join('');
+
+  const section = (loc: DeletionLocale, first: boolean) => {
+    const c = DELETION_COPY[loc];
+    const date = formatDate(data.deletion_date, loc);
+    return `
+    <tr><td style="background:#FFFFFF;padding:${first ? '36px' : '8px'} 40px 36px;${first ? '' : 'border-top:1px solid #E8E4DC;'}">
+      <p style="font-family:'JetBrains Mono',monospace,'Courier New',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#9CA3AF;margin:${first ? '0' : '28px'} 0 10px;">${c.eyebrow}</p>
+      <h1 style="font-family:Georgia,'Times New Roman',serif;font-size:26px;font-weight:normal;color:#16181B;margin:0 0 20px;line-height:1.25;">${c.title}</h1>
+      <p style="font-size:15px;color:#16181B;line-height:1.7;margin:0 0 14px;">${c.greeting(esc(data.first_name || ''))}</p>
+      <p style="font-size:15px;color:#374151;line-height:1.7;margin:0 0 18px;">${c.intro(n, Number(data.inactive_days) || 7, date)}</p>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 22px;border-top:1px solid #F3F4F6;">${list}</table>
+      <p style="font-size:15px;color:#374151;line-height:1.7;margin:0 0 24px;">${c.keep}</p>
+      <table cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;"><tr><td>
+        <a href="${ctaUrl}" style="display:inline-block;background:#0A0A0B;color:#FFFFFF;font-size:14px;padding:12px 24px;text-decoration:none;border-radius:4px;">${c.cta}</a>
+      </td></tr></table>
+      <p style="font-size:13px;color:#6B7280;line-height:1.6;margin:0 0 10px;">${c.plan}</p>
+      <p style="font-size:12px;color:#9CA3AF;line-height:1.6;margin:0;">${c.footer}</p>
+    </td></tr>`;
+  };
+
+  return wrap(`
+    ${header()}
+    ${locales.map((loc, i) => section(loc, i === 0)).join('')}
+    <tr><td style="background:#F4F1EC;padding:20px 40px;text-align:center;border-top:1px solid #E8E4DC;">
+      <p style="font-size:11px;color:#B0A99E;margin:0;"><a href="${accountUrl}" style="color:#B0A99E;text-decoration:underline;">Account settings / Paramètres du compte</a></p>
+    </td></tr>
   `);
 }

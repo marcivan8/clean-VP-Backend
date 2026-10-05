@@ -1,0 +1,169 @@
+{
+  "eyebrow": "Legal",
+  "title": "Terms of Service",
+  "lastUpdated": "Last updated: {{date}}",
+  "toc": "Contents",
+  "intro": [
+    "These terms govern your use of Vibed, an online video editor with AI-assisted features. By creating an account or subscribing to a plan, you accept them. Please read them; they are written to be short and clear."
+  ],
+  "sections": [
+    {
+      "id": "provider",
+      "title": "1. Who provides the service",
+      "blocks": [
+        "Vibed is operated by {{ownerName}}, {{legalForm}}, {{address}} (SIREN: {{siren}}), reachable at [{{email}}](mailto:{{email}}). In these terms, \"we\" means Vibed and \"you\" means the person using the service."
+      ]
+    },
+    {
+      "id": "service",
+      "title": "2. The service",
+      "blocks": [
+        "Vibed lets you upload videos, edit them in the browser, give instructions to an AI assistant (cutting silences, captions, reframing, motion and so on) and export the result. Features evolve over time. We may add, change or remove features, but we will not remove a core feature of a paid plan during a billing period you have already paid for."
+      ]
+    },
+    {
+      "id": "account",
+      "title": "3. Your account",
+      "blocks": [
+        "You must be at least 16 to create an account. You agree to give a valid email address and to keep your password confidential. You are responsible for what happens under your account; tell us straight away if you think someone else has used it.",
+        "You can try the editor without an account. In that case your work stays in your browser and can be lost if you clear its data."
+      ]
+    },
+    {
+      "id": "plans",
+      "title": "4. Plans, prices and payment",
+      "blocks": [
+        {
+          "table": {
+            "head": [
+              "Plan",
+              "Price",
+              "Includes"
+            ],
+            "rows": [
+              [
+                "Free",
+                "€0",
+                "2 projects, 10 AI operations per month, projects kept {{freeDays}} days after the last edit"
+              ],
+              [
+                "Creator",
+                "{{creatorPrice}} per month",
+                "Unlimited projects, 100 AI operations per month, export to editing software, projects kept {{creatorDays}} days after the last edit"
+              ],
+              [
+                "Pro",
+                "{{proPrice}} per month",
+                "Unlimited projects, unlimited AI operations within fair use, projects kept while subscribed"
+              ]
+            ]
+          }
+        },
+        "Taxes such as VAT are calculated at checkout according to your country, and the total shown before you pay is the amount charged. AI operation counters reset on the first day of each month and unused operations do not carry over.",
+        "Payments are handled by Polar Software Inc., which acts as merchant of record: Polar sells you the subscription on our behalf, collects the payment (through Stripe), issues the invoice and handles sales taxes. Polar's buyer terms also apply to the payment.",
+        "Subscriptions renew automatically each month until you cancel. You can cancel at any time from the billing portal linked in your account; the plan stays active until the end of the period already paid, then your account moves to the Free plan. We do not refund partial months, except where the law requires it or as set out in section 5.",
+        "We may change our prices. A new price applies to an existing subscription only from the next billing period after at least 30 days' notice by email, and you can cancel before it takes effect."
+      ]
+    },
+    {
+      "id": "withdrawal",
+      "title": "5. Right of withdrawal (consumers)",
+      "blocks": [
+        "If you are a consumer in the European Union, you have 14 days from the start of a paid subscription to withdraw from it, without giving a reason. To do so, write to [{{email}}](mailto:{{email}}) with a clear statement of your decision; you can use the model withdrawal form below, but you do not have to.",
+        "When you subscribe, you ask for the service to start immediately. If you withdraw within the 14 days, you will be refunded the amount paid minus a sum proportionate to the service provided up to your request. The refund is made within 14 days, by the same means of payment.",
+        {
+          "note": "Model withdrawal form. To {{tradeName}}, {{address}}, {{email}}: I hereby give notice that I withdraw from my contract for the following service: [plan], subscribed on [date]. Name: [name]. Email address of the account: [email]. Date: [date]."
+        }
+      ]
+    },
+    {
+      "id": "content",
+      "title": "6. Your content",
+      "blocks": [
+        "You keep all rights to the videos, audio, images and text you upload, and to the videos you export. We claim no ownership over them.",
+        "To run the service, you grant us a limited, non-exclusive, worldwide and free licence to host, copy, process, transform and display your content, only for as long as needed to provide Vibed to you and only for that purpose. This includes sending parts of it to the AI providers listed in our [Privacy Policy](/privacy). The licence ends when your content is deleted.",
+        "You confirm that you have the rights needed for everything you upload: the footage itself, music, logos, and the permission of the people who can be recognized in it. You are responsible for how you use and publish your exports.",
+        "We do not use your content to train AI models."
+      ]
+    },
+    {
+      "id": "ai",
+      "title": "7. AI-generated results",
+      "blocks": [
+        "Transcripts, captions, cuts, reframing and other suggestions are produced automatically. They can contain mistakes, such as a misheard word or a cut in the wrong place. Review the result before you publish it.",
+        "Subject to the rights of third parties in your source material, the results generated for you are yours to use, including commercially. Similar requests from other users may lead to similar results."
+      ]
+    },
+    {
+      "id": "use",
+      "title": "8. Acceptable use",
+      "blocks": [
+        "You agree not to use Vibed to:",
+        {
+          "list": [
+            "upload or create content that is illegal, including child sexual abuse material, content that incites hatred or violence, or content that infringes someone else's rights;",
+            "create deceptive content that impersonates a real person without their consent, in particular to mislead, defraud or harass;",
+            "attack, overload or try to bypass the security or usage limits of the service, including by automated means;",
+            "resell or give access to the service to third parties without our written agreement."
+          ]
+        },
+        "We may remove content that clearly breaks these rules or that we are legally required to remove. To report content, write to [{{email}}](mailto:{{email}}) with the reason and enough detail to find it."
+      ]
+    },
+    {
+      "id": "storage",
+      "title": "9. Storage and deletion",
+      "blocks": [
+        "Projects are kept according to your plan, as set out in section 4. Before a project is deleted for inactivity, we email you at least 24 hours in advance; opening or editing it keeps it. Vibed is an editing tool, not an archive: keep your own copy of the videos you want to keep.",
+        "You can delete a project or your account at any time. Deletion is permanent."
+      ]
+    },
+    {
+      "id": "availability",
+      "title": "10. Availability",
+      "blocks": [
+        "We do our best to keep Vibed available and working well, but we cannot promise uninterrupted service. Maintenance, updates or problems at our hosting providers may cause interruptions. We will try to announce planned maintenance in advance when it is significant."
+      ]
+    },
+    {
+      "id": "liability",
+      "title": "11. Liability",
+      "blocks": [
+        "If you are a consumer, you benefit from the legal guarantee of conformity for digital content and services (French Consumer Code, articles L224-25-12 and following). Nothing in these terms limits your statutory rights.",
+        "If you use Vibed for your business, our total liability for any claim relating to the service is limited to the amounts you paid us in the 12 months before the event giving rise to the claim. We are not liable for indirect losses such as lost revenue, lost audience or loss of data you could have backed up.",
+        "In all cases, we are not liable for content you upload or publish, or for events beyond our reasonable control."
+      ]
+    },
+    {
+      "id": "termination",
+      "title": "12. Suspension and closure",
+      "blocks": [
+        "You can stop using Vibed and delete your account at any time.",
+        "We may suspend or close an account that seriously or repeatedly breaks these terms. Except in urgent cases (illegal content, a threat to the security of the service), we will warn you first and give you a chance to explain. If we close a paid account without fault on your part, we refund the unused part of the current period."
+      ]
+    },
+    {
+      "id": "ip",
+      "title": "13. Our intellectual property",
+      "blocks": [
+        "The Vibed software, brand, logo, interface and the assets in our media library are protected. You may use the library assets inside your projects and exports, but not extract them to distribute them separately."
+      ]
+    },
+    {
+      "id": "changes",
+      "title": "14. Changes to these terms",
+      "blocks": [
+        "We may update these terms. For a change that affects your rights or obligations, we will notify you by email or in the app at least 30 days before it applies. If you do not agree, you can cancel your subscription and close your account before that date."
+      ]
+    },
+    {
+      "id": "law",
+      "title": "15. Applicable law and disputes",
+      "blocks": [
+        "These terms are governed by French law. If you are a consumer, you also keep the protection of the mandatory rules of the country where you live.",
+        "If a problem arises, contact us first at [{{email}}](mailto:{{email}}); most issues can be solved quickly that way. If you are a consumer and we cannot reach an agreement, you can refer the dispute to a consumer mediator free of charge. Our mediator: {{mediator}}.",
+        "Failing an amicable solution, disputes go to the competent French courts. For consumers, these include the courts of their place of residence."
+      ]
+    }
+  ]
+}

@@ -34,14 +34,18 @@
   },
   "footer": {
     "tagline": "The creative operating system for modern storytellers, editors and studios.",
-    "gdpr": "GDPR Compliant · GCS Data Processor · 30-Day Retention",
+    "gdpr": "Projects and accounts stored in Switzerland and the EU",
     "company": "Company",
     "legal": "Legal",
     "links": {
       "about": "About",
       "privacyPolicy": "Privacy Policy",
       "cookiePolicy": "Cookie Policy",
-      "yourData": "Your data"
+      "yourData": "Your data",
+      "terms": "Terms of Service",
+      "legalNotice": "Legal notice",
+      "gdpr": "GDPR rights",
+      "cookieSettings": "Cookie settings"
     },
     "copyright": "© 2026 Vibed. All rights reserved.",
     "madeWith": ""
@@ -60,5 +64,23 @@
     "notNow": "Not now",
     "manageBilling": "Manage billing",
     "checkoutFailed": "Couldn't open checkout. Try again in a moment."
+  },
+  "consent": {
+    "title": "Cookies and error replay",
+    "body": "We only use what is needed to run Vibed, plus one optional tool: when the editor hits an error, a short replay of the screen helps us fix it. Text, images and video are hidden in these replays.",
+    "accept": "Accept",
+    "refuse": "Refuse",
+    "learnMore": "Cookie policy",
+    "close": "Close",
+    "saved": "Your choice has been saved."
+  },
+  "unsubscribe": {
+    "title": "Email preferences",
+    "body": "Stop receiving the weekly summary and product updates from Vibed. You will still get emails about your account, such as payment receipts and notices before projects are deleted.",
+    "button": "Unsubscribe",
+    "working": "Updating...",
+    "done": "You are unsubscribed. No more summaries or product updates will be sent to this address.",
+    "invalid": "This link is not valid. Use the link from a recent email, or write to us and we will unsubscribe you.",
+    "error": "Something went wrong. Please try again in a moment."
   }
 }

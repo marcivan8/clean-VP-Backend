@@ -8,6 +8,7 @@
  */
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { ensureMediaSession } from '../utils/mediaSession.js';
 import ReactDOM from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -687,7 +688,8 @@ export default function DashboardPage() {
     // ── load projects ─────────────────────────────────────────────────────────
     const load = useCallback(async () => {
         setLoading(true);
-        const list = await listProjects();
+        // Media cookie first: project thumbnails are owner-only.
+        const [list] = await Promise.all([listProjects(), ensureMediaSession()]);
         setProjects(list);
         setLoading(false);
     }, []);

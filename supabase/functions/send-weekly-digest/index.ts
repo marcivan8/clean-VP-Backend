@@ -3,7 +3,10 @@
 // Queries usage data for all active creator/pro users and sends the weekly digest.
 //
 // Deploy: supabase functions deploy send-weekly-digest
-// Required secrets: RESEND_API_KEY, PUBLIC_URL, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+// Required secrets: PUBLIC_URL, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+// Optional: EMAIL_FUNCTION_SECRET (accepted in x-email-secret instead of the
+// service-role bearer). Callers must be trusted: the anon key is public, and
+// accepting it here let anyone trigger a digest to every paying user.
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -12,12 +15,17 @@ const SUPABASE_URL  = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_KEY   = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const PUBLIC_URL    = Deno.env.get('PUBLIC_URL') ?? 'https://www.viralpilot.fr';
 const SEND_EMAIL_FN = `${SUPABASE_URL}/functions/v1/send-email`;
-const ANON_KEY      = Deno.env.get('SUPABASE_ANON_KEY') ?? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2bGVjY3RpZmdjdHJnaGx2bmVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ5ODY2MDAsImV4cCI6MjA3MDU2MjYwMH0.bJR3TLmfea-zLwrZ_C8LRoRSN68s0BSgn0zfkOV0hxQ';
+const CRON_SECRET   = Deno.env.get('EMAIL_FUNCTION_SECRET') ?? '';
 
-const CORS = {
-  'Access-Control-Allow-Origin':  '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+const CORS = { 'Content-Type': 'application/json' };
+
+function isTrustedCaller(req: Request): boolean {
+  const auth = req.headers.get('authorization') ?? '';
+  const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+  if (SERVICE_KEY && bearer === SERVICE_KEY) return true;
+  const secret = req.headers.get('x-email-secret') ?? '';
+  return !!CRON_SECRET && secret === CRON_SECRET;
+}
 
 function formatTimeSaved(opCount: number): string {
   // Heuristic: each AI op saves ~8 minutes of manual editing
@@ -38,7 +46,9 @@ function formatRelativeTime(date: Date): string {
 }
 
 serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
+  if (!isTrustedCaller(req)) {
+    return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: CORS });
+  }
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
 
@@ -100,12 +110,13 @@ serve(async (req: Request) => {
         method:  'POST',
         headers: {
           'Content-Type':  'application/json',
-          'Authorization': `Bearer ${ANON_KEY}`,
+          'Authorization': `Bearer ${SERVICE_KEY}`,
         },
         body: JSON.stringify({
           type: 'weekly',
           to:   user.email,
           data: {
+            user_id:           profile.id,
             first_name:        firstName,
             week_date:         weekDate,
             clips_edited:      clipsEdited,
@@ -114,7 +125,6 @@ serve(async (req: Request) => {
             last_edited_time:  lastEditedTime,
             cta_url:           `${PUBLIC_URL}/dashboard`,
             account_url:       `${PUBLIC_URL}/account`,
-            unsubscribe_url:   `${PUBLIC_URL}/unsubscribe?uid=${profile.id}`,
           },
         }),
       });

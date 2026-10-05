@@ -1,46 +1,333 @@
 {
-  "eyebrow": "Legal Document",
+  "eyebrow": "Legal",
   "title": "Privacy Policy",
-  "lastUpdated": "Last Updated: {{date}}",
-  "section1": {
-    "title": "1. Identity of the Data Controller",
-    "p1": "For the purposes of the General Data Protection Regulation (GDPR) and other applicable data protection laws, the Data Controller responsible for your personal information is:",
-    "companyName": "VIBED (Vibed studio)",
-    "addressLines": ["47 avenue du President Franklin Roosevelt", "94320, THIAIS", "France"]
-  },
-  "section2": {
-    "title": "2. Legal Basis for Processing",
-    "p1": "We only process your personal data when we have a valid legal basis to do so. Our primary legal bases are:",
-    "items": [
-      { "label": "Contractual Necessity:", "text": "We process your email, authentication credentials, and video files to provide you with the Vibed editing service, manage your account, and process payments. Without this processing, we cannot provide our core service." },
-      { "label": "Legitimate Interest:", "text": "We process basic usage analytics (e.g., which features are used) to improve our product, ensure the security of our platform, and troubleshoot issues. This processing does not override your fundamental rights and freedoms." },
-      { "label": "Consent:", "text": "Where required by law, we will obtain your explicit consent before processing data for certain marketing activities or deploying non-essential cookies." }
-    ]
-  },
-  "section3": {
-    "title": "3. Data Retention and Storage",
-    "p1": "We retain your personal data only for as long as necessary to fulfill the purposes outlined in this policy.",
-    "items": [
-      { "label": "Account Data:", "text": "Retained for as long as your account is active. If you delete your account, this data is immediately and permanently removed." },
-      { "label": "Project Files (Free Tier):", "text": "Automatically deleted after 7 days of inactivity." },
-      { "label": "Project Files (Creator Tier):", "text": "Retained for 30 days." },
-      { "label": "Project Files (Pro Tier):", "text": "Retained for 90 days and persist as long as your subscription remains active." }
-    ],
-    "p2": "Your data is stored securely using Google Cloud Storage (our Data Processor) in encrypted data centers."
-  },
-  "section4": {
-    "title": "4. Your Rights as a Data Subject",
-    "p1": "Under the GDPR, you possess specific rights regarding your personal data:",
-    "items": [
-      { "label": "Right to Access:", "text": "You can request a copy of the personal data we hold about you." },
-      { "label": "Right to Erasure (Deletion):", "text": "You can request that we delete all your personal data, project files, and account information permanently. You can also self-serve this directly from your account dashboard." },
-      { "label": "Right to Data Portability:", "text": "You can request your data in a structured, commonly used, and machine-readable format. You may also export your video projects directly from the editor at any time." },
-      { "label": "Right to Rectification:", "text": "You can ask us to correct inaccurate or incomplete data." },
-      { "label": "Right to Object / Restrict:", "text": "You may object to or request the restriction of our processing of your data, particularly regarding analytics or direct marketing." }
-    ],
-    "p2": "To exercise any of these rights, please contact us at the email address provided below. We process all requests within 30 days, free of charge."
-  },
-  "cta": {
-    "prompt": "To exercise your data rights, contact us at:"
-  }
+  "lastUpdated": "Last updated: {{date}}",
+  "toc": "Contents",
+  "intro": [
+    "This policy explains what personal data Vibed collects, why, who processes it, how long it is kept and how you can exercise your rights. It applies to the Vibed website, the editor and the emails we send.",
+    "In short: we use your data to run the service you signed up for. We do not sell it, we do not show ads, and we do not use your videos to train AI models."
+  ],
+  "sections": [
+    {
+      "id": "controller",
+      "title": "1. Who is responsible for your data",
+      "blocks": [
+        "The data controller is {{ownerName}}, {{legalForm}}, trading as {{tradeName}}.",
+        {
+          "defs": [
+            {
+              "term": "Address",
+              "desc": "{{address}}"
+            },
+            {
+              "term": "Email",
+              "desc": "[{{email}}](mailto:{{email}})"
+            },
+            {
+              "term": "SIREN",
+              "desc": "{{siren}}"
+            }
+          ]
+        },
+        "We have not appointed a data protection officer, as the law does not require one for a business of our size. Every privacy question or request goes to the email address above."
+      ]
+    },
+    {
+      "id": "data",
+      "title": "2. The data we collect",
+      "blocks": [
+        "**Account.** Your email address, your name if you give it, and your password, which is stored in hashed form by our authentication provider. We never see it in clear text.",
+        "**Your content.** The videos, audio files and images you upload, the projects you create (timeline, captions, text, settings), the files you export and the thumbnails we generate.",
+        "**Analysis of your content.** To power the editing features, we create transcripts, speaker labels (\"Speaker 1\", \"Speaker 2\"), scene descriptions, the position of faces in the frame and similar technical data. These results are stored with your project.",
+        "**Instructions to the assistant.** The requests you type to the AI assistant, its answers, and a record of which suggestions you accepted or rejected.",
+        "**Style profile.** Editing preferences we infer from how you work, such as preferred pace, fonts, target platforms and the type of content you make. See section 7.",
+        "**Plan and billing.** Your plan, subscription status, usage counters (for example AI operations used this month) and the customer and subscription identifiers sent by our payment provider. We do not receive or store your card details.",
+        "**Technical data.** Server logs (time, request, account identifier), error reports from the app (error message, browser type, page), and, only if you accept it, a masked replay of the screen when an error occurs (see the [Cookie Policy](/cookie-policy)). Our hosting providers may record IP addresses in their access logs.",
+        "**Emails.** Which service emails we sent you and whether you unsubscribed from product updates.",
+        "**Before you sign up.** You can try the editor without an account. Your project then stays in your browser. Our server keeps only a temporary session identifier, valid for 48 hours."
+      ]
+    },
+    {
+      "id": "purposes",
+      "title": "3. Why we use it, and on what legal basis",
+      "blocks": [
+        {
+          "table": {
+            "head": [
+              "Purpose",
+              "Legal basis (GDPR art. 6)"
+            ],
+            "rows": [
+              [
+                "Creating and managing your account, storing your projects and files, running the editing and AI features, exporting your videos",
+                "Performance of our contract with you"
+              ],
+              [
+                "Subscriptions, payments, invoices and accounting records",
+                "Performance of the contract and our legal obligations"
+              ],
+              [
+                "Service emails: welcome, plan confirmation, renewal, notice before projects are deleted",
+                "Performance of the contract"
+              ],
+              [
+                "Weekly summary and product updates sent to customers",
+                "Our legitimate interest in keeping customers informed about a service they use. You can unsubscribe from any of these emails in one click."
+              ],
+              [
+                "Learning your editing style to tailor suggestions",
+                "Our legitimate interest in making suggestions relevant. You can see, download or reset this profile at any time."
+              ],
+              [
+                "Security, abuse prevention, error monitoring and fixing bugs",
+                "Our legitimate interest in a reliable and secure service"
+              ],
+              [
+                "Screen replay when an error occurs",
+                "Your consent, which you can withdraw at any time"
+              ],
+              [
+                "Answering requests from authorities and keeping records the law requires",
+                "Legal obligation"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "ai",
+      "title": "4. How the AI features use your content",
+      "blocks": [
+        "When you use a feature that needs it, the relevant part of your content is sent to an AI provider and the result comes back to us:",
+        {
+          "list": [
+            "**Transcription and speaker separation:** the audio track is sent to AssemblyAI, Groq or OpenAI, or processed on servers we operate.",
+            "**Understanding your requests:** the text of your request, along with the transcript and the project details the assistant needs, is sent to Groq or OpenAI.",
+            "**Visual analysis:** still frames taken from your video are sent to Google (Gemini) or OpenAI, for example to describe scenes or pick b-roll.",
+            "**Subject cut-outs:** a temporary private link to the video is sent to Replicate to separate a person from the background.",
+            "**Searching our media library:** your search text is sent to OpenAI to find matching assets."
+          ]
+        },
+        "Only what the feature needs is sent. Providers process it under their business API terms and do not keep it longer than those terms allow. We do not use your content to train AI models.",
+        "**Faces and voices.** Some features detect where faces are in the frame (to keep them in view when reframing) or which voice is speaking (to label speakers in a transcript). This is not used to recognize who a person is, and it does not identify anyone across different videos.",
+        "**Automated decisions.** None of this leads to a decision that has legal or similarly significant effects on you. The AI suggests edits; you decide what to keep."
+      ]
+    },
+    {
+      "id": "recipients",
+      "title": "5. Who processes your data",
+      "blocks": [
+        "Your data is accessible only to us and to the service providers below, each limited to its task and bound by a data processing agreement. Polar acts on its own account as the seller of your subscription (merchant of record).",
+        {
+          "table": {
+            "head": [
+              "Provider",
+              "Role",
+              "Location"
+            ],
+            "rows": [
+              [
+                "Supabase",
+                "Database and sign-in",
+                "Zurich, Switzerland"
+              ],
+              [
+                "Google Cloud",
+                "File storage (uploads, exports)",
+                "European Union"
+              ],
+              [
+                "Railway",
+                "Application servers",
+                "{{railwayRegion}}"
+              ],
+              [
+                "Fly.io",
+                "Video rendering servers",
+                "Paris, France"
+              ],
+              [
+                "AssemblyAI",
+                "Transcription, speaker labels",
+                "United States"
+              ],
+              [
+                "Groq",
+                "AI language and speech models",
+                "United States"
+              ],
+              [
+                "OpenAI",
+                "AI language and vision models, search",
+                "United States"
+              ],
+              [
+                "Google (Gemini)",
+                "Analysis of video frames",
+                "United States"
+              ],
+              [
+                "Replicate",
+                "Subject segmentation",
+                "United States"
+              ],
+              [
+                "Sentry",
+                "Error monitoring, replays with consent",
+                "Germany (EU)"
+              ],
+              [
+                "{{hostingerEntity}}",
+                "Sending our emails",
+                "Türkiye"
+              ],
+              [
+                "Bunny Fonts",
+                "Font delivery in the editor",
+                "European Union"
+              ],
+              [
+                "Polar",
+                "Payments, as merchant of record (with Stripe)",
+                "United States"
+              ]
+            ]
+          }
+        },
+        "We never sell or rent your data, and we do not share it with advertisers."
+      ]
+    },
+    {
+      "id": "transfers",
+      "title": "6. Transfers outside the European Union",
+      "blocks": [
+        "Some providers above are located outside the EU, or are companies that may access data from outside it. Switzerland benefits from an adequacy decision of the European Commission. For the United States and Türkiye, transfers rely on the Standard Contractual Clauses approved by the European Commission, or on the EU-U.S. Data Privacy Framework when the provider is certified under it, together with the provider's security measures.",
+        "You can ask us for a copy of the safeguards that apply to a given provider by writing to [{{email}}](mailto:{{email}})."
+      ]
+    },
+    {
+      "id": "style",
+      "title": "7. Your style profile",
+      "blocks": [
+        "Vibed learns from how you edit (for example, whether you usually remove silences or add captions) to make its suggestions fit your habits. This is a form of profiling under the GDPR, limited to adjusting suggestions inside the editor.",
+        "On the [Your style](/style) page you can see this profile, download it as a JSON file or delete it. Deleting it does not affect your projects. You can also object to this processing by writing to us."
+      ]
+    },
+    {
+      "id": "retention",
+      "title": "8. How long we keep your data",
+      "blocks": [
+        {
+          "table": {
+            "head": [
+              "Data",
+              "Kept for"
+            ],
+            "rows": [
+              [
+                "Projects and their files on the Free plan",
+                "{{freeDays}} days after the project was last modified"
+              ],
+              [
+                "Projects and their files on the Creator plan",
+                "{{creatorDays}} days after the project was last modified"
+              ],
+              [
+                "Projects and their files on the Pro plan",
+                "As long as the subscription is active, then the Free plan rule applies"
+              ],
+              [
+                "Uploads never added to a project",
+                "Same periods as above, counted from the upload"
+              ],
+              [
+                "Video analyses created from the analysis page",
+                "30 days"
+              ],
+              [
+                "Account, style profile and preferences",
+                "Until you delete your account or reset the profile"
+              ],
+              [
+                "Billing and accounting records",
+                "10 years, as required by French commercial law"
+              ],
+              [
+                "Error reports",
+                "Up to 90 days"
+              ],
+              [
+                "Temporary session before sign-up",
+                "Deleted 30 days after it expires"
+              ],
+              [
+                "Your cookie choice",
+                "6 months, then we ask again"
+              ]
+            ]
+          }
+        },
+        "Before a project is deleted for inactivity, we email you at least 24 hours in advance. Opening or editing the project before the date keeps it.",
+        "When you delete a project or your account, the data is removed from our database and storage straight away. Copies may remain in our database provider's backups for a short time (up to 30 days) until those backups are overwritten."
+      ]
+    },
+    {
+      "id": "rights",
+      "title": "9. Your rights",
+      "blocks": [
+        "Under the GDPR and the French Data Protection Act, you can:",
+        {
+          "list": [
+            "access your data and get a copy of it;",
+            "have inaccurate data corrected;",
+            "have your data deleted;",
+            "restrict how we use it in some cases;",
+            "object to processing based on our legitimate interest, including your style profile and product emails;",
+            "receive the data you gave us in a reusable format (portability);",
+            "withdraw your consent at any time, without affecting what was done before;",
+            "give instructions on what should happen to your data after your death."
+          ]
+        },
+        "Several of these are available directly in the app: delete a project from the dashboard, delete your account from the [account page](/auth), manage your style profile on [Your style](/style), unsubscribe from the link in any product email, and change your cookie choice from the footer. For anything else, write to [{{email}}](mailto:{{email}}). We reply within one month. We may ask you to confirm your identity if we have a reasonable doubt about it.",
+        "If you think we have not handled your data properly, you can lodge a complaint with the CNIL, the French data protection authority: [www.cnil.fr](https://www.cnil.fr), 3 place de Fontenoy, TSA 80715, 75334 Paris Cedex 07. We would appreciate the chance to sort it out with you first."
+      ]
+    },
+    {
+      "id": "security",
+      "title": "10. Security",
+      "blocks": [
+        "All traffic is encrypted (HTTPS). Your files are stored in a private bucket and are only served to your own signed-in account, through a check on our servers. Passwords are hashed. Access to production systems is limited to us.",
+        "No system is free of risk. If a breach affected your data and was likely to put your rights at risk, we would notify the CNIL within 72 hours and inform you without undue delay."
+      ]
+    },
+    {
+      "id": "cookies",
+      "title": "11. Cookies and similar technologies",
+      "blocks": [
+        "We use only what the service needs to work, plus one optional error replay tool that requires your consent. The details are in the [Cookie Policy](/cookie-policy)."
+      ]
+    },
+    {
+      "id": "prospects",
+      "title": "12. Business contacts",
+      "blocks": [
+        "We sometimes contact professionals (creators, agencies, studios) whose contact details are publicly available in a professional context, to present Vibed. We keep their name, professional email, company and the public source of the information, based on our legitimate interest in business development. Every message lets you object, and we then stop all contact. Without a reply, we delete these details 3 years after the last contact."
+      ]
+    },
+    {
+      "id": "children",
+      "title": "13. Children",
+      "blocks": [
+        "Vibed is not intended for children. You must be at least 16 to create an account. If you believe a child has given us personal data, please contact us and we will delete it."
+      ]
+    },
+    {
+      "id": "changes",
+      "title": "14. Changes to this policy",
+      "blocks": [
+        "We update this policy when the service or the law changes. The date at the top shows the latest version. If a change affects how we use your data in a significant way, we will tell you by email or in the app before it applies."
+      ]
+    }
+  ]
 }

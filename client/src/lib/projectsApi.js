@@ -157,16 +157,22 @@ export async function renameProject(projectId, newName) {
  * @returns {Promise<boolean>}
  */
 export async function deleteProject(projectId) {
-    const { error } = await supabase
-        .from('projects')
-        .delete()
-        .eq('id', projectId);
-
-    if (error) {
-        console.error('[projectsApi] deleteProject failed:', error.message);
+    // Through the API: it deletes the project's files (uploads, proxies,
+    // exports, thumbnail) as well as the row. Deleting the row directly left
+    // every video in storage.
+    try {
+        const { authFetch } = await import('../utils/authFetch.js');
+        const res = await authFetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' });
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            console.error('[projectsApi] deleteProject failed:', body.error || res.status);
+            return false;
+        }
+        return true;
+    } catch (err) {
+        console.error('[projectsApi] deleteProject failed:', err.message);
         return false;
     }
-    return true;
 }
 
 /**

@@ -7,7 +7,9 @@ const { supabaseAdmin } = require('../config/database');
 const PLAN_LIMITS = {
     free:    { ai_ops: 10,  max_duration: 1200,  projects: 2,  storage_days: 7  },
     creator: { ai_ops: 100, max_duration: 5400,  projects: -1, storage_days: 30 },
-    pro:     { ai_ops: -1,  max_duration: 14400, projects: -1, storage_days: 90 },
+    // storage_days is informational: services/retentionJob.js applies it.
+    // Pro (null) keeps projects while the subscription is active.
+    pro:     { ai_ops: -1,  max_duration: 14400, projects: -1, storage_days: null },
 };
 
 async function getUserPlan(userId) {

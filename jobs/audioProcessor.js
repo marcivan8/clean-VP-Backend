@@ -54,7 +54,8 @@ async function uploadProcessedAudio(localFilePath, userId, prefix) {
                 destination: destPath,
                 metadata: { cacheControl: 'no-store' },
             });
-            try { await bucket.file(destPath).makePublic(); } catch (_) { /* uniform-ACL bucket */ }
+            // Never makePublic(): it is served to its owner through
+            // /api/proxy/gcs-media (access-checked, services/mediaAccess.js).
             return `/api/proxy/gcs-media/${destPath}`;
         } else {
             // Local fallback: keep the file where it is — Express already serves /uploads

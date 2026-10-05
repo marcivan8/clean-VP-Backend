@@ -28,7 +28,8 @@ export const analyzeFile = async (file, onLog, onSuggestion, onComplete, onError
     const formData = new FormData();
     formData.append('video', file);
     formData.append('title', file.name);
-    formData.append('ai_training_consent', 'true');
+    // No ai_training_consent field: training use is never opted into on the
+    // user's behalf (the server defaults it to false).
 
     try {
         onLog({

@@ -1,0 +1,85 @@
+{
+  "eyebrow": "Mentions juridiques",
+  "title": "Mentions légales",
+  "lastUpdated": "Dernière mise à jour : {{date}}",
+  "intro": [
+    "Informations prévues par l'article 6 de la loi n° 2004-575 du 21 juin 2004 pour la confiance dans l'économie numérique."
+  ],
+  "sections": [
+    {
+      "id": "publisher",
+      "title": "Éditeur",
+      "blocks": [
+        {
+          "defs": [
+            {
+              "term": "Nom",
+              "desc": "{{ownerName}}, {{legalForm}}"
+            },
+            {
+              "term": "Nom commercial",
+              "desc": "{{tradeName}}"
+            },
+            {
+              "term": "Adresse",
+              "desc": "{{address}}"
+            },
+            {
+              "term": "SIREN",
+              "desc": "{{siren}}"
+            },
+            {
+              "term": "E-mail",
+              "desc": "[{{email}}](mailto:{{email}})"
+            },
+            {
+              "term": "Téléphone",
+              "desc": "{{phone}}",
+              "requires": "phone"
+            },
+            {
+              "term": "Directeur de la publication",
+              "desc": "{{ownerName}}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hosting",
+      "title": "Hébergement",
+      "blocks": [
+        {
+          "defs": [
+            {
+              "term": "Site et application",
+              "desc": "Railway Corporation, 548 Market St Suite 68956, San Francisco, CA 94104, États-Unis, [railway.com](https://railway.com)"
+            },
+            {
+              "term": "Base de données",
+              "desc": "Supabase Inc., données hébergées à Zurich, Suisse, [supabase.com](https://supabase.com)"
+            },
+            {
+              "term": "Fichiers",
+              "desc": "Google Cloud (Google Cloud EMEA Limited), données hébergées dans l'Union européenne, [cloud.google.com](https://cloud.google.com)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ip",
+      "title": "Propriété intellectuelle",
+      "blocks": [
+        "Le nom et le logo Vibed, le site, le logiciel et leurs contenus sont protégés par le droit de la propriété intellectuelle. Toute reproduction ou utilisation sans autorisation est interdite, sauf dans les cas prévus par la loi. Les contenus importés par les utilisateurs restent leur propriété."
+      ]
+    },
+    {
+      "id": "data",
+      "title": "Données personnelles",
+      "blocks": [
+        "Le traitement des données personnelles est décrit dans la [Politique de confidentialité](/privacy) et la [Politique des cookies](/cookie-policy). L'utilisation du service est régie par les [Conditions d'utilisation](/terms)."
+      ]
+    }
+  ]
+}

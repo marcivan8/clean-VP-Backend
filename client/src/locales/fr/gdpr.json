@@ -1,25 +1,133 @@
 {
-  "eyebrow": "Conformité",
-  "title": "RGPD et droits européens",
-  "subtitle": "VIBED respecte votre vie privée et se conforme strictement au Règlement Général sur la Protection des Données (RGPD). Voici comment exercer vos droits européens sur vos données.",
-  "cards": [
-    { "title": "Responsable du traitement", "value": "Vibed SAS", "detail": "Détermine les finalités du traitement" },
-    { "title": "Sous-traitant", "value": "Google Cloud Storage", "detail": "Fournit l'infrastructure d'hébergement sécurisée" },
-    { "title": "Localisation des données", "value": "us-central1", "detail": "Avec des mécanismes de transfert valides (CCT)" }
+  "eyebrow": "RGPD",
+  "title": "Vos droits et comment les exercer",
+  "lastUpdated": "Dernière mise à jour : {{date}}",
+  "intro": [
+    "Le Règlement général sur la protection des données vous donne la maîtrise de vos données personnelles. Cette page présente chaque droit simplement et la façon la plus rapide de l'exercer auprès de Vibed. Les traitements eux-mêmes sont décrits dans notre [Politique de confidentialité](/privacy)."
   ],
-  "rights": {
-    "sectionTitle": "Vos droits en vertu du RGPD",
-    "intro": "En vertu du Règlement Général sur la Protection des Données (RGPD), vous disposez de droits fondamentaux spécifiques concernant vos données personnelles :",
-    "items": [
-      { "title": "Droit d'accès", "text": "Vous pouvez demander une copie complète des données personnelles que nous détenons à votre sujet." },
-      { "title": "Droit à l'effacement (droit à l'oubli)", "text": "Vous pouvez nous demander de supprimer définitivement toutes vos données personnelles, fichiers de projet et informations de compte." },
-      { "title": "Droit de rectification", "text": "Vous avez le droit de nous demander de corriger toute donnée personnelle inexacte ou incomplète." },
-      { "title": "Droit d'opposition et de limitation du traitement", "text": "Vous pouvez vous opposer à notre traitement de vos données, y compris pour le marketing direct ou les analyses." }
-    ]
-  },
-  "exercise": {
-    "sectionTitle": "Comment exercer vos droits",
-    "p1": "Pour exercer l'un de ces droits, envoyez-nous simplement un e-mail depuis l'adresse associée à votre compte VIBED. Nous traitons toutes les demandes d'accès (DSAR) sous 30 jours, entièrement gratuitement.",
-    "ctaPrompt": "Soumettre une demande RGPD"
-  }
+  "sections": [
+    {
+      "id": "how",
+      "title": "Où aller",
+      "blocks": [
+        {
+          "table": {
+            "head": [
+              "Vous souhaitez",
+              "Comment faire"
+            ],
+            "rows": [
+              [
+                "Consulter ou télécharger votre profil de style",
+                "[Votre style](/style), bouton d'export"
+              ],
+              [
+                "Réinitialiser votre profil de style",
+                "[Votre style](/style), bouton de réinitialisation"
+              ],
+              [
+                "Supprimer un projet et ses fichiers",
+                "Tableau de bord, menu du projet, Supprimer"
+              ],
+              [
+                "Supprimer votre compte et toutes ses données",
+                "[Page compte](/auth), Supprimer le compte"
+              ],
+              [
+                "Ne plus recevoir le récapitulatif hebdomadaire ni les actualités produit",
+                "Le lien de désabonnement en bas de ces e-mails"
+              ],
+              [
+                "Accepter ou refuser la relecture des erreurs",
+                "Gestion des cookies, dans le pied de page de l'accueil ou sur la [Politique des cookies](/cookie-policy)"
+              ],
+              [
+                "Toute autre demande (copie de vos données, rectification, opposition...)",
+                "Écrire à [{{email}}](mailto:{{email}})"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "rights",
+      "title": "Vos droits en détail",
+      "blocks": [
+        {
+          "defs": [
+            {
+              "term": "Accès",
+              "desc": "Savoir si nous traitons vos données et en obtenir une copie, avec les finalités, les destinataires et les durées de conservation."
+            },
+            {
+              "term": "Rectification",
+              "desc": "Faire corriger des données inexactes ou incomplètes."
+            },
+            {
+              "term": "Effacement",
+              "desc": "Faire supprimer vos données, sauf si la loi nous impose de les conserver (pièces de facturation, par exemple)."
+            },
+            {
+              "term": "Limitation",
+              "desc": "Demander la suspension de l'utilisation de vos données pendant l'examen d'une contestation."
+            },
+            {
+              "term": "Opposition",
+              "desc": "Vous opposer aux traitements fondés sur notre intérêt légitime, comme votre profil de style ou les e-mails d'actualité. Pour ces e-mails, l'opposition est toujours acceptée."
+            },
+            {
+              "term": "Portabilité",
+              "desc": "Recevoir les données que vous avez fournies dans un format structuré et lisible par machine, ou les faire transmettre à un autre service lorsque c'est techniquement possible."
+            },
+            {
+              "term": "Consentement",
+              "desc": "Retirer votre consentement à tout moment, sans remettre en cause les traitements déjà effectués."
+            },
+            {
+              "term": "Après le décès",
+              "desc": "Définir des directives sur la conservation, l'effacement ou la communication de vos données après votre décès (article 85 de la loi Informatique et Libertés)."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "process",
+      "title": "Traitement de votre demande",
+      "blocks": [
+        "Si possible, envoyez votre demande depuis l'adresse e-mail associée à votre compte, afin que nous puissions la rattacher rapidement. Nous répondons dans un délai d'un mois. Pour une demande complexe, ce délai peut être prolongé de deux mois ; nous vous en indiquons alors la raison dans le premier mois. Les demandes sont gratuites, sauf si elles sont manifestement infondées ou excessives.",
+        "Nous ne demandons un justificatif d'identité qu'en cas de doute raisonnable sur l'auteur de la demande."
+      ]
+    },
+    {
+      "id": "complaint",
+      "title": "Réclamation",
+      "blocks": [
+        "Si notre réponse ne vous satisfait pas, vous pouvez introduire une réclamation auprès de la CNIL (Commission nationale de l'informatique et des libertés), 3 place de Fontenoy, TSA 80715, 75334 Paris Cedex 07, ou en ligne sur [www.cnil.fr](https://www.cnil.fr). Si vous résidez dans un autre pays de l'UE, vous pouvez également saisir l'autorité de ce pays."
+      ]
+    },
+    {
+      "id": "contact",
+      "title": "Contact",
+      "blocks": [
+        {
+          "defs": [
+            {
+              "term": "Responsable du traitement",
+              "desc": "{{ownerName}}, {{legalForm}}, exerçant sous le nom {{tradeName}}"
+            },
+            {
+              "term": "Adresse",
+              "desc": "{{address}}"
+            },
+            {
+              "term": "E-mail",
+              "desc": "[{{email}}](mailto:{{email}})"
+            }
+          ]
+        }
+      ]
+    }
+  ]
 }

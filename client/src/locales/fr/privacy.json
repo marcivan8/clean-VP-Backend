@@ -1,46 +1,333 @@
 {
-  "eyebrow": "Document juridique",
+  "eyebrow": "Mentions juridiques",
   "title": "Politique de confidentialité",
-  "lastUpdated": "Dernière mise à jour : {{date}}",
-  "section1": {
-    "title": "1. Identité du responsable du traitement",
-    "p1": "Aux fins du Règlement Général sur la Protection des Données (RGPD) et des autres lois applicables en matière de protection des données, le responsable du traitement de vos informations personnelles est :",
-    "companyName": "VIBED (Vibed studio)",
-    "addressLines": ["47 avenue du President Franklin Roosevelt", "94320, THIAIS", "France"]
-  },
-  "section2": {
-    "title": "2. Base juridique du traitement",
-    "p1": "Nous ne traitons vos données personnelles que lorsque nous disposons d'une base juridique valable pour le faire. Nos bases juridiques principales sont :",
-    "items": [
-      { "label": "Nécessité contractuelle :", "text": "Nous traitons votre e-mail, vos identifiants d'authentification et vos fichiers vidéo afin de vous fournir le service de montage Vibed, de gérer votre compte et de traiter les paiements. Sans ce traitement, nous ne pouvons pas fournir notre service principal." },
-      { "label": "Intérêt légitime :", "text": "Nous traitons des données d'usage basiques (par exemple, quelles fonctionnalités sont utilisées) afin d'améliorer notre produit, d'assurer la sécurité de notre plateforme et de résoudre les problèmes. Ce traitement ne porte pas atteinte à vos droits et libertés fondamentaux." },
-      { "label": "Consentement :", "text": "Lorsque la loi l'exige, nous obtiendrons votre consentement explicite avant de traiter des données pour certaines activités marketing ou de déployer des cookies non essentiels." }
-    ]
-  },
-  "section3": {
-    "title": "3. Conservation et stockage des données",
-    "p1": "Nous ne conservons vos données personnelles que le temps nécessaire pour répondre aux finalités décrites dans cette politique.",
-    "items": [
-      { "label": "Données de compte :", "text": "Conservées tant que votre compte est actif. Si vous supprimez votre compte, ces données sont immédiatement et définitivement supprimées." },
-      { "label": "Fichiers de projet (offre gratuite) :", "text": "Supprimés automatiquement après 7 jours d'inactivité." },
-      { "label": "Fichiers de projet (offre Creator) :", "text": "Conservés pendant 30 jours." },
-      { "label": "Fichiers de projet (offre Pro) :", "text": "Conservés pendant 90 jours et maintenus tant que votre abonnement reste actif." }
-    ],
-    "p2": "Vos données sont stockées de manière sécurisée sur Google Cloud Storage (notre sous-traitant) dans des centres de données chiffrés."
-  },
-  "section4": {
-    "title": "4. Vos droits en tant que personne concernée",
-    "p1": "En vertu du RGPD, vous disposez de droits spécifiques concernant vos données personnelles :",
-    "items": [
-      { "label": "Droit d'accès :", "text": "Vous pouvez demander une copie des données personnelles que nous détenons à votre sujet." },
-      { "label": "Droit à l'effacement (suppression) :", "text": "Vous pouvez demander la suppression définitive de toutes vos données personnelles, fichiers de projet et informations de compte. Vous pouvez également le faire vous-même directement depuis le tableau de bord de votre compte." },
-      { "label": "Droit à la portabilité des données :", "text": "Vous pouvez demander vos données dans un format structuré, couramment utilisé et lisible par machine. Vous pouvez également exporter vos projets vidéo directement depuis l'éditeur à tout moment." },
-      { "label": "Droit de rectification :", "text": "Vous pouvez nous demander de corriger des données inexactes ou incomplètes." },
-      { "label": "Droit d'opposition / de limitation :", "text": "Vous pouvez vous opposer ou demander la limitation du traitement de vos données, notamment concernant les analyses ou le marketing direct." }
-    ],
-    "p2": "Pour exercer l'un de ces droits, veuillez nous contacter à l'adresse e-mail indiquée ci-dessous. Nous traitons toutes les demandes sous 30 jours, gratuitement."
-  },
-  "cta": {
-    "prompt": "Pour exercer vos droits sur vos données, contactez-nous à :"
-  }
+  "lastUpdated": "Dernière mise à jour : {{date}}",
+  "toc": "Sommaire",
+  "intro": [
+    "Cette politique explique quelles données personnelles Vibed collecte, pourquoi, qui les traite, combien de temps elles sont conservées et comment exercer vos droits. Elle s'applique au site Vibed, à l'éditeur et aux e-mails que nous envoyons.",
+    "En résumé : nous utilisons vos données pour faire fonctionner le service auquel vous vous êtes inscrit. Nous ne les vendons pas, nous n'affichons pas de publicité et nous n'utilisons pas vos vidéos pour entraîner des modèles d'IA."
+  ],
+  "sections": [
+    {
+      "id": "controller",
+      "title": "1. Responsable du traitement",
+      "blocks": [
+        "Le responsable du traitement est {{ownerName}}, {{legalForm}}, exerçant sous le nom commercial {{tradeName}}.",
+        {
+          "defs": [
+            {
+              "term": "Adresse",
+              "desc": "{{address}}"
+            },
+            {
+              "term": "E-mail",
+              "desc": "[{{email}}](mailto:{{email}})"
+            },
+            {
+              "term": "SIREN",
+              "desc": "{{siren}}"
+            }
+          ]
+        },
+        "Nous n'avons pas désigné de délégué à la protection des données, la loi ne l'imposant pas à une structure de notre taille. Toute question ou demande relative à vos données peut être adressée à l'e-mail ci-dessus."
+      ]
+    },
+    {
+      "id": "data",
+      "title": "2. Les données que nous collectons",
+      "blocks": [
+        "**Compte.** Votre adresse e-mail, votre nom si vous le renseignez, et votre mot de passe, conservé sous forme hachée, donc illisible, par notre prestataire d'authentification. Nous n'y avons jamais accès en clair.",
+        "**Vos contenus.** Les vidéos, fichiers audio et images que vous importez, les projets que vous créez (timeline, sous-titres, textes, réglages), les fichiers que vous exportez et les miniatures que nous générons.",
+        "**Analyse de vos contenus.** Pour faire fonctionner les outils de montage, nous produisons des transcriptions, des étiquettes de locuteurs (« Intervenant 1 », « Intervenant 2 »), des descriptions de scènes, la position des visages dans l'image et d'autres données techniques du même type. Ces résultats sont enregistrés avec votre projet.",
+        "**Instructions données à l'assistant.** Les demandes que vous écrivez à l'assistant IA, ses réponses, et la trace des suggestions acceptées ou refusées.",
+        "**Profil de style.** Des préférences de montage déduites de votre façon de travailler : rythme, polices, plateformes visées, type de contenu. Voir la section 7.",
+        "**Offre et facturation.** Votre offre, l'état de votre abonnement, vos compteurs d'utilisation (par exemple les opérations IA du mois) et les identifiants client et abonnement transmis par notre prestataire de paiement. Nous ne recevons ni ne conservons vos données de carte bancaire.",
+        "**Données techniques.** Journaux serveur (date, requête, identifiant du compte), rapports d'erreur de l'application (message d'erreur, type de navigateur, page) et, uniquement si vous l'acceptez, une relecture masquée de l'écran au moment d'une erreur (voir la [Politique des cookies](/cookie-policy)). Nos hébergeurs peuvent enregistrer les adresses IP dans leurs journaux d'accès.",
+        "**E-mails.** Les e-mails de service qui vous ont été envoyés et votre éventuel désabonnement des actualités produit.",
+        "**Avant l'inscription.** Vous pouvez essayer l'éditeur sans compte. Votre projet reste alors dans votre navigateur. Notre serveur ne conserve qu'un identifiant de session temporaire, valable 48 heures."
+      ]
+    },
+    {
+      "id": "purposes",
+      "title": "3. Finalités et bases légales",
+      "blocks": [
+        {
+          "table": {
+            "head": [
+              "Finalité",
+              "Base légale (art. 6 RGPD)"
+            ],
+            "rows": [
+              [
+                "Créer et gérer votre compte, stocker vos projets et fichiers, faire fonctionner les outils de montage et d'IA, exporter vos vidéos",
+                "Exécution du contrat conclu avec vous"
+              ],
+              [
+                "Abonnements, paiements, factures et pièces comptables",
+                "Exécution du contrat et obligations légales"
+              ],
+              [
+                "E-mails de service : bienvenue, confirmation d'offre, renouvellement, avis avant suppression de projets",
+                "Exécution du contrat"
+              ],
+              [
+                "Récapitulatif hebdomadaire et actualités produit envoyés aux clients",
+                "Notre intérêt légitime à informer nos clients sur un service qu'ils utilisent. Vous pouvez vous désabonner en un clic depuis chacun de ces e-mails."
+              ],
+              [
+                "Apprentissage de votre style de montage pour adapter les suggestions",
+                "Notre intérêt légitime à proposer des suggestions pertinentes. Vous pouvez consulter, télécharger ou réinitialiser ce profil à tout moment."
+              ],
+              [
+                "Sécurité, prévention des abus, suivi des erreurs et correction des bugs",
+                "Notre intérêt légitime à fournir un service fiable et sûr"
+              ],
+              [
+                "Relecture de l'écran lors d'une erreur",
+                "Votre consentement, que vous pouvez retirer à tout moment"
+              ],
+              [
+                "Réponse aux demandes des autorités et conservation des documents exigés par la loi",
+                "Obligation légale"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "ai",
+      "title": "4. Utilisation de vos contenus par les outils d'IA",
+      "blocks": [
+        "Lorsque vous utilisez une fonction qui en a besoin, la partie concernée de votre contenu est transmise à un prestataire d'IA, qui nous renvoie le résultat :",
+        {
+          "list": [
+            "**Transcription et séparation des voix :** la piste audio est envoyée à AssemblyAI, Groq ou OpenAI, ou traitée sur des serveurs que nous exploitons.",
+            "**Compréhension de vos demandes :** le texte de votre demande, avec la transcription et les éléments du projet dont l'assistant a besoin, est envoyé à Groq ou OpenAI.",
+            "**Analyse visuelle :** des images fixes extraites de votre vidéo sont envoyées à Google (Gemini) ou OpenAI, par exemple pour décrire les scènes ou choisir des plans d'illustration.",
+            "**Détourage :** un lien privé et temporaire vers la vidéo est envoyé à Replicate pour séparer une personne de l'arrière-plan.",
+            "**Recherche dans notre bibliothèque de médias :** le texte de votre recherche est envoyé à OpenAI pour trouver les éléments correspondants."
+          ]
+        },
+        "Seules les données nécessaires à la fonction sont transmises. Les prestataires les traitent selon leurs conditions d'API professionnelles et ne les conservent pas au-delà de ce que ces conditions prévoient. Nous n'utilisons pas vos contenus pour entraîner des modèles d'IA.",
+        "**Visages et voix.** Certaines fonctions repèrent l'emplacement des visages dans l'image (pour les garder dans le cadre lors d'un recadrage) ou la voix qui parle (pour étiqueter les intervenants d'une transcription). Ces traitements ne servent pas à reconnaître l'identité d'une personne et ne permettent pas de la retrouver d'une vidéo à l'autre.",
+        "**Décisions automatisées.** Aucun de ces traitements ne produit de décision ayant des effets juridiques ou significatifs pour vous. L'IA propose des modifications, vous décidez de ce que vous gardez."
+      ]
+    },
+    {
+      "id": "recipients",
+      "title": "5. Destinataires et sous-traitants",
+      "blocks": [
+        "Vos données ne sont accessibles qu'à nous et aux prestataires ci-dessous, chacun limité à sa mission et lié par un accord de traitement des données. Polar agit pour son propre compte en tant que vendeur de votre abonnement (marchand officiel, ou « merchant of record »).",
+        {
+          "table": {
+            "head": [
+              "Prestataire",
+              "Rôle",
+              "Localisation"
+            ],
+            "rows": [
+              [
+                "Supabase",
+                "Base de données et connexion",
+                "Zurich, Suisse"
+              ],
+              [
+                "Google Cloud",
+                "Stockage des fichiers (imports, exports)",
+                "Union européenne"
+              ],
+              [
+                "Railway",
+                "Serveurs de l'application",
+                "{{railwayRegion}}"
+              ],
+              [
+                "Fly.io",
+                "Serveurs de rendu vidéo",
+                "Paris, France"
+              ],
+              [
+                "AssemblyAI",
+                "Transcription, identification des intervenants",
+                "États-Unis"
+              ],
+              [
+                "Groq",
+                "Modèles d'IA de langage et de parole",
+                "États-Unis"
+              ],
+              [
+                "OpenAI",
+                "Modèles d'IA de langage et de vision, recherche",
+                "États-Unis"
+              ],
+              [
+                "Google (Gemini)",
+                "Analyse d'images extraites des vidéos",
+                "États-Unis"
+              ],
+              [
+                "Replicate",
+                "Détourage de sujets",
+                "États-Unis"
+              ],
+              [
+                "Sentry",
+                "Suivi des erreurs, relectures avec consentement",
+                "Allemagne (UE)"
+              ],
+              [
+                "{{hostingerEntity}}",
+                "Envoi de nos e-mails",
+                "Turquie"
+              ],
+              [
+                "Bunny Fonts",
+                "Diffusion des polices de l'éditeur",
+                "Union européenne"
+              ],
+              [
+                "Polar",
+                "Paiements, en tant que marchand officiel (avec Stripe)",
+                "États-Unis"
+              ]
+            ]
+          }
+        },
+        "Nous ne vendons ni ne louons jamais vos données et ne les partageons pas avec des annonceurs."
+      ]
+    },
+    {
+      "id": "transfers",
+      "title": "6. Transferts hors de l'Union européenne",
+      "blocks": [
+        "Certains prestataires sont situés hors de l'UE, ou sont des sociétés susceptibles d'accéder aux données depuis l'extérieur de l'UE. La Suisse bénéficie d'une décision d'adéquation de la Commission européenne. Pour les États-Unis et la Turquie, les transferts reposent sur les clauses contractuelles types adoptées par la Commission européenne, ou sur le cadre de protection des données UE-États-Unis (Data Privacy Framework) lorsque le prestataire y est certifié, complétés par les mesures de sécurité du prestataire.",
+        "Vous pouvez obtenir une copie des garanties applicables à un prestataire en écrivant à [{{email}}](mailto:{{email}})."
+      ]
+    },
+    {
+      "id": "style",
+      "title": "7. Votre profil de style",
+      "blocks": [
+        "Vibed apprend de votre façon de monter (par exemple, si vous supprimez habituellement les silences ou ajoutez des sous-titres) pour adapter ses suggestions à vos habitudes. Il s'agit d'un profilage au sens du RGPD, limité à l'ajustement des suggestions dans l'éditeur.",
+        "Sur la page [Votre style](/style), vous pouvez consulter ce profil, le télécharger au format JSON ou le supprimer. Sa suppression n'a aucun effet sur vos projets. Vous pouvez aussi vous opposer à ce traitement en nous écrivant."
+      ]
+    },
+    {
+      "id": "retention",
+      "title": "8. Durées de conservation",
+      "blocks": [
+        {
+          "table": {
+            "head": [
+              "Données",
+              "Durée de conservation"
+            ],
+            "rows": [
+              [
+                "Projets et fichiers associés, offre Free",
+                "{{freeDays}} jours après la dernière modification du projet"
+              ],
+              [
+                "Projets et fichiers associés, offre Creator",
+                "{{creatorDays}} jours après la dernière modification du projet"
+              ],
+              [
+                "Projets et fichiers associés, offre Pro",
+                "Tant que l'abonnement est actif, puis la règle de l'offre Free s'applique"
+              ],
+              [
+                "Fichiers importés jamais ajoutés à un projet",
+                "Mêmes durées, à compter de l'import"
+              ],
+              [
+                "Analyses vidéo créées depuis la page d'analyse",
+                "30 jours"
+              ],
+              [
+                "Compte, profil de style et préférences",
+                "Jusqu'à la suppression du compte ou la réinitialisation du profil"
+              ],
+              [
+                "Pièces comptables et de facturation",
+                "10 ans, conformément au Code de commerce"
+              ],
+              [
+                "Rapports d'erreur",
+                "90 jours au maximum"
+              ],
+              [
+                "Session temporaire avant inscription",
+                "Supprimée 30 jours après son expiration"
+              ],
+              [
+                "Votre choix en matière de cookies",
+                "6 mois, puis nous vous le redemandons"
+              ]
+            ]
+          }
+        },
+        "Avant qu'un projet soit supprimé pour inactivité, nous vous prévenons par e-mail au moins 24 heures à l'avance. Ouvrir ou modifier le projet avant la date indiquée suffit à le conserver.",
+        "Lorsque vous supprimez un projet ou votre compte, les données sont immédiatement effacées de notre base de données et de notre stockage. Des copies peuvent subsister pendant une courte durée (30 jours au maximum) dans les sauvegardes de notre prestataire de base de données, jusqu'à leur remplacement."
+      ]
+    },
+    {
+      "id": "rights",
+      "title": "9. Vos droits",
+      "blocks": [
+        "Conformément au RGPD et à la loi Informatique et Libertés, vous pouvez :",
+        {
+          "list": [
+            "accéder à vos données et en obtenir une copie ;",
+            "faire rectifier des données inexactes ;",
+            "faire effacer vos données ;",
+            "demander la limitation de leur traitement dans certains cas ;",
+            "vous opposer aux traitements fondés sur notre intérêt légitime, notamment votre profil de style et les e-mails d'actualité ;",
+            "recevoir les données que vous nous avez fournies dans un format réutilisable (portabilité) ;",
+            "retirer votre consentement à tout moment, sans remettre en cause les traitements déjà effectués ;",
+            "définir des directives relatives au sort de vos données après votre décès."
+          ]
+        },
+        "Plusieurs de ces droits s'exercent directement dans l'application : supprimer un projet depuis le tableau de bord, supprimer votre compte depuis la [page compte](/auth), gérer votre profil de style sur [Votre style](/style), vous désabonner via le lien présent dans chaque e-mail d'actualité, et modifier votre choix en matière de cookies depuis le pied de page. Pour toute autre demande, écrivez à [{{email}}](mailto:{{email}}). Nous répondons dans un délai d'un mois. En cas de doute raisonnable sur votre identité, nous pouvons vous demander de la confirmer.",
+        "Si vous estimez que vos données n'ont pas été traitées correctement, vous pouvez adresser une réclamation à la CNIL : [www.cnil.fr](https://www.cnil.fr), 3 place de Fontenoy, TSA 80715, 75334 Paris Cedex 07. Nous vous remercions de nous contacter d'abord, afin que nous puissions chercher une solution avec vous."
+      ]
+    },
+    {
+      "id": "security",
+      "title": "10. Sécurité",
+      "blocks": [
+        "Toutes les communications sont chiffrées (HTTPS). Vos fichiers sont stockés dans un espace privé et ne sont servis qu'à votre propre compte connecté, après vérification par nos serveurs. Les mots de passe sont hachés. L'accès aux systèmes de production nous est réservé.",
+        "Aucun système n'est exempt de risque. Si une violation de données présentait un risque pour vos droits, nous la notifierions à la CNIL dans les 72 heures et vous en informerions dans les meilleurs délais."
+      ]
+    },
+    {
+      "id": "cookies",
+      "title": "11. Cookies et technologies similaires",
+      "blocks": [
+        "Nous utilisons uniquement ce qui est nécessaire au fonctionnement du service, ainsi qu'un outil facultatif de relecture des erreurs soumis à votre consentement. Le détail figure dans la [Politique des cookies](/cookie-policy)."
+      ]
+    },
+    {
+      "id": "prospects",
+      "title": "12. Contacts professionnels",
+      "blocks": [
+        "Il nous arrive de contacter des professionnels (créateurs, agences, studios) dont les coordonnées sont publiquement accessibles dans un cadre professionnel, afin de leur présenter Vibed. Nous conservons leur nom, leur e-mail professionnel, leur société et la source publique de l'information, sur la base de notre intérêt légitime à développer notre activité. Chaque message permet de s'y opposer, et nous cessons alors tout contact. Sans réponse, ces informations sont supprimées 3 ans après le dernier contact."
+      ]
+    },
+    {
+      "id": "children",
+      "title": "13. Mineurs",
+      "blocks": [
+        "Vibed ne s'adresse pas aux enfants. Il faut avoir au moins 16 ans pour créer un compte. Si vous pensez qu'un enfant nous a transmis des données personnelles, contactez-nous et nous les supprimerons."
+      ]
+    },
+    {
+      "id": "changes",
+      "title": "14. Modifications de cette politique",
+      "blocks": [
+        "Nous mettons cette politique à jour lorsque le service ou la réglementation évoluent. La date en haut de page indique la version en vigueur. Si une modification change de manière importante l'utilisation de vos données, nous vous en informerons par e-mail ou dans l'application avant son entrée en vigueur."
+      ]
+    }
+  ]
 }

@@ -1,29 +1,117 @@
 {
-  "eyebrow": "LEGAL",
+  "eyebrow": "Legal",
   "title": "Cookie Policy",
-  "lastUpdated": "Last updated: June 2026 · Vibed Studio",
-  "section1": {
-    "title": "What are cookies?",
-    "body": "Cookies are small text files placed on your device when you visit a website. They are widely used to make websites work, or work more efficiently, and to provide information to website owners."
-  },
-  "section2": {
-    "title": "Cookies we use",
-    "durationLabel": "Duration:",
-    "items": [
-      { "name": "Authentication (Supabase)", "type": "Strictly necessary", "purpose": "Keeps you signed in during your session. Without this cookie you would be logged out on every page.", "duration": "Session / 1 year" },
-      { "name": "Cookie consent (Iubenda)", "type": "Strictly necessary", "purpose": "Stores your cookie consent preferences so we do not show the banner on every visit.", "duration": "1 year" },
-      { "name": "Analytics", "type": "Optional", "purpose": "We do not currently use any third-party analytics cookies. If this changes we will update this policy and request fresh consent.", "duration": "N/A" }
-    ]
-  },
-  "section3": {
-    "title": "Managing your preferences",
-    "p1": "You can review and change your cookie preferences at any time by clicking the cookie settings link in the footer. You can also delete cookies through your browser settings — note that doing so may affect how the site works.",
-    "p2Pre": "For more detail on how we handle your personal data, see our ",
-    "p2LinkText": "Privacy Policy",
-    "p2Post": "."
-  },
-  "section4": {
-    "title": "Contact",
-    "p1Pre": "Questions about this policy? "
-  }
+  "lastUpdated": "Last updated: {{date}}",
+  "intro": [
+    "Like most web applications, Vibed stores a few small pieces of information in your browser, as cookies or in local storage. This page lists all of them. We do not use advertising or audience measurement cookies, and no third party tracks you across sites through Vibed."
+  ],
+  "sections": [
+    {
+      "id": "necessary",
+      "title": "1. Strictly necessary",
+      "blocks": [
+        "These are needed for the service to work, or keep a setting you chose. The law does not require consent for them, and they cannot be turned off without breaking Vibed.",
+        {
+          "table": {
+            "head": [
+              "Name",
+              "Purpose",
+              "Duration"
+            ],
+            "rows": [
+              [
+                "sb-…-auth-token (local storage)",
+                "Keeps you signed in",
+                "Until you sign out or the session ends"
+              ],
+              [
+                "vibed_media (cookie)",
+                "Lets your browser load your own videos securely. Signed, HttpOnly, never readable by scripts",
+                "12 hours"
+              ],
+              [
+                "vp_session, vp_session_expires (local storage)",
+                "Temporary session when you use the editor without an account",
+                "48 hours"
+              ],
+              [
+                "vp_autosave, vp_project_id, vp_project_name, vp_timeline_history",
+                "Local copy of the open project and its undo history, so no work is lost",
+                "Until replaced or cleared"
+              ],
+              [
+                "vp-user-memory, vp_user_presets, vp_preset_favorites, vp_main_track_magnet",
+                "Your editor preferences and presets",
+                "Until cleared"
+              ],
+              [
+                "vp_onboarding_tour_seen, vp_pending_jobs, vibed.activeExport.*",
+                "Remembers the onboarding tour and tracks uploads and exports in progress",
+                "Until cleared"
+              ],
+              [
+                "vibed_lang",
+                "Your language",
+                "Until cleared"
+              ],
+              [
+                "vibed_consent_v1",
+                "Your choice in the cookie banner",
+                "6 months"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "optional",
+      "title": "2. Optional, with your consent",
+      "blocks": [
+        {
+          "table": {
+            "head": [
+              "Tool",
+              "Purpose",
+              "Duration"
+            ],
+            "rows": [
+              [
+                "Sentry Session Replay (provider: Sentry, data stored in Germany)",
+                "When the editor hits an error, a short replay of the screen helps us understand and fix it. All text and input fields are masked, and images and videos are blocked, so the replay shows the layout of the page and never your content. Nothing is recorded if no error occurs.",
+                "Replay buffer kept for the browser session; replays kept up to 90 days"
+              ]
+            ]
+          }
+        },
+        "This tool only runs if you click Accept in the banner. If you refuse, the editor works exactly the same."
+      ]
+    },
+    {
+      "id": "third",
+      "title": "3. Content loaded from other services",
+      "blocks": [
+        "The editor loads its caption fonts from Bunny Fonts, a European service that does not set cookies or log visitors' IP addresses. Error reports (without replay) are sent to Sentry to help us fix bugs; they do not use cookies."
+      ]
+    },
+    {
+      "id": "choice",
+      "title": "4. Changing your choice",
+      "blocks": [
+        "You can change your choice at any time. It takes effect immediately.",
+        {
+          "action": "cookie-settings",
+          "label": "Open cookie settings"
+        },
+        "You can also delete cookies and local storage in your browser settings. Doing so signs you out and removes local copies of unsaved work."
+      ]
+    },
+    {
+      "id": "more",
+      "title": "5. More information",
+      "blocks": [
+        "How we handle personal data in general is explained in our [Privacy Policy](/privacy). For any question, write to [{{email}}](mailto:{{email}})."
+      ]
+    }
+  ]
 }

@@ -631,6 +631,8 @@ router.delete('/profile/reset', authenticateUser, async (req, res) => {
             supabaseAdmin.from('suggestion_feedback').delete().eq('user_id', userId),
             supabaseAdmin.from('user_presets').delete().eq('user_id', userId),
             supabaseAdmin.from('asset_usage_log').delete().eq('user_id', userId),
+            supabaseAdmin.from('editing_sessions').delete().eq('user_id', userId),
+            supabaseAdmin.from('user_asset_preferences').delete().eq('user_id', userId),
         ]);
 
         console.log(`[brainRoutes] Profile reset for user ${userId}`);
@@ -648,11 +650,13 @@ router.get('/profile/export', authenticateUser, async (req, res) => {
     const userId = req.user.id;
 
     try {
-        const [profileRes, feedbackRes, presetsRes, usageRes] = await Promise.all([
-            supabaseAdmin.from('user_editing_profiles').select('*').eq('user_id', userId).single(),
+        const [profileRes, feedbackRes, presetsRes, usageRes, sessionsRes, assetPrefsRes] = await Promise.all([
+            supabaseAdmin.from('user_editing_profiles').select('*').eq('user_id', userId).maybeSingle(),
             supabaseAdmin.from('suggestion_feedback').select('*').eq('user_id', userId),
             supabaseAdmin.from('user_presets').select('*').eq('user_id', userId),
             supabaseAdmin.from('asset_usage_log').select('*').eq('user_id', userId),
+            supabaseAdmin.from('editing_sessions').select('*').eq('user_id', userId),
+            supabaseAdmin.from('user_asset_preferences').select('*').eq('user_id', userId),
         ]);
 
         const exportData = {
@@ -662,6 +666,8 @@ router.get('/profile/export', authenticateUser, async (req, res) => {
             suggestion_feedback: feedbackRes.data || [],
             user_presets:      presetsRes.data    || [],
             asset_usage_log:   usageRes.data      || [],
+            editing_sessions:  sessionsRes.data   || [],
+            asset_preferences: assetPrefsRes.data || [],
         };
 
         res.setHeader('Content-Type', 'application/json');

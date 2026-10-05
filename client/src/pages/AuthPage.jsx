@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
+import { useTranslation, Trans } from 'react-i18next';
 import { supabase } from '../lib/supabaseClient';
 import useSessionStore from '../store/useSessionStore';
 import { Logo } from '../components/Logo.jsx';
@@ -419,9 +419,16 @@ export default function AuthPage() {
                     </button>
                 </form>
 
-                {/* AI Transparency Notice */}
+                {/* Terms and privacy notice */}
                 <p style={{ margin: '20px 0 0', textAlign: 'center', fontSize: 12, color: 'var(--fg-4)', lineHeight: 1.4, padding: '0 10px' }}>
-                    {t('aiNotice')}
+                    <Trans
+                        t={t}
+                        i18nKey="aiNotice"
+                        components={{
+                            terms: <a href="/terms" target="_blank" rel="noopener" style={{ color: 'var(--fg-3)', textDecoration: 'underline' }} />,
+                            privacy: <a href="/privacy" target="_blank" rel="noopener" style={{ color: 'var(--fg-3)', textDecoration: 'underline' }} />,
+                        }}
+                    />
                 </p>
 
                 {/* Footer link */}

@@ -4,7 +4,6 @@ import useAIStore from '../../store/useAIStore';
 import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../../store/useTimelineStore';
 import useJobStore, { JOB_STATES, TERMINAL_STATES } from '../../store/useJobStore';
-import { analyzeFile } from '../../services/aiService';
 import { parseAgentCommand } from '../../services/autoEditService';
 import classNames from 'classnames';
 import useUserPreferences from '../../store/useUserPreferences';

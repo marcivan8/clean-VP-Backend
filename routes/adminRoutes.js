@@ -1,15 +1,31 @@
-// routes/adminRoutes.js — TEMPORARY: remove after running these endpoints once
+// routes/adminRoutes.js: admin operations, guarded by the ADMIN_SECRET header
 const express = require('express');
 const router = express.Router();
 const { bucket } = require('../config/storage');
 
+const crypto = require('crypto');
+
+// ADMIN_SECRET must be set: before, an unset secret compared equal to a
+// missing header (undefined === undefined) and let anyone in.
+function checkAdminSecret(req, res) {
+    const expected = process.env.ADMIN_SECRET || '';
+    const given = String(req.headers['x-admin-secret'] || '');
+    const ok = expected.length >= 16 && given.length === expected.length &&
+        crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected));
+    if (!ok) res.status(403).json({ error: 'Forbidden' });
+    return ok;
+}
+
 function requireAdmin(req, res, next) {
-    if (req.headers['x-admin-secret'] !== process.env.ADMIN_SECRET) {
-        return res.status(403).json({ error: 'Forbidden' });
-    }
+    if (!checkAdminSecret(req, res)) return;
     if (!bucket) {
         return res.status(500).json({ error: 'GCS bucket not configured' });
     }
+    next();
+}
+
+function requireAdminNoBucket(req, res, next) {
+    if (!checkAdminSecret(req, res)) return;
     next();
 }
 
@@ -43,28 +59,42 @@ router.post('/set-cors', requireAdmin, async (_req, res) => {
     }
 });
 
-// Make all existing proxy objects publicly readable (fixes 403 on already-uploaded files)
-router.post('/make-proxies-public', requireAdmin, async (_req, res) => {
+// Remove public read access from every user file (raw uploads, proxies,
+// exports, ...). Files are served only through /api/proxy/gcs-media, which
+// checks the owner (services/mediaAccess.js). Proxies used to be made public
+// here and on upload; run this once to close that. No-op on a uniform-access
+// bucket (check the bucket's IAM has no allUsers / allAuthenticatedUsers).
+router.post('/make-media-private', requireAdmin, async (_req, res) => {
     try {
-        const [files] = await bucket.getFiles({ prefix: 'proxies/' });
-        const results = { ok: [], failed: [] };
-
-        await Promise.all(files.map(async (file) => {
-            try {
-                await file.makePublic();
-                results.ok.push(file.name);
-            } catch (err) {
-                results.failed.push({ name: file.name, error: err.message });
-            }
-        }));
-
-        res.json({
-            success: true,
-            publicized: results.ok.length,
-            failed: results.failed.length,
-            failures: results.failed,
-        });
+        const { USER_PREFIXES } = require('../services/mediaAccess');
+        const results = { ok: 0, failed: [] };
+        for (const prefix of USER_PREFIXES) {
+            const [files] = await bucket.getFiles({ prefix: `${prefix}/` });
+            await Promise.all(files.map(async (file) => {
+                try {
+                    await file.makePrivate();
+                    results.ok++;
+                } catch (err) {
+                    results.failed.push({ name: file.name, error: err.message });
+                }
+            }));
+        }
+        res.json({ success: true, madePrivate: results.ok, failed: results.failed.length, failures: results.failed.slice(0, 50) });
     } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Run the retention job now. ?dryRun=1 reports what would be warned and
+// deleted without sending emails or deleting anything.
+router.post('/retention/run', requireAdminNoBucket, async (req, res) => {
+    try {
+        const dryRun = ['1', 'true', 'yes'].includes(String(req.query.dryRun || '').toLowerCase());
+        const { runRetentionNow } = require('../services/retentionScheduler');
+        const report = await runRetentionNow({ dryRun });
+        res.json({ success: true, dryRun, report });
+    } catch (err) {
+        console.error('[admin/retention] failed:', err.message);
         res.status(500).json({ error: err.message });
     }
 });

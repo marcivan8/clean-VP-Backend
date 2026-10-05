@@ -13,6 +13,10 @@ import SuccessPage from './pages/SuccessPage';
 import CookiePolicyPage from './pages/CookiePolicyPage';
 import UserStylePage from './pages/UserStylePage';
 import AccountPage from './pages/AccountPage';
+import TermsPage from './pages/TermsPage';
+import LegalNoticePage from './pages/LegalNoticePage';
+import UnsubscribePage from './pages/UnsubscribePage';
+import ConsentBanner from './components/ConsentBanner';
 import { supabase } from './lib/supabaseClient';
 import useSessionStore from './store/useSessionStore';
 
@@ -61,7 +65,11 @@ function App() {
                 <Route path="/about"    element={<AboutPage />} />
                 <Route path="/success"       element={<SuccessPage />} />
                 <Route path="/cookie-policy" element={<CookiePolicyPage />} />
+                <Route path="/terms"         element={<TermsPage />} />
+                <Route path="/legal"         element={<LegalNoticePage />} />
+                <Route path="/unsubscribe"   element={<UnsubscribePage />} />
             </Routes>
+            <ConsentBanner />
         </BrowserRouter>
     );
 }

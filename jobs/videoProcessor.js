@@ -51,16 +51,10 @@ async function uploadToStorage(localFilePath, destinationPath) {
     } else {
         await bucket.upload(localFilePath, {
             destination: destinationPath,
-            metadata: { cacheControl: 'public, max-age=31536000' },
+            // Private: served only through /api/proxy/gcs-media, which checks
+            // the owner (services/mediaAccess.js). It used to be made public.
+            metadata: { cacheControl: 'private, max-age=3600' },
         });
-        // Try to make public (works on fine-grained-ACL buckets; no-op on uniform-access).
-        try {
-            await bucket.file(destinationPath).makePublic();
-        } catch (err) {
-            if (!err.message?.includes('uniform bucket-level access')) {
-                console.warn(`[uploadToStorage] makePublic failed for ${destinationPath}:`, err.message);
-            }
-        }
         // Always route through our server proxy so clients never hit GCS directly.
         // This avoids 403s on private objects and keeps CORS handling server-side.
         return `/api/proxy/gcs-media/${destinationPath}`;

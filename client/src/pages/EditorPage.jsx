@@ -3,27 +3,25 @@ import { useParams, useNavigate } from 'react-router-dom';
 import IDELayout from '../layouts/IDELayout';
 import useTimelineStore from '../store/useTimelineStore';
 import { getProject } from '../lib/projectsApi.js';
+import { ensureMediaSession } from '../utils/mediaSession.js';
 
 console.log('[EditorPage] Component Rendered');
 
-// All 35 caption-editor fonts, injected on-demand rather than blocking the
+// All caption-editor fonts, served by Bunny Fonts (EU, no visitor logging)
+// instead of Google Fonts, so opening the editor does not send the visitor's
+// IP address to Google. Injected on-demand rather than blocking the
 // landing page. Loaded once per session — browser caches the font files so
 // subsequent editor opens have zero latency.
 const EDITOR_FONTS_URL =
-    'https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Montserrat:wght@300;400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700;800&family=Barlow+Condensed:wght@600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400;1,700&family=Lora:wght@400;700&family=Merriweather:ital,wght@0,300;0,400;0,700;1,400&family=DM+Serif+Display&family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700&family=DM+Sans:wght@400;500;600&family=Unbounded:wght@700;900&family=Nunito:wght@400;600;700;800&family=Poppins:wght@400;500;600;700&family=Quicksand:wght@400;500;700&family=Josefin+Sans:wght@400;700&family=Raleway:wght@400;500;700&family=Rajdhani:wght@500;600;700&family=Exo+2:wght@600;700;800&family=Orbitron:wght@700;900&family=Oxanium:wght@600;700&family=Roboto+Condensed:wght@400;700&family=Oswald:wght@400;500;600;700&family=Teko:wght@500;600;700&family=Black+Han+Sans&family=Saira+Condensed:wght@700;800&family=Cabin:wght@600;700&family=Caveat:wght@400;600;700&family=Pacifico&family=Kalam:wght@400;700&family=Satisfy&family=Dancing+Script:wght@400;700&family=Boogaloo&family=Righteous&family=Press+Start+2P&family=Audiowide&family=Outfit:wght@300;400;500;600;700;800&family=Roboto:wght@300;400;500;700&family=Lato:wght@300;400;700&display=swap';
+    'https://fonts.bunny.net/css?family=anton:400|bebas-neue:400|montserrat:300,400,500,600,700,800,900|inter:300,400,500,600,700,800|barlow-condensed:600,700|playfair-display:400,700,400i,700i|lora:400,700|merriweather:300,400,700,400i|dm-serif-display:400|cormorant-garamond:400,600,700,400i,600i,700i|dm-sans:400,500,600|unbounded:700,900|nunito:400,600,700,800|poppins:400,500,600,700|quicksand:400,500,700|josefin-sans:400,700|raleway:400,500,700|rajdhani:500,600,700|exo-2:600,700,800|orbitron:700,900|oxanium:600,700|roboto-condensed:400,700|oswald:400,500,600,700|teko:500,600,700|black-han-sans:400|saira-condensed:700,800|cabin:600,700|caveat:400,600,700|pacifico:400|kalam:400,700|satisfy:400|dancing-script:400,700|boogaloo:400|righteous:400|press-start-2p:400|audiowide:400|outfit:300,400,500,600,700,800|roboto:300,400,500,700|lato:300,400,700&display=swap';
 
 function injectEditorFonts() {
     if (document.getElementById('vibed-editor-fonts')) return; // already injected
     const pc1 = document.createElement('link');
     pc1.rel = 'preconnect';
-    pc1.href = 'https://fonts.googleapis.com';
+    pc1.href = 'https://fonts.bunny.net';
+    pc1.crossOrigin = 'anonymous';
     pc1.id = 'vibed-fonts-pc1';
-
-    const pc2 = document.createElement('link');
-    pc2.rel = 'preconnect';
-    pc2.href = 'https://fonts.gstatic.com';
-    pc2.crossOrigin = 'anonymous';
-    pc2.id = 'vibed-fonts-pc2';
 
     const link = document.createElement('link');
     link.rel = 'stylesheet';
@@ -31,7 +29,6 @@ function injectEditorFonts() {
     link.id = 'vibed-editor-fonts';
 
     document.head.appendChild(pc1);
-    document.head.appendChild(pc2);
     document.head.appendChild(link);
 }
 
@@ -68,7 +65,8 @@ const EditorPage = () => {
         async function fetchAndHydrate() {
             setCloudLoading(true);
             try {
-                const project = await getProject(projectId);
+                // Media cookie first: the project's videos are owner-only.
+                const [project] = await Promise.all([getProject(projectId), ensureMediaSession()]);
 
                 if (!project) {
                     // Not found or access denied — bounce back to dashboard

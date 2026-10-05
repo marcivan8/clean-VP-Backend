@@ -7,6 +7,12 @@ import './index.css'
 // blank because t() returns undefined for every key.
 import './i18n.js'
 import App from './App.jsx'
+import { supabase } from './lib/supabaseClient'
+import { startMediaSessionKeeper } from './utils/mediaSession.js'
+import { hasReplayConsent, onConsentChange } from './lib/consent.js'
+
+// Signed media cookie: lets this browser stream the user's own videos (owner-only).
+startMediaSessionKeeper(supabase)
 
 // DSN is public by design — safe to hardcode as fallback.
 // Override with VITE_SENTRY_DSN env var if you need per-environment DSNs.
@@ -19,15 +25,14 @@ if (SENTRY_DSN) {
         environment: import.meta.env.MODE,           // 'development' | 'production'
         integrations: [
             Sentry.browserTracingIntegration(),
-            Sentry.replayIntegration({
-                maskAllText: false,
-                blockAllMedia: false,
-            }),
+            // Session Replay is NOT listed here: it only starts after the
+            // visitor accepts it in the consent banner (see below).
         ],
         // 10 % of transactions captured for performance monitoring.
-        // 100 % of sessions that had an error get a replay.
+        // With replay consent, 100 % of sessions that had an error get a replay.
         tracesSampleRate: 0.1,
-        replaysSessionSampleRate: 0.05,
+        sendDefaultPii: false,
+        replaysSessionSampleRate: 0,      // never record sessions without an error
         replaysOnErrorSampleRate: 1.0,
         // Known-noisy, non-actionable errors that originate OUTSIDE Vibed's own
         // code — filtered here rather than left to alert-fatigue the Sentry feed.
@@ -63,6 +68,39 @@ if (SENTRY_DSN) {
         ],
     });
 }
+
+// Sentry Session Replay, only with consent (cookie banner). All text is
+// masked and all images and video are blocked, so a replay shows the layout
+// of the editor, never the user's content.
+let replayInstance = null;
+let replayActive = false;
+function syncReplayWithConsent() {
+    if (!SENTRY_DSN) return;
+    try {
+        if (hasReplayConsent()) {
+            if (replayActive) return;
+            if (!replayInstance) {
+                replayInstance = Sentry.replayIntegration({
+                    maskAllText: true,
+                    maskAllInputs: true,
+                    blockAllMedia: true,
+                });
+                Sentry.addIntegration(replayInstance);
+            } else {
+                // Consent given again after a refusal: resume error-only buffering.
+                replayInstance.startBuffering();
+            }
+            replayActive = true;
+        } else if (replayActive && replayInstance) {
+            replayInstance.stop();
+            replayActive = false;
+        }
+    } catch (err) {
+        console.warn('[consent] replay toggle failed:', err?.message);
+    }
+}
+syncReplayWithConsent();
+onConsentChange(syncReplayWithConsent);
 
 // Recover from a stale client bundle: if the browser loaded this app before
 // a newer deploy replaced client/dist, a lazy-loaded chunk (Compositor,

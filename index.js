@@ -53,22 +53,17 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc:              ["'self'"],
-      scriptSrc:               ["'self'",
-                                "https://cdn.iubenda.com",
-                                // Hash of the Iubenda config inline script in the old build.
-                                // Safe to remove once the frontend is rebuilt (the new build
-                                // loads /iubenda-config.js as an external file instead).
-                                "'sha256-nkFQkdgl82bXmdiehongvIXI8phjn3IWsIBf7u/rHH8='"],
-      styleSrc:                ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      fontSrc:                 ["'self'", "https://fonts.gstatic.com"],
-      imgSrc:                  ["'self'", "data:", "blob:", "https://storage.googleapis.com", "https://*.iubenda.com"],
+      scriptSrc:               ["'self'"],
+      // Editor fonts come from Bunny Fonts (EU), not Google Fonts.
+      styleSrc:                ["'self'", "'unsafe-inline'", "https://fonts.bunny.net"],
+      fontSrc:                 ["'self'", "https://fonts.bunny.net"],
+      imgSrc:                  ["'self'", "data:", "blob:", "https://storage.googleapis.com"],
       mediaSrc:                ["'self'", "blob:", "https://storage.googleapis.com"],
       connectSrc: [
         "'self'",
         "https://*.supabase.co",
         "wss://*.supabase.co",
         "https://storage.googleapis.com",
-        "https://*.iubenda.com",
         // Sentry error reporting — both ingest domains (EU + global)
         "https://*.ingest.sentry.io",
         "https://*.ingest.de.sentry.io",
@@ -189,7 +184,13 @@ app.use((req, res, next) => {
 });
 
 // Static files for uploads
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Local storage files. Same access rule as /api/proxy/gcs-media: a user's
+// files only for that user (media cookie), shared library folders for anyone.
+// This used to serve the whole folder (temp uploads under their original
+// names included) to anyone.
+app.use('/uploads',
+  require('./services/mediaAccess').requireMediaAccess(req => decodeURIComponent(req.path), { localUploads: true }),
+  express.static(path.join(__dirname, 'uploads')));
 
 // Import routes - ONLY auth and analyze (no payment routes)
 let authRoutes, analyzeRoutes, exportRoutes, audioRoutes;
@@ -251,6 +252,7 @@ app.get('/api/analyze/test', (req, res) => {
 
 // Mount API routes — rate limiters applied to expensive endpoints
 app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/email', authLimiter, require('./routes/emailRoutes')); // Unsubscribe links
 app.use('/api/analyze', uploadLimiter, analyzeRoutes);
 app.use('/api/v2/analyze', uploadLimiter, analyzeRoutes);
 app.use('/analyze', uploadLimiter, analyzeRoutes);          // legacy/proxy
@@ -396,6 +398,14 @@ if (require.main === module) {
     const runCleanup = require('./scripts/cleanup');
     runCleanup();
     setInterval(runCleanup, 24 * 60 * 60 * 1000);
+
+    // Daily project retention (privacy policy: Free 7 days, Creator 30 days,
+    // Pro while subscribed; one reminder email 24 h before). Production only.
+    try {
+      require('./services/retentionScheduler').startRetentionSchedule();
+    } catch (err) {
+      console.error('[retention] schedule unavailable:', err.message);
+    }
 
     // Report whether the tables our features read from actually contain data.
     // Four separate CLAUDE.md rules (R12/R21/R37/R38) describe the same bug

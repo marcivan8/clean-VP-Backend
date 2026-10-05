@@ -1,29 +1,117 @@
 {
-  "eyebrow": "LÉGAL",
-  "title": "Politique relative aux cookies",
-  "lastUpdated": "Dernière mise à jour : juin 2026 · Vibed Studio",
-  "section1": {
-    "title": "Que sont les cookies ?",
-    "body": "Les cookies sont de petits fichiers texte déposés sur votre appareil lorsque vous visitez un site web. Ils sont largement utilisés pour faire fonctionner les sites web, ou les faire fonctionner plus efficacement, et pour fournir des informations à leurs propriétaires."
-  },
-  "section2": {
-    "title": "Les cookies que nous utilisons",
-    "durationLabel": "Durée :",
-    "items": [
-      { "name": "Authentification (Supabase)", "type": "Strictement nécessaire", "purpose": "Vous maintient connecté pendant votre session. Sans ce cookie, vous seriez déconnecté à chaque page.", "duration": "Session / 1 an" },
-      { "name": "Consentement aux cookies (Iubenda)", "type": "Strictement nécessaire", "purpose": "Enregistre vos préférences de consentement aux cookies afin de ne pas afficher la bannière à chaque visite.", "duration": "1 an" },
-      { "name": "Analyses", "type": "Optionnel", "purpose": "Nous n'utilisons actuellement aucun cookie d'analyse tiers. Si cela change, nous mettrons à jour cette politique et solliciterons un nouveau consentement.", "duration": "N/A" }
-    ]
-  },
-  "section3": {
-    "title": "Gérer vos préférences",
-    "p1": "Vous pouvez consulter et modifier vos préférences de cookies à tout moment en cliquant sur le lien des paramètres de cookies dans le pied de page. Vous pouvez également supprimer les cookies via les paramètres de votre navigateur — notez que cela peut affecter le fonctionnement du site.",
-    "p2Pre": "Pour plus de détails sur la façon dont nous traitons vos données personnelles, consultez notre ",
-    "p2LinkText": "Politique de confidentialité",
-    "p2Post": "."
-  },
-  "section4": {
-    "title": "Contact",
-    "p1Pre": "Des questions sur cette politique ? "
-  }
+  "eyebrow": "Mentions juridiques",
+  "title": "Politique des cookies",
+  "lastUpdated": "Dernière mise à jour : {{date}}",
+  "intro": [
+    "Comme la plupart des applications web, Vibed enregistre quelques informations dans votre navigateur, sous forme de cookies ou dans le stockage local. Cette page les recense toutes. Nous n'utilisons aucun cookie publicitaire ni de mesure d'audience, et aucun tiers ne vous suit d'un site à l'autre par l'intermédiaire de Vibed."
+  ],
+  "sections": [
+    {
+      "id": "necessary",
+      "title": "1. Strictement nécessaires",
+      "blocks": [
+        "Ils sont indispensables au fonctionnement du service ou conservent un réglage que vous avez choisi. La loi ne soumet pas leur dépôt à votre consentement, et les désactiver empêcherait Vibed de fonctionner.",
+        {
+          "table": {
+            "head": [
+              "Nom",
+              "Finalité",
+              "Durée"
+            ],
+            "rows": [
+              [
+                "sb-…-auth-token (stockage local)",
+                "Maintient votre connexion",
+                "Jusqu'à la déconnexion ou l'expiration de la session"
+              ],
+              [
+                "vibed_media (cookie)",
+                "Permet à votre navigateur de charger vos propres vidéos de façon sécurisée. Signé, HttpOnly, jamais lisible par un script",
+                "12 heures"
+              ],
+              [
+                "vp_session, vp_session_expires (stockage local)",
+                "Session temporaire lorsque vous utilisez l'éditeur sans compte",
+                "48 heures"
+              ],
+              [
+                "vp_autosave, vp_project_id, vp_project_name, vp_timeline_history",
+                "Copie locale du projet ouvert et de son historique d'annulation, pour ne rien perdre",
+                "Jusqu'à remplacement ou effacement"
+              ],
+              [
+                "vp-user-memory, vp_user_presets, vp_preset_favorites, vp_main_track_magnet",
+                "Vos préférences et préréglages de l'éditeur",
+                "Jusqu'à effacement"
+              ],
+              [
+                "vp_onboarding_tour_seen, vp_pending_jobs, vibed.activeExport.*",
+                "Mémorise la visite guidée et suit les imports et exports en cours",
+                "Jusqu'à effacement"
+              ],
+              [
+                "vibed_lang",
+                "Votre langue",
+                "Jusqu'à effacement"
+              ],
+              [
+                "vibed_consent_v1",
+                "Votre choix dans le bandeau cookies",
+                "6 mois"
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "optional",
+      "title": "2. Facultatifs, soumis à votre consentement",
+      "blocks": [
+        {
+          "table": {
+            "head": [
+              "Outil",
+              "Finalité",
+              "Durée"
+            ],
+            "rows": [
+              [
+                "Sentry Session Replay (prestataire : Sentry, données hébergées en Allemagne)",
+                "Lorsque l'éditeur rencontre une erreur, une courte relecture de l'écran nous aide à la comprendre et à la corriger. Tous les textes et champs de saisie sont masqués, les images et vidéos sont bloquées : la relecture montre la mise en page, jamais vos contenus. Rien n'est enregistré en l'absence d'erreur.",
+                "Mémoire tampon limitée à la session du navigateur ; relectures conservées 90 jours au maximum"
+              ]
+            ]
+          }
+        },
+        "Cet outil ne fonctionne que si vous cliquez sur Accepter dans le bandeau. Si vous refusez, l'éditeur fonctionne exactement de la même façon."
+      ]
+    },
+    {
+      "id": "third",
+      "title": "3. Contenus chargés depuis d'autres services",
+      "blocks": [
+        "L'éditeur charge les polices des sous-titres depuis Bunny Fonts, un service européen qui ne dépose pas de cookie et n'enregistre pas l'adresse IP des visiteurs. Les rapports d'erreur (sans relecture) sont envoyés à Sentry pour nous aider à corriger les bugs ; ils n'utilisent pas de cookie."
+      ]
+    },
+    {
+      "id": "choice",
+      "title": "4. Modifier votre choix",
+      "blocks": [
+        "Vous pouvez modifier votre choix à tout moment, avec effet immédiat.",
+        {
+          "action": "cookie-settings",
+          "label": "Ouvrir la gestion des cookies"
+        },
+        "Vous pouvez aussi supprimer les cookies et le stockage local depuis les réglages de votre navigateur. Cela vous déconnecte et efface les copies locales du travail non enregistré."
+      ]
+    },
+    {
+      "id": "more",
+      "title": "5. En savoir plus",
+      "blocks": [
+        "La manière dont nous traitons les données personnelles est décrite dans notre [Politique de confidentialité](/privacy). Pour toute question, écrivez à [{{email}}](mailto:{{email}})."
+      ]
+    }
+  ]
 }

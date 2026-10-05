@@ -244,10 +244,13 @@ router.delete('/account', authenticateUser, async (req, res) => {
   console.log(`[auth] DELETE account requested for user: ${userId}`);
 
   try {
-    // 1. Delete GCS files (raw + proxy)
+    // 1. Delete every stored file of this user: uploads, proxies, exports,
+    //    thumbnails, waveforms, processed audio, custom LUTs... (it used to
+    //    delete raw/ and proxies/ only, leaving exported videos behind).
     const bucket = storageConfig.bucket;
     if (bucket) {
-      for (const prefix of [`raw/${userId}/`, `proxies/${userId}/`]) {
+      const { USER_PREFIXES } = require('../services/mediaAccess');
+      for (const prefix of [...USER_PREFIXES].map(p => `${p}/${userId}/`)) {
         try {
           const [files] = await bucket.getFiles({ prefix });
           await Promise.all(files.map(f => f.delete().catch(() => {})));
@@ -259,8 +262,17 @@ router.delete('/account', authenticateUser, async (req, res) => {
       }
     }
 
-    // 2. Delete DB rows (non-fatal individually)
+    // 2. Delete DB rows (non-fatal individually). Most user tables cascade
+    //    from auth.users (projects, usage_events, editing profile, presets,
+    //    favorites, media_assets...); these two do not.
     await supabaseAdmin.from('video_analyses').delete().eq('user_id', userId);
+    await supabaseAdmin.from('projects').delete().eq('user_id', userId);
+    // These keep their rows with user_id set to null when the auth user goes
+    // (ON DELETE SET NULL) or have no foreign key at all: delete them outright.
+    for (const table of ['anonymous_sessions', 'asset_usage_log', 'timeline_event_log', 'usage_logs']) {
+      const { error } = await supabaseAdmin.from(table).delete().eq('user_id', userId);
+      if (error) console.warn(`[auth] ${table} cleanup skipped: ${error.message}`);
+    }
     await supabaseAdmin.from('profiles').delete().eq('id', userId);
 
     // 3. Delete from Supabase Auth last (invalidates the token used for this request)

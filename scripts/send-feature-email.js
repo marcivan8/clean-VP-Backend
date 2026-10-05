@@ -14,15 +14,18 @@
 //   node scripts/send-feature-email.js            # sends to everyone below
 //   node scripts/send-feature-email.js --dry-run   # logs payloads, sends nothing
 //
-// Requires SUPABASE_URL and SUPABASE_ANON_KEY in your environment (already in
-// your .env). The edge function itself needs RESEND_API_KEY and FROM_EMAIL
+// Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in your environment:
+// send-email refuses the anon key since 2026-10 (it made the function an
+// open relay). Opt-out is honoured only when data.user_id is passed.
+// (your .env). The edge function itself needs RESEND_API_KEY and FROM_EMAIL
 // configured as Supabase Edge Function secrets — those are separate from your
 // local .env and were presumably set already since 'welcome'/'plan' emails
 // are live in production; worth a quick check in the Supabase dashboard
 // (Edge Functions → send-email → Secrets) if a send comes back failed.
 
+const { sendTransactionalEmail } = require('../services/emailClient');
 const SUPABASE_URL  = process.env.SUPABASE_URL;
-const SUPABASE_ANON = process.env.SUPABASE_ANON_KEY;
+const SERVICE_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 // Users who have actually run at least one editing session, pulled from
 // Supabase on 2026-08-20. Excludes mariojaris2@gmail.com (your own account)
@@ -70,23 +73,15 @@ const DATA = {
 };
 
 async function sendFeatureEmail(to) {
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${SUPABASE_ANON}`,
-        },
-        body: JSON.stringify({ type: 'feature', to, data: DATA }),
-    });
-    const body = await res.json().catch(() => ({}));
-    return { ok: res.ok, status: res.status, body };
+    const ok = await sendTransactionalEmail('feature', to, DATA);
+    return { ok, status: ok ? 200 : 'failed', body: {} };
 }
 
 async function main() {
     const dryRun = process.argv.includes('--dry-run');
 
-    if (!SUPABASE_URL || !SUPABASE_ANON) {
-        console.error('Missing SUPABASE_URL or SUPABASE_ANON_KEY in the environment. Aborting.');
+    if (!SUPABASE_URL || !SERVICE_KEY) {
+        console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in the environment. Aborting.');
         process.exit(1);
     }
 
