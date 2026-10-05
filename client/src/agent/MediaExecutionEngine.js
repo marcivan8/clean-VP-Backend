@@ -51,6 +51,7 @@ import { selectAnimateMoments, sfxPlayableUrl, countMoments, CLUSTER_S } from '.
 import i18next from 'i18next';
 import { resolveRetakeSource, retakeReviewLines, makeRetakeT, findTranscript } from './retakeSource.js';
 import { clipSourceWords, buildRhythmRequest, shotsToKeyframes } from './rhythmShots.js';
+import { findBestShortWindow, rangesOutside } from './shortPicker.js';
 
 // See _deriveAudioPeaksForClip below.
 const DERIVED_PEAK_DB_FLOOR = -8;
@@ -854,6 +855,35 @@ export class MediaExecutionEngine {
                 if (nBroll > 0) parts.push(`${nBroll} b-roll cutaway(s) on the words they illustrate${onMoments ? ` (${onMoments} on key moments)` : ''}`);
                 if (nPops > 0) parts.push(`${nPops} number pop(s)`);
                 return { action, success: true, message: `Placed ${parts.join(' and ')}.` };
+            }
+
+            // ── R91: Reel style, keep the strongest 15-60 s ───────────────────
+            case 'extract_short': {
+                const st = useTimelineStore.getState();
+                const words = Array.isArray(st.captions) ? st.captions : [];
+                if (words.length === 0) {
+                    return { action, success: false, message: 'Picking the best moment needs a transcript. Run "add captions" first.' };
+                }
+                const target = Math.min(180, Math.max(10, Number(args.target) || 60));
+                const tracks = st.tracks || [];
+                const total = tracks.reduce((m, t) => Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
+                if (total <= target + 1) {
+                    return { action, success: true, message: `The video is already ${Math.round(total)} s, short enough for a ${target} s short. Nothing was cut.` };
+                }
+                const events = await this._fetchSemanticEvents();
+                const win = findBestShortWindow(words, { events, target, min: Math.min(15, target), max: target });
+                if (!win) {
+                    return { action, success: false, message: 'No sentence-aligned moment of the right length was found in the transcript.' };
+                }
+                const ranges = rangesOutside(win, total);
+                if (ranges.length === 0) {
+                    return { action, success: true, message: 'The strongest moment already covers the whole video. Nothing was cut.' };
+                }
+                const cut = st.cutTimelineRanges(ranges);
+                if (!cut) return { action, success: false, message: 'The short could not be cut from the timeline.' };
+                const len = Math.round(Math.min(total, win.end + 0.3) - Math.max(0, win.start - 0.15));
+                const hook = win.hookEvent ? ' It opens on a key moment.' : '';
+                return { action, success: true, message: `Kept the strongest ${len} s (from ${win.start.toFixed(1)} s): "${win.text.slice(0, 80)}".${hook}` };
             }
 
             // ── R90 (A7): one-click style recipes ────────────────────────────

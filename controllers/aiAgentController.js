@@ -2,6 +2,9 @@ const OpenAI = require('openai');
 const { getAIClient, isAIConfigured, resolveModel } = require('../services/AIProvider');
 const { analyzeStructure } = require('../viralEngine/structure.js');
 
+// R91 — editing styles accepted in ProjectContext.editingStyle (client: agent/EditingStyles.js).
+const EDITING_STYLE_IDS = ['vlog', 'talking_head', 'interview', 'podcast', 'reel'];
+
 const openai = getAIClient();
 
 const chatAgentHandler = async (req, res) => {
@@ -143,6 +146,11 @@ The context includes editingMode = "CREATION" | "REPURPOSE".
 - CREATION: Single long raw clip, no cuts, no structure. Goal: build a new edit.
 - REPURPOSE: Multiple clips arranged, existing structure. Goal: adapt existing edit.
 Your suggestions MUST differ based on mode.
+
+When ProjectContext.editingStyle is present (vlog, talking_head, interview,
+podcast, reel), the user picked that editing style. Follow its guidance for
+everything the request leaves open: pacing, how tight the cuts are, caption
+look, transitions and target length. An explicit request always wins.
 
 ═══════════════════════════════════════════════════
 ⏱ DURATION LOGIC RULES
@@ -422,6 +430,15 @@ You MUST respond by calling the execute_video_edit function — never as plain t
         const enrichedContext = {
             ProjectContext: {
                 editingMode: proj.editingMode,
+                // R91: editing style picked under the chat box. Id from a fixed
+                // list, guidance capped: it is the user's own setting, but it
+                // must not become a channel for arbitrary prompt text.
+                ...(proj.editingStyle && EDITING_STYLE_IDS.includes(proj.editingStyle.id) ? {
+                    editingStyle: {
+                        id: proj.editingStyle.id,
+                        guidance: String(proj.editingStyle.guidance || '').slice(0, 300),
+                    },
+                } : {}),
             },
             TimelineState: {
                 totalTimelineDuration: tl.totalTimelineDuration,

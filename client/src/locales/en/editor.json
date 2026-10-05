@@ -851,5 +851,30 @@
     },
     "syncCutaways": "Sync b-roll and number pops to speech",
     "note": "Needs captions. One undo reverts the whole recipe."
+  },
+  "editingStyles": {
+    "label": "Style",
+    "none": "No style",
+    "modeLabel": "Editing mode",
+    "names": {
+      "vlog": "Vlog",
+      "talking_head": "Talking head",
+      "interview": "Interview",
+      "podcast": "Podcast",
+      "reel": "Reel"
+    },
+    "hints": {
+      "none": "Roka works out the format from your footage",
+      "vlog": "Story order, b-roll on what you describe, light energy",
+      "talking_head": "One speaker to camera, tight cuts, punchy captions",
+      "interview": "Questions and answers kept whole, clean captions",
+      "podcast": "Long conversation, clear audio, calm pacing",
+      "reel": "Short social cut: best moment first, 9:16, under 60 s"
+    },
+    "normal": "Normal",
+    "auto": "Auto",
+    "normalHint": "Roka does what you ask, in your style",
+    "autoHint": "Roka edits the whole video in your style. One undo reverts it.",
+    "autoPlaceholder": "Auto: say \"edit it\" or describe the video, Roka edits it end to end"
   }
 }

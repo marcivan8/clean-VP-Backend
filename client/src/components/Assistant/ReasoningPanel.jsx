@@ -17,6 +17,7 @@ import { CAPTION_STYLES, FONT_STACK } from './captionStylePacks.js';
 import BrainPanel from '../BrainPanel.jsx';
 import { useTranslation } from 'react-i18next';
 import { enqueueIfVideoNotReady } from '../../agent/rokaPromptQueue.js';
+import EditingStylePicker from './EditingStylePicker.jsx';
 
 
 // --- Sub-components ---
@@ -690,6 +691,8 @@ const CaptionStylesCard = ({ log }) => {
 const ReasoningPanel = ({ className }) => {
     const { t } = useTranslation('editor');
     const { logs, suggestions, isAnalyzing, setIsAnalyzing, addLog, addSuggestion, removeSuggestion, contextualSuggestion, quickChips, setActiveTab } = useAIStore();
+    // R91: Auto mode changes the input hint (EditingStylePicker below the box).
+    const editingMode = useTimelineStore(s => s.editingMode);
     const { uploadedFile, performAction, assets, tracks, projectId } = useTimelineStore(useShallow(state => ({
         uploadedFile:  state.uploadedFile,
         performAction: state.performAction,
@@ -1212,7 +1215,7 @@ const ReasoningPanel = ({ className }) => {
 
             {/* Input Area */}
             <div className="p-4 border-t" style={{ borderColor: 'var(--line-soft)', background: 'var(--glass)' }}>
-                <div className="relative group rounded-lg overflow-hidden transition-all"
+                <div className="relative group rounded-lg transition-all"
                     style={{ border: '1px solid var(--line)', background: 'rgba(0,0,0,0.35)' }}
                     onFocusCapture={e => e.currentTarget.style.border = '1px solid var(--accent)'}
                     onBlurCapture={e => e.currentTarget.style.border = '1px solid var(--line)'}
@@ -1223,7 +1226,7 @@ const ReasoningPanel = ({ className }) => {
                         disabled={isAnalyzing}
                         onKeyDown={handleKeyDown}
                         onInput={handleInput}
-                        placeholder={isAnalyzing ? t('assistant.rokaWorking') : contextualSuggestion ? t('assistant.tryPlaceholder', { suggestion: contextualSuggestion }) : t('assistant.tellRokaPlaceholder')}
+                        placeholder={isAnalyzing ? t('assistant.rokaWorking') : editingMode === 'auto' ? t('editingStyles.autoPlaceholder') : contextualSuggestion ? t('assistant.tryPlaceholder', { suggestion: contextualSuggestion }) : t('assistant.tellRokaPlaceholder')}
                         // text-[16px] md:text-sm: this panel is also the mobile AI bar's
                         // "expanded" view (see MobileAIBar's onExpand). Below 16px, iOS
                         // Safari auto-zooms the whole page on focus — same fix as
@@ -1233,8 +1236,13 @@ const ReasoningPanel = ({ className }) => {
                         className="w-full resize-none px-4 pt-3 pb-10 text-[16px] md:text-sm focus:outline-none transition-all disabled:opacity-50 placeholder:opacity-40"
                         style={{ background: 'transparent', color: 'var(--fg)', fontFamily: 'var(--f-sans)', lineHeight: '1.5', minHeight: '88px', maxHeight: '160px' }}
                     />
+                    {/* R91: editing style + Normal/Auto, like a model picker */}
+                    {/* Desktop only (this panel is also the mobile expanded view). */}
+                    <div className="absolute bottom-2 left-2.5 hidden md:block">
+                        <EditingStylePicker disabled={isAnalyzing} />
+                    </div>
                     <div className="absolute bottom-2.5 right-2.5 flex items-center gap-2">
-                        <span className="text-[10px] opacity-30" style={{ color: 'var(--fg)', fontFamily: 'var(--f-mono)' }}>{t('assistant.newlineHint')}</span>
+                        <span className="text-[10px] opacity-30 hidden 2xl:inline" style={{ color: 'var(--fg)', fontFamily: 'var(--f-mono)' }}>{t('assistant.newlineHint')}</span>
                         <button
                             onClick={processCommand}
                             disabled={isAnalyzing}

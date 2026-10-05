@@ -273,6 +273,19 @@ export const COMMANDS = [
         destructive: false,
     },
     {
+        // R91 — Reel style: keep the strongest 15-60 s of a longer talk (agent/shortPicker.js).
+        id: 'extract_short',
+        category: 'edit',
+        label: 'Extract a short',
+        summary: 'Keeps the strongest 15-60 s of the talk, starting on a hook, and cuts the rest.',
+        phrases: ['extract a short', 'make a short', 'make it a short', 'cut a short', 'turn it into a short',
+                  'turn this into a reel', 'make a reel', 'best moment for a reel', 'best moment for a short',
+                  'repurpose into a short', 'repurpose it as a short', 'fais un short', 'extrais un short',
+                  'fais un reel', 'meilleur moment pour un short'],
+        destructive: true,
+        requires: ['transcript'],
+    },
+    {
         // R90 (to-do A7) — style recipes (motion/StyleRecipes.js).
         id: 'apply_style_recipe',
         category: 'macro',

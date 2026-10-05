@@ -198,6 +198,12 @@ const useTimelineStore = create(
             // Long-Form Intelligence Engine — stores ContentAnalyzer result
             contentAnalysis: _preRestoredProject?.contentAnalysis || null,
 
+            // R91 — editing style picked under the chat box (agent/EditingStyles.js),
+            // saved with the project. Mode is Normal or Auto; it is not saved, so a
+            // reload never resumes in Auto by surprise.
+            editingStyle: _preRestoredProject?.editingStyle || null,
+            editingMode: 'normal',
+
             // Speaker diarization map — populated after split_speakers completes.
             // Shape: { SPEAKER_00: { role: 'interviewer'|'guest'|null, label: string|null, words: [{word, start, end}] } }
             speakerMap: _preRestoredProject?.speakerMap || {},
@@ -573,6 +579,11 @@ const useTimelineStore = create(
 
             // Long-Form Intelligence Engine
             setContentAnalysis: (analysis) => set({ contentAnalysis: analysis }),
+            setEditingStyle: (styleId) => {
+                set({ editingStyle: styleId || null });
+                try { get().saveProject(); } catch (err) { console.error('[setEditingStyle] save failed:', err); }
+            },
+            setEditingMode: (mode) => set({ editingMode: mode === 'auto' ? 'auto' : 'normal' }),
             clearContentAnalysis: () => set({ contentAnalysis: null }),
 
             // Speaker diarization
@@ -2577,10 +2588,6 @@ const useTimelineStore = create(
 
             _saveHistory: () => {
                 const state = get();
-                // R89: inside a history group (a style recipe runs many store
-                // actions), only the snapshot taken when the group opened
-                // counts, so one undo reverts the whole operation.
-                if (state._historyGroupDepth > 0) return;
                 const snapshot = {
                     _timelineState: timelineManager.getState(),
                     currentTime: state.currentTime,
@@ -2595,17 +2602,53 @@ const useTimelineStore = create(
             saveToHistory: () => get()._saveHistory(),
 
             /**
-             * R89 — group several actions into ONE undo step. Saves one
-             * snapshot, then every _saveHistory() inside is ignored until the
-             * matching endHistoryGroup(). Always pair them in try/finally.
+             * R90/R91 — group several actions into ONE undo step (style
+             * recipes, synced cutaways, Auto mode). Always pair them in
+             * try/finally.
+             *
+             * Actions inside the group record history as usual, so the ones
+             * that patch or drop their own snapshot (ripple deletes, range
+             * cuts) keep working. When the outermost group closes, everything
+             * recorded inside is replaced by ONE snapshot of the state before
+             * the group, carrying the word-level captions and duration too,
+             * so undo restores the timeline and the captions together.
              */
             _historyGroupDepth: 0,
+            _historyGroupBase: null,
+            _historyGroupPast: null,
             beginHistoryGroup: () => {
-                if (get()._historyGroupDepth === 0) get()._saveHistory();
+                const st = get();
+                if (st._historyGroupDepth === 0) {
+                    set({
+                        _historyGroupBase: {
+                            _timelineState: timelineManager.getState(),
+                            currentTime: st.currentTime,
+                            activeClipId: st.activeClipId,
+                            selectedClipIds: [...(st.selectedClipIds || [])],
+                            _extraState: { captions: st.captions, duration: st.duration },
+                        },
+                        _historyGroupPast: st.past,
+                    });
+                }
                 set({ _historyGroupDepth: get()._historyGroupDepth + 1 });
             },
             endHistoryGroup: () => {
-                set({ _historyGroupDepth: Math.max(0, get()._historyGroupDepth - 1) });
+                const depth = Math.max(0, get()._historyGroupDepth - 1);
+                if (depth > 0) { set({ _historyGroupDepth: depth }); return; }
+                const st = get();
+                const base = st._historyGroupBase;
+                const before = st._historyGroupPast;
+                const changed = !!base && (
+                    st.past !== before
+                    || timelineManager.getState() !== base._timelineState
+                    || st.captions !== base._extraState.captions
+                    || st.duration !== base._extraState.duration);
+                if (base && changed) {
+                    set({ _historyGroupDepth: 0, _historyGroupBase: null, _historyGroupPast: null,
+                        past: [...(before || []), base].slice(-50), future: [] });
+                } else {
+                    set({ _historyGroupDepth: 0, _historyGroupBase: null, _historyGroupPast: null });
+                }
             },
 
             undo: () => set((state) => {
@@ -2730,6 +2773,7 @@ const useTimelineStore = create(
                     transcripts:          state.transcripts || {},
                     transcriptVerified:   state.transcriptVerified || {},
                     contentAnalysis:      state.contentAnalysis || null,
+                    editingStyle:         state.editingStyle || null,
                     speakerMap:           state.speakerMap || {},
                     diarizationByAsset:   state.diarizationByAsset || {},
                     sceneAnalysisByAsset: state.sceneAnalysisByAsset || {},
@@ -2812,6 +2856,9 @@ const useTimelineStore = create(
                     transcripts:          projectData.transcripts          ?? get().transcripts,
                     transcriptVerified:   projectData.transcriptVerified   ?? get().transcriptVerified,
                     contentAnalysis:      projectData.contentAnalysis      ?? get().contentAnalysis,
+                    // Per project: a project saved without one opens with none.
+                    editingStyle:         projectData.editingStyle || null,
+                    editingMode:          'normal',
                     speakerMap:           projectData.speakerMap           ?? get().speakerMap,
                     diarizationByAsset:   projectData.diarizationByAsset   ?? get().diarizationByAsset,
                     sceneAnalysisByAsset: projectData.sceneAnalysisByAsset ?? get().sceneAnalysisByAsset,

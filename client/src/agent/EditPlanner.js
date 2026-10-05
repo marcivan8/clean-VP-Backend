@@ -16,6 +16,7 @@ import { ClarificationGenerator } from './ClarificationGenerator.js';
 import { normalizeTransitionType, transitionFromText } from '../motion/TransitionFX.js';
 import { templateFromText } from '../motion/TemplateGraphics.js';
 import { recipeFromText } from '../motion/StyleRecipes.js';
+import { getEditingStyle } from './EditingStyles.js';
 
 export const ACTIONS = {
     COMPUTE_SPLIT_TIMESTAMP: 'compute_split_timestamp',
@@ -236,8 +237,20 @@ export class EditPlanner {
                     { step_id: 'step_1', action: 'sync_cutaways', args: { layout, broll: !numbersOnly, numberPops: true }, reason: 'Place cutaways and number pops on the words' },
                 ]);
             }
+            case 'extract_short': {
+                // R91: "a 30 second short" → 30; otherwise the style's target (Reel: 60).
+                const m = String(intent.originalPrompt || '').match(/(\d{2,3})\s*(?:s\b|sec|second|seconde)/i);
+                const styleTarget = getEditingStyle(useTimelineStore.getState().editingStyle)?.targetDuration;
+                const target = m ? Math.min(180, Math.max(10, Number(m[1]))) : (styleTarget || 60);
+                return this.buildPlan(planId, 'extract_short', [
+                    { step_id: 'step_1', action: 'extract_short', args: { target }, reason: `Keep the strongest ${target} s as a short` },
+                ]);
+            }
             case 'apply_style_recipe': {
-                const recipeId = recipeFromText(intent.originalPrompt);
+                const recipeId = recipeFromText(intent.originalPrompt)
+                    // R91: "apply my style" → the recipe of the style picked under the chat box.
+                    || getEditingStyle(useTimelineStore.getState().editingStyle)?.recipeId
+                    || null;
                 return this.buildPlan(planId, 'apply_style_recipe', [
                     { step_id: 'step_1', action: 'apply_style_recipe', args: { recipeId }, reason: recipeId ? `Apply the ${recipeId} style recipe` : 'Apply a style recipe' },
                 ]);
@@ -484,7 +497,7 @@ export class EditPlanner {
         return this.buildPlan(planId, 'add_transition', [
             // R89: the type is resolved onto the pack here (free text → pack
             // name); "between all the clips" → every cut, else the selected clip's end.
-            { step_id: 'step_1', action: ACTIONS.ADD_TRANSITION, clip_id: constraints.target === 'all' ? '$ALL_CLIPS' : clip?.id, type: normalizeTransitionType(constraints.type) || transitionFromText(constraints.type) || transitionFromText(originalPrompt) || 'dip', duration: constraints.duration || null, position: 'between_clips' }
+            { step_id: 'step_1', action: ACTIONS.ADD_TRANSITION, clip_id: constraints.target === 'all' ? '$ALL_CLIPS' : clip?.id, type: normalizeTransitionType(constraints.type) || transitionFromText(constraints.type) || transitionFromText(originalPrompt) || getEditingStyle(useTimelineStore.getState().editingStyle)?.transition || 'dip', duration: constraints.duration || null, position: 'between_clips' }
         ]);
     }
 
@@ -830,7 +843,8 @@ export class EditPlanner {
     }
 
     static planRhythmZoom(planId, constraints) {
-        const style = constraints?.style || 'dynamic';
+        // R91: the editing style's zoom rhythm when the request names none.
+        const style = constraints?.style || getEditingStyle(useTimelineStore.getState().editingStyle)?.rhythmZoom || 'dynamic';
         return this.buildPlan(planId, 'rhythm_zoom', [
             {
                 step_id: 'step_1',

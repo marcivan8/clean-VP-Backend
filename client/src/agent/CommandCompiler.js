@@ -1076,6 +1076,7 @@ const COMMAND_REGISTRY = new Map([
     ['emphasize_keywords', { compiler: compileAtomicStore('emphasize_keywords', 'Highlight the key word of each caption') }],
     ['add_template',              { compiler: compileAtomicStore('add_template', 'Add an animated template') }],
     ['sync_cutaways',             { compiler: compileAtomicStore('sync_cutaways', 'Place cutaways and number pops on the words') }],
+    ['extract_short',             { compiler: compileAtomicStore('extract_short', 'Keep the strongest moment as a short') }],
     ['apply_style_recipe',        { compiler: compileAtomicStore('apply_style_recipe', 'Apply a style recipe') }],
     ['layout_split_screen',       { compiler: compileAtomicStore('layout_split_screen', 'Split screen layout') }],
     ['layout_picture_in_picture', { compiler: compileAtomicStore('layout_picture_in_picture', 'Picture-in-picture layout') }],

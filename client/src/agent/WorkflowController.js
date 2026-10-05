@@ -7,6 +7,8 @@ import useTimelineStore from '../store/useTimelineStore.js';
 import { trackEvent } from '../utils/trackEvent.js';
 import { countMetric, distributionMetric, nowMs } from '../utils/metrics.js';
 import { getNextAction, getQuickChips } from './SuggestionEngine.js';
+import { runAutopilot, stopAutopilot } from './StyleAutopilot.js';
+import { isQuestion } from './EditingStyles.js';
 
 // Per-operation editorial descriptions and next-step suggestions.
 // Keys must match the `operation` field returned by IntentParser / EditJobManager.
@@ -25,6 +27,10 @@ const OPERATION_META = {
 
     // AI Animation Intelligence (R68)
     animate_automatically: { description: 'The most interesting moments — reveals, punchlines, emphasis, and emotional beats — now have motion graphics applied automatically.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
+
+    // R91 — Auto mode (editing style playbook) and the Reel short picker
+    auto_edit:         { description: 'Your editing style was applied from start to finish. One undo reverts the whole edit.', suggestion: 'Export for social', suggestionPrompt: 'Export for TikTok' },
+    extract_short:     { description: 'The strongest moment was kept as a short, starting on its hook.', suggestion: 'Set it to vertical', suggestionPrompt: 'Set the aspect ratio to 9:16' },
 
     // Compound clean + dynamic
     compound_clean_dynamic: { description: 'Silences removed and dynamic zoom applied — your edit flows tighter and punches with energy.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
@@ -134,9 +140,13 @@ const workflowMachine = createMachine({
                     const { userPrompt } = input;
                     console.log('[Workflow] Processing via EditJobManager...');
 
+                    // R91: Auto mode runs the editing style's whole playbook
+                    // (StyleAutopilot). Questions stay normal chat.
+                    const { editingMode } = useTimelineStore.getState();
+                    const auto = editingMode === 'auto' && !isQuestion(userPrompt);
                     // Use the new pipeline
-                    const result = await measureAICommand('prompt',
-                        () => editJobManager.processEditRequest(userPrompt));
+                    const result = await measureAICommand(auto ? 'auto' : 'prompt',
+                        () => (auto ? runAutopilot(userPrompt) : editJobManager.processEditRequest(userPrompt)));
 
                     console.log('[Workflow] Job completed:', result);
                     return result;
@@ -353,6 +363,7 @@ const workflowMachine = createMachine({
                     target: 'idle',
                     actions: () => {
                         countMetric('ai.command.timeout', { phase: 'prompt' });
+                        stopAutopilot(); // R91: no further Auto steps after the UI said it stopped.
                         console.error('[Workflow] Processing timed out after 15 minutes');
                         useAIStore.getState().setIsAnalyzing(false);
                         useAIStore.getState().addLog({
@@ -553,6 +564,7 @@ export class WorkflowController {
      * Cancel the current job
      */
     cancelCurrentJob() {
+        stopAutopilot(); // R91: Stop also ends an Auto run after the current step.
         const activeJob = useJobStore.getState().getActiveJob();
         if (activeJob && !TERMINAL_STATES.includes(activeJob.state)) {
             editJobManager.cancelJob(activeJob.id);

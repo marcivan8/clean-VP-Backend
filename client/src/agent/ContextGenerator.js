@@ -1,4 +1,5 @@
 import useTimelineStore from '../store/useTimelineStore.js';
+import { styleContext } from './EditingStyles.js';
 
 export class ContextGenerator {
     static getTimelineContext() {
@@ -157,7 +158,10 @@ export class ContextGenerator {
         return {
             ProjectContext: {
                 editingMode,
-                exportTarget: null // Set by user intent, not context
+                exportTarget: null, // Set by user intent, not context
+                // R91: the editing style picked under the chat box. Follow its
+                // guidance for anything the request leaves open.
+                editingStyle: styleContext(state.editingStyle, state.editingMode),
             },
             TimelineState: {
                 totalTimelineDuration: duration,

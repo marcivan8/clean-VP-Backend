@@ -42,11 +42,21 @@ export class EditJobManager {
     constructor() {
         this.activeActors = new Map();
         this.abortControllers = new Map();
+        // R91: jobs started by Auto mode skip the plan approval gate. The
+        // caller removes the id once the job settled (cleanup() runs before).
+        this.autoApproveJobs = new Set();
     }
 
-    async processEditRequest(userPrompt) {
+    /**
+     * @param {string} userPrompt
+     * @param {{autoApprove?: boolean}} [options] R91: Auto mode (StyleAutopilot)
+     *   runs each playbook step without the plan approval dialog. Normal
+     *   prompts never pass it.
+     */
+    async processEditRequest(userPrompt, options = {}) {
         const store = useJobStore.getState();
         const jobId = store.createJob(userPrompt);
+        if (options?.autoApprove) this.autoApproveJobs.add(jobId);
         console.log(`[EditJobManager] Starting job: ${jobId}`);
 
         const abortController = new AbortController();
@@ -302,7 +312,12 @@ export class EditJobManager {
         // MobileRokaApproval sheet answers this event instead of ApprovalDialog.
         const planFirst = !planResult.plan?.requiresApproval
             && shouldPlanFirst(intentResult.operation, isMobileViewport());
-        if (planResult.plan?.requiresApproval || planFirst) {
+        // R91: Auto mode already chose to run the whole playbook (one undo).
+        const autoApproved = this.autoApproveJobs.has(jobId);
+        if (autoApproved && (planResult.plan?.requiresApproval || planFirst)) {
+            logStep('Auto mode: applying without asking');
+        }
+        if (!autoApproved && (planResult.plan?.requiresApproval || planFirst)) {
             logStep('Waiting for your approval…');
             useAIStore.getState().setIsAnalyzing(false); // stop spinner while waiting
 

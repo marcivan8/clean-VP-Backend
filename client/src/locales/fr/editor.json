@@ -851,5 +851,30 @@
     },
     "syncCutaways": "Caler le b-roll et les chiffres sur la parole",
     "note": "Nécessite des sous-titres. Une seule annulation retire toute la recette."
+  },
+  "editingStyles": {
+    "label": "Style",
+    "none": "Aucun style",
+    "modeLabel": "Mode de montage",
+    "names": {
+      "vlog": "Vlog",
+      "talking_head": "Face caméra",
+      "interview": "Interview",
+      "podcast": "Podcast",
+      "reel": "Reel"
+    },
+    "hints": {
+      "none": "Roka devine le format à partir de vos rushes",
+      "vlog": "Ordre du récit, b-roll sur ce que vous décrivez, rythme léger",
+      "talking_head": "Une personne face caméra, coupes serrées, sous-titres percutants",
+      "interview": "Questions et réponses gardées entières, sous-titres sobres",
+      "podcast": "Longue conversation, son clair, rythme posé",
+      "reel": "Format court : meilleur moment en premier, 9:16, moins de 60 s"
+    },
+    "normal": "Normal",
+    "auto": "Auto",
+    "normalHint": "Roka fait ce que vous demandez, dans votre style",
+    "autoHint": "Roka monte toute la vidéo dans votre style. Une seule annulation suffit à tout retirer.",
+    "autoPlaceholder": "Auto : dites « monte la vidéo » ou décrivez-la, Roka fait tout le montage"
   }
 }
