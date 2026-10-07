@@ -155,7 +155,7 @@ section('6 · AI-tool switch wiring (MediaExecutionEngine.js)');
     check("case 'track_speaker' exists", /case 'track_speaker':/.test(mee));
     check("case 'blur_background' exists", /case 'blur_background':/.test(mee));
     check('_findClipAndTrack helper defined', /_findClipAndTrack\(store, clipId\)/.test(mee));
-    check('separate_speaker posts to /api/vision/separate-speaker', /\/api\/vision\/separate-speaker/.test(mee));
+    check('R92: separate_speaker uses the free browser matte (_ensureMatte), not the paid SAM2 job', /case 'separate_speaker'[\s\S]{0,400}_ensureMatte/.test(mee));
 }
 
 section('7 · export wiring (jobs/exportProcessor.js) — reuse + new primitive');
@@ -164,7 +164,7 @@ section('7 · export wiring (jobs/exportProcessor.js) — reuse + new primitive'
     check('defines renderBackgroundBlurSegment', /function renderBackgroundBlurSegment/.test(exp));
     check('uses alphamerge for the SAM2 matte composite', /alphamerge/.test(exp));
     check('branches on clip.layerTarget === \'background\'', /clip\.layerTarget === 'background'/.test(exp));
-    check('blur-background branch fails open (falls through, does not throw the whole export)', /falling back to unblurred/.test(exp));
+    check('background branch fails open (exports the clip unchanged, does not throw the whole export)', /background removal failed for clip[\s\S]{0,120}exporting it unchanged/.test(exp));
     // zoom_speaker/track_speaker need ZERO new export code — confirm the
     // EXISTING virtualCam crop path (R14) is untouched and still present.
     check('existing virtualCam crop path is unchanged (R14 — no new gating added)', /const vc = clip\.virtualCam;/.test(exp));
@@ -175,7 +175,7 @@ section('8 · preview wiring (ObjectLayerOverlay.jsx + VideoPlayer.jsx mount)');
     check('ObjectLayerOverlay.jsx exists', exists('client/src/components/Player/ObjectLayerOverlay.jsx'));
     const overlay = read('client/src/components/Player/ObjectLayerOverlay.jsx');
     check('reads clip.layerTarget === \'background\'', /clip\.layerTarget === 'background'/.test(overlay));
-    check('reads clip.layerMask.maskAssetUrl', /layerMask\?\.maskAssetUrl/.test(overlay));
+    check('reads the stored mask (path or link) and refreshes the link', /lm\?\.maskAssetPath \|\| lm\?\.maskAssetUrl/.test(overlay) && /freshMaskUrl/.test(overlay));
     check('composites via luma matte (getImageData/putImageData)', /getImageData/.test(overlay) && /putImageData/.test(overlay));
 
     const videoPlayer = read('client/src/components/Player/VideoPlayer.jsx');

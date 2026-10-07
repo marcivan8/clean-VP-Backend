@@ -91,9 +91,21 @@ export function parseTextShadow(value) {
     return best;
 }
 
+/**
+ * R92 round C: EVERY text clip with text goes through the program and is
+ * drawn as an image (RasterCaptionCompiler), the same box the preview draws:
+ * 80 % wide with wrapping, weight, italic, alignment, every shadow layer and a
+ * centred stroke. The plain drawtext path drew one unwrapped line, a yellow
+ * default instead of white, and dropped weight, italic, alignment and the
+ * shadow of static captions. drawtext stays as the fallback if the image pass
+ * fails. PARITY_ALL_TEXT = false restores the old selective behaviour.
+ */
+export const PARITY_ALL_TEXT = true;
+
 /** Does this clip need anything the CURRENT static drawtext path can't render? */
 function needsCaptionProgram(clip, layer) {
     if (!clip) return false;
+    if (PARITY_ALL_TEXT && String(clip.content || clip.name || '').trim()) return true;
     if (Array.isArray(layer?.animations) && layer.animations.length > 0) return true;
     if (parseTextShadow(clip.textShadow)) return true;
     if (clip.captionStyle?.uppercase) return true;
@@ -317,7 +329,7 @@ export function buildCaptionProgram(tracks, baseClips) {
             const emphasis = resolveEmphasis(clip, tokens.length);
             const rotated = geometry.some(g => Math.abs(Number(g.rotation) || 0) > 0.05);
             const wordRender = !!highlight || !!emphasis || needsReveal;
-            const raster = rotated || !!highlight || !!emphasis;
+            const raster = PARITY_ALL_TEXT || rotated || !!highlight || !!emphasis;
 
             entries.push({
                 clipId: clip.id,
@@ -327,9 +339,10 @@ export function buildCaptionProgram(tracks, baseClips) {
                 outputStart: Number(outputStart.toFixed(4)),
                 outputEnd: Number(outputEnd.toFixed(4)),
                 style: {
-                    fontFamily: clip.fontFamily,
+                    // R92: same defaults as the preview (TextOverlay: Inter, white).
+                    fontFamily: clip.fontFamily || 'Inter',
                     fontSize: Number(clip.fontSize) || 48,
-                    color: clip.color || '#FACC15',
+                    color: clip.color || '#ffffff',
                     stroke: clip.stroke || null,
                     shadow: parseTextShadow(clip.textShadow),
                 },

@@ -15,6 +15,7 @@
  * - On any network or parse error: sets `error`, never throws.
  */
 
+import { ledgerForBrain } from '../agent/EditRecap.js'; // R92 round B
 import { useState, useCallback, useRef } from 'react';
 import useTimelineStore from '../store/useTimelineStore';
 import { authFetch } from '../utils/authFetch';
@@ -86,6 +87,9 @@ function buildProjectState() {
     // Brain always reasoned as if the project were untouched and kept proposing
     // work the user had already completed. Send the real ledger, newest last.
     const editHistory = (state.editHistory || []).map(e => e.op).filter(Boolean);
+    // R92: the same ledger with why and impact (agent/EditRecap.js), so the
+    // Brain knows what each edit changed, not only its name.
+    const editLedger = ledgerForBrain(state.editHistory || []);
 
     // Effect COVERAGE, not just booleans: "multicam on 3 of 40 clips" is a very
     // different situation from "multicam on all of them", and the Brain should be
@@ -115,6 +119,7 @@ function buildProjectState() {
         mediaBin,
         captions,
         editHistory,
+        editLedger,
         effects,
         projectLUTId:     state.projectLUTId || null,
         // Lightweight track summary for the brain's context engine

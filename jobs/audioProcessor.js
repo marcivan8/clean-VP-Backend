@@ -7,6 +7,14 @@ const { OpenAI } = require('openai');
 const { getAIClient, isAIConfigured, resolveModel } = require('../services/AIProvider');
 const storageConfig = require('../config/storage');
 
+/** R92: voice enhancement chain (also asserted by scripts/test_round_a.mjs). */
+const ENHANCE_VOICE_FILTERS = [
+    'highpass=f=80',
+    'afftdn=nf=-25',
+    'acompressor=threshold=-20dB:ratio=3:attack=5:release=80:makeup=2',
+    'loudnorm=I=-16:TP=-1.5:LRA=11',
+];
+
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 let openaiInstance = null;
@@ -381,6 +389,28 @@ module.exports = async function processAudioJob(job) {
             const denoiseUrl = await uploadProcessedAudio(outputPath, userId, 'denoised');
             await job.updateProgress(100);
             return { url: denoiseUrl, message: "Noise reduction applied successfully." };
+        }
+
+        case 'enhance': {
+            // R92: one pass, so the steps build on each other instead of each
+            // restarting from the original file. Order: cut rumble, remove
+            // steady noise, gentle compression, then loudness to -16 LUFS.
+            console.log(`[Job ${job.id}] ✨ Enhancing voice: ${inputPath}`);
+            const outputPath = path.join(tempDir, `enhanced-${Date.now()}.mp4`);
+            await new Promise((resolve, reject) => {
+                ffmpeg(inputPath)
+                    .audioFilters(ENHANCE_VOICE_FILTERS)
+                    .videoCodec('copy')
+                    .output(outputPath)
+                    .on('progress', (p) => p.percent && job.updateProgress(10 + p.percent * 0.8))
+                    .on('end', resolve)
+                    .on('error', reject)
+                    .run();
+            });
+            await job.updateProgress(95);
+            const enhanceUrl = await uploadProcessedAudio(outputPath, userId, 'enhanced');
+            await job.updateProgress(100);
+            return { url: enhanceUrl, message: 'Voice enhanced: less noise, even level, -16 LUFS.' };
         }
 
         case 'normalize': {

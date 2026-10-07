@@ -69,6 +69,9 @@ export function colorLookQuery(constraints, originalPrompt = '') {
     return rest.length ? rest.join(' ') : 'cinematic';
 }
 
+import { sfxQueryFromText } from './sfxCues.js'; // R92 round A
+import { platformsFromText, shortCountFromText, getPlatformProfile } from './PlatformProfiles.js'; // R92 round B
+
 export class EditPlanner {
 
     static async generatePlan(intent, signal = null) {
@@ -241,9 +244,68 @@ export class EditPlanner {
                 // R91: "a 30 second short" → 30; otherwise the style's target (Reel: 60).
                 const m = String(intent.originalPrompt || '').match(/(\d{2,3})\s*(?:s\b|sec|second|seconde)/i);
                 const styleTarget = getEditingStyle(useTimelineStore.getState().editingStyle)?.targetDuration;
-                const target = m ? Math.min(180, Math.max(10, Number(m[1]))) : (styleTarget || 60);
+                // R92 round B: "a short for TikTok" → the middle of TikTok's sweet spot.
+                const named = getPlatformProfile(platformsFromText(intent.originalPrompt)[0]);
+                const platformTarget = named ? Math.round((named.length.ideal[0] + named.length.ideal[1]) / 2) : null;
+                const target = m ? Math.min(180, Math.max(10, Number(m[1]))) : (platformTarget || styleTarget || 60);
                 return this.buildPlan(planId, 'extract_short', [
                     { step_id: 'step_1', action: 'extract_short', args: { target }, reason: `Keep the strongest ${target} s as a short` },
+                ]);
+            }
+            case 'remove_background': {
+                // R92: the look comes from the words; the Background panel tunes it.
+                const bg = backgroundFromText(intent.originalPrompt);
+                return this.buildPlan(planId, 'remove_background', [
+                    { step_id: 'step_1', action: 'remove_background', args: bg, reason: `Background: ${bg.mode}` },
+                ]);
+            }
+            case 'zoom_speaker':
+            case 'track_speaker': {
+                return this.buildPlan(planId, operation, [
+                    { step_id: 'step_1', action: operation, args: {}, reason: operation === 'zoom_speaker' ? 'Frame the speaker' : 'Keep the speaker framed' },
+                ]);
+            }
+            case 'polish_short': {
+                return this.buildPlan(planId, 'polish_short', [
+                    { step_id: 'step_1', action: 'polish_short', args: { brief: String(intent.originalPrompt || '').slice(0, 300) }, reason: 'Give the short a pro finish for its platform' },
+                ]);
+            }
+            case 'repurpose_shorts': {
+                // R92 round B: count and platforms come from the words; default
+                // three shorts, one per platform.
+                const text = intent.originalPrompt || '';
+                const platforms = platformsFromText(text);
+                const count = /\b(?:one|a|1)\s+(?:for\s+)?each\b/.test(text.toLowerCase()) && platforms.length
+                    ? platforms.length
+                    : Math.max(shortCountFromText(text), platforms.length || 0);
+                return this.buildPlan(planId, 'repurpose_shorts', [
+                    { step_id: 'step_1', action: 'repurpose_shorts', args: { count, platforms }, reason: `Find ${count} short(s) for ${platforms.length ? platforms.join(', ') : 'TikTok, Reels and YouTube Shorts'}` },
+                ]);
+            }
+            case 'enhance_audio': {
+                return this.buildPlan(planId, 'enhance_audio', [
+                    { step_id: 'step_1', action: 'enhance_audio', reason: 'Enhance the voice: less noise, even level, standard loudness' },
+                ]);
+            }
+            case 'add_sfx': {
+                // R92: "add a whoosh" → that sound at the playhead; "add sound
+                // effects" → sound the whole edit (transitions, pops), at the
+                // level the editing style allows.
+                const query = sfxQueryFromText(intent.originalPrompt) || constraints?.query || null;
+                if (query) {
+                    return this.buildPlan(planId, 'add_sfx', [
+                        { step_id: 'step_1', action: 'place_sfx', args: { query }, reason: `Add a ${query} sound at the playhead` },
+                    ]);
+                }
+                return this.buildPlan(planId, 'add_sfx', [
+                    { step_id: 'step_1', action: 'auto_sfx', args: {}, reason: 'Add sound effects on the transitions and pops' },
+                ]);
+            }
+            case 'compose_motion': {
+                // R92: the request itself is the motion brief.
+                const brief = String(intent.originalPrompt || '').slice(0, 600);
+                return this.buildPlan(planId, 'compose_motion', [
+                    { step_id: 'step_1', action: 'compose_motion', args: { brief }, reason: 'Write custom motion for the requested layers' },
                 ]);
             }
             case 'apply_style_recipe': {
@@ -654,6 +716,14 @@ export class EditPlanner {
                     optional: true,
                     reason: 'Remove repeated takes and false starts, keeping the best take',
                 });
+            }
+
+            // R92: a full "clean up" also enhances the voice (denoise, level,
+            // loudness). LAST, after every cut, and optional: a missing source
+            // file must not fail the cuts already made.
+            const wantsEnhance = actions.length === 0 || actions.some(a => a === 'enhance_audio');
+            if (wantsEnhance) {
+                steps.push({ step_id: 'step_x', action: 'enhance_audio', optional: true, reason: 'Enhance the voice: less noise, even level, standard loudness' });
             }
 
             steps.forEach((st, n) => { st.step_id = `step_${n + 1}`; });
@@ -1087,3 +1157,24 @@ export class EditPlanner {
 }
 
 export default EditPlanner;
+
+/**
+ * R92: read the wanted background look from a request.
+ * "blur" → blur; "dim/darken" → dim; "green screen" / a colour → color;
+ * plain "remove" → a dark backdrop (an mp4 cannot be transparent).
+ */
+export function backgroundFromText(text) {
+    const s = String(text || '').toLowerCase();
+    const all = /\b(all|every|each)\b|\btous\b|\btoutes\b/.test(s);
+    const hex = (s.match(/#[0-9a-f]{6}\b/) || [])[0];
+    const COLORS = { black: '#000000', noir: '#000000', white: '#ffffff', blanc: '#ffffff', green: '#00b140', vert: '#00b140',
+        blue: '#1e40ff', bleu: '#1e40ff', grey: '#3a3a40', gray: '#3a3a40', gris: '#3a3a40', red: '#d1202f', rouge: '#d1202f',
+        yellow: '#ffd400', jaune: '#ffd400', pink: '#ff4fa3', rose: '#ff4fa3', purple: '#7b2cbf', violet: '#7b2cbf' };
+    const named = Object.keys(COLORS).find(k => new RegExp(`\\b${k}\\b`).test(s));
+    if (/green screen|chroma/.test(s)) return { mode: 'color', color: '#00b140', all };
+    if (hex || named) return { mode: 'color', color: hex || COLORS[named], all };
+    if (/\bdim\b|darken|assombri/.test(s)) return { mode: 'dim', all };
+    if (/blur|flou|floute/.test(s)) return { mode: 'blur', all };
+    if (/remove|cut out|enleve|supprime|replace|remplace|change/.test(s)) return { mode: 'color', color: '#101014', all };
+    return { mode: 'blur', all };
+}

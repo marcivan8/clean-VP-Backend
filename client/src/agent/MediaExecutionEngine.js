@@ -47,11 +47,18 @@ import { transcriptionManager } from './TranscriptionManager.js';
 // the manual Motion tab does, so a brain-picked preset and a hand-picked one
 // are indistinguishable to every downstream consumer (preview, export).
 import { applyPresetToClip, AUTO_ANIMATE } from '../motion/ClipAdapter.js';
+// R92 — motion written by the AI (with a rules fallback)
+import { composeMotion, planMotionFromBrief, COMPOSED } from '../motion/MotionComposer.js';
+import { normalizeMatte } from '../motion/MatteSettings.js';
+import { sfxLevel, sfxVolume, collectSfxCues, SFX_QUERIES } from './sfxCues.js'; // R92 round A
+import { pickMotionTargets, layersForPrompt, scriptFor } from './composeMotionTargets.js';
 import { selectAnimateMoments, sfxPlayableUrl, countMoments, CLUSTER_S } from './animateMoments.js';
 import i18next from 'i18next';
 import { resolveRetakeSource, retakeReviewLines, makeRetakeT, findTranscript } from './retakeSource.js';
 import { clipSourceWords, buildRhythmRequest, shotsToKeyframes } from './rhythmShots.js';
-import { findBestShortWindow, rangesOutside } from './shortPicker.js';
+import { findBestShortWindow, findShortCandidates, rangesOutside } from './shortPicker.js';
+import { PLATFORM_PROFILES, assignPlatforms, platformsFromText } from './PlatformProfiles.js'; // R92 round B
+import { polishShort } from './shortPolish.js'; // R92 round C
 import { packSegments } from './segmentPacking.js';
 
 // See _deriveAudioPeaksForClip below.
@@ -675,6 +682,126 @@ export class MediaExecutionEngine {
      * Returns { trackId: null, clipId: null } (not throw) when not found —
      * every caller above already checks `!clipId` and returns a clean error.
      */
+    /** R92: the SFX audio track (created once, named "SFX"). */
+    _ensureSfxTrack() {
+        const live = useTimelineStore.getState();
+        const existing = live.tracks?.find(t => t.type === 'audio' && t.name === 'SFX');
+        if (existing) return existing.id;
+        const id = live.addTrack('audio');
+        if (id) useTimelineStore.getState().renameTrack(id, 'SFX');
+        return id || null;
+    }
+
+    /** R92: best library sound for a query, or null. Cached per call site. */
+    async _fetchSfxAsset(query, cache = new Map()) {
+        if (cache.has(query)) return cache.get(query);
+        let asset = null;
+        try {
+            const res = await authFetch('/api/audio/search', {
+                method: 'POST',
+                body: JSON.stringify({ query, assetTypes: ['SOUND_EFFECT'], limit: 5 }),
+            });
+            const data = await res.json().catch(() => ({}));
+            const rows = Array.isArray(data?.results) ? data.results : [];
+            asset = rows.map(r => r?.asset || r).find(a => sfxPlayableUrl(a)) || null;
+        } catch (err) {
+            console.warn('[sfx] search failed:', err.message);
+        }
+        cache.set(query, asset);
+        return asset;
+    }
+
+    /**
+     * R92: place sound effects on cues. Clips are tagged `sfxCue` so a re-run
+     * replaces them instead of stacking. Call inside a history step.
+     * @returns {Promise<{placed:number, missing:string[]}>}
+     */
+    async _placeSfxCues(cues, level) {
+        if (level === 'none' || !Array.isArray(cues) || cues.length === 0) return { placed: 0, missing: [] };
+        const cache = new Map();
+        const missing = new Set();
+        const trackId = this._ensureSfxTrack();
+        if (!trackId) return { placed: 0, missing: ['SFX track'] };
+        // Replace this command's earlier cues (not sounds the user placed).
+        const old = (useTimelineStore.getState().tracks || []).find(t => t.id === trackId)?.clips || [];
+        old.filter(c => c.sfxCue).forEach(c => useTimelineStore.getState().removeClip(trackId, c.id, { skipHistory: true }));
+        let placed = 0;
+        for (const cue of cues) {
+            const asset = await this._fetchSfxAsset(SFX_QUERIES[cue.kind] || cue.kind, cache);
+            const url = sfxPlayableUrl(asset);
+            if (!asset || !url) { missing.add(cue.kind); continue; }
+            useTimelineStore.getState().addClip(trackId, {
+                id: `sfx-${cue.kind}-${Math.round(cue.t * 1000)}-${placed}-${Date.now()}`,
+                type: 'audio',
+                name: asset.display_name || asset.displayName || asset.name || cue.kind,
+                url, src: url, sourceUrl: url,
+                assetId: asset.id || null,
+                start: Math.max(0, cue.t),
+                duration: Number(asset.duration) > 0 ? Math.min(3, Number(asset.duration)) : 1,
+                volume: sfxVolume(asset.recommended_volume, level),
+                isSFX: true,
+                sfxCue: cue.kind,
+            }, { skipHistory: true });
+            placed += 1;
+        }
+        return { placed, missing: [...missing] };
+    }
+
+    /**
+     * R92: playable URL of a clip's source, same rule as VideoPlayer's
+     * ObjectLayerOverlay prop (proxy first, GCS paths through the media proxy).
+     */
+    _clipSourceUrl(store, clip) {
+        const asset = clip?.assetId ? (store.assets || []).find(a => a.id === clip.assetId) : null;
+        let url = asset?.proxyUrl || clip?.url || asset?.url || null;
+        if (url && (url.startsWith('proxies/') || url.startsWith('raw/'))) url = `/api/proxy/gcs-media/${url}`;
+        return url;
+    }
+
+    /**
+     * R92: which video clips a background request applies to. "all" / "every"
+     * → every video clip; otherwise the given or selected clip, then the clip
+     * under the playhead, then the first video clip.
+     */
+    _matteTargets(store, args = {}) {
+        const videoTracks = (store.tracks || []).filter(t => t.type === 'video');
+        const all = videoTracks.flatMap(t => (t.clips || []).filter(c => c.type !== 'image').map(c => ({ trackId: t.id, clipId: c.id, clip: c })));
+        if (all.length === 0) return [];
+        if (args.all) return all;
+        const wanted = args.clipId || (store.selectedClipIds || []).find(id => all.some(x => x.clipId === id)) || store.activeClipId;
+        const byId = all.find(x => x.clipId === wanted);
+        if (byId) return [byId];
+        const t = Number(store.currentTime) || 0;
+        const under = all.find(x => t >= (Number(x.clip.start) || 0) && t < (Number(x.clip.start) || 0) + (Number(x.clip.duration) || 0));
+        return [under || all[0]];
+    }
+
+    /**
+     * R92: make sure a clip has a mask covering its trimmed range; bake one
+     * in the browser if not. Returns { ok, baked, people, error }.
+     */
+    async _ensureMatte(trackId, clipId, job) {
+        const st = useTimelineStore.getState();
+        const clip = (st.tracks || []).find(t => t.id === trackId)?.clips?.find(c => c.id === clipId);
+        if (!clip) return { ok: false, error: `clip "${clipId}" not found` };
+        const speed = Number(clip.speed) > 0 ? Number(clip.speed) : 1;
+        const need0 = Number(clip.offset) || 0;
+        const need1 = need0 + (Number(clip.duration) || 0) * speed;
+        const lm = clip.layerMask;
+        const covers = lm && (lm.maskAssetPath || lm.maskAssetUrl)
+            && Number.isFinite(Number(lm.sourceStart)) && Number.isFinite(Number(lm.sourceDuration))
+            && Number(lm.sourceStart) <= need0 + 0.05
+            && Number(lm.sourceStart) + Number(lm.sourceDuration) >= need1 - 0.15;
+        if (covers) return { ok: true, baked: false, people: (lm.bboxTrack || []).length > 0 };
+        const sourceUrl = this._clipSourceUrl(st, clip);
+        if (!sourceUrl) return { ok: false, error: 'This clip has no playable source yet. Wait for the upload to finish.' };
+        const { bakeMatte } = await import('../vision/MatteBaker.js');
+        const baked = await bakeMatte({ sourceUrl, sourceStart: need0, sourceDuration: need1 - need0, signal: job?.signal });
+        const applied = useTimelineStore.getState().applyLayerSeparation(trackId, clipId, { ...baked, settings: lm?.settings, skipHistory: true });
+        if (!applied?.success) return { ok: false, error: applied?.error };
+        return { ok: true, baked: true, people: baked.bboxTrack.length > 0 };
+    }
+
     _findClipAndTrack(store, clipId) {
         if (!clipId) return { trackId: null, clipId: null };
         for (const track of (store.tracks || [])) {
@@ -793,65 +920,81 @@ export class MediaExecutionEngine {
             // detect_scene. SAM2 video inference is minutes, not seconds — the
             // timeout below is generous on purpose (matches the diarize
             // Whisper-job timeout precedent elsewhere in this file).
+            // R92: the free browser matte replaces the paid SAM2 job. Same
+            // result shape (mask + bboxTrack), so zoom/track speaker work on it.
             case 'separate_speaker': {
-                const { trackId, clipId } = this._findClipAndTrack(store, args.clipId);
-                if (!clipId) return { action, success: false, error: `clip "${args.clipId}" not found` };
-
-                const clip = (store.tracks || []).find(t => t.id === trackId)?.clips?.find(c => c.id === clipId);
-                const assetObj = (store.assets || []).find(a => a.id === clip?.assetId);
-                const gcsPath = resolveAssetServerPath(assetObj);
-                if (!gcsPath) {
-                    return { action, success: false, error: 'Could not resolve this clip\'s source file on the server — try again once upload processing finishes.' };
-                }
-
-                try {
-                    const enqueueRes = await authFetch('/api/vision/separate-speaker', {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            clipId,
-                            assetId: clip.assetId,
-                            gcsPath,
-                            clickPoint: args.clickPoint || null,
-                            clickFrame: args.clickFrame || 0,
-                        }),
-                    });
-                    const enqueueData = await enqueueRes.json();
-                    if (!enqueueRes.ok) {
-                        return { action, success: false, error: enqueueData.error || 'Could not start speaker separation.' };
+                const [target] = this._matteTargets(store, args);
+                if (!target) return { action, success: false, error: 'There is no video clip to work on.' };
+                const m = await this._ensureMatte(target.trackId, target.clipId, job);
+                if (!m.ok) return { action, success: false, error: m.error };
+                return {
+                    action, success: true,
+                    message: m.people === false
+                        ? 'No person was found in this clip, so speaker tools have nothing to follow.'
+                        : 'The speaker is separated from the background. You can now say "zoom to the speaker", "track the speaker" or "blur the background".',
+                };
+            }
+            // ── R92: free background removal (vision/MatteBaker.js) ──────────
+            // Blur, dim, colour or image behind the person. The mask is made
+            // in the browser with a free model the first time, then reused.
+            case 'remove_background': {
+                const st = useTimelineStore.getState();
+                const targets = this._matteTargets(st, args);
+                if (targets.length === 0) return { action, success: false, message: 'There is no video clip to work on. Add a video first.' };
+                const settings = {};
+                if (args.mode) settings.mode = args.mode;
+                if (args.color) settings.color = args.color;
+                if (Number.isFinite(Number(args.blur))) settings.blur = Number(args.blur);
+                let done = 0;
+                let noPerson = 0;
+                const failures = [];
+                st._saveHistory?.();
+                for (const { trackId, clipId } of targets) {
+                    try {
+                        const m = await this._ensureMatte(trackId, clipId, job);
+                        if (!m.ok) { failures.push(m.error); continue; }
+                        if (m.people === false) noPerson += 1;
+                        const live = useTimelineStore.getState();
+                        const clip = (live.tracks || []).find(t => t.id === trackId)?.clips?.find(c => c.id === clipId);
+                        const merged = { ...(clip?.layerMask?.settings || {}), ...settings };
+                        live.updateClip(trackId, clipId, {
+                            layerMask: { ...clip.layerMask, settings: normalizeMatte(merged) },
+                            layerTarget: 'background',
+                        }, { skipHistory: true });
+                        done += 1;
+                    } catch (err) {
+                        if (err?.name === 'AbortError') throw err;
+                        console.warn('[remove_background] failed:', err.message);
+                        failures.push(err.message);
                     }
-
-                    // SAM2 video inference: allow up to 8 minutes, matching
-                    // services/ReplicateSAM2Service.js's own DEFAULT_MAX_WAIT_MS.
-                    const result = await pollJobResult(enqueueData.jobId, job?.signal ?? null, 8 * 60 * 1000);
-                    const applied = this._callStore(store, 'applyLayerSeparation', trackId, clipId, result);
-                    return {
-                        action, success: !!applied?.success, error: applied?.error,
-                        message: applied?.success
-                            ? 'Separated speaker from background. You can now say "zoom to speaker", "track speaker", or "blur background".'
-                            : applied?.error,
-                    };
-                } catch (err) {
-                    console.warn('[separate_speaker] failed:', err.message);
-                    return { action, success: false, error: err.message };
                 }
+                if (done === 0) return { action, success: false, message: failures[0] || 'The background could not be removed.' };
+                const look = normalizeMatte(settings).mode;
+                const lookText = { blur: 'blurred', dim: 'darkened', color: 'replaced with a solid colour', image: 'replaced with your image' }[look] || 'changed';
+                const warn = noPerson ? ` No person was found in ${noPerson} clip(s), so they may look fully replaced.` : '';
+                return { action, success: true, message: `Background ${lookText} on ${done} clip(s). Adjust it in the Background panel. One undo reverts it.${warn}`, details: { done, mode: look } };
             }
             case 'zoom_speaker': {
-                const { trackId, clipId } = this._findClipAndTrack(store, args.clipId);
-                if (!clipId) return { action, success: false, error: `clip "${args.clipId}" not found` };
-                const result = this._callStore(store, 'zoomToSpeaker', trackId, clipId);
+                const [target] = this._matteTargets(store, args);
+                if (!target) return { action, success: false, error: 'There is no video clip to work on.' };
+                const { trackId, clipId } = target;
+                const zm = await this._ensureMatte(trackId, clipId, job);
+                if (!zm.ok) return { action, success: false, error: zm.error };
+                const result = this._callStore(useTimelineStore.getState(), 'zoomToSpeaker', trackId, clipId);
                 return { action, success: !!result?.success, error: result?.error };
             }
             case 'track_speaker': {
-                const { trackId, clipId } = this._findClipAndTrack(store, args.clipId);
-                if (!clipId) return { action, success: false, error: `clip "${args.clipId}" not found` };
-                const result = this._callStore(store, 'trackSpeaker', trackId, clipId, args.options || {});
+                const [target] = this._matteTargets(store, args);
+                if (!target) return { action, success: false, error: 'There is no video clip to work on.' };
+                const { trackId, clipId } = target;
+                const tm = await this._ensureMatte(trackId, clipId, job);
+                if (!tm.ok) return { action, success: false, error: tm.error };
+                const result = this._callStore(useTimelineStore.getState(), 'trackSpeaker', trackId, clipId, args.options || {});
                 return { action, success: !!result?.success, error: result?.error, segments: result?.segments };
             }
             case 'blur_background': {
-                const { trackId, clipId } = this._findClipAndTrack(store, args.clipId);
-                if (!clipId) return { action, success: false, error: `clip "${args.clipId}" not found` };
-                const result = this._callStore(store, 'setLayerTarget', trackId, clipId, 'background');
-                return { action, success: !!result?.success, error: result?.error };
+                // R92: same free matte path as remove_background, blur look.
+                return this.executeStoreAction({ action: 'remove_background', args: { ...args, mode: 'blur' } }, job);
             }
             // ── R90 (A6): beat-synced cutaways + number pops ──────────────────
             // B-roll starts on the word it illustrates, favouring reveal /
@@ -980,6 +1123,17 @@ export class MediaExecutionEngine {
                     } else if (recipe.broll || recipe.numberPops) {
                         skipped.push('b-roll and number pops (need captions)');
                     }
+                    // 6. R92: sound effects on what the recipe placed (whoosh on
+                    // transitions, pop on number pops), level from the style.
+                    const lvl = sfxLevel(useTimelineStore.getState().editingStyle, recipe.id);
+                    if (lvl !== 'none') {
+                        const cues = collectSfxCues(useTimelineStore.getState().tracks, { level: lvl });
+                        if (cues.length > 0) {
+                            const sfx = await this._placeSfxCues(cues, lvl);
+                            if (sfx.placed > 0) done.push(`${sfx.placed} sound effect(s)${lvl === 'subtle' ? ' (soft)' : ''}`);
+                            else skipped.push('sound effects (none found in the library)');
+                        }
+                    }
                 } finally {
                     useTimelineStore.getState().endHistoryGroup();
                 }
@@ -988,6 +1142,215 @@ export class MediaExecutionEngine {
                 }
                 const skippedText = skipped.length ? ` Skipped: ${skipped.join(', ')}.` : '';
                 return { action, success: true, message: `Style recipe applied: ${done.join(', ')}. One undo reverts it.${skippedText}` };
+            }
+
+            // ── R92: sound effects on the whole edit ("add sound effects") ────
+            case 'auto_sfx': {
+                const st = useTimelineStore.getState();
+                const level = args.level || sfxLevel(st.editingStyle);
+                if (level === 'none') {
+                    return { action, success: true, message: 'This editing style is kept calm, so no sound effects were added. Pick another style or add one by name, for example "add a whoosh".' };
+                }
+                const cues = collectSfxCues(st.tracks, { level });
+                if (cues.length === 0) {
+                    return { action, success: false, message: 'There is nothing to sound yet: no transitions, number pops, templates or stickers. Add some, or say "add a whoosh" to place one at the playhead.' };
+                }
+                // The track first (addTrack records its own step), then ONE step for the sounds.
+                this._ensureSfxTrack();
+                useTimelineStore.getState()._saveHistory?.();
+                const { placed, missing } = await this._placeSfxCues(cues, level);
+                if (placed === 0) return { action, success: false, message: 'No matching sounds were found in the library.' };
+                const soft = level === 'subtle' ? ' Kept soft for this style.' : '';
+                const miss = missing.length ? ` No sound found for: ${missing.join(', ')}.` : '';
+                return { action, success: true, message: `Added ${placed} sound effect(s) on the transitions and pops.${soft}${miss} One undo removes them.` };
+            }
+
+            // ── R92: one named sound at the playhead ("add a whoosh") ──────────
+            case 'place_sfx': {
+                const st = useTimelineStore.getState();
+                const query = String(args.query || 'whoosh').slice(0, 60);
+                const asset = await this._fetchSfxAsset(query);
+                const url = sfxPlayableUrl(asset);
+                if (!asset || !url) return { action, success: false, message: `No "${query}" sound was found in the library. Try another word, like whoosh, pop or riser.` };
+                const trackId = this._ensureSfxTrack();
+                if (!trackId) return { action, success: false, message: 'The SFX track could not be created.' };
+                const at = Number.isFinite(Number(args.at)) ? Number(args.at) : (Number(st.currentTime) || 0);
+                useTimelineStore.getState().addClip(trackId, {
+                    id: `sfx-${Date.now()}`,
+                    type: 'audio',
+                    name: asset.display_name || asset.displayName || asset.name || query,
+                    url, src: url, sourceUrl: url,
+                    assetId: asset.id || null,
+                    start: Math.max(0, at),
+                    duration: Number(asset.duration) > 0 ? Number(asset.duration) : 1,
+                    volume: sfxVolume(asset.recommended_volume, 'full'),
+                    isSFX: true,
+                });
+                return { action, success: true, message: `Added "${asset.display_name || asset.name || query}" at ${at.toFixed(1)} s.` };
+            }
+
+            // ── R92 round C: the pro short finish on the MAIN edit ────────────
+            // For a project that IS the short (Reel style, or after "make a
+            // short"): hook title with written motion, platform captions with
+            // key words, camera punch-ins, number pops, transitions, then sound
+            // effects. One undo.
+            case 'polish_short': {
+                const isFinishLayer = c => String(c?.id || '').startsWith('short-') || String(c?.clipId || '').startsWith('short-');
+                const st = useTimelineStore.getState();
+                const named = platformsFromText(String(args.brief || ''))[0];
+                const platform = named || (st.editingStyle === 'reel' ? 'reels' : 'tiktok');
+                const profile = PLATFORM_PROFILES[platform];
+                const total = (st.tracks || []).reduce((m, t) => Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
+                if (!(total > 0)) return { action, success: false, message: 'There is nothing on the timeline to finish yet.' };
+                const words = Array.isArray(st.captions) ? st.captions : [];
+                const events = await this._fetchSemanticEvents();
+                let plan = null;
+                const text = words.slice(0, 400).map(w => String(w.word ?? w.text ?? '')).join(' ');
+                if (text) {
+                    const { fetchShortPlan } = await import('./shortFinisher.js');
+                    plan = await fetchShortPlan(text, platform, total);
+                }
+                // Earlier finish replaced, not stacked.
+                const before = JSON.parse(JSON.stringify(st.tracks || []));
+                const polished = polishShort({ tracks: before.map(t => ({ ...t, clips: t.clips.filter(c => !isFinishLayer(c)) })), duration: total, aspectRatio: st.aspectRatio },
+                    profile, { words, events, plan });
+                st._saveHistory?.();
+                // Remove the previous finish layers, then write the changes clip by clip.
+                for (const t of (useTimelineStore.getState().tracks || [])) {
+                    for (const c of (t.clips || [])) {
+                        if (isFinishLayer(c)) useTimelineStore.getState().removeClip(t.id, c.id, { skipHistory: true });
+                    }
+                }
+                const origById = new Map(before.flatMap(t => t.clips.map(c => [c.id, { trackId: t.id, clip: c }])));
+                const FIELDS = ['animations', 'animation', 'transition', 'emphasis', 'x', 'y', 'fontFamily', 'fontSize', 'fontWeight', 'color', 'stroke', 'textShadow', 'captionStyle', 'textAlign', 'layerTarget', 'layerMask'];
+                const newTrackIds = {};
+                for (const t of polished.tracks) {
+                    for (const c of t.clips) {
+                        const orig = origById.get(c.id);
+                        if (orig) {
+                            const patch = {};
+                            for (const k of FIELDS) if (JSON.stringify(c[k]) !== JSON.stringify(orig.clip[k]) && c[k] !== undefined) patch[k] = c[k];
+                            if (Object.keys(patch).length) useTimelineStore.getState().updateClip(orig.trackId, c.id, patch, { skipHistory: true });
+                            continue;
+                        }
+                        // A new layer: the hook title, its underline, number pops.
+                        if (!newTrackIds[t.id]) {
+                            const live = useTimelineStore.getState();
+                            const existing = live.tracks.find(x => x.type === t.type && x.name === t.name);
+                            newTrackIds[t.id] = existing?.id || live.addTrack(t.type);
+                            if (!existing && newTrackIds[t.id]) useTimelineStore.getState().renameTrack?.(newTrackIds[t.id], t.name);
+                        }
+                        if (newTrackIds[t.id]) useTimelineStore.getState().addClip(newTrackIds[t.id], c, { skipHistory: true });
+                    }
+                }
+                let sfxNote = '';
+                const lvl = sfxLevel(useTimelineStore.getState().editingStyle) === 'none' ? 'none' : profile.sfx;
+                if (lvl !== 'none') {
+                    const cues = collectSfxCues(useTimelineStore.getState().tracks, { level: lvl });
+                    if (cues.length) {
+                        const r = await this._placeSfxCues(cues, lvl);
+                        if (r.placed) sfxNote = `, ${r.placed} sound effect(s)`;
+                    }
+                }
+                const by = plan?.headline ? `AI headline "${plan.headline}", ` : '';
+                return { action, success: true, message: `Finished for ${profile.label}: ${by}${polished.applied.join(', ')}${sfxNote}. One undo reverts it.`, details: { applied: polished.applied, platform } };
+            }
+
+            // ── R92 round B: several shorts from one long video ──────────────
+            // One per platform (TikTok, Reels, Shorts) unless the request names
+            // platforms or a count. Saved as a list for the Shorts tab; the
+            // main edit is not changed.
+            case 'repurpose_shorts': {
+                const st = useTimelineStore.getState();
+                const words = Array.isArray(st.captions) ? st.captions : [];
+                if (words.length === 0) {
+                    return { action, success: false, message: 'Finding the best moments needs a transcript. Run "add captions" first, then ask again.' };
+                }
+                const count = Math.max(1, Math.min(5, Number(args.count) || 3));
+                const platforms = assignPlatforms(count, Array.isArray(args.platforms) ? args.platforms : []);
+                const total = (st.tracks || []).reduce((m, t) => Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
+                const slots = platforms.map(id => {
+                    const p = PLATFORM_PROFILES[id];
+                    const [lo, hi] = p.length.ideal;
+                    return { platform: id, min: Math.max(p.length.min, lo * 0.75), max: Math.min(p.length.max, hi * 1.3), target: (lo + hi) / 2 };
+                });
+                if (total < Math.min(...slots.map(s => s.min)) + 5) {
+                    return { action, success: false, message: `The video is ${Math.round(total)} s long, too short to cut shorts out of. It can be exported as one short as it is.` };
+                }
+                const events = await this._fetchSemanticEvents();
+                const found = findShortCandidates(words, { events, slots });
+                if (found.length === 0) {
+                    return { action, success: false, message: 'No sentence-aligned moments of the right length were found in the transcript.' };
+                }
+                const now = Date.now();
+                const shorts = found.map((f, i) => ({
+                    id: `short-${now.toString(36)}-${i}`,
+                    platform: f.platform,
+                    start: Math.round(f.start * 100) / 100,
+                    end: Math.round(f.end * 100) / 100,
+                    score: Math.round(f.score * 100) / 100,
+                    hookEvent: f.hookEvent || null,
+                    title: String(f.text || '').slice(0, 90),
+                    createdAt: now,
+                    exportUrl: null,
+                    // R92 round C: the moments inside this short (timeline time),
+                    // so its camera punches land on them at export.
+                    events: (events || []).filter(e => Number(e?.timelineTime) >= f.start && Number(e?.timelineTime) <= f.end)
+                        .slice(0, 12).map(e => ({ eventType: e.eventType, timelineTime: Number(e.timelineTime) })),
+                }));
+                st.setShorts(shorts);
+                try { useAIStore.getState().setActiveTab?.('shorts'); } catch { /* panel switch is a convenience */ }
+                const lines = shorts.map(s => `${PLATFORM_PROFILES[s.platform].label}: ${Math.round(s.end - s.start)} s from ${s.start.toFixed(0)} s, "${s.title.slice(0, 50)}"`);
+                const missing = count - shorts.length;
+                const missText = missing > 0 ? ` ${missing} more could not fit without overlapping.` : '';
+                return {
+                    action, success: true,
+                    message: `Found ${shorts.length} short(s): ${lines.join('; ')}.${missText} In the Shorts tab each one exports finished: AI hook title with motion, platform captions, camera punch-ins, number pops, transitions and sound effects. Your main edit is unchanged.`,
+                    details: { count: shorts.length, platforms: shorts.map(s => s.platform) },
+                };
+            }
+
+            // ── R92: custom motion written from a description ────────────────
+            case 'compose_motion': {
+                const st = useTimelineStore.getState();
+                const brief = String(args.brief || '').trim() || 'animate it';
+                const { layers, label } = pickMotionTargets(st.tracks || [], brief, st.selectedClipIds || []);
+                if (layers.length === 0) {
+                    return { action, success: false, message: 'There is no title, caption or graphic to animate yet. Add text or a graphic first.' };
+                }
+                let scripts = null;
+                let source = 'rules';
+                let notes = null;
+                try {
+                    const res = await authFetch('/api/motion/compose', {
+                        method: 'POST',
+                        body: JSON.stringify({ brief, layers: layersForPrompt(layers), editingStyle: st.editingStyle ?? null }),
+                        signal: job?.signal,
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (res.ok && data?.layers) { scripts = data.layers; source = data.source || 'rules'; notes = data.notes || null; }
+                } catch (mErr) {
+                    if (mErr?.name === 'AbortError') throw mErr;
+                    console.warn('[compose_motion] motion route unavailable, using rules:', mErr.message);
+                }
+                st._saveHistory?.();
+                let applied = 0;
+                const verbs = new Set();
+                for (const l of layers) {
+                    const duration = Math.max(0.2, Number(l.clip.duration) || 3);
+                    const kind = l.kind === 'shape' ? 'shape' : l.kind;
+                    const script = scriptFor(l, scripts) || planMotionFromBrief(brief, { duration });
+                    let { animations } = composeMotion(script, { duration, kind, source: COMPOSED });
+                    if (animations.length === 0) ({ animations } = composeMotion(planMotionFromBrief(brief, { duration }), { duration, kind, source: COMPOSED }));
+                    if (animations.length === 0) continue;
+                    (script.beats || []).forEach(b => b?.verb && verbs.add(String(b.verb)));
+                    useTimelineStore.getState().updateClip(l.trackId, l.clip.id, { animations, animation: 'none' }, { skipHistory: true });
+                    applied += 1;
+                }
+                if (applied === 0) return { action, success: false, message: 'No motion could be built from that description. Try naming a motion, for example "slam in" or "float".' };
+                const by = source === 'llm' ? 'written by the AI' : source === 'mixed' ? 'partly written by the AI' : 'built from the motion library';
+                const what = verbs.size ? ` (${[...verbs].slice(0, 6).join(', ')})` : '';
+                return { action, success: true, message: `Animated ${applied} layer(s), ${label}${what}, ${by}.${notes ? ` ${notes}` : ''} One undo reverts it.`, details: { applied, source, verbs: [...verbs] } };
             }
 
             // R68 — AI Animation Intelligence. "Brain chooses animations.
@@ -1041,6 +1404,8 @@ export class MediaExecutionEngine {
 
                     let animatedCount = 0, sfxCount = 0, sfxTrackId = null;
                     let lastSfxAt = -Infinity; // one sound effect per moment
+                    // R92: Reel/Vlog full, Talking head soft, Podcast/Interview none.
+                    const aaSfxLevel = sfxLevel(aaStore.editingStyle);
 
                     for (const item of plan) {
                         if (item.presetId && item.clipId) {
@@ -1074,7 +1439,7 @@ export class MediaExecutionEngine {
                         // TaxonomyService, so index 0 is the best match.
                         const topSfx = item.sfx?.[0];
                         const sfxUrl = sfxPlayableUrl(topSfx);
-                        if (topSfx && sfxUrl && Number(item.timelineTime) - lastSfxAt > CLUSTER_S) {
+                        if (aaSfxLevel !== 'none' && topSfx && sfxUrl && Number(item.timelineTime) - lastSfxAt > CLUSTER_S) {
                             lastSfxAt = Number(item.timelineTime);
                             const live = useTimelineStore.getState();
                             if (!sfxTrackId) {
@@ -1093,7 +1458,7 @@ export class MediaExecutionEngine {
                                     assetId:     topSfx.id || null,
                                     start:       Math.max(0, item.timelineTime),
                                     duration:    Number(topSfx.duration) > 0 ? Number(topSfx.duration) : 1,
-                                    volume:      Number(topSfx.recommended_volume) > 0 ? Number(topSfx.recommended_volume) : 0.8,
+                                    volume:      sfxVolume(topSfx.recommended_volume, aaSfxLevel),
                                     isSFX:       true,
                                     // Marks it as this command's own, so a re-run
                                     // replaces it instead of stacking another.
@@ -1108,7 +1473,7 @@ export class MediaExecutionEngine {
                         action, success: true,
                         message: `Animated ${countMoments(plan)} moment${countMoments(plan) !== 1 ? 's' : ''} (${animatedCount} layer${animatedCount !== 1 ? 's' : ''})` +
                             (sfxCount > 0 ? ` and added ${sfxCount} sound effect${sfxCount !== 1 ? 's' : ''}` : '') +
-                            ` — brain-detected reveal/punchline/emphasis/emotional-beat moments, zero manual picks.`,
+                            `, on the reveals, punchlines and key moments the AI found.`,
                     };
                 } catch (err) {
                     console.warn('[animate_automatically] failed:', err.message);
@@ -3174,7 +3539,7 @@ export class MediaExecutionEngine {
             }
 
             // ── 5. Audio denoise / normalize ──────────────────────────────
-            if ((command.action === 'audioDenoise' || command.action === 'audioNormalize') && result?.url) {
+            if ((command.action === 'audioDenoise' || command.action === 'audioNormalize' || command.action === 'audioEnhance') && result?.url) {
                 const timelineStore = useTimelineStore.getState();
                 const videoTrack    = timelineStore.tracks?.find(t => t.type === 'video');
                 const assetId       = videoTrack?.clips?.[0]?.assetId;
@@ -3215,7 +3580,9 @@ export class MediaExecutionEngine {
                 }
                 // Show what was found before cutting (approval sheet / dialog).
                 if (Array.isArray(result?.groups) && result.groups.length > 0) {
-                    const approved = await this._reviewRetakes(result.groups, job.signal);
+                    // R92: Auto mode runs hands-free, so it takes the AI's retake picks.
+                    const { isAutopilotRunning } = await import('./StyleAutopilot.js');
+                    const approved = isAutopilotRunning() ? true : await this._reviewRetakes(result.groups, job.signal);
                     if (!approved) {
                         return { engine: 'api', success: true, endpoint, skipped: true, message: makeRetakeT(i18next)('retakes.kept', { defaultValue: 'Retakes kept as they are.' }) };
                     }
@@ -3314,6 +3681,12 @@ export class MediaExecutionEngine {
             clearTimeout(timeoutId);
             if (err.name === 'AbortError' || err.message === 'API call cancelled') {
                 throw new Error('API call cancelled');
+            }
+            // R92: an optional step (audio enhancement inside "clean up") must
+            // not fail the whole plan; it is reported as skipped instead.
+            if (command.args?.optional) {
+                console.warn(`[MediaExecutionEngine] optional step skipped (${endpoint}):`, err.message);
+                return { engine: 'api', success: true, endpoint, skipped: true, message: `Skipped: ${err.message}` };
             }
             console.error(`[MediaExecutionEngine] ❌ executeApiCall(${endpoint}):`, err.message);
             throw err;

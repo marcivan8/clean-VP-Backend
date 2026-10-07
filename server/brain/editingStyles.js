@@ -42,6 +42,16 @@ function isCalmStyle(styleId) {
     return styleId === 'podcast' || styleId === 'interview';
 }
 
+/**
+ * R92: sound-effect level. Reel and Vlog: full. Talking head: soft (no impact
+ * hits). Podcast and Interview: none. No style: full (the old behaviour).
+ */
+function sfxLevel(styleId) {
+    if (styleId === 'podcast' || styleId === 'interview') return 'none';
+    if (styleId === 'talking_head') return 'subtle';
+    return 'full';
+}
+
 /** Music is not expected for these (a podcast without a music bed is complete). */
 function expectsMusic(styleId) {
     return !(styleId === 'podcast' || styleId === 'interview' || styleId === 'talking_head');
@@ -74,6 +84,99 @@ const BRAIN_RULES = {
         'Do not suggest long-form structure (intro, chapters, outro).',
     ],
 };
+
+/**
+ * R92 round B: the Brain's context, segmented by style. Each style looks at
+ * different things first, measured from the project, and leaves some aside.
+ * The rules above say HOW to edit; this says WHAT to check, in order, with
+ * the current numbers next to each item.
+ */
+const has = (ctx, ...ops) => (Array.isArray(ctx?.editsDone) ? ctx.editsDone : []).some(op => ops.includes(String(op)));
+const pct = n => `${Math.round((Number(n) || 0) * 100)}%`;
+const STYLE_FOCUS = {
+    talking_head: {
+        label: 'Talking head',
+        priorities: ['Pacing: silences, filler words and repeated takes', 'Zoom rhythm to hold attention on a single speaker', 'Captions for sound-off viewing', 'Voice clarity and loudness'],
+        checks: ctx => [
+            `cut rate ${ctx.cutRate || 0}/min (aim for 4 to 10)`,
+            `speaking pace ${ctx.speakingPace || '?'} wpm`,
+            `clean up ${has(ctx, 'long_form_edit', 'silence_removal', 'remove_filler_words') ? 'done' : 'not done'}`,
+            `zoom rhythm on ${pct(ctx.rhythmCoverage)} of clips`,
+            `captions ${ctx.hasCaptions ? 'yes' : 'no'}`,
+            `voice enhanced ${has(ctx, 'enhance_audio', 'denoise_audio', 'normalize_audio') ? 'yes' : 'no'}`,
+        ],
+        aside: ['music beds unless asked', 'heavy b-roll'],
+    },
+    podcast: {
+        label: 'Podcast',
+        priorities: ['Audio: clean voices at standard loudness', 'Dead air between turns', 'Readable captions', 'The best exchanges as shorts for social'],
+        checks: ctx => [
+            `${ctx.detectedSpeakers || ctx.effects?.speakerCount || 0} speaker(s)`,
+            `voice enhanced ${has(ctx, 'enhance_audio', 'denoise_audio', 'normalize_audio') ? 'yes' : 'no'}`,
+            `clean up ${has(ctx, 'long_form_edit', 'silence_removal') ? 'done' : 'not done'}`,
+            `captions ${ctx.hasCaptions ? 'yes' : 'no'}`,
+            `shorts picked ${has(ctx, 'repurpose_shorts', 'extract_short') ? 'yes' : 'no'}`,
+        ],
+        aside: ['impact sound effects', 'fast zooms', 'music beds', 'flashy transitions', 'reordering the conversation'],
+    },
+    interview: {
+        label: 'Interview',
+        priorities: ['Keep every question with its answer, in order', 'Trim dead air between turns', 'Camera angle on the active speaker', 'Quotable moments for social'],
+        checks: ctx => [
+            `${ctx.detectedSpeakers || ctx.effects?.speakerCount || 0} speaker(s)`,
+            `camera angles on ${pct(ctx.multicamCoverage)} of clips`,
+            `clean up ${has(ctx, 'long_form_edit', 'silence_removal') ? 'done' : 'not done'}`,
+            `captions ${ctx.hasCaptions ? 'yes' : 'no'}`,
+        ],
+        aside: ['hook-first reordering', 'impact sound effects', 'music beds'],
+    },
+    vlog: {
+        label: 'Vlog',
+        priorities: ['The story in recorded order, with clear beats', 'B-roll and transitions between places', 'A music bed under the talking', 'Natural pacing (keep the personality, cut only dead air)'],
+        checks: ctx => [
+            `${ctx.clipCount || 0} clips, ${ctx.duration || 0}s`,
+            `music ${ctx.hasMusic ? 'yes' : 'no'}`,
+            `transitions ${has(ctx, 'add_transition', 'apply_style_recipe') ? 'added' : 'none yet'}`,
+            `captions ${ctx.hasCaptions ? 'yes' : 'no'}`,
+        ],
+        aside: ['removing every filler word', 'hook-first reordering'],
+    },
+    reel: {
+        label: 'Reel',
+        priorities: ['Hook in the first 2 seconds', 'Length in the platform sweet spot (TikTok 21 to 34 s, Reels 15 to 30 s, Shorts 30 to 50 s)', '9:16 with the speaker framed', 'Bold captions kept clear of the app buttons', 'Energy: tight cuts, zooms, sound effects'],
+        checks: ctx => [
+            `${ctx.duration || 0}s long${(ctx.duration || 0) > 60 ? ' (too long for a short: extract one or repurpose into shorts)' : ''}`,
+            `aspect ${ctx.aspectRatio || 'unknown'}${ctx.aspectRatio && ctx.aspectRatio !== '9:16' ? ' (should be 9:16)' : ''}`,
+            `cut rate ${ctx.cutRate || 0}/min (aim for 15 to 30)`,
+            `captions ${ctx.hasCaptions ? 'yes' : 'no'}`,
+            `animation ${has(ctx, 'animate_automatically', 'compose_motion') ? 'yes' : 'no'}`,
+        ],
+        aside: ['long-form structure (intro, chapters, outro)'],
+    },
+};
+
+/** "STYLE FOCUS" section for the Brain, with the project's current numbers. '' with no style. */
+function styleFocusSection(styleId, ctx = {}) {
+    const id = sanitizeEditingStyle(styleId);
+    const f = id ? STYLE_FOCUS[id] : null;
+    if (!f) return '';
+    let checks = [];
+    try { checks = f.checks(ctx || {}); } catch { checks = []; }
+    return `═══════════════════════════════════════════════
+STYLE FOCUS: ${f.label}
+Look at these first, in this order:
+${f.priorities.map((p, i) => `  ${i + 1}. ${p}`).join('\n')}
+Where the project stands now: ${checks.join('; ')}.
+Leave aside unless the user asks: ${f.aside.join(', ')}.
+Rank every suggestion by this focus. Anything outside it goes last.`;
+}
+
+/** Recent edits with why and impact, for the Brain. '' when none. */
+function ledgerSection(ledger) {
+    const rows = (Array.isArray(ledger) ? ledger : []).filter(e => e && e.op).slice(-8);
+    if (rows.length === 0) return '';
+    return `Recent edits (what, why, impact):\n${rows.map(e => `  - ${e.op}${e.why ? `: ${String(e.why).slice(0, 160)}` : ''}${e.impact ? ` [${String(e.impact).slice(0, 200)}]` : ''}`).join('\n')}`;
+}
 
 /** Section for the Editorial Brain system prompt, or '' with no style. */
 function brainStyleSection(styleId) {
@@ -138,6 +241,10 @@ module.exports = {
     platformForStyle,
     keepsRecordedOrder,
     isCalmStyle,
+    sfxLevel,
+    styleFocusSection,
+    ledgerSection,
+    STYLE_FOCUS,
     expectsMusic,
     brainStyleSection,
     projectMapStyleNote,

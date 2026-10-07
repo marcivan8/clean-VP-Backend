@@ -263,6 +263,26 @@ function resolvePublicBackendUrl() {
  *
  * @throws on any failure — caller is responsible for the fails-open fallback.
  */
+/**
+ * R92: is the render-worker up? GET /health with a short timeout. Any error
+ * or non-2xx means "no", so the caller falls back to the built-in renderer.
+ */
+async function revideoWorkerHealthy() {
+    const workerUrl = process.env.RENDER_WORKER_URL;
+    if (!workerUrl) return false;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Number(process.env.REVIDEO_HEALTH_TIMEOUT_MS) || 5000);
+    try {
+        const res = await fetch(`${workerUrl.replace(/\/$/, '')}/health`, { signal: controller.signal });
+        return res.ok;
+    } catch (err) {
+        console.warn(`[exportProcessor] render-worker health check failed: ${err.message}`);
+        return false;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 async function renderViaRevideoWorker({ baseVideoUrl, tracks, duration, aspectRatio, fps, backendUrl, outputPath }) {
     const workerUrl    = process.env.RENDER_WORKER_URL;
     const workerSecret = process.env.WORKER_SECRET;
@@ -295,6 +315,77 @@ async function renderViaRevideoWorker({ baseVideoUrl, tracks, duration, aspectRa
     } finally {
         clearTimeout(timeoutHandle);
     }
+}
+
+/**
+ * R92: copy a clip's background mask to a local file. Prefers the stored
+ * path (no expiring link), then the link saved on the clip.
+ */
+async function fetchMaskToLocal(layerMask, localPath) {
+    const p = String(layerMask?.maskAssetPath || '');
+    if (p.startsWith('local:')) {
+        fs.copyFileSync(path.join(__dirname, '..', 'uploads', p.slice(6)), localPath);
+        return localPath;
+    }
+    if (p && storageConfig.bucket) {
+        await storageConfig.bucket.file(p).download({ destination: localPath });
+        return localPath;
+    }
+    if (layerMask?.maskAssetUrl) return downloadUrlToFile(layerMask.maskAssetUrl, localPath);
+    throw new Error('the clip has no stored mask');
+}
+
+let matteSettingsPromise = null;
+function loadMatteSettings() {
+    if (!matteSettingsPromise) {
+        const { pathToFileURL } = require('url');
+        matteSettingsPromise = import(pathToFileURL(path.join(__dirname, '..', 'client', 'src', 'motion', 'MatteSettings.js')).href);
+    }
+    return matteSettingsPromise;
+}
+
+/**
+ * R92: render one clip with its background removed (blur, dim, colour or
+ * image). Same filter graph builder as the preview's settings
+ * (client/src/motion/MatteSettings.js). The mask is read from
+ * (offset - mask.sourceStart), so trimmed clips stay in sync, and clip speed
+ * is applied to the picture, the mask and the audio together.
+ */
+async function renderMattedSegment(clip, src, segPath, opts) {
+    const { targetWidth, targetHeight, targetFps, codec, profile, audioBitrate, maskLocalPath, bgImagePath } = opts;
+    const { matteFilterGraph, normalizeMatte } = await loadMatteSettings();
+    const settings = normalizeMatte(clip.layerMask?.settings);
+    if (settings.mode === 'image' && !bgImagePath) settings.mode = 'blur';
+    const speed = Number(clip.speed) > 0 ? Number(clip.speed) : 1;
+    const offset = Number(clip.offset) || 0;
+    const readDur = (Number(clip.duration) || 0) * speed;
+    const maskSeek = Math.max(0, offset - (Number(clip.layerMask?.sourceStart) || 0));
+    const graph = matteFilterGraph(settings, { width: targetWidth, height: targetHeight, speed });
+    return new Promise((resolve, reject) => {
+        const cmd = ffmpeg()
+            .input(src).setStartTime(offset).setDuration(readDur)
+            .input(maskLocalPath).inputOptions(['-ss', maskSeek.toFixed(3)]);
+        if (settings.mode === 'image') cmd.input(bgImagePath).inputOptions(['-loop', '1']);
+        cmd.complexFilter(graph, 'outv');
+        const vol = (clip.volume ?? 1.0) * (clip.trackVolume ?? 1.0);
+        const af = [];
+        if (speed !== 1) af.push(...atempoChain(speed));
+        if (vol !== 1.0) af.push(`volume=${vol.toFixed(4)}`);
+        if (af.length) cmd.audioFilters(af);
+        cmd
+            .fps(targetFps)
+            .videoCodec(codec)
+            .addOutputOption('-map', '0:a?')
+            .addOutputOption('-profile:v', profile)
+            .addOutputOption('-pix_fmt', 'yuv420p')
+            .addOutputOption('-movflags', '+faststart')
+            .addOutputOption('-t', String(Number(clip.duration) || 0))
+            .audioBitrate(audioBitrate)
+            .output(segPath)
+            .on('end', resolve)
+            .on('error', reject)
+            .run();
+    });
 }
 
 function renderBackgroundBlurSegment(clip, src, segPath, opts) {
@@ -647,9 +738,17 @@ module.exports = async function processExportJob(job) {
     // not-yet-independently-verified render path (see CLAUDE.md), so it does
     // not become every user's default behaviour just by existing.
     const revideoEnabled = process.env.REVIDEO_RENDER_ENABLED === '1' && !!process.env.RENDER_WORKER_URL;
-    const useRevideo = revideoEnabled && (revideoTextTracks.length > 0 || revideoOverlayTracks.length > 0);
+    let useRevideo = revideoEnabled && (revideoTextTracks.length > 0 || revideoOverlayTracks.length > 0);
     let revideoSucceeded = false;
     let revideoWarning = null;
+    // R92: check the worker BEFORE the compositor step is skipped for it. A
+    // down worker used to mean an export with no captions and no graphics;
+    // now the built-in renderer (STEP 2.5 + STEP 4) draws them instead.
+    if (useRevideo && !(await revideoWorkerHealthy())) {
+        useRevideo = false;
+        revideoWarning = 'The motion graphics renderer was unreachable, so the built-in renderer drew the captions and graphics.';
+        console.warn('  ⚠️  Revideo worker unhealthy, falling back to the built-in renderer');
+    }
 
     if (videoTracks.length === 0) {
         throw new Error('No video or image clips found in timeline');
@@ -921,30 +1020,34 @@ module.exports = async function processExportJob(job) {
         // function rather than another branch inside the shared vFilters
         // pipeline below). Handled and `continue`d here so every clip WITHOUT
         // layerTarget:'background' goes through the existing, unmodified path.
-        if (!isImage && clip.layerTarget === 'background' && clip.layerMask?.maskAssetUrl) {
+        if (!isImage && clip.layerTarget === 'background' && (clip.layerMask?.maskAssetPath || clip.layerMask?.maskAssetUrl)) {
             try {
                 const maskLocalPath = path.join(tmpDir, `mask-${i}.mp4`);
-                await downloadUrlToFile(clip.layerMask.maskAssetUrl, maskLocalPath);
-                await renderBackgroundBlurSegment(clip, src, segPath, {
+                await fetchMaskToLocal(clip.layerMask, maskLocalPath);
+                let bgImagePath = null;
+                const bgUrl = clip.layerMask?.settings?.mode === 'image' ? clip.layerMask.settings.imageUrl : null;
+                if (bgUrl) {
+                    try {
+                        bgImagePath = path.join(tmpDir, `mattebg-${i}${path.extname(String(bgUrl).split('?')[0]) || '.png'}`);
+                        await downloadUrlToFile(bgUrl, bgImagePath);
+                    } catch (bgErr) {
+                        console.warn(`  [matte] background image unavailable, using blur: ${bgErr.message}`);
+                        bgImagePath = null;
+                    }
+                }
+                await renderMattedSegment(clip, src, segPath, {
                     targetWidth, targetHeight, targetFps, codec, profile, audioBitrate,
-                    maskLocalPath,
+                    maskLocalPath, bgImagePath,
                 });
                 segments.push(segPath);
                 segOutputStarts.push(cumulativeOut);
                 segClips.push(clip);
-                // renderBackgroundBlurSegment reads `duration` seconds at 1x,
-                // so the segment lasts exactly `dur` (speed is not applied on
-                // this path).
+                // The segment is cut to exactly `dur` timeline seconds (speed applied inside).
                 cumulativeOut += dur;
-                console.log(`  [blur-background] clip "${clip.name}": composited via SAM2 mask`);
+                console.log(`  [matte] clip "${clip.name}": background ${clip.layerMask?.settings?.mode || 'blur'}`);
             } catch (err) {
-                console.error(`[ExportJob] blur-background failed for clip "${clip.name}", falling back to unblurred: ${err.message}`);
-                // Fail-open per this project's convention (see CLAUDE.md's
-                // compositorWarning/captionProgramWarning precedent) — an
-                // export must never hard-fail because one effect couldn't
-                // render. Falls through to the normal per-clip path below by
-                // simply NOT `continue`-ing, so the clip still exports, just
-                // without the blur.
+                console.error(`[ExportJob] background removal failed for clip "${clip.name}", exporting it unchanged: ${err.message}`);
+                // Fail-open: an export never hard-fails because one effect could not render.
             }
             if (segments[segments.length - 1] === segPath) continue;
         }
@@ -1475,7 +1578,9 @@ module.exports = async function processExportJob(job) {
     const fontFallbackWarnings = new Set();
     const textTracks = timeline.tracks.filter(t => t.type === 'text' && t.clips?.length > 0);
 
-    if (textTracks.length > 0 && !useRevideo) {
+    // R92: gated on revideoSucceeded, not useRevideo. If the worker failed
+    // mid-render, captions are still drawn here instead of being dropped.
+    if (textTracks.length > 0 && !revideoSucceeded) {
         // ── Font resolution ────────────────────────────────────────────────
         const fontsDir = path.join(publicDir, 'fonts');
         if (!fs.existsSync(fontsDir)) fs.mkdirSync(fontsDir, { recursive: true });

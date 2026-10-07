@@ -999,6 +999,8 @@ export class TimelineStateManager {
                         // again replaces it). Same persistence contract: also read
                         // back in fromLegacyTracks.
                         autoAnimate: clip.autoAnimate || undefined,
+                        // R92: tags sounds placed by "add sound effects" / recipes so a re-run replaces them.
+                        sfxCue: clip.sfxCue || undefined,
                         // Transform
                         x: clip.x,
                         y: clip.y,
@@ -1088,6 +1090,7 @@ export class TimelineStateManager {
                                 // two lists in sync.
                                 animations: legacyClip.animations,
                                 autoAnimate: legacyClip.autoAnimate || undefined,
+                                sfxCue: legacyClip.sfxCue || undefined,
                                 words: legacyClip.words,
                                 captionStyle: legacyClip.captionStyle,
                                 // R88 — keyword emphasis. Mirrors toLegacyTracks above.

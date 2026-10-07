@@ -40,6 +40,8 @@ import {
 import KeyframeEditor from './Effects/KeyframeEditor.jsx';
 import TemplatePanel from './TemplatePanel.jsx';
 import StyleRecipePanel from './StyleRecipePanel.jsx';
+import MotionDirectorPanel from './MotionDirectorPanel.jsx';
+import BackgroundPanel from './BackgroundPanel.jsx';
 
 export default function MotionPanel() {
     const { t } = useTranslation('editor');
@@ -56,13 +58,13 @@ export default function MotionPanel() {
 
     // Resolve the selected clip and the track it lives on. Both are needed:
     // updateClip is keyed by (trackId, clipId).
-    const { clip, trackId } = useMemo(() => {
+    const { clip, trackId, trackType } = useMemo(() => {
         for (const track of (tracks || [])) {
             for (const c of (track.clips || [])) {
-                if (c.id === activeClipId) return { clip: c, trackId: track.id };
+                if (c.id === activeClipId) return { clip: c, trackId: track.id, trackType: track.type };
             }
         }
-        return { clip: null, trackId: null };
+        return { clip: null, trackId: null, trackType: null };
     }, [tracks, activeClipId]);
 
     const layer = useMemo(() => (clip ? clipToMotionLayer(clip) : null), [clip]);
@@ -189,6 +191,10 @@ export default function MotionPanel() {
 
             <StyleRecipePanel />
             <TemplatePanel selectedClip={clip} selectedTrackId={trackId} />
+            {/* R92: write the motion (AI or verb by verb) */}
+            <MotionDirectorPanel clip={clip} trackId={trackId} trackType={trackType} />
+            {/* R92: free background removal for video clips */}
+            {trackType === 'video' && <BackgroundPanel clip={clip} trackId={trackId} />}
 
             {/* Presets — grouped by what the selected layer actually is */}
             {presetIds.map(({ group, ids }) => (

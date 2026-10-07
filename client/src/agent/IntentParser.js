@@ -195,6 +195,8 @@ const NLP_MAP = {
         // a "TikTok or YouTube?" question) instead of cleaning anything.
         'clean up', 'clean up my video', 'clean up this video', 'clean my video',
         'clean up everything', 'tidy it up', 'tidy up the video',
+        // R92: "full cleanup" no longer adds a zoom rhythm.
+        'full cleanup', 'full clean up', 'clean and polish', 'nettoie la video', 'nettoie tout',
         // Podcast / interview context
         'clean this podcast', 'clean the podcast', 'edit the podcast',
         'clean up the interview', 'edit this interview', 'clean up the recording',
@@ -377,6 +379,11 @@ const NLP_MAP = {
 // It is never sent from the client — only { prompt, context, conversationHistory } are posted.
 
 export class IntentParser {
+    /** R92: a request for the recap of what was edited, why and with what impact. */
+    static isRecapRequest(lower) {
+        return /what did you|what have you (?:done|edited|changed)|show me what you|what changed|summari[sz]e.*(edit|change)|\brecap\b|why did you (?:edit|cut|do|change|make|remove|add)|explain (?:the|your|what you|all the|all your) ?(?:edits|changes|did|cuts)|what (?:was|has been) (?:done|edited|changed)|summary of (?:the |my |your )?edits|qu.est.ce que tu as fait|qu.as.tu fait|r[ée]sum[ée] des (?:modifs|modifications|changements)/.test(String(lower || ''));
+    }
+
     static async parse(userPrompt, signal = null) {
         console.log('[IntentParser] Parsing:', userPrompt);
 
@@ -386,6 +393,13 @@ export class IntentParser {
 
         const prompt = userPrompt.trim();
         const structuredContext = ContextGenerator.getStructuredContext();
+
+        // R92: "what did you do / why did you cut that / explain the edits" is a
+        // recap of the saved ledger. Checked first: those questions otherwise
+        // read as chat, or as a cut command because they contain "cut".
+        if (IntentParser.isRecapRequest(prompt.toLowerCase())) {
+            return this.createIntent(INTENT_TYPES.QUERY, 'query_session_summary', { constraints: {} });
+        }
 
         // ── Fast local-first check ───────────────────────────────────────────────────────────────
         // For deterministic single-operation commands (captions, silence, filler
@@ -784,8 +798,8 @@ export class IntentParser {
                 operation: 'long_form_edit',
                 parameters: {
                     editMode: 'CLEAN_EDIT',
-                    actions: ['silence_removal', 'remove_filler_words', 'remove_repetition'],
-                    reason: 'Generic "clean" command — removing silences, filler words and repeated takes',
+                    actions: ['silence_removal', 'remove_filler_words', 'remove_repetition', 'enhance_audio'],
+                    reason: 'Generic "clean" command: silences, filler words, repeated takes and voice enhancement',
                 },
                 confidence: 'HIGH',
                 missingParameters: []
@@ -997,7 +1011,7 @@ export class IntentParser {
 
         if (matches('cleanEdit')) {
             return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.LONG_FORM_EDIT, {
-                constraints: { editMode: 'CLEAN_EDIT', actions: ['silence_removal', 'remove_filler_words', 'remove_repetition'], platform: this.inferPlatform(lower) || 'podcast' }
+                constraints: { editMode: 'CLEAN_EDIT', actions: ['silence_removal', 'remove_filler_words', 'remove_repetition', 'enhance_audio'], platform: this.inferPlatform(lower) || 'podcast' }
             });
         }
 
@@ -1252,7 +1266,8 @@ export class IntentParser {
             };
         }
 
-        if (/what did you|what have you|show me what|what changed|summarize.*(edit|change)|recap/.test(lower)) {
+        // R92: recap of the saved ledger (what / why / impact), in more phrasings.
+        if (IntentParser.isRecapRequest(lower)) {
             return this.createIntent(INTENT_TYPES.QUERY, 'query_session_summary', { constraints: {} });
         }
 

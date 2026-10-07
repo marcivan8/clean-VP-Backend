@@ -101,6 +101,8 @@ class ContextEngine {
             platform,
             editingStyle,
             editsDone:      editHistory,
+            // R92: what / why / impact of recent edits (client agent/EditRecap.js).
+            editLedger:     Array.isArray(state.editLedger) ? state.editLedger.slice(-8) : [],
 
             // Captions
             transcriptPreview:    captionContext.transcriptPreview,

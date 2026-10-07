@@ -53,7 +53,8 @@ export function useSupabasePersistence() {
         // R91: the editing style is saved with the project too, so picking one
         // syncs even when the timeline itself did not change.
         const unsub = useTimelineStore.subscribe(
-            (state) => [state.tracks, state.editingStyle],
+            // R92: the shorts list is saved with the project too.
+            (state) => [state.tracks, state.editingStyle, state.shorts],
             () => {
                 clearTimeout(timerRef.current);
                 timerRef.current = setTimeout(async () => {
@@ -109,7 +110,7 @@ export function useSupabasePersistence() {
                     }
                 }, DEBOUNCE_MS);
             },
-            { equalityFn: (a, b) => a[0] === b[0] && a[1] === b[1] }
+            { equalityFn: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2] }
         );
 
         return () => {

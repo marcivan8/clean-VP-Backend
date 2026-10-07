@@ -262,6 +262,7 @@ app.use('/api/filler', uploadLimiter, audioRoutes);         // alias: /api/fille
 app.use('/api/silence', require('./routes/silenceRoutes'));
 app.use('/api/ai', aiLimiter, require('./routes/aiRoutes')); // GPT-4o — expensive
 app.use('/api/brain', aiLimiter, require('./server/routes/brainRoutes')); // Editorial Brain
+app.use('/api/motion', aiLimiter, require('./server/routes/motionRoutes')); // R92: LLM-written motion (rules fallback)
 app.use('/api/effects', require('./routes/effectsRoutes'));
 // NOTE: uploadLimiter is NOT applied router-wide here — it would also throttle
 // GET /api/proxy/gcs-media/*, the read-heavy route that streams video/audio/

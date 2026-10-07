@@ -75,7 +75,12 @@ export const COMMANDS = [
         label: 'Remove repetition',
         summary: 'Cuts repeated takes and restated points.',
         phrases: ['remove repetition', 'remove repeated', 'cut repeated takes',
-                  'remove duplicate takes', 'cut the repeats', 'remove redundant'],
+                  'remove duplicate takes', 'cut the repeats', 'remove redundant',
+                  // R92: plural and everyday phrasings used to miss the registry
+                  'remove repetitions', 'remove the repetitions', 'cut repetitions', 'cut the repetitions',
+                  'remove repeats', 'remove the repeats', 'remove retakes', 'cut the retakes', 'remove false starts',
+                  'clean up repetition', 'clean up repetitions', 'remove what i repeated', 'remove repeated parts',
+                  'supprime les repetitions', 'enleve les repetitions', 'coupe les repetitions'],
         destructive: true,
         requires: ['transcript'],
     },
@@ -193,6 +198,65 @@ export const COMMANDS = [
         destructive: false,
     },
 
+    // ── R92: motion written by the AI (motion/MotionComposer.js) ───────────
+    // "animate the title so it slams in", "elegant animation on the text".
+    // The plain "animate it" stays animate_automatically: every phrase here
+    // needs a target word or a named motion.
+    {
+        id: 'compose_motion',
+        category: 'transform',
+        label: 'Design the motion',
+        summary: 'Writes custom motion for titles, captions and graphics from a description (slam in, float, glitch, elegant…).',
+        phrases: ['animate title', 'animate titles', 'animate text', 'animate captions', 'animate subtitles',
+                  'animate selected', 'animate selection', 'animate sticker', 'animate stickers', 'animate logo',
+                  'animate graphics', 'custom animation', 'custom motion', 'design motion', 'motion design',
+                  'text animation', 'title animation', 'caption animation',
+                  'slam in', 'slams in', 'pop in', 'pops in', 'slide in', 'slides in', 'drop in', 'drops in',
+                  'whip in', 'swing in', 'spin in', 'blur in', 'glitch in', 'fly out', 'flies out', 'shrink out',
+                  'sink out', 'whip out', 'typewriter', 'typing effect', 'type writer', 'title fade', 'text fade',
+                  'text bounce', 'title bounce', 'text shake', 'title shake', 'text float', 'title float',
+                  'elegant animation', 'cinematic animation', 'punchy animation', 'smooth animation',
+                  'playful animation', 'glitch animation', 'subtle animation',
+                  'anime le titre', 'anime le texte', 'anime les sous titres', 'animation du titre', 'animation du texte'],
+        negative: ['crop', 'silence', 'filler', 'remove', 'clear', 'enleve', 'supprime', 'transition'],
+        destructive: false,
+    },
+
+    // ── R92: free background removal (vision/MatteBaker.js) ────────────────
+    {
+        id: 'remove_background',
+        category: 'transform',
+        label: 'Remove the background',
+        summary: 'Blurs, darkens or replaces the background behind the person, with a free on-device model.',
+        phrases: ['remove the background', 'remove background', 'blur the background', 'blur background',
+                  'background blur', 'replace the background', 'change the background', 'green screen',
+                  'background removal', 'cut out the background', 'dim the background', 'darken the background',
+                  'black background', 'white background', 'background color', 'background colour',
+                  'enleve le fond', 'supprime le fond', 'floute le fond', 'flou d arriere plan', 'change le fond',
+                  'remplace le fond', 'fond noir', 'fond flou'],
+        // "remove the background music / noise" is audio, not the picture.
+        negative: ['music', 'noise', 'audio', 'sound', 'hum', 'musique', 'bruit', 'son'],
+        destructive: false,
+    },
+    {
+        id: 'zoom_speaker',
+        category: 'transform',
+        label: 'Zoom to the speaker',
+        summary: 'Frames the person with one steady crop (finds them with the free background model).',
+        phrases: ['zoom to the speaker', 'zoom on the speaker', 'zoom into the speaker', 'frame the speaker',
+                  'crop to the speaker', 'centre the speaker', 'center the speaker', 'cadre sur la personne'],
+        destructive: false,
+    },
+    {
+        id: 'track_speaker',
+        category: 'transform',
+        label: 'Track the speaker',
+        summary: 'Keeps the person framed as they move, re-centring the crop when they drift.',
+        phrases: ['track the speaker', 'follow the speaker', 'keep the speaker centered', 'keep the speaker centred',
+                  'speaker tracking', 'suis la personne', 'suivre la personne'],
+        destructive: false,
+    },
+
     // ── Text / captions ──────────────────────────────────────────────────────
     {
         id: 'auto_captions',
@@ -273,6 +337,34 @@ export const COMMANDS = [
         destructive: false,
     },
     {
+        // R92 round C: the pro short finish on the main edit (agent/shortPolish.js).
+        id: 'polish_short',
+        category: 'transform',
+        label: 'Pro short finish',
+        summary: 'AI hook title with motion, platform captions with key words, camera punch-ins, number pops, transitions and sound effects.',
+        phrases: ['pro finish', 'finish it like a pro', 'make it look pro', 'make it look professional', 'polish the short',
+                  'finish the short', 'add a hook title', 'hook title', 'add a hook on screen', 'make it viral', 'make it pop',
+                  'finish it for tiktok', 'finish it for reels', 'finish it for shorts',
+                  'finition pro', 'rends le pro', 'ajoute un titre accrocheur', 'titre d accroche'],
+        negative: ['remove', 'supprime', 'enleve'],
+        destructive: false,
+    },
+    {
+        // R92 round B: several shorts, one per platform, main edit untouched (Shorts tab).
+        id: 'repurpose_shorts',
+        category: 'edit',
+        label: 'Repurpose into shorts',
+        summary: 'Finds the strongest moments and makes one short per platform (TikTok, Reels, YouTube Shorts) without changing the main edit.',
+        phrases: ['repurpose into shorts', 'repurpose this video', 'repurpose the video', 'repurpose it', 'repurpose for social',
+                  'make shorts', 'make some shorts', 'make 3 shorts', 'make three shorts', 'turn it into shorts', 'turn this into shorts',
+                  'cut it into shorts', 'find the best clips', 'find shorts', 'clips for tiktok', 'shorts for tiktok',
+                  'for tiktok reels and shorts', 'tiktok reels and shorts', 'one for each platform',
+                  'fais des shorts', 'decoupe en shorts', 'transforme en shorts', 'recycle la video'],
+        negative: ['caption', 'sous titre', 'remove', 'supprime'],
+        destructive: false,
+        requires: ['transcript'],
+    },
+    {
         // R91 — Reel style: keep the strongest 15-60 s of a longer talk (agent/shortPicker.js).
         id: 'extract_short',
         category: 'edit',
@@ -304,7 +396,12 @@ export const COMMANDS = [
         summary: 'Adds a flip counter, a number/price pop, a logo card or a code window at the playhead.',
         phrases: ['add a counter', 'day counter', 'flip counter', 'add a price pop', 'price pop', 'number pop',
                   'pop the price', 'add a code window', 'code window', 'typing code', 'add a logo card', 'logo card',
-                  'ajoute un compteur', 'compteur de jours', 'fenetre de code', 'carte logo', 'prix anime'],
+                  'ajoute un compteur', 'compteur de jours', 'fenetre de code', 'carte logo', 'prix anime',
+                  // R92: vector shapes
+                  'add a bar chart', 'bar chart', 'add a chart', 'add a graph', 'add an arrow', 'draw an arrow',
+                  'add a progress bar', 'progress bar', 'circle callout', 'circle it', 'draw a circle',
+                  'highlight box', 'box around', 'add an underline', 'underline it', 'add a burst',
+                  'ajoute un graphique', 'ajoute une fleche', 'barre de progression', 'entoure'],
         negative: ['remove', 'clear', 'enleve', 'retire', 'supprime'],
         destructive: false,
     },
@@ -337,8 +434,20 @@ export const COMMANDS = [
         category: 'audio',
         label: 'Reduce noise',
         summary: 'Removes background hiss and hum.',
-        phrases: ['remove background noise', 'denoise', 'clean up the audio', 'reduce noise',
+        phrases: ['remove background noise', 'denoise', 'reduce noise',
                   'remove the hiss', 'remove hum'],
+        destructive: false,
+    },
+    {
+        // R92: one pass (high-pass, denoise, compression, -16 LUFS). Part of "clean up".
+        id: 'enhance_audio',
+        category: 'audio',
+        label: 'Enhance the voice',
+        summary: 'Less background noise, even level and standard loudness, in one pass.',
+        phrases: ['enhance the audio', 'enhance audio', 'improve the audio', 'improve audio', 'fix the audio',
+                  'clean up the audio', 'clean the audio', 'better audio', 'better sound', 'make the voice clearer',
+                  'enhance the voice', 'studio sound', 'ameliore le son', 'ameliore l audio', 'nettoie le son'],
+        negative: ['music', 'musique', 'volume'],
         destructive: false,
     },
     {
@@ -347,7 +456,10 @@ export const COMMANDS = [
         label: 'Add a sound effect',
         summary: 'Places a sound effect from the library.',
         phrases: ['add a sound effect', 'add sfx', 'add a whoosh', 'add a riser',
-                  'put a sound on', 'add an impact sound'],
+                  'put a sound on', 'add an impact sound',
+                  // R92: plural = sound the whole edit; named = that sound at the playhead
+                  'add sound effects', 'add some sound effects', 'sound effects', 'add a pop sound', 'add a swoosh',
+                  'add a ding', 'add a boom', 'ajoute des effets sonores', 'ajoute des bruitages', 'ajoute un bruitage'],
         params: [{ name: 'query', type: 'text', optional: true }],
         destructive: false,
     },
@@ -525,7 +637,9 @@ export const COMMANDS = [
         category: 'macro',
         label: 'Clean up and polish',
         summary: 'Remove silences → remove fillers → add zoom rhythm.',
-        phrases: ['clean it up and make it dynamic', 'clean and polish', 'full cleanup'],
+        // R92: "full cleanup" / "clean and polish" are a plain clean up (no zoom)
+        // now; only an explicit "make it dynamic" adds the zoom rhythm.
+        phrases: ['clean it up and make it dynamic', 'clean up and make it dynamic'],
         macro: ['silence_removal', 'remove_filler_words', 'rhythm_zoom'],
         destructive: true,
     },

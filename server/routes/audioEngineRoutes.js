@@ -15,7 +15,7 @@
  */
 
 const express = require('express');
-const { sanitizeEditingStyle, isCalmStyle } = require('../brain/editingStyles');
+const { sanitizeEditingStyle, isCalmStyle, sfxLevel } = require('../brain/editingStyles');
 const router  = express.Router();
 
 const { authenticateUser }       = require('../../middleware/auth.js');
@@ -149,6 +149,9 @@ router.post('/animate-automatically', authenticateUser, async (req, res) => {
     // R91: calm editing styles (podcast, interview) get softer motion and no
     // impact / comedy sound effects.
     const calm = isCalmStyle(sanitizeEditingStyle(req.body?.editingStyle ?? projectState?.editingStyle));
+    // R92: Talking head keeps sound effects soft: no impact or zoom-punch hits.
+    const soft = sfxLevel(sanitizeEditingStyle(req.body?.editingStyle ?? projectState?.editingStyle)) === 'subtle';
+    const HARD_INTENTS = new Set(['IMPACT', 'ZOOM_PUNCH', 'impact', 'zoom_punch']);
 
     if (!projectState || !Array.isArray(projectState.tracks)) {
         return res.status(400).json({ error: 'projectState.tracks is required' });
@@ -218,7 +221,7 @@ router.post('/animate-automatically', authenticateUser, async (req, res) => {
             // the project's cached tone (both free — see AnimationCombiner.js).
             const secondaryPresetId = calm ? null : pickSecondaryPreset(presetId, computeStyleSeed(event, projectTone));
 
-            const intents = calm ? [] : sfxIntentsForEventType(event.eventType);
+            const intents = calm ? [] : sfxIntentsForEventType(event.eventType).filter(i => !(soft && HARD_INTENTS.has(String(i))));
             let sfx = [];
             if (intents.length) {
                 if (!sfxCache.has(event.eventType)) {

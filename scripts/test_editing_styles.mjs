@@ -62,12 +62,19 @@ await check('generic requests and questions', () => {
 });
 await check('playbooks: cuts first, captions after them, levelling after cuts', () => {
     const keys = (id, req = 'edit it', facts = { hasTranscript: true }) => ES.buildAutopilotSteps(id, req, facts).map(s => s.key);
-    assert.deepEqual(keys('talking_head'), ['silences', 'fillers', 'captions', 'recipe']);
-    assert.deepEqual(keys('vlog'), ['silences', 'captions', 'recipe']);
-    assert.deepEqual(keys('podcast'), ['silences', 'fillers', 'audio', 'captions', 'recipe']);
-    assert.deepEqual(keys('interview', 'cut the intro'), ['request', 'silences', 'fillers', 'captions', 'recipe']);
-    assert.deepEqual(keys('reel'), ['short', 'vertical', 'silences', 'fillers', 'captions', 'recipe']);
-    assert.deepEqual(keys('reel', 'go', {}), ['transcript', 'short', 'vertical', 'silences', 'fillers', 'captions', 'recipe']);
+    // R92 round A: full clean up (silences, fillers, repetition, voice) in one step,
+    // animation last for the energetic styles, none for the calm ones.
+    assert.deepEqual(keys('talking_head'), ['cleanup', 'captions', 'recipe', 'animate']);
+    assert.deepEqual(keys('vlog'), ['silences', 'enhance', 'captions', 'recipe', 'animate']);
+    assert.deepEqual(keys('podcast'), ['cleanup', 'captions', 'recipe']);
+    assert.deepEqual(keys('interview'), ['cleanup', 'captions', 'recipe']);
+    // R92 round C: a Reel ends with the pro short finish instead of the generic animation.
+    assert.deepEqual(keys('reel'), ['short', 'vertical', 'cleanup', 'captions', 'recipe', 'finish']);
+    assert.deepEqual(keys('reel', 'go', {}), ['transcript', 'short', 'vertical', 'cleanup', 'captions', 'recipe', 'finish']);
+    // A specific request runs ALONE ("animate" used to also run the clean up).
+    assert.deepEqual(keys('interview', 'cut the intro'), ['request']);
+    assert.deepEqual(keys('talking_head', 'animate it'), ['request']);
+    assert.deepEqual(keys('podcast', 'remove the repetitions'), ['request']);
     assert.deepEqual(keys('nope'), []);
 });
 await check('pacing per style', () => {
@@ -78,7 +85,7 @@ await check('pacing per style', () => {
 
 log('every playbook prompt reaches its command');
 setTimeline();
-const EXPECT = { captions: 'auto_captions', short: 'extract_short', vertical: 'set_aspect_ratio', silences: 'silence_removal', fillers: 'remove_filler_words', audio: 'normalize_audio', recipe: 'apply_style_recipe' };
+const EXPECT = { captions: 'auto_captions', short: 'extract_short', vertical: 'set_aspect_ratio', silences: 'silence_removal', cleanup: 'long_form_edit', enhance: 'enhance_audio', animate: 'animate_automatically', finish: 'polish_short', recipe: 'apply_style_recipe' };
 const seen = new Map();
 for (const id of ES.EDITING_STYLE_IDS) for (const s of ES.buildAutopilotSteps(id, 'go', {})) if (EXPECT[s.key === 'transcript' ? 'captions' : s.key]) seen.set(s.prompt, EXPECT[s.key === 'transcript' ? 'captions' : s.key]);
 for (const [prompt, op] of seen) {
@@ -221,14 +228,14 @@ await check('runs the playbook in order as ONE undo step and reports skips', asy
     const before = S.getState().past.length;
     const r = await runAutopilot('edit it', { run: async (p) => {
         prompts.push(p);
-        if (p === 'Remove silences') { S.getState().cutTimelineRanges([[140, 150]]); return { success: true, jobId: 'j1' }; }
-        if (p === 'Remove filler words') return { success: false, message: 'no fillers found' };
+        if (p === 'Clean up the video') { S.getState().cutTimelineRanges([[140, 150]]); return { success: true, jobId: 'j1' }; }
+        if (p === 'Animate automatically') return { success: false, message: 'no moments found' };
         S.getState().addTemplateClip('counter', {}, { start: 2, select: false });
         return { success: true, jobId: 'j2' };
     } });
-    assert.deepEqual(prompts, ['Remove silences', 'Remove filler words', 'Add captions', 'Apply the punchy style recipe']);
+    assert.deepEqual(prompts, ['Clean up the video', 'Add captions', 'Apply the punchy style recipe', 'Animate automatically']);
     assert.equal(r.success, true); assert.equal(r.operation, 'auto_edit');
-    assert.match(r.message, /Talking head/); assert.match(r.message, /no fillers found/);
+    assert.match(r.message, /Talking head/); assert.match(r.message, /no moments found/);
     assert.equal(S.getState().past.length, before + 1);
     assert.equal(S.getState()._historyGroupDepth, 0);
 });
@@ -239,7 +246,7 @@ await check('no style picked: Talking head, said so; clarifications skipped; a t
     const r = await runAutopilot('go', { run: async (p) => {
         prompts.push(p);
         if (p === 'Add captions') return { success: false, requiresClarification: true, jobId: 'x' };
-        if (p === 'Remove filler words') throw new Error('boom');
+        if (p === 'Apply the punchy style recipe') throw new Error('boom');
         return { success: true };
     } });
     assert.equal(prompts.length, 4);
@@ -399,7 +406,8 @@ await check('engine extract_short cuts outside the picked window', () => {
 await check('picker is in the desktop chat box, style syncs to the cloud', () => {
     const rp = read('../client/src/components/Assistant/ReasoningPanel.jsx');
     assert.ok(/hidden md:block">\s*<EditingStylePicker/.test(rp));
-    assert.ok(/\[state\.tracks, state\.editingStyle\]/.test(read('../client/src/hooks/useSupabasePersistence.js')));
+    // R92 round B: the shorts list syncs in the same selector.
+    assert.ok(/\[state\.tracks, state\.editingStyle(?:, state\.shorts)?\]/.test(read('../client/src/hooks/useSupabasePersistence.js')));
     for (const lang of ['en', 'fr']) {
         const j = JSON.parse(read(`../client/src/locales/${lang}/editor.json`)).editingStyles;
         for (const id of ES.EDITING_STYLE_IDS) assert.ok(j.names[id] && j.hints[id], `${lang} ${id}`);

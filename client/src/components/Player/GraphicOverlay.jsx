@@ -18,6 +18,9 @@ import { clipsInGroup } from '../../motion/ClipGrouping.js';
 import RotateHandle from './RotateHandle.jsx';
 import { hasLayoutFrame, frameToCss } from '../../motion/LayoutPresets.js';
 import TemplateCanvas from './TemplateCanvas.jsx';
+// R92 round C: alignment guides while dragging
+import { computeSnap, measureOthers } from '../../motion/SnapGuides.js';
+import { useSnapGuides } from './SnapGuidesLayer.jsx';
 
 /**
  * A video on the overlay track (b-roll cutaway, screen recording, PiP). Before
@@ -79,7 +82,7 @@ const GraphicOverlay = () => {
     const gestureRef = React.useRef({});
     const clipElRefs = React.useRef({});
 
-    const { currentTime, tracks, activeClipId, updateClip, setActiveClip, saveToHistory, isPlaying } = useTimelineStore(useShallow(state => ({
+    const { currentTime, tracks, activeClipId, updateClip, setActiveClip, saveToHistory, isPlaying, aspectRatio } = useTimelineStore(useShallow(state => ({
         currentTime:   state.currentTime,
         isPlaying:     state.isPlaying,
         tracks:        state.tracks,
@@ -87,6 +90,7 @@ const GraphicOverlay = () => {
         updateClip:    state.updateClip,
         setActiveClip: state.setActiveClip,
         saveToHistory: state.saveToHistory,
+        aspectRatio:   state.aspectRatio,
     })));
 
     const overlayTracks = tracks.filter(t => t.type === 'overlay');
@@ -131,6 +135,18 @@ const GraphicOverlay = () => {
             state.initialClipY = typeof clip.y === 'number' ? clip.y : 18;
             state.mode         = 'drag';
             state.trackId      = trackId;
+            {
+                const fr = containerRef.current?.getBoundingClientRect();
+                const own = clipElRefs.current[clip.id]?.getBoundingClientRect();
+                state.snap = fr && fr.width > 0 ? {
+                    frameW: fr.width, frameH: fr.height,
+                    w: own ? (own.width / fr.width) * 100 : 0,
+                    h: own ? (own.height / fr.height) * 100 : 0,
+                    // Group members move together, so they are not snap targets.
+                    others: measureOthers(containerRef.current, clip.id)
+                        .filter(o => !(clip.groupId && clipsInGroup(tracks, clip.groupId).some(g => g.clip.id === o.id))),
+                } : null;
+            }
             // R66 — snapshot every group member's OWN starting x/y (across
             // ALL tracks, not just this one) once, up front — the same
             // "capture initial, then add delta" shape the single-clip case
@@ -187,8 +203,16 @@ const GraphicOverlay = () => {
         } else if (state.mode === 'drag') {
             const deltaX = e.clientX - state.dragStartX;
             const deltaY = e.clientY - state.dragStartY;
-            const deltaXPct = (deltaX / rect.width)  * 100;
-            const deltaYPct = (deltaY / rect.height) * 100;
+            let deltaXPct = (deltaX / rect.width)  * 100;
+            let deltaYPct = (deltaY / rect.height) * 100;
+            // R92: snap the dragged clip; the group follows the same delta.
+            if (state.snap) {
+                const s = computeSnap({ x: state.initialClipX + deltaXPct, y: state.initialClipY + deltaYPct, w: state.snap.w, h: state.snap.h },
+                    { others: state.snap.others, aspectRatio, frameW: state.snap.frameW, frameH: state.snap.frameH, disabled: e.altKey });
+                deltaXPct = s.x - state.initialClipX;
+                deltaYPct = s.y - state.initialClipY;
+                useSnapGuides.getState().setGuides(s.guides);
+            }
             if (state.groupMembers) {
                 // R66 — grouped drag: every member (this clip included) moves
                 // by the SAME percent delta from ITS OWN starting position.
@@ -209,7 +233,10 @@ const GraphicOverlay = () => {
         const state = gs[clip.id];
         if (!state) return;
         delete state.pointers[e.pointerId];
-        if (Object.keys(state.pointers).length === 0) delete gs[clip.id];
+        if (Object.keys(state.pointers).length === 0) {
+            delete gs[clip.id];
+            useSnapGuides.getState().clear();
+        }
     };
 
     return (
@@ -254,6 +281,7 @@ const GraphicOverlay = () => {
                         <div
                             key={clip.id}
                             ref={setRef}
+                        data-snap-id={clip.id}
                             {...handlers}
                             className={`absolute select-none ${isActive ? 'ring-1 ring-primary ring-inset' : ''}`}
                             style={{ ...css.box, pointerEvents: 'auto', touchAction: 'none', cursor: isActive ? 'grab' : 'pointer' }}
@@ -280,6 +308,7 @@ const GraphicOverlay = () => {
                     <div
                         key={clip.id}
                         ref={setRef}
+                        data-snap-id={clip.id}
                         {...handlers}
                         className={`absolute select-none origin-center ${isActive ? 'ring-1 ring-primary ring-offset-1 ring-offset-transparent' : ''}`}
                         style={{

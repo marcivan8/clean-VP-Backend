@@ -98,14 +98,14 @@ section('1 · The client and worker agree on the program version');
         `worker=${SUPPORTED_PROGRAM_VERSION} client=${CLIENT.CAPTION_PROGRAM_VERSION}`);
 }
 
-section('2 · The non-breaking guarantee — plain captions produce NO program entry');
+section('2 · R92 parity: plain captions go through the program too (drawn like the preview)');
 {
     const plain = textTrack([{ id: 'c1', type: 'text', content: 'Hello world', start: 0, duration: 2, fontSize: 48 }]);
     const program = CLIENT.buildCaptionProgram([baseTrack(3), plain], baseTrack(3).clips);
-    check('a caption with no animation/shadow/uppercase yields ZERO program entries',
-        program.entries.length === 0,
-        'if this is ever non-zero, plain captions stopped taking the untouched static drawtext path');
-    check('captionProgramIsNoOp() reports it', CLIENT.captionProgramIsNoOp(program) === true);
+    check('a plain caption is one program entry, drawn as an image', program.entries.length === 1 && !!program.entries[0].raster);
+    check('captionProgramIsNoOp() is false for it', CLIENT.captionProgramIsNoOp(program) === false);
+    const empty = textTrack([{ id: 'c0', type: 'text', content: '', start: 0, duration: 2 }]);
+    check('a project with only empty text is still a no-op', CLIENT.captionProgramIsNoOp(CLIENT.buildCaptionProgram([baseTrack(3), empty], baseTrack(3).clips)) === true);
 }
 
 section('3 · Anything animated, shadowed, or uppercased DOES produce an entry');
@@ -453,7 +453,7 @@ section('11 · Wired into the export job, guarded and fail-open');
         src.indexOf('let captionProgramWarning = null;') <
         // Matched as actual code (line-anchored, 4-space indent), not the
         // phrase appearing inside an explanatory comment above the declaration.
-        src.search(/\n {4}if \(textTracks\.length > 0 && !useRevideo\) \{/),
+        src.search(/\n {4}if \(textTracks\.length > 0 && !(?:useRevideo|revideoSucceeded)\) \{/),
         'declared after/inside that if-block is exactly the regression: the return statement ' +
         'reads a name the block-scoped `let` never made visible outside it');
 

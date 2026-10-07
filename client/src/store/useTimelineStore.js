@@ -25,6 +25,8 @@ import { clipsInGroup, computeGroupMoveUpdates, computeGroupDuplicateSpecs } fro
 import { deriveSpeakerCrop, deriveTrackingSegments } from '../motion/ObjectLayers.js';
 import { frameForPreset, splitSpeakerCrop, fillFrameCrop, LAYOUT_PRESETS } from '../motion/LayoutPresets.js';
 import { TEMPLATE_KINDS, TEMPLATE_WIDTH_FRACTION, templateParams, templateSize } from '../motion/TemplateGraphics.js';
+import { normalizeMatte } from '../motion/MatteSettings.js'; // R92
+import { ledgerEntry } from '../agent/EditRecap.js'; // R92 round B
 import { getPlayerDimensions } from '../utils/playerDimensions.js';
 import { computeRippleDelete, computeGapRipple, remapTimelineWords } from '../timeline/rippleDelete.js';
 import { computeMultiMove } from '../timeline/multiMove.js';
@@ -203,6 +205,10 @@ const useTimelineStore = create(
             // reload never resumes in Auto by surprise.
             editingStyle: _preRestoredProject?.editingStyle || null,
             editingMode: 'normal',
+            // R92 round B: shorts found in this project (repurposing). Each is a
+            // window of the main edit tuned for one platform; the main edit is
+            // never changed by them. Saved with the project.
+            shorts: Array.isArray(_preRestoredProject?.shorts) ? _preRestoredProject.shorts : [],
 
             // Speaker diarization map — populated after split_speakers completes.
             // Shape: { SPEAKER_00: { role: 'interviewer'|'guest'|null, label: string|null, words: [{word, start, end}] } }
@@ -584,6 +590,20 @@ const useTimelineStore = create(
                 try { get().saveProject(); } catch (err) { console.error('[setEditingStyle] save failed:', err); }
             },
             setEditingMode: (mode) => set({ editingMode: mode === 'auto' ? 'auto' : 'normal' }),
+            /** R92: replace the shorts list (from "repurpose into shorts"). Saved. */
+            setShorts: (list) => {
+                set({ shorts: Array.isArray(list) ? list.slice(0, 10) : [] });
+                try { get().saveProject(); } catch (err) { console.error('[setShorts] save failed:', err); }
+            },
+            /** R92: change one short (platform, export state, title). Saved. */
+            updateShort: (id, patch = {}) => {
+                set(state => ({ shorts: (state.shorts || []).map(x => (x.id === id ? { ...x, ...patch } : x)) }));
+                try { get().saveProject(); } catch (err) { console.error('[updateShort] save failed:', err); }
+            },
+            removeShort: (id) => {
+                set(state => ({ shorts: (state.shorts || []).filter(x => x.id !== id) }));
+                try { get().saveProject(); } catch (err) { console.error('[removeShort] save failed:', err); }
+            },
             clearContentAnalysis: () => set({ contentAnalysis: null }),
 
             // Speaker diarization
@@ -615,9 +635,14 @@ const useTimelineStore = create(
              * Capped at 60 entries — enough for the Brain's context window while
              * keeping the saved project payload small.
              */
-            recordEdit: (op, { summary = null, params = null } = {}) => set(state => {
+            recordEdit: (op, { summary = null, params = null, reasons = null, description = null, before = null, after = null } = {}) => set(state => {
                 if (!op) return {};
-                const entry = { op, at: Date.now(), summary, params };
+                // R92: what / why / impact (agent/EditRecap.js). Params are kept
+                // only when small: the ledger is saved with the project.
+                const built = ledgerEntry({ op, message: summary, reasons: reasons || [], description, before, after, style: state.editingStyle || null });
+                let small = null;
+                try { small = params && JSON.stringify(params).length <= 2000 ? params : null; } catch { small = null; }
+                const entry = { ...built, params: small };
                 const next  = [...state.editHistory, entry];
                 return { editHistory: next.length > 60 ? next.slice(-60) : next };
             }),
@@ -1922,14 +1947,42 @@ const useTimelineStore = create(
              */
 
             /** Store the SAM2 result on a clip. One history step. */
-            applyLayerSeparation: (trackId, clipId, { maskAssetUrl, bboxTrack, sourceWidth, sourceHeight } = {}) => {
-                if (!maskAssetUrl || !Array.isArray(bboxTrack) || bboxTrack.length === 0) {
-                    return { success: false, error: 'applyLayerSeparation: maskAssetUrl and a non-empty bboxTrack are required' };
+            applyLayerSeparation: (trackId, clipId, result = {}) => {
+                // R92: the SAM2 job returned `maskSignedUrl` while this read
+                // `maskAssetUrl`, so applying always failed. Both spellings are
+                // accepted now, plus the stored path (links expire, paths do
+                // not) and the source range the R92 browser matte covers.
+                const maskAssetUrl = result.maskAssetUrl || result.maskSignedUrl || null;
+                const maskAssetPath = result.maskAssetPath || null;
+                if (!maskAssetUrl && !maskAssetPath) {
+                    return { success: false, error: 'applyLayerSeparation: a mask (maskAssetUrl or maskAssetPath) is required' };
                 }
+                const prev = get().tracks.find(t => t.id === trackId)?.clips?.find(c => c.id === clipId)?.layerMask;
                 get().updateClip(trackId, clipId, {
-                    layerMask: { maskAssetUrl, bboxTrack, sourceWidth, sourceHeight, status: 'ready' },
-                });
+                    layerMask: {
+                        maskAssetUrl,
+                        maskAssetPath,
+                        bboxTrack: Array.isArray(result.bboxTrack) ? result.bboxTrack : [],
+                        sourceWidth: result.sourceWidth ?? null,
+                        sourceHeight: result.sourceHeight ?? null,
+                        sourceStart: Number.isFinite(Number(result.sourceStart)) ? Number(result.sourceStart) : 0,
+                        sourceDuration: Number.isFinite(Number(result.sourceDuration)) ? Number(result.sourceDuration) : null,
+                        fps: Number(result.fps) || null,
+                        settings: normalizeMatte(result.settings || prev?.settings),
+                        status: 'ready',
+                    },
+                }, result.skipHistory ? { skipHistory: true } : undefined);
                 return { success: true };
+            },
+
+            /** R92: change how the background behind the person looks. One history step. */
+            setMatteSettings: (trackId, clipId, patch = {}) => {
+                const clip = get().tracks.find(t => t.id === trackId)?.clips?.find(c => c.id === clipId);
+                if (!clip) return { success: false, error: `clip "${clipId}" not found on track "${trackId}"` };
+                if (!clip.layerMask) return { success: false, error: 'Remove the background first, then adjust it.' };
+                const settings = normalizeMatte({ ...(clip.layerMask.settings || {}), ...patch });
+                get().updateClip(trackId, clipId, { layerMask: { ...clip.layerMask, settings } });
+                return { success: true, settings };
             },
 
             /**
@@ -2269,17 +2322,17 @@ const useTimelineStore = create(
              * this action just makes `clip.layerTarget` the thing both of
              * those read.
              */
-            setLayerTarget: (trackId, clipId, target) => {
+            setLayerTarget: (trackId, clipId, target, opts = {}) => {
                 if (target !== null && target !== 'speaker' && target !== 'background') {
                     return { success: false, error: `invalid layerTarget "${target}"` };
                 }
                 const track = get().tracks.find(t => t.id === trackId);
                 const clip = track?.clips?.find(c => c.id === clipId);
                 if (!clip) return { success: false, error: `clip "${clipId}" not found on track "${trackId}"` };
-                if (target && !clip.layerMask?.bboxTrack?.length) {
-                    return { success: false, error: 'No SAM2 separation on this clip yet — run "separate speaker" first.' };
+                if (target && !(clip.layerMask?.maskAssetPath || clip.layerMask?.maskAssetUrl || clip.layerMask?.bboxTrack?.length)) {
+                    return { success: false, error: 'This clip has no background mask yet. Say "remove the background" first.' };
                 }
-                get().updateClip(trackId, clipId, { layerTarget: target });
+                get().updateClip(trackId, clipId, { layerTarget: target }, opts?.skipHistory ? { skipHistory: true } : undefined);
                 return { success: true };
             },
 
@@ -2840,6 +2893,7 @@ const useTimelineStore = create(
                     transcriptVerified:   state.transcriptVerified || {},
                     contentAnalysis:      state.contentAnalysis || null,
                     editingStyle:         state.editingStyle || null,
+                    shorts:               Array.isArray(state.shorts) ? state.shorts : [],
                     speakerMap:           state.speakerMap || {},
                     diarizationByAsset:   state.diarizationByAsset || {},
                     sceneAnalysisByAsset: state.sceneAnalysisByAsset || {},
@@ -2925,6 +2979,7 @@ const useTimelineStore = create(
                     // Per project: a project saved without one opens with none.
                     editingStyle:         projectData.editingStyle || null,
                     editingMode:          'normal',
+                    shorts:               Array.isArray(projectData.shorts) ? projectData.shorts : [],
                     speakerMap:           projectData.speakerMap           ?? get().speakerMap,
                     diarizationByAsset:   projectData.diarizationByAsset   ?? get().diarizationByAsset,
                     sceneAnalysisByAsset: projectData.sceneAnalysisByAsset ?? get().sceneAnalysisByAsset,

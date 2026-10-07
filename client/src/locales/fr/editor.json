@@ -121,7 +121,8 @@
       "effects": "effets",
       "interview": "interview",
       "marketplace": "extensions",
-      "motion": "animation"
+      "motion": "animation",
+      "shorts": "shorts"
     },
     "colorGrading": {
       "title": "Étalonnage",
@@ -315,7 +316,12 @@
     "tabMyPresets": "Mes préréglages",
     "noPresetsFound": "Aucun préréglage trouvé",
     "import": "Importer",
-    "export": "Exporter"
+    "export": "Exporter",
+    "easingSpring": "Ressort",
+    "easingSpringWobbly": "Ressort souple",
+    "easingSpringSnappy": "Ressort vif",
+    "easingExpoOut": "Expo sortie",
+    "easingBackOut": "Dépassement"
   },
   "player": {
     "pacingAlert": "Alerte de rythme",
@@ -818,7 +824,14 @@
       "counter": "Compteur",
       "price-pop": "Chiffre animé",
       "logo-card": "Carte logo",
-      "code-window": "Fenêtre de code"
+      "code-window": "Fenêtre de code",
+      "highlight-box": "Cadre",
+      "underline": "Soulignement",
+      "circle-callout": "Cercle",
+      "arrow": "Flèche",
+      "progress-bar": "Barre de progression",
+      "bar-chart": "Graphique en barres",
+      "burst": "Éclat"
     },
     "fields": {
       "label": "Libellé",
@@ -832,7 +845,18 @@
       "logo": "Image du logo",
       "title": "Titre",
       "code": "Code",
-      "cps": "Caractères par seconde"
+      "cps": "Caractères par seconde",
+      "thickness": "Épaisseur",
+      "direction": "Direction",
+      "values": "Valeurs (séparées par des virgules)",
+      "labels": "Libellés (séparés par des virgules)",
+      "rays": "Rayons"
+    },
+    "directions": {
+      "right": "Droite",
+      "left": "Gauche",
+      "up": "Haut",
+      "down": "Bas"
     }
   },
   "styleRecipes": {
@@ -876,5 +900,111 @@
     "normalHint": "Roka fait ce que vous demandez, dans votre style",
     "autoHint": "Roka monte toute la vidéo dans votre style. Une seule annulation suffit à tout retirer.",
     "autoPlaceholder": "Auto : dites « monte la vidéo » ou décrivez-la, Roka fait tout le montage"
+  },
+  "motionDirector": {
+    "title": "Écrire le mouvement",
+    "placeholder": "ex. arrive en force, flotte, sortie élégante",
+    "write": "Écrire",
+    "writtenByAI": "Mouvement écrit par l’IA.",
+    "builtFromLibrary": "Mouvement créé depuis la bibliothèque.",
+    "nothing": "Aucun mouvement n’a pu être créé. Essayez de nommer un mouvement, par exemple « slam in ».",
+    "failed": "Le mouvement n’a pas pu être écrit. Réessayez.",
+    "notForThisLayer": "Ce mouvement ne s’applique pas à ce calque.",
+    "groups": {
+      "in": "Entrée",
+      "emphasis": "Accent",
+      "hold": "Maintien",
+      "out": "Sortie"
+    },
+    "verbs": {
+      "fade-in": "Fondu",
+      "rise-in": "Montée",
+      "drop-in": "Chute",
+      "slide-in": "Glissé",
+      "slam-in": "Impact",
+      "pop-in": "Pop",
+      "zoom-in": "Zoom",
+      "whip-in": "Fouetté",
+      "swing-in": "Balancier",
+      "spin-in": "Rotation",
+      "blur-in": "Mise au point",
+      "typewriter": "Machine à écrire",
+      "word-reveal": "Révélation",
+      "glitch-in": "Glitch",
+      "punch": "Punch",
+      "pulse": "Pulsation",
+      "shake": "Secousse",
+      "wobble": "Oscillation",
+      "nod": "Hochement",
+      "flash": "Flash",
+      "jiggle": "Tremblement",
+      "bounce": "Rebond",
+      "float": "Flottement",
+      "breathe": "Respiration",
+      "sway": "Balancement",
+      "drift": "Dérive",
+      "push-in": "Avancée",
+      "fade-out": "Fondu",
+      "sink-out": "Descente",
+      "fly-out": "Envol",
+      "shrink-out": "Rétrécir",
+      "blur-out": "Flou",
+      "whip-out": "Fouetté"
+    }
+  },
+  "backgroundPanel": {
+    "title": "Arrière-plan",
+    "remove": "Supprimer l’arrière-plan",
+    "working": "Détection de la personne… {{pct}} %",
+    "cancel": "Annuler",
+    "hint": "Calculé sur votre appareil avec un modèle gratuit. Seul le masque final est envoyé.",
+    "mode": "Rendu de l’arrière-plan",
+    "modes": {
+      "blur": "Flou",
+      "color": "Couleur",
+      "image": "Image",
+      "dim": "Assombrir"
+    },
+    "blur": "Flou",
+    "dim": "Obscurité",
+    "color": "Couleur",
+    "image": "Image",
+    "feather": "Douceur du bord",
+    "threshold": "Précision de la découpe",
+    "softness": "Fondu du bord",
+    "refresh": "Refaire le masque",
+    "off": "Désactiver",
+    "noPerson": "Aucune personne trouvée dans ce clip, tout le cadre peut être remplacé."
+  },
+  "shortsPanel": {
+    "title": "Shorts",
+    "find": "Trouver des shorts dans cette vidéo",
+    "findAgain": "Trouver de nouveaux shorts",
+    "findPrompt": "Repurpose this video into 3 shorts for TikTok, Reels and YouTube Shorts",
+    "exportAll": "Tout exporter",
+    "empty": "Aucun short pour l’instant. L’IA choisit les meilleurs moments de votre vidéo, un par plateforme, sans modifier votre montage principal.",
+    "platform": "Plateforme",
+    "range": "{{from}} à {{to}} · {{len}} s",
+    "preview": "Aperçu",
+    "export": "Exporter pour {{platform}}",
+    "exporting": "Export… {{pct}} %",
+    "remove": "Supprimer ce short",
+    "download": "Télécharger le short",
+    "footnote": "Chaque short est exporté en 9:16, la personne cadrée et les sous-titres à l’écart des boutons de l’application. Votre montage principal n’est pas modifié.",
+    "steps": {
+      "mask": "Détection de la personne…",
+      "polish": "Finition…",
+      "render": "Rendu",
+      "project": "Création du projet…"
+    },
+    "polish": "Finition pro",
+    "polishHint": "Titre d’accroche animé par l’IA, sous-titres de la plateforme avec mots clés, zooms sur les moments forts, chiffres animés et transitions.",
+    "sfx": "Effets sonores",
+    "sfxHint": "Whoosh sur les coupes, pops sur les graphiques, impacts sur le titre, au niveau de la plateforme.",
+    "popOut": "Mise en avant de la personne",
+    "popOutHint": "Adoucit et assombrit l’arrière-plan derrière la personne (modèle gratuit sur l’appareil, un peu plus long la première fois).",
+    "open": "Ouvrir comme projet",
+    "openFailed": "Le short n’a pas pu être enregistré comme projet.",
+    "applied": "Ajouté : {{list}}."
   }
 }

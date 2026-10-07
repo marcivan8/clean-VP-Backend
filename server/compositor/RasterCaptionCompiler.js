@@ -35,8 +35,10 @@
  * ─── SCOPE ─────────────────────────────────────────────────────────────────
  * Glow is drawn at its PEAK value for the caption's whole life (the R63
  * drawtext path does the same). Animated opacity is reproduced as fade-in /
- * fade-out (CompositorCompiler.findFade), static opacity exactly. Synthetic
- * bold/italic is not applied: the font file is drawn as-is, like drawtext.
+ * fade-out (CompositorCompiler.findFade), static opacity exactly.
+ * R92: bold and italic are SYNTHESISED (a fill-colour outline for bold, a
+ * 12-degree slant for italic), the same thing a browser does when the font
+ * has no bold or italic face, so the export matches the preview.
  */
 
 'use strict';
@@ -213,7 +215,8 @@ function drawState(Canvas, entry, state, opts) {
     const tokens = Array.isArray(entry.tokens) && entry.tokens.length > 0
         ? entry.tokens
         : String(entry.text || '').split(' ').filter(Boolean);
-    const baseColor = cssColor(entry.style.color, '#FACC15');
+    // R92: the preview's default is white (TextOverlay: clip.color || '#ffffff').
+    const baseColor = cssColor(entry.style.color, '#FFFFFF');
     const looks = tokens.map((_, i) => wordLook(i, state, raster, baseColor));
 
     const measureCanvas = Canvas.createCanvas(4, 4);
@@ -241,6 +244,10 @@ function drawState(Canvas, entry, state, opts) {
     const align = raster.layout?.align || 'center';
     const strokeW = Number(entry.style.stroke?.width) > 0 ? Number(entry.style.stroke.width) * renderScale : 0;
     const strokeColor = cssColor(entry.style.stroke?.color, '#000000');
+    const weight = String(raster.font?.weight || 'normal');
+    const synthBold = weight === 'bold' || weight === 'bolder' || Number(weight) >= 600;
+    const synthItalic = /italic|oblique/.test(String(raster.font?.style || ''));
+    const boldW = synthBold ? Math.max(1, fontPx * 0.045) : 0;
 
     // Shadows: the preview's glow REPLACES clip.textShadow while it is active
     // (`glowShadow || clip.textShadow`); drawn at peak glow, see header.
@@ -282,6 +289,10 @@ function drawState(Canvas, entry, state, opts) {
             ctx.translate(-cx, -cy);
         }
         const textX = w.left + w.pad / 2;
+        if (synthItalic) {
+            // Slant around the baseline so the word stays on its line.
+            ctx.transform(1, 0, -0.21, 1, 0.21 * w.baseline, 0);
+        }
         if (pass === 'box' && w.look.background) {
             const r = 0.08 * fontPx;
             const bx = w.left, by = w.top + halfLeading, bw = w.boxW, bh = contentPx;
@@ -303,11 +314,18 @@ function drawState(Canvas, entry, state, opts) {
                 ctx.shadowOffsetY = sh.y * pxScale * renderScale;
                 ctx.fillStyle = cssColor(w.look.color, '#FFFFFF');
                 ctx.fillText(w.tok, textX, w.baseline);
+                if (boldW > 0) { ctx.lineWidth = boldW; ctx.strokeStyle = ctx.fillStyle; ctx.strokeText(w.tok, textX, w.baseline); }
                 ctx.restore();
             }
         } else if (pass === 'fill') {
             ctx.fillStyle = cssColor(w.look.color, '#FFFFFF');
             ctx.fillText(w.tok, textX, w.baseline);
+            if (boldW > 0) {
+                // Synthetic bold: thicken the glyph with its own colour.
+                ctx.lineWidth = boldW;
+                ctx.strokeStyle = ctx.fillStyle;
+                ctx.strokeText(w.tok, textX, w.baseline);
+            }
             if (strokeW > 0) {
                 // -webkit-text-stroke: centred on the outline, painted over the fill.
                 ctx.lineWidth = strokeW;

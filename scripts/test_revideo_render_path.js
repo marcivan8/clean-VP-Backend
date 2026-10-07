@@ -242,7 +242,8 @@ section('5 · jobs/exportProcessor.js — opt-in wiring, mutual exclusion, fails
     check('useRevideo requires an actual text or overlay track (no-op otherwise)', /revideoTextTracks\.length > 0 \|\| revideoOverlayTracks\.length > 0/.test(exp));
 
     check('STEP 2.5 (compositor) is skipped when useRevideo — no double-compositing', /rawPlan && process\.env\.COMPOSITOR_DISABLED !== '1' && !useRevideo/.test(exp));
-    check('STEP 4 (drawtext captions) is skipped when useRevideo — no double captions', /textTracks\.length > 0 && !useRevideo/.test(exp));
+    check('STEP 4 (drawtext captions) is skipped only when Revideo succeeded — no double captions, no dropped captions (R92)', /textTracks\.length > 0 && !revideoSucceeded/.test(exp));
+    check('R92: worker health is checked before the compositor is skipped', /useRevideo && !\(await revideoWorkerHealthy\(\)\)/.test(exp) && /async function revideoWorkerHealthy/.test(exp));
 
     check('Revideo call is wrapped in try/catch (fails open)', /catch \(revideoErr\)/.test(exp));
     check('failure sets revideoWarning rather than throwing the whole export', /revideoWarning = revideoErr\.message/.test(exp));

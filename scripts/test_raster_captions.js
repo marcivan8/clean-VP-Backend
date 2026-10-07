@@ -60,21 +60,26 @@ const textTrack = (clips) => ({ id: 't1', type: 'text', order: -1, clips });
 const program = (clips, dur = 4) => CLIENT.buildCaptionProgram([baseTrack(dur), textTrack(clips)], baseTrack(dur).clips);
 const words = (text, start, step) => text.split(' ').map((w, i) => ({ text: w, start: start + i * step, end: start + (i + 1) * step - 0.02 }));
 
-section('1 · Non-breaking: plain and R63-only captions are not raster');
+section('1 · R92 parity: every text clip is drawn as an image, like the preview box');
 {
     const p = program([{ id: 'c1', content: 'Hello world', start: 0, duration: 2 }]);
-    check('a plain caption still yields no program entry', p.entries.length === 0);
+    check('a plain caption is now a raster entry (wraps, weight, align, shadow like the preview)', p.entries.length === 1 && !!p.entries[0].raster);
+    check('...with the preview defaults: Inter, white', p.entries[0]?.style.fontFamily === 'Inter' && p.entries[0]?.style.color === '#ffffff');
+    check('...and the preview box: 80% wide, centred', p.entries[0]?.raster.layout.widthFrac === 0.8 && p.entries[0]?.raster.layout.align === 'center');
 
     const r63 = program([{ id: 'c2', content: 'pop in', start: 0, duration: 2, animations: CLIENT.buildPreset('pop', { duration: 2 }) }]);
-    check('an animated caption is an R63 entry...', r63.entries.length === 1);
-    check('...with NO raster block (stays on drawtext)', r63.entries[0] && !r63.entries[0].raster);
+    check('an animated caption is one entry, raster too', r63.entries.length === 1 && !!r63.entries[0].raster);
 
     const timed = program([{ id: 'c3', content: 'just words', start: 0, duration: 2, words: words('just words', 0, 0.5) }]);
-    check('word timings alone (no highlight, no emphasis) produce no entry', timed.entries.length === 0);
+    check('word timings alone draw plain (no per-word states)', timed.entries.length === 1 && !timed.entries[0].raster.wordStates);
 
     const noneHl = program([{ id: 'c4', content: 'calm doc line', start: 0, duration: 2, words: words('calm doc line', 0, 0.5),
         captionStyle: { packId: 'documentary', wordHighlight: { mode: 'none', scale: 1 } } }]);
-    check("a pack whose highlight mode is 'none' adds nothing", noneHl.entries.length === 0);
+    check("a pack whose highlight mode is 'none' adds no highlight", noneHl.entries.length === 1 && !noneHl.entries[0].raster.highlight);
+
+    const empty = program([{ id: 'c5', content: '   ', start: 0, duration: 2 }]);
+    check('an empty text clip draws nothing', empty.entries.length === 0);
+    check('bold and italic travel to the image renderer', program([{ id: 'c6', content: 'x', start: 0, duration: 1, fontWeight: 'bold', fontStyle: 'italic' }]).entries[0].raster.font.weight === 'bold');
 }
 
 section('2 · The client flags rotation / highlight / emphasis as raster');

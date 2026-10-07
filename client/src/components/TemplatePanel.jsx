@@ -65,6 +65,24 @@ const TemplateEditor = ({ trackId, clip }) => {
                 <LogoPicker value={draft.imageAssetId} onPick={(asset) => commit({ imageAssetId: asset?.id || null, imageUrl: asset ? (asset.url || asset.proxyUrl || null) : null })} />
             </>)}
             {kind === 'code-window' && (<>{text('title')}{text('code', { multiline: true, rows: 6 })}{text('cps', { number: true })}</>)}
+            {/* R92: vector shapes */}
+            {['highlight-box', 'underline', 'circle-callout', 'burst'].includes(kind) && (<>
+                {color('color')}
+                <div className="grid grid-cols-2 gap-2">{text('thickness', { number: true })}{kind === 'burst' ? text('rays', { number: true }) : null}</div>
+            </>)}
+            {kind === 'arrow' && (<>
+                {color('color')}
+                <label className="block">
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.fields.direction')}</span>
+                    <select value={draft.direction || 'right'} onChange={e => commit({ direction: e.target.value })}
+                        className="mt-1 w-full bg-background border border-border rounded px-2 py-1 text-xs">
+                        {['right', 'left', 'up', 'down'].map(d => <option key={d} value={d}>{t(`templates.directions.${d}`)}</option>)}
+                    </select>
+                </label>
+                {text('thickness', { number: true })}
+            </>)}
+            {kind === 'progress-bar' && (<>{text('label')}{text('value', { number: true })}{color('color')}</>)}
+            {kind === 'bar-chart' && (<>{text('values')}{text('labels')}{color('color')}{color('accent')}</>)}
         </div>
     );
 };

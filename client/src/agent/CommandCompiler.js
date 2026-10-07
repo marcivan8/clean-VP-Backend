@@ -405,6 +405,20 @@ function compileDenoiseAudio(step, ctx) {
     ]);
 }
 
+// R92: voice enhancement in one pass (high-pass, denoise, gentle compression,
+// loudness to -16 LUFS). Separate denoise then normalize would each start
+// from the original file, so the second would undo the first.
+function compileEnhanceAudio(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.API, 'audioEnhance', {
+            endpoint: '/api/audio/enhance',
+            method: 'POST',
+            payload: { filename: '$uploaded_file' },
+            optional: !!step.optional,
+        }, { source_step_id: step.step_id, symbolic_refs: ['$uploaded_file'], description: 'Enhance the voice (denoise, level, loudness)' }),
+    ]);
+}
+
 // ── NEW: remove_repeated_takes ─────────────────────────────────────────────────
 
 /**
@@ -660,13 +674,6 @@ function compileFindHook(step, ctx) {
 function compilePlaceContextualBroll(step, ctx) {
     return ok(step.step_id, [
         cmd(ENGINE.STORE, 'placeContextualBroll', {}, { source_step_id: step.step_id, description: 'Match b-roll to spoken dialogue' }),
-    ]);
-}
-
-function compileRemoveRepetition(step, ctx) {
-    return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'removeRepetition', { importance_threshold: step.importance_threshold || 0.3 },
-            { source_step_id: step.step_id, description: 'Remove repetitive / low-value segments' }),
     ]);
 }
 
@@ -1080,6 +1087,16 @@ const COMMAND_REGISTRY = new Map([
     ['sync_cutaways',             { compiler: compileAtomicStore('sync_cutaways', 'Place cutaways and number pops on the words') }],
     ['extract_short',             { compiler: compileAtomicStore('extract_short', 'Keep the strongest moment as a short') }],
     ['apply_style_recipe',        { compiler: compileAtomicStore('apply_style_recipe', 'Apply a style recipe') }],
+    ['compose_motion',            { compiler: compileAtomicStore('compose_motion', 'Write custom motion') }],
+    ['enhance_audio',             { compiler: compileEnhanceAudio }],
+    ['repurpose_shorts',          { compiler: compileAtomicStore('repurpose_shorts', 'Find shorts for each platform') }],
+    ['polish_short',              { compiler: compileAtomicStore('polish_short', 'Pro short finish') }],
+    ['auto_sfx',                  { compiler: compileAtomicStore('auto_sfx', 'Add sound effects on the edit') }],
+    ['place_sfx',                 { compiler: compileAtomicStore('place_sfx', 'Add a sound effect') }],
+    ['remove_background',         { compiler: compileAtomicStore('remove_background', 'Remove the background') }],
+    ['zoom_speaker',              { compiler: compileAtomicStore('zoom_speaker', 'Zoom to the speaker') }],
+    ['track_speaker',             { compiler: compileAtomicStore('track_speaker', 'Track the speaker') }],
+    ['separate_speaker',          { compiler: compileAtomicStore('separate_speaker', 'Separate the speaker') }],
     ['layout_split_screen',       { compiler: compileAtomicStore('layout_split_screen', 'Split screen layout') }],
     ['layout_picture_in_picture', { compiler: compileAtomicStore('layout_picture_in_picture', 'Picture-in-picture layout') }],
     ['layout_fullscreen',         { compiler: compileAtomicStore('layout_fullscreen', 'Full-screen cutaway layout') }],
@@ -1119,7 +1136,10 @@ const COMMAND_REGISTRY = new Map([
     ['smart_cleanup', { compiler: compileSmartCleanup }],
     ['find_hook', { compiler: compileFindHook }],
     ['place_contextual_broll', { compiler: compilePlaceContextualBroll }],
-    ['remove_repetition', { compiler: compileRemoveRepetition }],
+    // R92: the legacy store path returned failure without real analysis;
+    // every remove_repetition step (server plans included) now runs the real
+    // retake detector.
+    ['remove_repetition', { compiler: compileRemoveRepeatedTakes }],
     ['reorder_segment', { compiler: compileReorderSegment }],
     ['reorder_clips',   { compiler: compileReorderClips }],
     ['chat', { compiler: compileChat }],

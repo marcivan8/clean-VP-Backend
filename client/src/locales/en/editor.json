@@ -121,7 +121,8 @@
       "effects": "effects",
       "interview": "interview",
       "marketplace": "marketplace",
-      "motion": "motion"
+      "motion": "motion",
+      "shorts": "shorts"
     },
     "colorGrading": {
       "title": "Color Grading",
@@ -315,7 +316,12 @@
     "tabMyPresets": "My Presets",
     "noPresetsFound": "No presets found",
     "import": "Import",
-    "export": "Export"
+    "export": "Export",
+    "easingSpring": "Spring",
+    "easingSpringWobbly": "Wobbly spring",
+    "easingSpringSnappy": "Snappy spring",
+    "easingExpoOut": "Expo out",
+    "easingBackOut": "Overshoot"
   },
   "player": {
     "pacingAlert": "Pacing Alert",
@@ -818,7 +824,14 @@
       "counter": "Flip counter",
       "price-pop": "Number pop",
       "logo-card": "Logo card",
-      "code-window": "Code window"
+      "code-window": "Code window",
+      "highlight-box": "Highlight box",
+      "underline": "Underline",
+      "circle-callout": "Circle",
+      "arrow": "Arrow",
+      "progress-bar": "Progress bar",
+      "bar-chart": "Bar chart",
+      "burst": "Burst"
     },
     "fields": {
       "label": "Label",
@@ -832,7 +845,18 @@
       "logo": "Logo image",
       "title": "Title",
       "code": "Code",
-      "cps": "Characters per second"
+      "cps": "Characters per second",
+      "thickness": "Line width",
+      "direction": "Direction",
+      "values": "Values (comma separated)",
+      "labels": "Labels (comma separated)",
+      "rays": "Rays"
+    },
+    "directions": {
+      "right": "Right",
+      "left": "Left",
+      "up": "Up",
+      "down": "Down"
     }
   },
   "styleRecipes": {
@@ -876,5 +900,111 @@
     "normalHint": "Roka does what you ask, in your style",
     "autoHint": "Roka edits the whole video in your style. One undo reverts it.",
     "autoPlaceholder": "Auto: say \"edit it\" or describe the video, Roka edits it end to end"
+  },
+  "motionDirector": {
+    "title": "Write the motion",
+    "placeholder": "e.g. slam in, then float, elegant exit",
+    "write": "Write",
+    "writtenByAI": "Motion written by the AI.",
+    "builtFromLibrary": "Motion built from the library.",
+    "nothing": "No motion could be built from that. Try naming a motion like \"slam in\".",
+    "failed": "The motion could not be written. Try again.",
+    "notForThisLayer": "This motion does not apply to this layer.",
+    "groups": {
+      "in": "Entrance",
+      "emphasis": "Emphasis",
+      "hold": "Hold",
+      "out": "Exit"
+    },
+    "verbs": {
+      "fade-in": "Fade",
+      "rise-in": "Rise",
+      "drop-in": "Drop",
+      "slide-in": "Slide",
+      "slam-in": "Slam",
+      "pop-in": "Pop",
+      "zoom-in": "Zoom",
+      "whip-in": "Whip",
+      "swing-in": "Swing",
+      "spin-in": "Spin",
+      "blur-in": "Focus",
+      "typewriter": "Typewriter",
+      "word-reveal": "Reveal",
+      "glitch-in": "Glitch",
+      "punch": "Punch",
+      "pulse": "Pulse",
+      "shake": "Shake",
+      "wobble": "Wobble",
+      "nod": "Nod",
+      "flash": "Flash",
+      "jiggle": "Jiggle",
+      "bounce": "Bounce",
+      "float": "Float",
+      "breathe": "Breathe",
+      "sway": "Sway",
+      "drift": "Drift",
+      "push-in": "Push in",
+      "fade-out": "Fade",
+      "sink-out": "Sink",
+      "fly-out": "Fly away",
+      "shrink-out": "Shrink",
+      "blur-out": "Defocus",
+      "whip-out": "Whip"
+    }
+  },
+  "backgroundPanel": {
+    "title": "Background",
+    "remove": "Remove background",
+    "working": "Finding the person… {{pct}}%",
+    "cancel": "Cancel",
+    "hint": "Runs on your device with a free model. Nothing is uploaded except the final mask.",
+    "mode": "Background look",
+    "modes": {
+      "blur": "Blur",
+      "color": "Colour",
+      "image": "Image",
+      "dim": "Dim"
+    },
+    "blur": "Blur",
+    "dim": "Darkness",
+    "color": "Colour",
+    "image": "Image",
+    "feather": "Edge softness",
+    "threshold": "Cut tightness",
+    "softness": "Edge blend",
+    "refresh": "Redo the mask",
+    "off": "Off",
+    "noPerson": "No person was found in this clip, so the whole frame may be replaced."
+  },
+  "shortsPanel": {
+    "title": "Shorts",
+    "find": "Find shorts in this video",
+    "findAgain": "Find new shorts",
+    "findPrompt": "Repurpose this video into 3 shorts for TikTok, Reels and YouTube Shorts",
+    "exportAll": "Export all",
+    "empty": "No shorts yet. The AI picks the strongest moments of your video, one per platform, and keeps your main edit as it is.",
+    "platform": "Platform",
+    "range": "{{from}} to {{to}} · {{len}} s",
+    "preview": "Preview",
+    "export": "Export for {{platform}}",
+    "exporting": "Exporting… {{pct}}%",
+    "remove": "Remove this short",
+    "download": "Download the short",
+    "footnote": "Each short is exported in 9:16 with the speaker framed and the captions kept clear of the app buttons. Your main edit is not changed.",
+    "steps": {
+      "mask": "Finding the speaker…",
+      "polish": "Finishing…",
+      "render": "Rendering",
+      "project": "Creating the project…"
+    },
+    "polish": "Pro finish",
+    "polishHint": "AI hook title with motion, platform captions with key words, camera punch-ins on key moments, number pops and transitions.",
+    "sfx": "Sound effects",
+    "sfxHint": "Whooshes on cuts, pops on graphics, hits on the title, at the platform level.",
+    "popOut": "Speaker pop-out",
+    "popOutHint": "Softens and dims the background behind the person (free on-device model, takes a moment the first time).",
+    "open": "Open as project",
+    "openFailed": "The short could not be saved as a project.",
+    "applied": "Added: {{list}}."
   }
 }

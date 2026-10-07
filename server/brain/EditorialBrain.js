@@ -21,7 +21,7 @@
 'use strict';
 
 const OpenAI = require('openai');
-const { brainStyleSection } = require('./editingStyles');
+const { brainStyleSection, styleFocusSection, ledgerSection } = require('./editingStyles');
 const { getAIClient, isAIConfigured, resolveModel, resolveProvider } = require('../../services/AIProvider');
 const { ContextEngine } = require('./ContextEngine');
 const { UserProfileEngine } = require('./UserProfileEngine');
@@ -273,6 +273,7 @@ Aspect ratio:   ${ctx.aspectRatio || 'unknown'}
 Platform:       ${platform} ${loudnessNote}
 Completion:     ${ctx.completionScore || 0}/100
 Edits applied:  ${(ctx.editsDone || []).join(', ') || 'none'}
+${ledgerSection(ctx.editLedger)}
 Effect coverage: camera angles on ${ctx.effects?.multicamClips ?? 0}/${ctx.effects?.totalVideoClips ?? 0} clips (${Math.round((ctx.multicamCoverage || 0) * 100)}%), zoom rhythm on ${ctx.effects?.zoomRhythmClips ?? 0}/${ctx.effects?.totalVideoClips ?? 0} clips (${Math.round((ctx.rhythmCoverage || 0) * 100)}%), ${ctx.effects?.speakerCount ?? 0} speaker(s) diarized across ${ctx.effects?.videoTrackCount ?? 0} video track(s)
 NEVER recommend an edit that "Edits applied" or "Effect coverage" shows is already done — recommend the next thing that genuinely improves THIS project, or a refinement of what's there.
 
@@ -478,6 +479,7 @@ IMPORTANT — use the detected format to drive your assessment and suggestions:
     to generate captions first so you can give a proper assessment.
 
 ${brainStyleSection(ctx.editingStyle)}
+${styleFocusSection(ctx.editingStyle, ctx)}
 
 Transcript preview (speaker-labelled if multiple speakers):
 ${transcriptSnippet}

@@ -1,3 +1,4 @@
+import { buildRecap, timelineFacts } from './EditRecap.js'; // R92 round B
 import { createJobActor, mapStateToJobState, isTerminalState } from './JobStateMachine.js';
 import { IntentParser } from './IntentParser.js';
 import { EditPlanner } from './EditPlanner.js';
@@ -89,10 +90,16 @@ export class EditJobManager {
                 actor.send({ type: 'PLAN_GENERATED', plan: { plan_id: jobId, steps: [] } });
                 actor.send({ type: 'EXECUTION_COMPLETE', result: { success: true } });
                 actor.send({ type: 'VALIDATION_COMPLETE', result: { success: true } });
+                // R92: the saved ledger (what / why / impact), not the
+                // in-memory "Planning: <op>" list that was lost on reload.
+                const recapState = useTimelineStore.getState();
+                const ledger = recapState.editHistory || [];
                 return {
                     success: true,
                     jobId,
-                    message: editSessionMemory.getSummary(),
+                    message: ledger.length
+                        ? buildRecap(ledger, { style: recapState.editingStyle, facts: timelineFacts(recapState) })
+                        : editSessionMemory.getSummary(),
                     suggestions: ['Continue editing', 'Undo the last change', 'Export the video'],
                 };
             }
@@ -469,6 +476,8 @@ export class EditJobManager {
             jobId,
             operation: intentResult.operation,   // ← WorkflowController needs this to emit per-op UI
             message: feedback.message,
+            // R92: the plan's reasons become the "why" of the edit recap.
+            reasons: (planResult.plan?.steps || []).map(st => st?.reason).filter(Boolean),
             suggestions: feedback.suggestions,
             details: executionResult.results,
             validation: validationResult,

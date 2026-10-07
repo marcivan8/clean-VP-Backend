@@ -9,6 +9,7 @@ import { countMetric, distributionMetric, nowMs } from '../utils/metrics.js';
 import { getNextAction, getQuickChips } from './SuggestionEngine.js';
 import { runAutopilot, stopAutopilot, isAutopilotRunning } from './StyleAutopilot.js';
 import { isQuestion } from './EditingStyles.js';
+import { timelineFacts } from './EditRecap.js'; // R92 round B: measured impact per edit
 
 // Per-operation editorial descriptions and next-step suggestions.
 // Keys must match the `operation` field returned by IntentParser / EditJobManager.
@@ -30,6 +31,10 @@ const OPERATION_META = {
 
     // R91 — Auto mode (editing style playbook) and the Reel short picker
     auto_edit:         { description: 'Your editing style was applied from start to finish. One undo reverts the whole edit.', suggestion: 'Export for social', suggestionPrompt: 'Export for TikTok' },
+    polish_short:      { description: 'The short got a pro finish: hook title, platform captions, camera moves, pops, transitions and sounds.', suggestion: 'Export it', suggestionPrompt: null },
+    repurpose_shorts:  { description: 'Shorts were picked from the strongest moments, one per platform. The main edit is unchanged.', suggestion: 'Open the Shorts tab', suggestionPrompt: null, suggestionTab: 'shorts' },
+    remove_background: { description: 'The background behind the person was changed. Fine-tune it in the Background panel.', suggestion: 'Try a solid colour', suggestionPrompt: 'Replace the background with black' },
+    compose_motion:    { description: 'Custom motion was written for the layers. Undo reverts it in one step.', suggestion: 'Try another feel', suggestionPrompt: 'Make the title animation more elegant' },
     extract_short:     { description: 'The strongest moment was kept as a short, starting on its hook.', suggestion: 'Set it to vertical', suggestionPrompt: 'Set the aspect ratio to 9:16' },
 
     // Compound clean + dynamic
@@ -129,6 +134,7 @@ const workflowMachine = createMachine({
                         useAIStore.getState().setIsAnalyzing(true);
                         context.userPrompt = event.prompt;
                         context.initialHistoryLen = useTimelineStore.getState().past.length;
+                        context.preJobFacts = timelineFacts(useTimelineStore.getState());
                     }
                 }
             }
@@ -214,9 +220,15 @@ const workflowMachine = createMachine({
                                     // step, so the suggestion engine (and the Editorial
                                     // Brain, which reads editHistory via buildProjectState)
                                     // both reason over a timeline that includes this edit.
+                                    // R92: with WHY (plan reasons) and measured IMPACT
+                                    // (before/after facts) so "what did you do?" can explain it.
                                     useTimelineStore.getState().recordEdit?.(result.operation, {
                                         summary: result.message || null,
                                         params:  result.details || null,
+                                        reasons: result.reasons || null,
+                                        description: opMeta?.description || null,
+                                        before: context.preJobFacts || null,
+                                        after: timelineFacts(useTimelineStore.getState()),
                                     });
 
                                     // Tell the SERVER what actually ran, so the user's
@@ -387,6 +399,7 @@ const workflowMachine = createMachine({
                         console.log('[Workflow] Resuming with answers:', event.answers);
                         useAIStore.getState().setIsAnalyzing(true);
                         context.initialHistoryLen = useTimelineStore.getState().past.length;
+                        context.preJobFacts = timelineFacts(useTimelineStore.getState());
                     }
                 },
                 // If the user sends a NEW prompt while we are waiting for clarification,
@@ -440,6 +453,16 @@ const workflowMachine = createMachine({
 
                             if (event.output.success) {
                                 const stepsApplied = useTimelineStore.getState().past.length - context.initialHistoryLen;
+                                // R92: answers to a clarification are edits too; record them.
+                                if (event.output.operation && event.output.operation !== 'chat') {
+                                    useTimelineStore.getState().recordEdit?.(event.output.operation, {
+                                        summary: event.output.message || null,
+                                        reasons: event.output.reasons || null,
+                                        description: getOperationMeta(event.output.operation)?.description || null,
+                                        before: context.preJobFacts || null,
+                                        after: timelineFacts(useTimelineStore.getState()),
+                                    });
+                                }
                                 useAIStore.getState().addLog({
                                     id: 'task-complete-' + Date.now(),
                                     type: 'task_complete',

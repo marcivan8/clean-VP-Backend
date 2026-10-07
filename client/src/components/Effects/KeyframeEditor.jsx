@@ -21,7 +21,13 @@ const EASING_OPTIONS = [
     { value: 'ease-in', labelKey: 'effects.easingEaseIn', path: 'M0,1 C0.42,1 1,0 1,0' },
     { value: 'ease-out', labelKey: 'effects.easingEaseOut', path: 'M0,1 C0,1 0.58,0 1,0' },
     { value: 'ease-in-out', labelKey: 'effects.easingEaseInOut', path: 'M0,1 C0.42,1 0.58,0 1,0' },
-    { value: 'bounce', labelKey: 'effects.easingBounce', path: 'M0,1 C0.33,1 0.66,0.5 0.7,0 S1,0 1,0' }
+    { value: 'bounce', labelKey: 'effects.easingBounce', path: 'M0,1 C0.33,1 0.66,0.5 0.7,0 S1,0 1,0' },
+    // R92: real springs and expo curves (motion/Easing.js)
+    { value: 'spring', labelKey: 'effects.easingSpring', path: 'M0,1 C0.2,0 0.5,-0.08 1,0' },
+    { value: 'springWobbly', labelKey: 'effects.easingSpringWobbly', path: 'M0,1 C0.2,-0.3 0.4,0.15 0.6,-0.05 S1,0 1,0' },
+    { value: 'springSnappy', labelKey: 'effects.easingSpringSnappy', path: 'M0,1 C0.1,0 0.3,-0.04 1,0' },
+    { value: 'easeOutExpo', labelKey: 'effects.easingExpoOut', path: 'M0,1 C0.16,1 0.3,0 1,0' },
+    { value: 'backOut', labelKey: 'effects.easingBackOut', path: 'M0,1 C0.34,-0.4 0.64,0 1,0' }
 ];
 
 /**

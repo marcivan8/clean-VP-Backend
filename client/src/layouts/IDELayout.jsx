@@ -1,7 +1,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap } from 'lucide-react';
+import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap, Smartphone } from 'lucide-react';
 import classNames from 'classnames';
 import { Player } from '@revideo/player-react';
 import { Video as RevideoVideo, Audio as RevideoAudio, Media as RevideoMedia } from '@revideo/2d';
@@ -33,6 +33,8 @@ import InterviewEditPanel from '../components/InterviewEditPanel';
 // ReferenceError if it ever were. Add both halves or the panel is dead on
 // arrival.
 import MotionPanel from '../components/MotionPanel';
+import ShortsPanel from '../components/ShortsPanel'; // R92 round B: repurposed shorts
+import SnapGuidesLayer from '../components/Player/SnapGuidesLayer.jsx'; // R92 round C
 import LayoutPresetPicker from '../components/LayoutPresetPicker.jsx';
 import AssetPanel from '../components/AssetPanel';
 import ExportModal from '../components/ExportModal';
@@ -1389,8 +1391,14 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         try { localStorage.removeItem(activeExportKey); } catch { /* storage unavailable */ }
     };
 
-    const handleFfmpegExport = async (settings) => {
-        const { tracks, duration, assets, projectLUTId, aspectRatio: projectAspectRatio } = useTimelineStore.getState();
+    // R92 round B: `override` exports something other than the main edit (a
+    // short from the Shorts tab: its own sliced tracks, duration and 9:16
+    // frame) through this SAME path, so it gets the same compositor, caption
+    // program and camera motion. The main edit is never touched.
+    const handleFfmpegExport = async (settings, override = null) => {
+        const live = useTimelineStore.getState();
+        const { tracks, duration, assets, projectLUTId, aspectRatio: projectAspectRatio } = override ? { ...live, ...override } : live;
+        const planAspectRatio = override?.aspectRatio || aspectRatio;
         const { authFetch }     = await import('../utils/authFetch.js');
         const { pollJobResult } = await import('../utils/jobPoller.js');
 
@@ -1414,7 +1422,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         let plan = null; // kept even when compositionPlan is nulled-out — captionProgram needs plan.base
         try {
             const { buildCompositionPlan, planIsNoOp } = await import('../motion/Compositor.js');
-            const [aw, ah] = String(aspectRatio || '9:16').split(':').map(Number);
+            const [aw, ah] = String(planAspectRatio || '9:16').split(':').map(Number);
             const ratio = (aw > 0 && ah > 0) ? aw / ah : 9 / 16;
             // Nominal frame — only its ASPECT is load-bearing.
             const nominalHeight = 1920;
@@ -1518,7 +1526,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         if (!data.jobId)   throw new Error('Export response missing jobId');
         // Remember the running job so a page reload / coming back to the
         // project picks the render up again (the server keeps rendering).
-        saveActiveExport({ jobId: data.jobId, startedAt: Date.now(), settings });
+        if (!override) saveActiveExport({ jobId: data.jobId, startedAt: Date.now(), settings });
 
         // Poll until the worker finishes (handles Railway timeouts gracefully).
         // Budget scales with timeline length and resolution — see
@@ -1528,7 +1536,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             ...(tracksForExport || []).flatMap(t => (t.clips || []).map(c =>
                 (Number(c.start) || 0) + (Number(c.duration) || 0))),
         );
-        const result = await pollJobResult(data.jobId, null, getExportPollTimeoutMs(settings, timelineSeconds), setExportProgress);
+        const result = await pollJobResult(data.jobId, null, getExportPollTimeoutMs(settings, timelineSeconds), override?.onProgress || setExportProgress);
         if (!result?.url) throw new Error('Export completed but no URL returned');
 
         // FIX: this used to return only {url, filename, metadata} — silently
@@ -2045,7 +2053,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                         <div className="relative border-b" style={{ borderColor: "var(--line-soft)" }}>
                             <div ref={tabBarRef} className="p-2 flex gap-1 overflow-x-auto no-scrollbar">
-                                {['media', 'captions', 'transcript', 'color', 'motion', 'assets', 'audio', 'transform', 'settings'].map(tab => (
+                                {['media', 'captions', 'transcript', 'color', 'motion', 'shorts', 'assets', 'audio', 'transform', 'settings'].map(tab => (
                                     <button
                                         key={tab}
                                         onClick={() => setActiveTab(tab)}
@@ -2056,6 +2064,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         {tab === 'transcript' && <span style={{ fontSize: 9 }}>📝</span>}
                                         {tab === 'color'      && <Palette  className="w-2.5 h-2.5" />}
                                         {tab === 'motion'     && <Zap      className="w-2.5 h-2.5" />}
+                                        {tab === 'shorts'     && <Smartphone className="w-2.5 h-2.5" />}
                                         {tab === 'assets'     && <Sparkles className="w-2.5 h-2.5" />}
                                         {tab === 'audio'      && <span style={{ fontSize: 9 }}>🎤</span>}
                                         {tab === 'transform'  && <Move     className="w-2.5 h-2.5" />}
@@ -2224,6 +2233,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 The tab button for this lives in the array above;
                                 both halves are required. */}
                             {activeTab === 'motion' && <MotionPanel />}
+                            {activeTab === 'shorts' && <ShortsPanel onExport={(settings, override) => handleFfmpegExport(settings, override)} />}
 
                             {activeTab === 'interview' && <section className="border-b border-border/50"><InterviewEditPanel /></section>}
                             {activeTab === 'captions' && <section className="p-4 border-b border-border/50"><TextPanel /></section>}
@@ -2411,6 +2421,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 </ErrorBoundary>
                                 <TextOverlay />
                                 <GraphicOverlay />
+                                {/* R92 round C: alignment guides while dragging */}
+                                <SnapGuidesLayer />
                             </div>
 
                             {/* Floating Playback Controls (desktop; mobile uses MobileTransportBar) */}

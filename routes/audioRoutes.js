@@ -92,6 +92,73 @@ router.post('/denoise', optionalAuth, async (req, res) => {
     }
 });
 
+/**
+ * POST /api/audio/enhance
+ * R92: voice enhancement in one pass (high-pass, denoise, compression,
+ * loudness -16 LUFS). Same input rules and job flow as /denoise.
+ */
+router.post('/enhance', optionalAuth, async (req, res) => {
+    try {
+        const { filePath, filename } = req.body;
+
+        if (!filePath && !filename) {
+            return res.status(400).json({ error: 'No filePath or filename provided' });
+        }
+
+        // SECURITY: Resolve path and enforce uploads/ boundary
+        const uploadsDir = path.resolve(__dirname, '../uploads');
+        let inputPath;
+
+        if (filename && !filePath) {
+            const norm = filename.replace(/\\/g, '/').replace(/^\/|\.\.\/|\.\.$/g, '');
+            inputPath = path.resolve(uploadsDir, norm);
+            // Fall back to temp/ for bare filenames (e.g. "video.mp4" with no directory)
+            if (!fs.existsSync(inputPath)) {
+                const tempPath = path.resolve(uploadsDir, 'temp', path.basename(filename));
+                if (fs.existsSync(tempPath)) inputPath = tempPath;
+            }
+        } else {
+            inputPath = path.resolve(filePath);
+        }
+
+        if (!inputPath.startsWith(uploadsDir)) {
+            return res.status(403).json({ error: 'Access denied: invalid file path' });
+        }
+
+        if (!fs.existsSync(inputPath)) {
+            if (storageConfig.bucket && !storageConfig.useLocalStorage) {
+                console.warn(`[audioRoutes] File not found locally (${inputPath}); worker will attempt GCS download.`);
+            } else {
+                return res.status(404).json({ error: 'File not found on server' });
+            }
+        }
+
+        console.log(`🎧 Enqueuing Voice Enhance: ${inputPath}`);
+
+        const uniqueJobId = `enhance-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`;
+        const job = await audioQueue.add('enhance-audio', {
+            action: 'enhance',
+            filePath: inputPath,
+            // Also forward the original filename so the worker can reconstruct the
+            // GCS object path when the local file is absent (production / Railway).
+            filename: filename || null,
+            userId: req.user?.id || 'anonymous',
+        }, {
+            jobId: uniqueJobId
+        });
+
+        res.json({
+            success: true,
+            jobId: job.id,
+            status: 'queued'
+        });
+
+    } catch (error) {
+        console.error("Enhance Endpoint Failed:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 
 /**
  * POST /api/audio/beat-detect

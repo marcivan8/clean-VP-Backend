@@ -371,6 +371,8 @@ OPERATIONS:
 - remove_repetition: Remove repeated segments. Params: {}
 - build_from_rushes: Build video from raw rushes. Params: { platform?, targetDuration? }
 - animate_automatically: Detect the most interesting/relevant moments (reveals, punchlines, emphasis, emotional beats) and automatically apply motion graphics/animations to them to illustrate and bring the video to life — no manual picks. Params: {}
+- compose_motion: Write custom motion for named layers from a description ("make the title slam in then float", "elegant animation on the captions", "typewriter effect"). Use when the user describes HOW something should move. Params: { brief: the user's words }
+- remove_background: Remove, blur, dim or replace the background behind the person in the video ("remove the background", "blur the background", "replace the background with black", "green screen"). Params: { mode?: 'blur'|'color'|'image'|'dim', color?: '#rrggbb' }
 
 For direct commands with valid duration logic, return:
 {
@@ -516,6 +518,8 @@ USER REQUEST:
                                             "compound_clean_dynamic",
                                             // AI Animation Intelligence (R68)
                                             "animate_automatically",
+                                            // R92: written motion + free background removal
+                                            "compose_motion", "remove_background",
                                             // Conversational
                                             "chat"
                                         ]
@@ -1505,6 +1509,15 @@ function generateLocalPlan(intent, context, planId) {
 
         case 'adjust_volume':
             steps = [{ step_id: 'volume', action: 'adjust_volume', clip_id: clipId, volume: params.volume ?? 0.8 }];
+            break;
+
+        case 'compose_motion':
+            // R92: the client composes; the brief is the user's words.
+            steps = [{ step_id: 'motion', action: 'compose_motion', args: { brief: params.brief || intent?.originalPrompt || intent?.prompt || '' } }];
+            break;
+
+        case 'remove_background':
+            steps = [{ step_id: 'matte', action: 'remove_background', args: { mode: params.mode || 'blur', color: params.color || null } }];
             break;
 
         case 'animate_automatically':

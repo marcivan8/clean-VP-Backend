@@ -18,6 +18,9 @@ import { revealedWordCount, activeWordIndex, resolveEmphasis } from '../../motio
 import { clipsInGroup } from '../../motion/ClipGrouping.js';
 import { getPlayerDimensions } from '../../utils/playerDimensions.js';
 import RotateHandle from './RotateHandle.jsx';
+// R92 round C: alignment guides while dragging
+import { computeSnap, startPosition, measureOthers } from '../../motion/SnapGuides.js';
+import { useSnapGuides } from './SnapGuidesLayer.jsx';
 
 // Map preset names to actual font families
 const FONT_MAP = {
@@ -287,9 +290,23 @@ const TextOverlay = () => {
             saveToHistory();
             state.dragStartX    = e.clientX;
             state.dragStartY    = e.clientY;
-            state.initialClipX  = typeof clip.x === 'number' ? clip.x : 50;
-            state.initialClipY  = typeof clip.y === 'number' ? clip.y : 50;
+            // R92: start where the element is DRAWN ('bottom' captions sit at
+            // 85 %), not at 50/50, so the first drag no longer jumps.
+            const startPos      = startPosition(clip);
+            state.initialClipX  = startPos.x;
+            state.initialClipY  = startPos.y;
             state.mode          = 'drag';
+            // Snap context: this element's size and the other elements, measured once.
+            {
+                const fr = containerRef.current?.getBoundingClientRect();
+                const own = clipElRefs.current[clip.id]?.getBoundingClientRect();
+                state.snap = fr && fr.width > 0 ? {
+                    frameW: fr.width, frameH: fr.height,
+                    w: own ? (own.width / fr.width) * 100 : 0,
+                    h: own ? (own.height / fr.height) * 100 : 0,
+                    others: measureOthers(containerRef.current, clip.id),
+                } : null;
+            }
             // R66 — every OTHER member of this clip's group (this clip's own
             // position is already owned by `applyCaptionUpdate` below —
             // unchanged, including its global/individual scope fan-out).
@@ -350,8 +367,17 @@ const TextOverlay = () => {
             const deltaY = e.clientY - state.dragStartY;
             const deltaXPct = (deltaX / rect.width)  * 100;
             const deltaYPct = (deltaY / rect.height) * 100;
-            const newX = state.initialClipX + deltaXPct;
-            const newY = state.initialClipY + deltaYPct;
+            const rawX = state.initialClipX + deltaXPct;
+            const rawY = state.initialClipY + deltaYPct;
+            // R92: snap to the frame centre, thirds, safe margins and other
+            // elements (Alt / Option drags freely).
+            const snapped = state.snap
+                ? computeSnap({ x: rawX, y: rawY, w: state.snap.w, h: state.snap.h },
+                    { others: state.snap.others, aspectRatio, frameW: state.snap.frameW, frameH: state.snap.frameH, disabled: e.altKey })
+                : { x: rawX, y: rawY, guides: [] };
+            useSnapGuides.getState().setGuides(snapped.guides);
+            const newX = snapped.x;
+            const newY = snapped.y;
             state.pendingUpdate = { x: newX, y: newY };
             applyCaptionUpdate({ x: newX, y: newY }, { clipId: clip.id, skipHistory: true, liveOnly: true });
             // R66 — drag the rest of the group (e.g. a LowerThird's
@@ -360,7 +386,7 @@ const TextOverlay = () => {
             // caption and has no global/individual scope of its own.
             if (state.groupMembers) {
                 for (const m of state.groupMembers) {
-                    updateClip(m.trackId, m.clipId, { x: m.initialX + deltaXPct, y: m.initialY + deltaYPct }, { skipHistory: true });
+                    updateClip(m.trackId, m.clipId, { x: m.initialX + (newX - state.initialClipX), y: m.initialY + (newY - state.initialClipY) }, { skipHistory: true });
                 }
             }
         }
@@ -385,6 +411,7 @@ const TextOverlay = () => {
             if (state.pendingUpdate) {
                 applyCaptionUpdate(state.pendingUpdate, { clipId: clip.id, skipHistory: true });
             }
+            useSnapGuides.getState().clear();
             // All fingers lifted — clean up
             delete gs[clip.id];
         } else if (remaining === 1 && state.mode === 'pinch') {
@@ -393,8 +420,9 @@ const TextOverlay = () => {
             const [lastPt] = Object.values(state.pointers);
             state.dragStartX   = lastPt.clientX;
             state.dragStartY   = lastPt.clientY;
-            state.initialClipX = typeof clip.x === 'number' ? clip.x : 50;
-            state.initialClipY = typeof clip.y === 'number' ? clip.y : 50;
+            const resumePos    = startPosition(clip);
+            state.initialClipX = resumePos.x;
+            state.initialClipY = resumePos.y;
             state.mode         = 'drag';
         }
     };
@@ -502,6 +530,7 @@ const TextOverlay = () => {
                         // drop the pointer capture on a drag.
                         key={clip.id}
                         ref={(el) => { if (el) clipElRefs.current[clip.id] = el; else delete clipElRefs.current[clip.id]; }}
+                        data-snap-id={clip.id}
                         onPointerDown={(e) => handlePointerDown(e, clip)}
                         onPointerMove={(e) => handlePointerMove(e, clip)}
                         onPointerUp={(e)   => handlePointerUp(e, clip)}

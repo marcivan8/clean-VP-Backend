@@ -49,11 +49,13 @@ log('✓ every registry command plans and compiles (no empty clarification)');
 
 for (const p of ['clean up', 'Clean it up', 'clean up my video', 'clean up the video']) {
     const r = await run(p);
-    assert.deepEqual(r.steps, ['remove_repeated_takes', 'silence_removal', 'remove_filler_words'], p);
-    assert.deepEqual(r.commands, ['detectRepeatedTakes', 'silenceDetect', 'fillerDetect'], p);
+    // R92: plus voice enhancement, last and optional.
+    assert.deepEqual(r.steps, ['remove_repeated_takes', 'silence_removal', 'remove_filler_words', 'enhance_audio'], p);
+    assert.deepEqual(r.commands, ['detectRepeatedTakes', 'silenceDetect', 'fillerDetect', 'audioEnhance'], p);
     assert.equal(r.plan.plan.steps[0].optional, true, 'repeated takes are optional inside a clean-up');
+    assert.equal(r.plan.plan.steps[3].optional, true, 'voice enhancement is optional inside a clean-up');
 }
-log('✓ "clean up" = silences + fillers + repeated takes (optional)');
+log('✓ "clean up" = repeated takes + silences + fillers + voice enhancement (optional ones flagged)');
 
 let r = await run('Remove silences and filler words');
 assert.deepEqual(r.steps, ['silence_removal', 'remove_filler_words'], 'chip runs both, not fillers only');

@@ -109,13 +109,19 @@ export function isQuestion(text) {
 
 /**
  * The Auto playbook: plain prompts, each run through the normal pipeline.
- * Order matters:
- *  - cuts first, captions AFTER them: caption clips are placed on the
- *    timeline as it is, and a later cut does not move them;
- *  - "Add captions" always runs after the cuts (it replaces earlier caption
- *    clips, keeping their font), so existing captions are re-synced too;
- *  - audio levelling after the cuts (a cut rebuilds clips from the source
- *    file, which would drop the levelled audio);
+ *
+ * R92 round A: a SPECIFIC request in Auto mode ("animate it", "remove the
+ * repetitions") runs on its own, hands-free, as one undo. Only a generic
+ * request ("edit it", "do your thing") runs the style's whole playbook.
+ * Before, "animate" in Auto mode also ran silences, fillers, captions and the
+ * recipe, which read as "animate runs clean up".
+ *
+ * Order in a playbook matters:
+ *  - cuts first, captions AFTER them: caption clips are placed on the timeline
+ *    as it is, and a later cut does not move them;
+ *  - "Clean up the video" is the full clean up: silences, filler words,
+ *    repeated takes, then voice enhancement (after the cuts);
+ *  - animation last, so its moments and sound effects land on the final cut;
  *  - Reel picks its moment from the transcript; with no transcript yet it
  *    transcribes first.
  * @param {string} styleId
@@ -126,19 +132,33 @@ export function isQuestion(text) {
 export function buildAutopilotSteps(styleId, request, facts = {}) {
     const style = getEditingStyle(styleId);
     if (!style) return [];
-    const custom = isGenericEditRequest(request) ? null : String(request).trim();
+    if (!isGenericEditRequest(request)) {
+        const custom = String(request || '').trim();
+        return custom ? [{ key: 'request', prompt: custom }] : [];
+    }
     const steps = [];
     if (style.id === 'reel') {
         if (!facts.hasTranscript) steps.push({ key: 'transcript', prompt: 'Add captions' });
         steps.push({ key: 'short', prompt: `Extract a short of ${style.targetDuration} seconds` });
         steps.push({ key: 'vertical', prompt: 'Set the aspect ratio to 9:16' });
     }
-    if (custom) steps.push({ key: 'request', prompt: custom });
-    steps.push({ key: 'silences', prompt: 'Remove silences' });
-    if (style.id !== 'vlog') steps.push({ key: 'fillers', prompt: 'Remove filler words' });
-    if (style.id === 'podcast') steps.push({ key: 'audio', prompt: 'Normalize the audio' });
+    if (style.id === 'vlog') {
+        // A vlog keeps its natural "ums": silences only, plus the voice.
+        steps.push({ key: 'silences', prompt: 'Remove silences' });
+        steps.push({ key: 'enhance', prompt: 'Enhance the audio' });
+    } else {
+        steps.push({ key: 'cleanup', prompt: 'Clean up the video' });
+    }
     steps.push({ key: 'captions', prompt: 'Add captions' });
     steps.push({ key: 'recipe', prompt: `Apply the ${style.recipeId} style recipe` });
+    // Motion + sound effects: not for the calm styles. A Reel gets the full
+    // pro short finish (R92 round C: hook title, platform captions, camera
+    // punch-ins, pops, transitions, sounds) instead of the generic animation.
+    if (style.id === 'reel') {
+        steps.push({ key: 'finish', prompt: 'Pro finish' });
+    } else if (style.id === 'vlog' || style.id === 'talking_head') {
+        steps.push({ key: 'animate', prompt: 'Animate automatically' });
+    }
     return steps;
 }
 

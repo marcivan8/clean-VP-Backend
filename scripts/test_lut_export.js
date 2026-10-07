@@ -85,7 +85,9 @@ section('2 · It fails OPEN — an export must never die over a colour grade');
 section('3 · The client actually sends the selection');
 {
     check('projectLUTId is read from the store',
-        /const \{ tracks, duration, assets, projectLUTId.*\} = useTimelineStore\.getState\(\)/.test(ideSrc));
+        // R92: read from the store; a short export overrides only tracks/duration/aspect.
+        (/const \{ tracks, duration, assets, projectLUTId.*\} = useTimelineStore\.getState\(\)/.test(ideSrc)
+            || (/const live = useTimelineStore\.getState\(\);/.test(ideSrc) && /const \{ tracks, duration, assets, projectLUTId.*\} = override \? \{ \.\.\.live, \.\.\.override \} : live;/.test(ideSrc))));
     check('it is included in the export settings',
         /projectLUTId: projectLUTId \|\| null/.test(ideSrc),
         'without this the worker never learns a LUT was chosen');
