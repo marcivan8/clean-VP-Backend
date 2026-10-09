@@ -14,6 +14,7 @@
  */
 
 export const MATTE_MODES = ['blur', 'color', 'image', 'dim'];
+export const MATTE_REVEALS = ['none', 'rack-focus', 'focus-pull', 'dim-spotlight', 'flash-reveal', 'zoom-drift'];
 
 export const MATTE_DEFAULTS = Object.freeze({
     mode: 'blur',
@@ -31,6 +32,12 @@ export const MATTE_DEFAULTS = Object.freeze({
     imageUrl: null,
     /** Background darkening for mode "dim", 0..1. */
     dim: 0.55,
+    /** Animated reveal preset for background transitions */
+    reveal: 'none',
+    /** Duration of the background reveal transition in seconds */
+    revealDuration: 0.7,
+    /** Enable depth sandwiching (rendering designated text/graphics behind subject) */
+    sandwich: false,
 });
 
 const clamp = (v, lo, hi, d) => {
@@ -45,6 +52,7 @@ const HEX = /^#[0-9a-f]{6}$/i;
 export function normalizeMatte(settings) {
     const s = settings && typeof settings === 'object' ? settings : {};
     const mode = MATTE_MODES.includes(s.mode) ? s.mode : MATTE_DEFAULTS.mode;
+    const reveal = MATTE_REVEALS.includes(s.reveal) ? s.reveal : MATTE_DEFAULTS.reveal;
     return {
         mode: mode === 'image' && !s.imageUrl ? 'blur' : mode,
         blur: clamp(s.blur, 0, 60, MATTE_DEFAULTS.blur),
@@ -54,6 +62,68 @@ export function normalizeMatte(settings) {
         color: HEX.test(String(s.color || '')) ? s.color : MATTE_DEFAULTS.color,
         imageUrl: typeof s.imageUrl === 'string' && s.imageUrl ? s.imageUrl : null,
         dim: clamp(s.dim, 0, 1, MATTE_DEFAULTS.dim),
+        reveal,
+        revealDuration: clamp(s.revealDuration, 0.1, 5, MATTE_DEFAULTS.revealDuration),
+        sandwich: Boolean(s.sandwich),
+    };
+}
+
+/**
+ * Computes animated matte values at a specific elapsed timeline position.
+ * Applies smooth cubic easing for natural cinematic camera focus/exposure reveals.
+ */
+export function evaluateAnimatedMatte(settings, elapsedSec = 0) {
+    const s = normalizeMatte(settings);
+    const dur = Math.max(0.1, Number(s.revealDuration) || 0.7);
+    const t = Math.min(1, Math.max(0, elapsedSec / dur));
+    // Easing curves:
+    const easeOutCubic = 1 - Math.pow(1 - t, 3);
+    const easeInOutCubic = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+    let effectiveBlur = s.blur;
+    let effectiveDim = s.dim;
+    let effectiveScale = 1.0;
+    let flashAlpha = 0.0;
+
+    switch (s.reveal) {
+        case 'rack-focus': {
+            // Starts heavily defocused, sweeps down into target bokeh blur
+            const startBlur = Math.max(45, s.blur * 2.5);
+            effectiveBlur = startBlur - (startBlur - s.blur) * easeOutCubic;
+            break;
+        }
+        case 'focus-pull': {
+            // Starts crystal sharp (blur: 0), smoothly pulls into target defocus
+            effectiveBlur = s.blur * easeInOutCubic;
+            break;
+        }
+        case 'dim-spotlight': {
+            // Starts natural brightness, smoothly dims background to spotlight subject
+            effectiveDim = s.dim * easeOutCubic;
+            break;
+        }
+        case 'flash-reveal': {
+            // Exposure burst that rapidly settles into the background look
+            flashAlpha = Math.max(0, 1 - easeOutCubic);
+            break;
+        }
+        case 'zoom-drift': {
+            // Slow cinematic scale drift on the background plate for subtle parallax
+            effectiveScale = 1.0 + 0.05 * easeOutCubic;
+            break;
+        }
+        case 'none':
+        default:
+            break;
+    }
+
+    return {
+        ...s,
+        effectiveBlur,
+        effectiveDim,
+        effectiveScale,
+        flashAlpha,
+        revealProgress: t,
     };
 }
 
@@ -99,7 +169,7 @@ export function maskTimeFor(clip, timelineTime) {
  * and [2:v] the background image when mode is "image".
  * Returns the graph lines; the output label is "outv".
  */
-export function matteFilterGraph(settings, { width, height, speed = 1 }) {
+export function matteFilterGraph(settings, { width, height, speed = 1, duration = 5, sandwichFilter = null }) {
     const m = normalizeMatte(settings);
     const ramp = alphaRamp(m);
     const feather = scaledPx(m.feather, width);
@@ -113,19 +183,68 @@ export function matteFilterGraph(settings, { width, height, speed = 1 }) {
         // last mask frame instead of ending the picture early.
         `[1:v]${fit}${pts},tpad=stop_mode=clone:stop_duration=3600,format=gray,lut=y='clip((val-${ramp.lo})*255/${ramp.hi - ramp.lo},0,255)'${feather > 0.3 ? `,gblur=sigma=${(feather / 2).toFixed(2)}` : ''}[mask]`,
     ];
+
+    // Background plate generation with reveal animation support
+    const revDur = m.revealDuration.toFixed(2);
     if (m.mode === 'blur') {
-        lines.push(`[base2]gblur=sigma=${Math.max(0.5, blur / 2).toFixed(2)}[bg]`);
+        if (m.reveal === 'rack-focus') {
+            const heavyBlur = Math.max(1, (blur * 2.5) / 2).toFixed(2);
+            const targetBlur = Math.max(0.5, blur / 2).toFixed(2);
+            lines.push(`[base2]split=2[b_target_src][b_heavy_src]`);
+            lines.push(`[b_heavy_src]gblur=sigma=${heavyBlur}[b_heavy]`);
+            lines.push(`[b_target_src]gblur=sigma=${targetBlur}[b_target]`);
+            lines.push(`[b_heavy][b_target]blend=all_expr='A*(1-min(1,T/${revDur}))+B*min(1,T/${revDur})'[bg_raw]`);
+        } else if (m.reveal === 'focus-pull') {
+            const targetBlur = Math.max(0.5, blur / 2).toFixed(2);
+            lines.push(`[base2]split=2[b_sharp][b_blur_src]`);
+            lines.push(`[b_blur_src]gblur=sigma=${targetBlur}[b_blurred]`);
+            lines.push(`[b_sharp][b_blurred]blend=all_expr='A*(1-min(1,T/${revDur}))+B*min(1,T/${revDur})'[bg_raw]`);
+        } else if (m.reveal === 'flash-reveal') {
+            const targetBlur = Math.max(0.5, blur / 2).toFixed(2);
+            lines.push(`[base2]gblur=sigma=${targetBlur},split=2[b_blurred][b_flash_src]`);
+            lines.push(`[b_flash_src]drawbox=x=0:y=0:w=iw:h=ih:color=white@0.7:t=fill[b_white]`);
+            lines.push(`[b_blurred][b_white]blend=all_expr='A*min(1,T/${revDur})+B*(1-min(1,T/${revDur}))'[bg_raw]`);
+        } else {
+            lines.push(`[base2]gblur=sigma=${Math.max(0.5, blur / 2).toFixed(2)}[bg_raw]`);
+        }
     } else if (m.mode === 'dim') {
-        lines.push(`[base2]gblur=sigma=${Math.max(0.5, blur / 4).toFixed(2)},colorchannelmixer=rr=${(1 - m.dim).toFixed(3)}:gg=${(1 - m.dim).toFixed(3)}:bb=${(1 - m.dim).toFixed(3)}[bg]`);
+        const dimBlur = Math.max(0.5, blur / 4).toFixed(2);
+        if (m.reveal === 'dim-spotlight') {
+            lines.push(`[base2]gblur=sigma=${dimBlur}[b_dimbase]`);
+            lines.push(`[b_dimbase]split=2[d_clean][d_dark_src]`);
+            lines.push(`[d_dark_src]colorchannelmixer=rr=${(1 - m.dim).toFixed(3)}:gg=${(1 - m.dim).toFixed(3)}:bb=${(1 - m.dim).toFixed(3)}[d_dark]`);
+            lines.push(`[d_clean][d_dark]blend=all_expr='A*(1-min(1,T/${revDur}))+B*min(1,T/${revDur})'[bg_raw]`);
+        } else {
+            lines.push(`[base2]gblur=sigma=${dimBlur},colorchannelmixer=rr=${(1 - m.dim).toFixed(3)}:gg=${(1 - m.dim).toFixed(3)}:bb=${(1 - m.dim).toFixed(3)}[bg_raw]`);
+        }
     } else if (m.mode === 'color') {
-        lines.push(`[base2]drawbox=x=0:y=0:w=iw:h=ih:color=${m.color.replace('#', '0x')}@1:t=fill[bg]`);
+        lines.push(`[base2]drawbox=x=0:y=0:w=iw:h=ih:color=${m.color.replace('#', '0x')}@1:t=fill[bg_raw]`);
     } else {
         lines.push(`[2:v]${fit},format=yuv420p[bgimg]`);
-        lines.push(`[base2][bgimg]overlay=0:0[bg]`);
+        lines.push(`[base2][bgimg]overlay=0:0[bg_raw]`);
     }
+
+    // Optional sandwich filter (e.g. text/graphics placed between background and subject)
+    if (sandwichFilter) {
+        lines.push(`[bg_raw]${sandwichFilter}[bg]`);
+    } else {
+        lines.push(`[bg_raw]null[bg]`);
+    }
+
     lines.push(`[base][mask]alphamerge[fg]`);
     lines.push(`[bg][fg]overlay=0:0:shortest=1,format=yuv420p[outv]`);
     return lines;
 }
 
-export default { MATTE_MODES, MATTE_DEFAULTS, normalizeMatte, alphaRamp, lumaToAlpha, scaledPx, maskTimeFor, matteFilterGraph };
+export default {
+    MATTE_MODES,
+    MATTE_REVEALS,
+    MATTE_DEFAULTS,
+    normalizeMatte,
+    evaluateAnimatedMatte,
+    alphaRamp,
+    lumaToAlpha,
+    scaledPx,
+    maskTimeFor,
+    matteFilterGraph,
+};

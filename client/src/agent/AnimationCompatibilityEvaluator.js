@@ -48,6 +48,14 @@ export const STYLE_MOTION_RULES = Object.freeze({
         idealTransitions: ['dip', 'crossfade'],
         incompatibleTransitions: ['flash', 'glitch'],
         palette: { primary: '#00E5FF', accent: '#FFE500', background: 'rgba(12, 16, 26, 0.94)' },
+        backgroundTreatment: {
+            recommendedMode: 'blur',
+            defaultBlur: 16,
+            reveal: 'rack-focus',
+            revealDuration: 0.65,
+            allowSandwichText: true,
+            sandwichDescription: 'Sandwich bold kinetic titles and KPI badges behind the speaker to establish authority and depth.',
+        },
     },
 
     reel: {
@@ -74,6 +82,14 @@ export const STYLE_MOTION_RULES = Object.freeze({
         idealTransitions: ['whip-left', 'whip-right', 'flash', 'zoom-punch'],
         incompatibleTransitions: ['dip'], // Long dips kill short-form retention
         palette: { primary: '#FFE500', accent: '#00E5FF', background: 'rgba(10, 10, 15, 0.95)' },
+        backgroundTreatment: {
+            recommendedMode: 'dim',
+            defaultDim: 0.45,
+            reveal: 'dim-spotlight',
+            revealDuration: 0.45,
+            allowSandwichText: true,
+            sandwichDescription: 'Sandwich large high-impact hook words behind the creator on opening beats.',
+        },
     },
 
     vlog: {
@@ -100,6 +116,14 @@ export const STYLE_MOTION_RULES = Object.freeze({
         idealTransitions: ['speed-lines', 'whip-left', 'whip-right'],
         incompatibleTransitions: ['glitch'],
         palette: { primary: '#FF3B5C', accent: '#FFE500', background: 'rgba(14, 18, 28, 0.92)' },
+        backgroundTreatment: {
+            recommendedMode: 'blur',
+            defaultBlur: 10,
+            reveal: 'focus-pull',
+            revealDuration: 0.8,
+            allowSandwichText: false,
+            sandwichDescription: 'Vlogs favor natural environmental framing without intrusive text sandwiching.',
+        },
     },
 
     repurposing: {
@@ -125,6 +149,14 @@ export const STYLE_MOTION_RULES = Object.freeze({
         idealTransitions: ['whip-left', 'flash', 'dip'],
         incompatibleTransitions: [],
         palette: { primary: '#00E5FF', accent: '#FFE500', background: 'rgba(12, 16, 24, 0.94)' },
+        backgroundTreatment: {
+            recommendedMode: 'dim',
+            defaultDim: 0.55,
+            reveal: 'dim-spotlight',
+            revealDuration: 0.6,
+            allowSandwichText: true,
+            sandwichDescription: 'Sandwich quote cards or key timestamps behind guest speakers.',
+        },
     },
 
     podcast: {
@@ -150,6 +182,14 @@ export const STYLE_MOTION_RULES = Object.freeze({
         idealTransitions: ['dip', 'crossfade'],
         incompatibleTransitions: ['flash', 'whip-left', 'whip-right', 'zoom-punch'],
         palette: { primary: '#E8C27A', accent: '#00E5FF', background: 'rgba(15, 18, 26, 0.94)' },
+        backgroundTreatment: {
+            recommendedMode: 'blur',
+            defaultBlur: 14,
+            reveal: 'none',
+            revealDuration: 0.5,
+            allowSandwichText: true,
+            sandwichDescription: 'Subtle lens bokeh with guest lower-third and topic titles placed with slight depth.',
+        },
     },
 
     explainer: {
@@ -176,6 +216,14 @@ export const STYLE_MOTION_RULES = Object.freeze({
         idealTransitions: ['dip', 'crossfade'],
         incompatibleTransitions: ['flash', 'glitch'],
         palette: { primary: '#00E5FF', accent: '#FFE500', background: 'rgba(12, 16, 26, 0.94)' },
+        backgroundTreatment: {
+            recommendedMode: 'dim',
+            defaultDim: 0.60,
+            reveal: 'rack-focus',
+            revealDuration: 0.75,
+            allowSandwichText: true,
+            sandwichDescription: 'Dim background and sandwich evidence charts or newspaper headlines behind the speaker.',
+        },
     },
 });
 
@@ -305,6 +353,51 @@ export function evaluateMotionCompatibility(styleId, category, itemKey, currentP
             break;
         }
 
+        case 'background': {
+            const bg = rules.backgroundTreatment || {};
+            const isRec = itemKey === bg.recommendedMode;
+            if (isRec) {
+                score = 0.96;
+                verdict = 'ideal';
+                reason = `'${itemKey}' background perfectly reinforces the ${rules.name} look. ${bg.sandwichDescription || ''}`;
+            } else if (itemKey === 'color' && normalizedStyle === 'vlog') {
+                score = 0.35;
+                verdict = 'incompatible';
+                reason = 'Solid backdrops clash with natural lifestyle vlog aesthetics.';
+                alternatives.push({ key: bg.recommendedMode || 'blur', name: bg.recommendedMode || 'blur', reason: `Natural fit for ${rules.name}` });
+            } else {
+                score = 0.75;
+                verdict = 'compatible';
+                reason = `'${itemKey}' background is compatible with ${rules.name}.`;
+            }
+            if (bg.reveal && !adaptedParams.reveal) {
+                adaptedParams.reveal = bg.reveal;
+                adaptedParams.revealDuration = bg.revealDuration;
+            }
+            break;
+        }
+
+        case 'depth': {
+            const bg = rules.backgroundTreatment || {};
+            if (itemKey === 'behind_subject') {
+                if (bg.allowSandwichText) {
+                    score = 0.98;
+                    verdict = 'ideal';
+                    reason = `Sandwiching text behind the subject creates immersive authority and depth in ${rules.name}.`;
+                } else {
+                    score = 0.40;
+                    verdict = 'caution';
+                    reason = `${rules.name} favors clean environmental framing over 3D text sandwiching.`;
+                    alternatives.push({ key: 'front', name: 'Standard Foreground', reason: `Maintains authentic natural framing` });
+                }
+            } else {
+                score = 0.85;
+                verdict = 'compatible';
+                reason = 'Standard foreground layering is clean and universally readable.';
+            }
+            break;
+        }
+
         default:
             score = 0.70;
             verdict = 'compatible';
@@ -338,6 +431,7 @@ export function getRecommendedMotionSuite(styleId) {
         recommendedCameraMotion: rules.idealCameraMotion[0],
         recommendedTransition: rules.idealTransitions[0],
         palette: rules.palette,
+        backgroundTreatment: rules.backgroundTreatment,
         safeZones: rules.safeZoneConstraint,
     };
 }

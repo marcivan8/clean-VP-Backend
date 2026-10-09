@@ -360,7 +360,7 @@ async function renderMattedSegment(clip, src, segPath, opts) {
     const offset = Number(clip.offset) || 0;
     const readDur = (Number(clip.duration) || 0) * speed;
     const maskSeek = Math.max(0, offset - (Number(clip.layerMask?.sourceStart) || 0));
-    const graph = matteFilterGraph(settings, { width: targetWidth, height: targetHeight, speed });
+    const graph = matteFilterGraph(settings, { width: targetWidth, height: targetHeight, speed, duration: Number(clip.duration) || 5 });
     return new Promise((resolve, reject) => {
         const cmd = ffmpeg()
             .input(src).setStartTime(offset).setDuration(readDur)

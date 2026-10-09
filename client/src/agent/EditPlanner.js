@@ -265,6 +265,11 @@ export class EditPlanner {
                     { step_id: 'step_1', action: operation, args: {}, reason: operation === 'zoom_speaker' ? 'Frame the speaker' : 'Keep the speaker framed' },
                 ]);
             }
+            case 'sandwich_text': {
+                return this.buildPlan(planId, 'sandwich_text', [
+                    { step_id: 'step_1', action: 'sandwich_text', args: {}, reason: 'Place text behind speaker in sandwich layer' },
+                ]);
+            }
             case 'polish_short': {
                 return this.buildPlan(planId, 'polish_short', [
                     { step_id: 'step_1', action: 'polish_short', args: { brief: String(intent.originalPrompt || '').slice(0, 300) }, reason: 'Give the short a pro finish for its platform' },
@@ -1171,10 +1176,21 @@ export function backgroundFromText(text) {
         blue: '#1e40ff', bleu: '#1e40ff', grey: '#3a3a40', gray: '#3a3a40', gris: '#3a3a40', red: '#d1202f', rouge: '#d1202f',
         yellow: '#ffd400', jaune: '#ffd400', pink: '#ff4fa3', rose: '#ff4fa3', purple: '#7b2cbf', violet: '#7b2cbf' };
     const named = Object.keys(COLORS).find(k => new RegExp(`\\b${k}\\b`).test(s));
-    if (/green screen|chroma/.test(s)) return { mode: 'color', color: '#00b140', all };
-    if (hex || named) return { mode: 'color', color: hex || COLORS[named], all };
-    if (/\bdim\b|darken|assombri/.test(s)) return { mode: 'dim', all };
-    if (/blur|flou|floute/.test(s)) return { mode: 'blur', all };
-    if (/remove|cut out|enleve|supprime|replace|remplace|change/.test(s)) return { mode: 'color', color: '#101014', all };
-    return { mode: 'blur', all };
+
+    let reveal = 'none';
+    if (/rack focus/.test(s)) reveal = 'rack-focus';
+    else if (/focus pull/.test(s)) reveal = 'focus-pull';
+    else if (/dim spotlight|spotlight/.test(s)) reveal = 'dim-spotlight';
+    else if (/flash reveal|flash/.test(s)) reveal = 'flash-reveal';
+    else if (/zoom drift|drift/.test(s)) reveal = 'zoom-drift';
+
+    const res = { mode: 'blur', all };
+    if (reveal !== 'none') res.reveal = reveal;
+
+    if (/green screen|chroma/.test(s)) { res.mode = 'color'; res.color = '#00b140'; return res; }
+    if (hex || named) { res.mode = 'color'; res.color = hex || COLORS[named]; return res; }
+    if (/\bdim\b|darken|assombri/.test(s) || reveal === 'dim-spotlight') { res.mode = 'dim'; return res; }
+    if (/blur|flou|floute/.test(s) || reveal === 'rack-focus' || reveal === 'focus-pull') { res.mode = 'blur'; return res; }
+    if (/remove|cut out|enleve|supprime|replace|remplace|change/.test(s)) { res.mode = 'color'; res.color = '#101014'; return res; }
+    return res;
 }

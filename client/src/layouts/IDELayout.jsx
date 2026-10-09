@@ -2419,8 +2419,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         );
                                     })()}
                                 </ErrorBoundary>
-                                <TextOverlay />
-                                <GraphicOverlay />
+                                <TextOverlay placementFilter="front" />
+                                <GraphicOverlay placementFilter="front" />
                                 {/* R92 round C: alignment guides while dragging */}
                                 <SnapGuidesLayer />
                             </div>

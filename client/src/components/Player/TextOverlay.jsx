@@ -211,7 +211,7 @@ const CaptionWords = ({ content, words, time, reveal, highlight, emphasis }) => 
 const pointerDist = (a, b) =>
     Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
 
-const TextOverlay = () => {
+const TextOverlay = ({ placementFilter = 'all' }) => {
     const { t } = useTranslation('editor');
     const containerRef = React.useRef(null);
 
@@ -238,25 +238,6 @@ const TextOverlay = () => {
     })));
 
     // ── Preview↔export font-size parity ─────────────────────────────────────
-    // `clip.fontSize` (and `clip.stroke.width`) are defined in the project's
-    // REFERENCE resolution — the same pixel space `<Player width={dims.width}
-    // height={dims.height}>` is mounted at in IDELayout.jsx, and (absent an
-    // explicit platform/resolution export override) the same space the export
-    // worker renders drawtext at. But this container itself is NOT locked to
-    // that resolution in actual CSS pixels — it's the responsively-sized div
-    // Player/TextOverlay/GraphicOverlay all share (Tailwind classes like
-    // `max-h-[70vh]`), so its rendered width is whatever the browser layout
-    // gives it. Applying `clip.fontSize`px directly, with no compensation,
-    // made captions look right or wrong purely by accident of window size —
-    // and never matched the export, which always renders at the full
-    // reference resolution. x/y positions never had this problem because
-    // they're stored as resolution-independent percentages; fontSize is the
-    // one property that's an absolute pixel value instead.
-    //
-    // previewScale = actual on-screen container width ÷ reference width, so
-    // `fontSize * previewScale` always LOOKS the same size on screen as
-    // `fontSize` px does when rendered at the full reference resolution —
-    // which is what the export produces.
     const [previewScale, setPreviewScale] = React.useState(1);
     React.useLayoutEffect(() => {
         const el = containerRef.current;
@@ -275,10 +256,20 @@ const TextOverlay = () => {
     const textTracks = tracks.filter(t => t.type === 'text');
     if (textTracks.length === 0) return null;
 
+    // Check if the current playhead is on a video clip with active background separation
+    const hasActiveMatte = React.useMemo(() => {
+        const vidClips = tracks.filter(t => t.type === 'video' || t.type === 'image').flatMap(t => t.clips || []);
+        return vidClips.some(c => c.layerTarget === 'background' && c.layerMask && currentTime >= c.start && currentTime < c.start + c.duration);
+    }, [tracks, currentTime]);
+
     const activeTextClips = textTracks.flatMap(track =>
-        track.clips.filter(clip =>
-            currentTime >= clip.start && currentTime < clip.start + clip.duration
-        )
+        track.clips.filter(clip => {
+            if (!(currentTime >= clip.start && currentTime < clip.start + clip.duration)) return false;
+            const isSandwich = clip.placement === 'behind_subject' || clip.placement === 'behind_speaker';
+            if (placementFilter === 'behind_subject') return isSandwich;
+            if (placementFilter === 'front') return hasActiveMatte ? !isSandwich : true;
+            return true;
+        })
     );
     if (activeTextClips.length === 0) return null;
 
@@ -500,7 +491,7 @@ const TextOverlay = () => {
     };
 
     return (
-        <div ref={containerRef} className="absolute inset-0 pointer-events-none overflow-hidden z-10">
+        <div ref={containerRef} className={`absolute inset-0 pointer-events-none overflow-hidden ${placementFilter === 'behind_subject' ? 'z-[2]' : 'z-10'}`}>
             {activeTextClips.map((clip) => {
                 const isActive = clip.id === activeClipId;
 

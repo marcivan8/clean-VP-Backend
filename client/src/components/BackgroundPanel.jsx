@@ -11,7 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { Loader2, UserRound, X } from 'lucide-react';
 
 import useTimelineStore from '../store/useTimelineStore';
-import { MATTE_MODES, normalizeMatte } from '../motion/MatteSettings.js';
+import { MATTE_MODES, MATTE_REVEALS, normalizeMatte } from '../motion/MatteSettings.js';
 
 function sourceUrlFor(clip, assets) {
     const asset = clip?.assetId ? (assets || []).find(a => a.id === clip.assetId) : null;
@@ -140,6 +140,31 @@ export default function BackgroundPanel({ clip, trackId }) {
                     {slider('feather', 0, 30)}
                     {slider('threshold', 0.05, 0.95, 0.01)}
                     {slider('softness', 0.02, 1, 0.01)}
+
+                    {/* R93: Background Reveal & Transition FX */}
+                    <div className="pt-2 mt-2 border-t border-border/40 mb-2">
+                        <div className="text-[9px] uppercase tracking-wider text-muted-foreground mb-1.5 font-mono">
+                            {t('backgroundPanel.revealTitle', 'Reveal Animation')}
+                        </div>
+                        <select
+                            value={settings.reveal || 'none'}
+                            onChange={e => set({ reveal: e.target.value })}
+                            className="w-full mb-2 bg-secondary border border-border/60 rounded px-2 py-1 text-[11px] text-foreground"
+                            aria-label={t('backgroundPanel.revealTitle', 'Reveal Animation')}
+                        >
+                            {MATTE_REVEALS.map(r => (
+                                <option key={r} value={r}>
+                                    {r === 'none' ? 'None (Static)' : r.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                                </option>
+                            ))}
+                        </select>
+                        {settings.reveal !== 'none' && slider('revealDuration', 0.2, 3.0, 0.05)}
+                    </div>
+
+                    {/* Sandwich Depth Layer notice */}
+                    <div className="p-2 rounded bg-primary/10 border border-primary/25 text-[10px] text-foreground/85 mb-3 leading-relaxed">
+                        <span className="font-semibold text-primary">✨ Sandwich Layer Ready:</span> In the Text or Graphic panel, toggle <span className="font-mono text-[9px] bg-background/50 px-1 py-0.5 rounded">Behind Subject</span> to layer titles and stickers between the background plate and the creator.
+                    </div>
                     <div className="flex gap-1.5">
                         <button type="button" onClick={handleRemove} disabled={busy}
                             className="flex-1 px-2 py-1 rounded text-[10px] bg-secondary hover:bg-white/10 disabled:opacity-50">

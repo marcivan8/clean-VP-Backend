@@ -290,6 +290,27 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true
                         aria-label={t('textPanel.rotation')}
                         style={{ width: '100%', accentColor: 'var(--accent)', height: 3, cursor: 'pointer' }} />
                 </div>
+
+                {/* Depth / Placement: In Front vs Behind Subject (Sandwich) */}
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: '0.5px solid var(--line-soft)' }}>
+                    <div style={{ ...S.label, marginBottom: 6 }}>{t('textPanel.depthPlacement', 'Depth & Layer')}</div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                            type="button"
+                            onClick={() => onUpdate({ placement: 'front' })}
+                            style={S.pill(clip.placement !== 'behind_subject')}
+                        >
+                            {t('textPanel.placementFront', 'In Front')}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => onUpdate({ placement: 'behind_subject' })}
+                            style={S.pill(clip.placement === 'behind_subject')}
+                        >
+                            {t('textPanel.placementBehind', '✨ Behind Subject')}
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <KeywordSection clip={clip} showWords={showContent} />

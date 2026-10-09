@@ -77,7 +77,7 @@ const DEFAULT_WIDTH_FRACTION = 25; // as a CSS percent
 const pointerDist = (a, b) =>
     Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
 
-const GraphicOverlay = () => {
+const GraphicOverlay = ({ placementFilter = 'all' }) => {
     const containerRef = React.useRef(null);
     const gestureRef = React.useRef({});
     const clipElRefs = React.useRef({});
@@ -96,9 +96,21 @@ const GraphicOverlay = () => {
     const overlayTracks = tracks.filter(t => t.type === 'overlay');
     if (overlayTracks.length === 0) return null;
 
+    // Check if the current playhead is on a video clip with active background separation
+    const hasActiveMatte = React.useMemo(() => {
+        const vidClips = tracks.filter(t => t.type === 'video' || t.type === 'image').flatMap(t => t.clips || []);
+        return vidClips.some(c => c.layerTarget === 'background' && c.layerMask && currentTime >= c.start && currentTime < c.start + c.duration);
+    }, [tracks, currentTime]);
+
     const activeClips = overlayTracks.flatMap(track =>
         track.clips
-            .filter(clip => currentTime >= clip.start && currentTime < clip.start + clip.duration)
+            .filter(clip => {
+                if (!(currentTime >= clip.start && currentTime < clip.start + clip.duration)) return false;
+                const isSandwich = clip.placement === 'behind_subject' || clip.placement === 'behind_speaker';
+                if (placementFilter === 'behind_subject') return isSandwich;
+                if (placementFilter === 'front') return hasActiveMatte ? !isSandwich : true;
+                return true;
+            })
             .map(clip => ({ clip, trackId: track.id }))
     );
     if (activeClips.length === 0) return null;
@@ -240,7 +252,7 @@ const GraphicOverlay = () => {
     };
 
     return (
-        <div ref={containerRef} className="absolute inset-0 pointer-events-none overflow-hidden z-10">
+        <div ref={containerRef} className={`absolute inset-0 pointer-events-none overflow-hidden ${placementFilter === 'behind_subject' ? 'z-[2]' : 'z-10'}`}>
             {activeClips.map(({ clip, trackId }) => {
                 const isActive = clip.id === activeClipId;
 

@@ -232,10 +232,21 @@ export const COMMANDS = [
                   'background blur', 'replace the background', 'change the background', 'green screen',
                   'background removal', 'cut out the background', 'dim the background', 'darken the background',
                   'black background', 'white background', 'background color', 'background colour',
+                  'rack focus', 'rack focus background', 'focus pull', 'reveal background', 'spotlight background',
                   'enleve le fond', 'supprime le fond', 'floute le fond', 'flou d arriere plan', 'change le fond',
                   'remplace le fond', 'fond noir', 'fond flou'],
         // "remove the background music / noise" is audio, not the picture.
         negative: ['music', 'noise', 'audio', 'sound', 'hum', 'musique', 'bruit', 'son'],
+        destructive: false,
+    },
+    {
+        id: 'sandwich_text',
+        category: 'transform',
+        label: 'Place text behind speaker',
+        summary: 'Sandwiches animated text or titles behind the speaker in a depth layer.',
+        phrases: ['put text behind speaker', 'text behind speaker', 'sandwich text', 'sandwich layer',
+                  'put text behind me', 'title behind speaker', 'words behind speaker', 'text behind subject',
+                  'texte derriere la personne', 'titre derriere moi'],
         destructive: false,
     },
     {

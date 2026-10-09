@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../../store/useTimelineStore';
 import CaptionOverlay from './CaptionOverlay';
 import TextOverlay from './TextOverlay';
+import GraphicOverlay from './GraphicOverlay';
 import FatigueAlert from './FatigueAlert';
 import DebugOverlay from './DebugOverlay';
 import PlaybackEngine from '../../engine/PlaybackEngine';
@@ -849,7 +850,11 @@ const VideoPlayer = () => {
                 currentTime={currentTime}
                 isPlaying={isPlaying}
                 containerStyle={{ transform: baseTransform, transformOrigin }}
-            />
+            >
+                {/* R93: Sandwich depth layer — text & graphics placed behind the speaker */}
+                <TextOverlay placementFilter="behind_subject" />
+                <GraphicOverlay placementFilter="behind_subject" />
+            </ObjectLayerOverlay>
 
             {transitionWins.length > 0 && <TransitionLayer fx={tfx} frameWidth={frameWidthPx} />}
 

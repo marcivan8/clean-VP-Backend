@@ -9,7 +9,7 @@
  * 4. Returns the raw Response (same signature as native fetch)
  */
 
-import { supabase } from '../lib/supabaseClient';
+import { supabase } from '../lib/supabaseClient.js';
 
 // Singleton refresh promise — prevents concurrent 401s from each spawning
 // their own supabase.auth.refreshSession() call, which interfere and all fail.

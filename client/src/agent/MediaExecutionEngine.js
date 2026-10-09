@@ -945,6 +945,8 @@ export class MediaExecutionEngine {
                 if (args.mode) settings.mode = args.mode;
                 if (args.color) settings.color = args.color;
                 if (Number.isFinite(Number(args.blur))) settings.blur = Number(args.blur);
+                if (args.reveal) settings.reveal = args.reveal;
+                if (Number.isFinite(Number(args.revealDuration))) settings.revealDuration = Number(args.revealDuration);
                 let done = 0;
                 let noPerson = 0;
                 const failures = [];
@@ -971,8 +973,43 @@ export class MediaExecutionEngine {
                 if (done === 0) return { action, success: false, message: failures[0] || 'The background could not be removed.' };
                 const look = normalizeMatte(settings).mode;
                 const lookText = { blur: 'blurred', dim: 'darkened', color: 'replaced with a solid colour', image: 'replaced with your image' }[look] || 'changed';
+                const revText = settings.reveal && settings.reveal !== 'none' ? ` with ${settings.reveal} reveal animation` : '';
                 const warn = noPerson ? ` No person was found in ${noPerson} clip(s), so they may look fully replaced.` : '';
-                return { action, success: true, message: `Background ${lookText} on ${done} clip(s). Adjust it in the Background panel. One undo reverts it.${warn}`, details: { done, mode: look } };
+                return { action, success: true, message: `Background ${lookText}${revText} on ${done} clip(s). Adjust it in the Background panel. One undo reverts it.${warn}`, details: { done, mode: look, reveal: settings.reveal } };
+            }
+            case 'sandwich_text':
+            case 'put_text_behind_speaker': {
+                const st = useTimelineStore.getState();
+                const textTracks = (st.tracks || []).filter(t => t.type === 'text');
+                const allTextClips = textTracks.flatMap(t => (t.clips || []).map(c => ({ clip: c, trackId: t.id })));
+                if (allTextClips.length === 0) {
+                    return { action, success: false, message: 'There is no text or caption clip to place behind the speaker. Add text first.' };
+                }
+                const activeId = st.activeClipId;
+                const target = (activeId && allTextClips.find(item => item.clip.id === activeId))
+                    || allTextClips.find(item => st.currentTime >= item.clip.start && st.currentTime <= item.clip.start + item.clip.duration)
+                    || allTextClips[0];
+                
+                st.saveToHistory?.();
+                st.updateClip(target.trackId, target.clip.id, { placement: 'behind_subject' });
+
+                const vidTargets = this._matteTargets(st, args);
+                let matteMsg = '';
+                if (vidTargets.length > 0) {
+                    const firstVid = vidTargets[0];
+                    const vClip = (st.tracks || []).find(t => t.id === firstVid.trackId)?.clips?.find(c => c.id === firstVid.clipId);
+                    if (vClip && vClip.layerTarget !== 'background') {
+                        await this.executeStoreAction({ action: 'remove_background', args: { mode: 'blur', blur: 16 } }, job);
+                        matteMsg = ' Video background blur enabled to reveal depth.';
+                    }
+                }
+
+                return {
+                    action,
+                    success: true,
+                    message: `Text placed behind the speaker in the sandwich layer.${matteMsg}`,
+                    details: { clipId: target.clip.id, placement: 'behind_subject' },
+                };
             }
             case 'zoom_speaker': {
                 const [target] = this._matteTargets(store, args);
