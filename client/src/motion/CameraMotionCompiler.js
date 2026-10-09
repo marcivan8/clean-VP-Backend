@@ -164,4 +164,97 @@ export function applyCameraMotionToBaseTrack(tracks, baseTrackId) {
     return changed ? next : tracks;
 }
 
-export default { deriveCameraKeyframes, deriveZoomKeyframes, evaluateKeyframes, applyCameraMotionToBaseTrack };
+/**
+ * Compute smooth dynamic pan/tilt keyframes from an active speaker bounding box track
+ * (e.g. from MatteBaker.js / MediaPipe person detection: `[{ t, x, y, w, h }]`).
+ *
+ * Smooths raw coordinates using exponential moving average (EMA) damping,
+ * preventing jitter while smoothly following moving speakers across the frame.
+ *
+ * @param {Array<{t:number, x:number, y:number, w:number, h:number}>} bboxTrack
+ * @param {number} clipDuration in seconds
+ * @param {object} [opts]
+ * @param {number} [opts.smoothing=0.82] 0 (instant) to 0.95 (heavy smoothing)
+ * @param {number} [opts.deadzone=0.04] normalized fraction of frame to ignore micro-movement
+ * @returns {{panX: Array<{time:number, value:number}>, panY: Array<{time:number, value:number}>, scale: Array<{time:number, value:number}>}|null}
+ */
+export function computeActiveSpeakerPan(bboxTrack, clipDuration, opts = {}) {
+    if (!Array.isArray(bboxTrack) || bboxTrack.length === 0) return null;
+    const dur = Number(clipDuration) || 0;
+    if (!(dur > 0)) return null;
+
+    const alpha = Math.max(0.05, Math.min(0.95, 1 - (Number(opts.smoothing) || 0.82)));
+    const deadzone = Number(opts.deadzone) || 0.04;
+
+    const samples = [...bboxTrack]
+        .filter(b => b && Number.isFinite(b.t) && Number.isFinite(b.x) && Number.isFinite(b.y))
+        .sort((a, b) => a.t - b.t);
+    if (samples.length === 0) return null;
+
+    let currentTargetX = (samples[0].x + (samples[0].w || 0) / 2) - 0.5;
+    let currentTargetY = (samples[0].y + (samples[0].h || 0) * 0.35) - 0.5;
+
+    let smoothedX = currentTargetX;
+    let smoothedY = currentTargetY;
+
+    const rawKeyframes = [];
+
+    for (const sample of samples) {
+        if (sample.t > dur) break;
+        const targetX = (sample.x + (sample.w || 0) / 2) - 0.5;
+        const targetY = (sample.y + (sample.h || 0) * 0.35) - 0.5;
+
+        if (Math.abs(targetX - currentTargetX) > deadzone) currentTargetX = targetX;
+        if (Math.abs(targetY - currentTargetY) > deadzone) currentTargetY = targetY;
+
+        smoothedX += alpha * (currentTargetX - smoothedX);
+        smoothedY += alpha * (currentTargetY - smoothedY);
+
+        const px = Math.max(-0.4, Math.min(0.4, smoothedX));
+        const py = Math.max(-0.3, Math.min(0.3, smoothedY));
+
+        rawKeyframes.push({
+            t: Number(sample.t.toFixed(4)),
+            px: Number(px.toFixed(4)),
+            py: Number(py.toFixed(4)),
+        });
+    }
+
+    if (rawKeyframes.length === 0) return null;
+
+    const panX = simplifySamples(rawKeyframes.map(k => ({ t: k.t, value: k.px })), 0.001, ['value'])
+        .map(k => ({ time: k.t, value: Number(k.value.toFixed(4)), easing: 'easeInOut' }));
+    const panY = simplifySamples(rawKeyframes.map(k => ({ t: k.t, value: k.py })), 0.001, ['value'])
+        .map(k => ({ time: k.t, value: Number(k.value.toFixed(4)), easing: 'easeInOut' }));
+
+    return {
+        panX,
+        panY,
+        scale: [{ time: 0, value: 1.0, easing: 'linear' }],
+    };
+}
+
+/**
+ * Apply auto-framing speaker tracking directly onto a clip.
+ */
+export function applyActiveSpeakerTracking(clip, bboxTrack, opts = {}) {
+    if (!clip) return clip;
+    const dur = Number(clip.duration) || 0;
+    const tracking = computeActiveSpeakerPan(bboxTrack, dur, opts);
+    if (!tracking) return clip;
+    const keyframes = {
+        ...(clip.keyframes || {}),
+        panX: tracking.panX,
+        panY: tracking.panY,
+    };
+    return { ...clip, keyframes, virtualCam: { ...(clip.virtualCam || {}), tracking: 'active-speaker' } };
+}
+
+export default {
+    deriveCameraKeyframes,
+    deriveZoomKeyframes,
+    evaluateKeyframes,
+    applyCameraMotionToBaseTrack,
+    computeActiveSpeakerPan,
+    applyActiveSpeakerTracking,
+};

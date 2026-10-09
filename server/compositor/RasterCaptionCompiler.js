@@ -151,6 +151,19 @@ function wordLook(i, state, raster, baseColor) {
             if (hl.background) look.background = hl.background;
             if (hl.color) look.color = hl.color;
             look.boxed = true;
+        } else if (mode === 'vox-marker') {
+            look.background = hl.background || '#FFE500';
+            look.color = hl.color || '#111827';
+            look.boxed = true;
+        } else if (mode === 'bounce-box') {
+            look.background = (i % 2 === 0 ? hl.background : hl.altBackground) || hl.background || '#FFE500';
+            look.color = hl.color || '#000000';
+            look.boxed = true;
+            look.scale = Math.max(look.scale, hl.scale || 1.15);
+        } else if (mode === 'terminal-cursor') {
+            look.color = hl.color || '#34D399';
+        } else if (mode === 'neon-glow') {
+            look.color = hl.color || '#00E5FF';
         } else if (mode === 'opacity') look.opacity = 1;
     } else if (visible && mode === 'opacity' && state.active >= 0) {
         look.opacity = 0.55;

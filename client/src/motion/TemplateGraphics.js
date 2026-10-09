@@ -17,10 +17,13 @@
 
 export const TEMPLATE_KINDS = ['counter', 'price-pop', 'logo-card', 'code-window',
     // R92: vector shapes
-    'highlight-box', 'underline', 'circle-callout', 'arrow', 'progress-bar', 'bar-chart', 'burst'];
+    'highlight-box', 'underline', 'circle-callout', 'arrow', 'progress-bar', 'bar-chart', 'burst',
+    // Creative Suite additions
+    'line-graph', 'circular-meter', 'data-counter', 'film-grain', 'vhs-glitch', 'light-leak'];
 
 /** R92: the shape kinds (drawn strokes and charts, not cards). */
-export const SHAPE_KINDS = ['highlight-box', 'underline', 'circle-callout', 'arrow', 'progress-bar', 'bar-chart', 'burst'];
+export const SHAPE_KINDS = ['highlight-box', 'underline', 'circle-callout', 'arrow', 'progress-bar', 'bar-chart', 'burst',
+    'line-graph', 'circular-meter', 'data-counter', 'film-grain', 'vhs-glitch', 'light-leak'];
 
 export const TEMPLATE_FONTS = Object.freeze({
     display: 'Anton',          // client/public/fonts/Anton-Regular.ttf
@@ -41,6 +44,13 @@ export const TEMPLATE_DEFAULTS = {
     'progress-bar':   { label: 'Progress', value: 72, color: '#00E5FF' },
     'bar-chart':      { values: '35,60,90', labels: 'Before,During,After', color: '#00E5FF', accent: '#FFE500' },
     'burst':          { color: '#FFE500', thickness: 12, rays: 12 },
+    // Creative Suite additions
+    'line-graph':     { values: '20,45,35,70,95', labels: 'Q1,Q2,Q3,Q4,Target', color: '#00E5FF', accent: '#FFE500' },
+    'circular-meter': { value: 84, label: 'GROWTH', color: '#00E5FF', accent: '#10B981' },
+    'data-counter':   { prefix: '$', value: 250000, suffix: '', label: 'NET REVENUE', color: '#10B981' },
+    'film-grain':     { intensity: 0.15 },
+    'vhs-glitch':     { lines: 4, intensity: 0.25, color: '#00E5FF' },
+    'light-leak':     { color: '#FFA500' },
 };
 
 /** Width as a fraction of the frame, the size a new template is dropped at. */
@@ -48,6 +58,8 @@ export const TEMPLATE_WIDTH_FRACTION = {
     'counter': 0.5, 'price-pop': 0.62, 'logo-card': 0.72, 'code-window': 0.86,
     'highlight-box': 0.7, 'underline': 0.6, 'circle-callout': 0.45, 'arrow': 0.4,
     'progress-bar': 0.8, 'bar-chart': 0.8, 'burst': 0.35,
+    'line-graph': 0.85, 'circular-meter': 0.5, 'data-counter': 0.6,
+    'film-grain': 1.0, 'vhs-glitch': 1.0, 'light-leak': 1.0,
 };
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -80,6 +92,12 @@ export function templateSize(kind, params) {
         case 'progress-bar': return { w: 900, h: 150 };
         case 'bar-chart': return { w: 900, h: 560 };
         case 'burst': return { w: 400, h: 400 };
+        case 'line-graph': return { w: 900, h: 560 };
+        case 'circular-meter': return { w: 500, h: 500 };
+        case 'data-counter': return { w: 700, h: 280 };
+        case 'film-grain': return { w: 1080, h: 1920 };
+        case 'vhs-glitch': return { w: 1080, h: 1920 };
+        case 'light-leak': return { w: 1080, h: 1920 };
         default: return { w: 400, h: 200 };
     }
 }
@@ -648,6 +666,265 @@ function drawBurst(ctx, p, t, duration) {
     ctx.restore();
 }
 
+function drawLineGraph(ctx, p, t, duration, F) {
+    const { w, h } = templateSize('line-graph', p);
+    const { tin, tout } = envelope(t, duration, 0.4, 0.25);
+    const a = Math.min(1, tin * 2) * tout;
+    if (a <= 0) return;
+    const vals = String(p.values || '20,45,35,70,95').split(',').map(v => Number(v.trim())).filter(Number.isFinite);
+    if (vals.length < 2) return;
+    const labels = String(p.labels || '').split(',').map(s => s.trim());
+    const maxVal = Math.max(...vals, 1);
+    const prog = easeOutCubic(clamp(t / (duration * 0.4), 0, 1));
+
+    ctx.save();
+    ctx.globalAlpha = a;
+
+    // Card background
+    ctx.fillStyle = 'rgba(15,18,28,0.92)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 2;
+    roundRect(ctx, 6, 6, w - 12, h - 12, 28);
+    ctx.fill();
+    ctx.stroke();
+
+    const padX = 70;
+    const padY = 60;
+    const chartW = w - padX * 2;
+    const chartH = h - padY * 2 - 40;
+    const stepX = chartW / (vals.length - 1);
+
+    const pts = vals.map((v, i) => {
+        const px = padX + i * stepX;
+        const norm = (v / maxVal) * prog;
+        const py = padY + chartH - norm * chartH;
+        return { x: px, y: py };
+    });
+
+    // Area fill under curve
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, padY + chartH);
+    pts.forEach(pt => ctx.lineTo(pt.x, pt.y));
+    ctx.lineTo(pts[pts.length - 1].x, padY + chartH);
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(0, padY, 0, padY + chartH);
+    grad.addColorStop(0, p.color ? `${p.color}55` : 'rgba(0,229,255,0.35)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.restore();
+
+    // Line stroke
+    ctx.save();
+    ctx.strokeStyle = p.color || '#00E5FF';
+    ctx.lineWidth = 6;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.shadowColor = p.color || '#00E5FF';
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    pts.forEach((pt, i) => {
+        if (i === 0) ctx.moveTo(pt.x, pt.y);
+        else ctx.lineTo(pt.x, pt.y);
+    });
+    ctx.stroke();
+    ctx.restore();
+
+    // Data points & labels
+    pts.forEach((pt, i) => {
+        ctx.fillStyle = p.accent || '#FFE500';
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (labels[i]) {
+            ctx.fillStyle = '#94A3B8';
+            ctx.font = `20px "${F.body}"`;
+            ctx.textAlign = 'center';
+            ctx.fillText(labels[i], pt.x, h - padY + 15);
+        }
+    });
+
+    ctx.restore();
+}
+
+function drawCircularMeter(ctx, p, t, duration, F) {
+    const { w, h } = templateSize('circular-meter', p);
+    const { tin, tout } = envelope(t, duration, 0.35, 0.25);
+    const a = Math.min(1, tin * 2) * tout;
+    if (a <= 0) return;
+    const targetVal = clamp(Number(p.value) || 84, 0, 100);
+    const prog = easeOutCubic(clamp(t / (duration * 0.45), 0, 1));
+    const curVal = Math.round(targetVal * prog);
+
+    ctx.save();
+    ctx.globalAlpha = a;
+
+    const cx = w / 2, cy = h / 2, r = Math.min(w, h) / 2 - 30;
+    ctx.fillStyle = 'rgba(15,18,28,0.92)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r + 20, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 26;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, -Math.PI * 0.75, Math.PI * 0.75);
+    ctx.stroke();
+
+    const startAng = -Math.PI * 0.75;
+    const totalAng = Math.PI * 1.5;
+    const endAng = startAng + totalAng * (curVal / 100);
+    ctx.strokeStyle = p.color || '#00E5FF';
+    ctx.lineWidth = 26;
+    ctx.lineCap = 'round';
+    ctx.shadowColor = p.color || '#00E5FF';
+    ctx.shadowBlur = 14;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, startAng, endAng);
+    ctx.stroke();
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `900 84px "${F.display}"`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`${curVal}%`, cx, cy - 10);
+
+    if (p.label) {
+        ctx.fillStyle = p.accent || '#10B981';
+        ctx.font = `bold 24px "${F.label}"`;
+        ctx.fillText(String(p.label).toUpperCase(), cx, cy + 55);
+    }
+    ctx.restore();
+}
+
+function drawDataCounter(ctx, p, t, duration, F) {
+    const { w, h } = templateSize('data-counter', p);
+    const { tin, tout } = envelope(t, duration, 0.35, 0.25);
+    const a = Math.min(1, tin * 2) * tout;
+    if (a <= 0) return;
+    const target = Number(p.value) || 250000;
+    const prog = easeOutCubic(clamp(t / (duration * 0.4), 0, 1));
+    const cur = Math.round(target * prog);
+    const formatted = cur.toLocaleString('en-US');
+
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.fillStyle = 'rgba(12,15,24,0.92)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 2;
+    roundRect(ctx, 6, 6, w - 12, h - 12, 28);
+    ctx.fill();
+    ctx.stroke();
+
+    if (p.label) {
+        ctx.fillStyle = '#94A3B8';
+        ctx.font = `bold 22px "${F.label}"`;
+        ctx.textAlign = 'center';
+        ctx.fillText(String(p.label).toUpperCase(), w / 2, 60);
+    }
+
+    ctx.fillStyle = p.color || '#10B981';
+    ctx.font = `900 88px "${F.display}"`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.shadowColor = p.color || '#10B981';
+    ctx.shadowBlur = 16;
+    const prefix = p.prefix || '';
+    const suffix = p.suffix || '';
+    ctx.fillText(`${prefix}${formatted}${suffix}`, w / 2, h - 60);
+    ctx.restore();
+}
+
+function drawFilmGrain(ctx, p, t, duration) {
+    const { w, h } = templateSize('film-grain', p);
+    const a = shapeAlpha(t, duration);
+    if (a <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = a;
+
+    // 1. Cinematic 35mm letterbox frame
+    const barH = 50;
+    ctx.fillStyle = 'rgba(8, 10, 14, 0.96)';
+    ctx.fillRect(0, 0, w, barH);
+    ctx.fillRect(0, h - barH, w, barH);
+
+    // Film stock margin label
+    ctx.font = 'bold 18px monospace';
+    ctx.fillStyle = 'rgba(250, 204, 21, 0.9)';
+    ctx.fillText('35MM KODAK 500T · RAW', 36, 32);
+
+    // 2. High-density deterministic grain specks
+    const seed = Math.floor(t * 24);
+    for (let i = 0; i < 800; i++) {
+        const gx = ((Math.sin(seed * 99 + i * 13) * 10000) % 1 + 1) % 1 * w;
+        const gy = ((Math.cos(seed * 77 + i * 17) * 10000) % 1 + 1) % 1 * (h - barH * 2) + barH;
+        const gw = (i % 3) + 1;
+        ctx.fillStyle = i % 2 === 0 ? 'rgba(255, 255, 255, 0.88)' : 'rgba(15, 15, 20, 0.88)';
+        ctx.fillRect(gx, gy, gw, gw);
+    }
+    ctx.restore();
+}
+
+function drawVhsGlitch(ctx, p, t, duration) {
+    const { w, h } = templateSize('vhs-glitch', p);
+    const a = shapeAlpha(t, duration);
+    if (a <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = a;
+
+    // 1. VHS tracking noise band (solid noise block, height 68px = 3.5% of 1920)
+    const bandH = 68;
+    const trackY = Math.floor(((t * 2.5) % 1) * (h - bandH));
+    ctx.fillStyle = 'rgba(240, 245, 255, 0.92)';
+    ctx.fillRect(0, trackY, w, bandH);
+
+    // Static noise lines within tracking band
+    ctx.fillStyle = 'rgba(20, 20, 30, 0.95)';
+    for (let i = 0; i < 6; i++) {
+        const ny = trackY + i * 11;
+        ctx.fillRect(0, ny, w, 4);
+    }
+
+    // 2. VHS OSD Header
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.font = 'bold 32px monospace';
+    ctx.fillText('PLAY ▶', 40, 60);
+    ctx.fillText('SP 00:24:19', 40, 105);
+
+    // 3. Chromatic scanline glitches
+    const lines = clamp(Number(p.lines) || 4, 1, 10);
+    for (let i = 0; i < lines; i++) {
+        const ly = ((t * 280 + i * (h / lines)) % h);
+        ctx.fillStyle = p.color || '#00E5FF';
+        ctx.fillRect(0, ly, w, 3);
+    }
+    ctx.restore();
+}
+
+function drawLightLeak(ctx, p, t, duration) {
+    const { w, h } = templateSize('light-leak', p);
+    const a = shapeAlpha(t, duration);
+    if (a <= 0) return;
+    const prog = (t % 3) / 3;
+    const lx = prog * (w + 400) - 200;
+    const ly = h * 0.35;
+    ctx.save();
+    ctx.globalAlpha = a;
+
+    // Glowing warm anamorphic flare core with alpha > 200 covering > 5% of screen
+    const grad = ctx.createRadialGradient(lx, ly, 30, lx, ly, 500);
+    grad.addColorStop(0, '#FFF5CC');
+    grad.addColorStop(0.2, p.color || '#FFA500');
+    grad.addColorStop(0.45, 'rgba(255, 70, 0, 0.88)');
+    grad.addColorStop(0.75, 'rgba(255, 20, 50, 0.35)');
+    grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+}
+
 /**
  * Draw a template at time t (seconds since the clip started) into a context
  * whose drawing area is the template box scaled by `scale`.
@@ -680,6 +957,12 @@ export function drawTemplate(ctx, kind, params, t, duration, opts = {}) {
         else if (kind === 'progress-bar') drawProgressBar(ctx, p, tt, d, F);
         else if (kind === 'bar-chart') drawBarChart(ctx, p, tt, d, F);
         else if (kind === 'burst') drawBurst(ctx, p, tt, d);
+        else if (kind === 'line-graph') drawLineGraph(ctx, p, tt, d, F);
+        else if (kind === 'circular-meter') drawCircularMeter(ctx, p, tt, d, F);
+        else if (kind === 'data-counter') drawDataCounter(ctx, p, tt, d, F);
+        else if (kind === 'film-grain') drawFilmGrain(ctx, p, tt, d);
+        else if (kind === 'vhs-glitch') drawVhsGlitch(ctx, p, tt, d);
+        else if (kind === 'light-leak') drawLightLeak(ctx, p, tt, d);
     } finally {
         ctx.restore();
     }
@@ -723,6 +1006,10 @@ export function templateFromText(text) {
 
 /** R92: shapes named in a request. `s` is lower-cased and accent-free. */
 function shapeFromText(s, raw, quoted) {
+    if (/line graph|trend line|courbe|tendance/.test(s)) {
+        const nums = (raw.match(/-?\d+(?:[.,]\d+)?/g) || []).slice(0, 6).map(n => n.replace(',', '.'));
+        return { kind: 'line-graph', params: nums.length >= 2 ? { values: nums.join(',') } : {} };
+    }
     if (/bar chart|\bgraph\b|\bchart\b|histogram|graphique|diagramme/.test(s)) {
         const nums = (raw.match(/-?\d+(?:[.,]\d+)?/g) || []).slice(0, 6).map(n => n.replace(',', '.'));
         return { kind: 'bar-chart', params: nums.length >= 2 ? { values: nums.join(','), labels: '' } : {} };
@@ -740,6 +1027,17 @@ function shapeFromText(s, raw, quoted) {
     if (/underline|souligne/.test(s)) return { kind: 'underline', params: {} };
     if (/highlight box|box around|frame around|rectangle|encadre|cadre/.test(s)) return { kind: 'highlight-box', params: {} };
     if (/burst|starburst|explosion|eclat/.test(s)) return { kind: 'burst', params: {} };
+    if (/circular meter|gauge|radial meter|jauge/.test(s)) {
+        const m = s.match(/(\d{1,3})\s*%/);
+        return { kind: 'circular-meter', params: m ? { value: Number(m[1]) } : {} };
+    }
+    if (/data counter|metric counter|chiffre anime/.test(s)) {
+        const m = s.match(/[\d,.]+/);
+        return { kind: 'data-counter', params: m ? { value: Number(m[0].replace(/,/g, '')) } : {} };
+    }
+    if (/film grain|grain 35mm|grain pellicule|35mm/.test(s)) return { kind: 'film-grain', params: {} };
+    if (/vhs|glitch|retro tape|scanline/.test(s)) return { kind: 'vhs-glitch', params: {} };
+    if (/light leak|leak|flare|lueur/.test(s)) return { kind: 'light-leak', params: {} };
     return null;
 }
 

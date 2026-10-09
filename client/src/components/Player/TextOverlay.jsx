@@ -167,6 +167,23 @@ const CaptionWords = ({ content, words, time, reveal, highlight, emphasis }) => 
                         if (highlight.color) style.color = highlight.color;
                         style.padding = '0 0.12em';
                         style.borderRadius = '0.08em';
+                    } else if (mode === 'vox-marker') {
+                        style.background = highlight.background || '#FFE500';
+                        style.color = highlight.color || '#111827';
+                        style.padding = '0.04em 0.2em';
+                        style.borderRadius = '0.12em';
+                        style.boxShadow = '0 2px 8px rgba(255,229,0,0.4)';
+                    } else if (mode === 'bounce-box') {
+                        style.background = (i % 2 === 0 ? highlight.background : highlight.altBackground) || highlight.background || '#FFE500';
+                        style.color = highlight.color || '#000000';
+                        style.padding = '0.06em 0.22em';
+                        style.borderRadius = '0.15em';
+                        style.transform = `scale(${Math.max(scale, 1.15)}) rotate(${i % 2 === 0 ? '-2deg' : '2deg'})`;
+                    } else if (mode === 'terminal-cursor') {
+                        style.color = highlight.color || '#34D399';
+                    } else if (mode === 'neon-glow') {
+                        style.color = highlight.color || '#00E5FF';
+                        style.textShadow = `0 0 12px ${highlight.glowColor || '#00E5FF'}, 0 0 24px ${highlight.glowColor || '#00E5FF'}`;
                     } else if (mode === 'opacity') {
                         // Everything else dims instead of the active word brightening.
                         style.opacity = 1;
@@ -175,9 +192,16 @@ const CaptionWords = ({ content, words, time, reveal, highlight, emphasis }) => 
                     style.opacity = 0.55;
                 }
 
-                if (scale !== 1) style.transform = `scale(${scale})`;
+                if (scale !== 1 && mode !== 'bounce-box') style.transform = `scale(${scale})`;
 
-                return <span key={i} style={style}>{word}</span>;
+                return (
+                    <span key={i} style={style}>
+                        {word}
+                        {isActive && mode === 'terminal-cursor' && (
+                            <span style={{ color: highlight.cursorColor || '#10B981', marginLeft: '2px', animation: 'pulse 1s infinite' }}>{highlight.cursor || '█'}</span>
+                        )}
+                    </span>
+                );
             })}
         </span>
     );
