@@ -19,7 +19,9 @@ export const TEMPLATE_KINDS = ['counter', 'price-pop', 'logo-card', 'code-window
     // R92: vector shapes
     'highlight-box', 'underline', 'circle-callout', 'arrow', 'progress-bar', 'bar-chart', 'burst',
     // Creative Suite additions
-    'line-graph', 'circular-meter', 'data-counter', 'film-grain', 'vhs-glitch', 'light-leak'];
+    'line-graph', 'circular-meter', 'data-counter', 'film-grain', 'vhs-glitch', 'light-leak',
+    // Online trend additions (Talking Head, Vlog, Short Form, Repurposing)
+    'lower-third-minimal', 'location-badge', 'retention-progress-bar', 'quote-card'];
 
 /** R92: the shape kinds (drawn strokes and charts, not cards). */
 export const SHAPE_KINDS = ['highlight-box', 'underline', 'circle-callout', 'arrow', 'progress-bar', 'bar-chart', 'burst',
@@ -51,6 +53,11 @@ export const TEMPLATE_DEFAULTS = {
     'film-grain':     { intensity: 0.15 },
     'vhs-glitch':     { lines: 4, intensity: 0.25, color: '#00E5FF' },
     'light-leak':     { color: '#FFA500' },
+    // Online trend additions
+    'lower-third-minimal': { name: 'Dr. Sarah Chen', role: 'Lead AI Researcher', color: '#00E5FF' },
+    'location-badge':      { location: 'Tokyo, Shibuya', time: '09:42 AM', color: '#FF3B5C' },
+    'retention-progress-bar': { label: 'Keep Watching', value: 75, color: '#00E5FF', accent: '#FFE500' },
+    'quote-card':          { quote: 'Focus on leverage, not just hours.', author: 'Naval Ravikant', color: '#FFE500' },
 };
 
 /** Width as a fraction of the frame, the size a new template is dropped at. */
@@ -60,6 +67,7 @@ export const TEMPLATE_WIDTH_FRACTION = {
     'progress-bar': 0.8, 'bar-chart': 0.8, 'burst': 0.35,
     'line-graph': 0.85, 'circular-meter': 0.5, 'data-counter': 0.6,
     'film-grain': 1.0, 'vhs-glitch': 1.0, 'light-leak': 1.0,
+    'lower-third-minimal': 0.75, 'location-badge': 0.55, 'retention-progress-bar': 0.88, 'quote-card': 0.82,
 };
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -98,6 +106,10 @@ export function templateSize(kind, params) {
         case 'film-grain': return { w: 1080, h: 1920 };
         case 'vhs-glitch': return { w: 1080, h: 1920 };
         case 'light-leak': return { w: 1080, h: 1920 };
+        case 'lower-third-minimal': return { w: 780, h: 160 };
+        case 'location-badge': return { w: 560, h: 110 };
+        case 'retention-progress-bar': return { w: 920, h: 100 };
+        case 'quote-card': return { w: 840, h: 300 };
         default: return { w: 400, h: 200 };
     }
 }
@@ -925,6 +937,205 @@ function drawLightLeak(ctx, p, t, duration) {
     ctx.restore();
 }
 
+function drawLowerThirdMinimal(ctx, p, t, duration, F) {
+    const { w, h } = templateSize('lower-third-minimal', p);
+    const { tin, tout } = envelope(t, duration, 0.35, 0.25);
+    const a = Math.min(1, tin * 2) * tout;
+    if (a <= 0) return;
+    const prog = easeOutCubic(clamp(t / 0.35, 0, 1));
+
+    ctx.save();
+    ctx.globalAlpha = a;
+
+    // Slide in from left
+    const slideX = (1 - prog) * -50;
+    ctx.translate(slideX, 0);
+
+    // Frosted pill card background (alpha 0.94 > 200)
+    ctx.fillStyle = 'rgba(12, 16, 26, 0.94)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, 4, 4, w - 8, h - 8, 20);
+    ctx.fill();
+    ctx.stroke();
+
+    // Accent indicator vertical bar on left edge
+    ctx.fillStyle = p.color || '#00E5FF';
+    roundRect(ctx, 16, 20, 8, h - 40, 4);
+    ctx.fill();
+
+    // Speaker Name
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `bold 32px "${F.label}"`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(String(p.name || 'SPEAKER NAME').toUpperCase(), 44, 68);
+
+    // Role / Title
+    ctx.fillStyle = '#94A3B8';
+    ctx.font = `500 20px "${F.body}"`;
+    ctx.fillText(String(p.role || 'LEAD CREATOR').toUpperCase(), 44, 114);
+
+    ctx.restore();
+}
+
+function drawLocationBadge(ctx, p, t, duration, F) {
+    const { w, h } = templateSize('location-badge', p);
+    const { tin, tout } = envelope(t, duration, 0.35, 0.25);
+    const a = Math.min(1, tin * 2) * tout;
+    if (a <= 0) return;
+    const pop = easeOutBack(clamp(t / 0.35, 0, 1));
+
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.translate(w / 2, h / 2);
+    ctx.scale(pop, pop);
+    ctx.translate(-w / 2, -h / 2);
+
+    // Dark pill container
+    ctx.fillStyle = 'rgba(14, 18, 28, 0.94)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 2;
+    roundRect(ctx, 4, 4, w - 8, h - 8, h / 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Red Location Pin Dot
+    ctx.fillStyle = p.color || '#FF3B5C';
+    ctx.beginPath();
+    ctx.arc(42, h / 2, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Pin pulse ring
+    ctx.strokeStyle = p.color || '#FF3B5C';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(42, h / 2, 16, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Location name
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `bold 24px "${F.label}"`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(p.location || 'LOCATION').toUpperCase(), 72, h / 2 - 1);
+
+    // Time / secondary
+    if (p.time) {
+        ctx.fillStyle = '#94A3B8';
+        ctx.font = `500 18px "${F.body}"`;
+        ctx.textAlign = 'right';
+        ctx.fillText(String(p.time), w - 36, h / 2);
+    }
+
+    ctx.restore();
+}
+
+function drawRetentionProgressBar(ctx, p, t, duration, F) {
+    const { w, h } = templateSize('retention-progress-bar', p);
+    const a = shapeAlpha(t, duration);
+    if (a <= 0) return;
+    const prog = easeOutCubic(clamp(t / (duration * 0.9), 0, 1));
+    const targetVal = clamp(Number(p.value) || 75, 0, 100);
+    const fillPercent = targetVal * prog;
+
+    ctx.save();
+    ctx.globalAlpha = a;
+
+    // Background container
+    ctx.fillStyle = 'rgba(12, 15, 24, 0.94)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+    ctx.lineWidth = 2;
+    roundRect(ctx, 4, 4, w - 8, h - 8, 18);
+    ctx.fill();
+    ctx.stroke();
+
+    // Progress track bar
+    const barX = 24, barY = 46, barW = w - 48, barH = 26;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+    roundRect(ctx, barX, barY, barW, barH, barH / 2);
+    ctx.fill();
+
+    // Active fill with glowing gradient
+    if (fillPercent > 0) {
+        const fillW = Math.max(barH, (barW * fillPercent) / 100);
+        const grad = ctx.createLinearGradient(barX, 0, barX + fillW, 0);
+        grad.addColorStop(0, p.color || '#00E5FF');
+        grad.addColorStop(1, p.accent || '#FFE500');
+        ctx.fillStyle = grad;
+        ctx.shadowColor = p.color || '#00E5FF';
+        ctx.shadowBlur = 12;
+        roundRect(ctx, barX, barY, fillW, barH, barH / 2);
+        ctx.fill();
+    }
+
+    // Top Label & Percentage
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#94A3B8';
+    ctx.font = `bold 18px "${F.label}"`;
+    ctx.textAlign = 'left';
+    ctx.fillText(String(p.label || 'PROGRESS').toUpperCase(), barX + 4, 30);
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.textAlign = 'right';
+    ctx.font = `bold 18px "${F.label}"`;
+    ctx.fillText(`${Math.round(fillPercent)}%`, barX + barW - 4, 30);
+
+    ctx.restore();
+}
+
+function drawQuoteCard(ctx, p, t, duration, F) {
+    const { w, h } = templateSize('quote-card', p);
+    const { tin, tout } = envelope(t, duration, 0.35, 0.25);
+    const a = Math.min(1, tin * 2) * tout;
+    if (a <= 0) return;
+    const pop = easeOutBack(clamp(t / 0.35, 0, 1));
+
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.translate(w / 2, h / 2);
+    ctx.scale(pop, pop);
+    ctx.translate(-w / 2, -h / 2);
+
+    // Card background
+    ctx.fillStyle = 'rgba(14, 18, 28, 0.94)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.lineWidth = 2;
+    roundRect(ctx, 4, 4, w - 8, h - 8, 24);
+    ctx.fill();
+    ctx.stroke();
+
+    // Stylized quote mark
+    ctx.fillStyle = p.color || '#FFE500';
+    ctx.font = `900 64px "${F.display}"`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('“', 32, 60);
+
+    // Quote text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `500 24px "${F.body}"`;
+    ctx.textBaseline = 'alphabetic';
+    const quoteStr = String(p.quote || 'Simplicity is prerequisite for reliability.');
+    ctx.fillText(`"${quoteStr.slice(0, 56)}"`, 36, 130);
+    if (quoteStr.length > 56) {
+        ctx.fillText(quoteStr.slice(56, 116), 36, 168);
+    }
+
+    // Author line
+    const authorY = h - 45;
+    ctx.fillStyle = p.color || '#FFE500';
+    ctx.beginPath();
+    ctx.arc(48, authorY - 6, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#94A3B8';
+    ctx.font = `bold 20px "${F.label}"`;
+    ctx.fillText(String(p.author || 'AUTHOR').toUpperCase(), 70, authorY);
+
+    ctx.restore();
+}
+
 /**
  * Draw a template at time t (seconds since the clip started) into a context
  * whose drawing area is the template box scaled by `scale`.
@@ -963,6 +1174,10 @@ export function drawTemplate(ctx, kind, params, t, duration, opts = {}) {
         else if (kind === 'film-grain') drawFilmGrain(ctx, p, tt, d);
         else if (kind === 'vhs-glitch') drawVhsGlitch(ctx, p, tt, d);
         else if (kind === 'light-leak') drawLightLeak(ctx, p, tt, d);
+        else if (kind === 'lower-third-minimal') drawLowerThirdMinimal(ctx, p, tt, d, F);
+        else if (kind === 'location-badge') drawLocationBadge(ctx, p, tt, d, F);
+        else if (kind === 'retention-progress-bar') drawRetentionProgressBar(ctx, p, tt, d, F);
+        else if (kind === 'quote-card') drawQuoteCard(ctx, p, tt, d, F);
     } finally {
         ctx.restore();
     }
@@ -1038,6 +1253,19 @@ function shapeFromText(s, raw, quoted) {
     if (/film grain|grain 35mm|grain pellicule|35mm/.test(s)) return { kind: 'film-grain', params: {} };
     if (/vhs|glitch|retro tape|scanline/.test(s)) return { kind: 'vhs-glitch', params: {} };
     if (/light leak|leak|flare|lueur/.test(s)) return { kind: 'light-leak', params: {} };
+    if (/lower third|titre bas|speaker card|nom du speaker/.test(s)) {
+        return { kind: 'lower-third-minimal', params: quoted ? { name: quoted } : {} };
+    }
+    if (/\b(location|lieu|pin|badge lieu|city|ville)\b/.test(s)) {
+        return { kind: 'location-badge', params: quoted ? { location: quoted } : {} };
+    }
+    if (/retention bar|retention progress|watch progress/.test(s)) {
+        const m = s.match(/(\d{1,3})\s*%/);
+        return { kind: 'retention-progress-bar', params: m ? { value: Number(m[1]) } : {} };
+    }
+    if (/quote card|citation|quote|tweet/.test(s)) {
+        return { kind: 'quote-card', params: quoted ? { quote: quoted } : {} };
+    }
     return null;
 }
 

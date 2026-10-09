@@ -4,6 +4,7 @@ import { ContentAnalyzer } from './ContentAnalyzer.js';
 import { LongFormEditPlanner } from './LongFormEditPlanner.js';
 import { authFetch } from '../utils/authFetch.js';
 import { autoEmphasizeCaptions, clearAllEmphasis } from '../utils/captionEmphasis.js';
+import { evaluateMotionCompatibility } from './AnimationCompatibilityEvaluator.js';
 
 /**
  * VideoEditorTools
@@ -2219,13 +2220,33 @@ if (matches.length === 0 && titleCardsCreated === 0) {
         }
     }
 
-    /** R89 — drop an animated template (counter, price pop, logo card, code window) at the playhead. */
+    /** R89 / Creative Suite — drop an animated template at the playhead with style compatibility check. */
     addTemplate({ kind, params = {} } = {}) {
         try {
-            const r = useTimelineStore.getState().addTemplateClip(kind, params);
+            const state = useTimelineStore.getState();
+            const currentStyle = state.editingStyle || 'talking_head';
+            const evalResult = evaluateMotionCompatibility(currentStyle, 'template', kind, params);
+            const finalParams = evalResult.adaptedParams || params;
+
+            const r = state.addTemplateClip(kind, finalParams);
             if (!r?.success) return { success: false, message: r?.error || 'The template could not be added.' };
-            const names = { 'counter': 'Flip counter', 'price-pop': 'Number pop', 'logo-card': 'Logo card', 'code-window': 'Code window' };
-            return { success: true, message: `${names[kind] || 'Template'} added at the playhead. Edit its text in the Motion panel.`, clipId: r.clipId };
+            const names = {
+                'counter': 'Flip counter', 'price-pop': 'Number pop', 'logo-card': 'Logo card', 'code-window': 'Code window',
+                'line-graph': 'Line graph', 'circular-meter': 'Circular meter', 'data-counter': 'Data counter',
+                'film-grain': 'Film grain', 'vhs-glitch': 'VHS glitch', 'light-leak': 'Light leak',
+                'lower-third-minimal': 'Lower third', 'location-badge': 'Location badge',
+                'retention-progress-bar': 'Retention progress bar', 'quote-card': 'Quote card',
+            };
+            const label = names[kind] || 'Template';
+            const styleNote = (!evalResult.compatible || evalResult.verdict === 'caution')
+                ? ` [Style notice: ${evalResult.reason}]`
+                : '';
+            return {
+                success: true,
+                message: `${label} added at the playhead.${styleNote} Edit its text in the Motion panel.`,
+                clipId: r.clipId,
+                compatibility: evalResult,
+            };
         } catch (error) {
             console.error('[VideoEditorTools] addTemplate error:', error);
             return { success: false, message: `Could not add the template: ${error.message}` };
