@@ -40,6 +40,86 @@ const fit = (want, duration) => {
 
 const kf = createKeyframe;
 
+/* ─── NEW CORE ANIMATION PRESETS (Phase 3 Motion Enrichment) ─── */
+const FLIP_3D_PRESET = {
+    label: '3D Flip',
+    build: ({ duration } = {}) => {
+        const d = fit(0.5, duration);
+        return [createAnimation({
+            type: ANIMATION_TYPES.ROTATE, presetId: 'flip-3d', duration: d, easing: 'backOut',
+            keyframes: [
+                kf(0,        { rotation: -35, opacity: 0, scale: 0.85 }),
+                kf(d * 0.65, { rotation: 6,   opacity: 1, scale: 1.04 }),
+                kf(d,        { rotation: 0,   opacity: 1, scale: 1 }),
+            ],
+        })];
+    },
+};
+
+const ELASTIC_SNAP_PRESET = {
+    label: 'Elastic Snap',
+    build: ({ duration } = {}) => {
+        const d = fit(0.55, duration);
+        return [createAnimation({
+            type: ANIMATION_TYPES.SCALE, presetId: 'elastic-snap', duration: d, easing: 'elastic',
+            keyframes: [
+                kf(0,        { scale: 0.15, opacity: 0 }),
+                kf(d * 0.5,  { scale: 1.18, opacity: 1 }),
+                kf(d * 0.75, { scale: 0.94, opacity: 1 }),
+                kf(d,        { scale: 1,    opacity: 1 }),
+            ],
+        })];
+    },
+};
+
+const KINETIC_SLAM_PRESET = {
+    label: 'Kinetic Slam',
+    build: ({ duration } = {}) => {
+        const d = fit(0.35, duration);
+        return [createAnimation({
+            type: ANIMATION_TYPES.SCALE, presetId: 'kinetic-slam', duration: d, easing: 'easeOutQuart',
+            keyframes: [
+                kf(0,       { scale: 2.0,  opacity: 0 }),
+                kf(d * 0.4, { scale: 0.96, opacity: 1 }),
+                kf(d,       { scale: 1,    opacity: 1 }),
+            ],
+        })];
+    },
+};
+
+const SPLIT_REVEAL_PRESET = {
+    label: 'Split Reveal',
+    build: ({ duration } = {}) => {
+        const d = fit(0.5, duration);
+        return [createAnimation({
+            type: ANIMATION_TYPES.REVEAL, presetId: 'split-reveal', duration: d, easing: 'easeInOutCubic',
+            keyframes: [
+                kf(0,        { reveal: 0,   opacity: 0 }),
+                kf(d * 0.25, { reveal: 0.3, opacity: 1 }),
+                kf(d,        { reveal: 1,   opacity: 1 }),
+            ],
+        })];
+    },
+};
+
+const GLITCH_STUTTER_PRESET = {
+    label: 'Glitch Stutter',
+    build: ({ duration } = {}) => {
+        const d = fit(0.35, duration);
+        return [createAnimation({
+            type: ANIMATION_TYPES.TRANSLATE, presetId: 'glitch-stutter', duration: d, easing: 'linear',
+            keyframes: [
+                kf(0,       { x: 0,    y: 0,    opacity: 0 }),
+                kf(d * 0.2, { x: -2.5, y: 1.2,  opacity: 0.8 }),
+                kf(d * 0.4, { x: 2.8,  y: -1.0, opacity: 1 }),
+                kf(d * 0.6, { x: -1.5, y: 0.6,  opacity: 0.7 }),
+                kf(d * 0.8, { x: 1.0,  y: -0.3, opacity: 1 }),
+                kf(d,       { x: 0,    y: 0,    opacity: 1 }),
+            ],
+        })];
+    },
+};
+
 /* ───────────────────────────── TEXT ───────────────────────────── */
 
 const TEXT_PRESETS = {
@@ -159,6 +239,11 @@ const TEXT_PRESETS = {
             })];
         },
     },
+    'flip-3d':        FLIP_3D_PRESET,
+    'elastic-snap':   ELASTIC_SNAP_PRESET,
+    'kinetic-slam':   KINETIC_SLAM_PRESET,
+    'split-reveal':   SPLIT_REVEAL_PRESET,
+    'glitch-stutter': GLITCH_STUTTER_PRESET,
 };
 
 /* ───────────────────────────── IMAGE ───────────────────────────── */
@@ -224,6 +309,8 @@ const IMAGE_PRESETS = {
             })];
         },
     },
+    'kinetic-slam': KINETIC_SLAM_PRESET,
+    'split-reveal': SPLIT_REVEAL_PRESET,
 };
 
 /* ──────────────────────────── STICKER ──────────────────────────── */
@@ -287,6 +374,9 @@ const STICKER_PRESETS = {
             })];
         },
     },
+    'flip-3d':        FLIP_3D_PRESET,
+    'elastic-snap':   ELASTIC_SNAP_PRESET,
+    'glitch-stutter': GLITCH_STUTTER_PRESET,
 };
 
 /* ──────────────────────────── CAMERA ───────────────────────────── */
@@ -358,6 +448,7 @@ const CAMERA_PRESETS = {
             })];
         },
     },
+    'kinetic-slam': KINETIC_SLAM_PRESET,
 };
 
 /** All presets, flat, keyed by id. */

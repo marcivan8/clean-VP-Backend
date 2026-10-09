@@ -244,5 +244,34 @@ section('6 · wiring — client-side pass-through');
         /projectId:\s*aaStore\.projectId \|\| null/.test(mediaExecSrc));
 }
 
+section('7 · new core animation presets & style-aware combination selection');
+{
+    const expectedNew = ['flip-3d', 'elastic-snap', 'kinetic-slam', 'split-reveal', 'glitch-stutter'];
+    for (const id of expectedNew) {
+        check(`new preset "${id}" exists in real MOTION_PRESETS`, Boolean(MOTION_PRESETS[id]));
+        const built = buildPreset(id, { duration: 2 });
+        check(`new preset "${id}" builds non-empty animations`, Array.isArray(built) && built.length > 0);
+    }
+
+    // Verify style-aware selection preferences
+    const talkingSecondary = pickSecondaryPreset('pop', 'fixed-seed-xyz', 'talking_head');
+    check('talking_head style bias selects clean secondary (slide-up or glow-reveal)',
+        ['slide-up', 'glow-reveal'].includes(talkingSecondary), `got ${talkingSecondary}`);
+
+    const reelSecondary = pickSecondaryPreset('pop', 'fixed-seed-xyz', 'reel');
+    check('reel style bias selects energetic secondary (flip-3d or glitch-stutter)',
+        ['flip-3d', 'glitch-stutter'].includes(reelSecondary), `got ${reelSecondary}`);
+
+    // Verify end-to-end combination with a new preset
+    if (typeof applyPresetToClip === 'function') {
+        const clip = { duration: 2.5 };
+        const combined = applyPresetToClip(clip, 'flip-3d', { intensity: 0.6, secondaryPresetId: 'glow-reveal' });
+        check('flip-3d + glow-reveal combines both rotate and glow channels',
+            Array.isArray(combined.animations) && combined.animations.length === 2 &&
+            combined.animations.some((a) => a.presetId === 'flip-3d' && a.type === 'rotate') &&
+            combined.animations.some((a) => a.presetId === 'glow-reveal' && a.type === 'glow'));
+    }
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

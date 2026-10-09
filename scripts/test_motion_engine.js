@@ -55,7 +55,7 @@ const read = (rel) => {
 // hand-rewritten copy would pass while the shipped file was broken.
 function loadModules() {
     const sandbox = { console, Math, Number, Date, Array, Object, JSON, String, Boolean, isNaN, parseInt, parseFloat };
-    const order = ['Easing', 'MotionSchema', 'MotionResolver', 'MotionPresets', 'CaptionModel', 'ClipAdapter', 'KeyframeBridge'];
+    const order = ['Easing', 'MotionSchema', 'MotionResolver', 'MotionPresets', 'AnimationSynthesizer', 'CaptionModel', 'ClipAdapter', 'KeyframeBridge'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);

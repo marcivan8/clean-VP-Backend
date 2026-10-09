@@ -532,6 +532,7 @@ const FONT_SPECS = {
     // Caption style picker extras (CaptionStylesCard)
     'DM Sans':            { file: 'DMSans-Regular.ttf',            slug: 'dm-sans',            weight: 400, subset: 'latin' },
     'Unbounded':          { file: 'Unbounded-Regular.ttf',         slug: 'unbounded',          weight: 400, subset: 'latin' },
+    'JetBrains Mono':     { file: 'JetBrainsMono-Regular.ttf',     slug: 'jetbrains-mono',     weight: 400, subset: 'latin' },
 };
 
 /**

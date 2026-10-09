@@ -65,13 +65,18 @@
  */
 const SECONDARY_PRESETS = {
     // ── TEXT (client/src/motion/MotionPresets.js TEXT_PRESETS) ──
-    'pop':          ['glow-reveal', 'slide-up'], // scale entrance + a glow flourish, or a lift
-    'scale-reveal': ['glow-reveal'],              // scale reveal + a soft glow accent
-    'blur-reveal':  ['fade'],                     // focus-pull + fade — gentle, for softer moments
-    'glow-reveal':  ['slide-up'],                 // glow + a subtle lift
-    'fade':         ['blur-reveal'],              // plain fade + a soft focus-pull (emotional_beat's gentlest pairing)
-    'mask-reveal':  ['slide-up'],                 // wipe-reveal + a lift — the two chapter_transition candidates, now layered instead of chosen between
-    'slide-up':     ['fade'],                     // lift + fade — gentle alternative when slide-up is the primary
+    'pop':            ['glow-reveal', 'slide-up', 'flip-3d', 'glitch-stutter'], // scale entrance + glow flourish, lift, 3D flip, or micro-stutter
+    'scale-reveal':   ['glow-reveal', 'flip-3d', 'glitch-stutter'],              // scale reveal + soft glow accent, 3D flip, or micro-stutter
+    'blur-reveal':    ['fade', 'elastic-snap', 'flip-3d'],                      // focus-pull + fade, snap, or 3D tilt
+    'glow-reveal':    ['slide-up', 'elastic-snap', 'flip-3d'],                  // glow + subtle lift, snap, or 3D tilt
+    'fade':           ['blur-reveal', 'split-reveal', 'flip-3d'],               // plain fade + soft focus-pull, split reveal, or 3D tilt
+    'mask-reveal':    ['slide-up', 'elastic-snap'],                             // wipe-reveal + lift or elastic bounce
+    'slide-up':       ['fade', 'elastic-snap', 'glow-reveal'],                  // lift + fade, elastic bounce, or glow accent
+    'flip-3d':        ['glow-reveal', 'slide-up', 'elastic-snap'],              // 3D rotation flip + glow accent, lift, or elastic snap
+    'elastic-snap':   ['glow-reveal', 'glitch-stutter', 'slide-up'],            // damped spring snap + glow flash, micro-stutter, or lift
+    'kinetic-slam':   ['camera-shake', 'glow-reveal', 'camera-whip'],           // high impact slam + camera shake, glow hit, or whip blur
+    'split-reveal':   ['slide-up', 'glow-reveal', 'fade'],                      // split mask wipe + vertical lift, glow accent, or soft fade
+    'glitch-stutter': ['glow-reveal', 'pulse', 'pop'],                          // rapid jitter + glow flare or pulsing scale
 
     // ── IMAGE (IMAGE_PRESETS) ──
     'reveal':    ['pan'],       // scale-in + a slow pan
@@ -82,16 +87,26 @@ const SECONDARY_PRESETS = {
     'float':     ['ken-burns'], // gentle drift + a slow push
 
     // ── STICKER (STICKER_PRESETS) ──
-    'sticker-pop': ['wiggle'], // pop-in + a playful wiggle
-    'bounce':      ['pulse'],  // bounce entrance + a pulsing scale
-    'shake':       ['pulse'],  // comedic shake + pulse (punchline/emphasis stickers)
-    'pulse':       ['wiggle'], // pulse + wiggle
+    'sticker-pop': ['wiggle', 'glitch-stutter'], // pop-in + playful wiggle or glitch
+    'bounce':      ['pulse', 'elastic-snap'],   // bounce entrance + pulsing scale or elastic snap
+    'shake':       ['pulse', 'glow-reveal'],    // comedic shake + pulse or glow accent
+    'pulse':       ['wiggle', 'glitch-stutter'], // pulse + wiggle or stutter
 
     // ── CAMERA (CAMERA_PRESETS) ──
-    'camera-push':  ['camera-whip'],  // push-in + a whip pan
-    'camera-shake': ['camera-zoom'],  // shake + a punch zoom — stacked punch, for a hard hit
-    'camera-zoom':  ['camera-shake'], // punch zoom + shake — reciprocal of 'camera-shake' above
-    'camera-pull':  ['camera-whip'],  // pull-out + a whip — "opening up" into a new topic
+    'camera-push':  ['camera-whip', 'camera-shake'], // push-in + whip pan or impact shake
+    'camera-shake': ['camera-zoom'],                 // shake + a punch zoom — stacked punch, for a hard hit
+    'camera-zoom':  ['camera-shake'],                // punch zoom + shake — reciprocal of 'camera-shake' above
+    'camera-pull':  ['camera-whip', 'camera-shake'], // pull-out + whip or settling shake
+};
+
+/** Preferred secondary animations tailored to each editing style */
+const STYLE_SECONDARY_PREFERENCES = {
+    talking_head: ['glow-reveal', 'slide-up', 'fade', 'blur-reveal', 'float'],
+    reel:         ['elastic-snap', 'glitch-stutter', 'flip-3d', 'camera-shake', 'camera-zoom', 'pulse', 'wiggle'],
+    vlog:         ['float', 'slide-up', 'glow-reveal', 'fade', 'ken-burns'],
+    repurposing:  ['split-reveal', 'slide-up', 'glow-reveal', 'blur-reveal'],
+    podcast:      ['fade', 'blur-reveal', 'float', 'glow-reveal'],
+    explainer:    ['split-reveal', 'slide-up', 'glow-reveal', 'flip-3d'],
 };
 
 /** DJB2 string hash. Deterministic, no dependencies, never Math.random. */
@@ -126,24 +141,37 @@ function computeStyleSeed(event, tone) {
 
 /**
  * Pick a complementary secondary preset id for a given primary, or null when
- * this primary has no curated pairing (e.g. a preset outside the 21 the
- * knowledge graph resolves to, or a bare/unknown id).
+ * this primary has no curated pairing (e.g. a preset outside the curated map
+ * or a bare/unknown id). Optionally style-aware when style parameter is provided.
  *
  * @param {?string} primaryPresetId
  * @param {string} seed — from computeStyleSeed
+ * @param {?string} [style] — optional editing style ('talking_head', 'reel', 'vlog', etc.)
  * @returns {?string}
  */
-function pickSecondaryPreset(primaryPresetId, seed) {
+function pickSecondaryPreset(primaryPresetId, seed, style = null) {
     if (!primaryPresetId) return null;
     const candidates = SECONDARY_PRESETS[primaryPresetId];
     if (!Array.isArray(candidates) || candidates.length === 0) return null;
     if (candidates.length === 1) return candidates[0];
+
+    // If a known style preference exists and matches any candidate, bias selection towards it
+    if (style && STYLE_SECONDARY_PREFERENCES[style]) {
+        const preferred = STYLE_SECONDARY_PREFERENCES[style];
+        const matches = candidates.filter(c => preferred.includes(c));
+        if (matches.length > 0) {
+            const idx = hashString(seed) % matches.length;
+            return matches[idx];
+        }
+    }
+
     const idx = hashString(seed) % candidates.length;
     return candidates[idx];
 }
 
 module.exports = {
     SECONDARY_PRESETS,
+    STYLE_SECONDARY_PREFERENCES,
     computeStyleSeed,
     pickSecondaryPreset,
 };
