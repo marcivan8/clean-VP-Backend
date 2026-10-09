@@ -21,7 +21,9 @@ export const TEMPLATE_KINDS = ['counter', 'price-pop', 'logo-card', 'code-window
     // Creative Suite additions
     'line-graph', 'circular-meter', 'data-counter', 'film-grain', 'vhs-glitch', 'light-leak',
     // Online trend additions (Talking Head, Vlog, Short Form, Repurposing)
-    'lower-third-minimal', 'location-badge', 'retention-progress-bar', 'quote-card'];
+    'lower-third-minimal', 'location-badge', 'retention-progress-bar', 'quote-card',
+    // Expanded Motion Catalog (Editorial, Social Proof, Comparison, KPI)
+    'comparison-card', 'social-notification', 'comment-bubble', 'kpi-stat-callout', 'newspaper-headline', 'search-bar'];
 
 /** R92: the shape kinds (drawn strokes and charts, not cards). */
 export const SHAPE_KINDS = ['highlight-box', 'underline', 'circle-callout', 'arrow', 'progress-bar', 'bar-chart', 'burst',
@@ -58,6 +60,13 @@ export const TEMPLATE_DEFAULTS = {
     'location-badge':      { location: 'Tokyo, Shibuya', time: '09:42 AM', color: '#FF3B5C' },
     'retention-progress-bar': { label: 'Keep Watching', value: 75, color: '#00E5FF', accent: '#FFE500' },
     'quote-card':          { quote: 'Focus on leverage, not just hours.', author: 'Naval Ravikant', color: '#FFE500' },
+    // Expanded Motion Catalog
+    'comparison-card':     { beforeLabel: 'BEFORE', beforeVal: '14 Hours', afterLabel: 'AFTER', afterVal: '35 Mins', color: '#00E5FF', accent: '#10B981' },
+    'social-notification': { title: 'NEW SUBSCRIBER', subtitle: '@alex started following you', color: '#FF3B5C', accent: '#FFFFFF' },
+    'comment-bubble':      { user: '@marcus_dev', text: 'How do you structure this without ads?', color: '#38BDF8' },
+    'kpi-stat-callout':     { stat: '+184%', label: 'ORGANIC RETENTION RATE', color: '#10B981', accent: '#38BDF8' },
+    'newspaper-headline':  { publication: 'THE TECH DISPATCH', headline: 'AI OVERHAULS CREATOR PRODUCTION', highlight: 'OVERHAULS', date: 'OCTOBER 2026' },
+    'search-bar':          { query: 'how to edit viral videos', placeholder: 'Search Google...', color: '#00E5FF' },
 };
 
 /** Width as a fraction of the frame, the size a new template is dropped at. */
@@ -68,6 +77,8 @@ export const TEMPLATE_WIDTH_FRACTION = {
     'line-graph': 0.85, 'circular-meter': 0.5, 'data-counter': 0.6,
     'film-grain': 1.0, 'vhs-glitch': 1.0, 'light-leak': 1.0,
     'lower-third-minimal': 0.75, 'location-badge': 0.55, 'retention-progress-bar': 0.88, 'quote-card': 0.82,
+    'comparison-card': 0.85, 'social-notification': 0.72, 'comment-bubble': 0.82,
+    'kpi-stat-callout': 0.78, 'newspaper-headline': 0.86, 'search-bar': 0.80,
 };
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -110,6 +121,12 @@ export function templateSize(kind, params) {
         case 'location-badge': return { w: 560, h: 110 };
         case 'retention-progress-bar': return { w: 920, h: 100 };
         case 'quote-card': return { w: 840, h: 300 };
+        case 'comparison-card': return { w: 860, h: 220 };
+        case 'social-notification': return { w: 680, h: 140 };
+        case 'comment-bubble': return { w: 800, h: 200 };
+        case 'kpi-stat-callout': return { w: 760, h: 210 };
+        case 'newspaper-headline': return { w: 880, h: 260 };
+        case 'search-bar': return { w: 780, h: 130 };
         default: return { w: 400, h: 200 };
     }
 }
@@ -1136,6 +1153,390 @@ function drawQuoteCard(ctx, p, t, duration, F) {
     ctx.restore();
 }
 
+function drawComparisonCard(ctx, p, t, duration, F) {
+    const { w, h } = templateSize('comparison-card', p);
+    const { tin, tout } = envelope(t, duration, 0.35, 0.25);
+    const a = Math.min(1, tin * 2) * tout;
+    if (a <= 0) return;
+    const pop = easeOutBack(clamp(t / 0.35, 0, 1));
+
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.translate(w / 2, h / 2);
+    ctx.scale(pop, pop);
+    ctx.translate(-w / 2, -h / 2);
+
+    // Card background
+    ctx.fillStyle = 'rgba(14, 18, 28, 0.95)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.lineWidth = 2;
+    roundRect(ctx, 4, 4, w - 8, h - 8, 22);
+    ctx.fill();
+    ctx.stroke();
+
+    // Divider
+    const midX = w / 2;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(midX, 24);
+    ctx.lineTo(midX, h - 24);
+    ctx.stroke();
+
+    // "VS" badge in center
+    ctx.fillStyle = 'rgba(30, 41, 59, 0.9)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(midX, h / 2, 24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#94A3B8';
+    ctx.font = `bold 16px "${F.label}"`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('VS', midX, h / 2);
+
+    // Left (Before)
+    const leftX = midX / 2;
+    ctx.fillStyle = '#EF4444';
+    ctx.font = `bold 18px "${F.label}"`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(String(p.beforeLabel || 'BEFORE').toUpperCase(), leftX, 60);
+
+    ctx.fillStyle = '#E2E8F0';
+    ctx.font = `900 36px "${F.display}"`;
+    ctx.fillText(String(p.beforeVal || '14 Hours'), leftX, 120);
+
+    // Right (After)
+    const rightX = midX + midX / 2;
+    ctx.fillStyle = p.accent || '#10B981';
+    ctx.font = `bold 18px "${F.label}"`;
+    ctx.textAlign = 'center';
+    ctx.fillText(String(p.afterLabel || 'AFTER').toUpperCase(), rightX, 60);
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `900 38px "${F.display}"`;
+    ctx.fillText(String(p.afterVal || '35 Mins'), rightX, 120);
+
+    ctx.restore();
+}
+
+function drawSocialNotification(ctx, p, t, duration, F) {
+    const { w, h } = templateSize('social-notification', p);
+    const { tin, tout } = envelope(t, duration, 0.30, 0.25);
+    const a = Math.min(1, tin * 2.5) * tout;
+    if (a <= 0) return;
+    const slide = easeOutBack(clamp(t / 0.30, 0, 1));
+
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.translate(0, (1 - slide) * -20);
+
+    // Notification Capsule
+    ctx.fillStyle = 'rgba(16, 22, 34, 0.96)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
+    ctx.lineWidth = 2;
+    roundRect(ctx, 4, 4, w - 8, h - 8, 24);
+    ctx.fill();
+    ctx.stroke();
+
+    // App/Social Icon Circle
+    const iconX = 54, iconY = h / 2;
+    ctx.fillStyle = p.color || '#FF3B5C';
+    ctx.beginPath();
+    ctx.arc(iconX, iconY, 24, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Notification bell / star symbol inside circle
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `bold 22px "${F.label}"`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('★', iconX, iconY);
+
+    // Title / App Name
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#F8FAFC';
+    ctx.font = `bold 20px "${F.label}"`;
+    ctx.fillText(String(p.title || 'NEW SUBSCRIBER').toUpperCase(), 96, 54);
+
+    // Timestamp
+    ctx.fillStyle = '#94A3B8';
+    ctx.font = `500 16px "${F.body}"`;
+    ctx.textAlign = 'right';
+    ctx.fillText('now', w - 32, 54);
+
+    // Subtitle / message
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#CBD5E1';
+    ctx.font = `500 20px "${F.body}"`;
+    const subStr = String(p.subtitle || '@alex started following you');
+    ctx.fillText(subStr.slice(0, 42), 96, 95);
+
+    ctx.restore();
+}
+
+function drawCommentBubble(ctx, p, t, duration, F) {
+    const { w, h } = templateSize('comment-bubble', p);
+    const { tin, tout } = envelope(t, duration, 0.35, 0.25);
+    const a = Math.min(1, tin * 2) * tout;
+    if (a <= 0) return;
+    const pop = easeOutBack(clamp(t / 0.35, 0, 1));
+
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.translate(w / 2, h / 2);
+    ctx.scale(pop, pop);
+    ctx.translate(-w / 2, -h / 2);
+
+    // Comment Card
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.96)';
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.25)';
+    ctx.lineWidth = 2;
+    roundRect(ctx, 4, 4, w - 8, h - 8, 22);
+    ctx.fill();
+    ctx.stroke();
+
+    // Avatar Circle
+    const avX = 52, avY = 56;
+    const grad = ctx.createLinearGradient(avX - 22, avY - 22, avX + 22, avY + 22);
+    grad.addColorStop(0, p.color || '#38BDF8');
+    grad.addColorStop(1, '#818CF8');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(avX, avY, 22, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Avatar Initial
+    const userStr = String(p.user || '@marcus_dev');
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `bold 18px "${F.label}"`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(userStr.replace('@', '')[0]?.toUpperCase() || 'U', avX, avY);
+
+    // Username
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `bold 22px "${F.label}"`;
+    ctx.fillText(userStr, 90, 52);
+
+    // Verified badge icon
+    ctx.fillStyle = '#38BDF8';
+    ctx.beginPath();
+    ctx.arc(90 + ctx.measureText(userStr).width + 16, 45, 8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Comment Text
+    ctx.fillStyle = '#E2E8F0';
+    ctx.font = `500 22px "${F.body}"`;
+    const cText = String(p.text || 'How do you structure this without ads?');
+    ctx.fillText(cText.slice(0, 52), 90, 110);
+    if (cText.length > 52) {
+        ctx.fillText(cText.slice(52, 105), 90, 145);
+    }
+
+    ctx.restore();
+}
+
+function drawKpiStatCallout(ctx, p, t, duration, F) {
+    const { w, h } = templateSize('kpi-stat-callout', p);
+    const { tin, tout } = envelope(t, duration, 0.35, 0.25);
+    const a = Math.min(1, tin * 2) * tout;
+    if (a <= 0) return;
+    const pop = easeOutBack(clamp(t / 0.35, 0, 1));
+
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.translate(w / 2, h / 2);
+    ctx.scale(pop, pop);
+    ctx.translate(-w / 2, -h / 2);
+
+    // Background Card with neon border
+    ctx.fillStyle = 'rgba(12, 18, 32, 0.96)';
+    ctx.strokeStyle = p.color || '#10B981';
+    ctx.lineWidth = 2.5;
+    roundRect(ctx, 4, 4, w - 8, h - 8, 22);
+    ctx.fill();
+    ctx.stroke();
+
+    // Big Stat Number
+    ctx.fillStyle = p.color || '#10B981';
+    ctx.font = `900 76px "${F.display}"`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    const statText = String(p.stat || '+184%');
+    ctx.fillText(statText, 40, 106);
+
+    // Trending up pill
+    const statW = ctx.measureText(statText).width;
+    const pillX = 50 + statW, pillY = 56, pillW = 86, pillH = 34;
+    ctx.fillStyle = 'rgba(16, 185, 129, 0.2)';
+    ctx.strokeStyle = p.color || '#10B981';
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, pillX, pillY, pillW, pillH, 17);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `bold 16px "${F.label}"`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('▲ DELTA', pillX + pillW / 2, pillY + pillH / 2);
+
+    // Label Line
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#94A3B8';
+    ctx.font = `bold 20px "${F.label}"`;
+    ctx.fillText(String(p.label || 'ORGANIC RETENTION RATE').toUpperCase(), 40, 160);
+
+    // Accent line underneath
+    ctx.fillStyle = p.accent || '#38BDF8';
+    ctx.fillRect(40, 178, w - 80, 4);
+
+    ctx.restore();
+}
+
+function drawNewspaperHeadline(ctx, p, t, duration, F) {
+    const { w, h } = templateSize('newspaper-headline', p);
+    const { tin, tout } = envelope(t, duration, 0.35, 0.25);
+    const a = Math.min(1, tin * 2) * tout;
+    if (a <= 0) return;
+    const pop = easeOutBack(clamp(t / 0.35, 0, 1));
+
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.translate(w / 2, h / 2);
+    ctx.scale(pop, pop);
+    ctx.translate(-w / 2, -h / 2);
+
+    // Cream newspaper background with crisp editorial feel
+    ctx.fillStyle = 'rgba(248, 246, 240, 0.98)';
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+    ctx.lineWidth = 2;
+    roundRect(ctx, 4, 4, w - 8, h - 8, 12);
+    ctx.fill();
+    ctx.stroke();
+
+    // Masthead header rules
+    const pubName = String(p.publication || 'THE TECH DISPATCH').toUpperCase();
+    ctx.strokeStyle = '#0F172A';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(32, 28);
+    ctx.lineTo(w - 32, 28);
+    ctx.moveTo(32, 62);
+    ctx.lineTo(w - 32, 62);
+    ctx.stroke();
+
+    // Publication title
+    ctx.fillStyle = '#0F172A';
+    ctx.font = `900 22px "${F.display}"`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(pubName, w / 2, 45);
+
+    // Date
+    ctx.font = `600 13px "${F.label}"`;
+    ctx.textAlign = 'right';
+    ctx.fillText(String(p.date || 'OCTOBER 2026').toUpperCase(), w - 40, 45);
+
+    // Headline
+    const hl = String(p.headline || 'AI OVERHAULS CREATOR PRODUCTION');
+    ctx.fillStyle = '#000000';
+    ctx.font = `900 36px "${F.display}"`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(hl.slice(0, 36), 36, 128);
+    if (hl.length > 36) {
+        ctx.fillText(hl.slice(36, 75), 36, 172);
+    }
+
+    // Yellow highlighter over key phrase
+    const highlightWord = p.highlight || 'OVERHAULS';
+    const hlProgress = clamp((t - 0.2) / 0.4, 0, 1);
+    if (hlProgress > 0) {
+        ctx.fillStyle = 'rgba(254, 240, 138, 0.65)';
+        ctx.fillRect(36, 138, (w - 72) * hlProgress, 28);
+    }
+
+    // Bottom column divider & deck
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(36, 214);
+    ctx.lineTo(w - 36, 214);
+    ctx.stroke();
+
+    ctx.fillStyle = '#475569';
+    ctx.font = `500 16px "${F.body}"`;
+    ctx.fillText('SPECIAL REPORT • EDITION No. 42', 36, 238);
+
+    ctx.restore();
+}
+
+function drawSearchBar(ctx, p, t, duration, F) {
+    const { w, h } = templateSize('search-bar', p);
+    const { tin, tout } = envelope(t, duration, 0.35, 0.25);
+    const a = Math.min(1, tin * 2) * tout;
+    if (a <= 0) return;
+    const pop = easeOutBack(clamp(t / 0.35, 0, 1));
+
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.translate(w / 2, h / 2);
+    ctx.scale(pop, pop);
+    ctx.translate(-w / 2, -h / 2);
+
+    // Search pill capsule
+    ctx.fillStyle = 'rgba(18, 24, 38, 0.96)';
+    ctx.strokeStyle = 'rgba(0, 229, 255, 0.35)';
+    ctx.lineWidth = 2.5;
+    roundRect(ctx, 4, 4, w - 8, h - 8, (h - 8) / 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Magnifying glass icon on left
+    const iconX = 52, iconY = h / 2;
+    ctx.strokeStyle = p.color || '#00E5FF';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(iconX, iconY - 3, 11, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(iconX + 8, iconY + 5);
+    ctx.lineTo(iconX + 17, iconY + 14);
+    ctx.stroke();
+
+    // Animated typing query
+    const fullQuery = String(p.query || 'how to edit viral videos');
+    const typeProg = clamp((t - 0.2) / (duration * 0.6), 0, 1);
+    const charCount = Math.floor(typeProg * fullQuery.length);
+    const displayedQuery = fullQuery.slice(0, charCount);
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `600 24px "${F.body}"`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(displayedQuery || (t < 0.25 ? String(p.placeholder || 'Search...') : ''), 88, h / 2);
+
+    // Blinking cursor
+    const cursorVisible = Math.floor(t * 4) % 2 === 0;
+    if (cursorVisible && charCount < fullQuery.length) {
+        const textW = ctx.measureText(displayedQuery).width;
+        ctx.fillStyle = p.color || '#00E5FF';
+        ctx.fillRect(92 + textW, h / 2 - 14, 3, 28);
+    }
+
+    ctx.restore();
+}
+
 /**
  * Draw a template at time t (seconds since the clip started) into a context
  * whose drawing area is the template box scaled by `scale`.
@@ -1178,6 +1579,12 @@ export function drawTemplate(ctx, kind, params, t, duration, opts = {}) {
         else if (kind === 'location-badge') drawLocationBadge(ctx, p, tt, d, F);
         else if (kind === 'retention-progress-bar') drawRetentionProgressBar(ctx, p, tt, d, F);
         else if (kind === 'quote-card') drawQuoteCard(ctx, p, tt, d, F);
+        else if (kind === 'comparison-card') drawComparisonCard(ctx, p, tt, d, F);
+        else if (kind === 'social-notification') drawSocialNotification(ctx, p, tt, d, F);
+        else if (kind === 'comment-bubble') drawCommentBubble(ctx, p, tt, d, F);
+        else if (kind === 'kpi-stat-callout') drawKpiStatCallout(ctx, p, tt, d, F);
+        else if (kind === 'newspaper-headline') drawNewspaperHeadline(ctx, p, tt, d, F);
+        else if (kind === 'search-bar') drawSearchBar(ctx, p, tt, d, F);
     } finally {
         ctx.restore();
     }
@@ -1265,6 +1672,24 @@ function shapeFromText(s, raw, quoted) {
     }
     if (/quote card|citation|quote|tweet/.test(s)) {
         return { kind: 'quote-card', params: quoted ? { quote: quoted } : {} };
+    }
+    if (/\b(comparison|before after|avant apres|comparatif|comparaison)\b/.test(s)) {
+        return { kind: 'comparison-card', params: quoted ? { beforeVal: quoted } : {} };
+    }
+    if (/\b(notification|social notif|notif|subscriber|nouvel abonne)\b/.test(s)) {
+        return { kind: 'social-notification', params: quoted ? { subtitle: quoted } : {} };
+    }
+    if (/\b(comment bubble|commentaire|bubble|social proof|temoignage)\b/.test(s)) {
+        return { kind: 'comment-bubble', params: quoted ? { text: quoted } : {} };
+    }
+    if (/\b(kpi|stat callout|metrique cle|taux|chiffre cle)\b/.test(s)) {
+        return { kind: 'kpi-stat-callout', params: quoted ? { stat: quoted } : {} };
+    }
+    if (/\b(newspaper|headline|journal|gazette|titre presse|presse)\b/.test(s)) {
+        return { kind: 'newspaper-headline', params: quoted ? { headline: quoted } : {} };
+    }
+    if (/\b(search bar|barre de recherche|recherche|google search)\b/.test(s)) {
+        return { kind: 'search-bar', params: quoted ? { query: quoted } : {} };
     }
     return null;
 }
