@@ -989,6 +989,12 @@ module.exports = async function processExportJob(job) {
     const segOutputStarts = []; // output video start time (s) for each segment
     const segClips        = []; // allClips entry that produced each segment
     let   cumulativeOut   = 0;  // running total output duration (s)
+    // A clip whose source never resolves (video OR audio — same cause, same
+    // fix below) used to just vanish from the render while the job still
+    // reported success. Collected here and folded into clipWarning, the same
+    // way compositorWarning/captionWarning already surface a degraded export
+    // instead of a silently wrong one.
+    const skippedClips = [];
 
     for (let i = 0; i < allClips.length; i++) {
         const clip    = allClips[i];
@@ -998,6 +1004,7 @@ module.exports = async function processExportJob(job) {
 
         if (!src) {
             console.warn(`⚠️  [ExportJob] No source for "${clip.name}", skipping`);
+            skippedClips.push(clip.name || 'a clip');
             continue;
         }
 
@@ -1452,7 +1459,7 @@ module.exports = async function processExportJob(job) {
                 const ext     = path.extname(clip.name || '.mp3') || '.mp3';
                 const aDlPath = path.join(tmpDir, `adl-${i}-${j}${ext}`);
                 const src     = await fetchClipSource(clip, aDlPath);
-                if (!src) continue;
+                if (!src) { skippedClips.push(clip.name || 'an audio track'); continue; }
 
                 const aSegPath = path.join(tmpDir, `audio-${i}-${j}.aac`);
                 const vol      = (clip.volume ?? 1.0) * (track.volume ?? 1.0);
@@ -2112,6 +2119,12 @@ module.exports = async function processExportJob(job) {
         // silently shipping a video missing its graphics is the failure mode
         // this codebase keeps rediscovering.
         compositorWarning: compositorWarning || undefined,
+        // A video or audio clip (e.g. a music track) whose source could not
+        // be found anywhere — GCS, local disk, or a usable URL — so it was
+        // left out of the render entirely rather than failing the export.
+        clipWarning: skippedClips.length
+            ? `Could not find: ${[...new Set(skippedClips)].join(', ')} — it was left out of this export.`
+            : undefined,
         // R89 — set when the transition pass (STEP 2.2) failed; the video
         // shipped with plain cuts instead.
         transitionWarning: transitionWarning || undefined,

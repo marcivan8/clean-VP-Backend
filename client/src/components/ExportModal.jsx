@@ -558,7 +558,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                     revideoWarning means captions are missing entirely;
                                     the others mean "rendered, but degraded" — worded
                                     accordingly rather than lumped together. */}
-                                {(exportResult.revideoWarning || exportResult.captionWarning || exportResult.compositorWarning || exportResult.transitionWarning || exportResult.captionProgramWarning) && (
+                                {(exportResult.revideoWarning || exportResult.captionWarning || exportResult.compositorWarning || exportResult.transitionWarning || exportResult.captionProgramWarning || exportResult.clipWarning) && (
                                     <div style={{
                                         width: '100%',
                                         background: 'color-mix(in srgb, #f5a623 10%, transparent)',
@@ -573,6 +573,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                             exportResult.compositorWarning && { text: exportResult.compositorWarning },
                                             exportResult.transitionWarning && { text: exportResult.transitionWarning },
                                             exportResult.captionProgramWarning && { text: exportResult.captionProgramWarning },
+                                            exportResult.clipWarning && { text: exportResult.clipWarning },
                                         ].filter(Boolean).map((w, i) => (
                                             <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                                                 <AlertCircle size={14} style={{ color: '#f5a623', flexShrink: 0, marginTop: 1 }} />

@@ -1562,6 +1562,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             transitionWarning: result.transitionWarning,
             captionProgramWarning: result.captionProgramWarning,
             revideoWarning: result.revideoWarning,
+            clipWarning: result.clipWarning,
         };
     };
     // route responds 500 "Render proxy not configured" and we surface a clear,
@@ -1609,6 +1610,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 compositorWarning: result.compositorWarning,
                 captionProgramWarning: result.captionProgramWarning,
                 revideoWarning: result.revideoWarning,
+                clipWarning: result.clipWarning,
             });
             setExportUrl(result.url);
 
@@ -1616,7 +1618,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             // A "successful" export can still be degraded (captions/overlays
             // silently missing) — count each warning kind separately.
             [['caption', result.captionWarning], ['compositor', result.compositorWarning],
-             ['caption_program', result.captionProgramWarning], ['revideo', result.revideoWarning]]
+             ['caption_program', result.captionProgramWarning], ['revideo', result.revideoWarning],
+             ['clip', result.clipWarning]]
                 .forEach(([kind, warning]) => { if (warning) countMetric('export.warning', { ...exportAttrs, kind }); });
         } catch (err) {
             console.error('Export Failed:', err);
