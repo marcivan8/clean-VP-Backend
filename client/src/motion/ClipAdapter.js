@@ -138,7 +138,8 @@ function animationAtMoment(anim, { at, clipDuration, release }) {
             duration = Math.max(duration, releaseEnd);
         }
     }
-    return { ...anim, startTime, duration, keyframes };
+    const anchor = mid ? 'moment' : anim.anchor;
+    return { ...anim, anchor, startTime, duration, keyframes };
 }
 
 /**
@@ -274,6 +275,16 @@ export function applyPresetToClip(clip, presetId, opts = {}) {
         if (builtSecondary.length > 0) {
             animations = animations.concat(scaleAnimations(builtSecondary, opts?.intensity));
         }
+    }
+
+    if (opts?.delay && Number(opts.delay) > 0) {
+        const delay = Math.max(0, Number(opts.delay));
+        animations = animations.map(a => {
+            if (a && a.anchor === 'in') {
+                return { ...a, startTime: Math.max(0, (Number(a.startTime) || 0) + delay) };
+            }
+            return a;
+        });
     }
 
     // The "animate" command: play at the detected moment, tag as its own,

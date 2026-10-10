@@ -995,6 +995,13 @@ export class TimelineStateManager {
                         // hit R58/R66 times before for new clip fields.
                         layerMask: clip.layerMask ?? null,
                         layerTarget: clip.layerTarget ?? null,
+                        placement: clip.placement ?? null,
+                        // R94: the design scene this clip belongs to, and which
+                        // node of it this clip is. Same persistence contract as
+                        // the fields above: dropped here means a reopened
+                        // project could no longer edit the graphic as a scene.
+                        sceneId: clip.sceneId ?? null,
+                        sceneNodeId: clip.sceneNodeId ?? null,
                         // A sound effect the "animate" command added (so running it
                         // again replaces it). Same persistence contract: also read
                         // back in fromLegacyTracks.
@@ -1105,6 +1112,10 @@ export class TimelineStateManager {
                                 // R67 — Object Intelligence. Mirrors toLegacyTracks above.
                                 layerMask: legacyClip.layerMask ?? null,
                                 layerTarget: legacyClip.layerTarget ?? null,
+                                placement: legacyClip.placement ?? null,
+                                // R94 — mirrors toLegacyTracks above.
+                                sceneId: legacyClip.sceneId ?? null,
+                                sceneNodeId: legacyClip.sceneNodeId ?? null,
                                 // Transform
                                 x: legacyClip.x,
                                 y: legacyClip.y,

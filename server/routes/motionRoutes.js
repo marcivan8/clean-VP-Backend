@@ -162,6 +162,94 @@ function cleanShortPlan(raw) {
     return headline.split(' ').length >= 2 ? { headline, keywords, titleBrief } : null;
 }
 
+/**
+ * R95 PHASE 4 — the words for a designed sequence.
+ *
+ * The director (client/src/motion/SceneDirector.js) decides the STRUCTURE
+ * from the brief: tone, which beats, how many, their pacing. What it will not
+ * do is invent the claims — a brief that asks for "three benefits" without
+ * saying what they are gets editable placeholders, because writing marketing
+ * copy the user never approved into their video is worse than an empty slot.
+ *
+ * This route is where those words can come from instead: the brief, plus the
+ * transcript when there is one, turned into a title, the points and a call to
+ * action. No key configured or the model fails and the client simply keeps its
+ * placeholders, so the feature degrades to "structure only" rather than
+ * breaking.
+ */
+function buildScenePlanPrompt({ brief, transcript, beats, tone, platform }) {
+    const asked = Array.isArray(beats) && beats.length ? beats.join(', ') : 'intro, point, point, point, cta';
+    return [
+        'You write on-screen text for motion graphics in a video. Short, concrete, no hype.',
+        '',
+        `The brief: "${brief}"`,
+        tone ? `The tone: ${tone}.` : '',
+        platform ? `It will be posted on ${platform}.` : '',
+        transcript ? `What is said in the video (use it for the facts, do not quote it at length):\n"""${transcript}"""` : 'There is no transcript, so work from the brief alone.',
+        '',
+        `The sequence has these beats, in order: ${asked}.`,
+        '',
+        'Rules:',
+        '- A title of 2 to 7 words. No full stop. Never a hashtag or an emoji.',
+        '- Each point is 2 to 6 words, a benefit or a fact, each one different.',
+        '- A call to action of 2 to 5 words, an instruction.',
+        '- A stat beat needs a short value ("+184%", "3x", "12 min") and a label of 2 to 4 words.',
+        '- Invent nothing that is not in the brief or the transcript. Leave a field out rather than guess.',
+        '',
+        'Reply as JSON only:',
+        '{"title":"...","points":["...","..."],"cta":"...","stat":{"value":"...","label":"..."}}',
+    ].filter(Boolean).join('\n');
+}
+
+/** Strip the things a model adds that on-screen text should never carry. */
+function cleanLine(value, { maxWords, maxChars = 80 }) {
+    // A model that answers with an object or a number is not giving us text:
+    // String({}) is "[object Object]", which passes every filter below and
+    // would be put on screen as if it were a headline.
+    if (typeof value !== 'string') return '';
+    let s = value.trim();
+    if (!s) return '';
+    // Order matters: strip the hashtags and emoji FIRST, then the wrapping
+    // quotes, or a quote left behind by "...text" #tag stays on the end.
+    s = s.replace(/#\w+/g, '');
+    s = s.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '');
+    s = s.replace(/\s+/g, ' ').trim();
+    s = s.replace(/^["'“”«»\s]+|["'“”«»\s]+$/g, '');
+    // On-screen text carries no trailing punctuation, and no "!!".
+    s = s.replace(/[.,;:!?]+$/, '').trim();
+    if (s.length < 2) return '';
+    if (maxWords) s = s.split(' ').slice(0, maxWords).join(' ');
+    return s.slice(0, maxChars).trim();
+}
+
+/**
+ * Keep only what is usable. Returns null when there is nothing left, so the
+ * client keeps its placeholders rather than showing a half-filled sequence.
+ */
+function cleanScenePlan(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const title = cleanLine(raw.title, { maxWords: 7, maxChars: 70 });
+    const cta = cleanLine(raw.cta, { maxWords: 5, maxChars: 40 });
+    const points = (Array.isArray(raw.points) ? raw.points : [])
+        .map(p => cleanLine(p, { maxWords: 6, maxChars: 48 }))
+        .filter(Boolean)
+        .filter((p, i, list) => list.indexOf(p) === i)
+        .slice(0, 6);
+    const statValue = cleanLine(raw.stat?.value, { maxWords: 2, maxChars: 12 });
+    const statLabel = cleanLine(raw.stat?.label, { maxWords: 4, maxChars: 32 });
+    const stat = statValue ? { value: statValue, label: statLabel || '' } : null;
+
+    // A single word is a label, not a title; two words is the floor.
+    const usableTitle = title.split(' ').length >= 2 ? title : '';
+    if (!usableTitle && points.length === 0 && !cta && !stat) return null;
+    return {
+        title: usableTitle,
+        points,
+        cta,
+        ...(stat ? { stat } : {}),
+    };
+}
+
 router.post('/short-plan', authenticateUser, async (req, res) => {
     // Rate limiter: mounted under aiLimiter in index.js (LLM call).
     const { text, platform, duration } = req.body || {};
@@ -188,9 +276,44 @@ router.post('/short-plan', authenticateUser, async (req, res) => {
     }
 });
 
+router.post('/scene-plan', authenticateUser, async (req, res) => {
+    // Rate limiter: mounted under aiLimiter in index.js (LLM call).
+    const { brief, transcript, beats, tone, platform } = req.body || {};
+    const cleanBrief = String(brief || '').trim().slice(0, 600);
+    if (!cleanBrief) return res.status(400).json({ error: 'brief is required' });
+    const cleanTranscript = String(transcript || '').trim().slice(0, 3000);
+    const beatList = (Array.isArray(beats) ? beats : []).map(b => String(b || '').slice(0, 20)).filter(Boolean).slice(0, 8);
+    // No AI configured is not an error: the client keeps its placeholders.
+    if (!isAIConfigured()) return res.json({ source: 'rules', plan: null });
+    try {
+        const ai = getAIClient({ timeout: 30_000 });
+        const completion = await ai.chat.completions.create({
+            model: resolveModel('gpt-4o', 'chat'),
+            messages: [{ role: 'user', content: buildScenePlanPrompt({
+                brief: cleanBrief,
+                transcript: cleanTranscript,
+                beats: beatList,
+                tone: tone ? String(tone).slice(0, 40) : '',
+                platform: platform ? String(platform).slice(0, 40) : '',
+            }) }],
+            response_format: { type: 'json_object' },
+            temperature: 0.6,
+            max_tokens: 500,
+        });
+        const raw = completion?.choices?.[0]?.message?.content;
+        const plan = raw ? cleanScenePlan(JSON.parse(raw)) : null;
+        return res.json({ source: plan ? 'llm' : 'rules', plan });
+    } catch (err) {
+        console.warn('[motionRoutes /scene-plan] LLM failed, the client keeps its placeholders:', err.message);
+        return res.json({ source: 'rules', plan: null });
+    }
+});
+
 module.exports = router;
 module.exports.buildShortPlanPrompt = buildShortPlanPrompt;
 module.exports.cleanShortPlan = cleanShortPlan;
+module.exports.buildScenePlanPrompt = buildScenePlanPrompt;
+module.exports.cleanScenePlan = cleanScenePlan;
 module.exports.buildMotionPrompt = buildMotionPrompt;
 module.exports.cleanLayers = cleanLayers;
 module.exports.loadComposer = loadComposer;

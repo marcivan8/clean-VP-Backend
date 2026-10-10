@@ -330,6 +330,46 @@ export class EditPlanner {
                     { step_id: 'step_1', action: 'add_template', args: tpl, reason: `Add a ${tpl.kind} template` },
                 ]);
             }
+            case 'design_scene': {
+                // The brief IS the prompt: the director reads its tone and
+                // beats (motion/SceneDirector.js), so nothing is decided here
+                // beyond passing the words through intact.
+                const brief = String(intent.originalPrompt || intent.constraints?.brief || '').trim();
+                return this.buildPlan(planId, 'design_scene', [
+                    { step_id: 'step_1', action: 'design_scene', args: { brief }, reason: 'Design the graphics sequence this brief describes' },
+                ]);
+            }
+            case 'add_motion_component': {
+                const raw = String(intent.originalPrompt || '');
+                const text = raw.toLowerCase();
+                let component = 'TitleSequence';
+                let preset = 'cinematic';
+                const params = {};
+                // The words to show: quoted text, or what follows "saying" / "that says" / "with the text".
+                const quoted = raw.match(/["“”«]([^"“”«»]{1,80})["“”»]/);
+                const said = raw.match(/\b(?:saying|that says|which says|with the text|reading|disant)\s*:?\s+(.{1,80})$/i);
+                const shown = (quoted?.[1] || said?.[1] || '').trim().replace(/[.!]+$/, '');
+                if (shown) params.title = shown;
+                const figure = raw.match(/[+-]?[$€£]?\d[\d,.]*\s*(?:%|x|k|m|€|\$)?/i);
+                if (text.includes('kinetic')) {
+                    component = 'KineticTitle';
+                    preset = text.includes('creator') ? 'creator' : 'punchy';
+                } else if (text.includes('stat') || text.includes('metric') || text.includes('growth')) {
+                    component = 'StatCallout';
+                    preset = text.includes('growth') ? 'growth' : 'metric-callout';
+                    if (figure) params.value = figure[0].replace(/\s+/g, '');
+                    if (shown) { params.label = shown; delete params.title; }
+                } else if (text.includes('lower third')) {
+                    component = 'LowerThird';
+                    preset = text.includes('modern') ? 'modern-line' : 'pro-minimal';
+                } else {
+                    component = 'TitleSequence';
+                    preset = text.includes('bold') ? 'modern-bold' : text.includes('minimal') ? 'minimal' : 'cinematic';
+                }
+                return this.buildPlan(planId, 'add_motion_component', [
+                    { step_id: 'step_1', action: 'addMotionComponent', args: { component, preset, params }, reason: `Add a ${component} (${preset}) motion component` },
+                ]);
+            }
             case 'layout_split_screen':       return this.planSingleStep(planId, 'layout_split_screen', 'Split screen: speaker top, b-roll bottom');
             case 'layout_picture_in_picture': return this.planSingleStep(planId, 'layout_picture_in_picture', 'Picture in picture');
             case 'layout_fullscreen':         return this.planSingleStep(planId, 'layout_fullscreen', 'Full-screen cutaway');

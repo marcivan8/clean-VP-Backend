@@ -22,6 +22,11 @@ import {
 // dynamically only at export time.
 import { buildComponent } from '../motion/ComponentLibrary.js';
 import { clipsInGroup, computeGroupMoveUpdates, computeGroupDuplicateSpecs } from '../motion/ClipGrouping.js';
+// R94 — PHASE 1 + 6: a designed graphic is a scene, checked before it lands.
+import { sceneFromPlacements, flattenScene, normalizeScene } from '../motion/SceneSchema.js';
+import { autoFixScene, safeZoneForAspect } from '../motion/SceneValidator.js';
+import { composeSceneFromBrief } from '../motion/SceneDirector.js';
+import { findNode, updateNode, removeNode as removeSceneNodeFrom, listNodes } from '../motion/SceneSchema.js';
 import { deriveSpeakerCrop, deriveTrackingSegments } from '../motion/ObjectLayers.js';
 import { frameForPreset, splitSpeakerCrop, fillFrameCrop, LAYOUT_PRESETS } from '../motion/LayoutPresets.js';
 import { TEMPLATE_KINDS, TEMPLATE_WIDTH_FRACTION, templateParams, templateSize } from '../motion/TemplateGraphics.js';
@@ -97,6 +102,24 @@ try {
         }
     }
 } catch (_) { /* corrupted autosave — ignore */ }
+
+/**
+ * R94: the scenes still referenced by a clip. A graphic that was undone or
+ * deleted leaves its scene behind; keeping every one of them would make the
+ * save grow for the whole life of the project.
+ */
+function pruneScenes(scenes, tracks) {
+    if (!scenes || typeof scenes !== 'object') return {};
+    const live = new Set();
+    for (const track of tracks || []) {
+        for (const clip of track?.clips || []) {
+            if (clip?.sceneId) live.add(clip.sceneId);
+        }
+    }
+    const out = {};
+    for (const id of live) if (scenes[id]) out[id] = scenes[id];
+    return out;
+}
 
 /**
  * Zustand store that syncs with TimelineStateManager
@@ -209,6 +232,15 @@ const useTimelineStore = create(
             // window of the main edit tuned for one platform; the main edit is
             // never changed by them. Saved with the project.
             shorts: Array.isArray(_preRestoredProject?.shorts) ? _preRestoredProject.shorts : [],
+            // R93: a finished short playing in the editor's own player. While set,
+            // the timeline shows the short and `saved` holds the main edit, which
+            // comes back untouched on exit. Never saved with the project.
+            shortPreview: null,
+            // R94: the design scenes behind the graphics in this project,
+            // keyed by scene id (clips carry `sceneId` back to one). This is
+            // what makes a generated graphic editable later instead of a bag
+            // of clip fields. Saved with the project; pruned on save.
+            scenes: _preRestoredProject?.scenes && typeof _preRestoredProject.scenes === 'object' ? _preRestoredProject.scenes : {},
 
             // Speaker diarization map — populated after split_speakers completes.
             // Shape: { SPEAKER_00: { role: 'interviewer'|'guest'|null, label: string|null, words: [{word, start, end}] } }
@@ -604,6 +636,82 @@ const useTimelineStore = create(
                 set(state => ({ shorts: (state.shorts || []).filter(x => x.id !== id) }));
                 try { get().saveProject(); } catch (err) { console.error('[removeShort] save failed:', err); }
             },
+            /**
+             * R93: play a finished short (agent/shortFinisher.js output) in the
+             * editor's player. The main edit and its undo history are put aside,
+             * nothing is saved while previewing (saveProject returns null), and
+             * exitShortPreview puts everything back exactly.
+             */
+            startShortPreview: (short, built, info = {}) => {
+                if (!short || !built || !Array.isArray(built.tracks)) return false;
+                const st = get();
+                // Previewing another short: keep the ORIGINAL main edit, not the previous short.
+                const saved = st.shortPreview?.saved || {
+                    tracks: st.tracks, duration: st.duration, aspectRatio: st.aspectRatio, captions: st.captions,
+                    past: st.past, future: st.future, currentTime: st.currentTime,
+                    activeClipId: st.activeClipId, selectedClipIds: st.selectedClipIds,
+                };
+                try {
+                    timelineManager.fromLegacyTracks(built.tracks);
+                    timelineManager.dispatch(TimelineActions.setAspectRatio(built.aspectRatio || '9:16'), { skipHistory: true });
+                    timelineManager.dispatch(TimelineActions.setDuration(built.duration), { skipHistory: true });
+                } catch (err) {
+                    console.error('[startShortPreview] could not load the short:', err);
+                    timelineManager.fromLegacyTracks(saved.tracks);
+                    return false;
+                }
+                set({
+                    shortPreview: { shortId: short.id, platform: short.platform, label: info.label || short.platform, saved },
+                    tracks: timelineManager.toLegacyTracks(),
+                    duration: built.duration,
+                    aspectRatio: built.aspectRatio || '9:16',
+                    captions: Array.isArray(built.words) ? built.words : [],
+                    past: [], future: [],
+                    currentTime: 0, activeClipId: null, selectedClipIds: [],
+                    isPlaying: true,
+                });
+                return true;
+            },
+            exitShortPreview: () => {
+                const p = get().shortPreview;
+                if (!p) return false;
+                const s = p.saved;
+                get().playerRef?.togglePlayback?.(false);
+                timelineManager.fromLegacyTracks(s.tracks);
+                timelineManager.dispatch(TimelineActions.setAspectRatio(s.aspectRatio), { skipHistory: true });
+                timelineManager.dispatch(TimelineActions.setDuration(s.duration), { skipHistory: true });
+                set({
+                    shortPreview: null,
+                    tracks: timelineManager.toLegacyTracks(),
+                    duration: s.duration, aspectRatio: s.aspectRatio, captions: s.captions,
+                    past: s.past || [], future: s.future || [],
+                    currentTime: s.currentTime || 0, activeClipId: s.activeClipId || null, selectedClipIds: s.selectedClipIds || [],
+                    isPlaying: false,
+                });
+                return true;
+            },
+            /**
+             * R94: the design scene behind a graphic. `clip.sceneId` is the
+             * way back from any clip of it.
+             */
+            getScene: (sceneId) => (sceneId ? (get().scenes || {})[sceneId] || null : null),
+            /** R94: store or replace a scene. Normalised so a bad write cannot poison a save. */
+            setScene: (scene) => {
+                const normalized = normalizeScene(scene);
+                if (!normalized?.id) return null;
+                set(state => ({ scenes: { ...state.scenes, [normalized.id]: normalized } }));
+                return normalized;
+            },
+            removeScene: (sceneId) => {
+                if (!sceneId) return;
+                set(state => {
+                    if (!state.scenes?.[sceneId]) return {};
+                    const next = { ...state.scenes };
+                    delete next[sceneId];
+                    return { scenes: next };
+                });
+            },
+
             clearContentAnalysis: () => set({ contentAnalysis: null }),
 
             // Speaker diarization
@@ -848,6 +956,20 @@ const useTimelineStore = create(
 
                 set({ tracks: timelineManager.toLegacyTracks() });
 
+                // R95 PHASE 5 — a clip that belongs to a design scene keeps the
+                // scene in step. Without this, dragging a generated title on
+                // the player would be undone the moment anything re-flattened
+                // the scene, which is exactly the "I refined it and it jumped
+                // back" bug a scene editor invites.
+                // `duration` lives in placementUpdates, not clipUpdates, so it
+                // has to be passed in explicitly or trimming a scene clip would
+                // be silently reverted by the next scene edit.
+                const mirrored = { ...clipUpdates, ...(updates.duration !== undefined ? { duration: updates.duration } : {}) };
+                if (placement && Object.keys(mirrored).length > 0) {
+                    const edited = get().tracks.flatMap(t => t.clips || []).find(c => c.id === clipId);
+                    if (edited?.sceneId && edited?.sceneNodeId) get()._mirrorClipToScene(edited, mirrored);
+                }
+
                 // Force the player to redraw the current frame if paused so edits
                 // (grading, virtualCam crop) are visible immediately.
                 // CSS-transform-only updates (x, y, scale, rotation, opacity) are applied
@@ -883,7 +1005,13 @@ const useTimelineStore = create(
                 if (!options.skipHistory) get()._saveHistory();
 
                 const state = get();
-                const targets = state.selectedClipIds.includes(clipId)
+                // `only` removes EXACTLY this clip. Without it, deleting a clip
+                // that happens to be part of the current selection deletes the
+                // whole selection — right for the Delete key, silent data loss
+                // for anything acting on one clip it chose itself (R95: hiding
+                // one layer of a design also removed whatever else the user
+                // had shift-selected).
+                const targets = (!options.only && state.selectedClipIds.includes(clipId))
                     ? state.selectedClipIds
                     : [clipId];
 
@@ -1671,8 +1799,12 @@ const useTimelineStore = create(
             // TRACK MANAGEMENT
             // ==============================================================
 
-            addTrack: (type) => {
-                get()._saveHistory();
+            addTrack: (type, options = {}) => {
+                // R94: `skipHistory` for a track created as part of a bigger
+                // operation. Without it, a graphic that needs both a text and
+                // an overlay track pushed three history entries, so ONE undo
+                // left half the graphic on the timeline.
+                if (!options.skipHistory) get()._saveHistory();
                 const layers = timelineManager.getEntitiesArray(ENTITY_TYPES.LAYER);
                 const count = layers.filter(l => l.type === type).length;
                 const id = `track-${Date.now()}`;
@@ -1773,6 +1905,324 @@ const useTimelineStore = create(
             },
 
             /**
+             * R95 PHASE 5 — write a clip's own edit back into its scene node,
+             * so the scene stays the source of truth for the design.
+             *
+             * Only the fields a user can actually change by hand are mirrored.
+             * `start` is NOT: a clip dragged along the timeline is a timeline
+             * decision, and `applySceneToTimeline` deliberately leaves clip
+             * timing alone for the same reason.
+             */
+            _mirrorClipToScene: (clip, updates) => {
+                const scene = (get().scenes || {})[clip.sceneId];
+                if (!scene) return;
+                const entry = findNode(scene, clip.sceneNodeId);
+                if (!entry) return;
+                const node = entry.node;
+
+                const transform = { ...node.transform };
+                let movedOrStyled = false;
+                // x/y on a clip are absolute percent; a node inside a group
+                // carries an offset, so the delta is what transfers.
+                if (updates.x !== undefined || updates.y !== undefined) {
+                    const abs = { x: Number(clip.x), y: Number(clip.y) };
+                    const prevAbs = get()._sceneAbsOf(scene, node.id);
+                    if (prevAbs) {
+                        if (updates.x !== undefined && Number.isFinite(abs.x)) transform.x = Math.round((Number(node.transform.x) + (abs.x - prevAbs.x)) * 1000) / 1000;
+                        if (updates.y !== undefined && Number.isFinite(abs.y)) transform.y = Math.round((Number(node.transform.y) + (abs.y - prevAbs.y)) * 1000) / 1000;
+                        movedOrStyled = true;
+                    }
+                }
+                if (updates.rotation !== undefined && Number.isFinite(Number(clip.rotation))) { transform.rotation = Number(clip.rotation); movedOrStyled = true; }
+                if (updates.opacity !== undefined && Number.isFinite(Number(clip.opacity))) { transform.opacity = Number(clip.opacity); movedOrStyled = true; }
+                // A text clip is sized by its font, so its scale stays 1.
+                if (updates.scale !== undefined && Number.isFinite(Number(clip.scale)) && clip.type !== 'text') { transform.scale = Number(clip.scale); movedOrStyled = true; }
+
+                const style = { ...node.style };
+                for (const key of ['fontSize', 'fontFamily', 'fontWeight', 'color', 'textAlign', 'stroke', 'textShadow', 'captionStyle', 'emphasis']) {
+                    if (updates[key] !== undefined) { style[key] = clip[key]; movedOrStyled = true; }
+                }
+                const patch = { transform, style };
+                if (updates.content !== undefined) { patch.content = clip.content ?? ''; movedOrStyled = true; }
+                if (updates.template !== undefined && clip.template) { patch.template = clip.template; movedOrStyled = true; }
+                if (updates.duration !== undefined && Number(clip.duration) > 0) { patch.duration = Number(clip.duration); movedOrStyled = true; }
+                if (updates.animations !== undefined) { patch.animations = Array.isArray(clip.animations) ? clip.animations : []; movedOrStyled = true; }
+                if (!movedOrStyled) return;
+
+                const next = updateNode(scene, node.id, patch);
+                set(state => ({ scenes: { ...state.scenes, [scene.id]: next } }));
+            },
+
+            /** The absolute transform of a scene node, for mapping a clip edit back. */
+            _sceneAbsOf: (scene, nodeId) => {
+                const entry = listNodes(scene).find(e => e.node.id === nodeId);
+                if (!entry) return null;
+                // Walk up through the ancestors the same way flattening does.
+                let x = 0;
+                let y = 0;
+                let scale = 1;
+                const path = entry.path;
+                let list = scene.nodes;
+                for (const i of path) {
+                    const n = list[i];
+                    if (!n) break;
+                    x += Number(n.transform.x) * scale;
+                    y += Number(n.transform.y) * scale;
+                    scale *= Number(n.transform.scale) || 1;
+                    list = n.children || [];
+                }
+                return { x, y, scale };
+            },
+
+            /**
+             * R95 PHASE 5 — push a scene's current state back onto the
+             * timeline.
+             *
+             * A DIFF, not a rebuild: clips that already exist get only the
+             * fields that actually changed, so a clip the user dragged along
+             * the timeline keeps its start, and React keys stay stable. Nodes
+             * that are new get a clip; clips whose node has gone are removed.
+             * One undo for the whole update.
+             *
+             * @param {string} sceneId
+             * @param {{skipHistory?:boolean}} [opts]
+             */
+            applySceneToTimeline: (sceneId, opts = {}) => {
+                const scene = (get().scenes || {})[sceneId];
+                if (!scene) return { success: false, error: 'that design is not in this project' };
+                const placedAt = Math.max(0, Number(scene.meta?.placedAt) || 0);
+                const flat = flattenScene(scene, { startOffset: placedAt });
+
+                const existing = [];
+                for (const track of get().tracks || []) {
+                    for (const clip of track.clips || []) {
+                        if (clip.sceneId === sceneId) existing.push({ trackId: track.id, clip });
+                    }
+                }
+                const byNode = new Map(existing.filter(e => e.clip.sceneNodeId).map(e => [e.clip.sceneNodeId, e]));
+
+                if (!opts.skipHistory) get()._saveHistory();
+
+                const FIELDS = ['content', 'fontSize', 'fontFamily', 'fontWeight', 'color', 'textAlign', 'stroke',
+                    'textShadow', 'captionStyle', 'emphasis', 'x', 'y', 'scale', 'rotation', 'opacity',
+                    'template', 'metadata', 'animations', 'animation', 'duration', 'name'];
+                let changed = 0;
+                let added = 0;
+                const seen = new Set();
+
+                for (const placement of flat.placements) {
+                    const nodeId = placement.clip.sceneNodeId;
+                    seen.add(nodeId);
+                    const hit = byNode.get(nodeId);
+                    if (!hit) {
+                        // A node added since this scene was placed.
+                        const type = placement.trackType === 'text' ? 'text' : 'overlay';
+                        const existingTrack = get().tracks.find(t => t.type === type);
+                        const trackId = existingTrack ? existingTrack.id : get().addTrack(type, { skipHistory: true });
+                        if (trackId) { get().addClip(trackId, placement.clip, { skipHistory: true }); added++; }
+                        continue;
+                    }
+                    const patch = {};
+                    for (const key of FIELDS) {
+                        if (placement.clip[key] === undefined) continue;
+                        if (JSON.stringify(placement.clip[key]) !== JSON.stringify(hit.clip[key])) patch[key] = placement.clip[key];
+                    }
+                    if (Object.keys(patch).length) { get().updateClip(hit.trackId, hit.clip.id, patch, { skipHistory: true }); changed++; }
+                }
+
+                // A node that was deleted or hidden takes its clip with it.
+                let removed = 0;
+                for (const { trackId, clip } of existing) {
+                    // `only`: this clip and nothing else, whatever is selected.
+                    if (clip.sceneNodeId && !seen.has(clip.sceneNodeId)) { get().removeClip(trackId, clip.id, { skipHistory: true, only: true }); removed++; }
+                }
+                return { success: true, changed, added, removed };
+            },
+
+            /**
+             * R95 PHASE 5 — change one node of a design and show the result.
+             *
+             * This is what the scene editor calls: the words, the size, the
+             * colour, where it sits, how long it lasts. The scene is checked
+             * again (so an edit cannot push text off the frame unnoticed) and
+             * the clips follow, as ONE undo.
+             *
+             * @param {string} sceneId
+             * @param {string} nodeId
+             * @param {object} patch node fields: content, style, transform, duration, hidden, path, motion
+             * @returns {{success:boolean, issues?:Array, fixes?:Array, error?:string}}
+             */
+            editSceneNode: (sceneId, nodeId, patch = {}) => {
+                const scene = (get().scenes || {})[sceneId];
+                if (!scene) return { success: false, error: 'that design is not in this project' };
+                const entry = findNode(scene, nodeId);
+                if (!entry) return { success: false, error: 'that layer is not part of the design' };
+
+                const node = entry.node;
+                const next = updateNode(scene, nodeId, {
+                    ...patch,
+                    ...(patch.style ? { style: { ...node.style, ...patch.style } } : {}),
+                    ...(patch.transform ? { transform: { ...node.transform, ...patch.transform } } : {}),
+                });
+
+                let checked = { scene: next, fixes: [], issues: [] };
+                try {
+                    const aspectRatio = get().aspectRatio || '16:9';
+                    checked = autoFixScene(next, { safeZone: safeZoneForAspect(aspectRatio), assets: get().assets });
+                } catch (err) {
+                    console.error('[editSceneNode] validation failed:', err);
+                }
+                const saved = checked.scene || next;
+                get()._saveHistory();
+                set(state => ({ scenes: { ...state.scenes, [sceneId]: saved } }));
+                const applied = get().applySceneToTimeline(sceneId, { skipHistory: true });
+                return { success: true, ...applied, fixes: checked.fixes || [], issues: checked.issues || [] };
+            },
+
+            /** R95 PHASE 5 — hide or show one layer of a design. */
+            setSceneNodeHidden: (sceneId, nodeId, hidden) => get().editSceneNode(sceneId, nodeId, { hidden: !!hidden }),
+
+            /** R95 PHASE 5 — delete one layer of a design, and its clip. */
+            deleteSceneNode: (sceneId, nodeId) => {
+                const scene = (get().scenes || {})[sceneId];
+                if (!scene) return { success: false, error: 'that design is not in this project' };
+                if (!findNode(scene, nodeId)) return { success: false, error: 'that layer is not part of the design' };
+                const next = removeSceneNodeFrom(scene, nodeId);
+                get()._saveHistory();
+                set(state => ({ scenes: { ...state.scenes, [sceneId]: next } }));
+                return { success: true, ...get().applySceneToTimeline(sceneId, { skipHistory: true }) };
+            },
+
+            /**
+             * R95 — put a design scene on the timeline.
+             *
+             * The one path every designed graphic takes, whether it came from
+             * a component (`addMotionComponent`) or from a brief
+             * (`designScene`): validate and repair the scene, flatten it to
+             * clips, create the tracks it needs, add every clip as ONE undo,
+             * and keep the scene so it can be edited again later.
+             *
+             * Validation is pure, so it runs BEFORE `_saveHistory()` — a
+             * graphic that cannot be placed leaves no history entry behind.
+             * A check that throws is logged and skipped rather than stopping
+             * the graphic: a command that silently does nothing is worse than
+             * an unchecked graphic.
+             *
+             * @param {object} scene a Scene (SceneSchema)
+             * @param {{start?:number, label?:string}} [opts]
+             * @returns {{success:boolean, clipCount?:number, groupId?:string, sceneId?:string, fixes?:Array, issues?:Array, error?:string}}
+             */
+            _placeScene: (rawScene, opts = {}) => {
+                const aspectRatio = get().aspectRatio || '16:9';
+                const start = Math.max(0, Number.isFinite(Number(opts.start)) ? Number(opts.start) : get().currentTime);
+                const label = opts.label || 'graphic';
+                let scene = rawScene;
+                let fixes = [];
+                let issues = [];
+                try {
+                    const checked = autoFixScene(scene, { safeZone: safeZoneForAspect(aspectRatio), assets: get().assets });
+                    if (checked.scene) scene = checked.scene;
+                    fixes = checked.fixes || [];
+                    issues = checked.issues || [];
+                } catch (err) {
+                    console.error(`[_placeScene] ${label}: validation failed:`, err);
+                }
+                const flat = flattenScene(scene, { startOffset: start });
+                if (flat.placements.length === 0) {
+                    return { success: false, error: `"${label}" produced nothing that can be shown`, issues };
+                }
+
+                get()._saveHistory();
+
+                // skipHistory on every track and clip: the whole graphic is one undo.
+                let textTrackId = null;
+                let overlayTrackId = null;
+                const ensureTrack = (type) => {
+                    if (type === 'text') {
+                        if (textTrackId) return textTrackId;
+                        const existing = get().tracks.find(t => t.type === 'text');
+                        textTrackId = existing ? existing.id : get().addTrack('text', { skipHistory: true });
+                        return textTrackId;
+                    }
+                    if (overlayTrackId) return overlayTrackId;
+                    const existing = get().tracks.find(t => t.type === 'overlay');
+                    overlayTrackId = existing ? existing.id : get().addTrack('overlay', { skipHistory: true });
+                    return overlayTrackId;
+                };
+
+                let clipCount = 0;
+                for (const placement of flat.placements) {
+                    const trackId = ensureTrack(placement.trackType === 'text' ? 'text' : 'overlay');
+                    if (!trackId) continue;
+                    const a = placement.asset || {};
+                    get().addClip(trackId, placement.trackType === 'text' ? placement.clip : {
+                        ...(a.id ? { assetId: a.id } : {}),
+                        ...(a.url ? { url: a.url, sourceUrl: a.url } : {}),
+                        name: placement.clip?.name || a.name || label,
+                        ...placement.clip,
+                    }, { skipHistory: true });
+                    clipCount++;
+                }
+
+                // Where it was placed, so a later edit can re-flatten to the
+                // same times instead of snapping the whole design back to 0.
+                const stored = { ...scene, meta: { ...scene.meta, placedAt: start } };
+                set(state => ({ scenes: { ...state.scenes, [stored.id]: stored } }));
+                return { success: true, clipCount, groupId: flat.placements[0]?.clip?.groupId ?? null, sceneId: stored.id, fixes, issues };
+            },
+
+            /**
+             * R95 — PHASE 4: a designed graphic sequence from a brief.
+             *
+             * "Make this feel like a premium technology launch. Introduce the
+             * product, highlight three benefits, finish with a call to
+             * action." The director reads the tone and the beats, picks the
+             * look, places the graphics where the subject of the shot is not,
+             * and composes one scene whose beats run in sequence.
+             *
+             * `opts.plan` carries AI-written words when there are any; without
+             * them the beats get editable placeholders, which come back in
+             * `placeholders` so the caller can say so rather than inventing
+             * claims the user never approved.
+             */
+            designScene: (brief, opts = {}) => {
+                const st = get();
+                const aspectRatio = st.aspectRatio || '16:9';
+                const at = Math.max(0, Number.isFinite(Number(opts.start)) ? Number(opts.start) : st.currentTime);
+                // Only the clips actually under this point in the edit decide
+                // where the subject is, so a graphic is placed against the
+                // shot it will sit on.
+                const here = (st.tracks || [])
+                    .filter(t => t.type === 'video')
+                    .flatMap(t => t.clips || [])
+                    .filter(c => at >= (Number(c.start) || 0) - 0.01 && at < (Number(c.start) || 0) + (Number(c.duration) || 0));
+                let composed;
+                try {
+                    composed = composeSceneFromBrief(brief, {
+                        aspectRatio,
+                        safeZone: safeZoneForAspect(aspectRatio),
+                        clips: here.length ? here : (st.tracks || []).filter(t => t.type === 'video').flatMap(t => t.clips || []),
+                        duration: Number(opts.duration) > 0 ? Number(opts.duration) : 0,
+                        plan: opts.plan || null,
+                        title: opts.title || null,
+                        items: Array.isArray(opts.items) ? opts.items : null,
+                        tone: opts.tone || null,
+                        palette: opts.palette || null,
+                    });
+                } catch (err) {
+                    console.error('[designScene] could not compose the sequence:', err);
+                    return { success: false, error: err.message };
+                }
+                if (!composed?.scene) return { success: false, error: 'That brief did not describe anything that could be designed.' };
+                const placed = get()._placeScene(composed.scene, { start: at, label: 'sequence' });
+                return {
+                    ...placed,
+                    plan: { tone: composed.plan.tone.label, pacing: composed.plan.pacing, beats: composed.plan.beats.map(b => b.kind), rationale: composed.scene.meta.rationale },
+                    placeholders: composed.placeholders,
+                };
+            },
+
+            /**
              * R65 — Motion Graphics Components.
              *
              * The store-side half of `client/src/motion/ComponentLibrary.js`.
@@ -1803,7 +2253,9 @@ const useTimelineStore = create(
             addMotionComponent: (componentId, presetId, params = {}) => {
                 let result;
                 try {
-                    result = buildComponent(componentId, presetId, params);
+                    // R95: the frame is what lets a designed component lay
+                    // itself out for THIS project rather than for 16:9.
+                    result = buildComponent(componentId, presetId, params, { aspectRatio: get().aspectRatio || '16:9' });
                 } catch (err) {
                     return { success: false, error: `could not build component: ${err.message}` };
                 }
@@ -1811,53 +2263,26 @@ const useTimelineStore = create(
                     return { success: false, error: result?.error || `component "${componentId}" produced nothing` };
                 }
 
-                get()._saveHistory();
-
+                // ── R94 — PHASE 1 + 6 ────────────────────────────────────────
+                // The graphic becomes a SCENE before it becomes clips. Two
+                // things follow from that. It is structured and editable: one
+                // group holding text with a real box, shapes with their own
+                // size, each node carrying its own motion. And it is CHECKED
+                // before it reaches the timeline — text that does not fit is
+                // shrunk, a shape too big for the frame is scaled down,
+                // anything reaching into the area a phone covers with its own
+                // buttons is moved back, animation timing is clamped inside
+                // its layer. Flattening then yields the same clips the
+                // timeline has always rendered, so preview, export, undo,
+                // dragging and persistence are untouched.
                 const start = Number.isFinite(Number(params.start)) ? Number(params.start) : get().currentTime;
-                let textTrackId = null;
-                let overlayTrackId = null;
-                const ensureTextTrack = () => {
-                    if (textTrackId) return textTrackId;
-                    const existing = get().tracks.find(t => t.type === 'text');
-                    textTrackId = existing ? existing.id : get().addTrack('text');
-                    return textTrackId;
-                };
-                const ensureOverlayTrack = () => {
-                    if (overlayTrackId) return overlayTrackId;
-                    const existing = get().tracks.find(t => t.type === 'overlay');
-                    overlayTrackId = existing ? existing.id : get().addTrack('overlay');
-                    return overlayTrackId;
-                };
-
-                let clipCount = 0;
-                for (const placement of result.placements) {
-                    if (placement.trackType === 'text') {
-                        const trackId = ensureTextTrack();
-                        get().addClip(trackId, { ...placement.clip, start }, { skipHistory: true });
-                        clipCount++;
-                    } else if (placement.trackType === 'overlay') {
-                        const trackId = ensureOverlayTrack();
-                        const a = placement.asset || {};
-                        get().addClip(trackId, {
-                            type: 'sticker',
-                            assetId: a.id,
-                            name: a.name || componentId,
-                            url: a.url,
-                            sourceUrl: a.url,
-                            ...placement.clip,
-                            start,
-                        }, { skipHistory: true });
-                        clipCount++;
-                    }
-                }
-
-                // R66 — every composite component's placements share a groupId
-                // (stamped by ComponentLibrary.buildComponent → assignGroupId);
-                // surfacing it lets a caller immediately follow up with
-                // moveClipGroup/duplicateClipGroup/removeClipGroup. null for
-                // the 5 single-clip components, which were never grouped.
-                const groupId = result.placements[0]?.clip?.groupId ?? null;
-                return { success: true, clipCount, groupId };
+                // R95: a composed component already IS a scene, with its roles,
+                // measures and constraints intact. Only the hand-built ones
+                // have to be lifted from their flat placements.
+                const scene = result.scene || sceneFromPlacements(result.placements, {
+                    componentId, presetId, aspectRatio: get().aspectRatio || '16:9', name: params.name || componentId,
+                });
+                return get()._placeScene(scene, { start, label: componentId });
             },
 
             /**
@@ -2704,6 +3129,10 @@ const useTimelineStore = create(
                     activeClipId: state.activeClipId,
                     selectedClipIds: [...state.selectedClipIds],
                     aspectRatio: state.aspectRatio,
+                    // R95: the designs too. Without them undo put the CLIPS
+                    // back but left the scene holding the undone change, and
+                    // the next edit re-applied it from the scene.
+                    scenes: state.scenes,
                 };
                 const newPast = [...state.past, snapshot].slice(-50);
                 set({ past: newPast, future: [] });
@@ -2777,6 +3206,7 @@ const useTimelineStore = create(
                     activeClipId: state.activeClipId,
                     selectedClipIds: [...state.selectedClipIds],
                     aspectRatio: state.aspectRatio,
+                    scenes: state.scenes,
                 };
 
                 // Only snapshots that opted in (rippleDeleteClip) carry _extraState.
@@ -2800,6 +3230,9 @@ const useTimelineStore = create(
                     // R91: snapshots carry the frame shape (9:16 for a reel), so
                     // undo puts the player back too. Older snapshots have none.
                     aspectRatio: previous.aspectRatio || state.aspectRatio,
+                    // `??`: an older snapshot has no scenes, and blanking the
+                    // designs would be worse than leaving them alone.
+                    scenes: previous.scenes ?? state.scenes,
                     past: newPast,
                     future: [currentSnapshot, ...state.future],
                     ...(previous._extraState || {}),
@@ -2818,6 +3251,7 @@ const useTimelineStore = create(
                     activeClipId: state.activeClipId,
                     selectedClipIds: [...state.selectedClipIds],
                     aspectRatio: state.aspectRatio,
+                    scenes: state.scenes,
                 };
 
                 if (next._extraState) {
@@ -2837,6 +3271,7 @@ const useTimelineStore = create(
                     selectedClipIds: next.selectedClipIds,
                     tracks: timelineManager.toLegacyTracks(),
                     aspectRatio: next.aspectRatio || state.aspectRatio,
+                    scenes: next.scenes ?? state.scenes,
                     past: [...state.past, currentSnapshot],
                     future: newFuture,
                     ...(next._extraState || {}),
@@ -2847,6 +3282,8 @@ const useTimelineStore = create(
             // PERSISTENCE
             // ==============================================================
             saveProject: () => {
+                // R93: never save the short being previewed as the project.
+                if (get().shortPreview) return null;
                 const state = get();
                 // Strip blob URLs and File objects — they die on page reload.
                 // Keep proxyUrl / fileUrl which point to server-side files that survive.
@@ -2894,6 +3331,10 @@ const useTimelineStore = create(
                     contentAnalysis:      state.contentAnalysis || null,
                     editingStyle:         state.editingStyle || null,
                     shorts:               Array.isArray(state.shorts) ? state.shorts : [],
+                    // R94: only the scenes a clip still points at. Without the
+                    // prune, every undone or deleted graphic would stay in the
+                    // save forever and the payload would only ever grow.
+                    scenes:               pruneScenes(state.scenes, state.tracks),
                     speakerMap:           state.speakerMap || {},
                     diarizationByAsset:   state.diarizationByAsset || {},
                     sceneAnalysisByAsset: state.sceneAnalysisByAsset || {},
@@ -2980,6 +3421,10 @@ const useTimelineStore = create(
                     editingStyle:         projectData.editingStyle || null,
                     editingMode:          'normal',
                     shorts:               Array.isArray(projectData.shorts) ? projectData.shorts : [],
+                    // R94: the design scenes behind this project's graphics.
+                    scenes:               projectData.scenes && typeof projectData.scenes === 'object' ? projectData.scenes : {},
+                    // R93: a preview belongs to the project that was open; never restore it into this one.
+                    shortPreview:         null,
                     speakerMap:           projectData.speakerMap           ?? get().speakerMap,
                     diarizationByAsset:   projectData.diarizationByAsset   ?? get().diarizationByAsset,
                     sceneAnalysisByAsset: projectData.sceneAnalysisByAsset ?? get().sceneAnalysisByAsset,

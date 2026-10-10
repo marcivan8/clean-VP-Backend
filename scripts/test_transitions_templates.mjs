@@ -149,7 +149,12 @@ if (!Canvas) {
         const img = await Canvas.loadImage(fs.readFileSync(a.files[6]));
         const c = Canvas.createCanvas(img.width, img.height); const x = c.getContext('2d'); x.drawImage(img, 0, 0);
         const d = x.getImageData(0, 0, img.width, img.height).data;
-        let opaque = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 200) opaque++;
+        // R95: `panel` is a BACKDROP - translucent on purpose (0.72 by default)
+        // so the footage still reads through it. Every other kind is drawn to
+        // be seen on its own and must still be near-opaque, so the floor is
+        // per-kind rather than relaxed for all of them.
+        const alphaFloor = kind === 'panel' ? 120 : 200;
+        let opaque = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > alphaFloor) opaque++;
         assert.ok(opaque > img.width * img.height * 0.03, `${kind} draws nothing`);
     }
     ok('every template draws, deterministically (same frames twice)');

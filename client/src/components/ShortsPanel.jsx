@@ -2,42 +2,55 @@
  * client/src/components/ShortsPanel.jsx
  *
  * R92: the shorts found in this project ("repurpose into shorts").
- * Each short is a window of the main edit tuned for one platform. Preview
- * jumps the player to it; Export renders it on its own (sliced timeline, 9:16
- * speaker crop, captions in the platform safe zone, platform preset) through
- * the normal export path. The main edit is never changed.
+ * Each short is a window of the main edit tuned for one platform. The main
+ * edit is never changed.
+ *
+ * R93:
+ *  - Preview plays the FINISHED short (9:16 framing, hook title, captions,
+ *    camera moves, sounds, as exported) in the editor's own player. The main
+ *    edit is set aside and comes back with "Back to my edit"
+ *    (useTimelineStore.startShortPreview / exitShortPreview, ShortPreviewBar).
+ *  - Every short shows a picture of the speaker, framed like the export
+ *    (utils/captureShortThumbnail.js), instead of a block of text.
+ *  - Speaker pop-out bakes the mask through the engine (the old call pointed
+ *    at a MatteBaker export that does not exist, so pop-out never applied).
  */
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Smartphone, Play, Download, Loader2, Trash2, Wand2, ExternalLink, Sparkles, Volume2, UserCheck } from 'lucide-react';
+import { Smartphone, Play, Square, Download, Loader2, Trash2, Wand2, ExternalLink, Sparkles, Volume2, UserCheck, AlertTriangle } from 'lucide-react';
 
 import useTimelineStore from '../store/useTimelineStore';
 import { PLATFORM_IDS, PLATFORM_PROFILES, profileNotes } from '../agent/PlatformProfiles.js';
 import { finishShort } from '../agent/shortFinisher.js';
 import { createProject } from '../lib/projectsApi.js';
+import { captureShortThumbnail, getCachedShortThumbnail, thumbnailKey } from '../utils/captureShortThumbnail.js';
 
 const fmt = (s) => {
     const n = Math.max(0, Math.round(Number(s) || 0));
     return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
 };
 
-export async function ensureMattesFor(short) {
+/** The main edit's state, even while a short is being previewed. */
+function mainEditState() {
     const st = useTimelineStore.getState();
-    const clips = (st.tracks || []).flatMap(t => t.clips || []).filter(c => c.type === 'video' && c.assetId);
-    if (!clips.length) return short;
-    try {
-        const { bakeClipMatte } = await import('../vision/MatteBaker.js');
-        for (const clip of clips) {
-            const asset = (st.assets || []).find(a => a.id === clip.assetId);
-            const url = asset?.proxyUrl || asset?.sourceUrl || asset?.url;
-            if (url && !clip.layerMask?.maskUrl) {
-                // eslint-disable-next-line no-await-in-loop
-                await bakeClipMatte(clip, url).catch(() => null);
-            }
+    return st.shortPreview ? { ...st, ...st.shortPreview.saved } : st;
+}
+
+/** Bake the free background mask on the main-edit video clips a short uses. */
+async function ensureMattesFor(short) {
+    useTimelineStore.getState().exitShortPreview();
+    const st = useTimelineStore.getState();
+    const { mediaExecutionEngine } = await import('../agent/MediaExecutionEngine.js');
+    for (const t of (st.tracks || []).filter(tr => tr.type === 'video')) {
+        for (const c of t.clips || []) {
+            const cs = Number(c.start) || 0;
+            const ce = cs + (Number(c.duration) || 0);
+            if (ce <= short.start || cs >= short.end || (c.type && c.type !== 'video')) continue;
+            // eslint-disable-next-line no-await-in-loop
+            const r = await mediaExecutionEngine._ensureMatte(t.id, c.id, null);
+            if (!r?.ok) throw new Error(r?.error || 'The background mask could not be made.');
         }
-    } catch {
-        // optional on-device model
     }
     return short;
 }
@@ -46,9 +59,12 @@ export default function ShortsPanel({ onExport }) {
     const { t } = useTranslation('editor');
     const navigate = useNavigate();
     const shorts = useTimelineStore(s => s.shorts) || [];
-    const hasCaptions = useTimelineStore(s => (s.tracks || []).some(tr => tr.type === 'text' && (tr.clips || []).length > 0));
-    const [busy, setBusy] = useState({});   // id -> progress 0..100
+    const previewId = useTimelineStore(s => s.shortPreview?.shortId || null);
+    const hasCaptions = useTimelineStore(s => (s.shortPreview?.saved?.tracks || s.tracks || []).some(tr => tr.type === 'text' && (tr.clips || []).length > 0));
+    const [busy, setBusy] = useState({});         // id -> export progress 0..100
+    const [preparing, setPreparing] = useState(null); // id of the short being readied for preview
     const [errors, setErrors] = useState({});
+    const [thumbs, setThumbs] = useState({});     // thumbnailKey -> data URL | null
 
     // Treatment options
     const [polish, setPolish] = useState(true);
@@ -56,6 +72,33 @@ export default function ShortsPanel({ onExport }) {
     const [sfx, setSfx] = useState(true);
 
     const sorted = useMemo(() => [...shorts].sort((a, b) => (a.start || 0) - (b.start || 0)), [shorts]);
+    const thumbKeys = sorted.map(thumbnailKey).join('|');
+
+    // One picture per short, one at a time (each loads the video once).
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            for (const s of sorted) {
+                const key = thumbnailKey(s);
+                if (cancelled) return;
+                if (getCachedShortThumbnail(s)) {
+                    setThumbs(m => (m[key] ? m : { ...m, [key]: getCachedShortThumbnail(s) }));
+                    continue;
+                }
+                try {
+                    // eslint-disable-next-line no-await-in-loop
+                    const pic = await captureShortThumbnail(s, mainEditState());
+                    if (!cancelled) setThumbs(m => ({ ...m, [key]: pic || null }));
+                } catch (err) {
+                    console.warn('[ShortsPanel] thumbnail failed:', err.message);
+                    if (!cancelled) setThumbs(m => ({ ...m, [key]: null }));
+                }
+            }
+        })();
+        return () => { cancelled = true; };
+        // thumbKeys captures every field a picture depends on.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [thumbKeys]);
 
     const handleFind = useCallback(async () => {
         try {
@@ -66,11 +109,25 @@ export default function ShortsPanel({ onExport }) {
         }
     }, [t]);
 
-    const handlePreview = useCallback((short) => {
+    const handlePreview = useCallback(async (short) => {
         const st = useTimelineStore.getState();
-        st.setCurrentTime?.(Math.max(0, Number(short.start) || 0));
-        st.setIsPlaying?.(true);
-    }, []);
+        if (st.shortPreview?.shortId === short.id) { st.exitShortPreview(); return; }
+        if (preparing) return;
+        const profile = PLATFORM_PROFILES[short.platform] || PLATFORM_PROFILES.tiktok;
+        setPreparing(short.id);
+        setErrors(e => ({ ...e, [short.id]: null }));
+        try {
+            if (popOut) await ensureMattesFor(short);
+            const built = await finishShort(mainEditState(), short, { polish, popOut, sfx });
+            const ok = useTimelineStore.getState().startShortPreview(short, built, { label: profile.label });
+            if (!ok) setErrors(e => ({ ...e, [short.id]: t('shortsPanel.previewFailed') }));
+        } catch (err) {
+            console.error('[ShortsPanel] preview failed:', err.message);
+            setErrors(e => ({ ...e, [short.id]: err.message || t('shortsPanel.previewFailed') }));
+        } finally {
+            setPreparing(null);
+        }
+    }, [preparing, polish, popOut, sfx, t]);
 
     const handleExport = useCallback(async (short) => {
         if (!onExport || busy[short.id] !== undefined) return;
@@ -79,7 +136,7 @@ export default function ShortsPanel({ onExport }) {
         setErrors(e => ({ ...e, [short.id]: null }));
         try {
             if (popOut) await ensureMattesFor(short);
-            const built = await finishShort(useTimelineStore.getState(), short, { polish, popOut, sfx });
+            const built = await finishShort(mainEditState(), short, { polish, popOut, sfx });
             const result = await onExport(
                 { platform: profile.exportPreset, quality: 'high', resolution: '1080p', fps: profile.fps },
                 {
@@ -101,11 +158,13 @@ export default function ShortsPanel({ onExport }) {
     const handleOpenAsProject = useCallback(async (short) => {
         const profile = PLATFORM_PROFILES[short.platform] || PLATFORM_PROFILES.tiktok;
         try {
+            // The project is built from the main edit, so the preview ends first.
+            useTimelineStore.getState().exitShortPreview();
             if (popOut) await ensureMattesFor(short);
             const built = await finishShort(useTimelineStore.getState(), short, { polish, popOut, sfx });
             const st = useTimelineStore.getState();
             const data = {
-                ...(st.saveProject ? st.saveProject() : {}),
+                ...(st.saveProject() || {}),
                 tracks: built.tracks,
                 duration: built.duration,
                 aspectRatio: built.aspectRatio,
@@ -125,6 +184,12 @@ export default function ShortsPanel({ onExport }) {
             setErrors(e => ({ ...e, [short.id]: err.message }));
         }
     }, [navigate, polish, popOut, sfx, t]);
+
+    const handleRemove = useCallback((short) => {
+        const st = useTimelineStore.getState();
+        if (st.shortPreview?.shortId === short.id) st.exitShortPreview();
+        st.removeShort(short.id);
+    }, []);
 
     const handleExportAll = useCallback(async () => {
         for (const s of sorted) {
@@ -155,19 +220,19 @@ export default function ShortsPanel({ onExport }) {
 
             {/* Finish treatment toggles */}
             <div className="mb-3 p-2 rounded bg-secondary/20 border border-border/60 space-y-1.5 text-[11px]">
-                <label className="flex items-center justify-between cursor-pointer">
+                <label className="flex items-center justify-between cursor-pointer" title={t('shortsPanel.polishHint')}>
                     <span className="flex items-center gap-1.5 text-foreground">
                         <Sparkles className="w-3 h-3 text-primary" /> {t('shortsPanel.polish')}
                     </span>
                     <input type="checkbox" checked={polish} onChange={e => setPolish(e.target.checked)} className="rounded" />
                 </label>
-                <label className="flex items-center justify-between cursor-pointer">
+                <label className="flex items-center justify-between cursor-pointer" title={t('shortsPanel.sfxHint')}>
                     <span className="flex items-center gap-1.5 text-foreground">
                         <Volume2 className="w-3 h-3 text-primary" /> {t('shortsPanel.sfx')}
                     </span>
                     <input type="checkbox" checked={sfx} onChange={e => setSfx(e.target.checked)} className="rounded" />
                 </label>
-                <label className="flex items-center justify-between cursor-pointer">
+                <label className="flex items-center justify-between cursor-pointer" title={t('shortsPanel.popOutHint')}>
                     <span className="flex items-center gap-1.5 text-foreground">
                         <UserCheck className="w-3 h-3 text-primary" /> {t('shortsPanel.popOut')}
                     </span>
@@ -181,42 +246,72 @@ export default function ShortsPanel({ onExport }) {
                 {sorted.map(short => {
                     const profile = PLATFORM_PROFILES[short.platform] || PLATFORM_PROFILES.tiktok;
                     const len = (Number(short.end) || 0) - (Number(short.start) || 0);
+                    // Only what needs attention is shown; the rest is in the tooltip.
                     const notes = profileNotes(short, profile, { hasCaptions });
+                    const warnings = notes.filter(n => n.level === 'warn');
                     const progress = busy[short.id];
+                    const key = thumbnailKey(short);
+                    const pic = thumbs[key];
+                    const isPreviewing = previewId === short.id;
+                    const isPreparing = preparing === short.id;
                     return (
-                        <li key={short.id} className="rounded border border-border p-2 bg-secondary/40">
-                            <div className="flex items-center justify-between gap-2 mb-1">
-                                <select value={short.platform} aria-label={t('shortsPanel.platform')}
-                                    onChange={e => useTimelineStore.getState().updateShort(short.id, { platform: e.target.value })}
-                                    className="bg-background border border-border rounded px-1.5 py-0.5 text-[11px]">
-                                    {PLATFORM_IDS.map(id => <option key={id} value={id}>{PLATFORM_PROFILES[id].label}</option>)}
-                                </select>
-                                <span className="text-[10px] font-mono text-muted-foreground">{fmt(short.start)} to {fmt(short.end)} · {Math.round(len)} s</span>
-                            </div>
-                            <p className="text-[11px] text-foreground line-clamp-2 mb-1">{short.title}</p>
-                            <ul className="mb-2">
-                                {notes.map(n => (
-                                    <li key={n.code} className={`text-[10px] ${n.level === 'warn' ? 'text-amber-400' : n.level === 'ok' ? 'text-emerald-400' : 'text-muted-foreground'}`}>{n.text}</li>
-                                ))}
-                            </ul>
-                            <div className="flex flex-wrap gap-1.5">
+                        <li key={short.id} className={`rounded border p-2 bg-secondary/40 ${isPreviewing ? 'border-primary/70' : 'border-border'}`}>
+                            <div className="flex gap-2">
+                                {/* 9:16 picture of the short; click to preview it in the player */}
                                 <button type="button" onClick={() => handlePreview(short)}
-                                    className="px-2 py-1 rounded text-[10px] bg-secondary hover:bg-white/10 flex items-center gap-1">
-                                    <Play className="w-3 h-3" /> {t('shortsPanel.preview')}
+                                    aria-label={isPreviewing ? t('shortsPanel.previewStop') : t('shortsPanel.preview')}
+                                    title={short.title || ''}
+                                    className="relative shrink-0 w-[54px] h-[96px] rounded overflow-hidden bg-black/60 border border-border group">
+                                    {pic
+                                        ? <img src={pic} alt="" className="w-full h-full object-cover" draggable={false} />
+                                        : pic === undefined
+                                            ? <span className="absolute inset-0 animate-pulse bg-white/5" />
+                                            : <Smartphone className="absolute inset-0 m-auto w-4 h-4 text-muted-foreground" />}
+                                    <span className={`absolute inset-0 flex items-center justify-center bg-black/30 ${isPreviewing || isPreparing ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
+                                        {isPreparing
+                                            ? <Loader2 className="w-4 h-4 text-white animate-spin" />
+                                            : isPreviewing ? <Square className="w-3.5 h-3.5 text-white fill-current" /> : <Play className="w-4 h-4 text-white fill-current" />}
+                                    </span>
+                                    <span className="absolute bottom-0.5 right-0.5 px-1 rounded bg-black/70 text-[9px] font-mono text-white">{fmt(len)}</span>
                                 </button>
-                                <button type="button" onClick={() => handleExport(short)} disabled={progress !== undefined || !onExport}
-                                    className="px-2 py-1 rounded text-[10px] bg-primary/15 border border-primary/40 text-primary disabled:opacity-50 flex items-center gap-1">
-                                    {progress !== undefined ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
-                                    {progress !== undefined ? t('shortsPanel.exporting', { pct: progress }) : t('shortsPanel.export', { platform: profile.label })}
-                                </button>
-                                <button type="button" onClick={() => handleOpenAsProject(short)}
-                                    className="px-2 py-1 rounded text-[10px] bg-secondary hover:bg-white/10 flex items-center gap-1">
-                                    <ExternalLink className="w-3 h-3" /> {t('shortsPanel.open')}
-                                </button>
-                                <button type="button" onClick={() => useTimelineStore.getState().removeShort(short.id)}
-                                    aria-label={t('shortsPanel.remove')} className="ml-auto px-1.5 py-1 rounded text-muted-foreground hover:bg-white/10">
-                                    <Trash2 className="w-3 h-3" />
-                                </button>
+
+                                <div className="min-w-0 flex-1">
+                                    <div className="flex items-center justify-between gap-1 mb-1">
+                                        <select value={short.platform} aria-label={t('shortsPanel.platform')}
+                                            onChange={e => useTimelineStore.getState().updateShort(short.id, { platform: e.target.value })}
+                                            className="bg-background border border-border rounded px-1 py-0.5 text-[11px] min-w-0">
+                                            {PLATFORM_IDS.map(id => <option key={id} value={id}>{PLATFORM_PROFILES[id].label}</option>)}
+                                        </select>
+                                        <span className="text-[10px] font-mono text-muted-foreground whitespace-nowrap"
+                                            title={notes.map(n => n.text).join('\n')}>
+                                            {fmt(short.start)}
+                                        </span>
+                                    </div>
+                                    {short.title && <p className="text-[11px] text-foreground truncate mb-1" title={short.title}>{short.title}</p>}
+                                    {warnings.slice(0, 1).map(n => (
+                                        <p key={n.code} className="text-[10px] text-amber-400 flex items-start gap-1 mb-1" title={n.text}>
+                                            <AlertTriangle className="w-3 h-3 shrink-0 mt-px" /><span className="line-clamp-1">{n.text}</span>
+                                        </p>
+                                    ))}
+                                    <div className="flex flex-wrap items-center gap-1">
+                                        <button type="button" onClick={() => handleExport(short)} disabled={progress !== undefined || !onExport}
+                                            title={t('shortsPanel.export', { platform: profile.label })}
+                                            className="px-2 py-1 rounded text-[10px] bg-primary/15 border border-primary/40 text-primary disabled:opacity-50 flex items-center gap-1">
+                                            {progress !== undefined ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                                            {progress !== undefined ? `${progress}%` : profile.label}
+                                        </button>
+                                        <button type="button" onClick={() => handleOpenAsProject(short)}
+                                            aria-label={t('shortsPanel.open')} title={t('shortsPanel.open')}
+                                            className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-white/10">
+                                            <ExternalLink className="w-3 h-3" />
+                                        </button>
+                                        <button type="button" onClick={() => handleRemove(short)}
+                                            aria-label={t('shortsPanel.remove')} title={t('shortsPanel.remove')}
+                                            className="ml-auto p-1 rounded text-muted-foreground hover:bg-white/10">
+                                            <Trash2 className="w-3 h-3" />
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                             {short.exportUrl && (
                                 <a href={short.exportUrl} target="_blank" rel="noreferrer" className="block mt-1 text-[10px] text-primary underline">
@@ -228,7 +323,6 @@ export default function ShortsPanel({ onExport }) {
                     );
                 })}
             </ul>
-            <p className="text-[10px] text-muted-foreground mt-3">{t('shortsPanel.footnote')}</p>
         </section>
     );
 }

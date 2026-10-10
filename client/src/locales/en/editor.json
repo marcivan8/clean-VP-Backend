@@ -980,6 +980,7 @@
     "title": "Shorts",
     "find": "Find shorts in this video",
     "findAgain": "Find new shorts",
+    "findingMoments": "Finding shorts across video…",
     "findPrompt": "Repurpose this video into 3 shorts for TikTok, Reels and YouTube Shorts",
     "exportAll": "Export all",
     "empty": "No shorts yet. The AI picks the strongest moments of your video, one per platform, and keeps your main edit as it is.",
@@ -1005,6 +1006,33 @@
     "popOutHint": "Softens and dims the background behind the person (free on-device model, takes a moment the first time).",
     "open": "Open as project",
     "openFailed": "The short could not be saved as a project.",
-    "applied": "Added: {{list}}."
+    "applied": "Added: {{list}}.",
+    "previewing": "Previewing the {{platform}} short",
+    "previewNote": "Your edit is safe. Changes made during the preview are not kept.",
+    "previewBack": "Back to my edit",
+    "previewReplay": "Replay",
+    "previewStop": "Stop preview",
+    "previewPreparing": "Preparing…",
+    "previewFailed": "The short could not be loaded in the player."
+  },
+  "scenePanel": {
+    "title": "Scene",
+    "empty": "No designed graphics in this project yet. Ask for a title sequence, a stat callout or a whole sequence, and its layers appear here to edit.",
+    "pick": "Pick a design",
+    "pickHint": "Select a graphic on the timeline, or pick a design above.",
+    "whichDesign": "Which design",
+    "toggleGroup": "Open or close this beat",
+    "show": "Show this layer",
+    "hide": "Hide this layer",
+    "deleteLayer": "Delete this layer",
+    "words": "Words",
+    "size": "Size",
+    "colour": "Colour",
+    "across": "Across %",
+    "down": "Down %",
+    "seconds": "Seconds",
+    "editFailed": "That change could not be applied.",
+    "placeholders": "{{count}} to fill in",
+    "footnote": "Changes apply straight away and each one is a single undo. Dragging the same layer on the player keeps this in step."
   }
 }

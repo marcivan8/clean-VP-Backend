@@ -206,12 +206,14 @@ await check('the command saves one short per platform and leaves the edit alone'
     assert.equal(S.getState().past.length, pastBefore, 'no undo step needed: nothing on the timeline changed');
     assert.match(r.message, /Shorts tab/);
 });
-await check('no transcript → an honest message, nothing saved', async () => {
+await check('no transcript → shorts follow the cuts, the message says so, captions untouched', async () => {
     loadTracks(LONG, { captions: [] });
+    const caps = S.getState().captions;
     const r = await engine.executeStoreAction({ action: 'repurpose_shorts', args: { count: 3 } }, null);
-    assert.equal(r.success, false);
-    assert.match(r.message, /transcript/);
-    assert.equal(S.getState().shorts.length, 0);
+    assert.equal(r.success, true);
+    assert.match(r.message, /no transcript yet/);
+    assert.ok(S.getState().shorts.every(s => /^Moment at \d+:\d\d$/.test(s.title)), 'neutral labels, nothing invented');
+    assert.ok(S.getState().captions === caps && caps.length === 0, 'the store captions array is not written to');
 });
 await check('shorts are saved with the project and come back on load', () => {
     loadTracks(LONG, { captions: WORDS });
@@ -228,7 +230,10 @@ await check('shorts are saved with the project and come back on load', () => {
 });
 await check('Shorts tab: mounted, exports through the normal path with a per-short timeline', () => {
     const ide = read('client/src/layouts/IDELayout.jsx');
-    assert.match(ide, /'motion', 'shorts', 'assets'/);
+    // The Shorts tab is in the tab list. Checked by name rather than by its
+    // neighbours, so adding another tab beside it is not a failure (R95 put
+    // the Scene tab between motion and shorts).
+    assert.match(ide, /\[(?:'[a-z]+',\s*)*'shorts'(?:,\s*'[a-z]+')*\]\.map\(tab =>/);
     assert.match(ide, /<ShortsPanel onExport=\{\(settings, override\) => handleFfmpegExport\(settings, override\)\} \/>/);
     assert.match(ide, /const handleFfmpegExport = async \(settings, override = null\)/);
     assert.match(ide, /if \(!override\) saveActiveExport/);

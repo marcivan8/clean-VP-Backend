@@ -56,7 +56,7 @@ import { selectAnimateMoments, sfxPlayableUrl, countMoments, CLUSTER_S } from '.
 import i18next from 'i18next';
 import { resolveRetakeSource, retakeReviewLines, makeRetakeT, findTranscript } from './retakeSource.js';
 import { clipSourceWords, buildRhythmRequest, shotsToKeyframes } from './rhythmShots.js';
-import { findBestShortWindow, findShortCandidates, rangesOutside } from './shortPicker.js';
+import { findBestShortWindow, findShortCandidates, findShortCandidatesFallback, rangesOutside } from './shortPicker.js';
 import { PLATFORM_PROFILES, assignPlatforms, platformsFromText } from './PlatformProfiles.js'; // R92 round B
 import { polishShort } from './shortPolish.js'; // R92 round C
 import { packSegments } from './segmentPacking.js';
@@ -892,9 +892,74 @@ export class MediaExecutionEngine {
             // asked for) with everything content-specific — text/url/emoji/
             // direction/position — under `params`, so those two reserved keys
             // can never collide with a component's own fields.
+            // ── R95 PHASE 4: a brief becomes a designed sequence ──────────
+            // The director reads the tone and the beats, picks the look,
+            // places the graphics clear of the subject of the shot, and
+            // composes one scene whose beats run in order. The words come
+            // from the AI when there is a transcript to work from; without
+            // them the beats carry editable placeholders, and the reply says
+            // so rather than inventing claims.
+            case 'design_scene': {
+                const st = useTimelineStore.getState();
+                const brief = String(args.brief || '').trim();
+                if (!brief) return { action, success: false, message: 'Tell me what the graphics should say or feel like, and I will design the sequence.' };
+
+                const { planFromBrief } = await import('../motion/SceneDirector.js');
+                const outline = planFromBrief(brief);
+                let plan = null;
+                if (outline.placeholders > 0) {
+                    const words = Array.isArray(st.captions) ? st.captions : [];
+                    const transcript = words.slice(0, 600).map(w => String(w.word ?? w.text ?? '')).join(' ');
+                    try {
+                        const res = await authFetch('/api/motion/scene-plan', {
+                            method: 'POST',
+                            body: JSON.stringify({ brief, transcript, beats: outline.beats.map(b => b.kind), tone: outline.tone.label }),
+                        });
+                        const data = await res.json().catch(() => ({}));
+                        if (res.ok) plan = data.plan || null;
+                    } catch (err) {
+                        // No words from the AI is not a failure: placeholders stand.
+                        console.warn('[design_scene] no AI words, using placeholders:', err.message);
+                    }
+                }
+
+                const result = this._callStore(store, 'designScene', brief, { plan });
+                if (!result?.success) return { action, success: false, error: result?.error, message: result?.error };
+
+                const beats = result.plan?.beats || [];
+                const left = (Array.isArray(result.issues) ? result.issues : []).filter(i => i.severity !== 'info');
+                let message = `Designed a ${result.plan?.tone || ''} sequence: ${beats.join(', ')}. ${result.plan?.rationale?.slice(0, 2).join(' ') || ''}`.replace(/\s+/g, ' ').trim();
+                if (result.placeholders?.length) {
+                    message += ` ${result.placeholders.length} of the layers are placeholders for you to fill in: ${result.placeholders.slice(0, 3).join(', ')}${result.placeholders.length > 3 ? ' and more' : ''}.`;
+                }
+                if (result.fixes?.length) message += ` Adjusted to fit the frame: ${result.fixes[0].message}`;
+                if (left.length) message += ` Worth a look: ${left[0].message}`;
+                message += ' One undo reverts the whole sequence.';
+                return {
+                    action, success: true, message,
+                    details: { sceneId: result.sceneId, clipCount: result.clipCount, beats, tone: result.plan?.tone, placeholders: result.placeholders?.length || 0, usedAiWords: !!plan },
+                };
+            }
+
             case 'addMotionComponent': {
                 const result = this._callStore(store, 'addMotionComponent', args.component, args.preset, args.params || {});
-                return { action, success: !!result?.success, error: result?.error, message: result?.success ? `Added ${args.component} (${args.preset})` : result?.error };
+                if (!result?.success) return { action, success: false, error: result?.error, message: result?.error };
+                // R94: the scene was checked before it landed. Say what was
+                // adjusted and what still deserves a look, rather than a bare
+                // "added" that hides a headline hanging off the frame.
+                const label = String(args.component || 'graphic').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+                const fixes = Array.isArray(result.fixes) ? result.fixes : [];
+                const left = (Array.isArray(result.issues) ? result.issues : []).filter(i => i.severity !== 'info');
+                let message = `Added a ${label}${args.preset ? ` (${args.preset})` : ''}.`;
+                if (fixes.length) {
+                    message += ` Adjusted to fit the frame: ${fixes[0].message}`;
+                    if (fixes.length > 1) message += ` And ${fixes.length - 1} more.`;
+                }
+                if (left.length) message += ` Worth a look: ${left[0].message}`;
+                return {
+                    action, success: true, message,
+                    details: { sceneId: result.sceneId || null, groupId: result.groupId || null, clipCount: result.clipCount || 0, fixes: fixes.length, issues: left.length },
+                };
             }
             // R66 — clip grouping. `groupId` is returned by `addMotionComponent`
             // on success as part of the created clips (see ComponentLibrary.js);
@@ -1274,7 +1339,7 @@ export class MediaExecutionEngine {
                         if (!newTrackIds[t.id]) {
                             const live = useTimelineStore.getState();
                             const existing = live.tracks.find(x => x.type === t.type && x.name === t.name);
-                            newTrackIds[t.id] = existing?.id || live.addTrack(t.type);
+                            newTrackIds[t.id] = existing?.id || live.addTrack(t.type, { skipHistory: true });
                             if (!existing && newTrackIds[t.id]) useTimelineStore.getState().renameTrack?.(newTrackIds[t.id], t.name);
                         }
                         if (newTrackIds[t.id]) useTimelineStore.getState().addClip(newTrackIds[t.id], c, { skipHistory: true });
@@ -1299,25 +1364,61 @@ export class MediaExecutionEngine {
             // main edit is not changed.
             case 'repurpose_shorts': {
                 const st = useTimelineStore.getState();
-                const words = Array.isArray(st.captions) ? st.captions : [];
+                // A copy: the fallbacks below must never push into the store's array.
+                let words = Array.isArray(st.captions) ? [...st.captions] : [];
+
+                // 1. Caption clips carry their words in TIMELINE time already
+                //    (toLegacyTracks applies the placement's wordShift). Titles
+                //    and other text without word timings are not speech.
                 if (words.length === 0) {
-                    return { action, success: false, message: 'Finding the best moments needs a transcript. Run "add captions" first, then ask again.' };
+                    for (const tc of (st.tracks || []).flatMap(t => t.clips || [])) {
+                        if (!Array.isArray(tc.words) || tc.words.length === 0) continue;
+                        for (const w of tc.words) {
+                            const s0 = Number(w?.start), e0 = Number(w?.end);
+                            if (Number.isFinite(s0) && Number.isFinite(e0)) words.push({ word: w.word ?? w.text, start: s0, end: e0 });
+                        }
+                    }
+                    words.sort((a, b) => a.start - b.start);
                 }
+
+                // 2. Try transcripts in store if st.captions is empty
+                if (words.length === 0 && st.transcripts && Object.keys(st.transcripts).length > 0) {
+                    try {
+                        const { mapTranscriptToTimeline } = await import('../timeline/transcriptMap.js');
+                        const mapped = mapTranscriptToTimeline({ tracks: st.tracks, assets: st.assets, transcripts: st.transcripts });
+                        if (Array.isArray(mapped) && mapped.length > 0) {
+                            words = mapped;
+                            st.setCaptions?.(mapped);
+                        }
+                    } catch (err) {
+                        console.warn('[repurpose_shorts] transcript map fallback failed:', err);
+                    }
+                }
+
                 const count = Math.max(1, Math.min(5, Number(args.count) || 3));
                 const platforms = assignPlatforms(count, Array.isArray(args.platforms) ? args.platforms : []);
                 const total = (st.tracks || []).reduce((m, t) => Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
+                if (total < 10) {
+                    return { action, success: false, message: `The video is ${Math.round(total)} s long, too short to cut shorts out of.` };
+                }
+
                 const slots = platforms.map(id => {
                     const p = PLATFORM_PROFILES[id];
                     const [lo, hi] = p.length.ideal;
                     return { platform: id, min: Math.max(p.length.min, lo * 0.75), max: Math.min(p.length.max, hi * 1.3), target: (lo + hi) / 2 };
                 });
-                if (total < Math.min(...slots.map(s => s.min)) + 5) {
-                    return { action, success: false, message: `The video is ${Math.round(total)} s long, too short to cut shorts out of. It can be exported as one short as it is.` };
-                }
+
                 const events = await this._fetchSemanticEvents();
-                const found = findShortCandidates(words, { events, slots });
+                let found = words.length > 0 ? findShortCandidates(words, { events, slots }) : [];
+
+                let fallbackUsed = false;
                 if (found.length === 0) {
-                    return { action, success: false, message: 'No sentence-aligned moments of the right length were found in the transcript.' };
+                    found = findShortCandidatesFallback(total, { events, slots, tracks: st.tracks });
+                    fallbackUsed = true;
+                }
+
+                if (found.length === 0) {
+                    return { action, success: false, message: 'Could not extract suitable short windows from this timeline.' };
                 }
                 const now = Date.now();
                 const shorts = found.map((f, i) => ({
@@ -1330,6 +1431,7 @@ export class MediaExecutionEngine {
                     title: String(f.text || '').slice(0, 90),
                     createdAt: now,
                     exportUrl: null,
+                    thumbnailUrl: null,
                     // R92 round C: the moments inside this short (timeline time),
                     // so its camera punches land on them at export.
                     events: (events || []).filter(e => Number(e?.timelineTime) >= f.start && Number(e?.timelineTime) <= f.end)
@@ -1340,9 +1442,12 @@ export class MediaExecutionEngine {
                 const lines = shorts.map(s => `${PLATFORM_PROFILES[s.platform].label}: ${Math.round(s.end - s.start)} s from ${s.start.toFixed(0)} s, "${s.title.slice(0, 50)}"`);
                 const missing = count - shorts.length;
                 const missText = missing > 0 ? ` ${missing} more could not fit without overlapping.` : '';
+                const transcriptNote = fallbackUsed
+                    ? (words.length ? ' (no full sentences fitted, so they follow the cuts)' : ' (there is no transcript yet, so they follow the cuts, not what is said; add captions and ask again for picks by content)')
+                    : '';
                 return {
                     action, success: true,
-                    message: `Found ${shorts.length} short(s): ${lines.join('; ')}.${missText} In the Shorts tab each one exports finished: AI hook title with motion, platform captions, camera punch-ins, number pops, transitions and sound effects. Your main edit is unchanged.`,
+                    message: `Found ${shorts.length} short(s)${transcriptNote}: ${lines.join('; ')}.${missText} In the Shorts tab each one exports finished: AI hook title with motion, platform captions, camera punch-ins, number pops, transitions and sound effects. Your main edit is unchanged.`,
                     details: { count: shorts.length, platforms: shorts.map(s => s.platform) },
                 };
             }

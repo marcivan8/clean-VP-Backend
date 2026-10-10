@@ -138,7 +138,29 @@ export function resolveMotionAt(layer, absoluteTime) {
         // a fade-in that stops contributing after it finishes would pop the
         // element back to base opacity the frame after it completes.
         const clampedLocal = clamp(localTime, 0, animDuration > 0 ? animDuration : 0);
-        if (localTime < 0) continue; // hasn't begun; contributes nothing yet
+        if (localTime < 0) {
+            // Before animStart: if this is an entrance animation (anchor === 'in' and not a mid-clip event),
+            // it holds its initial keyframe state so it doesn't pop on at t=0 before animating.
+            if (anim.anchor === 'in' && anim.source !== 'auto-animate') {
+                const sample = sampleAnimation(anim, 0);
+                for (const [prop, value] of Object.entries(sample)) {
+                    if (!Number.isFinite(value)) continue;
+                    const rule = COMPOSITION_RULES[prop] || 'add';
+                    if (acc[prop] === null) {
+                        acc[prop] = value;
+                    } else if (rule === 'add') {
+                        acc[prop] += value;
+                    } else if (rule === 'multiply') {
+                        acc[prop] *= value;
+                    } else if (rule === 'max') {
+                        acc[prop] = Math.max(acc[prop], value);
+                    } else if (rule === 'min') {
+                        acc[prop] = Math.min(acc[prop], value);
+                    }
+                }
+            }
+            continue; // hasn't begun; for non-entrance animations, contributes nothing yet
+        }
 
         const sample = sampleAnimation(anim, clampedLocal);
         for (const [prop, value] of Object.entries(sample)) {

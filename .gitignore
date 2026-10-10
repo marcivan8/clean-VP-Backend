@@ -17,8 +17,11 @@ ML_Models/
 # Python
 venv/
 __pycache__/
-*.pyc
-.DS_Storeclient/dist
+.DS_Store
+client/dist
+_to_delete/
+Claude outputs/
 
 # Raw SFX source pack (converted output lives in client/public/sfx-library/)
 Social SFX Pack - Collection 1/
+

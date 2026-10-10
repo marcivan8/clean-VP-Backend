@@ -137,3 +137,46 @@ export {
     deriveSpeakerCrop,
     deriveTrackingSegments,
 } from './ObjectLayers.js';
+
+export {
+    measureSingleLineWidth,
+    measureTextBounds,
+    fitTextToBox,
+    computeAccentBounds,
+} from './TextMeasurement.js';
+
+export {
+    SCENE_SCHEMA_VERSION,
+    NODE_TYPES,
+    OVERLAY_WIDTH_FRACTION,
+    frameForAspect,
+    createScene,
+    createNode,
+    createGroup,
+    normalizeScene,
+    migrateScene,
+    walkScene,
+    findNode,
+    listNodes,
+    updateNode,
+    removeNode,
+    addNode,
+    composeTransform,
+    resolveAbsoluteTransform,
+    nodeBox,
+    nodeLife,
+    flattenScene,
+    sceneFromPlacements,
+    rootGroup,
+    validateSceneShape,
+} from './SceneSchema.js';
+
+export {
+    SEVERITY,
+    ISSUE_CODES,
+    safeZoneForAspect,
+    contentRect,
+    validateScene,
+    autoFixScene,
+    describeIssues,
+} from './SceneValidator.js';

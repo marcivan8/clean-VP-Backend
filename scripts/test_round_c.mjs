@@ -264,5 +264,42 @@ await check('Shorts tab: finish toggles, open as project, user copy without em d
     for (const lang of ['en', 'fr']) assert.doesNotMatch(JSON.stringify(JSON.parse(read(`client/src/locales/${lang}/editor.json`)).shortsPanel), /—/);
 });
 
+// ── 4. Wiring of the shorts and motion-component commands ───────────────────
+log('\n4 · Command wiring');
+{
+    const { IntentParser } = await import('../client/src/agent/IntentParser.js');
+    const { EditPlanner } = await import('../client/src/agent/EditPlanner.js');
+    const { CommandCompiler } = await import('../client/src/agent/CommandCompiler.js');
+    const SP = await import('../client/src/agent/shortPicker.js');
+    const run = async (prompt) => {
+        const intent = await IntentParser.parse(prompt);
+        const plan = await EditPlanner.generatePlan(intent);
+        const cmds = plan.plan ? (CommandCompiler.compile({ ...plan.plan, intent: { ...intent, confidence: 'HIGH' } }, {}).commands || []) : [];
+        return { op: intent.operation, cmds };
+    };
+    await check('"make it short" / "create a short intro" are not repurposing; plural requests are, with their platforms', async () => {
+        for (const p of ['make it short', 'create a short intro']) assert.notEqual((await run(p)).op, 'repurpose_shorts', p);
+        const r = await run('turn this into reels');
+        assert.equal(r.op, 'repurpose_shorts');
+        assert.deepEqual(r.cmds[0].args.platforms, ['reels']);
+        assert.equal((await run('make 2 reels')).cmds[0].args.count, 2);
+    });
+    await check('motion components compile flat and carry the user\'s words', async () => {
+        const r = await run('add a kinetic title saying "Grow faster"');
+        assert.equal(r.cmds[0].action, 'addMotionComponent');
+        assert.equal(r.cmds[0].args.component, 'KineticTitle');
+        assert.equal(r.cmds[0].args.params.title, 'Grow faster');
+        const st = await run('add stat callout 300% revenue growth');
+        assert.equal(st.cmds[0].args.params.value, '300%');
+        assert.doesNotMatch(read('client/src/agent/EditJobManager.js'), /repurpose_shorts — deterministic bypass/);
+    });
+    await check('the no-transcript fallback never overlaps and invents no content labels', () => {
+        const slots = [10, 11, 12].map(() => ({ platform: 'tiktok', min: 20, max: 40, target: 30 }));
+        const out = SP.findShortCandidatesFallback(70, { slots, tracks: [] });
+        for (let i = 0; i < out.length; i++) for (let j = i + 1; j < out.length; j++) assert.ok(out[i].end <= out[j].start || out[j].end <= out[i].start, 'no overlap');
+        assert.ok(out.every(o => /^Moment at/.test(o.text) && o.hookEvent === null));
+    });
+}
+
 log(failures ? `\n${failures} FAILURE(S)` : '\nALL ROUND C CHECKS PASSED');
 process.exit(failures ? 1 : 0);

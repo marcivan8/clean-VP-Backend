@@ -35,6 +35,8 @@ import InterviewEditPanel from '../components/InterviewEditPanel';
 import MotionPanel from '../components/MotionPanel';
 import ShortsPanel from '../components/ShortsPanel'; // R92 round B: repurposed shorts
 import SnapGuidesLayer from '../components/Player/SnapGuidesLayer.jsx'; // R92 round C
+import ShortPreviewBar from '../components/Player/ShortPreviewBar.jsx'; // R93
+import ScenePanel from '../components/ScenePanel.jsx'; // R95 PHASE 5
 import LayoutPresetPicker from '../components/LayoutPresetPicker.jsx';
 import AssetPanel from '../components/AssetPanel';
 import ExportModal from '../components/ExportModal';
@@ -1396,9 +1398,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     // frame) through this SAME path, so it gets the same compositor, caption
     // program and camera motion. The main edit is never touched.
     const handleFfmpegExport = async (settings, override = null) => {
+        // R93: the main Export always renders the main edit, never a short being previewed.
+        if (!override) useTimelineStore.getState().exitShortPreview();
         const live = useTimelineStore.getState();
         const { tracks, duration, assets, projectLUTId, aspectRatio: projectAspectRatio } = override ? { ...live, ...override } : live;
-        const planAspectRatio = override?.aspectRatio || aspectRatio;
+        const planAspectRatio = override?.aspectRatio || live.aspectRatio || aspectRatio;
         const { authFetch }     = await import('../utils/authFetch.js');
         const { pollJobResult } = await import('../utils/jobPoller.js');
 
@@ -1951,7 +1955,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         <button onClick={() => { if (confirm(t('ideLayout.menu.confirmNewProject'))) { useTimelineStore.getState().loadProject({ tracks: [], duration: 60 }); } setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.newProject')}</button>
                                         <button onClick={() => { projectLoaderRef.current.click(); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.openProject')}</button>
                                         <div className="h-px bg-border my-1" />
-                                        <button onClick={() => { const data = useTimelineStore.getState().saveProject(); const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `project-${Date.now()}.json`; a.click(); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.saveProject')}</button>
+                                        <button onClick={() => { useTimelineStore.getState().exitShortPreview(); const data = useTimelineStore.getState().saveProject(); if (!data) return; const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `project-${Date.now()}.json`; a.click(); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.saveProject')}</button>
                                         <div className="h-px bg-border my-1" />
                                         <button onClick={() => { triggerImport(); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.importMedia')}</button>
                                         <button onClick={() => { setShowExportModal(true); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.exportVideo')}</button>
@@ -2053,7 +2057,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                         <div className="relative border-b" style={{ borderColor: "var(--line-soft)" }}>
                             <div ref={tabBarRef} className="p-2 flex gap-1 overflow-x-auto no-scrollbar">
-                                {['media', 'captions', 'transcript', 'color', 'motion', 'shorts', 'assets', 'audio', 'transform', 'settings'].map(tab => (
+                                {['media', 'captions', 'transcript', 'color', 'motion', 'scene', 'shorts', 'assets', 'audio', 'transform', 'settings'].map(tab => (
                                     <button
                                         key={tab}
                                         onClick={() => setActiveTab(tab)}
@@ -2064,6 +2068,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         {tab === 'transcript' && <span style={{ fontSize: 9 }}>📝</span>}
                                         {tab === 'color'      && <Palette  className="w-2.5 h-2.5" />}
                                         {tab === 'motion'     && <Zap      className="w-2.5 h-2.5" />}
+                                        {tab === 'scene'      && <Layers   className="w-2.5 h-2.5" />}
                                         {tab === 'shorts'     && <Smartphone className="w-2.5 h-2.5" />}
                                         {tab === 'assets'     && <Sparkles className="w-2.5 h-2.5" />}
                                         {tab === 'audio'      && <span style={{ fontSize: 9 }}>🎤</span>}
@@ -2233,6 +2238,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 The tab button for this lives in the array above;
                                 both halves are required. */}
                             {activeTab === 'motion' && <MotionPanel />}
+                            {/* R95 PHASE 5 — the scene editor: the layers of a
+                                generated graphic, and their properties. */}
+                            {activeTab === 'scene' && <ScenePanel />}
                             {activeTab === 'shorts' && <ShortsPanel onExport={(settings, override) => handleFfmpegExport(settings, override)} />}
 
                             {activeTab === 'interview' && <section className="border-b border-border/50"><InterviewEditPanel /></section>}
@@ -2423,6 +2431,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 <GraphicOverlay placementFilter="front" />
                                 {/* R92 round C: alignment guides while dragging */}
                                 <SnapGuidesLayer />
+                                {/* R93: a finished short playing in this player */}
+                                <ShortPreviewBar />
                             </div>
 
                             {/* Floating Playback Controls (desktop; mobile uses MobileTransportBar) */}

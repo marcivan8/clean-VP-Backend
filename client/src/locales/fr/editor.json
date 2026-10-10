@@ -980,6 +980,7 @@
     "title": "Shorts",
     "find": "Trouver des shorts dans cette vidéo",
     "findAgain": "Trouver de nouveaux shorts",
+    "findingMoments": "Recherche des shorts dans la vidéo…",
     "findPrompt": "Repurpose this video into 3 shorts for TikTok, Reels and YouTube Shorts",
     "exportAll": "Tout exporter",
     "empty": "Aucun short pour l’instant. L’IA choisit les meilleurs moments de votre vidéo, un par plateforme, sans modifier votre montage principal.",
@@ -1005,6 +1006,33 @@
     "popOutHint": "Adoucit et assombrit l’arrière-plan derrière la personne (modèle gratuit sur l’appareil, un peu plus long la première fois).",
     "open": "Ouvrir comme projet",
     "openFailed": "Le short n’a pas pu être enregistré comme projet.",
-    "applied": "Ajouté : {{list}}."
+    "applied": "Ajouté : {{list}}.",
+    "previewing": "Aperçu du short {{platform}}",
+    "previewNote": "Votre montage est protégé. Les changements faits pendant l’aperçu ne sont pas gardés.",
+    "previewBack": "Revenir à mon montage",
+    "previewReplay": "Rejouer",
+    "previewStop": "Arrêter l’aperçu",
+    "previewPreparing": "Préparation…",
+    "previewFailed": "Le short n’a pas pu être chargé dans le lecteur."
+  },
+  "scenePanel": {
+    "title": "Scène",
+    "empty": "Aucun graphique créé dans ce projet pour l’instant. Demandez une séquence de titre, un chiffre clé ou une séquence entière, et ses calques apparaissent ici.",
+    "pick": "Choisir un design",
+    "pickHint": "Sélectionnez un graphique sur la timeline, ou choisissez un design ci-dessus.",
+    "whichDesign": "Quel design",
+    "toggleGroup": "Ouvrir ou fermer ce temps",
+    "show": "Afficher ce calque",
+    "hide": "Masquer ce calque",
+    "deleteLayer": "Supprimer ce calque",
+    "words": "Texte",
+    "size": "Taille",
+    "colour": "Couleur",
+    "across": "Horizontal %",
+    "down": "Vertical %",
+    "seconds": "Secondes",
+    "editFailed": "Ce changement n’a pas pu être appliqué.",
+    "placeholders": "{{count}} à compléter",
+    "footnote": "Les changements s’appliquent tout de suite, chacun en une seule annulation. Déplacer le même calque sur le lecteur reste synchronisé."
   }
 }

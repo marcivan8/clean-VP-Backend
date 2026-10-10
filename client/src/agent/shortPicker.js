@@ -22,7 +22,7 @@ const CONNECTORS = /^(and|so|but|because|then|also|et|donc|mais|parce|alors|puis
 
 function wordText(w) { return String(w?.word ?? w?.text ?? '').trim(); }
 
-/** Split timeline words into sentences. */
+/** Split timeline words into sentences or natural speech clauses. */
 export function splitSentences(words) {
     const ws = (Array.isArray(words) ? words : [])
         .filter(w => Number.isFinite(Number(w?.start)) && Number.isFinite(Number(w?.end)) && wordText(w))
@@ -34,7 +34,15 @@ export function splitSentences(words) {
         cur.push(ws[i]);
         const next = ws[i + 1];
         const endsSentence = /[.!?…]["»)]?$/.test(ws[i].t);
-        if (!next || endsSentence || next.start - ws[i].end > SENTENCE_GAP_S) {
+        const pause = next ? next.start - ws[i].end : Infinity;
+        const curDur = ws[i].end - cur[0].start;
+
+        // Split on standard punctuation, or on natural clause pauses if the segment is long
+        const commaClause = curDur > 6 && /[,;:]["»)]?$/.test(ws[i].t) && pause > 0.25;
+        const maxClause = curDur > 12 && pause > 0.3;
+        const hardCap = curDur > 18;
+
+        if (!next || endsSentence || pause > SENTENCE_GAP_S || commaClause || maxClause || hardCap) {
             out.push({ start: cur[0].start, end: cur[cur.length - 1].end, words: cur, text: cur.map(w => w.t).join(' ') });
             cur = [];
         }
@@ -122,6 +130,8 @@ function bestWindowAvoiding(words, opts, allowed) {
         .filter(e => EVENT_WEIGHT[e.type] && Number.isFinite(e.t));
     const sentences = splitSentences(words);
     let best = null;
+
+    // 1. First pass: sentence-aligned combinations
     for (let i = 0; i < sentences.length; i++) {
         const opener = sentences[i].text;
         let nWords = 0;
@@ -143,13 +153,119 @@ function bestWindowAvoiding(words, opts, allowed) {
             score += Math.min(2, (nWords / dur) / 1.5);
             if (HOOK_OPENERS.test(opener)) score += 1;
             if (CONNECTORS.test(opener)) score -= 1.5;
-            // Closeness to the slot's target (not just "longer is better"):
-            // a TikTok slot should not grow to the Shorts length.
+            // Closeness to the slot's target
             score += 1 - Math.min(1, Math.abs(dur - target) / target);
             if (!best || score > best.score + 1e-9) best = { start, end, score, hookEvent, text: opener };
         }
     }
+
+    // 2. Fallback: if sentence combinations yielded nothing, slide across words
+    if (!best && Array.isArray(words) && words.length >= 5) {
+        const ws = words.filter(w => Number.isFinite(Number(w?.start)) && Number.isFinite(Number(w?.end)));
+        for (let i = 0; i < ws.length; i += 3) {
+            const start = Number(ws[i].start);
+            for (let j = i + 4; j < ws.length; j += 2) {
+                const end = Number(ws[j].end);
+                const dur = end - start;
+                if (dur > max) break;
+                if (dur < min) continue;
+                if (!allowed({ start, end })) continue;
+                const score = 1.0 + (1 - Math.min(1, Math.abs(dur - target) / target));
+                const text = ws.slice(i, i + 8).map(wordText).join(' ');
+                if (!best || score > best.score + 1e-9) {
+                    best = { start, end, score, hookEvent: null, text };
+                }
+            }
+        }
+    }
+
     return best;
+}
+
+/**
+ * Fallback when transcript words are missing or empty:
+ * Intelligently extracts non-overlapping short candidate windows across the timeline
+ * using clip cut points, semantic events, and golden-ratio moments.
+ *
+ * @param {number} totalDuration Total timeline duration in seconds
+ * @param {{slots:Array, events?:Array, tracks?:Array, gap?:number}} opts
+ * @returns {Array<{start:number, end:number, score:number, hookEvent:string|null, text:string, platform:string|null}>}
+ */
+export function findShortCandidatesFallback(totalDuration, opts = {}) {
+    const total = Math.max(0, Number(totalDuration) || 0);
+    const slots = Array.isArray(opts.slots) ? opts.slots : [];
+    if (total <= 5 || slots.length === 0) return [];
+
+    const gap = Number.isFinite(Number(opts.gap)) ? Number(opts.gap) : 2;
+    const cuts = new Set([0, total]);
+
+    // Collect cut points from tracks
+    for (const track of opts.tracks || []) {
+        for (const clip of track.clips || []) {
+            const s = Number(clip.start) || 0;
+            const e = s + (Number(clip.duration) || 0);
+            if (s > 0 && s < total) cuts.add(Math.round(s * 10) / 10);
+            if (e > 0 && e < total) cuts.add(Math.round(e * 10) / 10);
+        }
+    }
+    const cutPoints = Array.from(cuts).sort((a, b) => a - b);
+    const snapCut = (t, maxDelta = 3) => {
+        let best = t;
+        let minDiff = maxDelta;
+        for (const cp of cutPoints) {
+            const d = Math.abs(cp - t);
+            if (d < minDiff) { minDiff = d; best = cp; }
+        }
+        return best;
+    };
+
+    const taken = [];
+    const overlaps = (a, b) => a.start < b.end + gap && b.start < a.end + gap;
+    const out = [];
+
+    // Fallback golden anchor ratios for up to 5 slots
+    const anchorRatios = [0.03, 0.42, 0.72, 0.22, 0.88];
+    // Neutral labels: without a transcript nothing is known about the content.
+    const label = (t) => `Moment at ${Math.floor(t / 60)}:${String(Math.round(t % 60)).padStart(2, '0')}`;
+
+    slots.forEach((slot, idx) => {
+        const target = Math.max(slot.min || 15, Math.min(slot.max || 60, slot.target || 30));
+        const ratio = anchorRatios[idx % anchorRatios.length];
+        let idealStart = Math.max(0, (total - target) * ratio);
+        let start = snapCut(idealStart, 2.5);
+        let end = Math.min(total, start + target);
+
+        // Adjust if it pushes beyond total
+        if (end > total) {
+            end = total;
+            start = Math.max(0, end - target);
+        }
+
+        // Avoid overlap with existing picks; no free window means no short.
+        let candidate = { start: Math.round(start * 10) / 10, end: Math.round(end * 10) / 10 };
+        if (taken.some(t => overlaps(t, candidate))) {
+            candidate = null;
+            for (let searchStart = 0; searchStart + target <= total; searchStart += 5) {
+                const testCand = { start: searchStart, end: searchStart + target };
+                if (!taken.some(t => overlaps(t, testCand))) { candidate = testCand; break; }
+            }
+            if (!candidate) return;
+        }
+
+        if (candidate.end - candidate.start >= (slot.min ? Math.min(slot.min, 12) : 10)) {
+            taken.push(candidate);
+            out.push({
+                start: candidate.start,
+                end: candidate.end,
+                score: 2.5 - idx * 0.2,
+                hookEvent: null,
+                text: label(candidate.start),
+                platform: slot.platform || null,
+            });
+        }
+    });
+
+    return out;
 }
 
 /**
@@ -167,4 +283,5 @@ export function rangesOutside(window, total, pad = { before: 0.15, after: 0.3 })
     return out;
 }
 
-export default { splitSentences, findBestShortWindow, findShortCandidates, rangesOutside };
+export default { splitSentences, findBestShortWindow, findShortCandidates, findShortCandidatesFallback, rangesOutside };
+

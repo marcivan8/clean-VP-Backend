@@ -301,7 +301,6 @@ const NLP_MAP = {
         'best parts', 'best moments', 'best clips', 'highlight', 'highlights',
         'highlight reel', 'quotable', 'quotable moments', 'key moments',
         'extract segments', 'find segments', 'extract clips',
-        'short video', 'short form', 'repurpose', 'clips for social',
         'most engaging', 'impactful moments', 'memorable parts',
     ],
     conversational: [
@@ -958,6 +957,24 @@ export class IntentParser {
         if (matches('conversational') && !matches('extractHighlights') && !matches('silence')
             && !matches('fillerWords') && !matches('analyze') && !matches('buildFromRushes')) {
             return { ...this.createIntent(INTENT_TYPES.CHAT, OPERATIONS.CHAT, {}), message: null };
+        }
+
+        // Repurpose long video into shorts / social clips (Shorts tab — main edit untouched)
+        // Plural only: "make it short" / "create a short intro" are trims, and
+        // "make a short" / "make a reel" are extract_short (one short in place).
+        const isShortsRepurpose = (/\b(repurpos\w*|recycle\w*|decoupe)\b/i.test(lower)
+            && /\b(shorts?|reels?|tiktok|socials?)\b/i.test(lower))
+            || /\b(make|create|generate|turn (?:it |this )?into|cut (?:it |this )?into|fais des?)\s+(?:\d+\s+|some\s+|a few\s+|several\s+|three\s+|two\s+)?(?:shorts|reels|short videos|short clips|clips for (?:tiktok|socials?))\b/i.test(lower);
+
+        if (isShortsRepurpose) {
+            const countMatch = lower.match(/\b(\d+)\s+(?:shorts?|reels?|videos?|clips?)\b/i);
+            const count = countMatch ? parseInt(countMatch[1], 10) : 3;
+            // createIntent drops extra keys; the planner reads count and
+            // platforms from originalPrompt, so it has to ride on the intent.
+            return {
+                ...this.createIntent(INTENT_TYPES.EDIT, OPERATIONS.REPURPOSE_SHORTS, { constraints: { count, platform: this.inferPlatform(lower) } }),
+                originalPrompt: prompt,
+            };
         }
 
         // "extract personal stories" / "best parts for social" etc.

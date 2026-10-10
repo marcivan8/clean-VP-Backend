@@ -90,6 +90,9 @@ export const OPERATIONS = {
     REORDER_SEGMENT: 'reorder_segment',
     REORDER_CLIPS: 'reorder_clips',
     PLACE_CONTEXTUAL_BROLL: 'place_contextual_broll',
+    REPURPOSE_SHORTS: 'repurpose_shorts',
+    DESIGN_SCENE: 'design_scene',
+    EXTRACT_SHORT: 'extract_short',
 
     // Conversational
     CHAT: 'chat',

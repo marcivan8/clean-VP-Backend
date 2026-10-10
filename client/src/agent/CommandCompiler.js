@@ -1084,6 +1084,8 @@ const COMMAND_REGISTRY = new Map([
     ['detect_speakers',  { compiler: compileAtomicStore('detect_speakers', 'Detect speakers (analysis only)') }],
     ['emphasize_keywords', { compiler: compileAtomicStore('emphasize_keywords', 'Highlight the key word of each caption') }],
     ['add_template',              { compiler: compileAtomicStore('add_template', 'Add an animated template') }],
+    ['addMotionComponent',        { compiler: compileAtomicStore('addMotionComponent', 'Add a motion graphics component') }],
+    ['design_scene',              { compiler: compileAtomicStore('design_scene', 'Design a graphics sequence from the brief') }],
     ['sync_cutaways',             { compiler: compileAtomicStore('sync_cutaways', 'Place cutaways and number pops on the words') }],
     ['extract_short',             { compiler: compileAtomicStore('extract_short', 'Keep the strongest moment as a short') }],
     ['apply_style_recipe',        { compiler: compileAtomicStore('apply_style_recipe', 'Apply a style recipe') }],

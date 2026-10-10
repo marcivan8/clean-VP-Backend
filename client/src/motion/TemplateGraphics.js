@@ -23,7 +23,9 @@ export const TEMPLATE_KINDS = ['counter', 'price-pop', 'logo-card', 'code-window
     // Online trend additions (Talking Head, Vlog, Short Form, Repurposing)
     'lower-third-minimal', 'location-badge', 'retention-progress-bar', 'quote-card',
     // Expanded Motion Catalog (Editorial, Social Proof, Comparison, KPI)
-    'comparison-card', 'social-notification', 'comment-bubble', 'kpi-stat-callout', 'newspaper-headline', 'search-bar'];
+    'comparison-card', 'social-notification', 'comment-bubble', 'kpi-stat-callout', 'newspaper-headline', 'search-bar',
+    // R95 PHASE 2: a sized, gradient-filled backdrop for a block of text
+    'panel'];
 
 /** R92: the shape kinds (drawn strokes and charts, not cards). */
 export const SHAPE_KINDS = ['highlight-box', 'underline', 'circle-callout', 'arrow', 'progress-bar', 'bar-chart', 'burst',
@@ -67,6 +69,10 @@ export const TEMPLATE_DEFAULTS = {
     'kpi-stat-callout':     { stat: '+184%', label: 'ORGANIC RETENTION RATE', color: '#10B981', accent: '#38BDF8' },
     'newspaper-headline':  { publication: 'THE TECH DISPATCH', headline: 'AI OVERHAULS CREATOR PRODUCTION', highlight: 'OVERHAULS', date: 'OCTOBER 2026' },
     'search-bar':          { query: 'how to edit viral videos', placeholder: 'Search Google...', color: '#00E5FF' },
+    // R95 PHASE 2 - `panel`: the backdrop a block of text sits on, sized by
+    // the layout (`w`/`h` in reference px) rather than guessed. Two colours
+    // make a real gradient; `opacity` keeps the footage readable through it.
+    'panel': { color: '#0E0F11', color2: null, angle: 160, opacity: 0.72, radius: 28, border: 0, borderColor: '#FFFFFF', reveal: 'wipe', w: 0, h: 0 },
 };
 
 /** Width as a fraction of the frame, the size a new template is dropped at. */
@@ -79,6 +85,7 @@ export const TEMPLATE_WIDTH_FRACTION = {
     'lower-third-minimal': 0.75, 'location-badge': 0.55, 'retention-progress-bar': 0.88, 'quote-card': 0.82,
     'comparison-card': 0.85, 'social-notification': 0.72, 'comment-bubble': 0.82,
     'kpi-stat-callout': 0.78, 'newspaper-headline': 0.86, 'search-bar': 0.80,
+    'panel': 0.8,
 };
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -96,7 +103,11 @@ function splitLines(code) {
 /** Natural size of a template in reference pixels. */
 export function templateSize(kind, params) {
     const p = templateParams(kind, params);
+    if (Number(p.w) > 0 && Number(p.h) > 0) {
+        return { w: Math.round(Number(p.w)), h: Math.round(Number(p.h)) };
+    }
     switch (kind) {
+        case 'panel': return { w: 900, h: 300 };
         case 'counter': return { w: 540, h: 300 };
         case 'price-pop': return { w: 680, h: 300 };
         case 'logo-card': return { w: 780, h: 210 };
@@ -511,6 +522,71 @@ function drawHighlightBox(ctx, p, t, duration) {
     ctx.restore();
 }
 
+/**
+ * R95 PHASE 2 - a backdrop panel: rounded, gradient-filled, revealed by a
+ * wipe, a grow or a fade. Its size comes from the layout (`w`/`h`), so the
+ * panel is as wide as the text it carries rather than a fixed fraction.
+ *
+ * Drawn here, which means ONE implementation covers preview and export: the
+ * worker's `server/compositor/TemplateRenderer.js` imports this same module
+ * and calls `drawTemplate`.
+ */
+function drawPanel(ctx, p, t, duration) {
+    const w = Number(p.w) > 0 ? Number(p.w) : 900;
+    const h = Number(p.h) > 0 ? Number(p.h) : 300;
+    const radius = clamp(Number(p.radius) >= 0 ? Number(p.radius) : 28, 0, Math.min(w, h) / 2);
+    const baseAlpha = clamp(Number(p.opacity) >= 0 ? Number(p.opacity) : 0.72, 0, 1);
+    const inProg = easeOutCubic(clamp(t / SHAPE_IN, 0, 1));
+    const outProg = clamp((duration - t) / SHAPE_OUT, 0, 1);
+    const reveal = String(p.reveal || 'wipe');
+
+    ctx.save();
+    ctx.globalAlpha = baseAlpha * (reveal === 'wipe' ? 1 : inProg) * outProg;
+
+    // The fill: one colour, or a real gradient along `angle`.
+    let fill = p.color || '#0E0F11';
+    if (p.color2) {
+        // Number(0) || 160 would turn a horizontal gradient into a diagonal one.
+        const angle = Number.isFinite(Number(p.angle)) ? Number(p.angle) : 160;
+        const rad = (angle * Math.PI) / 180;
+        const cx = w / 2;
+        const cy = h / 2;
+        const half = Math.abs(Math.cos(rad) * w) / 2 + Math.abs(Math.sin(rad) * h) / 2;
+        const g = ctx.createLinearGradient(
+            cx - Math.cos(rad) * half, cy - Math.sin(rad) * half,
+            cx + Math.cos(rad) * half, cy + Math.sin(rad) * half,
+        );
+        g.addColorStop(0, p.color || '#0E0F11');
+        g.addColorStop(1, p.color2);
+        fill = g;
+    }
+
+    if (reveal === 'wipe') {
+        // Grow from the left edge, so text can appear as the panel passes under it.
+        ctx.beginPath();
+        ctx.rect(0, 0, Math.max(0, w * inProg), h);
+        ctx.clip();
+    } else if (reveal === 'grow') {
+        ctx.translate(w / 2, h / 2);
+        ctx.scale(1, Math.max(0.001, inProg));
+        ctx.translate(-w / 2, -h / 2);
+    }
+
+    ctx.fillStyle = fill;
+    roundRect(ctx, 0, 0, w, h, radius);
+    ctx.fill();
+
+    const border = Number(p.border) || 0;
+    if (border > 0) {
+        ctx.strokeStyle = p.borderColor || '#FFFFFF';
+        ctx.lineWidth = clamp(border, 1, 24);
+        ctx.globalAlpha *= 0.8;
+        roundRect(ctx, border / 2, border / 2, w - border, h - border, Math.max(0, radius - border / 2));
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+
 function drawUnderline(ctx, p, t, duration) {
     const { w, h } = templateSize('underline', p);
     const a = shapeAlpha(t, duration);
@@ -521,8 +597,9 @@ function drawUnderline(ctx, p, t, duration) {
     shapeStroke(ctx, { ...p, thickness: Number(p.thickness) || 18 });
     ctx.beginPath();
     const y0 = h * 0.62, y1 = h * 0.42;
-    ctx.moveTo(20, y0);
-    ctx.quadraticCurveTo(w * 0.5, h * 0.3, w - 20, y1);
+    const padX = Math.min(20, Math.round(w * 0.08));
+    ctx.moveTo(padX, y0);
+    ctx.quadraticCurveTo(w * 0.5, h * 0.3, w - padX, y1);
     strokeProgress(ctx, w * 1.02, prog);
     ctx.restore();
 }
@@ -1585,6 +1662,7 @@ export function drawTemplate(ctx, kind, params, t, duration, opts = {}) {
         else if (kind === 'kpi-stat-callout') drawKpiStatCallout(ctx, p, tt, d, F);
         else if (kind === 'newspaper-headline') drawNewspaperHeadline(ctx, p, tt, d, F);
         else if (kind === 'search-bar') drawSearchBar(ctx, p, tt, d, F);
+        else if (kind === 'panel') drawPanel(ctx, p, tt, d);
     } finally {
         ctx.restore();
     }
