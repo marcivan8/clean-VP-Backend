@@ -16,7 +16,7 @@ import { legacyPackToCaptionStyle } from '../../motion/CaptionModel.js';
 import { CAPTION_STYLES, FONT_STACK } from './captionStylePacks.js';
 import BrainPanel from '../BrainPanel.jsx';
 import { useTranslation } from 'react-i18next';
-import { enqueueIfVideoNotReady } from '../../agent/rokaPromptQueue.js';
+import { enqueueIfVideoNotReady, drainPromptQueue } from '../../agent/rokaPromptQueue.js';
 import EditingStylePicker from './EditingStylePicker.jsx';
 
 
@@ -918,6 +918,17 @@ const ReasoningPanel = ({ className }) => {
         if (projectId && !assets.some(a => a.isProxying)) analyzeProject('edit_applied');
     }, [editCount, projectId, assets, analyzeProject]);
 
+    // Run queued requests (above) once the video is ready and Roka is free.
+    // Mirrors MobileAIBar's wiring — without this, a prompt queued on desktop
+    // while the video is still preparing would never run.
+    useEffect(() => {
+        const run = () => { drainPromptQueue(t); };
+        const offTimeline = useTimelineStore.subscribe(run);
+        const offAI = useAIStore.subscribe(run);
+        run();
+        return () => { offTimeline(); offAI(); };
+    }, [t]);
+
     // Push each NEW Brain advisory into the chronological feed.
     // BrainPanel used to be a fixed element rendered after the feed, so its card
     // always appeared below everything regardless of when the advice was
@@ -1012,9 +1023,13 @@ const ReasoningPanel = ({ className }) => {
             return;
         }
 
-        // Mobile only: video still uploading / preparing → Roka queues the request
-        // and runs it once the video can play (agent/rokaPromptQueue.js).
-        if (typeof window !== 'undefined' && window.innerWidth < 768 && enqueueIfVideoNotReady(command, t)) {
+        // Video still uploading / preparing → Roka queues the request and runs
+        // it once the video can play (agent/rokaPromptQueue.js), instead of running
+        // against an asset with no usable duration yet (which read as a bogus
+        // "duration mismatch, please clarify"). Desktop used to skip this check
+        // entirely and hit that failure directly; the drain effect below is what
+        // actually re-runs the queued prompt once the video is ready.
+        if (enqueueIfVideoNotReady(command, t)) {
             setIsAnalyzing(false);
             return;
         }
