@@ -229,6 +229,34 @@ const EffectControls = ({
     playhead = 0
 }) => {
     const { t } = useTranslation('editor');
+
+    // These three hooks must run on EVERY render, so they stay ABOVE the
+    // "no parameters" early return below. They used to sit under it, so
+    // selecting an effect after that state had rendered called three hooks
+    // more than the previous render -- React error #310, which throws out of
+    // render and takes the panel down instead of just showing the controls.
+    const params = definition?.params || {};
+    const currentValues = effect?.params || {};
+    // useMemo so hasKeyframeAt below keeps a stable identity across renders
+    // (a fresh {} literal every render would rebuild it every time).
+    const keyframes = useMemo(() => effect?.keyframes || {}, [effect]);
+
+    const handleParamChange = useCallback((paramName, value) => {
+        if (!effect) return;
+        onUpdateParams(effect.id, { [paramName]: value });
+    }, [effect, onUpdateParams]);
+
+    const handleAddKeyframe = useCallback((paramName, value) => {
+        if (!effect) return;
+        onAddKeyframe(effect.id, paramName, playhead, value);
+    }, [effect, playhead, onAddKeyframe]);
+
+    const hasKeyframeAt = useCallback((paramName) => {
+        const paramKeyframes = keyframes[paramName];
+        if (!paramKeyframes) return false;
+        return paramKeyframes.some(k => Math.abs(k.time - playhead) < 0.01);
+    }, [keyframes, playhead]);
+
     if (!effect || !definition) {
         return (
             <div className="text-xs text-muted-foreground text-center py-2">
@@ -236,24 +264,6 @@ const EffectControls = ({
             </div>
         );
     }
-
-    const params = definition.params || {};
-    const currentValues = effect.params || {};
-    const keyframes = effect.keyframes || {};
-
-    const handleParamChange = useCallback((paramName, value) => {
-        onUpdateParams(effect.id, { [paramName]: value });
-    }, [effect.id, onUpdateParams]);
-
-    const handleAddKeyframe = useCallback((paramName, value) => {
-        onAddKeyframe(effect.id, paramName, playhead, value);
-    }, [effect.id, playhead, onAddKeyframe]);
-
-    const hasKeyframeAt = useCallback((paramName) => {
-        const paramKeyframes = keyframes[paramName];
-        if (!paramKeyframes) return false;
-        return paramKeyframes.some(k => Math.abs(k.time - playhead) < 0.01);
-    }, [keyframes, playhead]);
 
     // Reset to defaults
     const handleReset = () => {

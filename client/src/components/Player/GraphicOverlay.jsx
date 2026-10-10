@@ -93,14 +93,22 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
         aspectRatio:   state.aspectRatio,
     })));
 
-    const overlayTracks = tracks.filter(t => t.type === 'overlay');
-    if (overlayTracks.length === 0) return null;
-
-    // Check if the current playhead is on a video clip with active background separation
+    // Every hook must run on EVERY render, so this one stays ABOVE the early
+    // return below. It used to sit under it: a project with no overlay track
+    // bailed out before this useMemo, so the first render that DID have one
+    // called one hook more than the previous render -> React error #310
+    // ("rendered more hooks than during the previous render"), which threw out
+    // of render and unmounted the whole player subtree -- a blank dark preview
+    // with nothing in the UI to explain it. Previewing a short hits exactly
+    // that: agent/shortPolish.js adds track-short-graphics (type 'overlay')
+    // to a timeline that usually had no overlay track at all.
     const hasActiveMatte = React.useMemo(() => {
         const vidClips = tracks.filter(t => t.type === 'video' || t.type === 'image').flatMap(t => t.clips || []);
         return vidClips.some(c => c.layerTarget === 'background' && c.layerMask && currentTime >= c.start && currentTime < c.start + c.duration);
     }, [tracks, currentTime]);
+
+    const overlayTracks = tracks.filter(t => t.type === 'overlay');
+    if (overlayTracks.length === 0) return null;
 
     const activeClips = overlayTracks.flatMap(track =>
         track.clips

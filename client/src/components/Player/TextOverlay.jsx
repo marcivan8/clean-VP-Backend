@@ -253,14 +253,19 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
         return () => observer.disconnect();
     }, [aspectRatio]);
 
-    const textTracks = tracks.filter(t => t.type === 'text');
-    if (textTracks.length === 0) return null;
-
-    // Check if the current playhead is on a video clip with active background separation
+    // Hook before the early return -- see the same fix in GraphicOverlay.jsx.
+    // A timeline with no text track bailed out above this useMemo, so the
+    // first render that had one called an extra hook and threw React error
+    // #310, unmounting the player into a blank dark frame. A short preview
+    // adds track-short-title (type 'text') for the hook headline, so this
+    // fired together with the overlay one every time a short was previewed.
     const hasActiveMatte = React.useMemo(() => {
         const vidClips = tracks.filter(t => t.type === 'video' || t.type === 'image').flatMap(t => t.clips || []);
         return vidClips.some(c => c.layerTarget === 'background' && c.layerMask && currentTime >= c.start && currentTime < c.start + c.duration);
     }, [tracks, currentTime]);
+
+    const textTracks = tracks.filter(t => t.type === 'text');
+    if (textTracks.length === 0) return null;
 
     const activeTextClips = textTracks.flatMap(track =>
         track.clips.filter(clip => {
