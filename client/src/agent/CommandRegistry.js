@@ -506,6 +506,22 @@ export const COMMANDS = [
         destructive: false,
     },
     {
+        // R97: icon/emoji insert command. "add a fire emoji" places that
+        // glyph; "add a heart icon"/"add a sticker" resolves a keyword
+        // against the sticker library; "add 🔥" uses the literal glyph the
+        // user already typed. See stickerQuery.js for the parsing.
+        id: 'add_sticker',
+        category: 'asset',
+        label: 'Add an icon or emoji',
+        summary: 'Places an icon, emoji or sticker overlay from the library.',
+        phrases: ['add an emoji', 'add emoji', 'insert an emoji', 'add a sticker', 'insert a sticker',
+                  'add an icon', 'insert an icon', 'add a fire emoji', 'add a heart emoji',
+                  'put an emoji', 'add some emojis', 'add icons', 'add a sticker of', 'put a sticker',
+                  'ajoute un emoji', 'ajoute une icone', 'ajoute un autocollant'],
+        params: [{ name: 'query', type: 'text', optional: true }],
+        destructive: false,
+    },
+    {
         id: 'add_sfx',
         category: 'asset',
         label: 'Add a sound effect',

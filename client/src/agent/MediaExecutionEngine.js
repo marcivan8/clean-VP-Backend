@@ -51,6 +51,8 @@ import { applyPresetToClip, AUTO_ANIMATE } from '../motion/ClipAdapter.js';
 import { composeMotion, planMotionFromBrief, COMPOSED } from '../motion/MotionComposer.js';
 import { normalizeMatte } from '../motion/MatteSettings.js';
 import { sfxLevel, sfxVolume, collectSfxCues, SFX_QUERIES } from './sfxCues.js'; // R92 round A
+import { stickerQueryFromText } from './stickerQuery.js'; // R97
+import { buildStickerPlacement } from '../motion/StickerLibraryAdapter.js'; // R97
 import { pickMotionTargets, layersForPrompt, scriptFor } from './composeMotionTargets.js';
 import { selectAnimateMoments, sfxPlayableUrl, countMoments, CLUSTER_S } from './animateMoments.js';
 import i18next from 'i18next';
@@ -1298,6 +1300,73 @@ export class MediaExecutionEngine {
                     isSFX: true,
                 });
                 return { action, success: true, message: `Added "${asset.display_name || asset.name || query}" at ${at.toFixed(1)} s.` };
+            }
+
+            // ── R97: icon/emoji insert ("add a fire emoji" / "add a heart
+            // icon" / "add a sticker") ─────────────────────────────────────
+            // A literal emoji glyph the user already typed is rendered as a
+            // big animated text clip (ComponentLibrary's AnimatedEmoji — no
+            // image library needed, system emoji fonts already draw it).
+            // A keyword resolves against the sticker library (R83's
+            // assets+stickers tables, via the new /api/stickers/search
+            // route) and is placed as an overlay image through
+            // StickerLibraryAdapter. No emoji and no keyword falls back to a
+            // default sparkle glyph rather than silently doing nothing.
+            case 'add_sticker': {
+                const st = useTimelineStore.getState();
+                const start = Number(st.currentTime) || 0;
+
+                if (args.emoji) {
+                    const result = st.addMotionComponent('AnimatedEmoji', 'pop', { emoji: args.emoji, start });
+                    if (!result?.success) return { action, success: false, message: result?.error || `Could not place the ${args.emoji} emoji.` };
+                    return { action, success: true, message: `Added the ${args.emoji} emoji. One undo removes it.` };
+                }
+
+                const query = String(args.query || '').slice(0, 60);
+                if (!query) {
+                    // No keyword and no literal glyph — still do something
+                    // useful rather than failing the whole prompt.
+                    const result = useTimelineStore.getState().addMotionComponent('AnimatedEmoji', 'pop', { emoji: '✨', start });
+                    if (!result?.success) return { action, success: false, message: result?.error || 'Could not place an emoji.' };
+                    return { action, success: true, message: 'Added a ✨ emoji (say "add a fire emoji" or "add a heart icon" to pick one). One undo removes it.' };
+                }
+
+                let sticker = null;
+                try {
+                    const res = await authFetch('/api/stickers/search', {
+                        method: 'POST',
+                        body: JSON.stringify({ query, kind: args.kind || null, limit: 5 }),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    const rows = Array.isArray(data?.results) ? data.results : [];
+                    sticker = rows[0] || null;
+                } catch (err) {
+                    console.warn('[add_sticker] search failed:', err.message);
+                }
+
+                if (!sticker) {
+                    // Honest failure, same convention as place_sfx's own
+                    // library miss: there is no word-to-emoji dictionary in
+                    // this codebase (confirmed while building this command —
+                    // AnimatedEmoji only ever renders a glyph it is GIVEN),
+                    // so a missed keyword cannot be silently swapped for a
+                    // guessed glyph.
+                    return { action, success: false, message: `No "${query}" icon or emoji was found in the library. Try another word, or add the emoji character directly, e.g. "add 🔥".` };
+                }
+
+                const placement = buildStickerPlacement(sticker, { x: 78, y: 18, duration: 2.5, motionId: 'sticker-pop' });
+                if (!placement) return { action, success: false, message: `"${query}" matched a library entry with no usable image.` };
+
+                const trackId = useTimelineStore.getState().addOverlayClip(placement.asset, {
+                    kind: 'sticker',
+                    start,
+                    duration: placement.clip.duration,
+                    x: placement.clip.x,
+                    y: placement.clip.y,
+                    scale: placement.clip.scale,
+                });
+                if (!trackId) return { action, success: false, message: `Could not place "${query}" on the timeline.` };
+                return { action, success: true, message: `Added "${sticker.display_name || sticker.name || query}" from the library. One undo removes it.` };
             }
 
             // ── R92 round C: the pro short finish on the MAIN edit ────────────

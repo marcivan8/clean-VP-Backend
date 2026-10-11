@@ -290,6 +290,7 @@ app.use('/api/favorites', require('./routes/favoritesRoutes')); // User favorite
 // ── Creative Asset Intelligence System ────────────────────────────────────────
 app.use('/api/luts',   require('./server/routes/lutRoutes'));          // LUT library + CSS preview
 app.use('/api/audio',  require('./server/routes/audioEngineRoutes'));  // Asset search + recommendations
+app.use('/api/stickers', require('./server/routes/stickerRoutes'));  // R97: icon/emoji library search
 app.use('/api/audio',  require('./server/routes/audioExportRoutes')); // Audio-only export (mp3/wav/aac/m4a)
 // NOTE: /api/presets is already mounted above (line 241). The new server/routes/presetRoutes.js
 // extends it — update the require() path when the old routes/presetRoutes.js is retired.

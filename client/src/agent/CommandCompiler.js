@@ -1095,6 +1095,7 @@ const COMMAND_REGISTRY = new Map([
     ['polish_short',              { compiler: compileAtomicStore('polish_short', 'Pro short finish') }],
     ['auto_sfx',                  { compiler: compileAtomicStore('auto_sfx', 'Add sound effects on the edit') }],
     ['place_sfx',                 { compiler: compileAtomicStore('place_sfx', 'Add a sound effect') }],
+    ['add_sticker',               { compiler: compileAtomicStore('add_sticker', 'Add an icon or emoji') }],
     ['remove_background',         { compiler: compileAtomicStore('remove_background', 'Remove the background') }],
     ['zoom_speaker',              { compiler: compileAtomicStore('zoom_speaker', 'Zoom to the speaker') }],
     ['track_speaker',             { compiler: compileAtomicStore('track_speaker', 'Track the speaker') }],

@@ -70,6 +70,7 @@ export function colorLookQuery(constraints, originalPrompt = '') {
 }
 
 import { sfxQueryFromText } from './sfxCues.js'; // R92 round A
+import { stickerQueryFromText } from './stickerQuery.js'; // R97
 import { platformsFromText, shortCountFromText, getPlatformProfile } from './PlatformProfiles.js'; // R92 round B
 
 export class EditPlanner {
@@ -290,6 +291,21 @@ export class EditPlanner {
             case 'enhance_audio': {
                 return this.buildPlan(planId, 'enhance_audio', [
                     { step_id: 'step_1', action: 'enhance_audio', reason: 'Enhance the voice: less noise, even level, standard loudness' },
+                ]);
+            }
+            case 'add_sticker': {
+                // R97: icon/emoji insert. A literal emoji the user typed
+                // wins outright; otherwise resolve a keyword against the
+                // sticker library; otherwise fall back to a default glyph
+                // at execution time (see MediaExecutionEngine's add_sticker).
+                const parsed = stickerQueryFromText(intent.originalPrompt) || {};
+                const reason = parsed.emoji
+                    ? `Add the ${parsed.emoji} emoji`
+                    : parsed.keyword
+                        ? `Add a ${parsed.keyword} ${parsed.kind || 'icon/emoji'}`
+                        : 'Add an icon or emoji';
+                return this.buildPlan(planId, 'add_sticker', [
+                    { step_id: 'step_1', action: 'add_sticker', args: { emoji: parsed.emoji || null, query: parsed.keyword || null, kind: parsed.kind || null }, reason },
                 ]);
             }
             case 'add_sfx': {
