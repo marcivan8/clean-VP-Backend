@@ -247,6 +247,27 @@ function resolveGeometry(layer, timelineTime, frame) {
     };
 }
 
+/**
+ * R98 — validate/clamp a clip's shadow descriptor before it goes in the plan.
+ * dx/dy/blur are CSS-pixel-ish constants (same convention as CaptionModel's
+ * fixed-px textShadow presets, not frame-fraction-scaled): the preview
+ * applies them as literal CSS px, and CompositorCompiler's
+ * compileShadowSource scales them by the render resolution so a shadow
+ * reads the same size at 720p and at 4K.
+ */
+function normalizeShadow(shadow) {
+    const dx = Number(shadow?.dx);
+    const dy = Number(shadow?.dy);
+    const blur = Number(shadow?.blur);
+    const opacity = Number(shadow?.opacity);
+    return {
+        dx: Number.isFinite(dx) ? dx : 4,
+        dy: Number.isFinite(dy) ? dy : 6,
+        blur: Number.isFinite(blur) ? Math.max(0, blur) : 10,
+        opacity: Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : 0.55,
+    };
+}
+
 /** Round normalised geometry so sample-collapsing isn't defeated by float noise. */
 function roundGeometry(g) {
     const r = (v) => Math.round(v * 100000) / 100000;
@@ -462,6 +483,14 @@ export function buildCompositionPlan(tracks, opts = {}) {
                 animated: geometry.length > 1,
                 geometry,
                 ...(fit ? { fit } : {}),
+                // R98 — generic drop shadow (stickers/icons/shapes/templates).
+                // A constant style switch, not something that animates frame
+                // to frame, so it lives beside the geometry samples rather
+                // than inside them (same reasoning as `fit` above). The
+                // worker (CompositorCompiler's compileShadowSource) scales
+                // dx/dy/blur by the actual render resolution, so this stays
+                // in CSS-pixel-ish units consistent with the preview.
+                ...(clip.shadow ? { shadow: normalizeShadow(clip.shadow) } : {}),
             });
         }
     }

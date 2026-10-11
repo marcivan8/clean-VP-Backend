@@ -995,6 +995,11 @@ export class TimelineStateManager {
                         // hit R58/R66 times before for new clip fields.
                         layerMask: clip.layerMask ?? null,
                         layerTarget: clip.layerTarget ?? null,
+                        // R98 — generic drop shadow (stickers/icons/shapes/
+                        // templates). Same persistence-contract rule as every
+                        // field above: MUST also appear in fromLegacyTracks
+                        // below, or a shadow silently vanishes on reload.
+                        shadow: clip.shadow ?? null,
                         placement: clip.placement ?? null,
                         // R94: the design scene this clip belongs to, and which
                         // node of it this clip is. Same persistence contract as
@@ -1112,6 +1117,8 @@ export class TimelineStateManager {
                                 // R67 — Object Intelligence. Mirrors toLegacyTracks above.
                                 layerMask: legacyClip.layerMask ?? null,
                                 layerTarget: legacyClip.layerTarget ?? null,
+                                // R98 — generic drop shadow. Mirrors toLegacyTracks above.
+                                shadow: legacyClip.shadow ?? null,
                                 placement: legacyClip.placement ?? null,
                                 // R94 — mirrors toLegacyTracks above.
                                 sceneId: legacyClip.sceneId ?? null,

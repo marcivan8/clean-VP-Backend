@@ -522,6 +522,32 @@ export const COMMANDS = [
         destructive: false,
     },
     {
+        // R98: generic drop shadow for stickers/icons/shapes/templates on
+        // the overlay track (NOT captions -- those already have their own
+        // textShadow toggle, TextPanel.jsx). Targets the active clip, else
+        // whichever overlay clip is under the playhead, else the first one
+        // -- same fallback chain _matteTargets already uses for video.
+        id: 'add_shadow',
+        category: 'transform',
+        label: 'Add a shadow',
+        summary: 'Adds a drop shadow to the selected sticker, icon, shape or graphic.',
+        phrases: ['add a shadow', 'add shadow', 'add a drop shadow', 'give it a shadow',
+                  'add a shadow to the icon', 'add a shadow to the sticker', 'add a shadow to the logo',
+                  'add a shadow to the shape', 'put a shadow on it', 'ajoute une ombre'],
+        negative: ['text', 'caption', 'captions'],
+        destructive: false,
+    },
+    {
+        id: 'remove_shadow',
+        category: 'transform',
+        label: 'Remove the shadow',
+        summary: 'Removes the drop shadow from the selected sticker, icon, shape or graphic.',
+        phrases: ['remove the shadow', 'remove shadow', 'clear the shadow', 'remove the drop shadow',
+                  'take off the shadow', 'enleve l ombre'],
+        negative: ['text', 'caption', 'captions'],
+        destructive: false,
+    },
+    {
         id: 'add_sfx',
         category: 'asset',
         label: 'Add a sound effect',

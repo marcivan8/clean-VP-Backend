@@ -1083,6 +1083,8 @@ const COMMAND_REGISTRY = new Map([
     ['crop_clip',        { compiler: compileCropClip }],
     ['detect_speakers',  { compiler: compileAtomicStore('detect_speakers', 'Detect speakers (analysis only)') }],
     ['emphasize_keywords', { compiler: compileAtomicStore('emphasize_keywords', 'Highlight the key word of each caption') }],
+    ['add_shadow',    { compiler: compileAtomicStore('add_shadow', 'Add a drop shadow') }],
+    ['remove_shadow', { compiler: compileAtomicStore('remove_shadow', 'Remove the drop shadow') }],
     ['add_template',              { compiler: compileAtomicStore('add_template', 'Add an animated template') }],
     ['addMotionComponent',        { compiler: compileAtomicStore('addMotionComponent', 'Add a motion graphics component') }],
     ['design_scene',              { compiler: compileAtomicStore('design_scene', 'Design a graphics sequence from the brief') }],

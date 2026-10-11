@@ -67,6 +67,30 @@ const OverlayVideo = ({ clip, currentTime, isPlaying, style }) => {
 };
 
 
+/**
+ * R98 — CSS for a clip's generic drop shadow (stickers/icons/shapes/
+ * templates), combined with any motion blur into ONE `filter` string (CSS
+ * filter accepts several functions space-separated; a second `filter`
+ * property would just overwrite the first, not merge). `drop-shadow`, not
+ * `box-shadow`: it follows the element's own alpha silhouette -- a round
+ * icon gets a round shadow, not a square one -- which is the whole point for
+ * a sticker/icon/shape. The exact same magnitude is reproduced in export by
+ * CompositorCompiler.js's compileShadowSource, so a shadow looks the same
+ * in the preview and in the rendered video.
+ */
+function overlayFilterCss(motionBlur, clipShadow) {
+    const parts = [];
+    if (motionBlur > 0) parts.push(`blur(${motionBlur}px)`);
+    if (clipShadow) {
+        const dx = Number(clipShadow.dx) || 0;
+        const dy = Number(clipShadow.dy) || 0;
+        const blur = Math.max(0, Number(clipShadow.blur) || 0);
+        const alpha = Math.max(0, Math.min(1, Number.isFinite(Number(clipShadow.opacity)) ? Number(clipShadow.opacity) : 0.55));
+        parts.push(`drop-shadow(${dx}px ${dy}px ${blur}px rgba(0,0,0,${alpha}))`);
+    }
+    return parts.length ? parts.join(' ') : null;
+}
+
 // Must match DEFAULT_WIDTH_FRACTION in motion/Compositor.js's resolveGeometry.
 // The export computes an overlay's on-screen size as 25% of frame width times
 // clip.scale; the preview needs the identical constant or a sticker would be
@@ -292,9 +316,11 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
                 // as the export's scale+crop (CompositorCompiler, `fit`).
                 if (hasLayoutFrame(clip)) {
                     const css = frameToCss(clip.frame);
+                    const framedFilter = overlayFilterCss(0, clip.shadow);
                     const mediaStyle = {
                         ...css.media,
                         opacity: motion.opacity,
+                        ...(framedFilter ? { filter: framedFilter } : {}),
                         pointerEvents: 'none',
                     };
                     return (
@@ -316,12 +342,13 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
                 // The wrapper carries position/size/rotation so the rotate
                 // handle (a child) can sit on the sticker's corner; opacity and
                 // blur stay on the media so the handle itself never fades.
+                const overlayFilter = overlayFilterCss(motion.blur, clip.shadow);
                 const mediaStyle = {
                     display: 'block',
                     width: '100%',
                     height: 'auto',
                     opacity: motion.opacity,
-                    ...(motion.blur > 0 ? { filter: `blur(${motion.blur}px)` } : {}),
+                    ...(overlayFilter ? { filter: overlayFilter } : {}),
                     pointerEvents: 'none',
                 };
                 return (
@@ -342,7 +369,7 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
                         }}
                     >
                         {isTemplate
-                            ? <TemplateCanvas clip={clip} currentTime={currentTime} style={{ opacity: motion.opacity, pointerEvents: 'none', ...(motion.blur > 0 ? { filter: `blur(${motion.blur}px)` } : {}) }} />
+                            ? <TemplateCanvas clip={clip} currentTime={currentTime} style={{ opacity: motion.opacity, pointerEvents: 'none', ...(overlayFilter ? { filter: overlayFilter } : {}) }} />
                             : isVideo
                                 ? <OverlayVideo clip={clip} currentTime={currentTime} isPlaying={isPlaying} style={mediaStyle} />
                                 : <img src={src} alt={clip.name || 'overlay'} draggable={false} style={mediaStyle} />}

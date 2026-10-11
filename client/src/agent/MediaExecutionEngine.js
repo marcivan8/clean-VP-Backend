@@ -788,6 +788,29 @@ export class MediaExecutionEngine {
     }
 
     /**
+     * R98: which overlay-track clip (sticker/icon/shape/template -- every kind
+     * GraphicOverlay.jsx renders) a generic shadow command applies to. Same
+     * active -> selected -> under-playhead -> first fallback chain
+     * _matteTargets uses above, scoped to the overlay tracks rather than
+     * video, since that's where stickers/icons/shapes/templates live. The
+     * text/caption track is deliberately excluded -- captions already have
+     * their own textShadow toggle (TextPanel.jsx), a different mechanism
+     * (CSS text-shadow, not drop-shadow) for a different element shape.
+     */
+    _overlayTargets(store, args = {}) {
+        const overlayTracks = (store.tracks || []).filter(t => t.type === 'overlay');
+        const all = overlayTracks.flatMap(t => (t.clips || []).map(c => ({ trackId: t.id, clipId: c.id, clip: c })));
+        if (all.length === 0) return [];
+        if (args.all) return all;
+        const wanted = args.clipId || (store.selectedClipIds || []).find(id => all.some(x => x.clipId === id)) || store.activeClipId;
+        const byId = all.find(x => x.clipId === wanted);
+        if (byId) return [byId];
+        const t = Number(store.currentTime) || 0;
+        const under = all.find(x => t >= (Number(x.clip.start) || 0) && t < (Number(x.clip.start) || 0) + (Number(x.clip.duration) || 0));
+        return [under || all[0]];
+    }
+
+    /**
      * R92: make sure a clip has a mask covering its trimmed range; bake one
      * in the browser if not. Returns { ok, baked, people, error }.
      */
@@ -1367,6 +1390,35 @@ export class MediaExecutionEngine {
                 });
                 if (!trackId) return { action, success: false, message: `Could not place "${query}" on the timeline.` };
                 return { action, success: true, message: `Added "${sticker.display_name || sticker.name || query}" from the library. One undo removes it.` };
+            }
+
+            // ── R98: generic drop shadow for stickers/icons/shapes/templates
+            // ("add a shadow to the icon" / "remove the shadow") ─────────────
+            // DEFAULT_SHADOW matches the magnitude of TextPanel's own
+            // textShadow toggle preset ('2px 2px 4px rgba(0,0,0,0.8)'), scaled
+            // up slightly since a sticker/shape reads as a larger object on
+            // screen than caption strokes. Rendered as CSS drop-shadow in the
+            // preview (GraphicOverlay.jsx) and an equivalent FFmpeg filter in
+            // export (CompositorCompiler.js) -- drop-shadow, not box-shadow,
+            // because it hugs the clip's own alpha silhouette rather than
+            // drawing a rectangle behind it.
+            case 'add_shadow':
+            case 'remove_shadow': {
+                const st = useTimelineStore.getState();
+                const targets = this._overlayTargets(st, args);
+                if (targets.length === 0) {
+                    return { action, success: false, message: 'There is no sticker, icon, shape or graphic on the timeline yet to add a shadow to.' };
+                }
+                const adding = action === 'add_shadow';
+                const shadow = adding ? { dx: 4, dy: 6, blur: 10, opacity: 0.55 } : null;
+                st.saveToHistory?.();
+                for (const t of targets) {
+                    useTimelineStore.getState().updateClip(t.trackId, t.clipId, { shadow }, { skipHistory: true });
+                }
+                const what = targets.length > 1 ? `${targets.length} items` : (targets[0].clip.name || 'it');
+                return adding
+                    ? { action, success: true, message: `Added a drop shadow to ${what}. One undo removes it.` }
+                    : { action, success: true, message: `Removed the shadow from ${what}. One undo brings it back.` };
             }
 
             // ── R92 round C: the pro short finish on the MAIN edit ────────────

@@ -391,6 +391,8 @@ export class EditPlanner {
             case 'layout_fullscreen':         return this.planSingleStep(planId, 'layout_fullscreen', 'Full-screen cutaway');
             case 'emphasize_keywords': return this.planSingleStep(planId, 'emphasize_keywords', 'Highlight the key word of each caption');
             case 'clear_keywords':     return this.planSingleStep(planId, 'clear_keywords', 'Remove key word highlights from the captions');
+            case 'add_shadow':    return this.planSingleStep(planId, 'add_shadow', 'Add a drop shadow');
+            case 'remove_shadow': return this.planSingleStep(planId, 'remove_shadow', 'Remove the drop shadow');
             case 'apply_lut':      return this.planApplyLUT(planId, constraints, intent.originalPrompt);
             case 'clear_lut':      return this.planClearLUT(planId, constraints);
             case 'recommend_luts': return this.planRecommendLUTs(planId, constraints);

@@ -940,6 +940,13 @@ const useTimelineStore = create(
                 // as groupId above.
                 if (updates.layerMask !== undefined) clipUpdates.layerMask = updates.layerMask;
                 if (updates.layerTarget !== undefined) clipUpdates.layerTarget = updates.layerTarget;
+                // R98 — generic drop shadow for stickers/icons/shapes/
+                // templates on the overlay track (GraphicOverlay.jsx /
+                // TemplateCanvas.jsx). `null` is legitimate (removing a
+                // shadow), same `!== undefined` rule as groupId/layerMask
+                // above — `if (updates.shadow)` would silently drop a
+                // remove_shadow call.
+                if (updates.shadow !== undefined) clipUpdates.shadow = updates.shadow;
 
                 if (Object.keys(clipUpdates).length > 0 && placement.clipId) {
                     timelineManager.dispatch(

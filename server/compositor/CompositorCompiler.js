@@ -217,6 +217,52 @@ function compileOverlaySource(ov, inputIdx, label, frame) {
 }
 
 /**
+ * R98 — a blackened, blurred, dimmed copy of an overlay's own source chain,
+ * for a generic drop shadow (stickers/icons/shapes/templates; see
+ * client/src/motion/Compositor.js's normalizeShadow and GraphicOverlay.jsx's
+ * overlayFilterCss for the preview twin of this). Built by reusing
+ * compileOverlaySource verbatim for the shape/scale/rotate/opacity/blur
+ * chain (so a shadow never silently drifts out of sync with its sprite —
+ * one real implementation of that geometry, not two) and appending the
+ * shadow-specific steps on top of its already-alpha-formatted output:
+ *   - `lutrgb=r=0:g=0:b=0` recolors every pixel to black while leaving the
+ *     alpha channel untouched, so the shadow keeps the sprite's own
+ *     silhouette instead of becoming a rectangle.
+ *   - `gblur` softens it further than the sprite's own blur (a shadow reads
+ *     as a soft blob, not a sharp silhouette).
+ *   - `colorchannelmixer=aa=` dims it to the requested shadow strength.
+ *
+ * dx/dy/blur arrive in Compositor.js's CSS-pixel-ish units (a 1080-wide-frame
+ * reference, matching the preview's typical player size); scaled here by the
+ * ACTUAL render width so a shadow reads the same size at 720p and at 4K —
+ * the same "one place the plan meets a pixel" rule this file's header
+ * documents for geometry.
+ *
+ * @param {object} ov       the overlay entry (must have ov.shadow)
+ * @param {number} inputIdx this overlay's FFmpeg input index (SAME source as
+ *                          the sprite's own chain — two independent chains
+ *                          reading the same input, not a split)
+ * @param {string} label    the stream label to produce (the sprite's own
+ *                          chain, from compileOverlaySource, is `${label}_raw`)
+ * @returns {string} two filter_complex statements joined by `;`, ending in `[label]`
+ */
+function compileShadowSource(ov, inputIdx, label, frame) {
+    const rawLabel = `${label}_raw`;
+    const base = compileOverlaySource(ov, inputIdx, rawLabel, frame);
+
+    const REFERENCE_WIDTH = 1080; // matches Compositor.js normalizeShadow's doc comment
+    const scale = frame.width / REFERENCE_WIDTH;
+    const blurPx = Math.max(0, (Number(ov.shadow?.blur) || 0) * scale);
+    const alpha = Math.max(0, Math.min(1, Number.isFinite(Number(ov.shadow?.opacity)) ? Number(ov.shadow.opacity) : 0.55));
+    // A touch softer than the sprite's own edge, floor so a near-zero blur
+    // (dx/dy-only "hard" shadow) still gets SOME softening rather than a
+    // razor-sharp silhouette, which would read as a second sticker, not a shadow.
+    const shadowSigma = Math.max(1, blurPx / 2);
+
+    return `${base};[${rawLabel}]lutrgb=r=0:g=0:b=0,gblur=sigma=${n4(shadowSigma)},colorchannelmixer=aa=${n4(alpha)}[${label}]`;
+}
+
+/**
  * Derive a leading fade-in / trailing fade-out window from opacity samples.
  * Returns null when opacity doesn't move in that direction at the relevant end.
  */
@@ -277,10 +323,22 @@ function compileCompositionPlan(plan, inputs) {
     const chains = [];
     drawable.forEach((ov, i) => {
         chains.push(compileOverlaySource(ov, byId.get(ov.id), `ov${i}`, frame));
+        // R98 — a shadowed overlay gets a SECOND source chain: a blackened,
+        // blurred, dimmed copy of the same input, drawn just before the real
+        // sprite (see compileShadowSource's own header for why two chains
+        // from one input rather than a split).
+        if (ov.shadow) chains.push(compileShadowSource(ov, byId.get(ov.id), `ov${i}s`, frame));
     });
+
+    // Total `overlay=` filter ops this graph will emit — a plain overlay
+    // plus one more per shadowed layer — so the LAST one (whichever layer it
+    // belongs to) gets the documented `vout` label, exactly as before R98
+    // when every layer produced exactly one op.
+    const totalOps = drawable.reduce((n, ov) => n + (ov.shadow ? 2 : 1), 0);
 
     // Base video is always input 0.
     let current = '0:v';
+    let opCount = 0;
     drawable.forEach((ov, i) => {
         const samples = decimate(ov.geometry, MAX_GEOMETRY_SAMPLES);
         let xExpr = buildPiecewiseExpr(samples, 'x', frame.width);
@@ -292,14 +350,38 @@ function compileCompositionPlan(plan, inputs) {
             xExpr = `(${xExpr})+(${buildPiecewiseExpr(samples, 'w', frame.width)})/2-overlay_w/2`;
             yExpr = `(${yExpr})+(${buildPiecewiseExpr(samples, 'h', frame.height)})/2-overlay_h/2`;
         }
-        const outLabel = (i === drawable.length - 1) ? 'vout' : `bg${i}`;
+        const enable = `enable='between(t,${n4(ov.outputStart)},${n4(ov.outputEnd)})'`;
 
-        // `enable` gates the overlay to its window; without it the last frame of
-        // a finished overlay would stick for the rest of the video.
-        // `eval=frame` is required for x/y expressions to be re-read per frame.
+        if (ov.shadow) {
+            // Same centred expression as the sprite, offset by the shadow's
+            // own dx/dy (already scaled to this render's resolution inside
+            // compileShadowSource's sibling normalisation — here it's just a
+            // pixel offset on an already-pixel expression).
+            const REFERENCE_WIDTH = 1080;
+            const scale = frame.width / REFERENCE_WIDTH;
+            const dx = n4((Number(ov.shadow.dx) || 0) * scale);
+            const dy = n4((Number(ov.shadow.dy) || 0) * scale);
+            const sxExpr = `(${xExpr})+${dx}`;
+            const syExpr = `(${yExpr})+${dy}`;
+            opCount += 1;
+            const shadowOutLabel = (opCount === totalOps) ? 'vout' : `bg${opCount}`;
+            // `enable` gates the overlay to its window; without it the last frame of
+            // a finished overlay would stick for the rest of the video.
+            // `eval=frame` is required for x/y expressions to be re-read per frame.
+            chains.push(
+                `[${current}][ov${i}s]overlay=x='${sxExpr}':y='${syExpr}'` +
+                `:eval=frame:${enable}` +
+                `[${shadowOutLabel}]`
+            );
+            current = shadowOutLabel;
+        }
+
+        opCount += 1;
+        const outLabel = (opCount === totalOps) ? 'vout' : `bg${opCount}`;
+
         chains.push(
             `[${current}][ov${i}]overlay=x='${xExpr}':y='${yExpr}'` +
-            `:eval=frame:enable='between(t,${n4(ov.outputStart)},${n4(ov.outputEnd)})'` +
+            `:eval=frame:${enable}` +
             `[${outLabel}]`
         );
         current = outLabel;
