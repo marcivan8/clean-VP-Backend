@@ -24,7 +24,7 @@
  */
 
 import { composeMotion, COMPOSED } from '../motion/MotionComposer.js';
-import { stylePackToClipFields } from '../motion/CaptionModel.js';
+import { stylePackToClipFields, groupWordsIntoSegments } from '../motion/CaptionModel.js';
 import { templateParams, templateSize, TEMPLATE_WIDTH_FRACTION } from '../motion/TemplateGraphics.js';
 import { STYLE_RECIPES, pickTransitionCuts, recipeTransitionForCut } from '../motion/StyleRecipes.js';
 import { TRANSITION_DEFAULT_DURATION } from '../motion/TransitionFX.js';
@@ -194,22 +194,70 @@ export function polishShort(built, profile, opts = {}) {
         }
     }
 
-    // 2. Captions: platform pack, safe zone, key words
+    // 2. Captions: platform pack, safe zone, key words.
+    // If the main edit was never captioned first (the common case for a
+    // short pulled straight from raw footage), there is nothing here to
+    // restyle -- this used to silently do nothing, which is the "captions
+    // aren't allowed" symptom. Generate lines from the word-level transcript
+    // (the same grouping the main editor's "Add captions" command uses,
+    // motion/CaptionModel.js's groupWordsIntoSegments) before styling, so a
+    // short always gets captions when a transcript is available, and only
+    // stays silent when there is truly no speech to caption.
     if (want.captions && profile?.captionPack) {
         const fields = stylePackToClipFields(profile.captionPack) || {};
-        let styled = 0;
+        const captionClips = [];
         for (const t of tracks) {
             if (t.type !== 'text' || t.id === 'track-short-title') continue;
             for (const c of t.clips) {
                 const isCaption = (Array.isArray(c.words) && c.words.length > 0) || String(c.clipId || c.id || '').startsWith('caption-') || c.style === 'subtitle';
-                if (!isCaption) continue;
-                Object.assign(c, fields, { x: 50, y: profile.captionY });
-                const idx = emphasisIndices(c.content, opts.plan?.keywords);
-                if (idx.length) c.emphasis = { indices: idx, source: 'auto' };
-                styled += 1;
+                if (isCaption) captionClips.push(c);
             }
         }
-        if (styled) applied.push(`captions (${styled})`);
+
+        let generated = 0;
+        if (captionClips.length === 0 && words.length > 0) {
+            const segments = groupWordsIntoSegments(words, 6, 0.4).filter(seg => (seg.start || 0) < duration);
+            if (segments.length) {
+                // `short-` prefixed, like the hook title, so a re-run of
+                // polish_short on the main edit replaces this batch instead
+                // of stacking a second one (MediaExecutionEngine's
+                // isFinishLayer).
+                const capTrack = trackOf(tracks, 'text', 'track-short-captions', 'Captions');
+                segments.forEach((seg, i) => {
+                    const nextStart = segments[i + 1]?.start;
+                    const clampedEnd = nextStart != null ? Math.min(seg.end || 0, nextStart) : (seg.end || 0);
+                    const segDuration = Math.max(0.3, Math.min(duration - (seg.start || 0), clampedEnd - (seg.start || 0)));
+                    if (segDuration <= 0) return;
+                    const clip = {
+                        id: `short-caption-${i}`,
+                        clipId: `short-caption-${i}`,
+                        type: 'text',
+                        name: seg.text,
+                        content: seg.text,
+                        position: 'bottom',
+                        style: 'subtitle',
+                        textAlign: 'center',
+                        animation: 'none',
+                        words: seg.words,
+                        start: seg.start || 0,
+                        duration: segDuration,
+                        sourceDuration: segDuration,
+                    };
+                    capTrack.clips.push(clip);
+                    captionClips.push(clip);
+                    generated += 1;
+                });
+            }
+        }
+
+        let styled = 0;
+        for (const c of captionClips) {
+            Object.assign(c, fields, { x: 50, y: profile.captionY });
+            const idx = emphasisIndices(c.content, opts.plan?.keywords);
+            if (idx.length) c.emphasis = { indices: idx, source: 'auto' };
+            styled += 1;
+        }
+        if (styled) applied.push(generated ? `captions (${styled}, generated from the transcript)` : `captions (${styled})`);
     }
 
     // 3. Camera: slow push per shot, punch on each moment
