@@ -819,12 +819,33 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         console.log(`[IDELayout] Auto-detected aspect ratio: ${detected}`);
                     }
                 }
-                // The probe gave up (iPhone Safari can time out on a large clip):
-                // detect the shape from the proxy once it exists instead of
-                // leaving the project at its 16:9 default. Only applied if the
-                // ratio is still what it is now (nobody changed it meanwhile).
-                const ratioFromProxy = isVideo && !ratioSet && !(metadata.width && metadata.height);
-                const ratioBeforeProxy = ratioFromProxy ? useTimelineStore.getState().aspectRatio : null;
+                // The probe gave up (iPhone Safari can time out on a large clip,
+                // and some codecs -- HEVC in a non-Safari browser -- never decode
+                // enough to read dimensions at all): read the shape from the proxy
+                // once it exists instead of leaving this asset with no resolution
+                // forever.
+                //
+                // This USED to be gated on `!ratioSet`, a flag that only tracks
+                // whether an EARLIER file in this same multi-file upload already
+                // set the PROJECT's aspect ratio. applyProxyDimensions is the only
+                // code path that ever backfills asset.resolution when the client
+                // probe fails -- so for the 2nd+ video in a batch, once an earlier
+                // file had already set `ratioSet = true`, this never ran again for
+                // this file, and that asset's resolution stayed null permanently.
+                // agent/shortTimeline.js's aspectOf() has no way to determine an
+                // unknown shape, so fillFrameCrop() returns null and the clip is
+                // left uncropped in every short made from it forever -- a short
+                // that renders pillarboxed/shrunk in the 9:16 player instead of
+                // filling the frame, with no error anywhere to explain it.
+                //
+                // Whether THIS FILE needs its dimensions backfilled is independent
+                // of the project-wide ratio-already-set flag, so it is no longer
+                // part of this condition; applyProxyDimensions() already guards
+                // the one thing that DOES need `ratioSet`-like protection -- not
+                // clobbering an aspect ratio someone else set in the meantime --
+                // internally, via its own `st.aspectRatio === ratioBefore` check.
+                const needsResolutionFromProxy = isVideo && !(metadata.width && metadata.height);
+                const ratioBeforeProxy = needsResolutionFromProxy ? useTimelineStore.getState().aspectRatio : null;
 
                 const assetId = `asset-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -957,7 +978,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 isProxying: false,
                                 uploadPhase: 'ready'
                             });
-                            if (ratioFromProxy) applyProxyDimensions(assetId, data, ratioBeforeProxy);
+                            if (needsResolutionFromProxy) applyProxyDimensions(assetId, data, ratioBeforeProxy);
 
                             // Backfill sourceUrl on any clips already placed on the
                             // timeline that belong to this asset — they were added
