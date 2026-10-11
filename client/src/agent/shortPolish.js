@@ -29,6 +29,16 @@ import { templateParams, templateSize, TEMPLATE_WIDTH_FRACTION } from '../motion
 import { STYLE_RECIPES, pickTransitionCuts, recipeTransitionForCut } from '../motion/StyleRecipes.js';
 import { TRANSITION_DEFAULT_DURATION } from '../motion/TransitionFX.js';
 import { normalizeMatte } from '../motion/MatteSettings.js';
+// R95 wiring: the hook title is now a DESIGNED graphic (R93-95's scene
+// engine) instead of a hand-rolled text clip + a hardcoded underline width.
+// `composeComponentScene` sizes the title from the real type scale, measures
+// the underline/accent from the actual headline in the actual frame
+// (`SceneLayout.computeAccentBounds`, replacing the old flat `widthFrac:
+// 0.55`), and keeps the safe zone honestly rather than a guessed `topSafe`
+// offset. `flattenScene` turns that design into the same clip shape this
+// file always produced, so the player, export and undo are unchanged.
+import { composeComponentScene } from '../motion/SceneComposer.js';
+import { flattenScene } from '../motion/SceneSchema.js';
 
 const STOP = new Set(('a an the and or but so to of in on at for with is are was were be been it this that these those i you we they he she my your our their me us them ' +
     'just really very like um uh then also do does did have has had will would can could should not no yes if about from as by here ' +
@@ -36,9 +46,16 @@ const STOP = new Set(('a an the and or but so to of in on at for with is are was
 
 /** Per-platform look of the treatment. */
 export const POLISH_LOOK = Object.freeze({
-    tiktok: { recipe: 'punchy', titleFont: 'Anton', titleColor: '#FFFFFF', accent: '#FFE500', titleEntrance: 'slam-in', titleExit: 'whip-out', cameraEnergy: 0.7, upper: true },
-    reels:  { recipe: 'travel', titleFont: 'Montserrat', titleColor: '#FFFFFF', accent: '#FF3B5C', titleEntrance: 'blur-in', titleExit: 'fade-out', cameraEnergy: 0.45, upper: false },
-    shorts: { recipe: 'punchy', titleFont: 'Anton', titleColor: '#FFFFFF', accent: '#00E5FF', titleEntrance: 'pop-in', titleExit: 'shrink-out', cameraEnergy: 0.6, upper: true },
+    // `titleComponent`/`titlePreset` pick the closest designed look
+    // (motion/SceneComposer.js's `LOOKS`) to what this platform always had:
+    // tiktok's slam-in/whip-out IS KineticTitle's "punchy" preset; shorts'
+    // pop-in/shrink-out is closest to "creator" (which adds a mid-beat wobble
+    // punch); reels' calmer blur/fade has no kinetic-title match, so it uses
+    // TitleSequence's "minimal" fade-in/fade-out instead. `titleColor`/
+    // `accent` still override the preset's own palette per platform.
+    tiktok: { recipe: 'punchy', titleFont: 'Anton', titleColor: '#FFFFFF', accent: '#FFE500', titleComponent: 'KineticTitle', titlePreset: 'punchy', cameraEnergy: 0.7, upper: true },
+    reels:  { recipe: 'travel', titleFont: 'Montserrat', titleColor: '#FFFFFF', accent: '#FF3B5C', titleComponent: 'TitleSequence', titlePreset: 'minimal', cameraEnergy: 0.45, upper: false },
+    shorts: { recipe: 'punchy', titleFont: 'Anton', titleColor: '#FFFFFF', accent: '#00E5FF', titleComponent: 'KineticTitle', titlePreset: 'creator', cameraEnergy: 0.6, upper: true },
 });
 
 const MOMENT_TYPES = new Set(['REVEAL', 'PUNCHLINE_DETECTED', 'EMPHASIS_MOMENT']);
@@ -143,34 +160,37 @@ export function polishShort(built, profile, opts = {}) {
     const applied = [];
     const topSafe = (profile?.safeZone?.top ?? 0.12) * 100;
 
-    // 1. Hook title + underline
+    // 1. Hook title: a designed graphic (kicker/headline + a measured
+    // accent), composed for the real frame and safe zone rather than a flat
+    // text clip over a hardcoded-width underline.
     if (want.title) {
         const headline = (opts.plan?.headline && String(opts.plan.headline).trim())
             || headlineFromText(words.slice(0, 18).map(wordOf).join(' '), { upper: look.upper });
         if (headline) {
             const hookDur = Math.min(Math.max(2.2, (profile?.hookSeconds || 1.5) + 1.4), Math.max(1.2, duration * 0.35));
-            const titleY = topSafe + 10;
-            const beats = [
-                { verb: look.titleEntrance, energy: look.cameraEnergy },
-                { verb: 'punch', at: Math.min(hookDur * 0.55, 1.4), energy: look.cameraEnergy * 0.8 },
-                { verb: look.titleExit, energy: look.cameraEnergy },
-            ];
-            const { animations } = composeMotion({ beats }, { duration: hookDur, kind: 'text' });
-            const titleTrack = trackOf(tracks, 'text', 'track-short-title', 'Hook');
-            titleTrack.clips.push({
-                id: 'short-hook-title', type: 'text', name: 'Hook',
-                content: look.upper ? headline.toUpperCase() : headline,
-                start: 0, duration: hookDur, x: 50, y: titleY,
-                fontFamily: look.titleFont, fontSize: 78, fontWeight: 'bold', color: look.titleColor,
-                stroke: { width: 3, color: '#000000' },
-                textShadow: '0 6px 18px rgba(0,0,0,0.55)',
-                textAlign: 'center',
-                animations, animation: 'none',
-            });
-            const gfx = trackOf(tracks, 'overlay', 'track-short-graphics', 'Short graphics');
-            gfx.clips.push(templateClip('short-hook-underline', 'underline', { color: look.accent, thickness: 16 },
-                { start: 0.25, duration: Math.max(0.8, hookDur - 0.25), y: titleY + 6, widthFrac: 0.55 }));
-            applied.push('hook title');
+            const scene = composeComponentScene(look.titleComponent, look.titlePreset, {
+                title: look.upper ? headline.toUpperCase() : headline,
+                color: look.titleColor,
+                accentColor: look.accent,
+                fontFamily: look.titleFont,
+                duration: hookDur,
+                anchor: 'top',
+            }, { aspectRatio: built?.aspectRatio || '9:16', safeZone: profile?.safeZone });
+            if (scene) {
+                const { placements } = flattenScene(scene);
+                // `short-` prefixed ids (as the old hand-rolled clips always
+                // had) are how `polish_short` finds and replaces this layer
+                // on a re-run instead of stacking a second one - see
+                // MediaExecutionEngine.js's `isFinishLayer`.
+                let textN = 0, gfxN = 0;
+                for (const p of placements) {
+                    const isText = p.trackType === 'text';
+                    const t = trackOf(tracks, isText ? 'text' : 'overlay', isText ? 'track-short-title' : 'track-short-graphics', isText ? 'Hook' : 'Short graphics');
+                    const id = isText ? `short-hook-text-${textN++}` : `short-hook-gfx-${gfxN++}`;
+                    t.clips.push({ ...p.clip, id });
+                }
+                if (placements.length) applied.push('hook title');
+            }
         }
     }
 

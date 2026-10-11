@@ -55,7 +55,7 @@ await check('Preview loads the finished 9:16 short; Back puts the main edit, und
     assert.ok(Math.abs(p.duration - built.duration) < 1e-6);
     assert.equal(p.past.length, 0, 'undo cannot reach into the main edit while previewing');
     assert.equal(p.isPlaying, true);
-    assert.ok(p.tracks.some(t => t.clips.some(c => c.id === 'short-hook-title')), 'the hook title is on the player timeline');
+    assert.ok(p.tracks.some(t => t.clips.some(c => String(c.id).startsWith('short-hook-text-'))), 'the hook title is on the player timeline');
     assert.ok(p.tracks.find(t => t.type === 'video').clips[0].virtualCam, 'speaker framing travels to the player');
     assert.equal(p.shortPreview.label, 'TikTok');
     assert.equal(S.getState().exitShortPreview(), true);

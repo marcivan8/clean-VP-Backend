@@ -152,7 +152,10 @@ await check('every layer is added, tuned per platform, and the input is not chan
     assert.ok(title.animations.some(a => a.presetId === 'composed:slam-in') && title.animations.some(a => a.anchor === 'out'));
     assert.ok(title.y > PP.PLATFORM_PROFILES.tiktok.safeZone.top * 100, 'title below the top UI');
     const gfx = r.tracks.find(t => t.id === 'track-short-graphics').clips;
-    assert.ok(gfx.some(c => c.template.kind === 'underline') && gfx.some(c => c.template.kind === 'price-pop'));
+    // R95 wiring: tiktok's hook title is now KineticTitle's "punchy" preset,
+    // whose measured accent is a burst shape (not a flat underline) - see
+    // motion/SceneComposer.js LOOKS.KineticTitle.punchy.
+    assert.ok(gfx.some(c => c.template.kind === 'burst') && gfx.some(c => c.template.kind === 'price-pop'));
     const cap = r.tracks.find(t => t.id === 't').clips[0];
     assert.equal(cap.y, PP.PLATFORM_PROFILES.tiktok.captionY);
     assert.deepEqual(cap.emphasis.indices, [2, 4]);
@@ -169,8 +172,10 @@ await check('the look differs per platform; an AI headline and keywords win', ()
     const reels = SPo.polishShort(SHORT, PP.PLATFORM_PROFILES.reels, { words: WORDS, plan: { headline: 'The one change that tripled us', keywords: ['year'] } });
     const title = reels.tracks.find(t => t.id === 'track-short-title').clips[0];
     assert.equal(title.content, 'The one change that tripled us', 'Reels keeps sentence case');
-    assert.equal(title.fontFamily, 'Montserrat');
-    assert.ok(title.animations.some(a => a.presetId === 'composed:blur-in'));
+    assert.equal(title.fontFamily, 'Montserrat', 'brand font survives the designed-title wiring');
+    // R95 wiring: reels' hook title is now TitleSequence's "minimal" preset
+    // (closest calm entrance to the old hand-rolled blur-in).
+    assert.ok(title.animations.some(a => a.presetId === 'composed:fade-in'));
     assert.ok(reels.tracks.find(t => t.id === 't').clips[0].emphasis.indices.includes(5), '"year" from the AI keywords');
 });
 await check('the title\'s motion resolves cleanly over its life', () => {

@@ -145,7 +145,10 @@ const DEFAULT_DURATION = { TitleSequence: 4, KineticTitle: 3, StatCallout: 3.5, 
 
 const num = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
 
-/** A look, with `params` allowed to override any colour. */
+/** A look, with `params` allowed to override any colour, and the display
+ *  font (a caller with its own brand type, like a platform's hook title,
+ *  keeps its font while still getting the preset's measured layout, accent
+ *  and motion). */
 function resolveLook(componentId, presetId, params = {}) {
     const table = LOOKS[componentId];
     if (!table) return null;
@@ -159,7 +162,8 @@ function resolveLook(componentId, presetId, params = {}) {
         ...(params.statColor ? { text: params.statColor } : {}),
         ...(params.labelColor ? { sub: params.labelColor } : {}),
     };
-    return { ...look, palette, accent: params.accent || look.accent };
+    const fonts = params.fontFamily ? { ...look.fonts, display: params.fontFamily } : look.fonts;
+    return { ...look, palette, fonts, accent: params.accent || look.accent };
 }
 
 /**
