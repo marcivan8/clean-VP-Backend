@@ -682,12 +682,21 @@ export class MediaExecutionEngine {
      * Returns { trackId: null, clipId: null } (not throw) when not found —
      * every caller above already checks `!clipId` and returns a clean error.
      */
-    /** R92: the SFX audio track (created once, named "SFX"). */
+    /**
+     * R92: the SFX audio track (created once, named "SFX").
+     * skipHistory: true -- the doc comment on _placeSfxCues ("call inside a
+     * history step") means the CALLER already saved history for this whole
+     * operation; without it, creating the track here silently opened a
+     * SECOND undo step on top of the caller's one (found while wiring
+     * polish_short to transcribe first -- a never-transcribed video that
+     * then got sound effects placed on a fresh SFX track broke "one undo"
+     * every time, the exact bug that bit, just one history push removed).
+     */
     _ensureSfxTrack() {
         const live = useTimelineStore.getState();
         const existing = live.tracks?.find(t => t.type === 'audio' && t.name === 'SFX');
         if (existing) return existing.id;
-        const id = live.addTrack('audio');
+        const id = live.addTrack('audio', { skipHistory: true });
         if (id) useTimelineStore.getState().renameTrack(id, 'SFX');
         return id || null;
     }
@@ -1298,12 +1307,31 @@ export class MediaExecutionEngine {
             // effects. One undo.
             case 'polish_short': {
                 const isFinishLayer = c => String(c?.id || '').startsWith('short-') || String(c?.clipId || '').startsWith('short-');
-                const st = useTimelineStore.getState();
+                let st = useTimelineStore.getState();
                 const named = platformsFromText(String(args.brief || ''))[0];
                 const platform = named || (st.editingStyle === 'reel' ? 'reels' : 'tiktok');
                 const profile = PLATFORM_PROFILES[platform];
                 const total = (st.tracks || []).reduce((m, t) => Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
                 if (!(total > 0)) return { action, success: false, message: 'There is nothing on the timeline to finish yet.' };
+
+                // The hook title, captions and number pops all read from the
+                // word-level transcript (st.captions). A video that was never
+                // transcribed -- the common case right after upload -- has
+                // none, so without this every one of those layers used to
+                // silently do nothing: "pro finish" quietly degraded to just
+                // camera moves and transitions, with no sign anything was
+                // skipped. Transcribe the main track first, exactly like the
+                // plain "add captions" command does (and reusing the same
+                // code), so the pro finish gets the same words captions do.
+                // skipHistory: true -- this is one step of the SAME undo as
+                // the rest of the finish below, not a separate one.
+                if (!(Array.isArray(st.captions) && st.captions.length > 0) && job?.signal) {
+                    const sources = listMainTrackSources(st.tracks, st.assets);
+                    if (sources.length > 0) {
+                        await this._captionMainTrackSources(sources, { language: 'en', style: 'default' }, job, '/api/captions/generate', { skipHistory: true });
+                        st = useTimelineStore.getState();
+                    }
+                }
                 const words = Array.isArray(st.captions) ? st.captions : [];
                 const events = await this._fetchSemanticEvents();
                 let plan = null;
@@ -3203,7 +3231,7 @@ export class MediaExecutionEngine {
      * words. Running out of AI operations stops the loop and shows the
      * upgrade prompt, like every other quota hit.
      */
-    async _captionMainTrackSources(sources, resolvedPayload, job, endpoint) {
+    async _captionMainTrackSources(sources, resolvedPayload, job, endpoint, opts = {}) {
         // Per-file progress for the mobile Roka bar (useAIStore.captionProgress).
         // Only shown when there is more than one video; always cleared at the end.
         const showProgress = sources.length > 1;
@@ -3215,13 +3243,13 @@ export class MediaExecutionEngine {
             useAIStore.getState().setCaptionProgress?.({ files: progress.map(x => ({ ...x })) });
         };
         try {
-            return await this._captionMainTrackSourcesRun(sources, resolvedPayload, job, endpoint, setFile, progress);
+            return await this._captionMainTrackSourcesRun(sources, resolvedPayload, job, endpoint, setFile, progress, opts);
         } finally {
             if (showProgress) useAIStore.getState().setCaptionProgress?.(null);
         }
     }
 
-    async _captionMainTrackSourcesRun(sources, resolvedPayload, job, endpoint, setFile, progress) {
+    async _captionMainTrackSourcesRun(sources, resolvedPayload, job, endpoint, setFile, progress, opts = {}) {
         const isDone = (key) => {
             const s = useTimelineStore.getState();
             return !!s.transcriptVerified?.[key] && Array.isArray(s.transcripts?.[key]) && s.transcripts[key].length > 0;
@@ -3336,7 +3364,7 @@ export class MediaExecutionEngine {
         store.setTimelineTranscript?.(words);
         const captions = groupWordsIntoCaptions(words);
         console.log(`[MediaExecutionEngine] 💬 captions: adding ${captions.length} caption clips`);
-        store.addCaptionClips(captions);
+        store.addCaptionClips(captions, { skipHistory: !!opts.skipHistory });
 
         // Files still without words, not counting ones that simply have no speech.
         const missing = Math.max(0, sources.filter(s => !isDone(s.key)).length - noSpeech);

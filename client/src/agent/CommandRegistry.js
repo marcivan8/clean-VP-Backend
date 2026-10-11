@@ -356,6 +356,12 @@ export const COMMANDS = [
         phrases: ['pro finish', 'finish it like a pro', 'make it look pro', 'make it look professional', 'polish the short',
                   'finish the short', 'add a hook title', 'hook title', 'add a hook on screen', 'make it viral', 'make it pop',
                   'finish it for tiktok', 'finish it for reels', 'finish it for shorts',
+                  // R96: "pro grade", not just "look pro" — a near-miss on the
+                  // old wording (Marc's "make it pro grade looking" matched
+                  // NOTHING, so the whole multi-layer finish lost to a single
+                  // unrelated "add captions" match on the rest of the sentence).
+                  'pro grade', 'pro grade looking', 'make it pro grade', 'make it pro grade looking',
+                  'professional looking', 'professional grade', 'looking pro',
                   'finition pro', 'rends le pro', 'ajoute un titre accrocheur', 'titre d accroche'],
         negative: ['remove', 'supprime', 'enleve'],
         destructive: false,

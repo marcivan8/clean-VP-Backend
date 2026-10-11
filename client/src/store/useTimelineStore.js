@@ -2919,11 +2919,15 @@ const useTimelineStore = create(
                 }
             },
 
-            addCaptionClips: (captions) => {
+            addCaptionClips: (captions, { skipHistory = false } = {}) => {
                 if (!captions || captions.length === 0) return;
 
-                // Save history once (before any mutations)
-                get()._saveHistory();
+                // Save history once (before any mutations). Callers that are
+                // themselves one step of a larger undo (e.g. polish_short
+                // transcribing a never-captioned video before building its
+                // other layers) pass skipHistory so this doesn't open a
+                // second undo step on top of the caller's own.
+                if (!skipHistory) get()._saveHistory();
 
                 // Ensure a text track exists — dispatch directly to timelineManager
                 // so we don't trigger addTextTrack()'s own _saveHistory() call.
