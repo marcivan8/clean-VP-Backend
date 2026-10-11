@@ -20,8 +20,20 @@
 import { authFetch } from '../utils/authFetch.js';
 
 const TASKS_VERSION = '0.10.14';
-const TASKS_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TASKS_VERSION}/vision_bundle.mjs`;
-const WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TASKS_VERSION}/wasm`;
+// Two independent CDNs mirror every npm package byte-for-byte; if a
+// firewall, an ad-blocker, or an outage blocks one host, the other usually
+// still works. A browser reports a blocked cross-origin ESM import as a bare
+// "Failed to fetch dynamically imported module" with the URL but no reason,
+// so one host failing used to take the whole feature down with it even
+// though the fix (try the other host) is one line.
+const TASKS_URL_MIRRORS = [
+    `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TASKS_VERSION}/vision_bundle.mjs`,
+    `https://unpkg.com/@mediapipe/tasks-vision@${TASKS_VERSION}/vision_bundle.mjs`,
+];
+const WASM_URL_MIRRORS = [
+    `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TASKS_VERSION}/wasm`,
+    `https://unpkg.com/@mediapipe/tasks-vision@${TASKS_VERSION}/wasm`,
+];
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite';
 
 /** Mask width in px; height follows the source aspect (rounded to even). */
@@ -32,13 +44,35 @@ const SMOOTHING = 0.35;
 const LONG_CLIP_S = 120;
 const MAX_SECONDS = 15 * 60;
 
+/**
+ * Try `load(url)` against each mirror in turn, returning the first success.
+ * If every mirror fails, throws one clear, actionable error rather than
+ * whichever raw "Failed to fetch dynamically imported module" the LAST
+ * mirror happened to produce.
+ * @param {string[]} urls
+ * @param {(url:string)=>Promise<any>} load
+ */
+export async function withMirrors(urls, load) {
+    let lastErr = null;
+    for (const url of urls) {
+        try {
+            // eslint-disable-next-line no-await-in-loop
+            return await load(url);
+        } catch (err) {
+            lastErr = err;
+        }
+    }
+    const tried = urls.length === 1 ? '1 source' : `${urls.length} sources`;
+    throw new Error(`Speaker pop-out needs a one-time download that could not be reached (tried ${tried}). Check your network, firewall, or an ad-blocker, then try again.${lastErr?.message ? ` (${lastErr.message})` : ''}`);
+}
+
 let segmenterPromise = null;
 
 async function loadSegmenter() {
     if (segmenterPromise) return segmenterPromise;
     segmenterPromise = (async () => {
-        const vision = await import(/* @vite-ignore */ TASKS_URL);
-        const fileset = await vision.FilesetResolver.forVisionTasks(WASM_URL);
+        const vision = await withMirrors(TASKS_URL_MIRRORS, url => import(/* @vite-ignore */ url));
+        const fileset = await withMirrors(WASM_URL_MIRRORS, url => vision.FilesetResolver.forVisionTasks(url));
         const make = delegate => vision.ImageSegmenter.createFromOptions(fileset, {
             baseOptions: { modelAssetPath: MODEL_URL, delegate },
             runningMode: 'VIDEO',
