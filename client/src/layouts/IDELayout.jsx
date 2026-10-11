@@ -36,7 +36,6 @@ import MotionPanel from '../components/MotionPanel';
 import ShortsPanel from '../components/ShortsPanel'; // R92 round B: repurposed shorts
 import SnapGuidesLayer from '../components/Player/SnapGuidesLayer.jsx'; // R92 round C
 import ShortPreviewBar from '../components/Player/ShortPreviewBar.jsx'; // R93
-import ScenePanel from '../components/ScenePanel.jsx'; // R95 PHASE 5
 import LayoutPresetPicker from '../components/LayoutPresetPicker.jsx';
 import AssetPanel from '../components/AssetPanel';
 import ExportModal from '../components/ExportModal';
@@ -2081,7 +2080,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                         <div className="relative border-b" style={{ borderColor: "var(--line-soft)" }}>
                             <div ref={tabBarRef} className="p-2 flex gap-1 overflow-x-auto no-scrollbar">
-                                {['media', 'captions', 'transcript', 'color', 'motion', 'scene', 'shorts', 'assets', 'audio', 'transform', 'settings'].map(tab => (
+                                {['media', 'captions', 'transcript', 'color', 'motion', 'shorts', 'assets', 'audio', 'transform', 'settings'].map(tab => (
                                     <button
                                         key={tab}
                                         onClick={() => setActiveTab(tab)}
@@ -2092,7 +2091,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         {tab === 'transcript' && <span style={{ fontSize: 9 }}>📝</span>}
                                         {tab === 'color'      && <Palette  className="w-2.5 h-2.5" />}
                                         {tab === 'motion'     && <Zap      className="w-2.5 h-2.5" />}
-                                        {tab === 'scene'      && <Layers   className="w-2.5 h-2.5" />}
                                         {tab === 'shorts'     && <Smartphone className="w-2.5 h-2.5" />}
                                         {tab === 'assets'     && <Sparkles className="w-2.5 h-2.5" />}
                                         {tab === 'audio'      && <span style={{ fontSize: 9 }}>🎤</span>}
@@ -2262,9 +2260,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 The tab button for this lives in the array above;
                                 both halves are required. */}
                             {activeTab === 'motion' && <MotionPanel />}
-                            {/* R95 PHASE 5 — the scene editor: the layers of a
-                                generated graphic, and their properties. */}
-                            {activeTab === 'scene' && <ScenePanel />}
                             {activeTab === 'shorts' && <ShortsPanel onExport={(settings, override) => handleFfmpegExport(settings, override)} />}
 
                             {activeTab === 'interview' && <section className="border-b border-border/50"><InterviewEditPanel /></section>}
