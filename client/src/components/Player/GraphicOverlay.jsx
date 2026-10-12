@@ -16,6 +16,7 @@ import { resolveMotionAt }   from '../../motion/MotionResolver.js';
 // why a group is just clips sharing `clip.groupId`, not a new entity type.
 import { clipsInGroup } from '../../motion/ClipGrouping.js';
 import RotateHandle from './RotateHandle.jsx';
+import ResizeHandle from './ResizeHandle.jsx';
 import { hasLayoutFrame, frameToCss } from '../../motion/LayoutPresets.js';
 import TemplateCanvas from './TemplateCanvas.jsx';
 // R92 round C: alignment guides while dragging
@@ -380,6 +381,15 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
                                 onStart={() => saveToHistory()}
                                 onLive={(deg) => updateClip(trackId, clip.id, { rotation: deg }, { skipHistory: true })}
                                 onCommit={(deg) => updateClip(trackId, clip.id, { rotation: deg }, { skipHistory: true })}
+                            />
+                        )}
+                        {isActive && (
+                            <ResizeHandle
+                                getElement={() => clipElRefs.current[clip.id]}
+                                scale={Number(clip.scale) || 1}
+                                onStart={() => saveToHistory()}
+                                onLive={(s) => updateClip(trackId, clip.id, { scale: s }, { skipHistory: true })}
+                                onCommit={(s) => updateClip(trackId, clip.id, { scale: s }, { skipHistory: true })}
                             />
                         )}
                     </div>

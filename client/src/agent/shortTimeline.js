@@ -16,7 +16,7 @@
  *   - a transition on the very last clip is dropped (nothing comes after it).
  */
 
-import { fillFrameCrop } from '../motion/LayoutPresets.js';
+import { computeReframePlan } from '../motion/LayoutPresets.js';
 
 const EPS = 1e-3;
 
@@ -84,16 +84,14 @@ export function buildShortTimeline(tracks, short, opts = {}) {
     const aspectRatio = profile?.aspectRatio || '9:16';
     const [aw, ah] = aspectRatio.split(':').map(Number);
     const frameAspect = Number(opts.frameAspect) > 0 ? Number(opts.frameAspect) : aw / ah;
-    const assetOf = c => (opts.assets || []).find(x => x.id === c?.assetId) || null;
-    const aspectOf = c => {
-        const r = c?.metadata?.resolution || assetOf(c)?.resolution || null;
-        if (r && r.w > 0 && r.h > 0) return r.w / r.h;
-        const as = assetOf(c);
-        if (as && as.width > 0 && as.height > 0) return as.width / as.height;
-        const lm = c?.layerMask;
-        if (lm && lm.sourceWidth > 0 && lm.sourceHeight > 0) return lm.sourceWidth / lm.sourceHeight;
-        return null; // unknown shape: leave the frame as it is rather than guess a crop
-    };
+
+    // R100: the per-clip crop maths (fillFrameCrop + the aspectOf/assetOf
+    // lookups) is shared with the live editor's reframeToFrame()
+    // (useTimelineStore.js) via computeReframePlan() -- the short/repurposing
+    // pipeline gets the SAME intelligent, face-aware reframe instead of a
+    // second, separately-maintained copy of the same logic.
+    const { work } = computeReframePlan(sliced, { frameAspect, assets: opts.assets, aspectRatio });
+    const cropByKey = new Map(work.map(w => [`${w.trackId}::${w.clipId}`, w.crop]));
 
     let reframed = 0;
     let lastVideoEnd = -1;
@@ -103,17 +101,11 @@ export function buildShortTimeline(tracks, short, opts = {}) {
             if (track.type === 'video' && (!c.type || c.type === 'video')) {
                 const ce = c.start + c.duration;
                 if (ce > lastVideoEnd) { lastVideoEnd = ce; lastVideo = c; }
-                if (!c.virtualCam || c.virtualCam.reframe) {
-                    const speed = Number(c.speed) > 0 ? Number(c.speed) : 1;
-                    const fit = fillFrameCrop({
-                        bboxTrack: c.layerMask?.bboxTrack || null,
-                        sourceStart: Number(c.offset) || 0,
-                        duration: c.duration * speed,
-                        sourceAspect: aspectOf(c),
-                        frameAspect,
-                    });
-                    if (fit) { c.virtualCam = { ...fit.crop, reframe: aspectRatio }; reframed += 1; }
-                    else if (c.virtualCam?.reframe) delete c.virtualCam;
+                const key = `${track.id}::${c.id}`;
+                if (cropByKey.has(key)) {
+                    const crop = cropByKey.get(key);
+                    if (crop) { c.virtualCam = crop; reframed += 1; }
+                    else delete c.virtualCam;
                 }
             }
             if (profile && isCaptionClip(c, track)) {

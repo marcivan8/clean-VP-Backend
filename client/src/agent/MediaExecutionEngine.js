@@ -880,17 +880,19 @@ export class MediaExecutionEngine {
             case 'removeClip':     this._callStore(store, 'removeClip', args.trackId, args.clipId); return { action, success: true, message: `Removed clip ${args.clipId}` };
             case 'setClipSpeed':   this._callStore(store, 'setClipSpeed', args.trackId, args.clipId, args.speed); return { action, success: true };
             case 'setAspectRatio': {
+                // R100: store.setAspectRatio() now runs the speaker/face-aware
+                // reframe itself on every switch (see useTimelineStore.js), so this
+                // handler only needs to report what happened — it no longer decides
+                // whether to reframe.
                 this._callStore(store, 'setAspectRatio', args.ratio);
-                // R91: a reel fills 9:16 with a crop on the speaker, not bars; going
-                // back to a wider frame removes that crop again.
                 const fresh = useTimelineStore.getState();
-                const hasOurCrop = (fresh.tracks || []).some(t => (t.clips || []).some(c => c.virtualCam?.reframe));
-                if ((args.reframeMode === 'face' || hasOurCrop) && typeof fresh.reframeToFrame === 'function') {
-                    const r = fresh.reframeToFrame();
-                    if (r.reframed > 0) {
-                        const face = r.faceAware > 0 ? `, ${r.faceAware} centred on the detected speaker` : ', centred (no face data yet)';
-                        return { action, success: true, message: `Set to ${args.ratio}. Reframed ${r.reframed} clip(s) to fill the frame${face}.` };
-                    }
+                const reframedClips = (fresh.tracks || [])
+                    .flatMap(t => (t.clips || []))
+                    .filter(c => c.virtualCam?.reframe === args.ratio);
+                if (reframedClips.length > 0) {
+                    const faceAware = reframedClips.filter(c => c.virtualCam?.faceAware).length;
+                    const face = faceAware > 0 ? `, ${faceAware} centred on the detected speaker` : ', centred (no face data yet)';
+                    return { action, success: true, message: `Set to ${args.ratio}. Reframed ${reframedClips.length} clip(s) to fill the frame${face}.` };
                 }
                 return { action, success: true };
             }

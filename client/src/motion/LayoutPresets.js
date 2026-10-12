@@ -161,6 +161,66 @@ export function fillFrameCrop({ bboxTrack = null, sourceStart = 0, duration = In
 }
 
 /**
+ * R100 — compute the reframe crop for every video clip across a set of
+ * tracks, targeting `frameAspect`, by calling fillFrameCrop() per clip. Pure:
+ * returns the work to do ({trackId, clipId, crop}), it does not mutate
+ * anything and knows nothing about the Zustand store, so BOTH the live
+ * editor's reframeToFrame() (useTimelineStore.js, applies the work via
+ * updateClip) and the shorts/repurposing pipeline's buildShortTimeline()
+ * (agent/shortTimeline.js, applies it by mutating its own plain tracks array)
+ * share this ONE implementation instead of maintaining two copies that drift
+ * apart — this is exactly what happened before R100: the two had nearly
+ * identical but not-quite-identical aspectOf()/assetOf() lookups.
+ *
+ * `crop: null` in a result means "remove the crop WE previously applied"
+ * (tagged `reframe`) because the clip no longer needs one at this aspect. A
+ * clip with a crop that has NO `reframe` tag (a manual or multicam crop) is
+ * left out of the results entirely — never touched.
+ *
+ * @param {Array} tracks
+ * @param {{frameAspect:number, assets?:Array, aspectRatio:string}} opts
+ *   `aspectRatio` is the human label ('9:16' etc) stamped onto the crop so a
+ *   later call can tell "this crop is ours" from a crop set some other way.
+ * @returns {{work:Array<{trackId:string, clipId:string, crop:object|null}>, faceAwareCount:number, skippedCount:number}}
+ */
+export function computeReframePlan(tracks, { frameAspect, assets = [], aspectRatio } = {}) {
+    const assetOf = (c) => (assets || []).find(a => a.id === c?.assetId) || null;
+    const aspectOf = (c) => {
+        const r = c?.metadata?.resolution || assetOf(c)?.resolution || null;
+        if (r && r.w > 0 && r.h > 0) return r.w / r.h;
+        const a = assetOf(c);
+        if (a && a.width > 0 && a.height > 0) return a.width / a.height;
+        const lm = c?.layerMask;
+        if (lm && lm.sourceWidth > 0 && lm.sourceHeight > 0) return lm.sourceWidth / lm.sourceHeight;
+        return null;
+    };
+    const work = [];
+    let faceAwareCount = 0, skippedCount = 0;
+    for (const t of (tracks || []).filter(tr => tr.type === 'video')) {
+        for (const c of (t.clips || [])) {
+            if (c.type && c.type !== 'video') continue;
+            if (c.virtualCam && !c.virtualCam.reframe) { skippedCount++; continue; }
+            const speed = Number(c.speed) > 0 ? Number(c.speed) : 1;
+            const fit = fillFrameCrop({
+                bboxTrack: c.layerMask?.bboxTrack || null,
+                sourceStart: Number(c.offset) || 0,
+                duration: (Number(c.duration) || 0) * speed,
+                sourceAspect: aspectOf(c),
+                frameAspect,
+            });
+            if (!fit) {
+                if (c.virtualCam?.reframe) work.push({ trackId: t.id, clipId: c.id, crop: null });
+                else if (aspectOf(c) == null) skippedCount++;
+                continue;
+            }
+            work.push({ trackId: t.id, clipId: c.id, crop: { ...fit.crop, reframe: aspectRatio, faceAware: !!fit.faceAware } });
+            if (fit.faceAware) faceAwareCount++;
+        }
+    }
+    return { work, faceAwareCount, skippedCount };
+}
+
+/**
  * CSS for a framed overlay (preview). Returns the box style and the media
  * style; GraphicOverlay renders <div style=box><img|video style=media/></div>.
  */

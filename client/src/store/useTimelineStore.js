@@ -28,7 +28,7 @@ import { autoFixScene, safeZoneForAspect } from '../motion/SceneValidator.js';
 import { composeSceneFromBrief } from '../motion/SceneDirector.js';
 import { findNode, updateNode, removeNode as removeSceneNodeFrom, listNodes } from '../motion/SceneSchema.js';
 import { deriveSpeakerCrop, deriveTrackingSegments } from '../motion/ObjectLayers.js';
-import { frameForPreset, splitSpeakerCrop, fillFrameCrop, LAYOUT_PRESETS } from '../motion/LayoutPresets.js';
+import { frameForPreset, splitSpeakerCrop, fillFrameCrop, computeReframePlan, LAYOUT_PRESETS } from '../motion/LayoutPresets.js';
 import { TEMPLATE_KINDS, TEMPLATE_WIDTH_FRACTION, templateParams, templateSize } from '../motion/TemplateGraphics.js';
 import { normalizeMatte } from '../motion/MatteSettings.js'; // R92
 import { ledgerEntry } from '../agent/EditRecap.js'; // R92 round B
@@ -353,8 +353,24 @@ const useTimelineStore = create(
             },
 
             setAspectRatio: (newRatio) => {
+                const prevRatio = get().aspectRatio;
                 set({ aspectRatio: newRatio });
                 timelineManager.dispatch(TimelineActions.setAspectRatio(newRatio));
+                // R100: the smart speaker/face-aware crop now runs automatically on
+                // EVERY aspect-ratio switch, from every entry point (AI command,
+                // settings panel, timeline dropdown, mobile sheet) — not just when an
+                // explicit AI command asked for a face-aware reframe. reframeToFrame()
+                // is self-skipping: fillFrameCrop() returns null (nothing to do) once
+                // the new frame is wide enough to not need a crop, and in that case
+                // reframeToFrame() also drops any crop IT previously applied, so
+                // switching back to a wide frame correctly removes the crop again.
+                if (newRatio !== prevRatio && typeof get().reframeToFrame === 'function') {
+                    try {
+                        get().reframeToFrame();
+                    } catch (err) {
+                        console.error('[setAspectRatio] auto-reframe failed:', err);
+                    }
+                }
             },
 
             setDuration: (duration) => {
@@ -2587,43 +2603,19 @@ const useTimelineStore = create(
              * @returns {{reframed:number, faceAware:number, skipped:number}}
              */
             reframeToFrame: () => {
+                // R100: the per-clip crop maths is shared with the shorts/
+                // repurposing pipeline's buildShortTimeline() (agent/
+                // shortTimeline.js) via computeReframePlan() -- ONE
+                // implementation instead of two that drift apart. This
+                // function is just computeReframePlan() + the store's own
+                // apply step (history + updateClip).
                 const state = get();
                 const dims = getPlayerDimensions(state.aspectRatio);
                 const frameAspect = dims.width / dims.height;
-                const assetOf = (c) => (state.assets || []).find(a => a.id === c?.assetId) || null;
-                const aspectOf = (c) => {
-                    const r = c?.metadata?.resolution || assetOf(c)?.resolution || null;
-                    if (r && r.w > 0 && r.h > 0) return r.w / r.h;
-                    const a = assetOf(c);
-                    if (a && a.width > 0 && a.height > 0) return a.width / a.height;
-                    const lm = c?.layerMask;
-                    if (lm && lm.sourceWidth > 0 && lm.sourceHeight > 0) return lm.sourceWidth / lm.sourceHeight;
-                    return null;
-                };
-                const result = { reframed: 0, faceAware: 0, skipped: 0 };
-                const work = [];
-                for (const t of (state.tracks || []).filter(tr => tr.type === 'video')) {
-                    for (const c of (t.clips || [])) {
-                        if (c.type && c.type !== 'video') continue;
-                        if (c.virtualCam && !c.virtualCam.reframe) { result.skipped++; continue; }
-                        const speed = Number(c.speed) > 0 ? Number(c.speed) : 1;
-                        const fit = fillFrameCrop({
-                            bboxTrack: c.layerMask?.bboxTrack || null,
-                            sourceStart: Number(c.offset) || 0,
-                            duration: (Number(c.duration) || 0) * speed,
-                            sourceAspect: aspectOf(c),
-                            frameAspect,
-                        });
-                        if (!fit) {
-                            // Back to a frame the video fills (16:9 again): drop our crop.
-                            if (c.virtualCam?.reframe) work.push({ trackId: t.id, clipId: c.id, crop: null });
-                            else if (aspectOf(c) == null) result.skipped++;
-                            continue;
-                        }
-                        work.push({ trackId: t.id, clipId: c.id, crop: { ...fit.crop, reframe: state.aspectRatio } });
-                        if (fit.faceAware) result.faceAware++;
-                    }
-                }
+                const { work, faceAwareCount, skippedCount } = computeReframePlan(state.tracks, {
+                    frameAspect, assets: state.assets, aspectRatio: state.aspectRatio,
+                });
+                const result = { reframed: 0, faceAware: faceAwareCount, skipped: skippedCount };
                 if (work.length === 0) return result;
                 get()._saveHistory();
                 for (const w of work) {

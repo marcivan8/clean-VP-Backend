@@ -90,6 +90,65 @@ function buildScaleFilter(width, height) {
     return `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
 }
 
+// ── R100: base-clip (video/image) resize/reposition transform ──────────────
+// The export-side counterpart of BaseClipOverlay.jsx's on-screen drag/resize
+// handles. Until now `clip.x`/`clip.y`/`clip.scale` on a BASE clip were read
+// by the live preview (client/src/revideo/project.tsx) but had NO export
+// consumer at all — buildScaleFilter()'s centred fit-and-pad ran unconditionally
+// for every base clip, so a clip resized/moved in the editor came out full-
+// frame and centred in the actual export. This fixes that gap specifically;
+// it does not touch any clip that was never resized/moved (hasBaseClipTransform
+// is false for every pre-existing project — buildScaleFilter is still used
+// for those, completely unchanged).
+//
+// fitContainSizePx() MUST mirror client/src/motion/BaseClipGeometry.js's
+// fitContainSize() AND project.tsx's own fitSize() exactly — the same
+// preview/export-parity concern as DEFAULT_WIDTH_FRACTION elsewhere in this
+// codebase. It is duplicated here (not imported) because this file is
+// CommonJS and that one is an ES module — see vibed-codegen's module-format
+// rule.
+function fitContainSizePx(mediaW, mediaH, canvasWidth, canvasHeight) {
+    if (!mediaW || !mediaH || !canvasWidth || !canvasHeight) {
+        return { w: canvasWidth || 0, h: canvasHeight || 0 };
+    }
+    const s = Math.min(canvasWidth / mediaW, canvasHeight / mediaH);
+    return { w: Math.round(mediaW * s), h: Math.round(mediaH * s) };
+}
+
+/** True only for a clip actually moved/resized by the new handles — a tiny
+ *  float epsilon so a clip that was merely re-saved (scale === 1.0000001 from
+ *  a prior float round-trip) doesn't spuriously take the new code path. */
+function hasBaseClipTransform(clip) {
+    const scale = Number(clip.scale);
+    const x = Number(clip.x) || 0;
+    const y = Number(clip.y) || 0;
+    return (Number.isFinite(scale) && Math.abs(scale - 1) > 1e-6) || Math.abs(x) > 0.5 || Math.abs(y) > 0.5;
+}
+
+/**
+ * The scale filter (no pad) plus the pixel position to `overlay=` this clip
+ * at, so it lands on the output canvas at the same place/size the editor
+ * showed — contain-fit the source, multiply by clip.scale, then centre and
+ * nudge by clip.x/clip.y (canvas pixels from centre — see
+ * BaseClipGeometry.js's header for why base clips use this convention and
+ * not overlay clips' 0-100 percent).
+ */
+function buildTransformFilters(clip, targetWidth, targetHeight) {
+    const even = (n) => Math.max(2, Math.round(n / 2) * 2);
+    const srcW = clip.metadata?.resolution?.w || clip.sourceWidth || targetWidth;
+    const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || targetHeight;
+    const fitted = fitContainSizePx(srcW, srcH, targetWidth, targetHeight);
+    const scale = Number.isFinite(Number(clip.scale)) && Number(clip.scale) > 0 ? Number(clip.scale) : 1;
+    const w = even(fitted.w * scale);
+    const h = even(fitted.h * scale);
+    const overlayX = Math.round((targetWidth - w) / 2 + (Number(clip.x) || 0));
+    const overlayY = Math.round((targetHeight - h) / 2 + (Number(clip.y) || 0));
+    return {
+        scaleFilter: `scale=${w}:${h}:force_original_aspect_ratio=disable,setsar=1`,
+        overlayX, overlayY, w, h,
+    };
+}
+
 /**
  * Audio tempo for a clip speed, as a chain of atempo filters. One atempo
  * only accepts 0.5-2.0 (older ffmpeg), so 4x is atempo=2,atempo=2 and 0.25x
@@ -1118,6 +1177,19 @@ module.exports = async function processExportJob(job) {
             const vc = clip.virtualCam;
             const hasCrop = vc && typeof vc.cropW === 'number' && typeof vc.cropH === 'number'
                 && (vc.cropW < 0.999 || vc.cropH < 0.999);
+            // R100: a manual resize/reposition transform on this clip. Skipped
+            // when a multicam crop is ALSO present on the same clip: the crop
+            // runs first and changes the effective (cropped) source aspect,
+            // which fitContainSizePx() here does not know about — composing
+            // the two correctly is unhandled for now, so the crop wins and the
+            // transform is ignored rather than silently producing the wrong
+            // on-screen size. (The common case — a plain resized/repositioned
+            // clip with no multicam angle on it — is unaffected.)
+            const hasBaseTransform = hasBaseClipTransform(clip);
+            if (hasBaseTransform && hasCrop) {
+                console.warn(`  [R100] clip "${clip.name}" has both a multicam crop and a resize/position transform — the crop takes priority, the transform is skipped for this clip.`);
+            }
+            const baseTransform = (hasBaseTransform && !hasCrop) ? buildTransformFilters(clip, targetWidth, targetHeight) : null;
             // Camera track: scale keyframes (zoom rhythm, KeyframeEditor, camera
             // presets) plus panX/panY (camera shake/whip/pan, from
             // CameraMotionCompiler). Images get it too: a base-track photo
@@ -1149,7 +1221,7 @@ module.exports = async function processExportJob(job) {
                 const zoom = buildSmoothZoomFilter(scaleKfs || [{ time: 0, value: 1 }], { fps: targetFps, anchor, multiplier: baseZoom, maxZoom: 8.0, panX, panY })
                     || buildSmoothZoomFilter([{ time: 0, value: baseZoom }], { fps: targetFps, anchor, maxZoom: 8.0 });
                 if (zoom) vFilters.push(zoom);
-                vFilters.push(scaleFilter);
+                vFilters.push(baseTransform ? baseTransform.scaleFilter : scaleFilter);
                 console.log(
                     `  [multicam+rhythm] clip "${clip.name}" angle=${vc.angle || '?'}: composed zoom ` +
                     `centred @(${cx0.toFixed(2)},${cy0.toFixed(2)}), base=${baseZoom.toFixed(2)}x`
@@ -1163,7 +1235,7 @@ module.exports = async function processExportJob(job) {
                     vFilters.push(`crop=iw*${cw.toFixed(4)}:ih*${ch.toFixed(4)}:iw*${cx.toFixed(4)}:ih*${cy.toFixed(4)}`);
                     console.log(`  [multicam] clip "${clip.name}" angle=${vc.angle || '?'} crop=${cw.toFixed(2)}x${ch.toFixed(2)}@(${cx.toFixed(2)},${cy.toFixed(2)})`);
                 }
-                vFilters.push(scaleFilter);
+                vFilters.push(baseTransform ? baseTransform.scaleFilter : scaleFilter);
             }
 
             // A still image just lasts `dur`; speed means nothing for it.
@@ -1192,24 +1264,45 @@ module.exports = async function processExportJob(job) {
             // LUT to padding bars as well.
             if (lutFilter) vFilters.push(lutFilter);
 
-            // R99 — zone blur needs complexFilter, not flat videoFilters
-            if (clip.blurZone && zb) cmd.complexFilter([vFilters.length ? `[0:v]${vFilters.join(',')}[vbase]` : '[0:v]null[vbase]', ...zb.zoneBlurFilterGraph(clip.blurZone, { width: targetWidth, height: targetHeight, inLabel: 'vbase', outLabel: 'vout' })], 'vout');
-            else cmd.videoFilters(vFilters.join(','));
+            // R99 — zone blur needs complexFilter, not flat videoFilters.
+            // R100 — a resize/position transform ALSO needs complexFilter (the
+            // scaled clip must be `overlay=`'d onto a full-canvas background
+            // rather than simply padded, since it no longer fills the frame).
+            // Both reach a `[vbase]` stage meaning "this clip's content now
+            // fills the whole output canvas" — zone blur (frame-relative, not
+            // clip-relative — see BlurZoneOverlay.jsx) always runs on THAT,
+            // so it behaves identically regardless of which path produced it.
+            const hasZone = !!(clip.blurZone && zb);
+            const usedComplexFilter = !!baseTransform || hasZone;
+            if (baseTransform) {
+                const vbaseLabel = hasZone ? 'vbase' : 'vout';
+                const segs = [
+                    vFilters.length ? `[0:v]${vFilters.join(',')}[fg]` : '[0:v]null[fg]',
+                    `color=c=black:s=${targetWidth}x${targetHeight}:d=${dur}[bg]`,
+                    `[bg][fg]overlay=x=${baseTransform.overlayX}:y=${baseTransform.overlayY}:eval=init[${vbaseLabel}]`,
+                ];
+                if (hasZone) segs.push(...zb.zoneBlurFilterGraph(clip.blurZone, { width: targetWidth, height: targetHeight, inLabel: 'vbase', outLabel: 'vout' }));
+                cmd.complexFilter(segs, 'vout');
+            } else if (hasZone) {
+                cmd.complexFilter([vFilters.length ? `[0:v]${vFilters.join(',')}[vbase]` : '[0:v]null[vbase]', ...zb.zoneBlurFilterGraph(clip.blurZone, { width: targetWidth, height: targetHeight, inLabel: 'vbase', outLabel: 'vout' })], 'vout');
+            } else {
+                cmd.videoFilters(vFilters.join(','));
+            }
 
             if (isImage) {
                 cmd.input(`anullsrc=channel_layout=stereo:sample_rate=44100`).inputOptions(['-f', 'lavfi']);
-                // complexFilter() (the blurZone branch above) only auto-maps
-                // its own output label -- unlike videoFilters(), it does NOT
-                // fall back to mapping the first audio stream, so the lavfi
-                // silence input must be mapped explicitly or the segment
-                // comes out with no audio track at all.
-                if (clip.blurZone && zb) cmd.addOutputOption('-map', '1:a');
+                // complexFilter() (the blurZone / R100 transform branches
+                // above) only auto-maps its own output label -- unlike
+                // videoFilters(), it does NOT fall back to mapping the first
+                // audio stream, so the lavfi silence input must be mapped
+                // explicitly or the segment comes out with no audio track at all.
+                if (usedComplexFilter) cmd.addOutputOption('-map', '1:a');
             } else {
                 if (aFilters.length) cmd.audioFilters(aFilters.join(','));
                 // Same reasoning as the image branch above -- see
                 // renderMattedSegment's identical '-map', '0:a?' for the
                 // established precedent (R92).
-                if (clip.blurZone && zb) cmd.addOutputOption('-map', '0:a?');
+                if (usedComplexFilter) cmd.addOutputOption('-map', '0:a?');
             }
 
             cmd
@@ -2188,6 +2281,10 @@ module.exports.FONT_SPECS = FONT_SPECS;
 module.exports.rotationFromProbeStream = rotationFromProbeStream;
 module.exports.buildSmoothZoomFilter = buildSmoothZoomFilter;
 module.exports.atempoChain = atempoChain;
+// R100 — pure helpers, exported for scripts/test_base_clip_transform_export.mjs.
+module.exports.fitContainSizePx = fitContainSizePx;
+module.exports.hasBaseClipTransform = hasBaseClipTransform;
+module.exports.buildTransformFilters = buildTransformFilters;
 
 
 

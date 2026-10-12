@@ -59,11 +59,18 @@ section('1 · The export job resolves and applies the LUT');
         /if \(lutFilter\) vFilters\.push\(lutFilter\);/.test(exportSrc));
 
     // Order matters: grading before scale/pad would grade the padding bars too.
-    const pushIdx  = exportSrc.indexOf('if (lutFilter) vFilters.push(lutFilter);');
-    const joinIdx  = exportSrc.indexOf('cmd.videoFilters(vFilters.join(\',\'))');
+    // R100 added a branch choosing HOW vFilters is applied (plain videoFilters,
+    // the R99 zone-blur complexFilter, or the R100 resize/position
+    // complexFilter) -- all three read the SAME vFilters array via
+    // vFilters.join(','), so the real invariant is just "nothing pushes
+    // into vFilters again after the LUT", checked directly rather than by a
+    // brittle character-count gap to one specific consumption point.
+    const pushIdx = exportSrc.indexOf('if (lutFilter) vFilters.push(lutFilter);');
+    const joinIdx = exportSrc.indexOf('vFilters.join(\',\')', pushIdx);
+    const between = pushIdx !== -1 && joinIdx !== -1 ? exportSrc.slice(pushIdx + 'if (lutFilter) vFilters.push(lutFilter);'.length, joinIdx) : '';
     check('the LUT is appended LAST, just before the chain is applied',
-        pushIdx !== -1 && joinIdx !== -1 && pushIdx < joinIdx && (joinIdx - pushIdx) < 400,
-        'grading before scale/pad would tint the letterbox bars');
+        pushIdx !== -1 && joinIdx !== -1 && pushIdx < joinIdx && !/vFilters\.push\(/.test(between),
+        'grading before scale/pad would tint the letterbox bars, or something pushed into vFilters after the LUT');
 }
 
 section('2 · It fails OPEN — an export must never die over a colour grade');

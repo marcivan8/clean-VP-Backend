@@ -20,6 +20,7 @@ import TranscriptPanel from '../components/TranscriptPanel';
 import TextOverlay from '../components/Player/TextOverlay';
 import GraphicOverlay from '../components/Player/GraphicOverlay'; // R62 — stickers/logos/graphics track
 import BlurZoneOverlay from '../components/Player/BlurZoneOverlay'; // R99 — freeform zone blur
+import BaseClipOverlay from '../components/Player/BaseClipOverlay'; // R100 — move/resize handles for base video/image clips
 import { getPlayerDimensions } from '../utils/playerDimensions';
 import MobileToolbar from '../components/MobileToolbar';
 import MobileAIBar from '../components/MobileAIBar';
@@ -2451,6 +2452,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     layer, mounted BELOW the text/graphics overlays
                                     (so captions/stickers drawn in a blurred zone stay
                                     sharp) but ABOVE the Revideo player's video output. */}
+                                <BaseClipOverlay />
                                 <BlurZoneOverlay />
                                 <TextOverlay placementFilter="front" />
                                 <GraphicOverlay placementFilter="front" />
