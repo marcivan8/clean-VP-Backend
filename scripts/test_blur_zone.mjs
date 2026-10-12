@@ -283,6 +283,96 @@ if (!FFMPEG) {
         assert.ok(colorDist(farLeft, RED) < 10, `expected the untouched copy to stay pure red far from the zone, got ${farLeft}`);
     });
 
+    // ── 7 · A zoned clip's export still has real, audible audio ──────────────
+    // jobs/exportProcessor.js switches a zoned clip from cmd.videoFilters() to
+    // cmd.complexFilter() (R99), which -- unlike videoFilters() -- does NOT
+    // auto-map audio, so an explicit '-map' output option was added for both
+    // branches (isImage: '-map','1:a' for the lavfi silence input; otherwise
+    // '-map','0:a?' for the source's own audio, mirroring renderMattedSegment's
+    // R92 precedent). Section 6 above proves the VIDEO graph only blurs the
+    // zone; this proves the audio '-map' wiring actually survives against a
+    // REAL single-file source with both streams in input 0 -- a two-input
+    // lavfi test (video-only + audio-only sources) would hide this exact bug,
+    // since '-map 0:a?' would silently match nothing and ffmpeg would still
+    // exit 0 with a muted video, the one way this could fail "quietly".
+    log('\n7 · A zoned clip\'s export keeps a real, audible audio track (both branches)');
+    const fixtureSrc = path.join(dir, 'fixture_src.mp4');
+    const fixtureImage = path.join(dir, 'fixture_src.png');
+    await check('fixture: a real file with BOTH video and audio in stream 0 (not two lavfi inputs)', () => {
+        const r = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y',
+            '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=10:duration=2',
+            '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100:duration=2',
+            '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', fixtureSrc,
+        ], { encoding: 'utf8', timeout: 30_000 });
+        assert.equal(r.status, 0, (r.stderr || '').split('\n').slice(-6).join(' | '));
+    });
+    await check('fixture: a real still image -- \'-loop 1\' (the isImage branch) is only valid on an actual image input, never on a video file', () => {
+        const r = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y',
+            '-f', 'lavfi', '-i', 'testsrc=size=320x240', '-frames:v', '1', fixtureImage,
+        ], { encoding: 'utf8', timeout: 30_000 });
+        assert.equal(r.status, 0, (r.stderr || '').split('\n').slice(-6).join(' | '));
+    });
+
+    function renderZonedSegment({ asImage }) {
+        const segOut = path.join(dir, asImage ? 'seg_image.mp4' : 'seg_video.mp4');
+        const zone2 = { x: 0.1, y: 0.1, w: 0.3, h: 0.3, blur: 20 };
+        const zbGraph2 = ZB.zoneBlurFilterGraph(zone2, { width: 320, height: 240, inLabel: 'vbase', outLabel: 'vout' });
+        const complexFilterArg = ['[0:v]null[vbase]', ...zbGraph2].join(';');
+        const args = asImage
+            // Mirrors the isImage branch exactly: '-loop 1' on a REAL still
+            // image input (never a video file -- ffmpeg rejects '-loop' on
+            // non-image demuxers with "Option loop not found", which is a
+            // test-fixture bug, not a jobs/exportProcessor.js bug, if hit
+            // here), plus a separate lavfi silence input mapped with
+            // '-map','1:a' (the silence IS the clip's only possible audio).
+            ? ['-hide_banner', '-loglevel', 'error', '-y',
+               '-loop', '1', '-i', fixtureImage, '-t', '2',
+               '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
+               '-filter_complex', complexFilterArg, '-map', '[vout]', '-map', '1:a',
+               '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', segOut]
+            // Mirrors the non-image branch: one real input, '-map','0:a?'
+            // pulls that same input's own audio stream.
+            : ['-hide_banner', '-loglevel', 'error', '-y',
+               '-i', fixtureSrc,
+               '-filter_complex', complexFilterArg, '-map', '[vout]', '-map', '0:a?',
+               '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', segOut];
+        const r = spawnSync(FFMPEG, args, { encoding: 'utf8', timeout: 30_000 });
+        return { r, segOut };
+    }
+
+    function streamTypes(file) {
+        const p = spawnSync(FFMPEG.endsWith('ffmpeg') ? FFMPEG.replace(/ffmpeg$/, 'ffprobe') : 'ffprobe',
+            ['-v', 'error', '-show_entries', 'stream=codec_type,duration', '-of', 'json', file],
+            { encoding: 'utf8', timeout: 15_000 });
+        if (p.status !== 0) return null;
+        try { return JSON.parse(p.stdout).streams; } catch { return null; }
+    }
+
+    function meanVolumeDb(file) {
+        const r = spawnSync(FFMPEG, ['-hide_banner', '-i', file, '-af', 'volumedetect', '-f', 'null', '-'],
+            { encoding: 'utf8', timeout: 15_000 });
+        const m = (r.stderr || '').match(/mean_volume:\s*(-?[\d.]+)\s*dB/);
+        return m ? Number(m[1]) : null;
+    }
+
+    for (const asImage of [false, true]) {
+        const label = asImage ? 'isImage branch (\'-map\',\'1:a\')' : 'video branch (\'-map\',\'0:a?\')';
+        await check(`${label}: the render runs and produces both a video and an audio stream`, () => {
+            const { r, segOut } = renderZonedSegment({ asImage });
+            assert.equal(r.status, 0, (r.stderr || '').split('\n').slice(-6).join(' | '));
+            const streams = streamTypes(segOut);
+            assert.ok(streams, 'ffprobe could not read the output');
+            assert.ok(streams.some(s => s.codec_type === 'video'), 'no video stream in the output');
+            assert.ok(streams.some(s => s.codec_type === 'audio'), 'no audio stream in the output -- the \'-map\' wiring silently dropped it');
+        });
+    }
+    await check('video branch: the mapped audio is the source\'s real track, not silence', () => {
+        const { segOut } = renderZonedSegment({ asImage: false });
+        const db = meanVolumeDb(segOut);
+        assert.ok(db !== null, 'could not read mean_volume from the output');
+        assert.ok(db > -50, `expected an audible track (sine @ 440Hz), got mean_volume ${db} dB -- looks silent`);
+    });
+
     fs.rmSync(dir, { recursive: true, force: true });
 }
 
