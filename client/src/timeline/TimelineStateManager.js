@@ -1000,6 +1000,10 @@ export class TimelineStateManager {
                         // field above: MUST also appear in fromLegacyTracks
                         // below, or a shadow silently vanishes on reload.
                         shadow: clip.shadow ?? null,
+                        // R99 — freeform zone blur. Same persistence-contract
+                        // rule: MUST also appear in fromLegacyTracks below, or
+                        // a blur zone silently vanishes on reload.
+                        blurZone: clip.blurZone ?? null,
                         placement: clip.placement ?? null,
                         // R94: the design scene this clip belongs to, and which
                         // node of it this clip is. Same persistence contract as
@@ -1119,6 +1123,8 @@ export class TimelineStateManager {
                                 layerTarget: legacyClip.layerTarget ?? null,
                                 // R98 — generic drop shadow. Mirrors toLegacyTracks above.
                                 shadow: legacyClip.shadow ?? null,
+                                // R99 — freeform zone blur. Mirrors toLegacyTracks above.
+                                blurZone: legacyClip.blurZone ?? null,
                                 placement: legacyClip.placement ?? null,
                                 // R94 — mirrors toLegacyTracks above.
                                 sceneId: legacyClip.sceneId ?? null,

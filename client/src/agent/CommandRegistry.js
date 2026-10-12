@@ -548,6 +548,43 @@ export const COMMANDS = [
         destructive: false,
     },
     {
+        // R99: freeform zone blur. A STATIC rectangle (frame fractions),
+        // not a tracked region -- Marc explicitly did not pick "object
+        // tracking beyond people" among the editing features he approved.
+        // Covers what MatteBaker.js's person segmentation (R92) was never
+        // built to find: a logo, a watermark, a timestamp burned into the
+        // source, a stray face in the background. See zoneQuery.js for how
+        // the location phrase ("top right corner", "the bottom") resolves
+        // to a box, and _blurZoneTargets (MediaExecutionEngine.js) for the
+        // clip-targeting chain (scoped to video + overlay tracks, unlike
+        // _matteTargets, since a still photo is just as valid a target
+        // here as video).
+        id: 'add_blur_zone',
+        category: 'transform',
+        label: 'Blur a zone',
+        summary: 'Blurs a rectangular region of the frame (a logo, watermark or stray face) for the clip\'s full duration.',
+        phrases: ['blur this area', 'blur that area', 'blur this zone', 'blur this region',
+                  'add a blur zone', 'blur the corner', 'blur the top left corner', 'blur the top right corner',
+                  'blur the bottom left corner', 'blur the bottom right corner', 'blur the logo',
+                  'blur the watermark', 'blur the timestamp', 'blur the text in the corner',
+                  'pixelate the corner', 'pixelate the logo', 'censor the corner',
+                  'floute ce coin', 'floute la zone', 'floute le logo'],
+        // "blur the background" is a different command entirely (remove_background,
+        // R92 -- person segmentation, not a fixed rectangle).
+        negative: ['background', 'face', 'speaker', 'subject'],
+        destructive: false,
+    },
+    {
+        id: 'remove_blur_zone',
+        category: 'transform',
+        label: 'Remove the blur zone',
+        summary: 'Removes a previously added zone blur from the selected clip.',
+        phrases: ['remove the blur zone', 'remove blur zone', 'clear the blur zone', 'remove the pixelation',
+                  'unblur the corner', 'remove the corner blur', 'enleve le flou de zone', 'enleve le flou du coin'],
+        negative: ['background', 'face', 'speaker', 'subject'],
+        destructive: false,
+    },
+    {
         id: 'add_sfx',
         category: 'asset',
         label: 'Add a sound effect',

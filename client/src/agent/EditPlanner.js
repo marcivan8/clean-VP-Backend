@@ -71,6 +71,7 @@ export function colorLookQuery(constraints, originalPrompt = '') {
 
 import { sfxQueryFromText } from './sfxCues.js'; // R92 round A
 import { stickerQueryFromText } from './stickerQuery.js'; // R97
+import { zoneFromText } from './zoneQuery.js'; // R99
 import { platformsFromText, shortCountFromText, getPlatformProfile } from './PlatformProfiles.js'; // R92 round B
 
 export class EditPlanner {
@@ -393,6 +394,19 @@ export class EditPlanner {
             case 'clear_keywords':     return this.planSingleStep(planId, 'clear_keywords', 'Remove key word highlights from the captions');
             case 'add_shadow':    return this.planSingleStep(planId, 'add_shadow', 'Add a drop shadow');
             case 'remove_shadow': return this.planSingleStep(planId, 'remove_shadow', 'Remove the drop shadow');
+            case 'add_blur_zone': {
+                // R99: freeform zone blur. The location (a named corner or
+                // edge, optionally a size word) is parsed from the prompt;
+                // a prompt naming no location at all gets the default
+                // top-right corner (zoneQuery.js) rather than failing --
+                // same "no keyword -> sensible default" rule add_sticker
+                // (R97) established.
+                const zone = zoneFromText(intent.originalPrompt);
+                return this.buildPlan(planId, 'add_blur_zone', [
+                    { step_id: 'step_1', action: 'add_blur_zone', args: { zone }, reason: 'Blur a zone of the frame' },
+                ]);
+            }
+            case 'remove_blur_zone': return this.planSingleStep(planId, 'remove_blur_zone', 'Remove the blur zone');
             case 'apply_lut':      return this.planApplyLUT(planId, constraints, intent.originalPrompt);
             case 'clear_lut':      return this.planClearLUT(planId, constraints);
             case 'recommend_luts': return this.planRecommendLUTs(planId, constraints);

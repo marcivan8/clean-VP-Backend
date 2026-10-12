@@ -947,6 +947,10 @@ const useTimelineStore = create(
                 // above — `if (updates.shadow)` would silently drop a
                 // remove_shadow call.
                 if (updates.shadow !== undefined) clipUpdates.shadow = updates.shadow;
+                // R99 — freeform zone blur (stickers R97, shadows R98). Same
+                // persistence-contract rule: `null` is legitimate (removing
+                // a blur zone), so `!== undefined` not a truthiness check.
+                if (updates.blurZone !== undefined) clipUpdates.blurZone = updates.blurZone;
 
                 if (Object.keys(clipUpdates).length > 0 && placement.clipId) {
                     timelineManager.dispatch(

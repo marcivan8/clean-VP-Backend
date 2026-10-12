@@ -811,6 +811,30 @@ export class MediaExecutionEngine {
     }
 
     /**
+     * R99: which clips a freeform zone-blur command applies to. Scoped to
+     * the video + overlay tracks (the footage and any b-roll/image/overlay
+     * visual -- anywhere a logo, timestamp or stray face could sit),
+     * UNLIKE _matteTargets (R92) which deliberately excludes images since
+     * person segmentation doesn't apply to stills -- a blur zone is just a
+     * fixed rectangle (crop + blur + overlay-back), so a still photo is
+     * just as valid a target as video. Same active -> selected ->
+     * under-playhead -> first fallback chain as _matteTargets/
+     * _overlayTargets above.
+     */
+    _blurZoneTargets(store, args = {}) {
+        const tracks = (store.tracks || []).filter(t => t.type === 'video' || t.type === 'overlay');
+        const all = tracks.flatMap(t => (t.clips || []).map(c => ({ trackId: t.id, clipId: c.id, clip: c })));
+        if (all.length === 0) return [];
+        if (args.all) return all;
+        const wanted = args.clipId || (store.selectedClipIds || []).find(id => all.some(x => x.clipId === id)) || store.activeClipId;
+        const byId = all.find(x => x.clipId === wanted);
+        if (byId) return [byId];
+        const t = Number(store.currentTime) || 0;
+        const under = all.find(x => t >= (Number(x.clip.start) || 0) && t < (Number(x.clip.start) || 0) + (Number(x.clip.duration) || 0));
+        return [under || all[0]];
+    }
+
+    /**
      * R92: make sure a clip has a mask covering its trimmed range; bake one
      * in the browser if not. Returns { ok, baked, people, error }.
      */
@@ -1419,6 +1443,39 @@ export class MediaExecutionEngine {
                 return adding
                     ? { action, success: true, message: `Added a drop shadow to ${what}. One undo removes it.` }
                     : { action, success: true, message: `Removed the shadow from ${what}. One undo brings it back.` };
+            }
+
+            // R99: freeform zone blur -- a STATIC rectangle (crop + blur +
+            // overlay-back), not a tracked region (Marc did not pick "object
+            // tracking beyond people" among the features he approved).
+            // Covers a logo, watermark, timestamp or stray face MatteBaker.js's
+            // person segmentation (R92) was never built to find. Rendered as a
+            // CSS backdrop-filter in the preview (BlurZoneOverlay.jsx -- blurs
+            // whatever renders BEHIND it, no WebGL/Revideo change needed) and
+            // an equivalent split/crop/blur/overlay-back FFmpeg graph in
+            // export (ZoneBlur.js's zoneBlurFilterGraph, loaded by
+            // jobs/exportProcessor.js the same way it loads MatteSettings.js).
+            case 'add_blur_zone':
+            case 'remove_blur_zone': {
+                const st = useTimelineStore.getState();
+                const targets = this._blurZoneTargets(st, args);
+                if (targets.length === 0) {
+                    return { action, success: false, message: 'There is no clip on the timeline yet to blur a zone of.' };
+                }
+                const adding = action === 'add_blur_zone';
+                let blurZone = null;
+                if (adding) {
+                    const { normalizeZone } = await import('../motion/ZoneBlur.js');
+                    blurZone = normalizeZone({ ...(args.zone || {}), ...(Number.isFinite(args.blur) ? { blur: args.blur } : {}) });
+                }
+                st.saveToHistory?.();
+                for (const t of targets) {
+                    useTimelineStore.getState().updateClip(t.trackId, t.clipId, { blurZone }, { skipHistory: true });
+                }
+                const what = targets.length > 1 ? `${targets.length} clips` : (targets[0].clip.name || 'it');
+                return adding
+                    ? { action, success: true, message: `Blurred a zone of ${what}. One undo removes it.` }
+                    : { action, success: true, message: `Removed the blur zone from ${what}. One undo brings it back.` };
             }
 
             // ── R92 round C: the pro short finish on the MAIN edit ────────────

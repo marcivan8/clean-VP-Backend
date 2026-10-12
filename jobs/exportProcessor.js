@@ -344,6 +344,19 @@ function loadMatteSettings() {
     return matteSettingsPromise;
 }
 
+// R99 — freeform zone blur. Same dynamic-import trick as loadMatteSettings
+// above: client/src/motion/ZoneBlur.js is a pure ESM module with no DOM/
+// network dependency, so Node can import() it directly rather than this
+// file reimplementing the crop/blur/overlay-back filter graph math.
+let zoneBlurPromise = null;
+function loadZoneBlur() {
+    if (!zoneBlurPromise) {
+        const { pathToFileURL } = require('url');
+        zoneBlurPromise = import(pathToFileURL(path.join(__dirname, '..', 'client', 'src', 'motion', 'ZoneBlur.js')).href);
+    }
+    return zoneBlurPromise;
+}
+
 /**
  * R92: render one clip with its background removed (blur, dim, colour or
  * image). Same filter graph builder as the preview's settings
@@ -1077,6 +1090,12 @@ module.exports = async function processExportJob(job) {
         const rotation = isImage ? 0 : await getVideoRotation(src);
         if (rotation) console.log(`  [rotate] clip "${clip.name}": stored at ${rotation}°, auto-rotated upright`);
 
+        // R99 — freeform zone blur. Loaded here (outside the synchronous
+        // Promise executor below) since dynamic import() needs an await;
+        // null when the clip carries no blurZone, so the branch below is a
+        // single, cheap truthiness check per clip.
+        const zb = clip.blurZone ? await loadZoneBlur() : null;
+
         await new Promise((resolve, reject) => {
             let cmd;
             if (isImage) {
@@ -1173,12 +1192,24 @@ module.exports = async function processExportJob(job) {
             // LUT to padding bars as well.
             if (lutFilter) vFilters.push(lutFilter);
 
-            cmd.videoFilters(vFilters.join(','));
+            // R99 — zone blur needs complexFilter, not flat videoFilters
+            if (clip.blurZone && zb) cmd.complexFilter([vFilters.length ? `[0:v]${vFilters.join(',')}[vbase]` : '[0:v]null[vbase]', ...zb.zoneBlurFilterGraph(clip.blurZone, { width: targetWidth, height: targetHeight, inLabel: 'vbase', outLabel: 'vout' })], 'vout');
+            else cmd.videoFilters(vFilters.join(','));
 
             if (isImage) {
                 cmd.input(`anullsrc=channel_layout=stereo:sample_rate=44100`).inputOptions(['-f', 'lavfi']);
-            } else if (aFilters.length) {
-                cmd.audioFilters(aFilters.join(','));
+                // complexFilter() (the blurZone branch above) only auto-maps
+                // its own output label -- unlike videoFilters(), it does NOT
+                // fall back to mapping the first audio stream, so the lavfi
+                // silence input must be mapped explicitly or the segment
+                // comes out with no audio track at all.
+                if (clip.blurZone && zb) cmd.addOutputOption('-map', '1:a');
+            } else {
+                if (aFilters.length) cmd.audioFilters(aFilters.join(','));
+                // Same reasoning as the image branch above -- see
+                // renderMattedSegment's identical '-map', '0:a?' for the
+                // established precedent (R92).
+                if (clip.blurZone && zb) cmd.addOutputOption('-map', '0:a?');
             }
 
             cmd

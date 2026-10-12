@@ -1085,6 +1085,8 @@ const COMMAND_REGISTRY = new Map([
     ['emphasize_keywords', { compiler: compileAtomicStore('emphasize_keywords', 'Highlight the key word of each caption') }],
     ['add_shadow',    { compiler: compileAtomicStore('add_shadow', 'Add a drop shadow') }],
     ['remove_shadow', { compiler: compileAtomicStore('remove_shadow', 'Remove the drop shadow') }],
+    ['add_blur_zone',    { compiler: compileAtomicStore('add_blur_zone', 'Blur a zone of the frame') }],
+    ['remove_blur_zone', { compiler: compileAtomicStore('remove_blur_zone', 'Remove the blur zone') }],
     ['add_template',              { compiler: compileAtomicStore('add_template', 'Add an animated template') }],
     ['addMotionComponent',        { compiler: compileAtomicStore('addMotionComponent', 'Add a motion graphics component') }],
     ['design_scene',              { compiler: compileAtomicStore('design_scene', 'Design a graphics sequence from the brief') }],
