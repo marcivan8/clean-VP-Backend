@@ -66,10 +66,19 @@
     "checkoutFailed": "Impossible d'ouvrir le paiement. Réessayez dans un instant."
   },
   "consent": {
-    "title": "Cookies et relecture d'erreurs",
-    "body": "Nous utilisons uniquement ce qui est nécessaire au fonctionnement de Vibed, ainsi qu'un outil facultatif : lorsque l'éditeur rencontre une erreur, une courte relecture de l'écran nous aide à la corriger. Les textes, images et vidéos y sont masqués.",
-    "accept": "Accepter",
-    "refuse": "Refuser",
+    "title": "Cookies et outils facultatifs",
+    "body": "Nous utilisons uniquement ce qui est nécessaire au fonctionnement de Vibed, ainsi que deux outils facultatifs. Ils restent désactivés tant que vous ne les activez pas.",
+    "replay": {
+      "title": "Relecture d'erreurs",
+      "body": "Lorsque l'éditeur rencontre une erreur, une courte relecture de l'écran nous aide à la corriger. Les textes, images et vidéos sont masqués."
+    },
+    "analytics": {
+      "title": "Mesure d'utilisation",
+      "body": "Compte les pages que vous visitez et les fonctionnalités que vous utilisez, pour savoir quoi améliorer. Les textes de la page et vos contenus ne sont jamais envoyés."
+    },
+    "accept": "Tout accepter",
+    "refuse": "Tout refuser",
+    "save": "Enregistrer mes choix",
     "learnMore": "Politique des cookies",
     "close": "Fermer",
     "saved": "Votre choix a été enregistré."

@@ -3,7 +3,7 @@
   "title": "Politique des cookies",
   "lastUpdated": "Dernière mise à jour : {{date}}",
   "intro": [
-    "Comme la plupart des applications web, Vibed enregistre quelques informations dans votre navigateur, sous forme de cookies ou dans le stockage local. Cette page les recense toutes. Nous n'utilisons aucun cookie publicitaire ni de mesure d'audience, et aucun tiers ne vous suit d'un site à l'autre par l'intermédiaire de Vibed."
+    "Comme la plupart des applications web, Vibed enregistre quelques informations dans votre navigateur, sous forme de cookies ou dans le stockage local. Cette page les recense toutes. Nous n'utilisons aucun cookie publicitaire, nous ne mesurons l'audience que si vous l'acceptez, et aucun tiers ne vous suit d'un site à l'autre par l'intermédiaire de Vibed."
   ],
   "sections": [
     {
@@ -80,11 +80,16 @@
                 "Sentry Session Replay (prestataire : Sentry, données hébergées en Allemagne)",
                 "Lorsque l'éditeur rencontre une erreur, une courte relecture de l'écran nous aide à la comprendre et à la corriger. Tous les textes et champs de saisie sont masqués, les images et vidéos sont bloquées : la relecture montre la mise en page, jamais vos contenus. Rien n'est enregistré en l'absence d'erreur.",
                 "Mémoire tampon limitée à la session du navigateur ; relectures conservées 90 jours au maximum"
+              ],
+              [
+                "Mesure d'utilisation PostHog (prestataire : PostHog, données hébergées en Allemagne). Cookie : ph_<clé>_posthog",
+                "Compte les pages que vous visitez et les fonctionnalités que vous utilisez, avec un identifiant aléatoire, pour savoir quoi améliorer. Les textes de la page et vos contenus ne sont jamais envoyés, aucun écran n'est enregistré et votre adresse IP n'est pas conservée.",
+                "Cookie 1 an ; événements conservés 1 an au maximum"
               ]
             ]
           }
         },
-        "Cet outil ne fonctionne que si vous cliquez sur Accepter dans le bandeau. Si vous refusez, l'éditeur fonctionne exactement de la même façon."
+        "Ces outils ne fonctionnent que si vous les acceptez dans le bandeau, un par un ou avec Tout accepter. Si vous refusez, l'éditeur fonctionne exactement de la même façon."
       ]
     },
     {

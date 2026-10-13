@@ -42,7 +42,7 @@
         "**Instructions to the assistant.** The requests you type to the AI assistant, its answers, and a record of which suggestions you accepted or rejected.",
         "**Style profile.** Editing preferences we infer from how you work, such as preferred pace, fonts, target platforms and the type of content you make. See section 7.",
         "**Plan and billing.** Your plan, subscription status, usage counters (for example AI operations used this month) and the customer and subscription identifiers sent by our payment provider. We do not receive or store your card details.",
-        "**Technical data.** Server logs (time, request, account identifier), error reports from the app (error message, browser type, page), and, only if you accept it, a masked replay of the screen when an error occurs (see the [Cookie Policy](/cookie-policy)). Our hosting providers may record IP addresses in their access logs.",
+        "**Technical data.** Server logs (time, request, account identifier), error reports from the app (error message, browser type, page), and, only if you accept them, a masked replay of the screen when an error occurs and usage analytics (pages visited and features used, with a random identifier) (see the [Cookie Policy](/cookie-policy)). Our hosting providers may record IP addresses in their access logs.",
         "**Emails.** Which service emails we sent you and whether you unsubscribed from product updates.",
         "**Before you sign up.** You can try the editor without an account. Your project then stays in your browser. Our server keeps only a temporary session identifier, valid for 48 hours."
       ]
@@ -84,6 +84,10 @@
               ],
               [
                 "Screen replay when an error occurs",
+                "Your consent, which you can withdraw at any time"
+              ],
+              [
+                "Usage analytics (pages visited, features used)",
                 "Your consent, which you can withdraw at any time"
               ],
               [
@@ -178,6 +182,11 @@
                 "Germany (EU)"
               ],
               [
+                "PostHog",
+                "Usage analytics, with consent",
+                "Germany (EU)"
+              ],
+              [
                 "{{hostingerEntity}}",
                 "Sending our emails",
                 "Türkiye"
@@ -258,6 +267,10 @@
                 "Up to 90 days"
               ],
               [
+                "Usage analytics events",
+                "Up to 1 year"
+              ],
+              [
                 "Temporary session before sign-up",
                 "Deleted 30 days after it expires"
               ],
@@ -305,7 +318,7 @@
       "id": "cookies",
       "title": "11. Cookies and similar technologies",
       "blocks": [
-        "We use only what the service needs to work, plus one optional error replay tool that requires your consent. The details are in the [Cookie Policy](/cookie-policy)."
+        "We use only what the service needs to work, plus two optional tools that require your consent: error replay and usage analytics. The details are in the [Cookie Policy](/cookie-policy)."
       ]
     },
     {
