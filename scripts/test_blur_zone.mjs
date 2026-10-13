@@ -213,6 +213,23 @@ function ffmpegBin() {
 }
 const FFMPEG = ffmpegBin();
 
+function ffprobeBin() {
+    for (const bin of ['ffprobe', '/usr/bin/ffprobe']) {
+        const r = spawnSync(bin, ['-version'], { encoding: 'utf8' });
+        if (r.status === 0) return bin;
+    }
+    if (FFMPEG && FFMPEG.endsWith('ffmpeg')) {
+        const sibling = FFMPEG.replace(/ffmpeg$/, 'ffprobe');
+        if (fs.existsSync(sibling)) return sibling;
+    }
+    try {
+        const probePkg = require('@ffprobe-installer/ffprobe');
+        if (probePkg?.path && fs.existsSync(probePkg.path)) return probePkg.path;
+    } catch { /* ignore */ }
+    return null;
+}
+const FFPROBE = ffprobeBin();
+
 if (!FFMPEG) {
     log('\n6 · FFmpeg behavioural check -- skipped (no ffmpeg binary available)');
 } else {
@@ -341,11 +358,26 @@ if (!FFMPEG) {
     }
 
     function streamTypes(file) {
-        const p = spawnSync(FFMPEG.endsWith('ffmpeg') ? FFMPEG.replace(/ffmpeg$/, 'ffprobe') : 'ffprobe',
-            ['-v', 'error', '-show_entries', 'stream=codec_type,duration', '-of', 'json', file],
-            { encoding: 'utf8', timeout: 15_000 });
-        if (p.status !== 0) return null;
-        try { return JSON.parse(p.stdout).streams; } catch { return null; }
+        if (FFPROBE) {
+            const p = spawnSync(FFPROBE,
+                ['-v', 'error', '-show_entries', 'stream=codec_type,duration', '-of', 'json', file],
+                { encoding: 'utf8', timeout: 15_000 });
+            if (p.status === 0) {
+                try {
+                    const streams = JSON.parse(p.stdout).streams;
+                    if (Array.isArray(streams) && streams.length > 0) return streams;
+                } catch { /* fallback to ffmpeg inspection below */ }
+            }
+        }
+        if (FFMPEG) {
+            const p = spawnSync(FFMPEG, ['-hide_banner', '-i', file], { encoding: 'utf8', timeout: 15_000 });
+            const stderr = p.stderr || '';
+            const streams = [];
+            if (/Stream #\d+:\d+.*Video:/i.test(stderr)) streams.push({ codec_type: 'video' });
+            if (/Stream #\d+:\d+.*Audio:/i.test(stderr)) streams.push({ codec_type: 'audio' });
+            if (streams.length > 0) return streams;
+        }
+        return null;
     }
 
     function meanVolumeDb(file) {
