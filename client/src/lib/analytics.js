@@ -39,7 +39,6 @@ function loadPosthog() {
 }
 
 export async function syncAnalyticsWithConsent() {
-    if (!POSTHOG_KEY) return;
     try {
         if (hasAnalyticsConsent()) {
             const posthog = await loadPosthog();

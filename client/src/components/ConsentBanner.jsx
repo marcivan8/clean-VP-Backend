@@ -32,9 +32,9 @@ export default function ConsentBanner() {
     const allValue = (v) => current?.replay === v && current?.analytics === v;
 
     const option = (id, checked, onChange) => (
-        <label htmlFor={id} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginTop: 8, cursor: 'pointer' }}>
+        <label htmlFor={`vibed-consent-${id}`} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginTop: 8, cursor: 'pointer' }}>
             <input
-                id={id}
+                id={`vibed-consent-${id}`}
                 type="checkbox"
                 checked={checked}
                 onChange={(e) => onChange(e.target.checked)}
