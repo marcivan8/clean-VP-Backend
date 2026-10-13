@@ -33,7 +33,7 @@ const OPERATION_META = {
     auto_edit:         { description: 'Your editing style was applied from start to finish. One undo reverts the whole edit.', suggestion: 'Export for social', suggestionPrompt: 'Export for TikTok' },
     design_scene:      { description: 'A graphics sequence was designed from the brief: titles, points and a call to action, timed in order.', suggestion: 'Open the Scene panel', suggestionPrompt: null },
     polish_short:      { description: 'The short got a pro finish: hook title, platform captions, camera moves, pops, transitions and sounds.', suggestion: 'Export it', suggestionPrompt: null },
-    repurpose_shorts:  { description: 'Shorts were picked from the strongest moments, one per platform. The main edit is unchanged.', suggestion: 'Open the Shorts tab', suggestionPrompt: null, suggestionTab: 'shorts' },
+    repurpose_shorts:  { description: 'Shorts were picked from the strongest moments, several per video for variety. The main edit is unchanged.', suggestion: 'Open the Shorts tab', suggestionPrompt: null, suggestionTab: 'shorts' },
     remove_background: { description: 'The background behind the person was changed. Fine-tune it in the Background panel.', suggestion: 'Try a solid colour', suggestionPrompt: 'Replace the background with black' },
     compose_motion:    { description: 'Custom motion was written for the layers. Undo reverts it in one step.', suggestion: 'Try another feel', suggestionPrompt: 'Make the title animation more elegant' },
     extract_short:     { description: 'The strongest moment was kept as a short, starting on its hook.', suggestion: 'Set it to vertical', suggestionPrompt: 'Set the aspect ratio to 9:16' },

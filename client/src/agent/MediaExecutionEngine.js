@@ -59,7 +59,7 @@ import i18next from 'i18next';
 import { resolveRetakeSource, retakeReviewLines, makeRetakeT, findTranscript } from './retakeSource.js';
 import { clipSourceWords, buildRhythmRequest, shotsToKeyframes } from './rhythmShots.js';
 import { findBestShortWindow, findShortCandidates, findShortCandidatesFallback, rangesOutside } from './shortPicker.js';
-import { PLATFORM_PROFILES, assignPlatforms, platformsFromText } from './PlatformProfiles.js'; // R92 round B
+import { PLATFORM_PROFILES, MAX_SHORT_COUNT, assignPlatforms, platformsFromText } from './PlatformProfiles.js'; // R92 round B
 import { polishShort } from './shortPolish.js'; // R92 round C
 import { packSegments } from './segmentPacking.js';
 
@@ -1603,7 +1603,10 @@ export class MediaExecutionEngine {
                     }
                 }
 
-                const count = Math.max(1, Math.min(5, Number(args.count) || 3));
+                // R101: ceiling raised from 5 to MAX_SHORT_COUNT -- EditPlanner's
+                // autoShortCount() can now legitimately ask for more than 5 on a long
+                // upload, and a direct count request should not be silently clipped.
+                const count = Math.max(1, Math.min(MAX_SHORT_COUNT, Number(args.count) || 3));
                 const platforms = assignPlatforms(count, Array.isArray(args.platforms) ? args.platforms : []);
                 const total = (st.tracks || []).reduce((m, t) => Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
                 if (total < 10) {

@@ -72,7 +72,7 @@ export function colorLookQuery(constraints, originalPrompt = '') {
 import { sfxQueryFromText } from './sfxCues.js'; // R92 round A
 import { stickerQueryFromText } from './stickerQuery.js'; // R97
 import { zoneFromText } from './zoneQuery.js'; // R99
-import { platformsFromText, shortCountFromText, getPlatformProfile } from './PlatformProfiles.js'; // R92 round B
+import { platformsFromText, shortCountFromText, autoShortCount, getPlatformProfile } from './PlatformProfiles.js'; // R92 round B
 
 export class EditPlanner {
 
@@ -278,13 +278,19 @@ export class EditPlanner {
                 ]);
             }
             case 'repurpose_shorts': {
-                // R92 round B: count and platforms come from the words; default
-                // three shorts, one per platform.
+                // R92 round B: count and platforms come from the words.
+                // R101: with no explicit count, the default scales with how
+                // much video there actually is (autoShortCount) instead of a
+                // flat 3, so a long upload yields real variety instead of
+                // always stopping at the same three shorts.
                 const text = intent.originalPrompt || '';
                 const platforms = platformsFromText(text);
+                const requested = shortCountFromText(text);
+                const total = (useTimelineStore.getState().tracks || [])
+                    .reduce((m, t) => Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
                 const count = /\b(?:one|a|1)\s+(?:for\s+)?each\b/.test(text.toLowerCase()) && platforms.length
                     ? platforms.length
-                    : Math.max(shortCountFromText(text), platforms.length || 0);
+                    : Math.max(requested ?? autoShortCount(total), platforms.length || 0);
                 return this.buildPlan(planId, 'repurpose_shorts', [
                     { step_id: 'step_1', action: 'repurpose_shorts', args: { count, platforms }, reason: `Find ${count} short(s) for ${platforms.length ? platforms.join(', ') : 'TikTok, Reels and YouTube Shorts'}` },
                 ]);

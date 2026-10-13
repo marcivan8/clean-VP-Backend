@@ -371,7 +371,7 @@ export const COMMANDS = [
         id: 'repurpose_shorts',
         category: 'edit',
         label: 'Repurpose into shorts',
-        summary: 'Finds the strongest moments and makes one short per platform (TikTok, Reels, YouTube Shorts) without changing the main edit.',
+        summary: 'Finds the strongest moments and makes several shorts -- more for a longer video -- across platforms (TikTok, Reels, YouTube Shorts) without changing the main edit.',
         phrases: ['repurpose into shorts', 'repurpose this video', 'repurpose the video', 'repurpose it', 'repurpose for social',
                   'repurpose for socials', 'repurpose into short videos', 'repurpose into short videos for socials',
                   'repurpose long video into short videos for socials', 'repurpose a long video into short videos for socials',

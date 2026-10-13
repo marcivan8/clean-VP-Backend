@@ -146,7 +146,7 @@ await check('every layer is added, tuned per platform, and the input is not chan
     const before = JSON.stringify(SHORT);
     const r = SPo.polishShort(SHORT, PP.PLATFORM_PROFILES.tiktok, { words: WORDS, events: [{ eventType: 'REVEAL', timelineTime: 5 }], popOut: true });
     assert.equal(JSON.stringify(SHORT), before, 'input untouched');
-    assert.deepEqual(r.applied.map(a => a.split(' (')[0]), ['hook title', 'captions', 'camera moves', 'number pops', 'transitions', 'speaker pop-out']);
+    assert.deepEqual(r.applied.map(a => a.split(' (')[0]), ['hook title', 'captions', 'camera moves', 'moment graphics', 'transitions', 'speaker pop-out']);
     const title = r.tracks.find(t => t.id === 'track-short-title').clips[0];
     assert.equal(title.content, 'HOW WE GREW REVENUE BY 300');
     assert.ok(title.animations.some(a => a.presetId === 'composed:slam-in') && title.animations.some(a => a.anchor === 'out'));
@@ -155,7 +155,12 @@ await check('every layer is added, tuned per platform, and the input is not chan
     // R95 wiring: tiktok's hook title is now KineticTitle's "punchy" preset,
     // whose measured accent is a burst shape (not a flat underline) - see
     // motion/SceneComposer.js LOOKS.KineticTitle.punchy.
-    assert.ok(gfx.some(c => c.template.kind === 'burst') && gfx.some(c => c.template.kind === 'price-pop'));
+    // R101: the spoken-number callout is now the SAME scene engine (a
+    // StatCallout "metric-callout" preset, whose measured accent is a
+    // circle-callout shape) instead of the old flat "price-pop" template.
+    assert.ok(gfx.some(c => c.template.kind === 'burst') && gfx.some(c => c.template.kind === 'circle-callout'));
+    const momentText = r.tracks.find(t => t.id === 'track-short-moments').clips;
+    assert.ok(momentText.some(c => c.type === 'text' && c.content === '300%'), 'the spoken number gets a designed stat callout');
     const cap = r.tracks.find(t => t.id === 't').clips[0];
     assert.equal(cap.y, PP.PLATFORM_PROFILES.tiktok.captionY);
     assert.deepEqual(cap.emphasis.indices, [2, 4]);

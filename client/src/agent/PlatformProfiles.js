@@ -104,13 +104,44 @@ export function platformsFromText(text) {
     return hits.sort((a, b) => a.idx - b.idx).map(h => h.id).filter(id => id !== 'shorts' || shortsIsPlatform);
 }
 
-/** How many shorts a request asks for (default 3, at most 5). */
+/** Hard ceiling on shorts per request -- generous, but still a count a person can review. */
+export const MAX_SHORT_COUNT = 20;
+
+/**
+ * How many shorts a request explicitly asks for. Returns:
+ *   - an explicit number (digits or a number word) named next to "short/
+ *     clip/reel/...", clamped to MAX_SHORT_COUNT;
+ *   - MAX_SHORT_COUNT for "as many as possible" / "max variety" / "every
+ *     short you can find" style phrasing -- R101: Marc wants variety, not a
+ *     flat 3, when he does not name an exact number;
+ *   - null when nothing explicit was said, so the caller sizes the default
+ *     off the source video itself instead of guessing a flat number (see
+ *     autoShortCount below).
+ */
 export function shortCountFromText(text) {
     const s = String(text || '').toLowerCase();
-    const words = { one: 1, two: 2, three: 3, four: 4, five: 5, un: 1, deux: 2, trois: 3, quatre: 4, cinq: 5 };
-    const m = s.match(/\b(\d|one|two|three|four|five|un|deux|trois|quatre|cinq)\s+(?:short|clip|reel|tiktok|video|vid|extrait)/);
-    if (m) return Math.max(1, Math.min(5, Number(m[1]) || words[m[1]] || 3));
-    return 3;
+    const words = {
+        one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+        un: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, sept: 7, huit: 8, neuf: 9, dix: 10,
+    };
+    const m = s.match(/\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|un|deux|trois|quatre|cinq|sept|huit|neuf|dix)\s+(?:short|clip|reel|tiktok|video|vid|extrait)/);
+    if (m) return Math.max(1, Math.min(MAX_SHORT_COUNT, Number(m[1]) || words[m[1]] || 3));
+    if (/\b(as many(?: shorts| as possible)?|every (?:short|clip|moment)|as much variety|more variety|max(?:imum)? variety|lots of shorts?|tons of shorts?|all the shorts|plein de shorts|un max de shorts)\b/.test(s)) return MAX_SHORT_COUNT;
+    return null;
+}
+
+/**
+ * R101: the default short count when nothing explicit was asked for. A flat
+ * 3 (the old behaviour) ignored how much usable video there actually was --
+ * a 2-minute clip and a 90-minute podcast both got exactly 3 shorts. Scales
+ * with the source length instead so a long upload actually yields the
+ * variety Marc asked for; findShortCandidates() already reports (never
+ * errors) when fewer windows fit without overlapping, so asking for more
+ * than a short clip can supply is harmless.
+ */
+export function autoShortCount(totalSeconds) {
+    const t = Math.max(0, Number(totalSeconds) || 0);
+    return Math.max(3, Math.min(MAX_SHORT_COUNT, Math.round(t / 40)));
 }
 
 /**
@@ -151,4 +182,4 @@ export function platformContext(id) {
     return { id: p.id, label: p.label, idealSeconds: p.length.ideal, maxSeconds: p.length.max, hookSeconds: p.hookSeconds, guidance: p.guidance };
 }
 
-export default { PLATFORM_IDS, PLATFORM_PROFILES, getPlatformProfile, platformsFromText, shortCountFromText, assignPlatforms, profileNotes, platformContext };
+export default { PLATFORM_IDS, PLATFORM_PROFILES, MAX_SHORT_COUNT, getPlatformProfile, platformsFromText, shortCountFromText, autoShortCount, assignPlatforms, profileNotes, platformContext };

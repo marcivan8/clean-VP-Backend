@@ -15,7 +15,10 @@
  *      in the safe zone, with one or two key words emphasised per line.
  *   3. CAMERA: a slow push across each shot and a punch-in on every detected
  *      moment (reveal, punchline, emphasis), on the video clips themselves.
- *   4. NUMBER POPS: spoken prices, percentages and figures pop on screen.
+ *   4. MOMENT GRAPHICS: spoken prices/percentages/figures, and a couple of
+ *      other strong REVEAL/PUNCHLINE/EMPHASIS beats in the body of the short,
+ *      get a designed StatCallout -- the SAME scene engine as the hook title
+ *      (R101), not just a number template at the start.
  *   5. CUTS: transitions on scene changes and spaced jump cuts.
  *   6. SPEAKER POP-OUT (optional): background dimmed and softened behind the
  *      person, when a background mask exists for the clip.
@@ -25,7 +28,6 @@
 
 import { composeMotion, COMPOSED } from '../motion/MotionComposer.js';
 import { stylePackToClipFields, groupWordsIntoSegments } from '../motion/CaptionModel.js';
-import { templateParams, templateSize, TEMPLATE_WIDTH_FRACTION } from '../motion/TemplateGraphics.js';
 import { STYLE_RECIPES, pickTransitionCuts, recipeTransitionForCut } from '../motion/StyleRecipes.js';
 import { TRANSITION_DEFAULT_DURATION } from '../motion/TransitionFX.js';
 import { normalizeMatte } from '../motion/MatteSettings.js';
@@ -123,23 +125,36 @@ export function emphasisIndices(content, keywords = []) {
     return scored.slice(0, tokens.length > 6 ? (keys.size ? 3 : 2) : (keys.size ? 2 : 1)).map(x => x.i).sort((a, b) => a - b);
 }
 
+/** A short badge label for a mid-short moment callout that has no spoken number to show instead. */
+const MOMENT_LABEL = { REVEAL: 'JUST REVEALED', PUNCHLINE_DETECTED: 'THE PUNCHLINE', EMPHASIS_MOMENT: 'KEY MOMENT' };
+function momentLabel(eventType, upper) {
+    const raw = MOMENT_LABEL[eventType] || 'KEY MOMENT';
+    return upper ? raw : raw.charAt(0) + raw.slice(1).toLowerCase();
+}
+
+/**
+ * A short (up to 4-word) phrase from the words spoken around timeline time
+ * `t`, for a mid-short moment callout with no spoken number to show instead.
+ * Trims a bare connector/stop word off either edge so the snippet reads as
+ * its own beat rather than half a sentence. Null when nothing usable is near.
+ */
+export function phraseFromWords(words, t, { upper = true, span = 1.1, maxWords = 4 } = {}) {
+    const near = (words || [])
+        .filter(w => Number(w?.start) <= t + span && Number(w?.end) >= t - span)
+        .sort((a, b) => Number(a.start) - Number(b.start));
+    if (near.length === 0) return null;
+    let picked = near.slice(0, maxWords).map(w => clean(wordOf(w))).filter(Boolean);
+    while (picked.length > 1 && STOP.has(picked[0].toLowerCase())) picked.shift();
+    while (picked.length > 1 && STOP.has(picked[picked.length - 1].toLowerCase())) picked.pop();
+    if (picked.length === 0) return null;
+    const out = picked.join(' ');
+    return upper ? out.toUpperCase() : out.charAt(0).toUpperCase() + out.slice(1);
+}
+
 function trackOf(tracks, type, id, name) {
     let t = tracks.find(x => x.id === id);
     if (!t) { t = { id, type, name, clips: [] }; tracks.push(t); }
     return t;
-}
-
-function templateClip(id, kind, params, { start, duration, x = 50, y = 50, widthFrac }) {
-    const p = templateParams(kind, params);
-    const size = templateSize(kind, p);
-    return {
-        id, type: 'template', name: kind,
-        template: { kind, params: p },
-        metadata: { resolution: { w: size.w, h: size.h } },
-        start, duration, x, y,
-        scale: (widthFrac || TEMPLATE_WIDTH_FRACTION[kind] || 0.5) / 0.25,
-        rotation: 0, opacity: 1,
-    };
 }
 
 /**
@@ -158,7 +173,6 @@ export function polishShort(built, profile, opts = {}) {
     const words = Array.isArray(opts.words) ? opts.words : [];
     const moments = (opts.events || []).filter(e => MOMENT_TYPES.has(e?.eventType) && Number(e.timelineTime) >= 0 && Number(e.timelineTime) < duration);
     const applied = [];
-    const topSafe = (profile?.safeZone?.top ?? 0.12) * 100;
 
     // 1. Hook title: a designed graphic (kicker/headline + a measured
     // accent), composed for the real frame and safe zone rather than a flat
@@ -281,15 +295,59 @@ export function polishShort(built, profile, opts = {}) {
         if (moved) applied.push(`camera moves (${moments.length} punch-in${moments.length === 1 ? '' : 's'})`);
     }
 
-    // 4. Number pops
+    // 4. Moment graphics: a spoken number, or another strong beat in the
+    // body of the short, gets a designed StatCallout -- the SAME scene
+    // engine (R93-95, composeComponentScene + flattenScene) the hook title
+    // above already uses, instead of a flat hand-rolled TemplateGraphics
+    // node. Before R101 only spoken numbers got a graphic at all, and the
+    // hook title was the ONLY place the designed scene engine showed up in a
+    // short; Marc asked for the engine to carry the whole short, not just
+    // its opening couple of seconds.
     if (want.numbers) {
+        const hookEnd = want.title
+            ? Math.min(Math.max(2.2, (profile?.hookSeconds || 1.5) + 1.4), Math.max(1.2, duration * 0.35))
+            : 0;
         const nums = spokenNumbers(words).filter(n => n.t > 0.3 && n.t < duration - 1);
-        if (nums.length) {
-            const gfx = trackOf(tracks, 'overlay', 'track-short-graphics', 'Short graphics');
-            nums.forEach((n, i) => gfx.clips.push(templateClip(`short-pop-${i}`, 'price-pop', { text: n.text, color: look.accent },
-                { start: Math.max(0, n.t - 0.1), duration: Math.min(1.6, duration - n.t), y: topSafe + 22 })));
-            applied.push(`number pops (${nums.length})`);
-        }
+        let momentTextN = 0, momentGfxN = 0, momentsCount = 0;
+        const pushCallout = (scene, atStart) => {
+            if (!scene) return;
+            const { placements } = flattenScene(scene, { startOffset: atStart });
+            if (!placements.length) return;
+            for (const p of placements) {
+                const isText = p.trackType === 'text';
+                const t = trackOf(tracks, isText ? 'text' : 'overlay', isText ? 'track-short-moments' : 'track-short-graphics', isText ? 'Moments' : 'Short graphics');
+                const id = isText ? `short-moment-text-${momentTextN++}` : `short-moment-gfx-${momentGfxN++}`;
+                t.clips.push({ ...p.clip, id });
+            }
+            momentsCount += 1;
+        };
+        nums.forEach(n => {
+            const scene = composeComponentScene('StatCallout', 'metric-callout', {
+                value: n.text, label: look.upper ? 'JUST SAID' : 'just said', color: look.accent,
+                duration: Math.min(1.6, duration - n.t),
+            }, { aspectRatio: built?.aspectRatio || '9:16', safeZone: profile?.safeZone });
+            pushCallout(scene, Math.max(0, n.t - 0.1));
+        });
+        // The body of the short still deserves its own graphic beats, not
+        // only the hook: up to two more REVEAL/PUNCHLINE/EMPHASIS moments
+        // (clear of the hook, and clear of a number already shown) get a
+        // short phrase callout.
+        const phraseMoments = moments.filter(m => {
+            const t = Number(m.timelineTime);
+            if (!(t > hookEnd + 0.4 && t < duration - 1)) return false;
+            return !nums.some(n => Math.abs(n.t - t) < 2.5);
+        });
+        phraseMoments.slice(0, 2).forEach(m => {
+            const t = Number(m.timelineTime);
+            const phrase = phraseFromWords(words, t, { upper: look.upper });
+            if (!phrase) return;
+            const scene = composeComponentScene('StatCallout', 'metric-callout', {
+                value: phrase, label: momentLabel(m.eventType, look.upper), color: look.accent,
+                duration: Math.max(0.5, Math.min(1.6, duration - t - 0.1)),
+            }, { aspectRatio: built?.aspectRatio || '9:16', safeZone: profile?.safeZone });
+            pushCallout(scene, Math.max(0, t - 0.3));
+        });
+        if (momentsCount) applied.push(`moment graphics (${momentsCount})`);
     }
 
     // 5. Transitions on real cuts
@@ -340,4 +398,4 @@ export function shiftToShort(list, start, end, key = 'start') {
         }));
 }
 
-export default { POLISH_LOOK, headlineFromText, spokenNumbers, emphasisIndices, polishShort, shiftToShort };
+export default { POLISH_LOOK, headlineFromText, spokenNumbers, emphasisIndices, phraseFromWords, polishShort, shiftToShort };

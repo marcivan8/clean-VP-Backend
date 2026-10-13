@@ -62,8 +62,13 @@ await check('loose names and requests are understood', () => {
     assert.deepEqual(P.platformsFromText('make shorts for tiktok, reels and youtube shorts'), ['tiktok', 'reels', 'shorts']);
     assert.deepEqual(P.platformsFromText('turn it into shorts'), [], '"shorts" alone is not YouTube');
     assert.equal(P.shortCountFromText('make two reels'), 2);
-    assert.equal(P.shortCountFromText('make 9 clips'), 5, 'capped at 5');
-    assert.equal(P.shortCountFromText('repurpose it'), 3);
+    assert.equal(P.shortCountFromText('make 9 clips'), 9, 'raised past the old flat cap of 5');
+    assert.equal(P.shortCountFromText('make 30 clips'), P.MAX_SHORT_COUNT, 'still bounded at MAX_SHORT_COUNT');
+    assert.equal(P.shortCountFromText('repurpose it'), null, 'no explicit count -> caller sizes the default');
+    assert.equal(P.shortCountFromText('give me as many shorts as possible'), P.MAX_SHORT_COUNT);
+    assert.equal(P.autoShortCount(300), 8, 'scales with the source length instead of a flat 3');
+    assert.equal(P.autoShortCount(60), 3, 'never below the old default floor');
+    assert.equal(P.autoShortCount(100000), P.MAX_SHORT_COUNT, 'bounded even for a very long source');
     assert.deepEqual(P.assignPlatforms(3), ['tiktok', 'reels', 'shorts']);
     assert.deepEqual(P.assignPlatforms(2, ['reels']), ['reels', 'reels']);
 });
@@ -172,10 +177,13 @@ const plan = async (text) => {
     const p = await EditPlanner.generatePlan(intent);
     return { op: intent.operation, steps: p.plan?.steps || [] };
 };
+// LONG (below) is 300 s, so autoShortCount(300) = 8 drives the two
+// no-explicit-count cases -- R101 sizes the default off the source length
+// instead of a flat 3.
 for (const [t, count, platforms] of [
-    ['repurpose this video', 3, []],
+    ['repurpose this video', 8, []],
     ['make 3 shorts for tiktok', 3, ['tiktok']],
-    ['make shorts for tiktok, reels and youtube shorts', 3, ['tiktok', 'reels', 'shorts']],
+    ['make shorts for tiktok, reels and youtube shorts', 8, ['tiktok', 'reels', 'shorts']],
     ['turn this into shorts, one for each platform: tiktok and instagram', 2, ['tiktok', 'reels']],
 ]) {
     await check(`"${t}" → repurpose_shorts (${count}, ${platforms.join('/') || 'all'})`, async () => {
