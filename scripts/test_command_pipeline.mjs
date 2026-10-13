@@ -76,5 +76,13 @@ for (const [p, q] of [['color grade', 'cinematic'], ['make it cinematic', 'cinem
 assert.equal(colorLookQuery({ style: 'teal orange' }, 'whatever'), 'teal orange');
 log('✓ colour grade → a LUT look (preview + export), default "cinematic"');
 
+for (const p of ['repetition', 'repetitions', 'remove repetition', 'cut repetition', 'cut repetitions', 'enlever les répétitions', 'supprimer les répétitions']) {
+    r = await run(p);
+    assert.equal(r.intent.operation, 'remove_repetition', `${p} intent`);
+    assert.deepEqual(r.steps, ['remove_repeated_takes'], `${p} steps`);
+    assert.deepEqual(r.commands, ['detectRepeatedTakes'], `${p} commands`);
+}
+log('✓ repetition phrasings (single word, cut repetition, French) → remove_repeated_takes / detectRepeatedTakes');
+
 log('\nALL COMMAND-PIPELINE CHECKS PASSED');
 process.exit(0);

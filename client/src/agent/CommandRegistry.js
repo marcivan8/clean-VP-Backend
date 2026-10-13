@@ -80,7 +80,16 @@ export const COMMANDS = [
                   'remove repetitions', 'remove the repetitions', 'cut repetitions', 'cut the repetitions',
                   'remove repeats', 'remove the repeats', 'remove retakes', 'cut the retakes', 'remove false starts',
                   'clean up repetition', 'clean up repetitions', 'remove what i repeated', 'remove repeated parts',
-                  'supprime les repetitions', 'enleve les repetitions', 'coupe les repetitions'],
+                  'supprime les repetitions', 'enleve les repetitions', 'coupe les repetitions',
+                  // Single word & everyday shorthand
+                  'repetition', 'repetitions', 'cut repetition',
+                  // French infinitives and variants (accents are folded by scoreCommand)
+                  'supprimer les repetitions', 'enlever les repetitions', 'couper les repetitions', 'retirer les repetitions',
+                  'supprimer repetitions', 'enlever repetitions', 'couper repetitions', 'retirer repetitions',
+                  'retire les repetitions', 'retire repetitions',
+                  'supprime repetition', 'enleve repetition', 'coupe repetition',
+                  'coupe les retakes', 'supprime les retakes', 'enleve les retakes',
+                  'repeated takes', 'retakes', 'false starts'],
         destructive: true,
         requires: ['transcript'],
     },

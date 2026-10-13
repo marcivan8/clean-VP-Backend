@@ -1177,6 +1177,15 @@ function localParseIntent(prompt, context) {
                 missingParameters: []
             };
         }
+        if (has('repetition', 'repetitions', 'repeated', 'retake', 'retakes', 'false start', 'false starts', 'duplicate', 'says it twice', 'repeats')) {
+            return {
+                intent: 'edit',
+                operation: 'remove_repetition',
+                parameters: {},
+                confidence: 'HIGH',
+                missingParameters: []
+            };
+        }
         if (has('remove', 'delete', 'trash', 'get rid of', 'cut out', 'erase', 'drop')) {
             if (has('silence', 'dead air', 'quiet parts', 'gaps')) {
                 return {
@@ -1189,7 +1198,7 @@ function localParseIntent(prompt, context) {
             }
             if (has('repetition', 'repeated', 'duplicate', 'says it twice', 'repeats')) {
                 return {
-                    intent: 'long_form_build',
+                    intent: 'edit',
                     operation: 'remove_repetition',
                     parameters: {},
                     confidence: 'HIGH',

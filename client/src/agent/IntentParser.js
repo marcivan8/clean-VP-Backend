@@ -221,9 +221,16 @@ const NLP_MAP = {
         'format for youtube',
     ],
     removeRepetition: [
+        'repetition', 'repetitions',
         'remove repetition', 'remove repetitions', 'cut out repetitions',
+        'cut repetition', 'cut repetitions',
         'remove duplicate parts', 'cut repeated content', 'remove repeats',
-        'no repetition', 'clean up repetition', 'deduplicate',
+        'no repetition', 'clean up repetition', 'clean up repetitions', 'deduplicate',
+        'retakes', 'repeated takes', 'false starts',
+        'supprimer les repetitions', 'enlever les repetitions', 'couper les repetitions', 'retirer les repetitions',
+        'supprimer les répétitions', 'enlever les répétitions', 'couper les répétitions', 'retirer les répétitions',
+        'supprime les repetitions', 'enleve les repetitions', 'coupe les repetitions', 'retire les repetitions',
+        'supprime les répétitions', 'enleve les répétitions', 'coupe les répétitions', 'retire les répétitions',
     ],
     splitSpeakers: [
         'split speakers', 'split speaker', 'separate speakers', 'separate speaker',
@@ -586,7 +593,7 @@ export class IntentParser {
         const actions = [];
         if (has('silence') || /\bsilen(ce|ces|t)\b|\bpauses?\b|dead air/.test(lower)) actions.push('silence_removal');
         if (has('fillerWords') || /\bfillers?\b|\bums?\b|\buhs?\b/.test(lower)) actions.push('remove_filler_words');
-        if (has('removeRepetition') || /\brepeat(s|ed)?\b|\bretakes?\b|\bre-takes?\b|false starts?/.test(lower)) actions.push('remove_repetition');
+        if (has('removeRepetition') || /\brep[eé]tit(ion|ions)?\b|\brepeat(s|ed)?\b|\bretakes?\b|\bre-takes?\b|false starts?/i.test(lower)) actions.push('remove_repetition');
         if (actions.length < 2) return null;
         if (/\b(dynamic|zoom|rhythm|engaging|multicam|angles?)\b/.test(lower)) return null;
         return {
@@ -1155,7 +1162,13 @@ export class IntentParser {
         }
 
         if (matches('removeRepetition')) {
-            return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.LONG_FORM_EDIT, { constraints: { editMode: 'SMART_CLEANUP' } });
+            return {
+                intent: 'edit',
+                operation: 'remove_repetition',
+                parameters: {},
+                confidence: 'HIGH',
+                missingParameters: []
+            };
         }
 
         if (matches('organizeClips')) {
