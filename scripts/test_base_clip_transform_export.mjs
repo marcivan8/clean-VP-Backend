@@ -84,10 +84,45 @@ function ffmpegBin() {
 }
 const FFMPEG = ffmpegBin();
 
+function ffprobeBin() {
+    for (const bin of ['ffprobe', '/usr/bin/ffprobe']) {
+        const r = spawnSync(bin, ['-version'], { encoding: 'utf8' });
+        if (r.status === 0) return bin;
+    }
+    if (FFMPEG && FFMPEG.endsWith('ffmpeg')) {
+        const sibling = FFMPEG.replace(/ffmpeg$/, 'ffprobe');
+        if (fs.existsSync(sibling)) return sibling;
+    }
+    try {
+        const probePkg = require('@ffprobe-installer/ffprobe');
+        if (probePkg?.path && fs.existsSync(probePkg.path)) return probePkg.path;
+    } catch { /* ignore */ }
+    return null;
+}
+const FFPROBE = ffprobeBin();
+
+function readDimensions(file) {
+    if (FFPROBE) {
+        const probe = spawnSync(FFPROBE,
+            ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', file],
+            { encoding: 'utf8', timeout: 20_000 });
+        if (probe.status === 0 && (probe.stdout || '').trim()) {
+            const [w, h] = probe.stdout.trim().split(',').map(Number);
+            if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) return [w, h];
+        }
+    }
+    if (FFMPEG) {
+        const probe = spawnSync(FFMPEG, ['-hide_banner', '-i', file], { encoding: 'utf8', timeout: 20_000 });
+        const m = (probe.stderr || '').match(/Video:.*?,\s*(\d+)x(\d+)/);
+        if (m) return [Number(m[1]), Number(m[2])];
+    }
+    return [0, 0];
+}
+
 if (!FFMPEG) {
-    log('\n4 \xb7 FFmpeg behavioural check -- skipped (no ffmpeg binary available)');
+    log('\n4 · FFmpeg behavioural check -- skipped (no ffmpeg binary available)');
 } else {
-    log('\n4 \xb7 FFmpeg actually composites the transformed clip at the right size/position');
+    log('\n4 · FFmpeg actually composites the transformed clip at the right size/position');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'basetransform-'));
     const srcPath = path.join(dir, 'src.mp4');
     const outPath = path.join(dir, 'out.mp4');
@@ -117,10 +152,7 @@ if (!FFMPEG) {
     await check('the render runs and produces a file of exactly the canvas size', () => {
         assert.equal(render.status, 0, (render.stderr || '').split('\n').slice(-6).join(' | '));
         assert.ok(fs.existsSync(outPath) && fs.statSync(outPath).size > 0);
-        const probe = spawnSync(FFMPEG.replace(/ffmpeg(\.exe)?$/, 'ffprobe'),
-            ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', outPath],
-            { encoding: 'utf8', timeout: 20_000 });
-        const [w, h] = (probe.stdout || '').trim().split(',').map(Number);
+        const [w, h] = readDimensions(outPath);
         assert.equal(w, canvasW); assert.equal(h, canvasH);
     });
 
