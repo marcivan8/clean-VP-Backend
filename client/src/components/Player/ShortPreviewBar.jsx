@@ -41,20 +41,25 @@ export default function ShortPreviewBar() {
     };
 
     return (
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3 py-1.5 rounded-full backdrop-blur-xl shadow-xl max-w-[95%]"
-            style={{ background: 'rgba(14,15,17,0.88)', border: '0.5px solid var(--line-strong)' }}
+        <div className="absolute top-3 md:top-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2.5 px-3.5 py-2 rounded-full backdrop-blur-2xl shadow-2xl max-w-[95%] border transition-all pointer-events-auto"
+            style={{
+                background: 'rgba(14, 15, 17, 0.92)',
+                borderColor: 'var(--line-strong)',
+                boxShadow: '0 8px 32px -4px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08)'
+            }}
             role="status">
             <Smartphone className="w-3.5 h-3.5 text-primary shrink-0" />
-            <div className="min-w-0">
+            <div className="min-w-0 flex flex-col">
                 <div className="text-[11px] font-semibold text-foreground truncate">{t('shortsPanel.previewing', { platform: preview.label })}</div>
-                <div className="text-[10px] text-muted-foreground truncate">{t('shortsPanel.previewNote')}</div>
+                <div className="text-[10px] text-muted-foreground truncate hidden sm:block">{t('shortsPanel.previewNote')}</div>
             </div>
+            <div className="w-px h-3.5 mx-0.5 bg-white/10 shrink-0" />
             <button type="button" onClick={replay} aria-label={t('shortsPanel.previewReplay')} title={t('shortsPanel.previewReplay')}
-                className="p-1 rounded-full hover:bg-white/10 text-muted-foreground hover:text-foreground">
+                className="p-1 rounded-full hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors shrink-0">
                 <RotateCcw className="w-3.5 h-3.5" />
             </button>
             <button type="button" onClick={() => useTimelineStore.getState().exitShortPreview()}
-                className="flex items-center gap-1 px-2 py-1 rounded-full text-[10px] bg-primary/15 border border-primary/40 text-primary whitespace-nowrap">
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-primary/20 hover:bg-primary/30 border border-primary/50 text-primary hover:text-primary-foreground transition-all whitespace-nowrap shrink-0 shadow-sm">
                 <X className="w-3 h-3" /> {t('shortsPanel.previewBack')}
             </button>
         </div>

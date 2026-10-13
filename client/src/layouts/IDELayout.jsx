@@ -2382,8 +2382,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     // CSS aspect-ratio alone does NOT create a "definite height" for child
                                     // height:100% in WebKit — the canvas collapses to 0 and nothing plays.
                                     ? "w-full flex items-center justify-center"
-                                    // Desktop: unchanged
-                                    : "flex-1 flex items-center justify-center md:p-8 p-4"
+                                    // Desktop: flex-1 with min-h-0 so the player scales within available height between header and timeline
+                                    : "flex-1 min-h-0 md:shrink flex items-center justify-center md:p-8 p-4"
                             )}
                             style={{
                                 background: "radial-gradient(60% 80% at 50% 40%, #1c1f24 0%, #0c0d10 100%)",
@@ -2396,6 +2396,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 }),
                             }}
                         >
+                            {/* R93: a finished short playing in this player — floating at top of viewport so it's always clearly visible and never clipped */}
+                            <ShortPreviewBar />
+
                             <div className={classNames(
                                 "bg-black rounded-lg shadow-2xl relative border border-white/5 group overflow-hidden transition-all duration-500 ease-in-out",
                                 isMobile
@@ -2409,12 +2412,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                                 ? 'h-full w-auto aspect-square'
                                                 : 'w-full h-full'
                                       )
-                                    // Desktop: unchanged
+                                    // Desktop: cap to max-h-full so the player never overflows the viewport container into the header or timeline
                                     : (
                                         aspectRatio === '9:16'
-                                            ? 'aspect-[9/16] max-h-[70vh] md:max-h-[550px] w-auto'
+                                            ? 'aspect-[9/16] max-h-full max-w-full md:max-h-[550px] w-auto'
                                             : aspectRatio === '1:1'
-                                                ? 'aspect-square max-h-[50vh] md:max-h-[450px] w-auto'
+                                                ? 'aspect-square max-h-full max-w-full md:max-h-[450px] w-auto'
                                                 : 'aspect-video max-w-full max-h-full md:max-h-[60vh] w-auto'
                                       )
                             )}>
@@ -2458,8 +2461,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 <GraphicOverlay placementFilter="front" />
                                 {/* R92 round C: alignment guides while dragging */}
                                 <SnapGuidesLayer />
-                                {/* R93: a finished short playing in this player */}
-                                <ShortPreviewBar />
                             </div>
 
                             {/* Floating Playback Controls (desktop; mobile uses MobileTransportBar) */}
