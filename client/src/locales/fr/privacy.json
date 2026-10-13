@@ -42,7 +42,7 @@
         "**Instructions données à l'assistant.** Les demandes que vous écrivez à l'assistant IA, ses réponses, et la trace des suggestions acceptées ou refusées.",
         "**Profil de style.** Des préférences de montage déduites de votre façon de travailler : rythme, polices, plateformes visées, type de contenu. Voir la section 7.",
         "**Offre et facturation.** Votre offre, l'état de votre abonnement, vos compteurs d'utilisation (par exemple les opérations IA du mois) et les identifiants client et abonnement transmis par notre prestataire de paiement. Nous ne recevons ni ne conservons vos données de carte bancaire.",
-        "**Données techniques.** Journaux serveur (date, requête, identifiant du compte), rapports d'erreur de l'application (message d'erreur, type de navigateur, page) et, uniquement si vous l'acceptez, une relecture masquée de l'écran au moment d'une erreur (voir la [Politique des cookies](/cookie-policy)). Nos hébergeurs peuvent enregistrer les adresses IP dans leurs journaux d'accès.",
+        "**Données techniques.** Journaux serveur (date, requête, identifiant du compte), rapports d'erreur de l'application (message d'erreur, type de navigateur, page) et, uniquement si vous les acceptez, une relecture masquée de l'écran au moment d'une erreur et une mesure d'utilisation (pages visitées et fonctionnalités utilisées, avec un identifiant aléatoire) (voir la [Politique des cookies](/cookie-policy)). Nos hébergeurs peuvent enregistrer les adresses IP dans leurs journaux d'accès.",
         "**E-mails.** Les e-mails de service qui vous ont été envoyés et votre éventuel désabonnement des actualités produit.",
         "**Avant l'inscription.** Vous pouvez essayer l'éditeur sans compte. Votre projet reste alors dans votre navigateur. Notre serveur ne conserve qu'un identifiant de session temporaire, valable 48 heures."
       ]
@@ -84,6 +84,10 @@
               ],
               [
                 "Relecture de l'écran lors d'une erreur",
+                "Votre consentement, que vous pouvez retirer à tout moment"
+              ],
+              [
+                "Mesure d'utilisation (pages visitées, fonctionnalités utilisées)",
                 "Votre consentement, que vous pouvez retirer à tout moment"
               ],
               [
@@ -178,6 +182,11 @@
                 "Allemagne (UE)"
               ],
               [
+                "PostHog",
+                "Mesure d'utilisation, avec consentement",
+                "Allemagne (UE)"
+              ],
+              [
                 "{{hostingerEntity}}",
                 "Envoi de nos e-mails",
                 "Turquie"
@@ -258,6 +267,10 @@
                 "90 jours au maximum"
               ],
               [
+                "Événements de mesure d'utilisation",
+                "1 an au maximum"
+              ],
+              [
                 "Session temporaire avant inscription",
                 "Supprimée 30 jours après son expiration"
               ],
@@ -305,7 +318,7 @@
       "id": "cookies",
       "title": "11. Cookies et technologies similaires",
       "blocks": [
-        "Nous utilisons uniquement ce qui est nécessaire au fonctionnement du service, ainsi qu'un outil facultatif de relecture des erreurs soumis à votre consentement. Le détail figure dans la [Politique des cookies](/cookie-policy)."
+        "Nous utilisons uniquement ce qui est nécessaire au fonctionnement du service, ainsi que deux outils facultatifs soumis à votre consentement : la relecture des erreurs et la mesure d'utilisation. Le détail figure dans la [Politique des cookies](/cookie-policy)."
       ]
     },
     {

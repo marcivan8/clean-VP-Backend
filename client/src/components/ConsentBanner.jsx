@@ -3,25 +3,50 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { getConsent, setConsent, onConsentOpen } from '../lib/consent';
 
-// Small consent panel for the single optional tracker (Sentry error replay).
-// Accept and Refuse have the same size and weight, as the CNIL requires.
+// Small consent panel for the two optional trackers: Sentry error replay and
+// PostHog product analytics. Each one has its own switch, off by default.
+// Accept all and Refuse all have the same size and weight, as the CNIL requires.
 // Shown on first visit, after 6 months, and from the footer "Cookie settings".
 export default function ConsentBanner() {
     const { t } = useTranslation('common');
     const [open, setOpen] = useState(() => getConsent() === null);
     const [current, setCurrent] = useState(() => getConsent());
+    const [replay, setReplay] = useState(() => getConsent()?.replay === true);
+    const [analytics, setAnalytics] = useState(() => getConsent()?.analytics === true);
 
     useEffect(() => onConsentOpen(() => {
-        setCurrent(getConsent());
+        const saved = getConsent();
+        setCurrent(saved);
+        setReplay(saved?.replay === true);
+        setAnalytics(saved?.analytics === true);
         setOpen(true);
     }), []);
 
     if (!open) return null;
 
-    const choose = (replay) => {
-        setCurrent(setConsent({ replay }));
+    const choose = (choice) => {
+        setCurrent(setConsent(choice));
         setOpen(false);
     };
+
+    const allValue = (v) => current?.replay === v && current?.analytics === v;
+
+    const option = (id, checked, onChange) => (
+        <label htmlFor={`vibed-consent-${id}`} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginTop: 8, cursor: 'pointer' }}>
+            <input
+                id={`vibed-consent-${id}`}
+                type="checkbox"
+                checked={checked}
+                onChange={(e) => onChange(e.target.checked)}
+                style={{ marginTop: 4, accentColor: 'var(--accent)' }}
+            />
+            <span>
+                <span style={{ color: 'var(--fg)', fontWeight: 500 }}>{t(`consent.${id}.title`)}</span>
+                <br />
+                {t(`consent.${id}.body`)}
+            </span>
+        </label>
+    );
 
     const btn = {
         flex: 1,
@@ -61,30 +86,40 @@ export default function ConsentBanner() {
             <div id="vibed-consent-title" style={{ color: 'var(--fg)', fontWeight: 600, fontSize: 14, marginBottom: 6 }}>
                 {t('consent.title')}
             </div>
-            <p id="vibed-consent-body" style={{ margin: '0 0 10px' }}>
+            <p id="vibed-consent-body" style={{ margin: '0 0 6px' }}>
                 {t('consent.body')}
             </p>
+            {option('replay', replay, setReplay)}
+            {option('analytics', analytics, setAnalytics)}
+            <div style={{ height: 10 }} />
             <Link to="/cookie-policy" onClick={() => setOpen(false)} style={{ color: 'var(--accent)', textDecoration: 'none', fontSize: 13 }}>
                 {t('consent.learnMore')}
             </Link>
             <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
                 <button
                     type="button"
-                    onClick={() => choose(false)}
-                    aria-pressed={current?.replay === false}
+                    onClick={() => choose({ replay: false, analytics: false })}
+                    aria-pressed={allValue(false)}
                     style={btn}
                 >
                     {t('consent.refuse')}
                 </button>
                 <button
                     type="button"
-                    onClick={() => choose(true)}
-                    aria-pressed={current?.replay === true}
+                    onClick={() => choose({ replay: true, analytics: true })}
+                    aria-pressed={allValue(true)}
                     style={btn}
                 >
                     {t('consent.accept')}
                 </button>
             </div>
+            <button
+                type="button"
+                onClick={() => choose({ replay, analytics })}
+                style={{ ...btn, width: '100%', marginTop: 10, background: 'transparent' }}
+            >
+                {t('consent.save')}
+            </button>
         </div>
     );
 }

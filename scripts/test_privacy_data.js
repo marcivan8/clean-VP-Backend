@@ -11,6 +11,8 @@
  *     without that notice, editing revives a project, active Pro is kept,
  *     a failed email means no notice and no deletion (services/retentionJob.js)
  *   - unsubscribe links are signed (services/unsubscribeToken.js)
+ *   - product analytics (PostHog) only loads after its own consent, and the
+ *     legal pages list it (client/src/lib/consent.js, lib/analytics.js)
  * Runs against in-memory fakes of Supabase and Google Cloud Storage.
  */
 'use strict';
@@ -215,6 +217,44 @@ function makeBucket(names, createdAt) {
     check('valid signature accepted', ut.verifyUnsubscribe(uid, sig));
     check('signature for another user rejected', !ut.verifyUnsubscribe('123e4567-e89b-12d3-a456-426614174001', sig));
     check('malformed input rejected', !ut.verifyUnsubscribe(uid, 'abc') && !ut.verifyUnsubscribe('x', sig));
+
+    // ── analytics consent ────────────────────────────────────────────────────
+    console.log('analytics consent');
+    const fs = require('fs');
+    const path = require('path');
+    const { pathToFileURL } = require('url');
+    const root = path.join(__dirname, '..');
+    const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
+
+    const store = new Map();
+    globalThis.window = new EventTarget();
+    globalThis.localStorage = {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => store.set(k, String(v)),
+    };
+    const consent = await import(pathToFileURL(path.join(root, 'client/src/lib/consent.js')).href);
+    check('no analytics consent before a choice', !consent.hasAnalyticsConsent() && consent.getConsent() === null);
+    store.set('vibed_consent_v1', JSON.stringify({ replay: true, at: new Date().toISOString() }));
+    check('a choice saved before analytics existed is asked again', consent.getConsent() === null && !consent.hasReplayConsent());
+    consent.setConsent({ replay: true, analytics: false });
+    check('replay only: no analytics consent', consent.hasReplayConsent() && !consent.hasAnalyticsConsent());
+    consent.setConsent({ replay: false, analytics: true });
+    check('analytics only: no replay consent', consent.hasAnalyticsConsent() && !consent.hasReplayConsent());
+
+    const analyticsSrc = read('client/src/lib/analytics.js');
+    const mainSrc = read('client/src/main.jsx');
+    const staticImport = /import\s[^;]*from\s+['"]posthog-js['"]/;
+    check('posthog-js is never imported statically', !staticImport.test(analyticsSrc) && !staticImport.test(mainSrc));
+    check('posthog-js loads only after hasAnalyticsConsent()',
+        /hasAnalyticsConsent\(\)[\s\S]*loadPosthog\(\)/.test(analyticsSrc) && /import\('posthog-js'\)/.test(analyticsSrc));
+    check('PostHog records no screen', /disable_session_recording:\s*true/.test(analyticsSrc) && /mask_all_text:\s*true/.test(analyticsSrc));
+    check('CSP allows the PostHog EU host', read('index.js').includes('https://eu.i.posthog.com'));
+    for (const lang of ['en', 'fr']) {
+        check(`${lang}: cookie policy lists PostHog`, read(`client/src/locales/${lang}/cookies.json`).includes('PostHog'));
+        check(`${lang}: privacy policy lists PostHog`, read(`client/src/locales/${lang}/privacy.json`).includes('PostHog'));
+        const c = JSON.parse(read(`client/src/locales/${lang}/common.json`)).consent;
+        check(`${lang}: banner has an analytics choice`, !!(c?.analytics?.title && c?.analytics?.body && c?.save));
+    }
 
     console.log(failures ? `\n${failures} check(s) failed` : '\nAll privacy data checks passed');
     process.exit(failures ? 1 : 0);

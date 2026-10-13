@@ -67,6 +67,9 @@ app.use(helmet({
         // Sentry error reporting — both ingest domains (EU + global)
         "https://*.ingest.sentry.io",
         "https://*.ingest.de.sentry.io",
+        // PostHog product analytics (EU cloud), only after consent
+        "https://eu.i.posthog.com",
+        "https://eu-assets.i.posthog.com",
         ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
       ],
       // blob: is required for Web Workers created by Vite/Revideo at runtime.

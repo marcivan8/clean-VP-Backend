@@ -3,7 +3,7 @@
   "title": "Cookie Policy",
   "lastUpdated": "Last updated: {{date}}",
   "intro": [
-    "Like most web applications, Vibed stores a few small pieces of information in your browser, as cookies or in local storage. This page lists all of them. We do not use advertising or audience measurement cookies, and no third party tracks you across sites through Vibed."
+    "Like most web applications, Vibed stores a few small pieces of information in your browser, as cookies or in local storage. This page lists all of them. We do not use advertising cookies, we measure audience only if you accept it, and no third party tracks you across sites through Vibed."
   ],
   "sections": [
     {
@@ -80,11 +80,16 @@
                 "Sentry Session Replay (provider: Sentry, data stored in Germany)",
                 "When the editor hits an error, a short replay of the screen helps us understand and fix it. All text and input fields are masked, and images and videos are blocked, so the replay shows the layout of the page and never your content. Nothing is recorded if no error occurs.",
                 "Replay buffer kept for the browser session; replays kept up to 90 days"
+              ],
+              [
+                "PostHog product analytics (provider: PostHog, data stored in Germany). Cookie: ph_<key>_posthog",
+                "Counts the pages you visit and the features you use, with a random identifier, so we know what to improve. Text on the page and your content are never sent, no screen is recorded, and your IP address is not stored.",
+                "Cookie 1 year; events kept up to 1 year"
               ]
             ]
           }
         },
-        "This tool only runs if you click Accept in the banner. If you refuse, the editor works exactly the same."
+        "These tools only run if you accept them in the banner, one by one or with Accept all. If you refuse, the editor works exactly the same."
       ]
     },
     {

@@ -66,10 +66,19 @@
     "checkoutFailed": "Couldn't open checkout. Try again in a moment."
   },
   "consent": {
-    "title": "Cookies and error replay",
-    "body": "We only use what is needed to run Vibed, plus one optional tool: when the editor hits an error, a short replay of the screen helps us fix it. Text, images and video are hidden in these replays.",
-    "accept": "Accept",
-    "refuse": "Refuse",
+    "title": "Cookies and optional tools",
+    "body": "We only use what is needed to run Vibed, plus two optional tools. Both are off until you turn them on.",
+    "replay": {
+      "title": "Error replay",
+      "body": "When the editor hits an error, a short replay of the screen helps us fix it. Text, images and video are hidden."
+    },
+    "analytics": {
+      "title": "Usage analytics",
+      "body": "Counts the pages you visit and the features you use, so we know what to improve. Text on the page and your content are never sent."
+    },
+    "accept": "Accept all",
+    "refuse": "Refuse all",
+    "save": "Save my choices",
     "learnMore": "Cookie policy",
     "close": "Close",
     "saved": "Your choice has been saved."
