@@ -406,6 +406,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     order: t.order ?? idx,
                     clips: (t.clips || []).map(c => {
                         const sourceAsset = assets.find(a => a.id === c.assetId);
+                        const assetRes = sourceAsset?.resolution || (sourceAsset?.width && sourceAsset?.height ? { w: sourceAsset.width, h: sourceAsset.height } : null);
+                        const srcW = c.metadata?.resolution?.w || c.sourceWidth || assetRes?.w || null;
+                        const srcH = c.metadata?.resolution?.h || c.sourceHeight || assetRes?.h || null;
                         // Resolution order:
                         // 1. proxyUrl (server-relative or blob) — already correct format
                         // 2. asset blob URL (in-memory, valid while tab is open)
@@ -419,6 +422,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             || c.fileUrl;
                         return {
                             ...c,
+                            sourceWidth: srcW,
+                            sourceHeight: srcH,
+                            metadata: {
+                                ...(c.metadata || {}),
+                                ...(srcW && srcH ? { resolution: { w: srcW, h: srcH } } : {}),
+                            },
                             type: t.type || c.type,
                             globalVolume: trackVol,
                             url: toProxyUrl(rawUrl) || ""

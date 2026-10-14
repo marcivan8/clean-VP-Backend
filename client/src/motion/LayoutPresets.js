@@ -200,6 +200,7 @@ export function computeReframePlan(tracks, { frameAspect, assets = [], aspectRat
         for (const c of (t.clips || [])) {
             if (c.type && c.type !== 'video') continue;
             if (c.virtualCam && !c.virtualCam.reframe) { skippedCount++; continue; }
+            if (c.reframe === false || c.fit === 'contain') { skippedCount++; continue; }
             const speed = Number(c.speed) > 0 ? Number(c.speed) : 1;
             const fit = fillFrameCrop({
                 bboxTrack: c.layerMask?.bboxTrack || null,

@@ -484,6 +484,7 @@ const useTimelineStore = create(
                 }, 0) || 0;
                 
                 // Add the clip at the end
+                const res = asset.resolution || (asset.width && asset.height ? { w: asset.width, h: asset.height } : null);
                 get().addClip(trackId, {
                     assetId: asset.id,
                     start: currentEnd,
@@ -492,7 +493,10 @@ const useTimelineStore = create(
                     color: asset.type === 'audio' ? 'bg-orange-500' : 'bg-blue-500',
                     url: asset.url,
                     sourceUrl: asset.sourceUrl || asset.url,
-                    type: asset.type
+                    type: asset.type,
+                    sourceWidth: res?.w || null,
+                    sourceHeight: res?.h || null,
+                    metadata: res ? { resolution: { w: res.w, h: res.h } } : {},
                 });
                 
                 // Seek to the new clip

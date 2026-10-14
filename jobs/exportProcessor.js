@@ -1265,8 +1265,10 @@ module.exports = async function processExportJob(job) {
             const speedFirst = !isImage && speed !== 1.0 && hasZoomKfs;
             if (speedFirst) vFilters.push(`setpts=${(1 / speed).toFixed(4)}*PTS`);
 
-            if (hasCrop && hasZoomKfs) {
-                // ── COMPOSED: multicam crop + zoom-rhythm on the SAME clip ──────
+            const isAspectChangingCrop = hasCrop && (vc.reframe || Math.abs((vc.cropW ?? 1) - (vc.cropH ?? 1)) >= 0.05);
+
+            if (hasCrop && hasZoomKfs && !isAspectChangingCrop) {
+                // ── COMPOSED: same-aspect multicam crop + zoom-rhythm on the SAME clip ──────
                 // ONE zoom whose level is vc.scale * the rhythm scale, centred on
                 // the multicam angle (R16: never stack a static crop and a second
                 // zoom). Runs on the upright source frame; scale/pad follows.
@@ -1289,9 +1291,20 @@ module.exports = async function processExportJob(job) {
                     const cw = Math.max(0.05, Math.min(1 - cx, vc.cropW));
                     const ch = Math.max(0.05, Math.min(1 - cy, vc.cropH));
                     vFilters.push(`crop=iw*${cw.toFixed(4)}:ih*${ch.toFixed(4)}:iw*${cx.toFixed(4)}:ih*${cy.toFixed(4)}`);
-                    console.log(`  [multicam] clip "${clip.name}" angle=${vc.angle || '?'} crop=${cw.toFixed(2)}x${ch.toFixed(2)}@(${cx.toFixed(2)},${cy.toFixed(2)})`);
+                    console.log(`  [crop] clip "${clip.name}" angle=${vc.angle || '?'} crop=${cw.toFixed(2)}x${ch.toFixed(2)}@(${cx.toFixed(2)},${cy.toFixed(2)})`);
                 }
                 vFilters.push(baseTransform ? baseTransform.scaleFilter : scaleFilter);
+
+                // Aspect-changing crops (e.g. 16:9 to 9:16 reframe): apply zoom/pan keyframes
+                // on top of the scaled output rather than attempting a uniform perspective zoom
+                // on the uncropped wide frame.
+                if (hasCrop && hasZoomKfs && isAspectChangingCrop) {
+                    const zoom = buildSmoothZoomFilter(scaleKfs, { fps: targetFps, anchor: { mode: 'fixed', x: 0.5, y: 0.28 }, panX, panY });
+                    if (zoom) {
+                        vFilters.push(zoom);
+                        console.log(`  [camera] clip "${clip.name}": animated zoom on reframed output (${scaleKfs?.length || 0} scale keyframes)`);
+                    }
+                }
             }
 
             // A still image just lasts `dur`; speed means nothing for it.

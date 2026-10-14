@@ -241,7 +241,29 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     // Read grading once at render time (static snapshot).
                     // Reactive callbacks calling tracksSignal() inside filter lambdas
                     // cause "scene not available" errors in Revideo's signal context.
-                    const g = clip.grading;
+                                     // ── Virtual multicam / reframe crop (clip.virtualCam) ────────────────
+                    // {cropX, cropY, cropW, cropH} are UV fractions of the source
+                    // frame (see R14, render-lambda/revideo/src/scenes/timeline.tsx).
+                    const vc = clip.virtualCam;
+                    const hasVc = vc && typeof vc.cropW === 'number' && vc.cropW > 0 && vc.cropW < 0.999;
+                    const vcZoom = hasVc ? 1 / vc.cropW : 1;
+                    const vcCx = hasVc ? ((vc.cropX ?? 0) + vc.cropW / 2) - 0.5 : 0;
+                    const vcCy = hasVc ? ((vc.cropY ?? 0) + (vc.cropH ?? 1) / 2) - 0.5 : 0;
+
+                    const totalScaleX = () => videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : null, clip.scaleX ?? clip.scale ?? 1) * vcZoom;
+                    const totalScaleY = () => videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : null, clip.scaleY ?? clip.scale ?? 1) * vcZoom;
+
+                    const posX = () => {
+                        const baseX = motionLayer ? (clip.x || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dx : evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0);
+                        return baseX - vcCx * fitted.w * totalScaleX();
+                    };
+                    const posY = () => {
+                        const baseY = motionLayer
+                            ? (clip.y || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dy
+                                + (0.5 - RHYTHM_ANCHOR_Y) * canvasHeight * (videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale, 1) - 1)
+                            : evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0) + rhythmAnchorDy(kf, clipLocalTime(playback.time, clip.start), canvasHeight);
+                        return baseY - vcCy * fitted.h * totalScaleY();
+                    };
 
                     layerRefs[track.id]().add(
                         <Node ref={wrapperRef}>
@@ -251,20 +273,16 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             width={fitted.w}
                             height={fitted.h}
                             // Speed: the clip shows duration × speed seconds of
-                            // source from \`offset\` (timeline/speedChange.js).
+                            // source from `offset` (timeline/speedChange.js).
                             time={() => (playback.time - clip.start) * (clip.speed || 1) + (clip.offset || 0)}
                             playbackRate={clip.speed || 1}
                             play={true}
                             volume={(clip.volume ?? 1) * (clip.globalVolume ?? 1)}
                             allowVolumeAmplificationInPreview={true}
-                            x={() => motionLayer ? (clip.x || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dx : evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0)}
-                            y={() => motionLayer
-                                // Anchor the WHOLE camera zoom 28% from the top, like the export.
-                                ? (clip.y || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dy
-                                    + (0.5 - RHYTHM_ANCHOR_Y) * canvasHeight * (videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale, 1) - 1)
-                                : evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0) + rhythmAnchorDy(kf, clipLocalTime(playback.time, clip.start), canvasHeight)}
-                            scaleX={() => videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : null, clip.scaleX ?? clip.scale ?? 1)}
-                            scaleY={() => videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : null, clip.scaleY ?? clip.scale ?? 1)}
+                            x={posX}
+                            y={posY}
+                            scaleX={totalScaleX}
+                            scaleY={totalScaleY}
                             rotation={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).rotation : evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
                             opacity={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).opacity : evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
                             filters={g ? [
