@@ -241,7 +241,9 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     // Read grading once at render time (static snapshot).
                     // Reactive callbacks calling tracksSignal() inside filter lambdas
                     // cause "scene not available" errors in Revideo's signal context.
-                                     // ── Virtual multicam / reframe crop (clip.virtualCam) ────────────────
+                    const g = clip.grading;
+
+                    // ── Virtual multicam / reframe crop (clip.virtualCam) ────────────────
                     // {cropX, cropY, cropW, cropH} are UV fractions of the source
                     // frame (see R14, render-lambda/revideo/src/scenes/timeline.tsx).
                     const vc = clip.virtualCam;

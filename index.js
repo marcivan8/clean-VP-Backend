@@ -53,11 +53,12 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc:              ["'self'"],
-      scriptSrc:               ["'self'"],
+      // Allow self, PostHog asset CDNs, and inline scripts/hashes if needed
+      scriptSrc:               ["'self'", "https://*.posthog.com", "https://*.i.posthog.com", "https://eu-assets.i.posthog.com", "https://us-assets.i.posthog.com"],
       // Editor fonts come from Bunny Fonts (EU), not Google Fonts.
       styleSrc:                ["'self'", "'unsafe-inline'", "https://fonts.bunny.net"],
       fontSrc:                 ["'self'", "https://fonts.bunny.net"],
-      imgSrc:                  ["'self'", "data:", "blob:", "https://storage.googleapis.com"],
+      imgSrc:                  ["'self'", "data:", "blob:", "https://storage.googleapis.com", "https://*.posthog.com", "https://*.i.posthog.com"],
       mediaSrc:                ["'self'", "blob:", "https://storage.googleapis.com"],
       connectSrc: [
         "'self'",
@@ -67,6 +68,13 @@ app.use(helmet({
         // Sentry error reporting — both ingest domains (EU + global)
         "https://*.ingest.sentry.io",
         "https://*.ingest.de.sentry.io",
+        // PostHog analytics and session replay (EU + US + assets)
+        "https://*.posthog.com",
+        "https://*.i.posthog.com",
+        "https://eu.i.posthog.com",
+        "https://eu-assets.i.posthog.com",
+        "https://us.i.posthog.com",
+        "https://us-assets.i.posthog.com",
         ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
       ],
       // blob: is required for Web Workers created by Vite/Revideo at runtime.
