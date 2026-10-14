@@ -2239,6 +2239,12 @@ const useTimelineStore = create(
                         items: Array.isArray(opts.items) ? opts.items : null,
                         tone: opts.tone || null,
                         palette: opts.palette || null,
+                        // R101 PHASE 2/3 — when the caller already read a
+                        // palette/subject off the actual footage (client/src/
+                        // vision/FootageAnalyzer.js), it wins over this
+                        // tone's static palette and over whatever a
+                        // MatteBaker bboxTrack among `clips` would say.
+                        subject: opts.subject || null,
                     });
                 } catch (err) {
                     console.error('[designScene] could not compose the sequence:', err);

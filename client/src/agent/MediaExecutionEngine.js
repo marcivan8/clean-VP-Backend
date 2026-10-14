@@ -986,7 +986,40 @@ export class MediaExecutionEngine {
                     console.warn('[design_scene] AI structure/words unavailable, using the rule-based director:', err.message);
                 }
 
-                const result = this._callStore(store, 'designScene', brief, { plan });
+                // R101 PHASE 2 & 3 — "adapt to footage": read the palette and,
+                // unless a MatteBaker person mask already tracks a subject on
+                // this clip, a general object/product box off one sampled
+                // frame of whatever is under the playhead. Either can find
+                // nothing or fail outright (no playable source yet, the
+                // one-time model download blocked) without this command
+                // failing — designScene falls back to the tone's own static
+                // palette and a centred placement exactly as it did before.
+                let footagePalette = null;
+                let footageSubject = null;
+                const videoTracks = (st.tracks || []).filter(t => t.type === 'video');
+                const allVideoClips = videoTracks.flatMap(t => t.clips || []);
+                const playheadT = Number(st.currentTime) || 0;
+                const underPlayhead = allVideoClips.find(c => playheadT >= (Number(c.start) || 0) && playheadT < (Number(c.start) || 0) + (Number(c.duration) || 0));
+                const footageClip = underPlayhead || allVideoClips[0] || null;
+                if (footageClip) {
+                    const sourceUrl = this._clipSourceUrl(st, footageClip);
+                    const alreadyTracked = (footageClip.layerMask?.bboxTrack?.length || 0) > 0;
+                    if (sourceUrl) {
+                        try {
+                            const { analyzeFootageFrame } = await import('../vision/FootageAnalyzer.js');
+                            const speed = Number(footageClip.speed) > 0 ? Number(footageClip.speed) : 1;
+                            const atSeconds = (Number(footageClip.offset) || 0)
+                                + Math.max(0, playheadT - (Number(footageClip.start) || 0)) * speed;
+                            const read = await analyzeFootageFrame({ sourceUrl, atSeconds, detectSubject: !alreadyTracked });
+                            footagePalette = read?.palette || null;
+                            footageSubject = read?.subject || null;
+                        } catch (err) {
+                            console.warn('[design_scene] footage analysis unavailable, using the tone\'s own palette and a centred placement:', err.message);
+                        }
+                    }
+                }
+
+                const result = this._callStore(store, 'designScene', brief, { plan, palette: footagePalette, subject: footageSubject });
                 if (!result?.success) return { action, success: false, error: result?.error, message: result?.error };
 
                 const beats = result.plan?.beats || [];
