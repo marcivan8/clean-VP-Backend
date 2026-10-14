@@ -1,7 +1,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap, Smartphone } from 'lucide-react';
+import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap, Smartphone, Film } from 'lucide-react';
 import classNames from 'classnames';
 import { Player } from '@revideo/player-react';
 import { Video as RevideoVideo, Audio as RevideoAudio, Media as RevideoMedia } from '@revideo/2d';
@@ -45,6 +45,7 @@ import { Type } from 'lucide-react';
 import { ClarificationDialog } from '../components/ClarificationDialog';
 import { ApprovalDialog } from '../components/ApprovalDialog';
 import { trackEvent } from '../utils/trackEvent';
+import { captureEvent } from '../lib/posthog';
 import { countMetric, distributionMetric, nowMs, timelineBucket, timelineSecondsFromTracks } from '../utils/metrics';
 import { computeDragSnap } from '../timeline/dragSnap.js';
 
@@ -1605,6 +1606,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             timeline: timelineBucket(timelineSecondsFromTracks(useTimelineStore.getState().tracks)),
         };
         countMetric('export.started', exportAttrs);
+        captureEvent('editor_export_started', {
+            resolution: exportAttrs.resolution,
+            platform: exportAttrs.platform,
+            format: settings?.format || 'mp4',
+            timeline_bucket: exportAttrs.timeline,
+        });
         const finishExportMetric = (outcome) => {
             const attrs = { ...exportAttrs, outcome };
             countMetric('export.finished', attrs);
@@ -1637,6 +1644,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             setExportUrl(result.url);
 
             finishExportMetric('success');
+            captureEvent('editor_export_completed', {
+                resolution: exportAttrs.resolution,
+                platform: exportAttrs.platform,
+                format: settings?.format || 'mp4',
+                duration_ms: nowMs() - exportStartedAt,
+            });
             // A "successful" export can still be degraded (captions/overlays
             // silently missing) — count each warning kind separately.
             [['caption', result.captionWarning], ['compositor', result.compositorWarning],
@@ -1648,6 +1661,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             setExportError(err.message);
             // pollJobResult's own timeout message: "Job <id> timed out after <n>s"
             finishExportMetric(/timed out after/i.test(err?.message || '') ? 'client_timeout' : 'error');
+            captureEvent('editor_export_failed', {
+                resolution: exportAttrs.resolution,
+                platform: exportAttrs.platform,
+                duration_ms: nowMs() - exportStartedAt,
+                error_type: /timed out after/i.test(err?.message || '') ? 'timeout' : 'error',
+            });
         } finally {
             setIsExporting(false);
             clearActiveExport();
@@ -2159,17 +2178,29 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 <section className="p-4 border-b" style={{ borderColor: "var(--line-soft)" }}>
                                     <div className="flex items-center justify-between mb-4">
                                         <div className="studio-mono-label" style={{ color: 'var(--fg-2)' }}>{t('ideLayout.bin', { count: assets.length })}</div>
-                                        {/* Import button — input overlaid directly so Android taps hit the input itself */}
-                                        <div className="relative text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-colors flex items-center gap-1" style={{ fontFamily: "var(--f-mono)" }}>
-                                            <Upload className="w-3 h-3" /> {t('ideLayout.import')}
-                                            <input
-                                                type="file"
-                                                onChange={handleFileImport}
-                                                accept="video/*,audio/*,image/*"
-                                                multiple
-                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                style={{ fontSize: 0 }}
-                                            />
+                                        <div className="flex items-center gap-1.5">
+                                            {/* Stock media button — opens Stock tab in AssetPanel */}
+                                            <button
+                                                type="button"
+                                                onClick={() => setActiveTab('assets')}
+                                                className="text-[10px] bg-accent/10 hover:bg-accent/20 text-accent px-2 py-1 rounded transition-colors flex items-center gap-1 border border-accent/20"
+                                                style={{ fontFamily: "var(--f-mono)" }}
+                                                title="Pexels Stock Media"
+                                            >
+                                                <Film className="w-3 h-3" /> Stock
+                                            </button>
+                                            {/* Import button — input overlaid directly so Android taps hit the input itself */}
+                                            <div className="relative text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-colors flex items-center gap-1" style={{ fontFamily: "var(--f-mono)" }}>
+                                                <Upload className="w-3 h-3" /> {t('ideLayout.import')}
+                                                <input
+                                                    type="file"
+                                                    onChange={handleFileImport}
+                                                    accept="video/*,audio/*,image/*"
+                                                    multiple
+                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                    style={{ fontSize: 0 }}
+                                                />
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="grid grid-cols-2 gap-2">

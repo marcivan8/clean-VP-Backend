@@ -180,3 +180,81 @@ export {
     autoFixScene,
     describeIssues,
 } from './SceneValidator.js';
+
+export {
+    parseSvgPath,
+    drawSvgPath,
+    drawRoundRect,
+    drawPolygon,
+    drawStar,
+    drawArrow,
+    drawCapsule,
+    resolveGradient,
+    applyShadow,
+    setBlendMode,
+    applyTrimPath,
+    withClip,
+    withAlphaMask,
+    drawVectorGraphic,
+} from './VectorGraphics.js';
+
+export {
+    normalizeRuns,
+    layoutRichText,
+    sampleTypographyMotion,
+    drawRichText,
+} from './RichTextEngine.js';
+
+export {
+    SPRING_PRESETS as PHYSICS_SPRING_PRESETS,
+    createSpring,
+    estimateSpringSettlingTime,
+    solveSpringAt,
+    sampleSpringTrajectory,
+    compileSpringKeyframes,
+} from './SpringPhysics.js';
+
+export {
+    evaluateCubicBezier,
+    evaluateCubicBezierDerivative,
+    buildArcLengthLUT,
+    pointsToBezierSpline,
+    computeMotionBlur,
+} from './SpatialMotion.js';
+
+export {
+    topologicalSortNodes,
+    resolvePinToEdge,
+    computeLookAtRotation,
+    resolveConstraints,
+} from './ConstraintEngine.js';
+
+export {
+    DEPTH_LAYERS,
+    SUBJECT_ANCHORS,
+    deriveSubjectAnchors,
+    isBehindSubject,
+    partitionClipsByDepth,
+    resolveSelectiveEffects,
+} from './DepthCompositor.js';
+
+export {
+    VISUAL_PURPOSES,
+    CADENCE_TIERS,
+    classifyVisualPurpose,
+    deriveCadenceTier,
+    adaptArtDirection,
+    auditMotionCoherence,
+} from './ArtDirector.js';
+
+export {
+    VISUAL_TREATMENTS,
+    SPEAKER_LAYOUTS,
+    TRANSITION_PRESETS,
+    analyzePacingNeed,
+    decideVisualTreatment,
+    decideSpeakerLayout,
+    planTransitionStyling,
+    generateStorytellingPlan,
+} from './DirectorStoryteller.js';
+

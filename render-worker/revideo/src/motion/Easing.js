@@ -143,6 +143,9 @@ export const SPRING_PRESETS = Object.freeze({
     springStiff:   { stiffness: 210, damping: 20 },
     springSlow:    { stiffness: 280, damping: 60 },
     springSnappy:  { stiffness: 400, damping: 28 },
+    springBouncy:  { stiffness: 180, damping: 12 },
+    springSmooth:  { stiffness: 200, damping: 28.284 },
+    springHeavy:   { stiffness: 140, damping: 25, mass: 2 },
 });
 for (const [name, cfg] of Object.entries(SPRING_PRESETS)) {
     EASING_FUNCTIONS[name] = springEasing(cfg);
@@ -226,8 +229,14 @@ const EASING_ALIASES = {
     'spring-stiff':    'springStiff',
     'spring-slow':     'springSlow',
     'spring-snappy':   'springSnappy',
+    'spring-bouncy':   'springBouncy',
+    'spring-smooth':   'springSmooth',
+    'spring-heavy':    'springHeavy',
     'wobbly':          'springWobbly',
     'snappy':          'springSnappy',
+    'bouncy':          'springBouncy',
+    'smooth':          'springSmooth',
+    'heavy':           'springHeavy',
 };
 
 const _parsedCache = new Map();

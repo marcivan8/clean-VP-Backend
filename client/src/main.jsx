@@ -10,9 +10,13 @@ import App from './App.jsx'
 import { supabase } from './lib/supabaseClient'
 import { startMediaSessionKeeper } from './utils/mediaSession.js'
 import { hasReplayConsent, onConsentChange } from './lib/consent.js'
+import { initPostHog } from './lib/posthog.js'
 
 // Signed media cookie: lets this browser stream the user's own videos (owner-only).
 startMediaSessionKeeper(supabase)
+
+// PostHog analytics and session replay initialization (configured via VITE_POSTHOG_KEY)
+initPostHog()
 
 // DSN is public by design — safe to hardcode as fallback.
 // Override with VITE_SENTRY_DSN env var if you need per-environment DSNs.

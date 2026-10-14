@@ -28,19 +28,24 @@ function loadImage(url, onLoad) {
     return null;
 }
 
+import { drawVectorGraphic } from '../../motion/VectorGraphics.js';
+
 const TemplateCanvas = ({ clip, currentTime, style }) => {
     const ref = React.useRef(null);
     const [, bump] = React.useReducer(x => x + 1, 0);
+    const isVector = clip?.type === 'vector' || !!clip?.vector;
     const kind = clip?.template?.kind;
-    const params = templateParams(kind, clip?.template?.params);
-    const size = templateSize(kind, params);
+    const params = isVector ? null : templateParams(kind, clip?.template?.params);
+    const size = isVector
+        ? { w: Number(clip?.vector?.w) || 400, h: Number(clip?.vector?.h) || 400 }
+        : templateSize(kind, params);
     const localT = Math.max(0, (Number(currentTime) || 0) - (Number(clip?.start) || 0));
 
     React.useEffect(() => { ensureFonts().then(() => bump()); }, []);
 
     React.useEffect(() => {
         const cv = ref.current;
-        if (!cv || !kind) return;
+        if (!cv || (!kind && !isVector)) return;
         const rect = cv.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
         const W = Math.max(2, Math.round(rect.width * dpr));
@@ -50,8 +55,24 @@ const TemplateCanvas = ({ clip, currentTime, style }) => {
         const ctx = cv.getContext('2d');
         if (!ctx) return;
         ctx.clearRect(0, 0, W, H);
+
+        if (isVector) {
+            try {
+                drawVectorGraphic(ctx, {
+                    ...clip.vector,
+                    w: W,
+                    h: H,
+                    x: 0,
+                    y: 0,
+                });
+            } catch (err) {
+                console.warn('[TemplateCanvas] vector draw failed:', err?.message);
+            }
+            return;
+        }
+
         const images = {};
-        const img = loadImage(params.imageUrl, bump);
+        const img = loadImage(params?.imageUrl, bump);
         if (img) images[params.imageUrl] = img;
         try {
             drawTemplate(ctx, kind, params, localT, Number(clip.duration) || 3, { scale: W / size.w, images });

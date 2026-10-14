@@ -294,7 +294,7 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
                     ? resolveMotionAt(layer, currentTime)
                     : { x: clip.x ?? 78, y: clip.y ?? 18, scale: clip.scale || 1, rotation: 0, opacity: clip.opacity ?? 1, blur: 0 };
 
-                const isTemplate = clip.type === 'template' && !!clip.template;
+                const isTemplate = (clip.type === 'template' && !!clip.template) || (clip.type === 'vector' && !!clip.vector);
                 const src = clip.url || clip.sourceUrl;
                 if (!src && !isTemplate) return null;
 

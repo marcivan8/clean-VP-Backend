@@ -33,6 +33,7 @@
 import { sampleAnimation } from './MotionResolver.js';
 import { sanitizeAnimations, LIMITS } from './MotionComposer.js';
 import { createAnimation, createKeyframe, ANIMATION_TYPES } from './MotionSchema.js';
+import { pointsToBezierSpline } from './SpatialMotion.js';
 
 /** How a stagger walks the children of a group. */
 export const STAGGER_ORDERS = ['forward', 'reverse', 'centre', 'edges'];
@@ -170,19 +171,33 @@ export function compilePath(path, ctx = {}) {
     const spin = num(path.spin, 0);
 
     const keyframes = [];
+    const spline = (path.mode === 'bezier' || path.arcLength) ? pointsToBezierSpline(points, path.closed) : null;
+
     for (let i = 0; i < samples; i++) {
         const u = i / (samples - 1);
-        const [x, y] = sampleCurve(points, u);
-        const props = { x: round(x, 2), y: round(y, 2) };
-        if (bank !== 0) {
-            // Angle of travel, so the layer leans into the turn.
-            const ahead = sampleCurve(points, Math.min(1, u + 0.02));
-            const behind = sampleCurve(points, Math.max(0, u - 0.02));
-            const angle = (Math.atan2(ahead[1] - behind[1], ahead[0] - behind[0]) * 180) / Math.PI;
-            props.rotation = round(angle * bank, 2);
-        } else if (spin !== 0) {
-            props.rotation = round(spin * u, 2);
+        let x, y, rot;
+        if (spline) {
+            const pt = spline.sampleAtNormalizedDistance(u);
+            x = pt.x;
+            y = pt.y;
+            if (bank !== 0) {
+                rot = round(pt.heading * bank, 2);
+            }
+        } else {
+            const pt = sampleCurve(points, u);
+            x = pt[0];
+            y = pt[1];
+            if (bank !== 0) {
+                // Angle of travel, so the layer leans into the turn.
+                const ahead = sampleCurve(points, Math.min(1, u + 0.02));
+                const behind = sampleCurve(points, Math.max(0, u - 0.02));
+                const angle = (Math.atan2(ahead[1] - behind[1], ahead[0] - behind[0]) * 180) / Math.PI;
+                rot = round(angle * bank, 2);
+            }
         }
+        const props = { x: round(x, 2), y: round(y, 2) };
+        if (rot !== undefined) props.rotation = rot;
+        else if (spin !== 0) props.rotation = round(spin * u, 2);
         keyframes.push(createKeyframe(round(duration * u, 3), props));
     }
 

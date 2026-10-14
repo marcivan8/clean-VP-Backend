@@ -89,4 +89,49 @@ async function renderTemplateFrames(template, opts) {
     return { pattern: path.join(dir, 'f%05d.png'), frames, width: W, height: H, files };
 }
 
-module.exports = { renderTemplateFrames, loadTemplateGraphics, FONT_FILES };
+const VECTOR_GRAPHICS_PATH = path.join(ROOT, 'client', 'src', 'motion', 'VectorGraphics.js');
+let vectorGraphicsPromise = null;
+
+function loadVectorGraphics() {
+    if (!vectorGraphicsPromise) vectorGraphicsPromise = import(pathToFileURL(VECTOR_GRAPHICS_PATH).href);
+    return vectorGraphicsPromise;
+}
+
+/**
+ * Render vector shape frames using @napi-rs/canvas Skia engine.
+ * @param {object} vector Vector shape definition
+ * @param {object} opts { fps, durationSec, widthPx, tmpDir, name, canvasModule }
+ */
+async function renderVectorFrames(vector, opts) {
+    const VG = await loadVectorGraphics();
+    const Canvas = opts.canvasModule || require('@napi-rs/canvas');
+    const w = Number(vector?.w) || 400;
+    const h = Number(vector?.h) || 400;
+    const fps = Number(opts.fps) > 0 ? Number(opts.fps) : 30;
+    const duration = Math.max(0.2, Number(opts.durationSec) || 3);
+    const scale = Math.max(0.1, (Number(opts.widthPx) || w) / w);
+    const W = Math.max(2, Math.round(w * scale / 2) * 2);
+    const H = Math.max(2, Math.round(h * scale / 2) * 2);
+
+    const dir = path.join(opts.tmpDir, `vec-${opts.name || 'shape'}`);
+    fs.mkdirSync(dir, { recursive: true });
+    const frames = Math.max(1, Math.ceil(duration * fps));
+    const files = [];
+    for (let i = 0; i < frames; i++) {
+        const c = Canvas.createCanvas(W, H);
+        const ctx = c.getContext('2d');
+        VG.drawVectorGraphic(ctx, {
+            ...vector,
+            w: W,
+            h: H,
+            x: 0,
+            y: 0,
+        });
+        const file = path.join(dir, `f${String(i).padStart(5, '0')}.png`);
+        fs.writeFileSync(file, c.toBuffer('image/png'));
+        files.push(file);
+    }
+    return { pattern: path.join(dir, 'f%05d.png'), frames, width: W, height: H, files };
+}
+
+module.exports = { renderTemplateFrames, renderVectorFrames, loadTemplateGraphics, loadVectorGraphics, FONT_FILES };

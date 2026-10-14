@@ -292,6 +292,7 @@ app.use('/api/luts',   require('./server/routes/lutRoutes'));          // LUT li
 app.use('/api/audio',  require('./server/routes/audioEngineRoutes'));  // Asset search + recommendations
 app.use('/api/stickers', require('./server/routes/stickerRoutes'));  // R97: icon/emoji library search
 app.use('/api/audio',  require('./server/routes/audioExportRoutes')); // Audio-only export (mp3/wav/aac/m4a)
+app.use('/api/stock',  require('./routes/stockMediaRoutes'));        // Pexels stock media provider (Level 1)
 // NOTE: /api/presets is already mounted above (line 241). The new server/routes/presetRoutes.js
 // extends it — update the require() path when the old routes/presetRoutes.js is retired.
 

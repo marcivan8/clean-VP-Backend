@@ -12,20 +12,24 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Search, Music2, Palette, Layers, Loader2, RefreshCw, Upload } from 'lucide-react';
+import { Search, Music2, Palette, Layers, Loader2, RefreshCw, Upload, Film, Sparkles } from 'lucide-react';
 import { useAudioEngine }        from '../hooks/useAudioEngine.js';
 import useTimelineStore          from '../store/useTimelineStore.js';
 import { audioEngineAPI }        from '../audio-engine/AudioEngineAPI.js';
+import { stockMediaApi }          from '../services/stockMediaApi.js';
 import { lutToGrading }          from '../utils/lutGrading.js';
 import SoundCard                 from './SoundCard.jsx';
 import LUTCard                   from './LUTCard.jsx';
 import PresetCard                from './PresetCard.jsx';
+import StockCard                 from './StockCard.jsx';
+import BrollSuggestionCard       from './BrollSuggestionCard.jsx';
 import PresetApprovalModal       from './PresetApprovalModal.jsx';
 
 const TABS = [
     { key: 'sfx',     labelKey: 'assetPanel.tabSfx',     icon: Music2  },
     { key: 'luts',    labelKey: 'assetPanel.tabColor',   icon: Palette },
     { key: 'presets', labelKey: 'assetPanel.tabPresets', icon: Layers  },
+    { key: 'stock',   labelKey: 'assetPanel.tabStock',   icon: Film    },
 ];
 
 const PANEL = {
@@ -48,7 +52,22 @@ export default function AssetPanel({ onClose }) {
     const [applyResult,  setApplyResult]  = useState(null); // { success, executed }
     const [favoriteAssetIds, setFavoriteAssetIds] = useState(() => new Set());
 
+    // Stock Media state
+    const [stockResults,   setStockResults]   = useState([]);
+    const [stockLoading,   setStockLoading]   = useState(false);
+    const [stockError,     setStockError]     = useState(null);
+    const [stockMediaType, setStockMediaType] = useState('video'); // 'video' | 'photo'
+
+    // Context-Aware B-Roll Suggestions state (Level 2)
+    const [brollSuggestions,   setBrollSuggestions]   = useState([]);
+    const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+    const [suggestionsError,   setSuggestionsError]   = useState(null);
+    const [stockViewMode,      setStockViewMode]      = useState('search'); // 'search' | 'suggestions'
+
     const projectLUTId = useTimelineStore(s => s.projectLUTId);
+    const projectAssets = useTimelineStore(s => s.assets) || [];
+    const captions = useTimelineStore(s => s.captions) || [];
+    const binAssetIds = new Set(projectAssets.map(a => a.id));
 
     // Load favorited SFX/asset ids once — used to render the heart toggle on SoundCard
     useEffect(() => {
@@ -96,11 +115,32 @@ export default function AssetPanel({ onClose }) {
         applyPreset,
     } = useAudioEngine();
 
+    // Search stock media
+    const searchStock = useCallback(async (q, mediaType = stockMediaType) => {
+        setStockLoading(true);
+        setStockError(null);
+        try {
+            const data = await stockMediaApi.search({
+                query: q || 'nature',
+                type: mediaType,
+                perPage: 20,
+            });
+            setStockResults(data.results || []);
+        } catch (err) {
+            console.error('[AssetPanel] Stock search failed:', err.message);
+            setStockError(err.message || 'Failed to search stock media');
+            setStockResults([]);
+        } finally {
+            setStockLoading(false);
+        }
+    }, [stockMediaType]);
+
     // Load defaults on tab change
     useEffect(() => {
         if (tab === 'sfx'     && sfxResults.length === 0)     searchSFX('');
         if (tab === 'luts'    && lutResults.length === 0)     searchLUTs('');
         if (tab === 'presets' && presetResults.length === 0)  searchPresets();
+        if (tab === 'stock'   && stockResults.length === 0)   searchStock(query || 'landscape');
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [tab]);
 
@@ -135,7 +175,102 @@ export default function AssetPanel({ onClose }) {
         if (tab === 'sfx')     searchSFX(query);
         if (tab === 'luts')    searchLUTs(query);
         if (tab === 'presets') searchPresets(null, 20);
-    }, [tab, query, searchSFX, searchLUTs, searchPresets]);
+        if (tab === 'stock')   searchStock(query);
+    }, [tab, query, searchSFX, searchLUTs, searchPresets, searchStock]);
+
+    // Stock action handlers
+    const handleStockAddToTimeline = useCallback(item => {
+        const store = useTimelineStore.getState();
+        const exists = (store.assets || []).some(a => a.id === item.id);
+        if (!exists) {
+            store.addAssets?.([item]);
+        }
+        store.addAssetToTimeline?.(item);
+    }, []);
+
+    const handleStockAddToBin = useCallback(item => {
+        const store = useTimelineStore.getState();
+        const exists = (store.assets || []).some(a => a.id === item.id);
+        if (!exists) {
+            store.addAssets?.([item]);
+        }
+    }, []);
+
+    const handleStockAddAsOverlay = useCallback(item => {
+        const store = useTimelineStore.getState();
+        const exists = (store.assets || []).some(a => a.id === item.id);
+        if (!exists) {
+            store.addAssets?.([item]);
+        }
+        store.addOverlayClip?.(item, {
+            scale: 4,
+            x: 50,
+            y: 50,
+            duration: item.duration || 4,
+            kind: item.type === 'video' ? 'video' : 'image',
+        });
+    }, []);
+
+    // Level 2: Context-Aware B-Roll suggestion handlers
+    const handleGenerateBrollSuggestions = useCallback(async () => {
+        const store = useTimelineStore.getState();
+        const words = store.captions || [];
+        if (!Array.isArray(words) || words.length === 0) {
+            setSuggestionsError('No transcript available. Please transcribe your video first to generate context-aware B-roll.');
+            setStockViewMode('suggestions');
+            return;
+        }
+
+        setSuggestionsLoading(true);
+        setSuggestionsError(null);
+        setStockViewMode('suggestions');
+
+        try {
+            const data = await stockMediaApi.suggestBroll({ words, maxSuggestions: 6 });
+            setBrollSuggestions(data.suggestions || []);
+            if (!data.suggestions || data.suggestions.length === 0) {
+                setSuggestionsError('No strong visual moments found to illustrate in this transcript.');
+            }
+        } catch (err) {
+            console.error('[AssetPanel] Suggest B-roll failed:', err.message);
+            setSuggestionsError(err.message || 'Failed to generate B-roll suggestions.');
+            setBrollSuggestions([]);
+        } finally {
+            setSuggestionsLoading(false);
+        }
+    }, []);
+
+    const handleApproveBrollSuggestion = useCallback((suggestion, asset) => {
+        const store = useTimelineStore.getState();
+        const exists = (store.assets || []).some(a => a.id === asset.id);
+        if (!exists) {
+            store.addAssets?.([asset]);
+        }
+        store.addOverlayClip?.(asset, {
+            scale: 4,
+            x: 50,
+            y: 50,
+            start: suggestion.timelineTime,
+            duration: suggestion.duration || asset.duration || 3.5,
+            kind: 'video',
+            transitions: suggestion.transitions,
+            behindSubject: suggestion.behindSubject || (suggestion.speakerLayout === 'behind_speaker'),
+        });
+        // Remove approved suggestion from pending list
+        setBrollSuggestions(prev => prev.filter(s => s.id !== suggestion.id));
+    }, []);
+
+    const handleRejectBrollSuggestion = useCallback((id) => {
+        setBrollSuggestions(prev => prev.filter(s => s.id !== id));
+    }, []);
+
+    const handleReplaceBrollSuggestion = useCallback((suggestion) => {
+        if (suggestion.query) {
+            setQuery(suggestion.query);
+            setStockViewMode('search');
+            searchStock(suggestion.query, 'video');
+        }
+    }, [searchStock]);
 
     // SFX → add to audio track
     const handleAddSFX = useCallback(sfx => {
@@ -317,8 +452,9 @@ export default function AssetPanel({ onClose }) {
                             value={query}
                             onChange={e => setQuery(e.target.value)}
                             placeholder={
-                                tab === 'sfx'     ? t('assetPanel.searchPlaceholderSfx')  :
+                                tab === 'sfx'     ? t('assetPanel.searchPlaceholderSfx')   :
                                 tab === 'luts'    ? t('assetPanel.searchPlaceholderLuts')  :
+                                tab === 'stock'   ? t('assetPanel.searchPlaceholderStock') :
                                                    t('assetPanel.searchPlaceholderPresets')
                             }
                             style={{
@@ -468,6 +604,238 @@ export default function AssetPanel({ onClose }) {
                                             />
                                         );
                                     })}
+                                </div>
+                            )}
+
+                            {/* Stock tab */}
+                            {tab === 'stock' && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 4 }}>
+                                    {/* View Mode Toggle: Search vs AI Suggestions */}
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 4 }}>
+                                        <div style={{ display: 'flex', gap: 4 }}>
+                                            <button
+                                                type="button"
+                                                onClick={() => setStockViewMode('search')}
+                                                style={{
+                                                    padding: '3px 8px',
+                                                    borderRadius: 4,
+                                                    fontSize: 10,
+                                                    fontWeight: stockViewMode === 'search' ? 600 : 400,
+                                                    background: stockViewMode === 'search' ? 'rgba(0,229,255,0.18)' : 'rgba(255,255,255,0.04)',
+                                                    color: stockViewMode === 'search' ? 'var(--accent)' : 'var(--fg-3)',
+                                                    border: 'none',
+                                                    cursor: 'pointer',
+                                                }}
+                                            >
+                                                Search
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setStockViewMode('suggestions');
+                                                    if (brollSuggestions.length === 0 && !suggestionsLoading) {
+                                                        handleGenerateBrollSuggestions();
+                                                    }
+                                                }}
+                                                style={{
+                                                    padding: '3px 8px',
+                                                    borderRadius: 4,
+                                                    fontSize: 10,
+                                                    fontWeight: stockViewMode === 'suggestions' ? 600 : 400,
+                                                    background: stockViewMode === 'suggestions' ? 'rgba(0,229,255,0.18)' : 'rgba(255,255,255,0.04)',
+                                                    color: stockViewMode === 'suggestions' ? 'var(--accent)' : 'var(--fg-3)',
+                                                    border: 'none',
+                                                    cursor: 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: 3,
+                                                }}
+                                            >
+                                                <Sparkles size={10} />
+                                                <span>AI Suggestions {brollSuggestions.length > 0 ? `(${brollSuggestions.length})` : ''}</span>
+                                            </button>
+                                        </div>
+
+                                        <div style={{ fontSize: 9.5, color: 'var(--fg-3)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                                            <span>Photos & Videos by</span>
+                                            <a
+                                                href="https://www.pexels.com"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                style={{ color: '#05a081', fontWeight: 600, textDecoration: 'none' }}
+                                            >
+                                                Pexels
+                                            </a>
+                                        </div>
+                                    </div>
+
+                                    {/* Sub-bar in Search Mode: Videos vs Photos */}
+                                    {stockViewMode === 'search' && (
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                            <div style={{ display: 'flex', gap: 4 }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setStockMediaType('video');
+                                                        searchStock(query, 'video');
+                                                    }}
+                                                    style={{
+                                                        padding: '2px 7px',
+                                                        borderRadius: 3,
+                                                        fontSize: 9.5,
+                                                        fontWeight: stockMediaType === 'video' ? 600 : 400,
+                                                        background: stockMediaType === 'video' ? 'rgba(255,255,255,0.1)' : 'transparent',
+                                                        color: stockMediaType === 'video' ? 'var(--fg)' : 'var(--fg-4)',
+                                                        border: 'none',
+                                                        cursor: 'pointer',
+                                                    }}
+                                                >
+                                                    Videos
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setStockMediaType('photo');
+                                                        searchStock(query, 'photo');
+                                                    }}
+                                                    style={{
+                                                        padding: '2px 7px',
+                                                        borderRadius: 3,
+                                                        fontSize: 9.5,
+                                                        fontWeight: stockMediaType === 'photo' ? 600 : 400,
+                                                        background: stockMediaType === 'photo' ? 'rgba(255,255,255,0.1)' : 'transparent',
+                                                        color: stockMediaType === 'photo' ? 'var(--fg)' : 'var(--fg-4)',
+                                                        border: 'none',
+                                                        cursor: 'pointer',
+                                                    }}
+                                                >
+                                                    Photos
+                                                </button>
+                                            </div>
+
+                                            {captions.length > 0 && (
+                                                <button
+                                                    type="button"
+                                                    onClick={handleGenerateBrollSuggestions}
+                                                    style={{
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: 3,
+                                                        padding: '2px 6px',
+                                                        borderRadius: 4,
+                                                        background: 'rgba(0,229,255,0.08)',
+                                                        border: '0.5px solid rgba(0,229,255,0.2)',
+                                                        color: 'var(--accent)',
+                                                        fontSize: 9.5,
+                                                        cursor: 'pointer',
+                                                    }}
+                                                >
+                                                    <Sparkles size={9} />
+                                                    <span>Scan transcript</span>
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* Error in Search Mode */}
+                                    {stockViewMode === 'search' && stockError && (
+                                        <div style={{ padding: '6px 10px', background: 'rgba(255,80,80,0.1)', border: '0.5px solid rgba(255,80,80,0.25)', borderRadius: 6, fontSize: 10.5, color: '#ff8faa' }}>
+                                            {stockError}
+                                        </div>
+                                    )}
+
+                                    {/* Search Mode Results */}
+                                    {stockViewMode === 'search' && (
+                                        stockLoading ? (
+                                            <div style={{ display: 'flex', justifyContent: 'center', padding: 20 }}>
+                                                <Loader2 size={18} color="var(--accent)" style={{ animation: 'spin 1s linear infinite' }} />
+                                            </div>
+                                        ) : (
+                                            <>
+                                                {stockResults.length === 0 && !stockError && (
+                                                    <Empty label={query ? t('assetPanel.noStockFound') : t('assetPanel.searchForStockAbove')} />
+                                                )}
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                                                    {stockResults.map((item, idx) => (
+                                                        <StockCard
+                                                            key={item.id || idx}
+                                                            item={item}
+                                                            isAdded={binAssetIds.has(item.id)}
+                                                            onAddToTimeline={handleStockAddToTimeline}
+                                                            onAddToBin={handleStockAddToBin}
+                                                            onAddAsOverlay={handleStockAddAsOverlay}
+                                                        />
+                                                    ))}
+                                                </div>
+                                            </>
+                                        )
+                                    )}
+
+                                    {/* AI B-Roll Suggestions Mode */}
+                                    {stockViewMode === 'suggestions' && (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                                <div style={{ fontSize: 10.5, color: 'var(--fg-2)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                    <Sparkles size={11} color="var(--accent)" />
+                                                    <span>Context-Aware B-Roll</span>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleGenerateBrollSuggestions}
+                                                    disabled={suggestionsLoading}
+                                                    style={{
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: 3,
+                                                        padding: '3px 8px',
+                                                        borderRadius: 4,
+                                                        background: 'rgba(255,255,255,0.06)',
+                                                        border: '0.5px solid rgba(255,255,255,0.1)',
+                                                        color: 'var(--fg)',
+                                                        fontSize: 9.5,
+                                                        cursor: suggestionsLoading ? 'not-allowed' : 'pointer',
+                                                    }}
+                                                >
+                                                    {suggestionsLoading ? (
+                                                        <Loader2 size={9} style={{ animation: 'spin 1s linear infinite' }} />
+                                                    ) : (
+                                                        <RefreshCw size={9} />
+                                                    )}
+                                                    <span>Re-scan</span>
+                                                </button>
+                                            </div>
+
+                                            {suggestionsError && (
+                                                <div style={{ padding: '6px 10px', background: 'rgba(255,180,0,0.1)', border: '0.5px solid rgba(255,180,0,0.25)', borderRadius: 6, fontSize: 10.5, color: '#ffcc66' }}>
+                                                    {suggestionsError}
+                                                </div>
+                                            )}
+
+                                            {suggestionsLoading ? (
+                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, gap: 8 }}>
+                                                    <Loader2 size={20} color="var(--accent)" style={{ animation: 'spin 1s linear infinite' }} />
+                                                    <span style={{ fontSize: 10.5, color: 'var(--fg-3)' }}>Analyzing transcript & matching stock footage...</span>
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    {brollSuggestions.length === 0 && !suggestionsError && (
+                                                        <Empty label="Click 'Re-scan' to find visual moments in your video transcript." />
+                                                    )}
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                                        {brollSuggestions.map(sugg => (
+                                                            <BrollSuggestionCard
+                                                                key={sugg.id}
+                                                                suggestion={sugg}
+                                                                onApprove={handleApproveBrollSuggestion}
+                                                                onReject={handleRejectBrollSuggestion}
+                                                                onReplace={handleReplaceBrollSuggestion}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </>

@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import Logo from '../components/Logo';
 import { openConsentSettings } from '../lib/consent';
+import { captureEvent } from '../lib/posthog';
 
 const renderHighlightedText = (text, accent, bold, mint, boldFg) => {
     if (!text) return null;
@@ -18,6 +19,7 @@ const renderHighlightedText = (text, accent, bold, mint, boldFg) => {
 };
 
 async function createCheckout(plan) {
+    captureEvent('checkout_started', { plan: plan || 'unknown' });
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { window.location.href = '/auth?next=/'; return; }
     const res = await fetch('/api/checkout/create', {

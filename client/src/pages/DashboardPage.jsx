@@ -14,8 +14,10 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Logo } from '../components/Logo.jsx';
 import { supabase } from '../lib/supabaseClient.js';
+import { captureEvent } from '../lib/posthog.js';
 
 async function createCheckout(plan) {
+    captureEvent('checkout_started', { plan: plan || 'unknown' });
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { window.location.href = '/auth'; return; }
     const res = await fetch('/api/checkout/create', {

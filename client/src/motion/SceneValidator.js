@@ -233,7 +233,8 @@ export function contentRect(scene, opts = {}) {
 
 function checkContent(entry, issues) {
     const { node } = entry;
-    if ((node.type === NODE_TYPES.TEXT || node.type === NODE_TYPES.CAPTION) && !String(node.content ?? '').trim()) {
+    const hasRuns = Array.isArray(node.runs) && node.runs.some(r => String(r.text || '').trim());
+    if ((node.type === NODE_TYPES.TEXT || node.type === NODE_TYPES.CAPTION) && !String(node.content ?? '').trim() && !hasRuns) {
         issues.push(issue(ISSUE_CODES.EMPTY_CONTENT, SEVERITY.ERROR, node, 'This text layer has nothing in it, so nothing will show.'));
     }
 }
@@ -346,6 +347,7 @@ function checkPlacement(scene, entry, issues, opts) {
 function checkSource(entry, issues, opts) {
     const { node } = entry;
     if (node.type === NODE_TYPES.SHAPE) {
+        if (node.vector) return; // Native vector shape definition
         if (!node.template?.kind) {
             issues.push(issue(ISSUE_CODES.UNKNOWN_TEMPLATE, SEVERITY.ERROR, node, 'This shape layer has no shape to draw.'));
         } else if (!TEMPLATE_KINDS.includes(node.template.kind)) {
