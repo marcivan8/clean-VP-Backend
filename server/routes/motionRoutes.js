@@ -163,6 +163,17 @@ function cleanShortPlan(raw) {
 }
 
 /**
+ * The vocabulary SceneDirector.js decides from (client/src/motion/
+ * SceneDirector.js: BEAT_KINDS, TONES). Mirrored here as plain constants
+ * rather than dynamically imported, because cleanScenePlan() below is pure
+ * and synchronous — it is unit-tested directly with no server or AI
+ * involved — and this vocabulary is small and stable. Keep both lists in
+ * sync with SceneDirector.js if either changes.
+ */
+const BEAT_KINDS = ['intro', 'point', 'stat', 'quote', 'cta', 'outro'];
+const TONE_KEYS = ['premium', 'technology', 'viral', 'editorial', 'warm'];
+
+/**
  * R95 PHASE 4 — the words for a designed sequence.
  *
  * The director (client/src/motion/SceneDirector.js) decides the STRUCTURE
@@ -178,26 +189,57 @@ function cleanShortPlan(raw) {
  * breaking.
  */
 function buildScenePlanPrompt({ brief, transcript, beats, tone, platform }) {
-    const asked = Array.isArray(beats) && beats.length ? beats.join(', ') : 'intro, point, point, point, cta';
+    const hasStructure = Array.isArray(beats) && beats.length > 0;
+    if (hasStructure) {
+        // The caller already decided the structure (an explicit tone/beat
+        // list) — this is the original, narrower job: just write the words
+        // for a sequence whose shape is already fixed.
+        const asked = beats.join(', ');
+        return [
+            'You write on-screen text for motion graphics in a video. Short, concrete, no hype.',
+            '',
+            `The brief: "${brief}"`,
+            tone ? `The tone: ${tone}.` : '',
+            platform ? `It will be posted on ${platform}.` : '',
+            transcript ? `What is said in the video (use it for the facts, do not quote it at length):\n"""${transcript}"""` : 'There is no transcript, so work from the brief alone.',
+            '',
+            `The sequence has these beats, in order: ${asked}.`,
+            '',
+            'Rules:',
+            '- A title of 2 to 7 words. No full stop. Never a hashtag or an emoji.',
+            '- Each point is 2 to 6 words, a benefit or a fact, each one different.',
+            '- A call to action of 2 to 5 words, an instruction.',
+            '- A stat beat needs a short value ("+184%", "3x", "12 min") and a label of 2 to 4 words.',
+            '- Invent nothing that is not in the brief or the transcript. Leave a field out rather than guess.',
+            '',
+            'Reply as JSON only:',
+            '{"title":"...","points":["...","..."],"cta":"...","stat":{"value":"...","label":"..."}}',
+        ].filter(Boolean).join('\n');
+    }
+    // R101 PHASE 1 — no structure was handed in: decide the tone AND the
+    // ordered beat sequence together with the words, instead of only ever
+    // filling in text for a shape SceneDirector's regex already fixed.
     return [
-        'You write on-screen text for motion graphics in a video. Short, concrete, no hype.',
+        'You are a motion-graphics director for short social videos. Decide the tone, the ordered sequence of on-screen beats, and write the words for them — all from the brief. Short, concrete, no hype.',
         '',
         `The brief: "${brief}"`,
-        tone ? `The tone: ${tone}.` : '',
         platform ? `It will be posted on ${platform}.` : '',
         transcript ? `What is said in the video (use it for the facts, do not quote it at length):\n"""${transcript}"""` : 'There is no transcript, so work from the brief alone.',
         '',
-        `The sequence has these beats, in order: ${asked}.`,
+        `Pick ONE tone from: ${TONE_KEYS.join(', ')}.`,
+        `Each beat has a "kind", one of: ${BEAT_KINDS.join(', ')}. Typical sequences open with "intro", use "point" for benefits, features or steps, "stat" for one figure worth a callout, "quote" for a testimonial, and close with "cta" when the brief implies a call to action.`,
+        'Decide how many beats and which kinds actually fit the brief — do not force a shape it does not ask for.',
         '',
         'Rules:',
-        '- A title of 2 to 7 words. No full stop. Never a hashtag or an emoji.',
-        '- Each point is 2 to 6 words, a benefit or a fact, each one different.',
-        '- A call to action of 2 to 5 words, an instruction.',
-        '- A stat beat needs a short value ("+184%", "3x", "12 min") and a label of 2 to 4 words.',
-        '- Invent nothing that is not in the brief or the transcript. Leave a field out rather than guess.',
+        '- At most 8 beats.',
+        '- An "intro", "point" or "quote" beat\'s "text" is 2 to 7 words, a benefit or a fact. Number "point" beats with a two-digit "kicker" ("01", "02"...).',
+        '- A "cta" beat\'s "text" is 2 to 5 words, an instruction.',
+        '- A "stat" beat needs a short "value" ("+184%", "3x", "12 min") and a "label" of 2 to 4 words.',
+        '- No full stops, hashtags or emoji anywhere.',
+        '- Invent nothing that is not in the brief or the transcript. Leave a field, or a whole beat\'s "text", out rather than guess — an empty "text" is fine and becomes an editable placeholder.',
         '',
         'Reply as JSON only:',
-        '{"title":"...","points":["...","..."],"cta":"...","stat":{"value":"...","label":"..."}}',
+        '{"tone":"...","beats":[{"kind":"intro","text":"..."},{"kind":"point","text":"...","kicker":"01"},{"kind":"cta","text":"..."}]}',
     ].filter(Boolean).join('\n');
 }
 
@@ -226,6 +268,29 @@ function cleanLine(value, { maxWords, maxChars = 80 }) {
  * Keep only what is usable. Returns null when there is nothing left, so the
  * client keeps its placeholders rather than showing a half-filled sequence.
  */
+/**
+ * One beat of an AI-decided sequence: {kind, text?, kicker?, value?, label?}.
+ * Only `kind` is required — "invent nothing" means a beat the model left
+ * wordless (no `text`) is kept as-is, not dropped, so SceneDirector still
+ * shows it as an editable placeholder rather than silently losing a beat.
+ */
+function cleanBeat(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const kind = BEAT_KINDS.includes(raw.kind) ? raw.kind : null;
+    if (!kind) return null;
+    const text = cleanLine(raw.text, kind === 'cta' ? { maxWords: 5, maxChars: 40 } : { maxWords: 7, maxChars: 70 });
+    const kicker = cleanLine(raw.kicker, { maxWords: 2, maxChars: 8 });
+    const value = kind === 'stat' ? cleanLine(raw.value, { maxWords: 2, maxChars: 12 }) : '';
+    const label = (kind === 'stat' || kind === 'quote') ? cleanLine(raw.label, { maxWords: 4, maxChars: 32 }) : '';
+    return {
+        kind,
+        ...(text ? { text } : {}),
+        ...(kicker ? { kicker } : {}),
+        ...(value ? { value } : {}),
+        ...(label ? { label } : {}),
+    };
+}
+
 function cleanScenePlan(raw) {
     if (!raw || typeof raw !== 'object') return null;
     const title = cleanLine(raw.title, { maxWords: 7, maxChars: 70 });
@@ -239,14 +304,23 @@ function cleanScenePlan(raw) {
     const statLabel = cleanLine(raw.stat?.label, { maxWords: 4, maxChars: 32 });
     const stat = statValue ? { value: statValue, label: statLabel || '' } : null;
 
+    // R101 PHASE 1 — when the model also decided the structure: an ordered
+    // beat list and a tone word, both validated against the same vocabulary
+    // SceneDirector.js itself uses.
+    const beats = Array.isArray(raw.beats) ? raw.beats.slice(0, 8).map(cleanBeat).filter(Boolean) : [];
+    const toneRaw = typeof raw.tone === 'string' ? raw.tone.trim().toLowerCase() : '';
+    const tone = TONE_KEYS.includes(toneRaw) ? toneRaw : '';
+
     // A single word is a label, not a title; two words is the floor.
     const usableTitle = title.split(' ').length >= 2 ? title : '';
-    if (!usableTitle && points.length === 0 && !cta && !stat) return null;
+    if (!usableTitle && points.length === 0 && !cta && !stat && beats.length === 0) return null;
     return {
         title: usableTitle,
         points,
         cta,
         ...(stat ? { stat } : {}),
+        ...(beats.length ? { beats } : {}),
+        ...(tone ? { tone } : {}),
     };
 }
 
@@ -298,7 +372,7 @@ router.post('/scene-plan', authenticateUser, async (req, res) => {
             }) }],
             response_format: { type: 'json_object' },
             temperature: 0.6,
-            max_tokens: 500,
+            max_tokens: 700,
         });
         const raw = completion?.choices?.[0]?.message?.content;
         const plan = raw ? cleanScenePlan(JSON.parse(raw)) : null;

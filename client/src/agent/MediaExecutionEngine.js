@@ -964,23 +964,26 @@ export class MediaExecutionEngine {
                 const brief = String(args.brief || '').trim();
                 if (!brief) return { action, success: false, message: 'Tell me what the graphics should say or feel like, and I will design the sequence.' };
 
-                const { planFromBrief } = await import('../motion/SceneDirector.js');
-                const outline = planFromBrief(brief);
+                // R101 PHASE 1 — the AI decides the structure too (tone, which
+                // beats, how many, in what order), not just the words for a
+                // shape SceneDirector's regex already fixed. It is tried on
+                // every non-empty brief; SceneDirector.planFromBrief's
+                // regex-based reading is the fallback when it is unconfigured
+                // or fails, never a hard dependency.
+                const words = Array.isArray(st.captions) ? st.captions : [];
+                const transcript = words.slice(0, 600).map(w => String(w.word ?? w.text ?? '')).join(' ');
                 let plan = null;
-                if (outline.placeholders > 0) {
-                    const words = Array.isArray(st.captions) ? st.captions : [];
-                    const transcript = words.slice(0, 600).map(w => String(w.word ?? w.text ?? '')).join(' ');
-                    try {
-                        const res = await authFetch('/api/motion/scene-plan', {
-                            method: 'POST',
-                            body: JSON.stringify({ brief, transcript, beats: outline.beats.map(b => b.kind), tone: outline.tone.label }),
-                        });
-                        const data = await res.json().catch(() => ({}));
-                        if (res.ok) plan = data.plan || null;
-                    } catch (err) {
-                        // No words from the AI is not a failure: placeholders stand.
-                        console.warn('[design_scene] no AI words, using placeholders:', err.message);
-                    }
+                try {
+                    const res = await authFetch('/api/motion/scene-plan', {
+                        method: 'POST',
+                        body: JSON.stringify({ brief, transcript }),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (res.ok) plan = data.plan || null;
+                } catch (err) {
+                    // No AI decision is not a failure: the rule-based director
+                    // decides tone and structure from the brief instead.
+                    console.warn('[design_scene] AI structure/words unavailable, using the rule-based director:', err.message);
                 }
 
                 const result = this._callStore(store, 'designScene', brief, { plan });

@@ -132,10 +132,15 @@ function countNear(text, pattern, fallback) {
 export function planFromBrief(brief, opts = {}) {
     const text = String(brief || '');
     const s = text.toLowerCase();
-    const tone = opts.tone && TONES[opts.tone] ? TONES[opts.tone] : toneFromBrief(text);
+    const plan = opts.plan && typeof opts.plan === 'object' ? opts.plan : null;
+    // Tone resolution, most specific wins: an explicit opts.tone (the editor
+    // picked one), then the AI's own read of the brief (plan.tone, cleaned
+    // server-side against this same TONES table), then the regex fallback.
+    const tone = (opts.tone && TONES[opts.tone]) ? TONES[opts.tone]
+        : (plan?.tone && TONES[plan.tone]) ? TONES[plan.tone]
+        : toneFromBrief(text);
     const rationale = [];
     const beats = [];
-    const plan = opts.plan && typeof opts.plan === 'object' ? opts.plan : null;
 
     // An AI plan, when there is one, supplies the words. It never decides the
     // structure on its own: the brief does, so the result still matches what
