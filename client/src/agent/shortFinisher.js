@@ -21,20 +21,33 @@ import { collectSfxCues, sfxVolume, SFX_QUERIES } from './sfxCues.js';
 import { sfxPlayableUrl } from './animateMoments.js';
 import { PLATFORM_PROFILES } from './PlatformProfiles.js';
 
+// Each query caches every playable candidate the library returned (up to 5),
+// plus a rotation counter -- so repeated calls for the same query (e.g. every
+// "whoosh" cue in one short, or across several shorts generated in one
+// session, since this cache is module-level) cycle through real variety
+// instead of every call freezing onto the first result found. Previously
+// this cached a single resolved asset per query, so every transition's sound
+// effect in the whole video was the literal same clip.
 const sfxCache = new Map();
 
-/** Best library sound for a query, or null (cached for the session). */
+/** Best library sound for a query, rotating through real candidates on repeat calls for the same query (cached for the session). */
 export async function fetchSfxAsset(query) {
-    if (sfxCache.has(query)) return sfxCache.get(query);
-    let asset = null;
-    try {
-        const res = await authFetch('/api/audio/search', { method: 'POST', body: JSON.stringify({ query, assetTypes: ['SOUND_EFFECT'], limit: 5 }) });
-        const data = await res.json().catch(() => ({}));
-        asset = (Array.isArray(data?.results) ? data.results : []).map(r => r?.asset || r).find(a => sfxPlayableUrl(a)) || null;
-    } catch (err) {
-        console.warn('[shortFinisher] sound search failed:', err.message);
+    let entry = sfxCache.get(query);
+    if (!entry) {
+        let candidates = [];
+        try {
+            const res = await authFetch('/api/audio/search', { method: 'POST', body: JSON.stringify({ query, assetTypes: ['SOUND_EFFECT'], limit: 5 }) });
+            const data = await res.json().catch(() => ({}));
+            candidates = (Array.isArray(data?.results) ? data.results : []).map(r => r?.asset || r).filter(a => sfxPlayableUrl(a));
+        } catch (err) {
+            console.warn('[shortFinisher] sound search failed:', err.message);
+        }
+        entry = { candidates, next: 0 };
+        sfxCache.set(query, entry);
     }
-    sfxCache.set(query, asset);
+    if (entry.candidates.length === 0) return null;
+    const asset = entry.candidates[entry.next % entry.candidates.length];
+    entry.next += 1;
     return asset;
 }
 

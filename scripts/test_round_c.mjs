@@ -250,9 +250,12 @@ await check('"pro finish" on the main edit: one undo, a re-run replaces instead 
 });
 const R = await import('../client/src/agent/CommandRegistry.js');
 await check('"pro finish" / "add a hook title" reach the command; Reel Auto ends with it', async () => {
-    for (const t of ['pro finish', 'add a hook title', 'make it look professional', 'finish it for tiktok', 'finition pro']) assert.equal(R.resolveCommand(t).match?.id, 'polish_short', t);
+    for (const t of ['pro finish', 'add a hook title', 'make it look professional', 'finish it for tiktok', 'finition pro', 'pro finish for instagram reels']) assert.equal(R.resolveCommand(t).match?.id, 'polish_short', t);
     const ES = await import('../client/src/agent/EditingStyles.js');
-    assert.equal(ES.buildAutopilotSteps('reel', 'edit it', { hasTranscript: true }).at(-1).prompt, 'Pro finish');
+    // Names the platform explicitly so MediaExecutionEngine's polish_short
+    // handler doesn't have to re-derive it from the live editingStyle store
+    // value, which can silently default to 'tiktok' (see EditingStyles.js).
+    assert.equal(ES.buildAutopilotSteps('reel', 'edit it', { hasTranscript: true }).at(-1).prompt, 'Pro finish for Instagram Reels');
 });
 await check('the AI short plan: prompt and clean-up', () => {
     const stub = (rel, exp) => { const p = require.resolve(path.join(ROOT, rel)); require.cache[p] = { id: p, filename: p, loaded: true, exports: exp }; };

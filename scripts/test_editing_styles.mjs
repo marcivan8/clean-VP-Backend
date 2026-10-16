@@ -69,8 +69,8 @@ await check('playbooks: cuts first, captions after them, levelling after cuts', 
     assert.deepEqual(keys('podcast'), ['cleanup', 'captions', 'recipe']);
     assert.deepEqual(keys('interview'), ['cleanup', 'captions', 'recipe']);
     // R92 round C: a Reel ends with the pro short finish instead of the generic animation.
-    assert.deepEqual(keys('reel'), ['short', 'vertical', 'cleanup', 'captions', 'recipe', 'finish']);
-    assert.deepEqual(keys('reel', 'go', {}), ['transcript', 'short', 'vertical', 'cleanup', 'captions', 'recipe', 'finish']);
+    assert.deepEqual(keys('reel'), ['short', 'vertical', 'cleanup', 'broll', 'captions', 'recipe', 'finish']);
+    assert.deepEqual(keys('reel', 'go', {}), ['transcript', 'short', 'vertical', 'cleanup', 'broll', 'captions', 'recipe', 'finish']);
     // A specific request runs ALONE ("animate" used to also run the clean up).
     assert.deepEqual(keys('interview', 'cut the intro'), ['request']);
     assert.deepEqual(keys('talking_head', 'animate it'), ['request']);
@@ -191,7 +191,7 @@ await check('defaults follow the style, explicit requests win', async () => {
     setTimeline();
     S.getState().setEditingStyle('reel');
     let r = await plan('make a short');
-    assert.equal(r.steps[0].args.target, 60);
+    assert.equal(r.steps[0].args.target, 22, 'Reel defaults to its own 22s target (Instagram Reels\' 15-30s ideal), not a bare fallback');
     r = await plan('make a 30 second short');
     assert.equal(r.steps[0].args.target, 30);
     r = await plan('apply the style recipe');

@@ -186,9 +186,20 @@ async function generateScenePlan({
 
     // Determine actual AI client
     const targetCapability = 'motion';
-    const effectiveProvider = configuredProvider === 'current'
-        ? resolveProvider({ capability: targetCapability })
-        : configuredProvider;
+    // Always re-derive through AIProvider's own resolveProvider rather than
+    // trusting `configuredProvider` (this module's own env read) directly
+    // for anything but the 'rules' shortcut above. resolveProvider is where
+    // the production safety net lives (AI_MOTION_PROVIDER="gemma-local" or
+    // "mock" set in prod is overridden to "openai" there, by design -- see
+    // services/AIProvider.js). Passing `configuredProvider` straight through
+    // here meant the actual network call was still safely redirected (every
+    // other call site goes through getAIClient/resolveModel, which call
+    // resolveProvider too), but this function's own `effectiveProvider` --
+    // returned to the caller and written to telemetry -- kept reporting the
+    // requested-but-overridden provider (e.g. "gemma-local") instead of what
+    // actually served the request (e.g. "openai"), which is what operators
+    // read when diagnosing a production issue.
+    const effectiveProvider = resolveProvider({ capability: targetCapability });
 
     const isAvailable = effectiveProvider === 'mock' || effectiveProvider === 'gemma-local' || isAIConfigured({ capability: targetCapability });
     if (!isAvailable) {
@@ -352,9 +363,20 @@ async function generateMotionScript({
     }
 
     const targetCapability = 'motion';
-    const effectiveProvider = configuredProvider === 'current'
-        ? resolveProvider({ capability: targetCapability })
-        : configuredProvider;
+    // Always re-derive through AIProvider's own resolveProvider rather than
+    // trusting `configuredProvider` (this module's own env read) directly
+    // for anything but the 'rules' shortcut above. resolveProvider is where
+    // the production safety net lives (AI_MOTION_PROVIDER="gemma-local" or
+    // "mock" set in prod is overridden to "openai" there, by design -- see
+    // services/AIProvider.js). Passing `configuredProvider` straight through
+    // here meant the actual network call was still safely redirected (every
+    // other call site goes through getAIClient/resolveModel, which call
+    // resolveProvider too), but this function's own `effectiveProvider` --
+    // returned to the caller and written to telemetry -- kept reporting the
+    // requested-but-overridden provider (e.g. "gemma-local") instead of what
+    // actually served the request (e.g. "openai"), which is what operators
+    // read when diagnosing a production issue.
+    const effectiveProvider = resolveProvider({ capability: targetCapability });
 
     const isAvailable = effectiveProvider === 'mock' || effectiveProvider === 'gemma-local' || isAIConfigured({ capability: targetCapability });
     if (!isAvailable) {

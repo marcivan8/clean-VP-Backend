@@ -264,9 +264,32 @@ export function polishShort(built, profile, opts = {}) {
             }
         }
 
+        // The hook title (section 1) and these captions are two
+        // independently-designed full-screen text layers with no shared
+        // layout pass between them. When a caption's time range falls inside
+        // the hook's, keep it clear of the hook's vertical space instead of
+        // both landing in the same region of the frame -- this is what
+        // produced visibly overlapping text (hook headline + word-highlight
+        // caption stacked on screen) for the opening seconds of a short.
+        const hookDurForCaptions = want.title
+            ? Math.min(Math.max(2.2, (profile?.hookSeconds || 1.5) + 1.4), Math.max(1.2, duration * 0.35))
+            : 0;
+        // Below the safe-zone top margin the hook occupies, clamped so it
+        // never pushes past the bottom safe zone either.
+        const belowHookY = Math.min(100 - (profile?.safeZone?.bottom || 0.3) * 100, Math.max(profile.captionY, 38));
+
         let styled = 0;
         for (const c of captionClips) {
-            Object.assign(c, fields, { x: 50, y: profile.captionY });
+            const overlapsHook = hookDurForCaptions > 0 && (Number(c.start) || 0) < hookDurForCaptions;
+            Object.assign(c, fields, { x: 50, y: overlapsHook ? belowHookY : profile.captionY });
+            // A caption running long (more than ~4 words) renders as 2+ lines
+            // at the pack's base size and can grow tall enough to reach back
+            // up into the hook's space even after the Y offset above -- scale
+            // the font down a bit for those instead of just moving the anchor.
+            const wordCount = String(c.content || '').trim().split(/\s+/).filter(Boolean).length;
+            if (wordCount > 4 && Number.isFinite(Number(fields.fontSize))) {
+                c.fontSize = Math.round(Number(fields.fontSize) * (wordCount > 7 ? 0.72 : 0.85));
+            }
             const idx = emphasisIndices(c.content, opts.plan?.keywords);
             if (idx.length) c.emphasis = { indices: idx, source: 'auto' };
             styled += 1;
@@ -282,8 +305,15 @@ export function polishShort(built, profile, opts = {}) {
             for (const c of t.clips) {
                 if (c.type && c.type !== 'video') continue;
                 const d = Number(c.duration) || 0;
-                if (d < 0.8) continue;
-                const beats = [{ verb: 'push-in', at: 0, duration: d, energy: look.cameraEnergy * 0.5 }];
+                // Was a 0.8s floor: a Reel's own pacing (EditingStyles.js
+                // 'reel': minSilence 0.3, padding 0.05) routinely produces
+                // jump-cut clips well under 0.8s, so most of a tightly-cut
+                // short got NO camera movement at all. 0.3s still reads as
+                // motion on screen; energy is scaled down further for very
+                // short clips so the push doesn't feel like a jolt.
+                if (d < 0.3) continue;
+                const shortClipScale = d < 0.8 ? Math.max(0.35, d / 0.8) : 1;
+                const beats = [{ verb: 'push-in', at: 0, duration: d, energy: look.cameraEnergy * 0.5 * shortClipScale }];
                 for (const m of moments) {
                     const at = Number(m.timelineTime) - (Number(c.start) || 0);
                     if (at >= 0.1 && at < d - 0.3) beats.push({ verb: 'punch', at, energy: look.cameraEnergy });

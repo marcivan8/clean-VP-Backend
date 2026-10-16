@@ -244,15 +244,27 @@ export class EditPlanner {
                 ]);
             }
             case 'extract_short': {
-                // R91: "a 30 second short" → 30; otherwise the style's target (Reel: 60).
+                // R91: "a 30 second short" → 30; otherwise the style's target (Reel: 22, Instagram Reels' own 15-30s ideal).
                 const m = String(intent.originalPrompt || '').match(/(\d{2,3})\s*(?:s\b|sec|second|seconde)/i);
-                const styleTarget = getEditingStyle(useTimelineStore.getState().editingStyle)?.targetDuration;
+                const activeStyle = getEditingStyle(useTimelineStore.getState().editingStyle);
+                const styleTarget = activeStyle?.targetDuration;
+                // R93: a style can cap how long the output is ALLOWED to be
+                // (Reel: 120s, Instagram's own ceiling) without forcing every
+                // short down to that number -- MediaExecutionEngine's
+                // extract_short keeps the source video's own length whenever
+                // it already fits under this cap, and only trims to it when
+                // the source runs longer.
+                const styleMax = activeStyle?.maxDuration;
                 // R92 round B: "a short for TikTok" → the middle of TikTok's sweet spot.
                 const named = getPlatformProfile(platformsFromText(intent.originalPrompt)[0]);
                 const platformTarget = named ? Math.round((named.length.ideal[0] + named.length.ideal[1]) / 2) : null;
                 const target = m ? Math.min(180, Math.max(10, Number(m[1]))) : (platformTarget || styleTarget || 60);
+                // An explicit number in the request ("a 30 second short") is
+                // an exact ask and overrides the style's cap; otherwise the
+                // style's cap (when it has one) is the hard ceiling.
+                const max = m ? target : (styleMax || target);
                 return this.buildPlan(planId, 'extract_short', [
-                    { step_id: 'step_1', action: 'extract_short', args: { target }, reason: `Keep the strongest ${target} s as a short` },
+                    { step_id: 'step_1', action: 'extract_short', args: { target, max }, reason: max > target ? `Keep the strongest moment, up to ${max} s` : `Keep the strongest ${target} s as a short` },
                 ]);
             }
             case 'remove_background': {

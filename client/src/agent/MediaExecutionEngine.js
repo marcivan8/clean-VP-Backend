@@ -723,6 +723,31 @@ export class MediaExecutionEngine {
     }
 
     /**
+     * Up to `limit` distinct playable library assets for a query, cached per
+     * call site. Lets `_placeSfxCues` rotate through several real candidates
+     * for the same cue kind instead of every occurrence of e.g. "whoosh"
+     * resolving to the exact same cached asset for the whole run — which is
+     * what made every transition in a long short sound identical.
+     */
+    async _fetchSfxCandidates(query, cache = new Map(), limit = 5) {
+        if (cache.has(query)) return cache.get(query);
+        let candidates = [];
+        try {
+            const res = await authFetch('/api/audio/search', {
+                method: 'POST',
+                body: JSON.stringify({ query, assetTypes: ['SOUND_EFFECT'], limit }),
+            });
+            const data = await res.json().catch(() => ({}));
+            const rows = Array.isArray(data?.results) ? data.results : [];
+            candidates = rows.map(r => r?.asset || r).filter(a => sfxPlayableUrl(a));
+        } catch (err) {
+            console.warn('[sfx] search failed:', err.message);
+        }
+        cache.set(query, candidates);
+        return candidates;
+    }
+
+    /**
      * R92: place sound effects on cues. Clips are tagged `sfxCue` so a re-run
      * replaces them instead of stacking. Call inside a history step.
      * @returns {Promise<{placed:number, missing:string[]}>}
@@ -737,8 +762,14 @@ export class MediaExecutionEngine {
         const old = (useTimelineStore.getState().tracks || []).find(t => t.id === trackId)?.clips || [];
         old.filter(c => c.sfxCue).forEach(c => useTimelineStore.getState().removeClip(trackId, c.id, { skipHistory: true }));
         let placed = 0;
+        // Rotates through each kind's candidate pool independently, so the
+        // Nth "whoosh" doesn't repeat the (N-1)th whoosh's exact sound.
+        const kindOccurrence = {};
         for (const cue of cues) {
-            const asset = await this._fetchSfxAsset(SFX_QUERIES[cue.kind] || cue.kind, cache);
+            const candidates = await this._fetchSfxCandidates(SFX_QUERIES[cue.kind] || cue.kind, cache);
+            const occ = kindOccurrence[cue.kind] || 0;
+            kindOccurrence[cue.kind] = occ + 1;
+            const asset = candidates.length ? candidates[occ % candidates.length] : null;
             const url = sfxPlayableUrl(asset);
             if (!asset || !url) { missing.add(cue.kind); continue; }
             useTimelineStore.getState().addClip(trackId, {
@@ -1227,6 +1258,12 @@ export class MediaExecutionEngine {
             }
 
             // ── R91: Reel style, keep the strongest 15-60 s ───────────────────
+            // R93: `args.max` (when a style sets one, e.g. Reel's 120s
+            // Instagram cap) is the hard ceiling on output length; `args.target`
+            // is only a soft scoring preference. A source video already within
+            // the cap is left at its own natural length instead of being
+            // force-trimmed down to target -- that forcing (every Reel coming
+            // out at a fixed ~22s no matter the source) was the reported bug.
             case 'extract_short': {
                 const st = useTimelineStore.getState();
                 const words = Array.isArray(st.captions) ? st.captions : [];
@@ -1234,13 +1271,20 @@ export class MediaExecutionEngine {
                     return { action, success: false, message: 'Picking the best moment needs a transcript. Run "add captions" first.' };
                 }
                 const target = Math.min(180, Math.max(10, Number(args.target) || 60));
+                const cap = Number.isFinite(Number(args.max)) && Number(args.max) > 0
+                    ? Math.min(180, Math.max(10, Number(args.max)))
+                    : target;
                 const tracks = st.tracks || [];
                 const total = tracks.reduce((m, t) => Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
-                if (total <= target + 1) {
-                    return { action, success: true, message: `The video is already ${Math.round(total)} s, short enough for a ${target} s short. Nothing was cut.` };
+                if (total <= cap + 1) {
+                    return { action, success: true, message: `The video is already ${Math.round(total)} s, within the ${cap} s limit. Nothing was cut.` };
                 }
                 const events = await this._fetchSemanticEvents();
-                const win = findBestShortWindow(words, { events, target, min: Math.min(15, target), max: target });
+                // Scored against the cap, not the (possibly much smaller)
+                // soft target: when a trim is unavoidable it should use as
+                // much of the allowed length as the content supports, not
+                // collapse to the style's typical/preferred length.
+                const win = findBestShortWindow(words, { events, target: cap, min: Math.min(15, cap), max: cap });
                 if (!win) {
                     return { action, success: false, message: 'No sentence-aligned moment of the right length was found in the transcript.' };
                 }

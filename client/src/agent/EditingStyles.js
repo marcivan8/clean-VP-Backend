@@ -64,8 +64,22 @@ export const EDITING_STYLES = {
         recipeId: 'punchy',
         rhythmZoom: 'dynamic',
         transition: 'whip-left',
-        targetDuration: 60,
-        guidance: 'Reel: short social cut, often repurposed from a longer video. Strongest moment first (hook in the first 2 seconds), 15 to 60 seconds, vertical 9:16, very tight cuts, bold captions.',
+        // Instagram Reels' own ideal range (PlatformProfiles.js 'reels':
+        // length.ideal [15, 30]) is 15-30s -- used only as a soft starting
+        // point (e.g. normal-mode "make a short" with no explicit length and
+        // no platform named). The real output length follows the source
+        // video: extract_short keeps the whole thing untouched when it's
+        // already within maxDuration, and only trims down -- to the
+        // strongest content, not an arbitrary fixed number -- when the
+        // source runs longer than that cap. See maxDuration below.
+        targetDuration: 22,
+        // Hard ceiling regardless of source length or targetDuration above:
+        // Instagram's own Reels limit is a few minutes, but 2 minutes keeps
+        // the format tight. A source under this length is never force-cut
+        // down to a fixed duration -- see MediaExecutionEngine.js
+        // 'extract_short', which checks this cap, not targetDuration.
+        maxDuration: 120,
+        guidance: 'Reel: short social cut, often repurposed from a longer video. Strongest moment first (hook in the first 2 seconds), length follows the source (up to 2 minutes), vertical 9:16, very tight cuts, bold captions.',
     },
 };
 
@@ -139,20 +153,27 @@ export function buildAutopilotSteps(styleId, request, facts = {}) {
     const steps = [];
     if (style.id === 'reel') {
         if (!facts.hasTranscript) steps.push({ key: 'transcript', prompt: 'Add captions' });
-        steps.push({ key: 'short', prompt: `Extract a short of ${style.targetDuration} seconds` });
+        // No fixed number: the length should follow the source video, capped
+        // at maxDuration -- see EditPlanner.js/MediaExecutionEngine.js extract_short.
+        steps.push({ key: 'short', prompt: 'Extract a short of the strongest moment' });
         steps.push({ key: 'vertical', prompt: 'Set the aspect ratio to 9:16' });
     }
     if (style.id === 'vlog') {
         // A vlog keeps its natural "ums": silences only, plus the voice.
         steps.push({ key: 'silences', prompt: 'Remove silences' });
         steps.push({ key: 'enhance', prompt: 'Enhance the audio' });
-        // Vlog guidance says "cut to b-roll on what is being described" —
-        // match existing footage to the dialogue, falling back to stock
-        // footage (Pexels) for any moment nothing in the project covers.
-        // See VideoEditorTools.placeContextualBroll's stock fallback.
-        steps.push({ key: 'broll', prompt: 'Place b-roll automatically' });
     } else {
         steps.push({ key: 'cleanup', prompt: 'Clean up the video' });
+    }
+    // Vlog and Reel guidance both call for illustrative footage over the
+    // dialogue ("cut to b-roll on what is being described" / a Reel's "very
+    // tight cuts" reads flat without any visual variety beyond the talking
+    // head) — match existing footage to the words first, falling back to
+    // stock footage (Pexels) for any moment nothing in the project covers.
+    // See VideoEditorTools.placeContextualBroll's stock fallback. After cuts,
+    // before captions, so cutaway timing is computed on the settled cut.
+    if (style.id === 'vlog' || style.id === 'reel') {
+        steps.push({ key: 'broll', prompt: 'Place b-roll automatically' });
     }
     steps.push({ key: 'captions', prompt: 'Add captions' });
     steps.push({ key: 'recipe', prompt: `Apply the ${style.recipeId} style recipe` });
@@ -160,7 +181,14 @@ export function buildAutopilotSteps(styleId, request, facts = {}) {
     // pro short finish (R92 round C: hook title, platform captions, camera
     // punch-ins, pops, transitions, sounds) instead of the generic animation.
     if (style.id === 'reel') {
-        steps.push({ key: 'finish', prompt: 'Pro finish' });
+        // Names the platform explicitly: MediaExecutionEngine's polish_short
+        // handler resolves the platform from the prompt text first and only
+        // falls back to re-deriving it from the live editingStyle store value
+        // when nothing is named (a fallback that silently defaults to
+        // 'tiktok' whenever that store value isn't exactly 'reel' at the
+        // moment this step executes — the LAST of six Auto steps). Naming it
+        // here removes that fragility for the one path that matters most.
+        steps.push({ key: 'finish', prompt: 'Pro finish for Instagram Reels' });
     } else if (style.id === 'vlog' || style.id === 'talking_head') {
         steps.push({ key: 'animate', prompt: 'Animate automatically' });
     }
@@ -171,7 +199,7 @@ export function buildAutopilotSteps(styleId, request, facts = {}) {
 export function styleContext(styleId, mode) {
     const style = getEditingStyle(styleId);
     if (!style) return null;
-    return { id: style.id, mode: normalizeEditingMode(mode), guidance: style.guidance, recipe: style.recipeId, targetDurationSec: style.targetDuration };
+    return { id: style.id, mode: normalizeEditingMode(mode), guidance: style.guidance, recipe: style.recipeId, targetDurationSec: style.targetDuration, maxDurationSec: style.maxDuration };
 }
 
 export default { EDITING_STYLES, EDITING_STYLE_IDS, EDITING_MODES, getEditingStyle, stylePacing, zoomStyleFromText, normalizeEditingMode, isGenericEditRequest, isQuestion, buildAutopilotSteps, styleContext };
