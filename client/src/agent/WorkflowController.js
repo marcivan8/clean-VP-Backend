@@ -37,6 +37,8 @@ const OPERATION_META = {
     remove_background: { description: 'The background behind the person was changed. Fine-tune it in the Background panel.', suggestion: 'Try a solid colour', suggestionPrompt: 'Replace the background with black' },
     compose_motion:    { description: 'Custom motion was written for the layers. Undo reverts it in one step.', suggestion: 'Try another feel', suggestionPrompt: 'Make the title animation more elegant' },
     extract_short:     { description: 'The strongest moment was kept as a short, starting on its hook.', suggestion: 'Set it to vertical', suggestionPrompt: 'Set the aspect ratio to 9:16' },
+    place_contextual_broll: { description: 'B-roll matched to the dialogue — local footage first, stock footage (Pexels) for anything the project did not cover.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
+    fetch_stock_broll: { description: 'Stock footage added from Pexels.', suggestion: 'Export for YouTube', suggestionPrompt: 'Export for YouTube' },
 
     // Compound clean + dynamic
     compound_clean_dynamic: { description: 'Silences removed and dynamic zoom applied — your edit flows tighter and punches with energy.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },

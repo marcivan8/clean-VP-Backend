@@ -953,6 +953,7 @@ export class VideoEditorTools {
             case 'smart_cleanup': return await this.smartCleanup(action.args, action.signal);
             case 'find_hook': return await this.findHook();
             case 'place_contextual_broll': return await this.placeContextualBroll(action.args, action.signal);
+            case 'fetch_stock_broll': return await this.fetchStockBroll(action.args, action.signal);
             case 'remove_repetition': return await this.removeRepetition(action.args);
             case 'reorder_clips': return await this.reorderClips(action.args, action.signal);
             case 'reorder_segment': return this.reorderSegment(action.args);
@@ -1581,10 +1582,28 @@ export class VideoEditorTools {
             // buildBrollCandidates' doc comment. A match can now be an asset
             // the user imported but never dragged onto a track yet.
             const candidates = buildBrollCandidates(profiles, state.assets);
+            const chapterBoundaries = extractChapterBoundaries(state.tracks);
+
             if (candidates.length === 0) {
+                // ADR-001 follow-up: nothing local to match against. Rather
+                // than stopping here, fall back to Pexels — the same
+                // suggest-broll pass the Asset Panel's "Suggest b-roll"
+                // button runs, but auto-inserted instead of waiting for
+                // manual approval (this tool only runs when the user or an
+                // Auto-mode playbook explicitly asked for b-roll placement).
+                const stock = await this._fetchStockBrollFallback(words, chapterBoundaries, signal);
+                if (stock.inserted > 0) {
+                    return {
+                        success: true,
+                        message: `No analyzed local b-roll to match, so ${stock.inserted} cutaway(s) were pulled from stock footage (Pexels) instead.`,
+                        placements: stock.placements,
+                        titleCardsCreated: 0,
+                        fromStock: stock.inserted,
+                    };
+                }
                 return {
                     success: true,
-                    message: 'No analyzed b-roll found in the media bin to match against — nothing placed. (Clips or images need to finish their content analysis first.)',
+                    message: `No analyzed b-roll found in the media bin to match against, and ${stock.reason || 'no stock footage could be fetched either'} — nothing placed. (Clips or images need to finish their content analysis first.)`,
                     placements: [],
                     titleCardsCreated: 0,
                 };
@@ -1595,8 +1614,6 @@ export class VideoEditorTools {
             // pulled in from the bin, not to gate anything.
             const alreadyOnTimeline = new Set();
             (state.tracks || []).forEach(t => (t.clips || []).forEach(c => { if (c?.assetId) alreadyOnTimeline.add(c.assetId); }));
-
-            const chapterBoundaries = extractChapterBoundaries(state.tracks);
             // R90 (A6): `wordSync` starts each cutaway on the word it
             // illustrates; `events` favours reveal/punchline/emphasis moments;
             // `layout` ('fullscreen' | 'split' | 'pip') frames it (R88 presets).
@@ -1662,9 +1679,19 @@ export class VideoEditorTools {
             }
 
 if (matches.length === 0 && titleCardsCreated === 0) {
+                const stock = await this._fetchStockBrollFallback(words, chapterBoundaries, signal);
+                if (stock.inserted > 0) {
+                    return {
+                        success: true,
+                        message: `Local b-roll didn't match any moment closely enough, so ${stock.inserted} cutaway(s) were pulled from stock footage (Pexels) instead.`,
+                        placements: stock.placements,
+                        titleCardsCreated: 0,
+                        fromStock: stock.inserted,
+                    };
+                }
                 return {
                     success: true,
-                    message: 'Found analyzed b-roll but none matched a moment in the dialogue closely enough, and no new chapter title cards were needed — nothing placed.',
+                    message: `Found analyzed b-roll but none matched a moment in the dialogue closely enough, and ${stock.reason || 'no stock footage could be fetched either'} — nothing placed.`,
                     placements: [],
                     titleCardsCreated: 0,
                 };
@@ -1688,6 +1715,121 @@ if (matches.length === 0 && titleCardsCreated === 0) {
         } catch (error) {
             console.error('[VideoEditorTools] placeContextualBroll error:', error);
             return { success: false, message: `Failed to place contextual b-roll: ${error.message}`, placements: [], titleCardsCreated: 0 };
+        }
+    }
+
+    /**
+     * Stock-footage fallback for placeContextualBroll: when there is no
+     * local, already-analyzed b-roll to match against (or nothing matched
+     * closely enough), pull context-aware suggestions from Pexels — the
+     * exact pass services/BrollSuggesterService.js runs for the Asset
+     * Panel's "Suggest b-roll" button (POST /api/stock/suggest-broll) — and
+     * place them directly, the same way AssetPanel.handleApproveBrollSuggestion
+     * does when a person clicks Approve on a suggestion card. This tool only
+     * runs when b-roll placement was explicitly requested (a command, or an
+     * Auto-mode playbook step), so skipping the manual approval step mirrors
+     * every other Auto-mode action, which already runs hands-free.
+     *
+     * Never throws: a missing API key, a 503 from the backend, or zero
+     * results all just mean "nothing to place from stock either" — the
+     * caller still reports the real reason placement failed.
+     *
+     * @param {Array} words transcript words (state.captions)
+     * @param {Array<number>} chapterBoundaries
+     * @param {AbortSignal|null} signal
+     * @returns {Promise<{inserted:number, placements:Array, reason?:string}>}
+     */
+    async _fetchStockBrollFallback(words, chapterBoundaries, signal = null) {
+        try {
+            const response = await authFetch('/api/stock/suggest-broll', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ words, chapters: chapterBoundaries, maxSuggestions: 6 }),
+                signal,
+            });
+            if (!response.ok) {
+                if (response.status === 503) return { inserted: 0, placements: [], reason: 'stock footage search is not configured' };
+                const errText = await response.text().catch(() => '');
+                return { inserted: 0, placements: [], reason: `stock footage search failed (${errText || response.status})` };
+            }
+            const { suggestions = [] } = await response.json();
+            if (suggestions.length === 0) {
+                return { inserted: 0, placements: [], reason: 'no matching stock footage was found' };
+            }
+
+            const placements = [];
+            for (const suggestion of suggestions) {
+                const asset = suggestion.asset;
+                if (!asset) continue;
+                const live = useTimelineStore.getState();
+                const exists = (live.assets || []).some(a => a.id === asset.id);
+                if (!exists) live.addAssets?.([asset]);
+                const trackId = live.addOverlayClip(asset, {
+                    scale: 4, x: 50, y: 50,
+                    start: suggestion.timelineTime,
+                    duration: suggestion.duration || asset.duration || 3.5,
+                    kind: 'video',
+                    transitions: suggestion.transitions,
+                    behindSubject: suggestion.speakerLayout === 'behind_speaker',
+                });
+                if (trackId) placements.push({ assetId: asset.id, timelineTime: suggestion.timelineTime, duration: suggestion.duration, source: 'pexels' });
+            }
+            return { inserted: placements.length, placements };
+        } catch (error) {
+            console.error('[VideoEditorTools] stock b-roll fallback error:', error);
+            return { inserted: 0, placements: [], reason: `stock footage search failed (${error.message})` };
+        }
+    }
+
+    /**
+     * "find stock footage of X" — fetches directly from Pexels (not matched
+     * against existing dialogue/moments; see placeContextualBroll for that)
+     * and drops the top result on a B-Roll track at the playhead.
+     * @param {{query?: string}} args
+     * @param {AbortSignal|null} signal
+     */
+    async fetchStockBroll({ query } = {}, signal = null) {
+        const q = String(query || '').trim();
+        if (!q) return { success: false, message: 'No search query given for stock footage.' };
+
+        const state = this.store;
+        try {
+            const params = new URLSearchParams({ query: q, type: 'video', page: '1', perPage: '5' });
+            const response = await authFetch(`/api/stock/search?${params.toString()}`, { signal });
+            if (!response.ok) {
+                if (response.status === 503) {
+                    return { success: false, message: 'Stock footage search is not configured (no Pexels API key set up on the server).' };
+                }
+                const errText = await response.text().catch(() => '');
+                return { success: false, message: `Stock footage search failed: ${errText || response.status}` };
+            }
+            const data = await response.json();
+            const results = data?.results || [];
+            if (results.length === 0) {
+                return { success: false, message: `No stock footage found for "${q}". Try a broader or different search term.` };
+            }
+
+            const asset = results[0];
+            const exists = (state.assets || []).some(a => a.id === asset.id);
+            if (!exists) state.addAssets?.([asset]);
+
+            const trackId = state.addOverlayClip(asset, {
+                scale: 4, x: 50, y: 50,
+                start: typeof state.currentTime === 'number' ? state.currentTime : 0,
+                duration: asset.duration || 4,
+                kind: 'video',
+            });
+
+            return {
+                success: !!trackId,
+                message: trackId
+                    ? `✓ Added stock footage for "${q}" (Pexels, credit: ${asset.photographer || asset.user?.name || 'Pexels'}).`
+                    : `Found stock footage for "${q}" but could not place it on a track.`,
+                details: { query: q, assetId: asset.id, provider: 'pexels' },
+            };
+        } catch (error) {
+            console.error('[VideoEditorTools] fetchStockBroll error:', error);
+            return { success: false, message: `Failed to fetch stock footage: ${error.message}` };
         }
     }
 

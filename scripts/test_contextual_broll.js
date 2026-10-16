@@ -327,7 +327,7 @@ section('7 · Static wiring — command chain (IntentParser → EditPlanner → 
     check('CommandCompiler registers it in the compiler map', /\['place_contextual_broll',\s*\{\s*compiler:\s*compilePlaceContextualBroll\s*\}\]/.test(compSrc));
 
     const meeSrc = read('client/src/agent/MediaExecutionEngine.js');
-    check('MediaExecutionEngine delegates place_contextual_broll through the shared long-form switch', /case 'place_contextual_broll':/.test(meeSrc));
+    // FIX: compilePlaceContextualBroll's cmd() emits the camelCase action\n    // 'placeContextualBroll' (matching every sibling in this switch block that\n    // also goes through VideoEditorTools: reorderSegment, findHook,\n    // removeRepetition, analyzeStructure, longFormEdit — all camelCase, then\n    // converted to snake_case for VideoEditorTools' own switch). The case label\n    // here used to read the snake_case 'place_contextual_broll', which never\n    // matched, so "place b-roll automatically" threw 'Unknown store action:\n    // placeContextualBroll' every time. This check now follows the fix, not the bug.\n    check('MediaExecutionEngine delegates place_contextual_broll through the shared long-form switch', /case 'placeContextualBroll':/.test(meeSrc));
 }
 
 section('8 · Static wiring — GET /api/brain/broll-profiles');

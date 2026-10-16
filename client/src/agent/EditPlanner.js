@@ -227,6 +227,7 @@ export class EditPlanner {
             case 'build_from_rushes': return this.planLongFormEdit(planId, { ...constraints, editMode: 'FULL_BUILD' });
             case 'find_hook': return this.planFindHook(planId);
             case 'place_contextual_broll': return this.planPlaceContextualBroll(planId);
+            case 'fetch_stock_broll': return this.planFetchStockBroll(planId, constraints);
             case 'remove_repetition': return this.planRemoveRepetition(planId);
             case 'chat': return this.planChat(planId, intent.message);
             case 'reorder_segment': return this.planReorderSegment(planId, constraints);
@@ -868,6 +869,24 @@ export class EditPlanner {
     // transcript timestamps — no new LLM call. Gated by the same
     // requiresApproval:true → EditJobManager approval-dialog mechanism every
     // other real-edit ANALYZE operation here uses (find_hook, analyze_structure).
+    // "find stock footage of X" — a single fetch_stock_broll step carrying
+    // the search query through to VideoEditorTools.fetchStockBroll, which
+    // calls services/PexelsService.js (via /api/stock/search) and drops the
+    // result on a B-Roll track. Distinct from place_contextual_broll below,
+    // which only matches footage ALREADY in the project.
+    static planFetchStockBroll(planId, constraints) {
+        const query = String(constraints?.query || '').trim();
+        return {
+            plan_id: planId, operation: 'fetch_stock_broll', step_count: 1, requiresApproval: false,
+            steps: [{
+                step_id: 'step_1',
+                action: 'fetch_stock_broll',
+                query,
+                reason: query ? `Search Pexels stock footage for "${query}" and add it as b-roll` : 'Search Pexels stock footage',
+            }],
+        };
+    }
+
     static planPlaceContextualBroll(planId) {
         return {
             plan_id: planId, operation: 'place_contextual_broll', step_count: 1, requiresApproval: true,

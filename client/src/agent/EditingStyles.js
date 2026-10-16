@@ -92,7 +92,7 @@ export function normalizeEditingMode(mode) {
 }
 
 // A request that only says "go": the playbook alone is the edit.
-const GENERIC_REQUEST = /^(please\s+)?(edit|edit it|edit this|edit the video|edit my video|go|start|do it|run|auto edit|make it|make the edit|fais le montage|monte la vid[eé]o|monte|vas[- ]y|lance|lance le montage|[eé]dite|[eé]dite la vid[eé]o)[\s.!]*$/i;
+const GENERIC_REQUEST = /^(please\s+)?(edit|edit it|edit this|edit this video|edit this clip|edit the video|edit my video|edit my clip|go|start|do it|run|auto edit|make it|make the edit|fais le montage|monte la vid[eé]o|monte|vas[- ]y|lance|lance le montage|[eé]dite|[eé]dite la vid[eé]o)[\s.!]*$/i;
 
 export function isGenericEditRequest(text) {
     const s = String(text || '').trim();
@@ -146,6 +146,11 @@ export function buildAutopilotSteps(styleId, request, facts = {}) {
         // A vlog keeps its natural "ums": silences only, plus the voice.
         steps.push({ key: 'silences', prompt: 'Remove silences' });
         steps.push({ key: 'enhance', prompt: 'Enhance the audio' });
+        // Vlog guidance says "cut to b-roll on what is being described" —
+        // match existing footage to the dialogue, falling back to stock
+        // footage (Pexels) for any moment nothing in the project covers.
+        // See VideoEditorTools.placeContextualBroll's stock fallback.
+        steps.push({ key: 'broll', prompt: 'Place b-roll automatically' });
     } else {
         steps.push({ key: 'cleanup', prompt: 'Clean up the video' });
     }

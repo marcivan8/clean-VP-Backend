@@ -17,6 +17,7 @@ import { buildAutopilotSteps, getEditingStyle } from './EditingStyles.js';
 const STEP_LABEL = {
     captions: 'captions', transcript: 'transcript', short: 'best moment kept', vertical: 'vertical 9:16', request: 'your request',
     silences: 'silences removed', fillers: 'filler words removed', audio: 'audio levelled', recipe: 'style recipe',
+    broll: 'b-roll placed',
 };
 const STYLE_NAME = { vlog: 'Vlog', talking_head: 'Talking head', interview: 'Interview', podcast: 'Podcast', reel: 'Reel' };
 

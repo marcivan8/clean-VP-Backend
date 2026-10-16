@@ -1955,7 +1955,8 @@ export class MediaExecutionEngine {
             case 'apply_zoom':        // alias — server fallback generates this for "zoom in/out"
             case 'apply_smart_zoom':
             case 'identify_quotable_moments':
-            case 'place_contextual_broll':
+            case 'placeContextualBroll':
+            case 'fetchStockBroll':
             case 'apply_lut':
             case 'clear_lut':
             case 'emphasize_keywords':
