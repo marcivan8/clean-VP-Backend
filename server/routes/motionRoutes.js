@@ -21,6 +21,7 @@ const { pathToFileURL } = require('url');
 const { authenticateUser } = require('../../middleware/auth.js');
 const { getAIClient, isAIConfigured, resolveModel } = require('../../services/AIProvider');
 const { sanitizeEditingStyle, isCalmStyle } = require('../brain/editingStyles');
+const { generateScenePlan, generateMotionScript } = require('../../services/motionProvider.js');
 
 const router = express.Router();
 
@@ -83,55 +84,26 @@ Reply with JSON only: {"layers": {"<layer id>": {"beats": [...], "animations": [
 router.post('/compose', authenticateUser, async (req, res) => {
     // Rate limiter: mounted under aiLimiter in index.js (LLM call).
     const { brief, layers, editingStyle } = req.body || {};
-    const cleanBrief = String(brief || '').trim().slice(0, MAX_BRIEF);
-    const list = cleanLayers(layers);
-    if (list.length === 0) return res.status(400).json({ error: 'layers is required (at least one {id, kind, duration})' });
-
     try {
         const composer = await loadComposer();
         const style = sanitizeEditingStyle(editingStyle);
-        const fallbackFor = l => composer.planMotionFromBrief(cleanBrief || 'animate it', { duration: l.duration });
-        const rulesScripts = () => Object.fromEntries(list.map(l => [l.id, fallbackFor(l)]));
-
-        if (!isAIConfigured() || !cleanBrief) {
-            return res.json({ source: 'rules', layers: rulesScripts(), notes: null });
-        }
-
-        let parsed = null;
-        try {
-            const ai = getAIClient({ timeout: 45_000 });
-            const completion = await ai.chat.completions.create({
-                model: resolveModel('gpt-4o', 'chat'),
-                messages: [{ role: 'user', content: buildMotionPrompt({ brief: cleanBrief, layers: list, catalog: composer.verbCatalog(), editingStyle: style }) }],
-                response_format: { type: 'json_object' },
-                temperature: 0.6,
-                max_tokens: 2500,
-            });
-            const raw = completion?.choices?.[0]?.message?.content;
-            parsed = raw ? JSON.parse(raw) : null;
-        } catch (aiErr) {
-            console.warn('[motionRoutes /compose] LLM failed, using rules:', aiErr.message);
-        }
-
-        const out = {};
-        let usedLLM = 0;
-        for (const l of list) {
-            const script = parsed?.layers?.[l.id];
-            const kind = l.kind === 'caption' ? 'caption' : l.kind;
-            const check = script ? composer.composeMotion(script, { duration: l.duration, kind }) : null;
-            if (check && check.animations.length > 0) {
-                out[l.id] = { beats: script.beats || [], animations: script.animations || [] };
-                usedLLM += 1;
-            } else {
-                out[l.id] = fallbackFor(l);
-            }
-        }
+        const result = await generateMotionScript({
+            brief,
+            layers,
+            editingStyle: style,
+            composer,
+            buildPrompt: buildMotionPrompt,
+            cleanLayers,
+        });
         return res.json({
-            source: usedLLM === list.length ? 'llm' : usedLLM > 0 ? 'mixed' : 'rules',
-            layers: out,
-            notes: typeof parsed?.notes === 'string' ? parsed.notes.slice(0, 200) : null,
+            source: result.source,
+            layers: result.layers,
+            notes: result.notes,
         });
     } catch (err) {
+        if (err.message && err.message.includes('layers is required')) {
+            return res.status(400).json({ error: err.message });
+        }
         console.error('[motionRoutes /compose] error:', err.message);
         return res.status(500).json({ error: err.message });
     }
@@ -172,6 +144,18 @@ function cleanShortPlan(raw) {
  */
 const BEAT_KINDS = ['intro', 'point', 'stat', 'quote', 'cta', 'outro'];
 const TONE_KEYS = ['premium', 'technology', 'viral', 'editorial', 'warm'];
+
+/**
+ * R101 — mirrors client/src/motion/MotionComposer.js's VERBS, grouped the
+ * same way ('in'/'emphasis'/'out' — 'hold' verbs are for footage, not a
+ * beat's text, so they are deliberately left out here). Lets a beat suggest
+ * its own motion; SceneComposer.cleanMotionOverride validates it again
+ * client-side before it ever reaches composeMotion, so this server-side
+ * check only keeps obviously-wrong values out of the plan early.
+ */
+const ENTER_VERBS = ['fade-in', 'rise-in', 'drop-in', 'slide-in', 'slam-in', 'pop-in', 'zoom-in', 'whip-in', 'swing-in', 'spin-in', 'blur-in', 'typewriter', 'word-reveal', 'glitch-in'];
+const EMPHASIS_VERBS = ['punch', 'pulse', 'shake', 'wobble', 'nod', 'flash', 'jiggle', 'bounce'];
+const EXIT_VERBS = ['fade-out', 'sink-out', 'fly-out', 'shrink-out', 'blur-out', 'whip-out'];
 
 /**
  * R95 PHASE 4 — the words for a designed sequence.
@@ -230,6 +214,12 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform }) {
         `Each beat has a "kind", one of: ${BEAT_KINDS.join(', ')}. Typical sequences open with "intro", use "point" for benefits, features or steps, "stat" for one figure worth a callout, "quote" for a testimonial, and close with "cta" when the brief implies a call to action.`,
         'Decide how many beats and which kinds actually fit the brief — do not force a shape it does not ask for.',
         '',
+        'A beat MAY also suggest its own "motion" when the tone\'s usual treatment would undersell it (a standout number, the final call to action) — most beats should leave "motion" out and let the tone\'s own default carry them:',
+        `  "enter" (required if "motion" is given): one of ${ENTER_VERBS.join(', ')}`,
+        `  "emphasis" (optional): one of ${EMPHASIS_VERBS.join(', ')}, or omit it`,
+        `  "exit" (optional): one of ${EXIT_VERBS.join(', ')}, or omit it`,
+        '  "energy": 0 (subtle) to 1 (maximal), omit for a moderate default',
+        '',
         'Rules:',
         '- At most 8 beats.',
         '- An "intro", "point" or "quote" beat\'s "text" is 2 to 7 words, a benefit or a fact. Number "point" beats with a two-digit "kicker" ("01", "02"...).',
@@ -239,7 +229,7 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform }) {
         '- Invent nothing that is not in the brief or the transcript. Leave a field, or a whole beat\'s "text", out rather than guess — an empty "text" is fine and becomes an editable placeholder.',
         '',
         'Reply as JSON only:',
-        '{"tone":"...","beats":[{"kind":"intro","text":"..."},{"kind":"point","text":"...","kicker":"01"},{"kind":"cta","text":"..."}]}',
+        '{"tone":"...","beats":[{"kind":"intro","text":"..."},{"kind":"point","text":"...","kicker":"01"},{"kind":"cta","text":"...","motion":{"enter":"slam-in","emphasis":"punch","energy":0.8}}]}',
     ].filter(Boolean).join('\n');
 }
 
@@ -274,6 +264,30 @@ function cleanLine(value, { maxWords, maxChars = 80 }) {
  * wordless (no `text`) is kept as-is, not dropped, so SceneDirector still
  * shows it as an editable placeholder rather than silently losing a beat.
  */
+/**
+ * R101 — a beat's own motion suggestion, cleaned field by field: a missing
+ * or unrecognised entrance means nothing usable here at all (there is no
+ * sane beat with no way to arrive), but emphasis/exit are each independently
+ * optional — a model that names a good entrance and nothing else still gets
+ * that much, rather than the whole suggestion being discarded over one bad
+ * field.
+ */
+function cleanMotion(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const enter = ENTER_VERBS.includes(raw.enter) ? raw.enter : null;
+    if (!enter) return null;
+    // `null` is kept as an explicit "no emphasis/exit at all" (the client's
+    // cleanMotionOverride in SceneComposer.js treats that as deliberate).
+    // Anything else invalid is left OUT of the object (not coerced to
+    // `null`), so it round-trips through JSON as absent, not as an explicit
+    // opt-out — the client then falls back to the look's own value for that
+    // field, the same as if the model had never mentioned it.
+    const emphasis = raw.emphasis === null ? null : (EMPHASIS_VERBS.includes(raw.emphasis) ? raw.emphasis : undefined);
+    const exit = raw.exit === null ? null : (EXIT_VERBS.includes(raw.exit) ? raw.exit : undefined);
+    const energy = Number.isFinite(Number(raw.energy)) ? Math.min(1, Math.max(0, Number(raw.energy))) : 0.6;
+    return { enter, emphasis, exit, energy };
+}
+
 function cleanBeat(raw) {
     if (!raw || typeof raw !== 'object') return null;
     const kind = BEAT_KINDS.includes(raw.kind) ? raw.kind : null;
@@ -282,12 +296,14 @@ function cleanBeat(raw) {
     const kicker = cleanLine(raw.kicker, { maxWords: 2, maxChars: 8 });
     const value = kind === 'stat' ? cleanLine(raw.value, { maxWords: 2, maxChars: 12 }) : '';
     const label = (kind === 'stat' || kind === 'quote') ? cleanLine(raw.label, { maxWords: 4, maxChars: 32 }) : '';
+    const motion = cleanMotion(raw.motion);
     return {
         kind,
         ...(text ? { text } : {}),
         ...(kicker ? { kicker } : {}),
         ...(value ? { value } : {}),
         ...(label ? { label } : {}),
+        ...(motion ? { motion } : {}),
     };
 }
 
@@ -357,28 +373,20 @@ router.post('/scene-plan', authenticateUser, async (req, res) => {
     if (!cleanBrief) return res.status(400).json({ error: 'brief is required' });
     const cleanTranscript = String(transcript || '').trim().slice(0, 3000);
     const beatList = (Array.isArray(beats) ? beats : []).map(b => String(b || '').slice(0, 20)).filter(Boolean).slice(0, 8);
-    // No AI configured is not an error: the client keeps its placeholders.
-    if (!isAIConfigured()) return res.json({ source: 'rules', plan: null });
+
     try {
-        const ai = getAIClient({ timeout: 30_000 });
-        const completion = await ai.chat.completions.create({
-            model: resolveModel('gpt-4o', 'chat'),
-            messages: [{ role: 'user', content: buildScenePlanPrompt({
-                brief: cleanBrief,
-                transcript: cleanTranscript,
-                beats: beatList,
-                tone: tone ? String(tone).slice(0, 40) : '',
-                platform: platform ? String(platform).slice(0, 40) : '',
-            }) }],
-            response_format: { type: 'json_object' },
-            temperature: 0.6,
-            max_tokens: 700,
+        const result = await generateScenePlan({
+            brief: cleanBrief,
+            transcript: cleanTranscript,
+            beats: beatList,
+            tone: tone ? String(tone).slice(0, 40) : '',
+            platform: platform ? String(platform).slice(0, 40) : '',
+            buildPrompt: buildScenePlanPrompt,
+            cleanPlan: cleanScenePlan,
         });
-        const raw = completion?.choices?.[0]?.message?.content;
-        const plan = raw ? cleanScenePlan(JSON.parse(raw)) : null;
-        return res.json({ source: plan ? 'llm' : 'rules', plan });
+        return res.json({ source: result.source, plan: result.plan });
     } catch (err) {
-        console.warn('[motionRoutes /scene-plan] LLM failed, the client keeps its placeholders:', err.message);
+        console.warn('[motionRoutes /scene-plan] generation failed, falling back to rules:', err.message);
         return res.json({ source: 'rules', plan: null });
     }
 });

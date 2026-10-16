@@ -86,17 +86,17 @@ async function main() {
         quiet(() => withEnv({ AI_PROVIDER: 'llamafile', NODE_ENV: undefined }, () => {
             check('an unrecognised provider falls back to openai', resolveProvider() === 'openai');
         }));
-        check('the valid set is exactly openai/ollama/groq/gemini/mock',
-            VALID_PROVIDERS.join(',') === 'openai,ollama,groq,gemini,mock', VALID_PROVIDERS.join(','));
+        check('the valid set is exactly openai/ollama/groq/gemini/gemma-local/mock',
+            VALID_PROVIDERS.join(',') === 'openai,ollama,groq,gemini,gemma-local,mock', VALID_PROVIDERS.join(','));
     }
 
     // ── 2 · Production safety ────────────────────────────────────────────────
-    section('2 · ollama/mock are refused in production; groq/gemini are NOT (R84)');
+    section('2 · ollama/gemma-local/mock are refused in production; groq/gemini are NOT (R84)');
     {
-        check('the refused set is exactly ollama/mock',
-            PRODUCTION_REFUSED_PROVIDERS.join(',') === 'ollama,mock', PRODUCTION_REFUSED_PROVIDERS.join(','));
+        check('the refused set is exactly ollama/gemma-local/mock',
+            PRODUCTION_REFUSED_PROVIDERS.join(',') === 'ollama,gemma-local,mock', PRODUCTION_REFUSED_PROVIDERS.join(','));
 
-        for (const p of ['mock', 'ollama']) {
+        for (const p of ['mock', 'ollama', 'gemma-local']) {
             quiet(() => withEnv({ AI_PROVIDER: p, NODE_ENV: 'production' }, () => {
                 check(`AI_PROVIDER=${p} is ignored in production`,
                     resolveProvider() === 'openai',
@@ -116,6 +116,9 @@ async function main() {
         withEnv({ AI_PROVIDER: 'ollama', NODE_ENV: undefined }, () => {
             check('ollama IS allowed when NODE_ENV is unset', resolveProvider() === 'ollama');
         });
+        withEnv({ AI_PROVIDER: 'gemma-local', NODE_ENV: undefined }, () => {
+            check('gemma-local IS allowed when NODE_ENV is unset', resolveProvider() === 'gemma-local');
+        });
 
         // Must warn rather than throw: a misconfigured env var should degrade to
         // correct-but-costly, never take the API down.
@@ -125,13 +128,18 @@ async function main() {
         }));
         check('production refusal does not throw', !threw);
 
-        // AI_VISION_PROVIDER is capability-scoped — it must not leak into the
-        // base (chat/audio) provider resolution.
+        // AI_VISION_PROVIDER and AI_MOTION_PROVIDER are capability-scoped
         withEnv({ AI_PROVIDER: 'groq', AI_VISION_PROVIDER: 'gemini', NODE_ENV: 'production' }, () => {
             check('AI_VISION_PROVIDER only affects capability:vision',
                 resolveProvider({ capability: 'chat' }) === 'groq');
             check('AI_VISION_PROVIDER wins for capability:vision',
                 resolveProvider({ capability: 'vision' }) === 'gemini');
+        });
+        withEnv({ AI_PROVIDER: 'groq', AI_MOTION_PROVIDER: 'gemma-local', NODE_ENV: undefined }, () => {
+            check('AI_MOTION_PROVIDER only affects capability:motion',
+                resolveProvider({ capability: 'chat' }) === 'groq');
+            check('AI_MOTION_PROVIDER wins for capability:motion',
+                resolveProvider({ capability: 'motion' }) === 'gemma-local');
         });
     }
 
@@ -289,11 +297,27 @@ async function main() {
             check('GEMINI_MODEL overrides the default',
                 resolveModel('gpt-4o', 'vision') === 'gemini-2.0-flash');
         });
+        withEnv({ AI_PROVIDER: 'gemma-local', NODE_ENV: undefined }, () => {
+            check('gemma-local maps to default gemma2:2b',
+                resolveModel('gpt-4o') === 'gemma2:2b');
+        });
+        withEnv({ AI_PROVIDER: 'gemma-local', NODE_ENV: undefined, GEMMA_MODEL: 'gemma2:9b' }, () => {
+            check('GEMMA_MODEL overrides the default',
+                resolveModel('gpt-4o') === 'gemma2:9b');
+        });
     }
 
     // ── 6 · Mock bodies satisfy each caller's parser ─────────────────────────
     section('6 · Mock responses parse into the shape each caller expects');
     {
+        const motionBody = mockBodyFor('You are a senior motion designer. VERB VOCABULARY');
+        check('motion body has layers and notes',
+            'layers' in motionBody && 'notes' in motionBody);
+
+        const sceneBody = mockBodyFor('Write a scene-plan. Each beat has a "kind", one of: BEAT_KINDS');
+        check('scene body has tone and beats',
+            'tone' in sceneBody && Array.isArray(sceneBody.beats));
+
         const projectBody = mockBodyFor('PROJECT map through_line coverage_gaps');
         check('project map body has the required keys',
             'project_type' in projectBody && Array.isArray(projectBody.asset_roles)

@@ -36,6 +36,7 @@ import InterviewEditPanel from '../components/InterviewEditPanel';
 // old 'effects' branch did exactly that). Add both halves or the panel is dead
 // on arrival.
 import MotionPanel from '../components/MotionPanel';
+import TransformPanel from '../components/TransformPanel';
 import ShortsPanel from '../components/ShortsPanel'; // R92 round B: repurposed shorts
 import SnapGuidesLayer from '../components/Player/SnapGuidesLayer.jsx'; // R92 round C
 import ShortPreviewBar from '../components/Player/ShortPreviewBar.jsx'; // R93
@@ -2303,69 +2304,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             {activeTab === 'captions' && <section className="p-4 border-b border-border/50"><TextPanel /></section>}
                             {activeTab === 'audio' && <section className="p-4 border-b border-border/50"><MixerPanel /></section>}
 
-                            {activeTab === 'transform' && (
-                                <section className="p-4 border-b border-border/50">
-                                    <div className="space-y-6">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold">{t('ideLayout.transform.title')}</div>
-                                            {activeClip && <div className="text-[10px] text-green-400 font-mono">{t('ideLayout.active')}</div>}
-                                        </div>
-                                        {!activeClip ? (
-                                            <div className="p-4 rounded-md border border-dashed border-border text-center"><p className="text-xs text-muted-foreground">{t('ideLayout.transform.selectClip')}</p></div>
-                                        ) : (
-                                            <>
-                                                {activeTrackType === 'overlay' && (activeClip.type === 'video' || activeClip.type === 'image') && (
-                                                    <div className="pb-4 border-b border-border">
-                                                        <LayoutPresetPicker trackId={activeTrackId} clip={activeClip} />
-                                                    </div>
-                                                )}
-                                                {[
-                                                    { key: 'scale', label: t('ideLayout.transform.scale'), min: 10, max: 300, toDisplay: v => Math.round((v || 1) * 100), unit: '%', fromDisplay: v => v / 100 },
-                                                    { key: 'x', label: t('ideLayout.transform.positionX'), min: -1920, max: 1920, toDisplay: v => v || 0, unit: 'px', fromDisplay: v => v },
-                                                    { key: 'y', label: t('ideLayout.transform.positionY'), min: -1080, max: 1080, toDisplay: v => v || 0, unit: 'px', fromDisplay: v => v },
-                                                    { key: 'rotation', label: t('ideLayout.transform.rotation'), min: -180, max: 180, toDisplay: v => v || 0, unit: '°', fromDisplay: v => v },
-                                                ].map(({ key, label, min, max, toDisplay, unit, fromDisplay }) => {
-                                                    const displayVal = toDisplay(activeClip[key]);
-                                                    // Canvas renders at native video resolution (e.g. 1920px).
-                                                    // CSS scale() only degrades quality if the visual display
-                                                    // exceeds native res — unlikely below 300% on typical screens.
-                                                    const scaleQuality = key === 'scale'
-                                                        ? (displayVal <= 150 ? { color: '#34d399', label: t('ideLayout.transform.qualitySharp') }
-                                                        : displayVal <= 250 ? { color: '#fbbf24', label: t('ideLayout.transform.qualityZoomedIn') }
-                                                        : { color: '#f87171', label: t('ideLayout.transform.qualityExtremeZoom') })
-                                                        : null;
-                                                    return (
-                                                    <div key={key} className="space-y-2">
-                                                        <div className="flex justify-between text-xs items-center">
-                                                            <span>{label}</span>
-                                                            <div className="flex items-center gap-1.5">
-                                                                {scaleQuality && (
-                                                                    <span className="flex items-center gap-1">
-                                                                        <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: scaleQuality.color, boxShadow: `0 0 4px ${scaleQuality.color}` }} />
-                                                                        <span className="text-[10px]" style={{ color: scaleQuality.color }}>{scaleQuality.label}</span>
-                                                                    </span>
-                                                                )}
-                                                                <span className="text-muted-foreground">{displayVal}{unit}</span>
-                                                            </div>
-                                                        </div>
-                                                        <input type="range" min={min} max={max} value={displayVal}
-                                                            onChange={(e) => updateClip(activeTrackId, activeClip.id, { [key]: fromDisplay(parseInt(e.target.value)) }, { skipHistory: true })}
-                                                            onPointerUp={(e) => updateClip(activeTrackId, activeClip.id, { [key]: fromDisplay(parseInt(e.target.value)) })}
-                                                            className="w-full accent-primary h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer" />
-                                                    </div>
-                                                    );
-                                                })}
-                                                <p className="text-[10px] leading-relaxed pt-1" style={{ color: 'var(--fg-3)', fontFamily: 'var(--f-sans)' }}>
-                                                    {t('ideLayout.transform.qualityNote')}
-                                                </p>
-                                                <div className="pt-3 border-t border-border">
-                                                    <button onClick={() => updateClip(activeTrackId, activeClip.id, { scale: 1, x: 0, y: 0, rotation: 0 })} className="w-full py-1.5 text-xs bg-secondary hover:bg-white/10 rounded text-muted-foreground transition-colors">{t('ideLayout.transform.reset')}</button>
-                                                </div>
-                                            </>
-                                        )}
-                                    </div>
-                                </section>
-                            )}
+                            {activeTab === 'transform' && <TransformPanel />}
 
                             {activeTab === 'marketplace' && (
                                 <section className="p-4 border-b border-border/50">

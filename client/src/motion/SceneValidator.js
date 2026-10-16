@@ -411,6 +411,10 @@ function checkCollisions(leaves, issues) {
             if (to - from <= 0.1) continue;
             // A shape drawn deliberately behind its own text is not a collision.
             if (a.node.meta?.backdropFor === b.node.id || b.node.meta?.backdropFor === a.node.id) continue;
+            if (Array.isArray(a.node.meta?.backdropFor) && (a.node.meta.backdropFor.includes(b.node.id) || a.node.meta.backdropFor.includes(b.node.origin?.role))) continue;
+            if (Array.isArray(b.node.meta?.backdropFor) && (b.node.meta.backdropFor.includes(a.node.id) || b.node.meta.backdropFor.includes(a.node.origin?.role))) continue;
+            if ((a.node.origin?.role === 'backdrop' || a.node.meta?.isBackdrop) && (b.node.type === NODE_TYPES.TEXT || b.node.type === NODE_TYPES.CAPTION || b.node.meta?.overBackdrop)) continue;
+            if ((b.node.origin?.role === 'backdrop' || b.node.meta?.isBackdrop) && (a.node.type === NODE_TYPES.TEXT || a.node.type === NODE_TYPES.CAPTION || a.node.meta?.overBackdrop)) continue;
             if (a.node.mask?.nodeId === b.node.id || b.node.mask?.nodeId === a.node.id) continue;
             const area = overlapArea(a.box, b.box);
             if (area <= 0) continue;

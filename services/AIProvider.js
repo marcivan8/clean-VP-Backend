@@ -79,10 +79,10 @@
 
 'use strict';
 
-const VALID_PROVIDERS = ['openai', 'ollama', 'groq', 'gemini', 'mock'];
+const VALID_PROVIDERS = ['openai', 'ollama', 'groq', 'gemini', 'gemma-local', 'mock'];
 
 /** Providers refused in production — local/dev-only or non-real output. */
-const PRODUCTION_REFUSED_PROVIDERS = ['ollama', 'mock'];
+const PRODUCTION_REFUSED_PROVIDERS = ['ollama', 'gemma-local', 'mock'];
 
 /**
  * Which providers can serve which capability. Anything not listed for a
@@ -91,7 +91,8 @@ const PRODUCTION_REFUSED_PROVIDERS = ['ollama', 'mock'];
  * in the header comment above.
  */
 const CAPABILITY_PROVIDERS = {
-    chat:       ['openai', 'ollama', 'groq', 'gemini'],
+    chat:       ['openai', 'ollama', 'groq', 'gemini', 'gemma-local'],
+    motion:     ['openai', 'ollama', 'groq', 'gemini', 'gemma-local'],
     vision:     ['openai', 'ollama', 'gemini'],
     audio:      ['openai', 'groq'],
     embeddings: ['openai'],
@@ -116,7 +117,8 @@ let _clientCache = new Map();
  *
  * @param {Object}  [opts]
  * @param {string}  [opts.capability]  - when 'vision', AI_VISION_PROVIDER
- *                                       (if set and valid) wins over AI_PROVIDER
+ *                                       (if set and valid) wins over AI_PROVIDER.
+ *                                       when 'motion', AI_MOTION_PROVIDER wins.
  * @param {Object}  [opts.env]         - defaults to process.env
  */
 function resolveProvider(opts = {}) {
@@ -129,9 +131,13 @@ function resolveProvider(opts = {}) {
     if (capability === 'vision' && env.AI_VISION_PROVIDER) {
         raw = env.AI_VISION_PROVIDER;
         source = 'AI_VISION_PROVIDER';
+    } else if (capability === 'motion' && env.AI_MOTION_PROVIDER) {
+        raw = env.AI_MOTION_PROVIDER;
+        source = 'AI_MOTION_PROVIDER';
     }
 
     raw = String(raw || 'openai').toLowerCase().trim();
+    if (raw === 'gemma' || raw === 'gemma2') raw = 'gemma-local';
     let requested = VALID_PROVIDERS.includes(raw) ? raw : 'openai';
 
     if (raw && !VALID_PROVIDERS.includes(raw)) {
@@ -207,6 +213,9 @@ function getAIClient(opts = {}) {
         // key, but the SDK requires a non-empty string.
         config.baseURL = env.OLLAMA_BASE_URL || 'http://localhost:11434/v1';
         config.apiKey  = 'ollama';
+    } else if (provider === 'gemma-local') {
+        config.baseURL = env.GEMMA_BASE_URL || env.OLLAMA_BASE_URL || 'http://localhost:11434/v1';
+        config.apiKey  = env.GEMMA_API_KEY || 'gemma-local';
     } else if (provider === 'groq') {
         if (!env.GROQ_API_KEY) return null;
         config.baseURL = env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1';
@@ -242,6 +251,10 @@ function getAIClient(opts = {}) {
 function resolveModel(requestedModel, capability) {
     const provider = resolveProvider({ capability });
     if (provider === 'openai') return requestedModel;
+
+    if (provider === 'gemma-local') {
+        return process.env.GEMMA_MODEL || 'gemma2:2b';
+    }
 
     if (provider === 'ollama') {
         const isVision = capability === 'vision'
@@ -284,7 +297,13 @@ function createMockClient() {
         _mock: true,
         chat: {
             completions: {
-                create: async ({ messages = [], model } = {}) => {
+                create: async ({ messages = [], model } = {}, options = {}) => {
+                    if (options?.signal?.aborted) {
+                        const err = new Error('Request was aborted.');
+                        err.name = 'AbortError';
+                        throw err;
+                    }
+
                     const prompt = messages
                         .map(m => typeof m.content === 'string'
                             ? m.content
@@ -355,6 +374,39 @@ function mockBodyFor(prompt = '') {
         return { pauses: [] };
     }
 
+    // Scene plan (R95 / R101 / Upgrade A)
+    if (/scene[- ]plan|BEAT_KINDS|Each beat has a|decide how many beats/i.test(p)) {
+        return {
+            tone: 'technology',
+            beats: [
+                { kind: 'intro', text: 'Mock Product Reveal' },
+                { kind: 'point', text: 'Clean and validated animation', kicker: '01' },
+                { kind: 'cta', text: 'Discover more today' },
+            ],
+        };
+    }
+
+    // Motion composer (R92 / Upgrade A)
+    if (/VERB VOCABULARY|motion designer/i.test(p)) {
+        const ids = [...p.matchAll(/- id "([^"]+)":/g)].map(m => m[1]);
+        const layers = {};
+        if (ids.length > 0) {
+            for (const id of ids) {
+                layers[id] = {
+                    beats: [
+                        { verb: 'rise-in', at: 0, energy: 0.6 },
+                        { verb: 'punch', at: 1.0, energy: 0.5 },
+                        { verb: 'fade-out', at: 0, energy: 0.5 },
+                    ],
+                };
+            }
+        }
+        return {
+            layers,
+            notes: 'Mock motion script — synthetic response.',
+        };
+    }
+
     // VisualAnalyzer / scene layout
     if (/scene|framing|camera|faces/i.test(p)) {
         return {
@@ -388,9 +440,9 @@ function mockBodyFor(prompt = '') {
  * ollama need no key, and gating on one would 503 every AI route in exactly the
  * environments this factory exists to enable.
  */
-function isAIConfigured() {
-    const provider = resolveProvider();
-    if (provider === 'mock' || provider === 'ollama') return true;
+function isAIConfigured(opts = {}) {
+    const provider = resolveProvider(opts);
+    if (provider === 'mock' || provider === 'ollama' || provider === 'gemma-local') return true;
     if (provider === 'groq') return !!process.env.GROQ_API_KEY;
     if (provider === 'gemini') return !!process.env.GEMINI_API_KEY;
     return !!process.env.OPENAI_API_KEY;

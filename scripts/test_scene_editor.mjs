@@ -127,16 +127,44 @@ await check('a backdrop panel is sized from the block it sits behind, and draws'
 // ── 2. Components as scenes ──────────────────────────────────────────────────
 log('\n2 · Components compose themselves');
 
-await check('the designed components are scenes, laid out for the frame they are given', () => {
+await check('the designed components are scenes, laid out for the frame they are given — EVERY preset, R101\'s additions included', () => {
     for (const id of SC.COMPOSED_COMPONENTS) {
-        const preset = Object.keys(SC.LOOKS[id])[0];
-        const built = buildComponent(id, preset, { title: 'A premium launch', subtitle: 'Why it matters', value: '+184%', label: 'RETENTION' }, { aspectRatio: '9:16' });
-        assert.ok(built.scene, `${id} came back as a scene`);
-        assert.equal(SS.validateSceneShape(built.scene).valid, true, `${id} is well formed`);
-        assert.ok(built.placements.length >= 2, `${id} has layers`);
-        assert.equal(new Set(built.placements.map(p => p.clip.groupId)).size, 1, `${id} moves as one group`);
-        assert.ok(built.placements.every(p => p.clip.sceneNodeId), `${id} clips name their node`);
+        for (const preset of Object.keys(SC.LOOKS[id])) {
+            const built = buildComponent(id, preset, { title: 'A premium launch', subtitle: 'Why it matters', value: '+184%', label: 'RETENTION' }, { aspectRatio: '9:16' });
+            assert.ok(built.scene, `${id}/${preset} came back as a scene`);
+            assert.equal(SS.validateSceneShape(built.scene).valid, true, `${id}/${preset} is well formed`);
+            assert.ok(built.placements.length >= 2, `${id}/${preset} has layers`);
+            assert.equal(new Set(built.placements.map(p => p.clip.groupId)).size, 1, `${id}/${preset} moves as one group`);
+            assert.ok(built.placements.every(p => p.clip.sceneNodeId), `${id}/${preset} clips name their node`);
+        }
     }
+});
+
+await check('R101 — a beat\'s own motion overrides the look\'s, verb by verb, invalid fields fall back and energy clamps', () => {
+    const plain = SC.composeComponentScene('KineticTitle', 'creator', { title: 'Ships today' }, { aspectRatio: '16:9' });
+    const plainHeadline = SS.listNodes(plain).find(e => e.node.origin?.role === 'headline').node;
+    assert.ok(plainHeadline.animations.some(a => a.presetId === 'composed:pop-in'), 'the preset\'s own entrance, unmodified');
+
+    const overridden = SC.composeComponentScene('KineticTitle', 'creator', {
+        title: 'Ships today',
+        // "glitch-in" is a real entrance verb (overrides); "not-a-real-verb"
+        // is not a real emphasis verb (falls back to the look's own
+        // "wobble"); "exit: null" is an explicit, valid override to no exit
+        // at all; "energy: 5" is out of range and should clamp to 1.
+        motion: { enter: 'glitch-in', emphasis: 'not-a-real-verb', exit: null, energy: 5 },
+    }, { aspectRatio: '16:9' });
+    const headline = SS.listNodes(overridden).find(e => e.node.origin?.role === 'headline').node;
+    assert.ok(headline.animations.some(a => a.presetId === 'composed:glitch-in'), 'the entrance should be overridden');
+    assert.ok(!headline.animations.some(a => a.presetId === 'composed:pop-in'), 'the look\'s own entrance should not also be present');
+    assert.ok(headline.animations.some(a => a.presetId === 'composed:wobble'), 'an invalid emphasis verb should fall back to the look\'s own');
+    assert.ok(!headline.animations.some(a => a.presetId?.includes('shrink-out')), 'an explicit null exit should mean no exit plays');
+
+    // The pure validator in isolation, so the fallback contract is pinned
+    // directly and not only inferred from a composed scene.
+    const fallback = { enter: 'pop-in', emphasis: 'wobble', exit: 'shrink-out', energy: 0.7 };
+    assert.deepEqual(SC.cleanMotionOverride(null, fallback), fallback, 'no override at all keeps the look exactly');
+    assert.deepEqual(SC.cleanMotionOverride({ enter: 'glitch-in' }, fallback), { enter: 'glitch-in', emphasis: 'wobble', exit: 'shrink-out', energy: 0.7 });
+    assert.equal(SC.cleanMotionOverride({ energy: -3 }, fallback).energy, 0, 'energy clamps at the floor too');
 });
 
 await check('a vertical project gets a vertical layout: nothing to repair, nothing to warn about', () => {
@@ -291,6 +319,20 @@ await check('the brief is read for its tone and its beats', () => {
     assert.ok(SD.planFromBrief('a single title').beats.length >= 1, 'a brief with no structure still produces something');
 });
 
+await check('R101 — a tone naming several presets for a beat kind cycles through them, instead of pasting the same look over every repeat', () => {
+    const out = SD.composeSceneFromBrief('five reasons this works', { aspectRatio: '16:9', tone: 'technology' });
+    assert.equal(out.scene.nodes.length, 5, 'five point beats, no intro or cta this brief did not ask for');
+    // technology.presets.point is ['creator', 'futurist']: occurrences 0,2,4
+    // land on 'creator', 1,3 on 'futurist'.
+    assert.deepEqual(out.scene.nodes.map(n => n.origin.preset), ['creator', 'futurist', 'creator', 'futurist', 'creator']);
+    assert.ok(out.scene.nodes.every(n => n.origin.component === 'KineticTitle'));
+
+    // A tone that still names a single preset string for a kind (unchanged
+    // from before R101) keeps using exactly that one every time.
+    const premiumOut = SD.composeSceneFromBrief('five reasons this works', { aspectRatio: '16:9', tone: 'premium' });
+    assert.deepEqual(premiumOut.scene.nodes.map(n => n.origin.preset), ['creator', 'creator', 'creator', 'creator', 'creator']);
+});
+
 await check('words that were not given come back as placeholders, never invented', () => {
     const out = SD.composeSceneFromBrief(BRIEF, { aspectRatio: '16:9' });
     assert.equal(out.placeholders.length, 5);
@@ -353,6 +395,16 @@ await check('the AI words route cleans what a model hands back', async () => {
         const prompt = M.buildScenePlanPrompt({ brief: BRIEF, beats: ['intro', 'point', 'cta'], tone: 'premium' });
         assert.match(prompt, /Invent nothing/);
         assert.match(prompt, /intro, point, cta/);
+
+        // R101 — with no structure handed in, the model is asked to decide
+        // the tone and the beat sequence too, and may suggest a beat's
+        // motion from the real verb vocabulary.
+        const openPrompt = M.buildScenePlanPrompt({ brief: BRIEF });
+        assert.match(openPrompt, /Invent nothing/);
+        assert.match(openPrompt, /Pick ONE tone from/);
+        assert.match(openPrompt, /slam-in/, 'the entrance verb vocabulary should be in the prompt');
+        assert.match(openPrompt, /punch/, 'the emphasis verb vocabulary should be in the prompt');
+
         const plan = M.cleanScenePlan({
             title: '"The new standard" #launch 🚀',
             points: ['Twice the battery.', 'Twice the battery.', 'x', 'Half the weight'],
@@ -371,6 +423,26 @@ await check('the AI words route cleans what a model hands back', async () => {
         const odd = M.cleanScenePlan({ title: 'A real title', points: [{ text: 'Twice the battery' }, 'Half the weight', 42], stat: { value: { n: 5 }, label: ['x'] } });
         assert.deepEqual(odd.points, ['Half the weight'], 'only strings are text');
         assert.equal(odd.stat, undefined, 'and a stat with no usable value is dropped');
+
+        // R101 — the decided-structure shape: an ordered beat list, a tone,
+        // and a beat that suggests its own motion.
+        const structured = M.cleanScenePlan({
+            tone: 'TECHNOLOGY',
+            beats: [
+                { kind: 'intro', text: 'Meet the new standard' },
+                { kind: 'nonsense-kind', text: 'should be dropped entirely' },
+                { kind: 'cta', text: 'Pre-order today', motion: { enter: 'slam-in', emphasis: 'not-a-real-verb', exit: null, energy: 9 } },
+            ],
+        });
+        assert.equal(structured.tone, 'technology', 'a tone is matched case-insensitively against the real vocabulary');
+        assert.deepEqual(structured.beats.map(b => b.kind), ['intro', 'cta'], 'an unrecognised beat kind is dropped, not kept as junk');
+        assert.equal(structured.beats[1].motion.enter, 'slam-in');
+        assert.equal(structured.beats[1].motion.emphasis, undefined, 'an invalid emphasis verb is dropped rather than passed through');
+        assert.equal(structured.beats[1].motion.exit, null, 'an explicit null exit is kept as a deliberate opt-out, not dropped');
+        assert.equal(structured.beats[1].motion.energy, 1, 'energy clamps into range rather than being rejected outright');
+        assert.equal(M.cleanScenePlan({ tone: 'not-a-real-tone', beats: [{ kind: 'intro' }] }).tone, undefined, 'an unrecognised tone is left out, not guessed at');
+        assert.equal(M.cleanScenePlan({ beats: [{ kind: 'point' }] }).beats[0].text, undefined, 'a wordless beat survives as a placeholder, it is not dropped for having no text');
+        assert.equal(M.cleanScenePlan({ beats: [{ kind: 'nope-not-real' }] }), null, 'nothing usable anywhere means nothing, same as before R101');
     } finally {
         Module.prototype.require = orig;
     }
