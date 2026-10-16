@@ -220,7 +220,7 @@ const RULES = [
         when: f => f.clipCount > 0 && !f.hasColorGrade && f.cleanupDone,
         label: 'Add a color grade',
         prompt: null,
-        tab: 'effects',
+        tab: 'color',
         reason: 'A consistent look across shots.',
     },
     {
