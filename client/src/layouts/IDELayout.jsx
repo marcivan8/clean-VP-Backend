@@ -28,12 +28,13 @@ import useDeviceType from '../hooks/useDeviceType';
 import MixerPanel from '../components/Sidebar/MixerPanel';
 import InterviewEditPanel from '../components/InterviewEditPanel';
 // R61 — the Motion tab. NOTE: adding a panel here requires BOTH this import
-// AND an entry in the tab array below. This file already contains three render
-// branches ('effects', 'interview', 'marketplace') whose tab buttons were
-// trimmed from that array, so they can never be selected — and 'effects' also
-// renders a component that was never imported, which would throw a
-// ReferenceError if it ever were. Add both halves or the panel is dead on
-// arrival.
+// AND an entry in the tab array below. This file also contains two render
+// branches ('interview', 'marketplace') whose tab buttons were trimmed from
+// that array. A tab button is not the only way in: setActiveTab() is also
+// called by assistant suggestions (SuggestionEngine `tab`) and clip clicks, so
+// a branch that renders an unimported component crashes the whole editor (the
+// old 'effects' branch did exactly that). Add both halves or the panel is dead
+// on arrival.
 import MotionPanel from '../components/MotionPanel';
 import ShortsPanel from '../components/ShortsPanel'; // R92 round B: repurposed shorts
 import SnapGuidesLayer from '../components/Player/SnapGuidesLayer.jsx'; // R92 round C
@@ -2233,12 +2234,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                             <DraggableAsset key={asset.id} asset={asset} />
                                         ))}
                                     </div>
-                                </section>
-                            )}
-
-                            {activeTab === 'effects' && (
-                                <section className="h-full bg-card">
-                                    <EffectsPanel targetId={activeClipId} playbackEngine={useTimelineStore.getState().playbackEngine} playhead={useTimelineStore.getState().currentTime} className="h-full" />
                                 </section>
                             )}
 
