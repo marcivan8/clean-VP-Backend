@@ -172,32 +172,57 @@ class EditorialBrain {
                 ? `User said: "${input.rawInput}"`
                 : `Trigger: ${input?.trigger || 'unknown'}. Analyze the project and provide suggestions.`;
 
-            const completion = await this.openai.chat.completions.create({
-                model: resolveModel('gpt-4o', 'chat'),
+            const primaryModel = resolveModel('gpt-4o', 'chat');
+            const isGroq = resolveProvider({ capability: 'chat' }) === 'groq';
+            const callPayload = {
+                model: primaryModel,
                 temperature,
-                // FIX: was 800. Same class of bug as StoryIntelligence.js's
-                // max_tokens fix (see its comment) — production logs showed
-                // "max completion tokens reached... missing properties:
-                // response, learning", the last two fields in
-                // BRAIN_OUTPUT_SCHEMA. Strict JSON Schema Mode has no partial
-                // credit: if generation is cut off before every required key
-                // is emitted, the whole document is rejected. 800 was already
-                // tight for a schema with a reasoning string, an intent
-                // object, and a profileUpdates object; Groq's gpt-oss models
-                // also draw their internal thinking tokens from this same
-                // budget, which left little room for the actual answer.
-                max_tokens: 1800,
-                // Structured extraction, not open-ended reasoning — cap the
-                // model's internal thinking so the budget goes to the schema
-                // fields. Groq-only: other providers' APIs don't expect
-                // 'reasoning_effort'.
-                ...(resolveProvider({ capability: 'chat' }) === 'groq' ? { reasoning_effort: 'low' } : {}),
+                max_tokens: 1200,
+                ...(isGroq ? { reasoning_effort: 'low' } : {}),
                 response_format: BRAIN_OUTPUT_SCHEMA,
                 messages: [
                     { role: 'system', content: systemPrompt },
                     { role: 'user',   content: userMessage },
                 ],
-            });
+            };
+
+            let completion;
+            try {
+                completion = await this.openai.chat.completions.create(callPayload);
+            } catch (firstErr) {
+                const isRateLimit = firstErr.status === 429 || /429|rate limit/i.test(firstErr.message);
+                if (isRateLimit) {
+                    const match = firstErr.message?.match(/try again in ([\d\.]+)s/i);
+                    const waitSec = match ? parseFloat(match[1]) : null;
+
+                    // If the required wait is short (<= 6 seconds), sleep and retry once
+                    if (waitSec !== null && waitSec <= 6) {
+                        console.warn(`[EditorialBrain] 429 rate limit hit — backing off for ${waitSec.toFixed(1)}s...`);
+                        await new Promise(r => setTimeout(r, Math.ceil(waitSec * 1000) + 250));
+                        try {
+                            completion = await this.openai.chat.completions.create(callPayload);
+                        } catch (retryErr) {
+                            if (isGroq && callPayload.model.includes('gpt-oss')) {
+                                console.warn('[EditorialBrain] Still rate limited on gpt-oss; switching to llama-3.3-70b-versatile');
+                                const fallbackPayload = { ...callPayload, model: 'llama-3.3-70b-versatile' };
+                                delete fallbackPayload.reasoning_effort;
+                                completion = await this.openai.chat.completions.create(fallbackPayload);
+                            } else {
+                                throw retryErr;
+                            }
+                        }
+                    } else if (isGroq && callPayload.model.includes('gpt-oss')) {
+                        console.warn('[EditorialBrain] 429 limit on gpt-oss; immediately falling back to llama-3.3-70b-versatile');
+                        const fallbackPayload = { ...callPayload, model: 'llama-3.3-70b-versatile' };
+                        delete fallbackPayload.reasoning_effort;
+                        completion = await this.openai.chat.completions.create(fallbackPayload);
+                    } else {
+                        throw firstErr;
+                    }
+                } else {
+                    throw firstErr;
+                }
+            }
 
             const raw = completion.choices[0]?.message?.content;
             if (!raw) return this.fallbackOutput(input?.rawInput);
