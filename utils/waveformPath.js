@@ -97,9 +97,32 @@ function deriveGcsPath(rawGcsPath, proxyUrl) {
     return null;
 }
 
+/**
+ * Map a URL of a bundled static audio file to its path relative to the SPA
+ * root, or null. Sound-effect clips carry a relative `/sfx-library/<file>`
+ * URL (see client/public/sfx-library, R13). That URL is not a storage object,
+ * so deriveGcsPath() returns null for it and the route answered 400 every
+ * time. The route reads these files from disk instead.
+ *
+ * Only a single plain file name is accepted after the prefix, so the result
+ * can never point outside the library directory.
+ *
+ * @param {string|null|undefined} url
+ * @returns {string|null}  e.g. 'sfx-library/whoosh-01.mp3'
+ */
+function resolveStaticAudioPath(url) {
+    if (typeof url !== 'string') return null;
+    const m = /^\/(sfx-library)\/([^/?#]+)(?:[?#].*)?$/.exec(url);
+    if (!m) return null;
+    let file;
+    try { file = decodeURIComponent(m[2]); } catch { return null; }
+    if (!/^[\w .()-]+$/.test(file) || file.startsWith('.')) return null;
+    return `${m[1]}/${file}`;
+}
+
 /** Remove any query string / fragment from a derived object path. */
 function stripQuery(p) {
     return p.split('?')[0].split('#')[0];
 }
 
-module.exports = { deriveGcsPath };
+module.exports = { deriveGcsPath, resolveStaticAudioPath };

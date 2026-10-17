@@ -723,6 +723,31 @@ export class MediaExecutionEngine {
     }
 
     /**
+     * Up to `limit` distinct playable library assets for a query, cached per
+     * call site. Lets `_placeSfxCues` rotate through several real candidates
+     * for the same cue kind instead of every occurrence of e.g. "whoosh"
+     * resolving to the exact same cached asset for the whole run — which is
+     * what made every transition in a long short sound identical.
+     */
+    async _fetchSfxCandidates(query, cache = new Map(), limit = 5) {
+        if (cache.has(query)) return cache.get(query);
+        let candidates = [];
+        try {
+            const res = await authFetch('/api/audio/search', {
+                method: 'POST',
+                body: JSON.stringify({ query, assetTypes: ['SOUND_EFFECT'], limit }),
+            });
+            const data = await res.json().catch(() => ({}));
+            const rows = Array.isArray(data?.results) ? data.results : [];
+            candidates = rows.map(r => r?.asset || r).filter(a => sfxPlayableUrl(a));
+        } catch (err) {
+            console.warn('[sfx] search failed:', err.message);
+        }
+        cache.set(query, candidates);
+        return candidates;
+    }
+
+    /**
      * R92: place sound effects on cues. Clips are tagged `sfxCue` so a re-run
      * replaces them instead of stacking. Call inside a history step.
      * @returns {Promise<{placed:number, missing:string[]}>}
@@ -737,8 +762,14 @@ export class MediaExecutionEngine {
         const old = (useTimelineStore.getState().tracks || []).find(t => t.id === trackId)?.clips || [];
         old.filter(c => c.sfxCue).forEach(c => useTimelineStore.getState().removeClip(trackId, c.id, { skipHistory: true }));
         let placed = 0;
+        // Rotates through each kind's candidate pool independently, so the
+        // Nth "whoosh" doesn't repeat the (N-1)th whoosh's exact sound.
+        const kindOccurrence = {};
         for (const cue of cues) {
-            const asset = await this._fetchSfxAsset(SFX_QUERIES[cue.kind] || cue.kind, cache);
+            const candidates = await this._fetchSfxCandidates(SFX_QUERIES[cue.kind] || cue.kind, cache);
+            const occ = kindOccurrence[cue.kind] || 0;
+            kindOccurrence[cue.kind] = occ + 1;
+            const asset = candidates.length ? candidates[occ % candidates.length] : null;
             const url = sfxPlayableUrl(asset);
             if (!asset || !url) { missing.add(cue.kind); continue; }
             useTimelineStore.getState().addClip(trackId, {
@@ -964,26 +995,62 @@ export class MediaExecutionEngine {
                 const brief = String(args.brief || '').trim();
                 if (!brief) return { action, success: false, message: 'Tell me what the graphics should say or feel like, and I will design the sequence.' };
 
-                const { planFromBrief } = await import('../motion/SceneDirector.js');
-                const outline = planFromBrief(brief);
+                // R101 PHASE 1 — the AI decides the structure too (tone, which
+                // beats, how many, in what order), not just the words for a
+                // shape SceneDirector's regex already fixed. It is tried on
+                // every non-empty brief; SceneDirector.planFromBrief's
+                // regex-based reading is the fallback when it is unconfigured
+                // or fails, never a hard dependency.
+                const words = Array.isArray(st.captions) ? st.captions : [];
+                const transcript = words.slice(0, 600).map(w => String(w.word ?? w.text ?? '')).join(' ');
                 let plan = null;
-                if (outline.placeholders > 0) {
-                    const words = Array.isArray(st.captions) ? st.captions : [];
-                    const transcript = words.slice(0, 600).map(w => String(w.word ?? w.text ?? '')).join(' ');
-                    try {
-                        const res = await authFetch('/api/motion/scene-plan', {
-                            method: 'POST',
-                            body: JSON.stringify({ brief, transcript, beats: outline.beats.map(b => b.kind), tone: outline.tone.label }),
-                        });
-                        const data = await res.json().catch(() => ({}));
-                        if (res.ok) plan = data.plan || null;
-                    } catch (err) {
-                        // No words from the AI is not a failure: placeholders stand.
-                        console.warn('[design_scene] no AI words, using placeholders:', err.message);
+                try {
+                    const res = await authFetch('/api/motion/scene-plan', {
+                        method: 'POST',
+                        body: JSON.stringify({ brief, transcript }),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (res.ok) plan = data.plan || null;
+                } catch (err) {
+                    // No AI decision is not a failure: the rule-based director
+                    // decides tone and structure from the brief instead.
+                    console.warn('[design_scene] AI structure/words unavailable, using the rule-based director:', err.message);
+                }
+
+                // R101 PHASE 2 & 3 — "adapt to footage": read the palette and,
+                // unless a MatteBaker person mask already tracks a subject on
+                // this clip, a general object/product box off one sampled
+                // frame of whatever is under the playhead. Either can find
+                // nothing or fail outright (no playable source yet, the
+                // one-time model download blocked) without this command
+                // failing — designScene falls back to the tone's own static
+                // palette and a centred placement exactly as it did before.
+                let footagePalette = null;
+                let footageSubject = null;
+                const videoTracks = (st.tracks || []).filter(t => t.type === 'video');
+                const allVideoClips = videoTracks.flatMap(t => t.clips || []);
+                const playheadT = Number(st.currentTime) || 0;
+                const underPlayhead = allVideoClips.find(c => playheadT >= (Number(c.start) || 0) && playheadT < (Number(c.start) || 0) + (Number(c.duration) || 0));
+                const footageClip = underPlayhead || allVideoClips[0] || null;
+                if (footageClip) {
+                    const sourceUrl = this._clipSourceUrl(st, footageClip);
+                    const alreadyTracked = (footageClip.layerMask?.bboxTrack?.length || 0) > 0;
+                    if (sourceUrl) {
+                        try {
+                            const { analyzeFootageFrame } = await import('../vision/FootageAnalyzer.js');
+                            const speed = Number(footageClip.speed) > 0 ? Number(footageClip.speed) : 1;
+                            const atSeconds = (Number(footageClip.offset) || 0)
+                                + Math.max(0, playheadT - (Number(footageClip.start) || 0)) * speed;
+                            const read = await analyzeFootageFrame({ sourceUrl, atSeconds, detectSubject: !alreadyTracked });
+                            footagePalette = read?.palette || null;
+                            footageSubject = read?.subject || null;
+                        } catch (err) {
+                            console.warn('[design_scene] footage analysis unavailable, using the tone\'s own palette and a centred placement:', err.message);
+                        }
                     }
                 }
 
-                const result = this._callStore(store, 'designScene', brief, { plan });
+                const result = this._callStore(store, 'designScene', brief, { plan, palette: footagePalette, subject: footageSubject });
                 if (!result?.success) return { action, success: false, error: result?.error, message: result?.error };
 
                 const beats = result.plan?.beats || [];
@@ -1191,6 +1258,12 @@ export class MediaExecutionEngine {
             }
 
             // ── R91: Reel style, keep the strongest 15-60 s ───────────────────
+            // R93: `args.max` (when a style sets one, e.g. Reel's 120s
+            // Instagram cap) is the hard ceiling on output length; `args.target`
+            // is only a soft scoring preference. A source video already within
+            // the cap is left at its own natural length instead of being
+            // force-trimmed down to target -- that forcing (every Reel coming
+            // out at a fixed ~22s no matter the source) was the reported bug.
             case 'extract_short': {
                 const st = useTimelineStore.getState();
                 const words = Array.isArray(st.captions) ? st.captions : [];
@@ -1198,13 +1271,20 @@ export class MediaExecutionEngine {
                     return { action, success: false, message: 'Picking the best moment needs a transcript. Run "add captions" first.' };
                 }
                 const target = Math.min(180, Math.max(10, Number(args.target) || 60));
+                const cap = Number.isFinite(Number(args.max)) && Number(args.max) > 0
+                    ? Math.min(180, Math.max(10, Number(args.max)))
+                    : target;
                 const tracks = st.tracks || [];
                 const total = tracks.reduce((m, t) => Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
-                if (total <= target + 1) {
-                    return { action, success: true, message: `The video is already ${Math.round(total)} s, short enough for a ${target} s short. Nothing was cut.` };
+                if (total <= cap + 1) {
+                    return { action, success: true, message: `The video is already ${Math.round(total)} s, within the ${cap} s limit. Nothing was cut.` };
                 }
                 const events = await this._fetchSemanticEvents();
-                const win = findBestShortWindow(words, { events, target, min: Math.min(15, target), max: target });
+                // Scored against the cap, not the (possibly much smaller)
+                // soft target: when a trim is unavoidable it should use as
+                // much of the allowed length as the content supports, not
+                // collapse to the style's typical/preferred length.
+                const win = findBestShortWindow(words, { events, target: cap, min: Math.min(15, cap), max: cap });
                 if (!win) {
                     return { action, success: false, message: 'No sentence-aligned moment of the right length was found in the transcript.' };
                 }
@@ -1515,15 +1595,22 @@ export class MediaExecutionEngine {
                 const words = Array.isArray(st.captions) ? st.captions : [];
                 const events = await this._fetchSemanticEvents();
                 let plan = null;
+                let scenePlan = null;
                 const text = words.slice(0, 400).map(w => String(w.word ?? w.text ?? '')).join(' ');
                 if (text) {
-                    const { fetchShortPlan } = await import('./shortFinisher.js');
-                    plan = await fetchShortPlan(text, platform, total);
+                    const { fetchShortPlan, fetchScenePlan } = await import('./shortFinisher.js');
+                    // R102 -- the full SceneDirector plan, auto-triggered
+                    // alongside the existing short-plan fetch (same
+                    // transcript, same graceful "null on failure" contract).
+                    [plan, scenePlan] = await Promise.all([
+                        fetchShortPlan(text, platform, total),
+                        fetchScenePlan(text, platform, total),
+                    ]);
                 }
                 // Earlier finish replaced, not stacked.
                 const before = JSON.parse(JSON.stringify(st.tracks || []));
                 const polished = polishShort({ tracks: before.map(t => ({ ...t, clips: t.clips.filter(c => !isFinishLayer(c)) })), duration: total, aspectRatio: st.aspectRatio },
-                    profile, { words, events, plan });
+                    profile, { words, events, plan, scenePlan });
                 st._saveHistory?.();
                 // Remove the previous finish layers, then write the changes clip by clip.
                 for (const t of (useTimelineStore.getState().tracks || [])) {
@@ -1919,7 +2006,8 @@ export class MediaExecutionEngine {
             case 'apply_zoom':        // alias — server fallback generates this for "zoom in/out"
             case 'apply_smart_zoom':
             case 'identify_quotable_moments':
-            case 'place_contextual_broll':
+            case 'placeContextualBroll':
+            case 'fetchStockBroll':
             case 'apply_lut':
             case 'clear_lut':
             case 'emphasize_keywords':

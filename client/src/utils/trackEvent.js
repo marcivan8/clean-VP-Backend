@@ -12,9 +12,11 @@
  */
 
 import { supabase } from '../lib/supabaseClient';
+import { captureEvent } from '../lib/posthog';
 
-export async function trackEvent(operation) {
+export async function trackEvent(operation, properties = {}) {
     try {
+        captureEvent(operation, properties);
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return; // anonymous / not logged in — skip silently
 

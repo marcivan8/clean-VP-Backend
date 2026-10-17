@@ -155,7 +155,10 @@ export default function ObjectLayerOverlay({ clip, sourceUrl, currentTime, isPla
                 bgCtx.drawImage(img, (cw - img.width * s) / 2, (ch - img.height * s) / 2, img.width * s, img.height * s);
             } else {
                 const b = settings.mode === 'dim' ? blurPx / 2 : blurPx;
-                if (b > 0.3) bgCtx.filter = `blur(${b.toFixed(1)}px)`;
+                const filters = [];
+                if (b > 0.3) filters.push(`blur(${b.toFixed(1)}px)`);
+                if (settings.desaturate || settings.mode === 'desaturate') filters.push('grayscale(100%)');
+                if (filters.length > 0) bgCtx.filter = filters.join(' ');
                 bgCtx.drawImage(src, 0, 0, cw, ch);
                 bgCtx.filter = 'none';
                 if (settings.mode === 'dim' && anim.effectiveDim > 0) {
@@ -184,6 +187,13 @@ export default function ObjectLayerOverlay({ clip, sourceUrl, currentTime, isPla
 
             // Clear and draw foreground onto fgCanvas (alpha around person remains transparent)
             fgCanvasCtx.clearRect(0, 0, cw, ch);
+            if (settings.subjectGlow) {
+                fgCanvasCtx.save();
+                fgCanvasCtx.shadowColor = settings.subjectGlow.color || '#3b82f6';
+                fgCanvasCtx.shadowBlur = settings.subjectGlow.radius || 15;
+                fgCanvasCtx.drawImage(fg, 0, 0);
+                fgCanvasCtx.restore();
+            }
             fgCanvasCtx.drawImage(fg, 0, 0);
 
             if (isPlaying) rafRef.current = requestAnimationFrame(draw);

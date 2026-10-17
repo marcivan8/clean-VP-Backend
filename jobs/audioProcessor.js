@@ -121,7 +121,7 @@ function applyPaddingToSegments(segments, padding, totalDuration) {
 // Sends the full word-timestamp list to GPT-4o and gets back a list of ranges
 // to cut, with per-range confidence scores (0–1). Cuts with confidence >= 0.75
 // are applied; lower-confidence cuts are silently skipped (conservative).
-async function gptSemanticFillerAnalysis(words, openai) {
+async function gptSemanticFillerAnalysis(words, openai, language = 'en') {
     // Build a compact representation: index, start, end, word
     const wordList = words.map((w, i) => ({
         i,
@@ -129,6 +129,15 @@ async function gptSemanticFillerAnalysis(words, openai) {
         e: parseFloat((w.end   || 0).toFixed(3)),
         w: w.word,
     }));
+
+    // The speaker's language, so the filler/hesitation examples below actually
+    // match what they'll say -- without this the prompt only ever gave English
+    // examples, so GPT-4o had no signal that "euh", "hein", "du coup", "en
+    // fait" etc. are the French equivalents of "um"/"you know", and a French
+    // recording's disfluencies went uncut far more often than an English one's.
+    const languageNote = language && language !== 'en' && language !== 'auto'
+        ? `\n\nThe speaker is talking in language code "${language}". Judge fillers and false starts in THAT language, not English -- for example, in French: "euh", "heu", "ben", "hein", "bah", "quoi" (as a verbal tic, not a question word), "genre", "voilà" (as a filler, not a conclusion), "en fait", "du coup", "tu vois", "tu sais", "disons" are the equivalents of "um", "uh", "you know", "like", "kind of". Apply the same CUT/KEEP judgment in that language.`
+        : '';
 
     const prompt = `You are an expert video editor. Below is a word-level transcript with timestamps.
 
@@ -146,7 +155,7 @@ Identify and mark as CUT:
    - "really really important" → KEEP (intentional emphasis)
 3. Clear false starts where the speaker restarts a sentence:
    - "I was going to — anyway, the point is" → CUT everything up to the restart
-4. Pauses between complete thoughts (gap >= 0.5s between words) that interrupt flow → CUT the gap
+4. Pauses between complete thoughts (gap >= 0.5s between words) that interrupt flow → CUT the gap${languageNote}
 
 DO NOT CUT:
 - Content said only once, even if imperfect
@@ -194,27 +203,54 @@ Respond ONLY with valid JSON:
 
 // ── Keyword-set fallback (original logic, preserved) ──────────────────────────────────────
 function keywordFillerSpans(words) {
+    // Single-token fillers only -- a multi-word string here was never
+    // reachable: the detection loop below tests one word's token at a time,
+    // so bigrams must be matched explicitly (see FILLER_PHRASES).
     const FILLER_WORDS = new Set([
         'um', 'uh', 'ah', 'er', 'eh', 'hmm', 'hm',
         'like', 'basically', 'literally',
+        // French disfluencies. "quoi" and "voilà" are only fillers as verbal
+        // tics (not as "what"/"there it is"), but the keyword path is a
+        // conservative last-resort fallback already, so the same one-word
+        // ambiguity risk the English list accepts for "like"/"literally" applies here.
+        'euh', 'heu', 'ben', 'bah', 'hein', 'genre', 'voilà', 'quoi', 'disons',
+    ]);
+    // Multi-word filler phrases. These were previously listed inside
+    // FILLER_WORDS (a Set tested against single-word tokens), so "you know",
+    // "i mean", "kind of" and "sort of" never actually matched anything --
+    // fixed here by testing them as bigrams against each adjacent word pair.
+    const FILLER_PHRASES = new Set([
         'you know', 'i mean', 'kind of', 'sort of',
-        'euh', 'ben', 'genre', 'voilà', 'bah',
+        'en fait', 'du coup', 'tu vois', 'tu sais',
     ]);
     const MERGE_GAP = 0.15;
     const spans = [];
     let current = null;
+    let skipNext = false;
 
-    for (const w of words) {
-        const token = w.word.toLowerCase().replace(/[^a-zàâéèêëîïôùûüç ]/g, '').trim();
-        const isFiller = FILLER_WORDS.has(token);
+    const norm = (s) => s.toLowerCase().replace(/[^a-zàâéèêëîïôùûüç ]/g, '').trim();
 
-        if (isFiller) {
-            if (current && w.start - current.end <= MERGE_GAP) {
-                current.end = w.end;
-            } else {
-                if (current) spans.push(current);
-                current = { start: w.start, end: w.end };
-            }
+    const emit = (start, end) => {
+        if (current && start - current.end <= MERGE_GAP) {
+            current.end = end;
+        } else {
+            if (current) spans.push(current);
+            current = { start, end };
+        }
+    };
+
+    for (let i = 0; i < words.length; i++) {
+        if (skipNext) { skipNext = false; continue; }
+        const w = words[i];
+        const token = norm(w.word);
+        const next = words[i + 1];
+        const bigram = next ? `${token} ${norm(next.word)}` : null;
+
+        if (bigram && FILLER_PHRASES.has(bigram)) {
+            emit(w.start, next.end);
+            skipNext = true;
+        } else if (FILLER_WORDS.has(token)) {
+            emit(w.start, w.end);
         } else {
             if (current) { spans.push(current); current = null; }
         }
@@ -281,7 +317,7 @@ async function detectFillerWords(inputPath, language = 'en', tempDir = null, pre
         let usedGPT = false;
         try {
             const openai = getOpenAI();
-            const gptCuts = await gptSemanticFillerAnalysis(words, openai);
+            const gptCuts = await gptSemanticFillerAnalysis(words, openai, language);
             if (gptCuts !== null) {
                 cutSpans  = gptCuts;
                 usedGPT   = true;
@@ -659,9 +695,12 @@ module.exports = async function processAudioJob(job) {
             const FILLER_SET = new Set([
                 'um', 'uh', 'ah', 'er', 'eh', 'hmm', 'hm',
                 'like', 'basically', 'literally',
-                'euh', 'ben', 'genre', 'voilà', 'bah',
+                'euh', 'heu', 'ben', 'bah', 'hein', 'genre', 'voilà', 'quoi', 'disons',
             ]);
-            const FILLER_PHRASES = ['you know', 'i mean', 'kind of', 'sort of', 'you see'];
+            const FILLER_PHRASES = [
+                'you know', 'i mean', 'kind of', 'sort of', 'you see',
+                'en fait', 'du coup', 'tu vois', 'tu sais',
+            ];
 
             const fillers = [];
             const fillerIndices = new Set();

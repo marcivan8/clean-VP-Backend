@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { captureEvent } from '../lib/posthog.js';
 
 export default function SuccessPage() {
     const navigate = useNavigate();
@@ -12,6 +13,7 @@ export default function SuccessPage() {
 
     useEffect(() => {
         if (!checkoutId) { navigate('/dashboard'); return; }
+        captureEvent('checkout_completed', { checkout_id: checkoutId });
         const timer = setInterval(() => {
             setCountdown(n => {
                 if (n <= 1) { clearInterval(timer); navigate('/dashboard'); }

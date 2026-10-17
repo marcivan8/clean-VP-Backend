@@ -41,7 +41,7 @@ import {
     sizeForRole,
     ROLE_STYLE,
 } from './SceneLayout.js';
-import { composeMotion } from './MotionComposer.js';
+import { composeMotion, VERBS } from './MotionComposer.js';
 
 /**
  * How wide a block of text may run, as a share of the frame width — the
@@ -93,6 +93,15 @@ export const LOOKS = {
             accent: 'underline',
             motion: { enter: 'fade-in', emphasis: null, exit: 'fade-out', energy: 0.3 },
         },
+        // R101 — a fourth, serif-led look so "editorial" and "warm" briefs
+        // have somewhere to go besides the same two sans-serif treatments
+        // every other tone already uses.
+        'editorial-serif': {
+            palette: { text: '#F5EFE3', sub: '#D9CBB0', kicker: '#C8A96A', accent: '#C8A96A' },
+            fonts: { display: 'Playfair Display', subtitle: 'Inter', kicker: 'Inter' },
+            accent: 'underline',
+            motion: { enter: 'blur-in', emphasis: null, exit: 'fade-out', energy: 0.35 },
+        },
     },
     KineticTitle: {
         punchy: {
@@ -106,6 +115,22 @@ export const LOOKS = {
             fonts: { display: 'Anton', subtitle: 'Inter', kicker: 'Inter' },
             accent: 'highlight-box',
             motion: { enter: 'pop-in', emphasis: 'wobble', exit: 'shrink-out', energy: 0.7 },
+        },
+        // R101 — a third point/CTA look built around a display face with a
+        // genuinely different personality (Orbitron, not another grotesque),
+        // for "technology" and "viral" briefs to alternate into across a
+        // sequence's repeated point beats instead of reusing one preset.
+        futurist: {
+            palette: { text: '#ffffff', sub: '#9FF4FF', kicker: '#00E5FF', accent: '#00E5FF' },
+            fonts: { display: 'Orbitron', subtitle: 'Inter', kicker: 'Inter' },
+            accent: 'burst',
+            motion: { enter: 'zoom-in', emphasis: 'punch', exit: 'whip-out', energy: 0.8 },
+        },
+        refined: {
+            palette: { text: '#ffffff', sub: '#E2E8F0', kicker: '#C8A96A', accent: '#C8A96A' },
+            fonts: { display: 'Montserrat', subtitle: 'Inter', kicker: 'Inter' },
+            accent: 'underline',
+            motion: { enter: 'rise-in', emphasis: 'punch', exit: 'fade-out', energy: 0.5 },
         },
     },
     StatCallout: {
@@ -121,6 +146,14 @@ export const LOOKS = {
             accent: 'underline',
             motion: { enter: 'rise-in', emphasis: 'punch', exit: 'fade-out', energy: 0.6 },
         },
+        // R101 — a bolder, high-contrast number treatment to alternate with
+        // metric-callout when a sequence calls out more than one figure.
+        'bold-ticker': {
+            palette: { text: '#0E0F11', sub: '#3A4350', kicker: '#0E0F11', accent: '#FFE500' },
+            fonts: { display: 'Bebas Neue', subtitle: 'Inter', kicker: 'Inter' },
+            accent: 'highlight-box',
+            motion: { enter: 'zoom-in', emphasis: 'bounce', exit: 'whip-out', energy: 0.8 },
+        },
     },
     LowerThird: {
         'pro-minimal': {
@@ -135,6 +168,14 @@ export const LOOKS = {
             accent: 'highlight-box',
             motion: { enter: 'slide-in', emphasis: null, exit: 'fade-out', energy: 0.45 },
         },
+        // R101 — a softer, name-card look distinct from the two line-led
+        // presets above.
+        'editorial-name': {
+            palette: { text: '#ffffff', sub: '#F5EFE3', kicker: '#F5EFE3', accent: '#F5EFE3' },
+            fonts: { display: 'Poppins', subtitle: 'Inter', kicker: 'Inter' },
+            accent: 'underline',
+            motion: { enter: 'drop-in', emphasis: 'nod', exit: 'fade-out', energy: 0.5 },
+        },
     },
 };
 
@@ -145,10 +186,35 @@ const DEFAULT_DURATION = { TitleSequence: 4, KineticTitle: 3, StatCallout: 3.5, 
 
 const num = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
 
-/** A look, with `params` allowed to override any colour, and the display
- *  font (a caller with its own brand type, like a platform's hook title,
- *  keeps its font while still getting the preset's measured layout, accent
- *  and motion). */
+/**
+ * R101 — validate a motion OVERRIDE field by field against MotionComposer's
+ * own verb vocabulary, falling back to the look's own value for any field
+ * that is missing or names something that is not a real verb in the right
+ * slot. This is what lets a beat suggest its own motion (from an LLM, or a
+ * future editor UI) without a bad or hostile value ever reaching
+ * `composeMotion` — the same "clean what a model hands back, field by
+ * field, never all-or-nothing" discipline motionRoutes.js already applies
+ * to on-screen text.
+ *
+ * @param {object} raw {enter?, emphasis?, exit?, energy?}
+ * @param {{enter:string, emphasis:string|null, exit:string|null, energy:number}} fallback the look's own motion
+ */
+export function cleanMotionOverride(raw, fallback) {
+    if (!raw || typeof raw !== 'object') return fallback;
+    const isVerb = (name, group) => typeof name === 'string' && VERBS[name]?.group === group;
+    const enter = isVerb(raw.enter, 'in') ? raw.enter : fallback.enter;
+    const emphasis = raw.emphasis === null ? null : (isVerb(raw.emphasis, 'emphasis') ? raw.emphasis : fallback.emphasis);
+    const exit = raw.exit === null ? null : (isVerb(raw.exit, 'out') ? raw.exit : fallback.exit);
+    const energy = Number.isFinite(Number(raw.energy)) ? Math.min(1, Math.max(0, Number(raw.energy))) : fallback.energy;
+    return { enter, emphasis, exit, energy };
+}
+
+/** A look, with `params` allowed to override any colour, the display font (a
+ *  caller with its own brand type, like a platform's hook title, keeps its
+ *  font while still getting the preset's measured layout and accent), and —
+ *  R101 — the motion itself (`params.motion`), so a beat the director or an
+ *  LLM decided should move differently can, without picking a whole new
+ *  preset just to get a different verb. */
 function resolveLook(componentId, presetId, params = {}) {
     const table = LOOKS[componentId];
     if (!table) return null;
@@ -163,7 +229,8 @@ function resolveLook(componentId, presetId, params = {}) {
         ...(params.labelColor ? { sub: params.labelColor } : {}),
     };
     const fonts = params.fontFamily ? { ...look.fonts, display: params.fontFamily } : look.fonts;
-    return { ...look, palette, fonts, accent: params.accent || look.accent };
+    const motion = params.motion ? cleanMotionOverride(params.motion, look.motion) : look.motion;
+    return { ...look, palette, fonts, accent: params.accent || look.accent, motion };
 }
 
 /**
@@ -174,8 +241,9 @@ function resolveLook(componentId, presetId, params = {}) {
 function motionFor(look, { duration, index = 0, stagger = STAGGER, emphasis = true }) {
     const at = Math.min(index * stagger, Math.max(0, duration * 0.3));
     const beats = [{ verb: look.motion.enter, at, energy: look.motion.energy }];
-    if (emphasis && look.motion.emphasis) {
-        beats.push({ verb: look.motion.emphasis, at: Math.min(at + duration * 0.45, Math.max(at + 0.2, duration - 0.6)), energy: look.motion.energy * 0.8 });
+    const hasRoom = duration >= 2.2 && (at + 0.95 < duration - 0.4);
+    if (emphasis && look.motion.emphasis && hasRoom) {
+        beats.push({ verb: look.motion.emphasis, at: Math.min(at + duration * 0.45, Math.max(at + 0.2, duration - 0.7)), energy: look.motion.energy * 0.8 });
     }
     if (look.motion.exit) beats.push({ verb: look.motion.exit, energy: look.motion.energy });
     const { animations } = composeMotion({ beats }, { duration, kind: 'text' });
@@ -265,7 +333,7 @@ function sceneContext(componentId, presetId, params, opts) {
     const look = resolveLook(componentId, presetId, params);
     return {
         frame,
-        rect: rectForLook(frame, look, opts.safeZone),
+        rect: opts.rect || rectForLook(frame, look, opts.safeZone),
         duration: Math.max(0.5, num(params.duration, DEFAULT_DURATION[componentId] || 4)),
         look,
         origin: { componentId, presetId },
@@ -339,10 +407,26 @@ function composeKineticTitle(params, ctx) {
         frame,
         shapeKind: look.accent,
         x: look.accent === 'burst' ? num(params.x, 50) + 22 : num(params.x, 50),
-        offsetRatio: look.accent === 'burst' ? 0.9 : 0,
+        offsetRatio: 0,
     });
     nodes.push(accentNode({ ...accent, scale: look.accent === 'burst' ? 1 : accent.scale, params: look.accent === 'highlight-box' ? { fill: false } : {} },
         { look, duration, index: nodes.length, origin: { ...origin, role: 'accent' }, backdropFor: headlineId }));
+
+    if (params.backdrop) {
+        const panel = backdropFor(block, { frame, x: num(params.x, 50) });
+        if (panel) {
+            nodes.unshift(createNode(NODE_TYPES.SHAPE, {
+                name: 'Backdrop', start: 0, duration,
+                transform: { x: panel.x, y: panel.y, scale: panel.scale },
+                size: { w: panel.w, h: panel.h },
+                template: { kind: 'panel', params: { w: panel.w, h: panel.h, color: params.backdropColor || '#0E0F11', color2: params.backdropColor2 || null, opacity: num(params.backdropOpacity, 0.72), radius: 24, reveal: 'wipe' } },
+                animations: motionFor(look, { duration, index: 0, emphasis: false }),
+                meta: { backdropFor: headlineId },
+                origin: { ...origin, role: 'backdrop' },
+            }));
+        }
+    }
+
     return nodes;
 }
 
@@ -444,4 +528,4 @@ export function composeComponentScene(componentId, presetId, params = {}, opts =
     return scene;
 }
 
-export default { LOOKS, MEASURE, COMPOSED_COMPONENTS, composeComponentScene };
+export default { LOOKS, MEASURE, COMPOSED_COMPONENTS, composeComponentScene, cleanMotionOverride };

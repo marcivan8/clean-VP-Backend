@@ -178,6 +178,20 @@ const NLP_MAP = {
         'match footage to what he\'s saying', 'match my footage to the dialogue',
         'place b-roll automatically', 'auto place my b-roll', 'auto-edit my b-roll',
         'insert b-roll where it fits', 'cut away to matching footage',
+        // Plain natural phrasing — "add some b-rolls", "add b-roll" — was
+        // entirely missing here (every phrase above required a possessive
+        // "my"/"the" or a specific verb like "sync"/"match"), which sent a
+        // bare "add b-roll" request to the server LLM parser instead of
+        // resolving locally.
+        'add b-roll', 'add b-rolls', 'add some b-roll', 'add some b-rolls',
+        'add the b-roll', 'add the b-rolls', 'add more b-roll', 'add more b-rolls',
+        'add relevant b-roll', 'add matching b-roll',
+        'add cutaway footage', 'add some cutaway footage',
+    ],
+    fetchStockBroll: [
+        'stock footage', 'stock video', 'stock clip', 'stock clips',
+        'pexels footage', 'pexels video', 'pexels clip', 'from pexels',
+        'from stock', 'search pexels', 'search stock',
     ],
     buildFromRushes: [
         'build a full video', 'build from rushes', 'build from raw',
@@ -1023,6 +1037,18 @@ export class IntentParser {
             return this.createIntent(INTENT_TYPES.ANALYZE, OPERATIONS.PLACE_CONTEXTUAL_BROLL, { constraints: {} });
         }
 
+        // "find stock footage of a city skyline from pexels" — a NEW asset
+        // fetched from Pexels (services/PexelsService.js via
+        // /api/stock/search), not a match against footage already imported.
+        // See VideoEditorTools.fetchStockBroll.
+        if (matches('fetchStockBroll')) {
+            const query = this.extractStockQuery(lower);
+            if (!query) {
+                return this.needsClarification('What should I search stock footage for? (e.g., "find stock footage of a city skyline at night")');
+            }
+            return this.createIntent(INTENT_TYPES.EDIT, OPERATIONS.FETCH_STOCK_BROLL, { constraints: { query } });
+        }
+
         if (matches('buildFromRushes')) {
             return this.createIntent(INTENT_TYPES.LONG_FORM_BUILD, OPERATIONS.BUILD_FROM_RUSHES, {
                 constraints: {
@@ -1671,6 +1697,32 @@ export class IntentParser {
         if (/slow down|slower|make.+slower/.test(prompt)) return 0.5;
         const match = prompt.match(/(\d+(?:\.\d+)?)\s*x/);
         return match ? parseFloat(match[1]) : null;
+    }
+
+    /**
+     * Pulls the search subject out of a "find stock footage of X" style
+     * request, for OPERATIONS.FETCH_STOCK_BROLL. Returns null when no
+     * subject could be isolated (caller asks for clarification instead of
+     * sending an empty query to Pexels).
+     * @param {string} prompt lowercased prompt
+     * @returns {string|null}
+     */
+    static extractStockQuery(prompt) {
+        const p = String(prompt || '').trim();
+
+        // "b-roll of X from stock/pexels" / "footage of X from stock/pexels"
+        let m = p.match(/\b(?:b-?roll|footage|video|clip)\s+(?:of|for|showing|about)\s+(.+?)\s+from\s+(?:stock|pexels)\b/i);
+        if (m && m[1].trim()) return m[1].trim().replace(/[.?!]+$/, '');
+
+        // "search pexels/stock for X"
+        m = p.match(/\bsearch\s+(?:stock|pexels)\s+for\s+(.+)$/i);
+        if (m && m[1].trim()) return m[1].trim().replace(/[.?!]+$/, '');
+
+        // "find/get/add/fetch/insert/grab [me] [some] stock/pexels footage/video/clip/b-roll (of|for|showing|about) X"
+        m = p.match(/\b(?:find|get|fetch|add|insert|grab|pull)\b[^.?!]*?\b(?:stock|pexels)\b[^.?!]*?\b(?:footage|video|clip|clips|b-?roll)\b\s*(?:of|for|showing|about)?\s*(.*)$/i);
+        if (m && m[1].trim()) return m[1].trim().replace(/[.?!]+$/, '');
+
+        return null;
     }
 
     static extractAspectRatio(prompt) {

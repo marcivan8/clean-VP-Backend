@@ -17,10 +17,12 @@ import { X, Zap, ArrowRight, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import useDeviceType from '../hooks/useDeviceType';
 import { supabase } from '../lib/supabaseClient';
+import { captureEvent } from '../lib/posthog';
 import PlanSheet from './PlanSheet.jsx';
 
 async function startCheckout(plan) {
     try {
+        captureEvent('checkout_started', { plan: plan || 'unknown' });
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) { window.location.href = '/auth'; return; }
         const res = await fetch('/api/checkout/create', {

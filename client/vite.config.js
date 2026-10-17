@@ -4,7 +4,7 @@ import { sentryVitePlugin } from '@sentry/vite-plugin'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '')
+  const env = { ...loadEnv(mode, '../', ''), ...loadEnv(mode, process.cwd(), '') }
 
   // Only upload source maps when SENTRY_AUTH_TOKEN is set (production CI builds).
   // In local dev and staging without the token the plugin is simply omitted.
@@ -21,6 +21,7 @@ export default defineConfig(({ mode }) => {
     : null
 
   return {
+    envDir: '../',
     plugins: [react(), sentryPlugin].filter(Boolean),
 
     build: {

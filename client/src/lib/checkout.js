@@ -4,9 +4,11 @@
  * UpgradeModal use. Resolves false when it could not redirect.
  */
 import { supabase } from './supabaseClient.js';
+import { captureEvent } from './posthog.js';
 
 export async function startCheckout(plan) {
     try {
+        captureEvent('checkout_started', { plan: plan || 'unknown' });
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) { window.location.href = '/auth'; return false; }
         const res = await fetch('/api/checkout/create', {

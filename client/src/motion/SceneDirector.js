@@ -26,7 +26,7 @@
  * never approved into their video would be worse than an empty slot.
  */
 
-import { composeComponentScene } from './SceneComposer.js';
+import { composeComponentScene, LOOKS } from './SceneComposer.js';
 import { contentRectFor, resolveFrame } from './SceneLayout.js';
 import { createScene, createGroup, normalizeScene, sceneContentDuration } from './SceneSchema.js';
 
@@ -59,14 +59,18 @@ export const TONES = {
     technology: {
         label: 'technology',
         match: /technolog|tech\b|launch|product reveal|engineer|futur|ai\b|software|platform/,
-        presets: { intro: 'cinematic', point: 'creator', stat: 'metric-callout', quote: 'minimal', cta: 'punchy', outro: 'minimal' },
+        // R101 — point and stat beats commonly repeat (three benefits, two
+        // figures); a tone may name an ARRAY of acceptable presets for a
+        // beat kind instead of one, and composeSceneFromBrief cycles through
+        // it so a sequence does not paste the same look three times over.
+        presets: { intro: 'cinematic', point: ['creator', 'futurist'], stat: ['metric-callout', 'bold-ticker'], quote: 'minimal', cta: 'punchy', outro: 'minimal' },
         palette: { text: '#ffffff', sub: '#E2E8F0', accent: '#00E5FF' },
         pacing: 'measured',
     },
     viral: {
         label: 'punchy',
         match: /viral|hook|tiktok|reel|short|punchy|hype|energetic|fast|aggressive/,
-        presets: { intro: 'modern-bold', point: 'punchy', stat: 'metric-callout', quote: 'modern-bold', cta: 'punchy', outro: 'modern-bold' },
+        presets: { intro: 'modern-bold', point: ['punchy', 'futurist'], stat: ['metric-callout', 'bold-ticker'], quote: 'modern-bold', cta: 'punchy', outro: 'modern-bold' },
         palette: { text: '#ffffff', sub: '#ffffff', accent: '#FFE500' },
         pacing: 'rapid',
     },
@@ -132,10 +136,15 @@ function countNear(text, pattern, fallback) {
 export function planFromBrief(brief, opts = {}) {
     const text = String(brief || '');
     const s = text.toLowerCase();
-    const tone = opts.tone && TONES[opts.tone] ? TONES[opts.tone] : toneFromBrief(text);
+    const plan = opts.plan && typeof opts.plan === 'object' ? opts.plan : null;
+    // Tone resolution, most specific wins: an explicit opts.tone (the editor
+    // picked one), then the AI's own read of the brief (plan.tone, cleaned
+    // server-side against this same TONES table), then the regex fallback.
+    const tone = (opts.tone && TONES[opts.tone]) ? TONES[opts.tone]
+        : (plan?.tone && TONES[plan.tone]) ? TONES[plan.tone]
+        : toneFromBrief(text);
     const rationale = [];
     const beats = [];
-    const plan = opts.plan && typeof opts.plan === 'object' ? opts.plan : null;
 
     // An AI plan, when there is one, supplies the words. It never decides the
     // structure on its own: the brief does, so the result still matches what
@@ -156,15 +165,26 @@ export function planFromBrief(brief, opts = {}) {
                 kicker: typeof b?.kicker === 'string' ? b.kicker.trim() || null : null,
                 value: typeof b?.value === 'string' ? b.value.trim() || null : null,
                 label: typeof b?.label === 'string' ? b.label.trim() || null : null,
+                // R101 — an AI-suggested motion for this one beat (verbs from
+                // MotionComposer's vocabulary), validated field-by-field
+                // against the look's own motion in SceneComposer.resolveLook,
+                // never used raw.
+                motion: (b?.motion && typeof b.motion === 'object') ? b.motion : null,
             });
         }
         rationale.push(`The sequence follows the ${beats.length} beats in the plan.`);
     } else {
-        const pointWords = 'benefit|benefits|reason|reasons|point|points|feature|features|step|steps|pillar|pillars|tip|tips|way|ways';
+        const pointWords = 'benefit|benefits|reason|reasons|point|points|feature|features|capability|capabilities|callout|callouts|bullet|bullets|step|steps|pillar|pillars|tip|tips|way|ways';
         const wantsPoints = new RegExp(`\\b(?:${pointWords})\\b`).test(s);
         const wantsStat = /\bstat|\bnumber|\bmetric|\bresult|%|\bgrowth|\broi\b/.test(s);
         const wantsQuote = /\bquote|\btestimonial|\bsaid\b/.test(s);
-        const wantsCta = /call to action|\bcta\b|subscribe|sign ?up|follow|buy|order|book|download|get started|learn more/.test(s);
+        const wantsCta = /call[- ]to[- ]action|\bcta\b|subscribe|sign ?up|follow|buy|order|book|download|get started|learn more/.test(s);
+
+        const quoted = (text.match(/called\s+['"“]([^'"“”]+)['"”]/i) || text.match(/['"“]([^'"“”]+)['"”]/) || text.match(/\bcalled\s+([A-Z][a-zA-Z0-9_]+)\b/) || [])[1];
+        const extractedTitle = planTitle || opts.title || (quoted ? quoted.trim() : null);
+        const wantsTagline = /tagline|subtitle|tag\b/i.test(s);
+        const extractedSub = opts.subtitle || opts.sub || (wantsTagline ? (quoted ? 'Creative Software Reimagined' : 'Your supportive tagline') : null);
+
         // An opening because the brief asks for one, or because nothing else
         // was asked for. `beats.length === 0` here would always be true (the
         // list is still empty at this point), so every brief got an intro
@@ -173,7 +193,12 @@ export function planFromBrief(brief, opts = {}) {
             || !(wantsPoints || wantsStat || wantsQuote || wantsCta);
 
         if (wantsIntro) {
-            beats.push({ kind: 'intro', text: planTitle || opts.title || null, kicker: null });
+            beats.push({
+                kind: 'intro',
+                text: extractedTitle,
+                ...(extractedSub ? { sub: extractedSub } : {}),
+                kicker: null,
+            });
             rationale.push('It opens with a title, because the brief asks for an introduction.');
         }
         if (wantsPoints) {
@@ -189,14 +214,18 @@ export function planFromBrief(brief, opts = {}) {
         }
         if (wantsQuote) beats.push({ kind: 'quote', text: planPoints[0] || null });
         if (wantsCta) {
-            beats.push({ kind: 'cta', text: planCta || null, kicker: null });
+            const extractedCta = planCta || opts.cta || (text.match(/(?:call[- ]to[- ]action to|cta to)\s+([^.,\n]+)/i)?.[1]?.trim()?.toUpperCase()) || null;
+            beats.push({ kind: 'cta', text: extractedCta, kicker: null });
             rationale.push('It closes on the call to action.');
         }
         if (beats.length === 0) {
-            beats.push({ kind: 'intro', text: planTitle || opts.title || null });
+            beats.push({ kind: 'intro', text: extractedTitle });
             rationale.push('Nothing specific was asked for, so it is a single title.');
         }
     }
+
+    const durMatch = s.match(/\b(\d+(?:\.\d+)?)\s*(?:-second|seconds|second|s\b)\b/i);
+    const askedDuration = durMatch ? Number(durMatch[1]) : 0;
 
     rationale.unshift(`The tone reads as ${tone.label}, so the look and the pacing follow that.`);
     return {
@@ -205,6 +234,7 @@ export function planFromBrief(brief, opts = {}) {
         beats,
         placeholders: beats.filter(b => !b.text && b.kind !== 'stat').length,
         rationale,
+        ...(askedDuration > 0 ? { askedDuration } : {}),
     };
 }
 
@@ -225,11 +255,12 @@ export function placementAvoiding(subject, frameOrAspect, safeZone = null) {
     const bottom = num(subject.cy, 0.5) + num(subject.h, 0.4) / 2;
     const roomAbove = Math.max(0, top - rect.y / frame.h);
     const roomBelow = Math.max(0, (rect.y + rect.h) / frame.h - bottom);
-    // A third of the frame is enough for a title block; take the roomier side.
-    if (roomAbove >= 0.22 && roomAbove >= roomBelow) {
+    // In vertical formats (9:16), headroom is narrower but 14% is plenty of space for overlay cards
+    const minBand = (frame.h / frame.w > 1.2) ? 0.14 : 0.22;
+    if (roomAbove >= minBand && roomAbove >= roomBelow) {
         return { anchor: 'top', x: 50, rect: { ...rect, h: Math.max(1, top * frame.h - rect.y) }, reason: 'The subject is low in the shot, so the graphic goes above them.' };
     }
-    if (roomBelow >= 0.22) {
+    if (roomBelow >= minBand) {
         const y = bottom * frame.h;
         return { anchor: 'bottom', x: 50, rect: { ...rect, y, h: Math.max(1, rect.y + rect.h - y) }, reason: 'The subject is high in the shot, so the graphic goes below them.' };
     }
@@ -303,18 +334,31 @@ export function composeSceneFromBrief(brief, opts = {}) {
     const [minBeat, maxBeat] = PACING_SECONDS[plan.pacing] || PACING_SECONDS.measured;
     const weights = plan.beats.map(b => BEAT_COMPONENT[b.kind]?.share || 1);
     const totalWeight = weights.reduce((a, b) => a + b, 0);
-    const asked = num(opts.duration, 0);
+    const asked = num(opts.duration, 0) || num(plan.askedDuration, 0);
     const natural = plan.beats.reduce((sum, b, i) => sum + Math.min(maxBeat, Math.max(minBeat, weights[i] * ((minBeat + maxBeat) / 2))), 0);
     const total = asked > 0 ? asked : natural;
+
+    const wantsBackdrop = Boolean(opts.backdrop || /\bbackdrop\b/i.test(brief));
 
     const placeholders = [];
     const groups = [];
     let cursor = 0;
+    // R101 — a beat kind that repeats within one sequence (several "point"
+    // beats, say) cycles through whatever presets its tone names for that
+    // kind, so three benefits do not paste the same look three times. A
+    // tone that names a single preset string (unchanged) keeps using it
+    // every time, exactly as before.
+    const kindOccurrence = {};
     plan.beats.forEach((beat, i) => {
         const share = (weights[i] / totalWeight) * total;
-        const duration = round(Math.min(maxBeat * 1.6, Math.max(minBeat * 0.8, share)));
+        const duration = round(asked > 0 ? share : Math.min(maxBeat * 1.6, Math.max(minBeat * 0.8, share)));
         const spec = BEAT_COMPONENT[beat.kind] || BEAT_COMPONENT.point;
-        const preset = plan.tone.presets[beat.kind] || Object.keys({})[0];
+        const presetSpec = plan.tone.presets[beat.kind];
+        const occurrence = kindOccurrence[beat.kind] || 0;
+        kindOccurrence[beat.kind] = occurrence + 1;
+        const preset = Array.isArray(presetSpec) && presetSpec.length
+            ? presetSpec[occurrence % presetSpec.length]
+            : (presetSpec || Object.keys(LOOKS[spec.component] || {})[0]);
         const text = beat.text || placeholderFor(beat, i + 1);
         if (!beat.text && beat.kind !== 'stat') placeholders.push(text);
 
@@ -322,9 +366,15 @@ export function composeSceneFromBrief(brief, opts = {}) {
             duration,
             x: placement.x,
             anchor: placement.anchor,
+            backdrop: wantsBackdrop && beat.kind === 'intro',
             color: opts.palette?.text || plan.tone.palette.text,
             subColor: opts.palette?.sub || plan.tone.palette.sub,
             accentColor: opts.palette?.accent || opts.palette?.primary || plan.tone.palette.accent,
+            // R101 — a per-beat motion suggestion (from an AI-decided plan)
+            // overrides the look's own verbs; resolveLook validates it and
+            // falls back field-by-field, so an absent or invalid value never
+            // loses the look's own motion.
+            ...(beat.motion ? { motion: beat.motion } : {}),
         };
         if (beat.kind === 'stat') {
             params.value = beat.value || '+00%';
@@ -336,7 +386,7 @@ export function composeSceneFromBrief(brief, opts = {}) {
             if (beat.sub) params.subtitle = beat.sub;
         }
 
-        const beatScene = composeComponentScene(spec.component, preset, params, { frame, safeZone: opts.safeZone });
+        const beatScene = composeComponentScene(spec.component, preset, params, { frame, safeZone: opts.safeZone, rect: placement.rect });
         if (!beatScene) return;
         // The component's own group becomes this beat's group, placed in time.
         const inner = beatScene.nodes[0];

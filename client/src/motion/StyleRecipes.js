@@ -15,7 +15,7 @@ export const STYLE_RECIPES = {
         id: 'punchy',
         captionPack: 'hormozi',          // CaptionModel CAPTION_STYLE_PACKS
         keywords: true,                  // keyword emphasis (R88)
-        transitions: { cycle: ['flash', 'whip-left', 'zoom-punch', 'whip-right'], jumpCuts: true },
+        transitions: { cycle: ['flash', 'whip-left', 'zoom-punch', 'glitch', 'whip-right', 'speed-lines'], jumpCuts: true },
         rhythmZoom: 'dynamic',           // /api/interview/rhythm-zoom styles
         broll: { layout: 'fullscreen' }, // word-synced cutaways (A6)
         numberPops: true,
@@ -25,7 +25,7 @@ export const STYLE_RECIPES = {
         id: 'travel',
         captionPack: 'mrbeast',
         keywords: true,
-        transitions: { cycle: ['speed-lines', 'whip-left', 'whip-right'], jumpCuts: true },
+        transitions: { cycle: ['speed-lines', 'whip-left', 'dip', 'whip-right', 'zoom-punch'], jumpCuts: true },
         rhythmZoom: 'subtle',
         broll: { layout: 'fullscreen' },
         numberPops: true,

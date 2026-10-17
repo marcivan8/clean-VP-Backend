@@ -196,6 +196,8 @@ export const COMMANDS = [
         phrases: ['animate this automatically', 'animate automatically', 'auto animate',
                   'animate this for me', 'add animations automatically', 'automatically animate this',
                   'add motion graphics', 'add animations and motion graphics', 'add some motion graphics',
+                  'graphic motion', 'graphic motions', 'advanced graphic motion', 'advanced graphic motions',
+                  'advanced motion graphics', 'advanced animations', 'advanced animation', 'advanced motion',
                   'animate the interesting parts', 'animate the best moments', 'animate the highlights',
                   'bring it to life', 'bring this to life', 'make it come alive',
                   'illustrate this', 'illustrate the video', 'add some animation', 'add animation',

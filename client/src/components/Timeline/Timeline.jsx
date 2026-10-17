@@ -250,7 +250,22 @@ const Timeline = () => {
     const labelWRef = React.useRef(labelW);
     React.useEffect(() => { labelWRef.current = labelW; }, [labelW]);
 
-    React.useEffect(() => {
+    // The playhead's horizontal position is written imperatively here (not
+    // through React state) so it can move at 60fps without re-rendering the
+    // whole timeline. That only works if React never ALSO manages `left` on
+    // these same two elements: previously both playhead divs' JSX also
+    // carried a `style={{ left: ... }}`, and any unrelated re-render of this
+    // component (zoom change, a track mutating e.g. from a live waveform
+    // update during playback, selection, scrolling) made React reconcile
+    // that inline style back to its stale render-time value, snapping the
+    // playhead back toward the timeline start for one frame before this
+    // loop corrected it back on the next -- the intermittent "flicker".
+    // Fix: `left` is no longer part of either element's React-managed style
+    // (see the JSX below) -- this effect is now the ONLY writer of it, ever.
+    // useLayoutEffect (not useEffect) so the first position is painted
+    // synchronously, with no one-frame flash at mount while waiting for the
+    // first requestAnimationFrame callback.
+    React.useLayoutEffect(() => {
         let rafId;
         const updatePlayhead = () => {
             const state = useTimelineStore.getState();
@@ -275,7 +290,7 @@ const Timeline = () => {
 
             rafId = requestAnimationFrame(updatePlayhead);
         };
-        rafId = requestAnimationFrame(updatePlayhead);
+        updatePlayhead();
         return () => cancelAnimationFrame(rafId);
     }, []);
 
@@ -600,7 +615,8 @@ const Timeline = () => {
                 <div
                     ref={playheadLineRef}
                     className="absolute top-6 bottom-0 w-px bg-red-500 z-50 pointer-events-none"
-                    style={{ left: `${labelW}px` }}
+                    // No `left` here -- the useLayoutEffect above is the only
+                    // writer of this element's position (see its comment).
                 />
 
                 <div className="relative min-w-full" style={{ width: `calc(${labelW}px + ${duration * zoomLevel}px)` }}>
@@ -608,7 +624,12 @@ const Timeline = () => {
                     <div
                         ref={playheadHandleRef}
                         className="absolute top-0 bottom-0 w-px bg-red-500 z-50 pointer-events-none"
-                        style={{ left: '0px', marginLeft: `${labelW}px` }}
+                        // `left` is NOT set here -- the useLayoutEffect above is
+                        // the only writer of it (see its comment). `marginLeft`
+                        // stays React-managed: it only changes with the
+                        // responsive label width, not every frame, so there is
+                        // nothing for the playback loop to race against.
+                        style={{ marginLeft: `${labelW}px` }}
                     >
                         <div className="absolute -top-1 -left-1.5 w-3 h-3 bg-red-500 rotate-45 transform shadow-sm"></div>
                     </div>

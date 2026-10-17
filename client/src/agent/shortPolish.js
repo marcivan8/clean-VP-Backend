@@ -41,6 +41,10 @@ import { normalizeMatte } from '../motion/MatteSettings.js';
 // file always produced, so the player, export and undo are unchanged.
 import { composeComponentScene } from '../motion/SceneComposer.js';
 import { flattenScene } from '../motion/SceneSchema.js';
+// R102 -- the full multi-beat director (R95 PHASE 4), auto-triggered here
+// instead of only ever reachable through the manual "design_scene" command.
+// See the "1. Hook title" and "1b. CTA outro" sections below.
+import { composeSceneFromBrief } from '../motion/SceneDirector.js';
 
 const STOP = new Set(('a an the and or but so to of in on at for with is are was were be been it this that these those i you we they he she my your our their me us them ' +
     'just really very like um uh then also do does did have has had will would can could should not no yes if about from as by here ' +
@@ -162,7 +166,14 @@ function trackOf(tracks, type, id, name) {
  * @param {{tracks:Array, duration:number, aspectRatio?:string}} built from buildShortTimeline
  * @param {object} profile PLATFORM_PROFILES entry
  * @param {{words?:Array, events?:Array, plan?:{headline?:string, keywords?:string[], titleBrief?:string},
- *          popOut?:boolean, layers?:object}} opts words/events in SHORT time (start at 0)
+ *          scenePlan?:{title?:string, points?:string[], cta?:string, tone?:string, beats?:Array}|null,
+ *          popOut?:boolean, layers?:object}} opts words/events in SHORT time (start at 0).
+ *          `scenePlan` is the AI's full SceneDirector plan for this short
+ *          (shortFinisher.fetchScenePlan / POST /api/motion/scene-plan),
+ *          grounded in the short's own transcript. Optional and additive:
+ *          when it is null or empty (no AI configured, request failed, the
+ *          model had nothing to say), the hook falls back to exactly the
+ *          single static title this function always produced.
  * @returns {{tracks:Array, duration:number, aspectRatio:string, applied:string[]}}
  */
 export function polishShort(built, profile, opts = {}) {
@@ -177,21 +188,52 @@ export function polishShort(built, profile, opts = {}) {
     // 1. Hook title: a designed graphic (kicker/headline + a measured
     // accent), composed for the real frame and safe zone rather than a flat
     // text clip over a hardcoded-width underline.
+    const hookDur = Math.min(Math.max(2.2, (profile?.hookSeconds || 1.5) + 1.4), Math.max(1.2, duration * 0.35));
+    // composeSceneFromBrief places every beat via SceneDirector's own
+    // placementAvoiding(subject, frame, safeZone), which defaults to dead
+    // centre with no subject -- unlike the single-title path above (and
+    // every moment-graphics call in section 4), which always anchored
+    // 'top'. A centred hook/CTA would land in the same vertical band as
+    // captions (see the "two independently-designed... layers" note just
+    // below), reproducing the overlap that note already fixed once. There
+    // is no real subject tracking available here (this function stays pure
+    // -- no frame analysis), so a synthetic "speaker, roughly centred and
+    // lower in frame" box is enough for placementAvoiding's own geometry to
+    // resolve to 'top', matching every other designed graphic in this file.
+    const SYNTHETIC_SPEAKER_SUBJECT = { cx: 0.5, cy: 0.62, w: 0.5, h: 0.6 };
     if (want.title) {
-        const headline = (opts.plan?.headline && String(opts.plan.headline).trim())
-            || headlineFromText(words.slice(0, 18).map(wordOf).join(' '), { upper: look.upper });
-        if (headline) {
-            const hookDur = Math.min(Math.max(2.2, (profile?.hookSeconds || 1.5) + 1.4), Math.max(1.2, duration * 0.35));
-            const scene = composeComponentScene(look.titleComponent, look.titlePreset, {
-                title: look.upper ? headline.toUpperCase() : headline,
-                color: look.titleColor,
-                accentColor: look.accent,
-                fontFamily: look.titleFont,
-                duration: hookDur,
-                anchor: 'top',
-            }, { aspectRatio: built?.aspectRatio || '9:16', safeZone: profile?.safeZone });
-            if (scene) {
-                const { placements } = flattenScene(scene);
+        // R102 -- when the AI returned a real structured plan for this short
+        // (opts.scenePlan, grounded in its own transcript), the hook becomes
+        // the full SceneDirector's own intro beat (plus its first point/stat
+        // beat, if the hook budget has room for a second beat) instead of
+        // always a single static title. SceneDirector documents its own
+        // rule -- "never invent claims" -- so this path is only taken when
+        // there is real AI-written text to put on screen; with no plan (no
+        // AI configured, the request failed, the model had nothing to add)
+        // it falls straight through to the original single-title treatment,
+        // unchanged below.
+        const scenePlan = opts.scenePlan && typeof opts.scenePlan === 'object' ? opts.scenePlan : null;
+        const introBeats = scenePlan ? [
+            { kind: 'intro', text: (scenePlan.title && String(scenePlan.title).trim()) || null },
+            ...((scenePlan.points?.[0] && hookDur > 3.2) ? [{ kind: 'point', text: String(scenePlan.points[0]).trim(), kicker: '01' }] : []),
+        ].filter(b => b.text) : [];
+
+        let hookApplied = false;
+        if (introBeats.length) {
+            const designed = composeSceneFromBrief(
+                'A punchy short-form hook: open strong and surface the single most important point.',
+                {
+                    plan: { beats: introBeats },
+                    tone: 'viral',
+                    duration: hookDur,
+                    aspectRatio: built?.aspectRatio || '9:16',
+                    safeZone: profile?.safeZone,
+                    subject: SYNTHETIC_SPEAKER_SUBJECT,
+                    palette: { accent: look.accent, text: look.titleColor },
+                },
+            );
+            if (designed?.scene) {
+                const { placements } = flattenScene(designed.scene);
                 // `short-` prefixed ids (as the old hand-rolled clips always
                 // had) are how `polish_short` finds and replaces this layer
                 // on a re-run instead of stacking a second one - see
@@ -203,7 +245,72 @@ export function polishShort(built, profile, opts = {}) {
                     const id = isText ? `short-hook-text-${textN++}` : `short-hook-gfx-${gfxN++}`;
                     t.clips.push({ ...p.clip, id });
                 }
-                if (placements.length) applied.push('hook title');
+                if (placements.length) {
+                    applied.push(`hook sequence (${introBeats.length} beat${introBeats.length > 1 ? 's' : ''}, AI-directed)`);
+                    hookApplied = true;
+                }
+            }
+        }
+
+        if (!hookApplied) {
+            const headline = (opts.plan?.headline && String(opts.plan.headline).trim())
+                || headlineFromText(words.slice(0, 18).map(wordOf).join(' '), { upper: look.upper });
+            if (headline) {
+                const scene = composeComponentScene(look.titleComponent, look.titlePreset, {
+                    title: look.upper ? headline.toUpperCase() : headline,
+                    color: look.titleColor,
+                    accentColor: look.accent,
+                    fontFamily: look.titleFont,
+                    duration: hookDur,
+                    anchor: 'top',
+                }, { aspectRatio: built?.aspectRatio || '9:16', safeZone: profile?.safeZone });
+                if (scene) {
+                    const { placements } = flattenScene(scene);
+                    let textN = 0, gfxN = 0;
+                    for (const p of placements) {
+                        const isText = p.trackType === 'text';
+                        const t = trackOf(tracks, isText ? 'text' : 'overlay', isText ? 'track-short-title' : 'track-short-graphics', isText ? 'Hook' : 'Short graphics');
+                        const id = isText ? `short-hook-text-${textN++}` : `short-hook-gfx-${gfxN++}`;
+                        t.clips.push({ ...p.clip, id });
+                    }
+                    if (placements.length) applied.push('hook title');
+                }
+            }
+        }
+    }
+
+    // 1b. CTA outro: a brief, designed call-to-action beat at the very end
+    // of the short, when the AI's scene plan supplied one (from the
+    // transcript or an explicit ask -- never invented). Nothing filled this
+    // gap before: the hook title and the moment graphics in section 4 never
+    // covered the close of a short. Skipped outright when the short is too
+    // short to fit both the hook and a CTA without them overlapping.
+    if (want.title && opts.scenePlan?.cta) {
+        const ctaDur = Math.max(1.2, Math.min(2.2, duration * 0.12));
+        const ctaStart = Math.max(0, duration - ctaDur);
+        if (ctaStart > hookDur + 0.2) {
+            const designed = composeSceneFromBrief(
+                'A short, direct call to action to close a short-form video.',
+                {
+                    plan: { beats: [{ kind: 'cta', text: String(opts.scenePlan.cta).trim() }] },
+                    tone: 'viral',
+                    duration: ctaDur,
+                    aspectRatio: built?.aspectRatio || '9:16',
+                    safeZone: profile?.safeZone,
+                    subject: SYNTHETIC_SPEAKER_SUBJECT,
+                    palette: { accent: look.accent, text: look.titleColor },
+                },
+            );
+            if (designed?.scene) {
+                const { placements } = flattenScene(designed.scene, { startOffset: ctaStart });
+                let textN = 0, gfxN = 0;
+                for (const p of placements) {
+                    const isText = p.trackType === 'text';
+                    const t = trackOf(tracks, isText ? 'text' : 'overlay', isText ? 'track-short-cta' : 'track-short-graphics', isText ? 'CTA' : 'Short graphics');
+                    const id = isText ? `short-cta-text-${textN++}` : `short-cta-gfx-${gfxN++}`;
+                    t.clips.push({ ...p.clip, id });
+                }
+                if (placements.length) applied.push('cta outro');
             }
         }
     }
@@ -264,9 +371,32 @@ export function polishShort(built, profile, opts = {}) {
             }
         }
 
+        // The hook title (section 1) and these captions are two
+        // independently-designed full-screen text layers with no shared
+        // layout pass between them. When a caption's time range falls inside
+        // the hook's, keep it clear of the hook's vertical space instead of
+        // both landing in the same region of the frame -- this is what
+        // produced visibly overlapping text (hook headline + word-highlight
+        // caption stacked on screen) for the opening seconds of a short.
+        const hookDurForCaptions = want.title
+            ? Math.min(Math.max(2.2, (profile?.hookSeconds || 1.5) + 1.4), Math.max(1.2, duration * 0.35))
+            : 0;
+        // Below the safe-zone top margin the hook occupies, clamped so it
+        // never pushes past the bottom safe zone either.
+        const belowHookY = Math.min(100 - (profile?.safeZone?.bottom || 0.3) * 100, Math.max(profile.captionY, 38));
+
         let styled = 0;
         for (const c of captionClips) {
-            Object.assign(c, fields, { x: 50, y: profile.captionY });
+            const overlapsHook = hookDurForCaptions > 0 && (Number(c.start) || 0) < hookDurForCaptions;
+            Object.assign(c, fields, { x: 50, y: overlapsHook ? belowHookY : profile.captionY });
+            // A caption running long (more than ~4 words) renders as 2+ lines
+            // at the pack's base size and can grow tall enough to reach back
+            // up into the hook's space even after the Y offset above -- scale
+            // the font down a bit for those instead of just moving the anchor.
+            const wordCount = String(c.content || '').trim().split(/\s+/).filter(Boolean).length;
+            if (wordCount > 4 && Number.isFinite(Number(fields.fontSize))) {
+                c.fontSize = Math.round(Number(fields.fontSize) * (wordCount > 7 ? 0.72 : 0.85));
+            }
             const idx = emphasisIndices(c.content, opts.plan?.keywords);
             if (idx.length) c.emphasis = { indices: idx, source: 'auto' };
             styled += 1;
@@ -282,8 +412,15 @@ export function polishShort(built, profile, opts = {}) {
             for (const c of t.clips) {
                 if (c.type && c.type !== 'video') continue;
                 const d = Number(c.duration) || 0;
-                if (d < 0.8) continue;
-                const beats = [{ verb: 'push-in', at: 0, duration: d, energy: look.cameraEnergy * 0.5 }];
+                // Was a 0.8s floor: a Reel's own pacing (EditingStyles.js
+                // 'reel': minSilence 0.3, padding 0.05) routinely produces
+                // jump-cut clips well under 0.8s, so most of a tightly-cut
+                // short got NO camera movement at all. 0.3s still reads as
+                // motion on screen; energy is scaled down further for very
+                // short clips so the push doesn't feel like a jolt.
+                if (d < 0.3) continue;
+                const shortClipScale = d < 0.8 ? Math.max(0.35, d / 0.8) : 1;
+                const beats = [{ verb: 'push-in', at: 0, duration: d, energy: look.cameraEnergy * 0.5 * shortClipScale }];
                 for (const m of moments) {
                     const at = Number(m.timelineTime) - (Number(c.start) || 0);
                     if (at >= 0.1 && at < d - 0.3) beats.push({ verb: 'punch', at, energy: look.cameraEnergy });

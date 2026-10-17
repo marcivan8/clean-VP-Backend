@@ -416,6 +416,15 @@ function loadZoneBlur() {
     return zoneBlurPromise;
 }
 
+let depthCompositorPromise = null;
+function loadDepthCompositor() {
+    if (!depthCompositorPromise) {
+        const { pathToFileURL } = require('url');
+        depthCompositorPromise = import(pathToFileURL(path.join(__dirname, '..', 'client', 'src', 'motion', 'DepthCompositor.js')).href);
+    }
+    return depthCompositorPromise;
+}
+
 /**
  * R92: render one clip with its background removed (blur, dim, colour or
  * image). Same filter graph builder as the preview's settings
@@ -424,7 +433,7 @@ function loadZoneBlur() {
  * is applied to the picture, the mask and the audio together.
  */
 async function renderMattedSegment(clip, src, segPath, opts) {
-    const { targetWidth, targetHeight, targetFps, codec, profile, audioBitrate, maskLocalPath, bgImagePath } = opts;
+    const { targetWidth, targetHeight, targetFps, codec, profile, audioBitrate, maskLocalPath, bgImagePath, sandwichFilter, sandwichInput } = opts;
     const { matteFilterGraph, normalizeMatte } = await loadMatteSettings();
     const settings = normalizeMatte(clip.layerMask?.settings);
     if (settings.mode === 'image' && !bgImagePath) settings.mode = 'blur';
@@ -432,12 +441,15 @@ async function renderMattedSegment(clip, src, segPath, opts) {
     const offset = Number(clip.offset) || 0;
     const readDur = (Number(clip.duration) || 0) * speed;
     const maskSeek = Math.max(0, offset - (Number(clip.layerMask?.sourceStart) || 0));
-    const graph = matteFilterGraph(settings, { width: targetWidth, height: targetHeight, speed, duration: Number(clip.duration) || 5 });
+    const graph = matteFilterGraph(settings, { width: targetWidth, height: targetHeight, speed, duration: Number(clip.duration) || 5, sandwichFilter: sandwichFilter || null });
     return new Promise((resolve, reject) => {
         const cmd = ffmpeg()
             .input(src).setStartTime(offset).setDuration(readDur)
             .input(maskLocalPath).inputOptions(['-ss', maskSeek.toFixed(3)]);
         if (settings.mode === 'image') cmd.input(bgImagePath).inputOptions(['-loop', '1']);
+        if (sandwichInput && sandwichInput.path) {
+            cmd.input(sandwichInput.path).inputOptions(sandwichInput.options || []);
+        }
         cmd.complexFilter(graph, 'outv');
         const vol = (clip.volume ?? 1.0) * (clip.trackVolume ?? 1.0);
         const af = [];
@@ -1067,6 +1079,7 @@ module.exports = async function processExportJob(job) {
     // way compositorWarning/captionWarning already surface a degraded export
     // instead of a silently wrong one.
     const skippedClips = [];
+    const sandwichRenderedClipIds = new Set();
 
     for (let i = 0; i < allClips.length; i++) {
         const clip    = allClips[i];
@@ -1115,9 +1128,52 @@ module.exports = async function processExportJob(job) {
                         bgImagePath = null;
                     }
                 }
+
+                // Pillar G: Depth Sandwich — render text & graphics designated as behind_subject
+                let sandwichFilter = null;
+                try {
+                    const { isBehindSubject } = await loadDepthCompositor();
+                    const allTimelineClips = (timeline.tracks || []).flatMap(t => t.clips || []);
+                    const clipStart = Number(clip.start) || 0;
+                    const clipEnd = clipStart + (Number(clip.duration) || 0);
+                    const sandwichClips = allTimelineClips.filter(c => {
+                        if (!c || !isBehindSubject(c)) return false;
+                        const cStart = Number(c.start) || 0;
+                        const cEnd = cStart + (Number(c.duration) || 0);
+                        return Math.max(cStart, clipStart) < Math.min(cEnd, clipEnd);
+                    });
+
+                    if (sandwichClips.length > 0) {
+                        const filterParts = [];
+                        for (let sIdx = 0; sIdx < sandwichClips.length; sIdx++) {
+                            const sClip = sandwichClips[sIdx];
+                            sandwichRenderedClipIds.add(sClip.id);
+                            if (sClip.type === 'text' || sClip.content) {
+                                const rawText = sClip.content || sClip.name || '';
+                                const textFilePath = path.join(tmpDir, `sandwich-text-${i}-${sIdx}.txt`);
+                                fs.writeFileSync(textFilePath, rawText, 'utf8');
+                                const escapedTextFile = textFilePath.replace(/\\/g, '/').replace(/:/g, '\\:');
+                                const xPct = Number(sClip.x) || 50;
+                                const yPct = Number(sClip.y) || 50;
+                                const fsPx = Math.round((Number(sClip.fontSize) || 48) * (targetWidth / 1080));
+                                const fontColor = sClip.color || '#ffffff';
+                                const xExpr = `(w*${(xPct / 100).toFixed(4)}-text_w/2)`;
+                                const yExpr = `(h*${(yPct / 100).toFixed(4)}-text_h/2)`;
+                                filterParts.push(`drawtext=textfile='${escapedTextFile}':fontsize=${fsPx}:fontcolor=${fontColor}:x=${xExpr}:y=${yExpr}`);
+                            }
+                        }
+                        if (filterParts.length > 0) {
+                            sandwichFilter = filterParts.join(',');
+                            console.log(`  🥪 [depth-sandwich] clip "${clip.name}": compositing ${sandwichClips.length} element(s) behind subject`);
+                        }
+                    }
+                } catch (depthErr) {
+                    console.warn(`  [depth-sandwich] could not compile sandwich layer: ${depthErr.message}`);
+                }
+
                 await renderMattedSegment(clip, src, segPath, {
                     targetWidth, targetHeight, targetFps, codec, profile, audioBitrate,
-                    maskLocalPath, bgImagePath,
+                    maskLocalPath, bgImagePath, sandwichFilter,
                 });
                 segments.push(segPath);
                 segOutputStarts.push(cumulativeOut);
@@ -1209,8 +1265,10 @@ module.exports = async function processExportJob(job) {
             const speedFirst = !isImage && speed !== 1.0 && hasZoomKfs;
             if (speedFirst) vFilters.push(`setpts=${(1 / speed).toFixed(4)}*PTS`);
 
-            if (hasCrop && hasZoomKfs) {
-                // ── COMPOSED: multicam crop + zoom-rhythm on the SAME clip ──────
+            const isAspectChangingCrop = hasCrop && (vc.reframe || Math.abs((vc.cropW ?? 1) - (vc.cropH ?? 1)) >= 0.05);
+
+            if (hasCrop && hasZoomKfs && !isAspectChangingCrop) {
+                // ── COMPOSED: same-aspect multicam crop + zoom-rhythm on the SAME clip ──────
                 // ONE zoom whose level is vc.scale * the rhythm scale, centred on
                 // the multicam angle (R16: never stack a static crop and a second
                 // zoom). Runs on the upright source frame; scale/pad follows.
@@ -1233,9 +1291,20 @@ module.exports = async function processExportJob(job) {
                     const cw = Math.max(0.05, Math.min(1 - cx, vc.cropW));
                     const ch = Math.max(0.05, Math.min(1 - cy, vc.cropH));
                     vFilters.push(`crop=iw*${cw.toFixed(4)}:ih*${ch.toFixed(4)}:iw*${cx.toFixed(4)}:ih*${cy.toFixed(4)}`);
-                    console.log(`  [multicam] clip "${clip.name}" angle=${vc.angle || '?'} crop=${cw.toFixed(2)}x${ch.toFixed(2)}@(${cx.toFixed(2)},${cy.toFixed(2)})`);
+                    console.log(`  [crop] clip "${clip.name}" angle=${vc.angle || '?'} crop=${cw.toFixed(2)}x${ch.toFixed(2)}@(${cx.toFixed(2)},${cy.toFixed(2)})`);
                 }
                 vFilters.push(baseTransform ? baseTransform.scaleFilter : scaleFilter);
+
+                // Aspect-changing crops (e.g. 16:9 to 9:16 reframe): apply zoom/pan keyframes
+                // on top of the scaled output rather than attempting a uniform perspective zoom
+                // on the uncropped wide frame.
+                if (hasCrop && hasZoomKfs && isAspectChangingCrop) {
+                    const zoom = buildSmoothZoomFilter(scaleKfs, { fps: targetFps, anchor: { mode: 'fixed', x: 0.5, y: 0.28 }, panX, panY });
+                    if (zoom) {
+                        vFilters.push(zoom);
+                        console.log(`  [camera] clip "${clip.name}": animated zoom on reframed output (${scaleKfs?.length || 0} scale keyframes)`);
+                    }
+                }
             }
 
             // A still image just lasts `dur`; speed means nothing for it.
@@ -1925,7 +1994,7 @@ module.exports = async function processExportJob(job) {
 
             for (const track of textTracks) {
                 for (const clip of track.clips) {
-                    if (programClipIds.has(clip.id)) continue; // rendered by the compiled program instead
+                    if (programClipIds.has(clip.id) || sandwichRenderedClipIds.has(clip.id)) continue; // rendered by the compiled program or sandwich layer instead
                     const rawText    = clip.content || clip.name || '';
                     // Convert Vibed timeline positions to output video positions.
                     const vibedStart = typeof clip.start    === 'number' ? clip.start    : 0;

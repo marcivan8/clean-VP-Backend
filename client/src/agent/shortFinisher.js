@@ -21,20 +21,33 @@ import { collectSfxCues, sfxVolume, SFX_QUERIES } from './sfxCues.js';
 import { sfxPlayableUrl } from './animateMoments.js';
 import { PLATFORM_PROFILES } from './PlatformProfiles.js';
 
+// Each query caches every playable candidate the library returned (up to 5),
+// plus a rotation counter -- so repeated calls for the same query (e.g. every
+// "whoosh" cue in one short, or across several shorts generated in one
+// session, since this cache is module-level) cycle through real variety
+// instead of every call freezing onto the first result found. Previously
+// this cached a single resolved asset per query, so every transition's sound
+// effect in the whole video was the literal same clip.
 const sfxCache = new Map();
 
-/** Best library sound for a query, or null (cached for the session). */
+/** Best library sound for a query, rotating through real candidates on repeat calls for the same query (cached for the session). */
 export async function fetchSfxAsset(query) {
-    if (sfxCache.has(query)) return sfxCache.get(query);
-    let asset = null;
-    try {
-        const res = await authFetch('/api/audio/search', { method: 'POST', body: JSON.stringify({ query, assetTypes: ['SOUND_EFFECT'], limit: 5 }) });
-        const data = await res.json().catch(() => ({}));
-        asset = (Array.isArray(data?.results) ? data.results : []).map(r => r?.asset || r).find(a => sfxPlayableUrl(a)) || null;
-    } catch (err) {
-        console.warn('[shortFinisher] sound search failed:', err.message);
+    let entry = sfxCache.get(query);
+    if (!entry) {
+        let candidates = [];
+        try {
+            const res = await authFetch('/api/audio/search', { method: 'POST', body: JSON.stringify({ query, assetTypes: ['SOUND_EFFECT'], limit: 5 }) });
+            const data = await res.json().catch(() => ({}));
+            candidates = (Array.isArray(data?.results) ? data.results : []).map(r => r?.asset || r).filter(a => sfxPlayableUrl(a));
+        } catch (err) {
+            console.warn('[shortFinisher] sound search failed:', err.message);
+        }
+        entry = { candidates, next: 0 };
+        sfxCache.set(query, entry);
     }
-    sfxCache.set(query, asset);
+    if (entry.candidates.length === 0) return null;
+    const asset = entry.candidates[entry.next % entry.candidates.length];
+    entry.next += 1;
     return asset;
 }
 
@@ -72,10 +85,40 @@ export async function fetchShortPlan(text, platform, duration) {
 }
 
 /**
+ * R102 -- the full SceneDirector plan for a short's hook/CTA (POST
+ * /api/motion/scene-plan), grounded in the short's own transcript so the
+ * beats carry real words instead of SceneDirector's own "YOUR HEADLINE"-
+ * style placeholders (it refuses to invent claims -- see SceneDirector.js's
+ * own doc comment). The brief here is deliberately generic ("open strong,
+ * surface the key point, close with a call to action") because the actual
+ * content comes from the transcript; tone is decided client-side (shortPolish
+ * always forces 'viral' for this call), not from this brief. Beats are left
+ * unspecified so the model decides the full structure itself (R101 PHASE 1)
+ * instead of only ever filling words into a fixed shape -- shortPolish then
+ * picks just the intro/point/cta beats it has room for.
+ */
+export async function fetchScenePlan(text, platform, duration) {
+    if (!text) return null;
+    const brief = 'A short-form video: open with a strong hook, surface the single most '
+        + 'important point or figure, and close with a call to action if the video asks for one.';
+    try {
+        const res = await authFetch('/api/motion/scene-plan', {
+            method: 'POST',
+            body: JSON.stringify({ brief, transcript: text, platform, duration }),
+        });
+        const data = await res.json().catch(() => ({}));
+        return res.ok ? (data.plan || null) : null;
+    } catch (err) {
+        console.warn('[shortFinisher] scene plan unavailable, hook stays a single title:', err.message);
+        return null;
+    }
+}
+
+/**
  * Build the finished short.
  * @param {object} state useTimelineStore.getState()
  * @param {object} short an entry of state.shorts
- * @param {{polish?:boolean, popOut?:boolean, sfx?:boolean, plan?:object|null, fetchPlan?:Function, fetchAsset?:Function}} opts
+ * @param {{polish?:boolean, popOut?:boolean, sfx?:boolean, plan?:object|null, scenePlan?:object|null, fetchPlan?:Function, fetchScenePlan?:Function, fetchAsset?:Function}} opts
  * @returns {Promise<{tracks, duration, aspectRatio, applied:string[], words:Array}>}
  */
 export async function finishShort(state, short, opts = {}) {
@@ -89,9 +132,13 @@ export async function finishShort(state, short, opts = {}) {
     if (opts.polish === false) return { ...built, applied: [], words };
 
     const text = words.map(w => String(w.word ?? w.text ?? '')).join(' ').slice(0, 2000);
-    const plan = opts.plan !== undefined ? opts.plan
-        : (text ? await (opts.fetchPlan || fetchShortPlan)(text, profile.id, built.duration) : null);
-    const polished = polishShort(built, profile, { words, events, plan, popOut: !!opts.popOut });
+    const [plan, scenePlan] = await Promise.all([
+        opts.plan !== undefined ? opts.plan
+            : (text ? (opts.fetchPlan || fetchShortPlan)(text, profile.id, built.duration) : null),
+        opts.scenePlan !== undefined ? opts.scenePlan
+            : (text ? (opts.fetchScenePlan || fetchScenePlan)(text, profile.id, built.duration) : null),
+    ]);
+    const polished = polishShort(built, profile, { words, events, plan, scenePlan, popOut: !!opts.popOut });
     if (opts.sfx !== false) {
         const placed = await addSfxTrack(polished.tracks, collectSfxCues(polished.tracks, { level: profile.sfx }), profile.sfx, opts.fetchAsset);
         if (placed) polished.applied.push(`sound effects (${placed})`);
@@ -100,4 +147,4 @@ export async function finishShort(state, short, opts = {}) {
     return { ...polished, words };
 }
 
-export default { finishShort, fetchShortPlan, fetchSfxAsset, addSfxTrack };
+export default { finishShort, fetchShortPlan, fetchScenePlan, fetchSfxAsset, addSfxTrack };

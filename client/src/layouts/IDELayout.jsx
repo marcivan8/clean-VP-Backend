@@ -1,7 +1,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap, Smartphone } from 'lucide-react';
+import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap, Smartphone, Film } from 'lucide-react';
 import classNames from 'classnames';
 import { Player } from '@revideo/player-react';
 import { Video as RevideoVideo, Audio as RevideoAudio, Media as RevideoMedia } from '@revideo/2d';
@@ -28,13 +28,15 @@ import useDeviceType from '../hooks/useDeviceType';
 import MixerPanel from '../components/Sidebar/MixerPanel';
 import InterviewEditPanel from '../components/InterviewEditPanel';
 // R61 — the Motion tab. NOTE: adding a panel here requires BOTH this import
-// AND an entry in the tab array below. This file already contains three render
-// branches ('effects', 'interview', 'marketplace') whose tab buttons were
-// trimmed from that array, so they can never be selected — and 'effects' also
-// renders a component that was never imported, which would throw a
-// ReferenceError if it ever were. Add both halves or the panel is dead on
-// arrival.
+// AND an entry in the tab array below. This file also contains two render
+// branches ('interview', 'marketplace') whose tab buttons were trimmed from
+// that array. A tab button is not the only way in: setActiveTab() is also
+// called by assistant suggestions (SuggestionEngine `tab`) and clip clicks, so
+// a branch that renders an unimported component crashes the whole editor (the
+// old 'effects' branch did exactly that). Add both halves or the panel is dead
+// on arrival.
 import MotionPanel from '../components/MotionPanel';
+import TransformPanel from '../components/TransformPanel';
 import ShortsPanel from '../components/ShortsPanel'; // R92 round B: repurposed shorts
 import SnapGuidesLayer from '../components/Player/SnapGuidesLayer.jsx'; // R92 round C
 import ShortPreviewBar from '../components/Player/ShortPreviewBar.jsx'; // R93
@@ -45,6 +47,7 @@ import { Type } from 'lucide-react';
 import { ClarificationDialog } from '../components/ClarificationDialog';
 import { ApprovalDialog } from '../components/ApprovalDialog';
 import { trackEvent } from '../utils/trackEvent';
+import { captureEvent } from '../lib/posthog';
 import { countMetric, distributionMetric, nowMs, timelineBucket, timelineSecondsFromTracks } from '../utils/metrics';
 import { computeDragSnap } from '../timeline/dragSnap.js';
 
@@ -405,6 +408,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     order: t.order ?? idx,
                     clips: (t.clips || []).map(c => {
                         const sourceAsset = assets.find(a => a.id === c.assetId);
+                        const assetRes = sourceAsset?.resolution || (sourceAsset?.width && sourceAsset?.height ? { w: sourceAsset.width, h: sourceAsset.height } : null);
+                        const srcW = c.metadata?.resolution?.w || c.sourceWidth || assetRes?.w || null;
+                        const srcH = c.metadata?.resolution?.h || c.sourceHeight || assetRes?.h || null;
                         // Resolution order:
                         // 1. proxyUrl (server-relative or blob) — already correct format
                         // 2. asset blob URL (in-memory, valid while tab is open)
@@ -418,6 +424,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             || c.fileUrl;
                         return {
                             ...c,
+                            sourceWidth: srcW,
+                            sourceHeight: srcH,
+                            metadata: {
+                                ...(c.metadata || {}),
+                                ...(srcW && srcH ? { resolution: { w: srcW, h: srcH } } : {}),
+                            },
                             type: t.type || c.type,
                             globalVolume: trackVol,
                             url: toProxyUrl(rawUrl) || ""
@@ -1605,6 +1617,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             timeline: timelineBucket(timelineSecondsFromTracks(useTimelineStore.getState().tracks)),
         };
         countMetric('export.started', exportAttrs);
+        captureEvent('editor_export_started', {
+            resolution: exportAttrs.resolution,
+            platform: exportAttrs.platform,
+            format: settings?.format || 'mp4',
+            timeline_bucket: exportAttrs.timeline,
+        });
         const finishExportMetric = (outcome) => {
             const attrs = { ...exportAttrs, outcome };
             countMetric('export.finished', attrs);
@@ -1637,6 +1655,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             setExportUrl(result.url);
 
             finishExportMetric('success');
+            captureEvent('editor_export_completed', {
+                resolution: exportAttrs.resolution,
+                platform: exportAttrs.platform,
+                format: settings?.format || 'mp4',
+                duration_ms: nowMs() - exportStartedAt,
+            });
             // A "successful" export can still be degraded (captions/overlays
             // silently missing) — count each warning kind separately.
             [['caption', result.captionWarning], ['compositor', result.compositorWarning],
@@ -1648,6 +1672,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             setExportError(err.message);
             // pollJobResult's own timeout message: "Job <id> timed out after <n>s"
             finishExportMetric(/timed out after/i.test(err?.message || '') ? 'client_timeout' : 'error');
+            captureEvent('editor_export_failed', {
+                resolution: exportAttrs.resolution,
+                platform: exportAttrs.platform,
+                duration_ms: nowMs() - exportStartedAt,
+                error_type: /timed out after/i.test(err?.message || '') ? 'timeout' : 'error',
+            });
         } finally {
             setIsExporting(false);
             clearActiveExport();
@@ -2159,17 +2189,29 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 <section className="p-4 border-b" style={{ borderColor: "var(--line-soft)" }}>
                                     <div className="flex items-center justify-between mb-4">
                                         <div className="studio-mono-label" style={{ color: 'var(--fg-2)' }}>{t('ideLayout.bin', { count: assets.length })}</div>
-                                        {/* Import button — input overlaid directly so Android taps hit the input itself */}
-                                        <div className="relative text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-colors flex items-center gap-1" style={{ fontFamily: "var(--f-mono)" }}>
-                                            <Upload className="w-3 h-3" /> {t('ideLayout.import')}
-                                            <input
-                                                type="file"
-                                                onChange={handleFileImport}
-                                                accept="video/*,audio/*,image/*"
-                                                multiple
-                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                                style={{ fontSize: 0 }}
-                                            />
+                                        <div className="flex items-center gap-1.5">
+                                            {/* Stock media button — opens Stock tab in AssetPanel */}
+                                            <button
+                                                type="button"
+                                                onClick={() => setActiveTab('assets')}
+                                                className="text-[10px] bg-accent/10 hover:bg-accent/20 text-accent px-2 py-1 rounded transition-colors flex items-center gap-1 border border-accent/20"
+                                                style={{ fontFamily: "var(--f-mono)" }}
+                                                title="Pexels Stock Media"
+                                            >
+                                                <Film className="w-3 h-3" /> Stock
+                                            </button>
+                                            {/* Import button — input overlaid directly so Android taps hit the input itself */}
+                                            <div className="relative text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-colors flex items-center gap-1" style={{ fontFamily: "var(--f-mono)" }}>
+                                                <Upload className="w-3 h-3" /> {t('ideLayout.import')}
+                                                <input
+                                                    type="file"
+                                                    onChange={handleFileImport}
+                                                    accept="video/*,audio/*,image/*"
+                                                    multiple
+                                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                    style={{ fontSize: 0 }}
+                                                />
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="grid grid-cols-2 gap-2">
@@ -2193,12 +2235,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                             <DraggableAsset key={asset.id} asset={asset} />
                                         ))}
                                     </div>
-                                </section>
-                            )}
-
-                            {activeTab === 'effects' && (
-                                <section className="h-full bg-card">
-                                    <EffectsPanel targetId={activeClipId} playbackEngine={useTimelineStore.getState().playbackEngine} playhead={useTimelineStore.getState().currentTime} className="h-full" />
                                 </section>
                             )}
 
@@ -2268,69 +2304,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             {activeTab === 'captions' && <section className="p-4 border-b border-border/50"><TextPanel /></section>}
                             {activeTab === 'audio' && <section className="p-4 border-b border-border/50"><MixerPanel /></section>}
 
-                            {activeTab === 'transform' && (
-                                <section className="p-4 border-b border-border/50">
-                                    <div className="space-y-6">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold">{t('ideLayout.transform.title')}</div>
-                                            {activeClip && <div className="text-[10px] text-green-400 font-mono">{t('ideLayout.active')}</div>}
-                                        </div>
-                                        {!activeClip ? (
-                                            <div className="p-4 rounded-md border border-dashed border-border text-center"><p className="text-xs text-muted-foreground">{t('ideLayout.transform.selectClip')}</p></div>
-                                        ) : (
-                                            <>
-                                                {activeTrackType === 'overlay' && (activeClip.type === 'video' || activeClip.type === 'image') && (
-                                                    <div className="pb-4 border-b border-border">
-                                                        <LayoutPresetPicker trackId={activeTrackId} clip={activeClip} />
-                                                    </div>
-                                                )}
-                                                {[
-                                                    { key: 'scale', label: t('ideLayout.transform.scale'), min: 10, max: 300, toDisplay: v => Math.round((v || 1) * 100), unit: '%', fromDisplay: v => v / 100 },
-                                                    { key: 'x', label: t('ideLayout.transform.positionX'), min: -1920, max: 1920, toDisplay: v => v || 0, unit: 'px', fromDisplay: v => v },
-                                                    { key: 'y', label: t('ideLayout.transform.positionY'), min: -1080, max: 1080, toDisplay: v => v || 0, unit: 'px', fromDisplay: v => v },
-                                                    { key: 'rotation', label: t('ideLayout.transform.rotation'), min: -180, max: 180, toDisplay: v => v || 0, unit: '°', fromDisplay: v => v },
-                                                ].map(({ key, label, min, max, toDisplay, unit, fromDisplay }) => {
-                                                    const displayVal = toDisplay(activeClip[key]);
-                                                    // Canvas renders at native video resolution (e.g. 1920px).
-                                                    // CSS scale() only degrades quality if the visual display
-                                                    // exceeds native res — unlikely below 300% on typical screens.
-                                                    const scaleQuality = key === 'scale'
-                                                        ? (displayVal <= 150 ? { color: '#34d399', label: t('ideLayout.transform.qualitySharp') }
-                                                        : displayVal <= 250 ? { color: '#fbbf24', label: t('ideLayout.transform.qualityZoomedIn') }
-                                                        : { color: '#f87171', label: t('ideLayout.transform.qualityExtremeZoom') })
-                                                        : null;
-                                                    return (
-                                                    <div key={key} className="space-y-2">
-                                                        <div className="flex justify-between text-xs items-center">
-                                                            <span>{label}</span>
-                                                            <div className="flex items-center gap-1.5">
-                                                                {scaleQuality && (
-                                                                    <span className="flex items-center gap-1">
-                                                                        <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: scaleQuality.color, boxShadow: `0 0 4px ${scaleQuality.color}` }} />
-                                                                        <span className="text-[10px]" style={{ color: scaleQuality.color }}>{scaleQuality.label}</span>
-                                                                    </span>
-                                                                )}
-                                                                <span className="text-muted-foreground">{displayVal}{unit}</span>
-                                                            </div>
-                                                        </div>
-                                                        <input type="range" min={min} max={max} value={displayVal}
-                                                            onChange={(e) => updateClip(activeTrackId, activeClip.id, { [key]: fromDisplay(parseInt(e.target.value)) }, { skipHistory: true })}
-                                                            onPointerUp={(e) => updateClip(activeTrackId, activeClip.id, { [key]: fromDisplay(parseInt(e.target.value)) })}
-                                                            className="w-full accent-primary h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer" />
-                                                    </div>
-                                                    );
-                                                })}
-                                                <p className="text-[10px] leading-relaxed pt-1" style={{ color: 'var(--fg-3)', fontFamily: 'var(--f-sans)' }}>
-                                                    {t('ideLayout.transform.qualityNote')}
-                                                </p>
-                                                <div className="pt-3 border-t border-border">
-                                                    <button onClick={() => updateClip(activeTrackId, activeClip.id, { scale: 1, x: 0, y: 0, rotation: 0 })} className="w-full py-1.5 text-xs bg-secondary hover:bg-white/10 rounded text-muted-foreground transition-colors">{t('ideLayout.transform.reset')}</button>
-                                                </div>
-                                            </>
-                                        )}
-                                    </div>
-                                </section>
-                            )}
+                            {activeTab === 'transform' && <TransformPanel />}
 
                             {activeTab === 'marketplace' && (
                                 <section className="p-4 border-b border-border/50">

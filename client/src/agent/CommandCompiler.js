@@ -677,6 +677,14 @@ function compilePlaceContextualBroll(step, ctx) {
     ]);
 }
 
+function compileFetchStockBroll(step, ctx) {
+    if (!step.query || !String(step.query).trim()) return skipped(step.step_id, 'fetch_stock_broll requires a query');
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'fetchStockBroll', { query: step.query },
+            { source_step_id: step.step_id, description: `Fetch stock footage: "${step.query}"` }),
+    ]);
+}
+
 function compileReorderClips(step, ctx) {
     return ok(step.step_id, [
         cmd(ENGINE.STORE, 'reorder_clips', { prompt: step.prompt || '' },
@@ -1143,6 +1151,7 @@ const COMMAND_REGISTRY = new Map([
     ['smart_cleanup', { compiler: compileSmartCleanup }],
     ['find_hook', { compiler: compileFindHook }],
     ['place_contextual_broll', { compiler: compilePlaceContextualBroll }],
+    ['fetch_stock_broll', { compiler: compileFetchStockBroll }],
     // R92: the legacy store path returned failure without real analysis;
     // every remove_repetition step (server plans included) now runs the real
     // retake detector.

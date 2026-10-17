@@ -163,10 +163,14 @@ export function createNode(type, overrides = {}) {
 
         /** Text content (text/caption nodes). */
         content: overrides.content ?? '',
+        /** Advanced Typography: Multi-style runs and character motion. */
+        runs: Array.isArray(overrides.runs) ? overrides.runs.map(r => ({ ...r })) : null,
+        charAnim: overrides.charAnim && typeof overrides.charAnim === 'object' ? { ...overrides.charAnim } : null,
         /** Per-word timings for a caption node. See CaptionModel.js. */
         words: Array.isArray(overrides.words) ? overrides.words : null,
 
-        /** Shape nodes: `{ kind, params }` for TemplateGraphics.drawTemplate. */
+        /** Shape nodes: `{ kind, params }` for TemplateGraphics.drawTemplate or vector definition. */
+        vector: overrides.vector && typeof overrides.vector === 'object' ? { ...overrides.vector } : null,
         template: overrides.template && overrides.template.kind
             ? { kind: String(overrides.template.kind), params: { ...(overrides.template.params || {}) } }
             : null,
@@ -615,25 +619,43 @@ export function flattenScene(scene, opts = {}) {
                         ...(s.tracking !== undefined ? { tracking: s.tracking } : {}),
                         ...(s.captionStyle ? { captionStyle: s.captionStyle } : {}),
                         ...(node.words ? { words: node.words } : {}),
+                        ...(node.runs ? { runs: node.runs } : {}),
+                        ...(node.charAnim ? { charAnim: node.charAnim } : {}),
                         ...(node.style?.emphasis ? { emphasis: node.style.emphasis } : {}),
                     },
                 });
                 continue;
             }
 
-            if (node.type === NODE_TYPES.SHAPE && node.template) {
-                placements.push({
-                    trackType: 'overlay',
-                    clip: {
-                        ...common,
-                        type: 'template',
-                        template: { kind: node.template.kind, params: { ...node.template.params } },
-                        ...(node.size ? { metadata: { resolution: { w: node.size.w, h: node.size.h } } } : {}),
-                        x, y,
-                        scale: Math.round(num(abs.scale, 1) * 10000) / 10000,
-                    },
-                });
-                continue;
+            if (node.type === NODE_TYPES.SHAPE) {
+                if (node.vector) {
+                    placements.push({
+                        trackType: 'overlay',
+                        clip: {
+                            ...common,
+                            type: 'vector',
+                            vector: { ...node.vector },
+                            ...(node.size ? { metadata: { resolution: { w: node.size.w, h: node.size.h } } } : {}),
+                            x, y,
+                            scale: Math.round(num(abs.scale, 1) * 10000) / 10000,
+                        },
+                    });
+                    continue;
+                }
+                if (node.template) {
+                    placements.push({
+                        trackType: 'overlay',
+                        clip: {
+                            ...common,
+                            type: 'template',
+                            template: { kind: node.template.kind, params: { ...node.template.params } },
+                            ...(node.size ? { metadata: { resolution: { w: node.size.w, h: node.size.h } } } : {}),
+                            x, y,
+                            scale: Math.round(num(abs.scale, 1) * 10000) / 10000,
+                        },
+                    });
+                    continue;
+                }
             }
 
             // image / video / sticker

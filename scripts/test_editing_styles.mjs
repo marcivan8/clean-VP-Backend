@@ -65,12 +65,12 @@ await check('playbooks: cuts first, captions after them, levelling after cuts', 
     // R92 round A: full clean up (silences, fillers, repetition, voice) in one step,
     // animation last for the energetic styles, none for the calm ones.
     assert.deepEqual(keys('talking_head'), ['cleanup', 'captions', 'recipe', 'animate']);
-    assert.deepEqual(keys('vlog'), ['silences', 'enhance', 'captions', 'recipe', 'animate']);
+    assert.deepEqual(keys('vlog'), ['silences', 'enhance', 'broll', 'captions', 'recipe', 'animate']);
     assert.deepEqual(keys('podcast'), ['cleanup', 'captions', 'recipe']);
     assert.deepEqual(keys('interview'), ['cleanup', 'captions', 'recipe']);
     // R92 round C: a Reel ends with the pro short finish instead of the generic animation.
-    assert.deepEqual(keys('reel'), ['short', 'vertical', 'cleanup', 'captions', 'recipe', 'finish']);
-    assert.deepEqual(keys('reel', 'go', {}), ['transcript', 'short', 'vertical', 'cleanup', 'captions', 'recipe', 'finish']);
+    assert.deepEqual(keys('reel'), ['short', 'vertical', 'cleanup', 'broll', 'captions', 'recipe', 'finish']);
+    assert.deepEqual(keys('reel', 'go', {}), ['transcript', 'short', 'vertical', 'cleanup', 'broll', 'captions', 'recipe', 'finish']);
     // A specific request runs ALONE ("animate" used to also run the clean up).
     assert.deepEqual(keys('interview', 'cut the intro'), ['request']);
     assert.deepEqual(keys('talking_head', 'animate it'), ['request']);
@@ -85,7 +85,7 @@ await check('pacing per style', () => {
 
 log('every playbook prompt reaches its command');
 setTimeline();
-const EXPECT = { captions: 'auto_captions', short: 'extract_short', vertical: 'set_aspect_ratio', silences: 'silence_removal', cleanup: 'long_form_edit', enhance: 'enhance_audio', animate: 'animate_automatically', finish: 'polish_short', recipe: 'apply_style_recipe' };
+const EXPECT = { captions: 'auto_captions', short: 'extract_short', vertical: 'set_aspect_ratio', silences: 'silence_removal', cleanup: 'long_form_edit', enhance: 'enhance_audio', animate: 'animate_automatically', finish: 'polish_short', recipe: 'apply_style_recipe', broll: 'place_contextual_broll' };
 const seen = new Map();
 for (const id of ES.EDITING_STYLE_IDS) for (const s of ES.buildAutopilotSteps(id, 'go', {})) if (EXPECT[s.key === 'transcript' ? 'captions' : s.key]) seen.set(s.prompt, EXPECT[s.key === 'transcript' ? 'captions' : s.key]);
 for (const [prompt, op] of seen) {
@@ -191,7 +191,7 @@ await check('defaults follow the style, explicit requests win', async () => {
     setTimeline();
     S.getState().setEditingStyle('reel');
     let r = await plan('make a short');
-    assert.equal(r.steps[0].args.target, 60);
+    assert.equal(r.steps[0].args.target, 22, 'Reel defaults to its own 22s target (Instagram Reels\' 15-30s ideal), not a bare fallback');
     r = await plan('make a 30 second short');
     assert.equal(r.steps[0].args.target, 30);
     r = await plan('apply the style recipe');
