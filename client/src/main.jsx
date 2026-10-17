@@ -10,6 +10,7 @@ import App from './App.jsx'
 import { supabase } from './lib/supabaseClient'
 import { startMediaSessionKeeper } from './utils/mediaSession.js'
 import { hasReplayConsent, onConsentChange } from './lib/consent.js'
+import { syncAnalyticsWithConsent } from './lib/analytics.js'
 import { initPostHog } from './lib/posthog.js'
 
 // Signed media cookie: lets this browser stream the user's own videos (owner-only).
@@ -105,6 +106,10 @@ function syncReplayWithConsent() {
 }
 syncReplayWithConsent();
 onConsentChange(syncReplayWithConsent);
+
+// PostHog product analytics, only with consent (see lib/analytics.js).
+syncAnalyticsWithConsent();
+onConsentChange(syncAnalyticsWithConsent);
 
 // Recover from a stale client bundle: if the browser loaded this app before
 // a newer deploy replaced client/dist, a lazy-loaded chunk (Compositor,

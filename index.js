@@ -68,6 +68,9 @@ app.use(helmet({
         // Sentry error reporting — both ingest domains (EU + global)
         "https://*.ingest.sentry.io",
         "https://*.ingest.de.sentry.io",
+        // PostHog product analytics (EU cloud), only after consent
+        "https://eu.i.posthog.com",
+        "https://eu-assets.i.posthog.com",
         // PostHog analytics and session replay (EU + US + assets)
         "https://*.posthog.com",
         "https://*.i.posthog.com",

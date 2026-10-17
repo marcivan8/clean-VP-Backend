@@ -1,8 +1,13 @@
-// Cookie and tracker consent for the one optional tracker Vibed uses:
-// Sentry Session Replay (a masked recording of the screen when an error
-// happens, used to debug the editor). Everything else stored in the browser
-// is strictly necessary (sign-in session, media access cookie, language and
-// editor preferences) and does not need consent.
+// Cookie and tracker consent for the two optional trackers Vibed uses:
+//   - replay: Sentry Session Replay (a masked recording of the screen when an
+//     error happens, used to debug the editor)
+//   - analytics: PostHog product analytics (pages visited and features used)
+// Everything else stored in the browser is strictly necessary (sign-in
+// session, media access cookie, language and editor preferences) and does
+// not need consent.
+//
+// A choice saved before the analytics purpose existed has no `analytics`
+// field. It counts as no choice, so the banner asks again.
 //
 // The choice is kept for 6 months (CNIL recommendation), then asked again.
 
@@ -16,7 +21,7 @@ export function getConsent() {
         const raw = localStorage.getItem(KEY);
         if (!raw) return null;
         const v = JSON.parse(raw);
-        if (!v || typeof v.replay !== 'boolean' || !v.at) return null;
+        if (!v || typeof v.replay !== 'boolean' || typeof v.analytics !== 'boolean' || !v.at) return null;
         if (Date.now() - Date.parse(v.at) > MAX_AGE_MS) return null;
         return v;
     } catch {
@@ -28,8 +33,12 @@ export function hasReplayConsent() {
     return getConsent()?.replay === true;
 }
 
-export function setConsent({ replay }) {
-    const value = { replay: !!replay, at: new Date().toISOString() };
+export function hasAnalyticsConsent() {
+    return getConsent()?.analytics === true;
+}
+
+export function setConsent({ replay, analytics }) {
+    const value = { replay: !!replay, analytics: !!analytics, at: new Date().toISOString() };
     try {
         localStorage.setItem(KEY, JSON.stringify(value));
     } catch {
