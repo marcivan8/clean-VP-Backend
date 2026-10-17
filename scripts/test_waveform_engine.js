@@ -90,7 +90,8 @@ function loadEngine() {
         .replace(/^import \{ authFetch \} from .*$/m,
             'const authFetch = (url, opts = {}) => fetch(url, { ...opts, headers: { ...(opts.headers || {}), \'Content-Type\': \'application/json\' } });')
         .replace(/^export const WaveformEngine =/m, 'const WaveformEngine =')
-        .replace(/^export default WaveformEngine;$/m, 'module.exports = WaveformEngine;');
+        .replace(/^export default WaveformEngine;$/m,
+            'module.exports = WaveformEngine;\nmodule.exports.isServerResolvable = isServerResolvable;');
 
     const m = new Module('waveform-engine-under-test');
     m._compile(
@@ -135,7 +136,7 @@ const run = async () => {
     console.log('\n── 2. A second request hits cache, not the network ──');
     {
         fetchCalls = [];
-        const again = await WaveformEngine.getPeaks('asset-A', { proxyUrl: '/x/proxy.mp4' });
+        const again = await WaveformEngine.getPeaks('asset-A', { proxyUrl: '/api/proxy/gcs-media/proxies/u/x/proxy.mp4' });
         check('cached asset issued no further requests', fetchCalls.length === 0);
         check('cached value is correct', again?.peaks?.length === 3);
     }
@@ -162,6 +163,46 @@ const run = async () => {
             r2 === null && fetchCalls.length === 0);
     }
 
+    console.log('\n── 4b. The client sends exactly the URL shapes the server can read ──');
+    {
+        // Same rule on both sides: a URL the engine sends must resolve on the
+        // server, and a URL the server cannot read must never be sent (a 4xx is
+        // never retried, so it left the clip blank for the whole session).
+        const { deriveGcsPath, resolveStaticAudioPath } = require('../utils/waveformPath');
+        const serverReads = (u) => !!deriveGcsPath(null, u) || !!resolveStaticAudioPath(u)
+            || /^https?:\/\//i.test(u);
+        const shapes = [
+            '/api/proxy/gcs-media/proxies/u/f/proxy.mp4',
+            '/uploads/proxies/dev-user/f/proxy.mp4',
+            'raw/user/clip.mov',
+            '/sfx-library/bass-drop-01.mp3',
+            'https://videos.pexels.com/video-files/1/1.mp4',
+            'https://storage.googleapis.com/bucket/raw/u/a.mov',
+            'blob:http://localhost/abc',
+            'data:audio/mp3;base64,AAAA',
+            '/motion-assets/arrow.png',
+            '/sfx-library/../index.js',
+            '',
+        ];
+        for (const u of shapes) {
+            check(`client and server agree on ${JSON.stringify(u)}`,
+                WaveformEngine.isServerResolvable(u) === serverReads(u),
+                `client=${WaveformEngine.isServerResolvable(u)} server=${serverReads(u)}`);
+        }
+
+        fetchCalls = [];
+        fetchImpl = async (url) =>
+            String(url).includes('/api/waveform/extract')
+                ? jsonRes({ peaksUrl: '/peaks/sfx.json' })
+                : jsonRes({ peaks: [0.3, 0.6], duration: 1 });
+        const sfx = await WaveformEngine.getPeaks('asset-sfx', { proxyUrl: '/sfx-library/bass-drop-01.mp3' });
+        check('a /sfx-library/ clip gets peaks', sfx?.peaks?.length === 2);
+
+        fetchCalls = [];
+        const other = await WaveformEngine.getPeaks('asset-rel', { proxyUrl: '/motion-assets/arrow.png' });
+        check('an unknown relative URL makes no request', other === null && fetchCalls.length === 0);
+    }
+
     console.log('\n── 5. 503 backpressure is waited out, not counted as failure ──');
     {
         fetchCalls = [];
@@ -176,7 +217,7 @@ const run = async () => {
             return jsonRes({ peaks: [0.4], duration: 1 });
         };
 
-        const r = await WaveformEngine.getPeaks('asset-busy', { proxyUrl: '/y/proxy.mp4' });
+        const r = await WaveformEngine.getPeaks('asset-busy', { proxyUrl: '/api/proxy/gcs-media/proxies/u/y/proxy.mp4' });
         check('succeeded after two 503s', r?.peaks?.length === 1,
             '503 means "come back", not "broken" — it must not consume an attempt.');
         check('it actually retried past the default attempt cap', n === 3);
@@ -187,7 +228,7 @@ const run = async () => {
         fetchCalls = [];
         fetchImpl = async () => jsonRes({ error: 'gcsPath required' }, { status: 400 });
 
-        const r = await WaveformEngine.getPeaks('asset-400', { proxyUrl: '/z/proxy.mp4' });
+        const r = await WaveformEngine.getPeaks('asset-400', { proxyUrl: '/api/proxy/gcs-media/proxies/u/z/proxy.mp4' });
         const extractCalls = fetchCalls.filter(u => String(u).includes('/extract')).length;
         check('400 returned null', r === null);
         check('400 was not retried', extractCalls === 1,
@@ -199,14 +240,14 @@ const run = async () => {
         fetchCalls = [];
         fetchImpl = async () => jsonRes({ error: 'boom' }, { status: 500 });
 
-        const r = await WaveformEngine.getPeaks('asset-500', { proxyUrl: '/w/proxy.mp4' });
+        const r = await WaveformEngine.getPeaks('asset-500', { proxyUrl: '/api/proxy/gcs-media/proxies/u/w/proxy.mp4' });
         const extractCalls = fetchCalls.filter(u => String(u).includes('/extract')).length;
         check('500 eventually returned null', r === null);
         check('500 retried a bounded number of times', extractCalls === 3, `made ${extractCalls}`);
 
         // Subsequent asks must not restart the storm...
         fetchCalls = [];
-        await WaveformEngine.getPeaks('asset-500', { proxyUrl: '/w/proxy.mp4' });
+        await WaveformEngine.getPeaks('asset-500', { proxyUrl: '/api/proxy/gcs-media/proxies/u/w/proxy.mp4' });
         check('a failed asset stops retrying on later renders',
             fetchCalls.length === 0,
             'Otherwise every re-render of a broken clip re-hammers the route.');
@@ -214,7 +255,7 @@ const run = async () => {
         // ...until something changes that could plausibly fix it.
         WaveformEngine.reset('asset-500');
         fetchCalls = [];
-        await WaveformEngine.getPeaks('asset-500', { proxyUrl: '/w/proxy.mp4' });
+        await WaveformEngine.getPeaks('asset-500', { proxyUrl: '/api/proxy/gcs-media/proxies/u/w/proxy.mp4' });
         check('reset() re-enables retry (e.g. proxy job finally finished)',
             fetchCalls.filter(u => String(u).includes('/extract')).length > 0);
     }
@@ -222,7 +263,7 @@ const run = async () => {
     console.log('\n── 8. Inline-peaks fallback (server storage upload failed) ──');
     {
         fetchImpl = async () => jsonRes({ peaksUrl: null, peaks: [0.7, 0.2], duration: 2 });
-        const r = await WaveformEngine.getPeaks('asset-inline', { proxyUrl: '/i/proxy.mp4' });
+        const r = await WaveformEngine.getPeaks('asset-inline', { proxyUrl: '/api/proxy/gcs-media/proxies/u/i/proxy.mp4' });
         check('inline peaks are accepted when no peaksUrl is returned',
             r?.peaks?.length === 2,
             'The server returns peaks inline rather than leaving the client empty-handed.');

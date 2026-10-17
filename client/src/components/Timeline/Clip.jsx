@@ -86,8 +86,8 @@ const Clip = ({ clip, trackId, trackType }) => {
     // usePeaks is READ-ONLY — it does not fetch. WaveformEngine owns extraction,
     // caching, dedupe, concurrency and retry, so rendering a clip can no longer
     // trigger network work. Pass the raw URLs straight through; the engine
-    // decides what's usable (it rejects blob:/data:, which the server cannot
-    // resolve to a storage object, and waits for a real proxyUrl instead).
+    // decides what's usable (it only sends URL shapes the extract route can
+    // read, and waits for a real proxyUrl otherwise).
     //
     // ONE MORE THING it should NOT be handed: the RAW upload of a video asset
     // before its proxy exists. Raw phone footage routinely has its moov atom at
