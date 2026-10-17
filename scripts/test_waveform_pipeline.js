@@ -225,7 +225,7 @@ console.log('\n=== waveformRoutes: storage objects are read through a seekable i
     ok('a temp-file download is the fallback when signing fails', /file\.download\(\{ destination: tmp \}\)/.test(src), true);
     ok('the storage input is passed to ffmpeg as a path, not a stream',
         /extractPeaks\(storageInput, null\)/.test(src), true);
-    ok('/sfx-library/ URLs are read from disk', /resolveStaticAudioFile\(proxyUrl\)/.test(src), true);
+    ok('/sfx-library/ URLs are read from disk', /resolveStaticAudioFile\(staticRel\)/.test(src), true);
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);

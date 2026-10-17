@@ -115,9 +115,7 @@ const STATIC_AUDIO_ROOTS = [
     path.resolve(__dirname, '../client/public'),
 ];
 
-function resolveStaticAudioFile(url) {
-    const rel = resolveStaticAudioPath(url);
-    if (!rel) return null;
+function resolveStaticAudioFile(rel) {
     for (const root of STATIC_AUDIO_ROOTS) {
         const candidate = path.join(root, rel);
         if (fs.existsSync(candidate)) return candidate;
@@ -397,7 +395,7 @@ router.post('/extract', optionalAuth, async (req, res) => {
         let inputPath   = null;
         let inputStream = null;
         let storagePath = null;
-        const staticFile = gcsPath ? null : resolveStaticAudioFile(proxyUrl);
+        const staticRel = gcsPath ? null : resolveStaticAudioPath(proxyUrl);
 
         if (useGCS && gcsPath) {
             // Resolved inside the concurrency slot below — see resolveStorageInput.
@@ -410,10 +408,9 @@ router.post('/extract', optionalAuth, async (req, res) => {
                 return res.status(403).json({ error: 'Invalid gcsPath' });
             }
             inputPath = resolved;
-        } else if (staticFile) {
-            inputPath = staticFile;
-        } else if (resolveStaticAudioPath(proxyUrl)) {
-            return res.status(404).json({ error: 'Static audio file not found' });
+        } else if (staticRel) {
+            inputPath = resolveStaticAudioFile(staticRel);
+            if (!inputPath) return res.status(404).json({ error: 'Static audio file not found' });
         } else if (proxyUrl && /^https?:\/\//i.test(proxyUrl)) {
             // Not one of our own storage shapes — see the external-URL
             // fallback comment above the imports.
