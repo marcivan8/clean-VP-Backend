@@ -26,6 +26,53 @@ const storageConfig  = require('../config/storage');
 const { optionalAuth } = require('../middleware/auth');
 const { deriveGcsPath } = require('../utils/waveformPath');
 
+// ── External (non-storage) URL fallback ───────────────────────────────────
+// deriveGcsPath() can only translate OUR OWN proxy/raw URL shapes (the GCS
+// proxy marker, the local /uploads/ marker, a storage.googleapis.com URL, or
+// a bare storage-relative key) into a storage object path. A library asset
+// whose previewUrl points somewhere else entirely — a sound-effect pack
+// served from a third-party CDN, for instance — has no gcsPath to resolve,
+// so it fell straight into the 400 below no matter how many times the
+// client retried. The asset's audio still played fine, because the player
+// uses that URL directly; only waveform extraction (which needs a stream to
+// hand ffmpeg) was blocked. Fetch the URL directly as a last resort, the
+// same way the GCS branch below streams a storage object into ffmpeg.
+const https = require('https');
+const http  = require('http');
+
+const EXTERNAL_FETCH_TIMEOUT_MS = 20_000;
+const EXTERNAL_FETCH_MAX_REDIRECTS = 3;
+
+/**
+ * Resolve an absolute http(s) URL to a readable stream of its body.
+ * Follows a bounded number of redirects; rejects on a non-2xx status or on
+ * timeout so a stalled third-party host can't hold a ffmpeg slot forever
+ * (same concern WAVEFORM_FFMPEG_TIMEOUT_MS addresses for GCS reads below).
+ */
+function fetchAsReadStream(url, redirectsLeft = EXTERNAL_FETCH_MAX_REDIRECTS) {
+    return new Promise((resolve, reject) => {
+        let u;
+        try { u = new URL(url); } catch { return reject(new Error(`invalid URL: ${url}`)); }
+        const client = u.protocol === 'http:' ? http : https;
+
+        const req = client.get(u, { timeout: EXTERNAL_FETCH_TIMEOUT_MS }, (resp) => {
+            const status = resp.statusCode || 0;
+            if (status >= 300 && status < 400 && resp.headers.location && redirectsLeft > 0) {
+                resp.resume(); // drain so the socket can be reused
+                const next = new URL(resp.headers.location, u).toString();
+                return resolve(fetchAsReadStream(next, redirectsLeft - 1));
+            }
+            if (status < 200 || status >= 300) {
+                resp.resume();
+                return reject(new Error(`external source returned ${status}`));
+            }
+            resolve(resp);
+        });
+        req.on('timeout', () => { req.destroy(new Error(`external source timed out after ${EXTERNAL_FETCH_TIMEOUT_MS / 1000}s`)); });
+        req.on('error', reject);
+    });
+}
+
 // ─── Peak extraction ──────────────────────────────────────────────────────────
 
 const SAMPLE_RATE     = 22050;
@@ -308,6 +355,15 @@ router.post('/extract', optionalAuth, async (req, res) => {
                 return res.status(403).json({ error: 'Invalid gcsPath' });
             }
             inputPath = resolved;
+        } else if (proxyUrl && /^https?:\/\//i.test(proxyUrl)) {
+            // Not one of our own storage shapes — see the external-URL
+            // fallback comment above the imports.
+            try {
+                inputStream = await fetchAsReadStream(proxyUrl);
+            } catch (fetchErr) {
+                console.warn(`[waveformRoutes] external fetch failed for ${assetId} (${proxyUrl}):`, fetchErr.message);
+                return res.status(502).json({ error: `Could not read external audio source: ${fetchErr.message}` });
+            }
         } else {
             return res.status(400).json({
                 error: 'gcsPath is required when no cached peaks exist',

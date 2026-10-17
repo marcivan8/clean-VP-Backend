@@ -1595,15 +1595,22 @@ export class MediaExecutionEngine {
                 const words = Array.isArray(st.captions) ? st.captions : [];
                 const events = await this._fetchSemanticEvents();
                 let plan = null;
+                let scenePlan = null;
                 const text = words.slice(0, 400).map(w => String(w.word ?? w.text ?? '')).join(' ');
                 if (text) {
-                    const { fetchShortPlan } = await import('./shortFinisher.js');
-                    plan = await fetchShortPlan(text, platform, total);
+                    const { fetchShortPlan, fetchScenePlan } = await import('./shortFinisher.js');
+                    // R102 -- the full SceneDirector plan, auto-triggered
+                    // alongside the existing short-plan fetch (same
+                    // transcript, same graceful "null on failure" contract).
+                    [plan, scenePlan] = await Promise.all([
+                        fetchShortPlan(text, platform, total),
+                        fetchScenePlan(text, platform, total),
+                    ]);
                 }
                 // Earlier finish replaced, not stacked.
                 const before = JSON.parse(JSON.stringify(st.tracks || []));
                 const polished = polishShort({ tracks: before.map(t => ({ ...t, clips: t.clips.filter(c => !isFinishLayer(c)) })), duration: total, aspectRatio: st.aspectRatio },
-                    profile, { words, events, plan });
+                    profile, { words, events, plan, scenePlan });
                 st._saveHistory?.();
                 // Remove the previous finish layers, then write the changes clip by clip.
                 for (const t of (useTimelineStore.getState().tracks || [])) {

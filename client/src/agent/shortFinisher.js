@@ -85,10 +85,40 @@ export async function fetchShortPlan(text, platform, duration) {
 }
 
 /**
+ * R102 -- the full SceneDirector plan for a short's hook/CTA (POST
+ * /api/motion/scene-plan), grounded in the short's own transcript so the
+ * beats carry real words instead of SceneDirector's own "YOUR HEADLINE"-
+ * style placeholders (it refuses to invent claims -- see SceneDirector.js's
+ * own doc comment). The brief here is deliberately generic ("open strong,
+ * surface the key point, close with a call to action") because the actual
+ * content comes from the transcript; tone is decided client-side (shortPolish
+ * always forces 'viral' for this call), not from this brief. Beats are left
+ * unspecified so the model decides the full structure itself (R101 PHASE 1)
+ * instead of only ever filling words into a fixed shape -- shortPolish then
+ * picks just the intro/point/cta beats it has room for.
+ */
+export async function fetchScenePlan(text, platform, duration) {
+    if (!text) return null;
+    const brief = 'A short-form video: open with a strong hook, surface the single most '
+        + 'important point or figure, and close with a call to action if the video asks for one.';
+    try {
+        const res = await authFetch('/api/motion/scene-plan', {
+            method: 'POST',
+            body: JSON.stringify({ brief, transcript: text, platform, duration }),
+        });
+        const data = await res.json().catch(() => ({}));
+        return res.ok ? (data.plan || null) : null;
+    } catch (err) {
+        console.warn('[shortFinisher] scene plan unavailable, hook stays a single title:', err.message);
+        return null;
+    }
+}
+
+/**
  * Build the finished short.
  * @param {object} state useTimelineStore.getState()
  * @param {object} short an entry of state.shorts
- * @param {{polish?:boolean, popOut?:boolean, sfx?:boolean, plan?:object|null, fetchPlan?:Function, fetchAsset?:Function}} opts
+ * @param {{polish?:boolean, popOut?:boolean, sfx?:boolean, plan?:object|null, scenePlan?:object|null, fetchPlan?:Function, fetchScenePlan?:Function, fetchAsset?:Function}} opts
  * @returns {Promise<{tracks, duration, aspectRatio, applied:string[], words:Array}>}
  */
 export async function finishShort(state, short, opts = {}) {
@@ -102,9 +132,13 @@ export async function finishShort(state, short, opts = {}) {
     if (opts.polish === false) return { ...built, applied: [], words };
 
     const text = words.map(w => String(w.word ?? w.text ?? '')).join(' ').slice(0, 2000);
-    const plan = opts.plan !== undefined ? opts.plan
-        : (text ? await (opts.fetchPlan || fetchShortPlan)(text, profile.id, built.duration) : null);
-    const polished = polishShort(built, profile, { words, events, plan, popOut: !!opts.popOut });
+    const [plan, scenePlan] = await Promise.all([
+        opts.plan !== undefined ? opts.plan
+            : (text ? (opts.fetchPlan || fetchShortPlan)(text, profile.id, built.duration) : null),
+        opts.scenePlan !== undefined ? opts.scenePlan
+            : (text ? (opts.fetchScenePlan || fetchScenePlan)(text, profile.id, built.duration) : null),
+    ]);
+    const polished = polishShort(built, profile, { words, events, plan, scenePlan, popOut: !!opts.popOut });
     if (opts.sfx !== false) {
         const placed = await addSfxTrack(polished.tracks, collectSfxCues(polished.tracks, { level: profile.sfx }), profile.sfx, opts.fetchAsset);
         if (placed) polished.applied.push(`sound effects (${placed})`);
@@ -113,4 +147,4 @@ export async function finishShort(state, short, opts = {}) {
     return { ...polished, words };
 }
 
-export default { finishShort, fetchShortPlan, fetchSfxAsset, addSfxTrack };
+export default { finishShort, fetchShortPlan, fetchScenePlan, fetchSfxAsset, addSfxTrack };

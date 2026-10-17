@@ -178,6 +178,15 @@ const NLP_MAP = {
         'match footage to what he\'s saying', 'match my footage to the dialogue',
         'place b-roll automatically', 'auto place my b-roll', 'auto-edit my b-roll',
         'insert b-roll where it fits', 'cut away to matching footage',
+        // Plain natural phrasing — "add some b-rolls", "add b-roll" — was
+        // entirely missing here (every phrase above required a possessive
+        // "my"/"the" or a specific verb like "sync"/"match"), which sent a
+        // bare "add b-roll" request to the server LLM parser instead of
+        // resolving locally.
+        'add b-roll', 'add b-rolls', 'add some b-roll', 'add some b-rolls',
+        'add the b-roll', 'add the b-rolls', 'add more b-roll', 'add more b-rolls',
+        'add relevant b-roll', 'add matching b-roll',
+        'add cutaway footage', 'add some cutaway footage',
     ],
     fetchStockBroll: [
         'stock footage', 'stock video', 'stock clip', 'stock clips',
