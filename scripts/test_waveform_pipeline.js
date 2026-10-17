@@ -23,7 +23,7 @@
  * Run: node scripts/test_waveform_pipeline.js
  */
 
-const { deriveGcsPath } = require('../utils/waveformPath');
+const { deriveGcsPath, resolveStaticAudioPath } = require('../utils/waveformPath');
 
 let passed = 0;
 let failed = 0;
@@ -182,6 +182,50 @@ console.log('\n=== proxyRoutes: a range-stream error always ends the response ==
     ok('the old log-and-hang handler is gone',
         !/Range stream error[\s\S]{0,120}if \(!res\.headersSent\) res\.status\(500\)\.end\(\);\s*\}\);/.test(src),
         true);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sound-effect clips carry a relative /sfx-library/<file> URL. It is not a
+// storage object, so the route answered 400 "gcsPath is required" and the
+// client never retried. The route now reads these files from disk.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n=== resolveStaticAudioPath: bundled sound effects ===');
+{
+    ok('a library file resolves', resolveStaticAudioPath('/sfx-library/bass-drop-01.mp3'), 'sfx-library/bass-drop-01.mp3');
+    ok('an encoded name with a query string resolves',
+        resolveStaticAudioPath('/sfx-library/Whoosh%201.mp3?v=2'), 'sfx-library/Whoosh 1.mp3');
+    ok('a ".." segment is refused', resolveStaticAudioPath('/sfx-library/../index.js'), null);
+    ok('an encoded ".." is refused', resolveStaticAudioPath('/sfx-library/%2e%2e%2fsecret'), null);
+    ok('a nested path is refused', resolveStaticAudioPath('/sfx-library/a/b.mp3'), null);
+    ok('a storage URL is not static audio', resolveStaticAudioPath('/uploads/x.mp3'), null);
+    ok('deriveGcsPath still refuses the sfx URL (handled separately)',
+        deriveGcsPath(null, '/sfx-library/bass-drop-01.mp3'), null);
+
+    const fs   = require('fs');
+    const path = require('path');
+    const libDir = path.resolve(__dirname, '../client/public/sfx-library');
+    const names  = fs.existsSync(libDir) ? fs.readdirSync(libDir) : [];
+    const unresolved = names.filter(n => resolveStaticAudioPath(`/sfx-library/${encodeURIComponent(n)}`) !== `sfx-library/${n}`);
+    ok('every shipped sound-effect file name resolves', unresolved.join(', '), '');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ffmpeg must get a SEEKABLE input for storage objects. Through `-i pipe:0` a
+// file with its moov atom at the end (raw phone uploads) cannot be demuxed
+// until the whole object streams in — the 500s on clips that fall back to raw.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n=== waveformRoutes: storage objects are read through a seekable input ===');
+{
+    const fs   = require('fs');
+    const path = require('path');
+    const src  = fs.readFileSync(path.resolve(__dirname, '../routes/waveformRoutes.js'), 'utf8');
+
+    ok('GCS objects are no longer piped from a read stream', /\.createReadStream\(/.test(src), false);
+    ok('GCS objects are read through a signed URL', /getSignedUrl\(/.test(src), true);
+    ok('a temp-file download is the fallback when signing fails', /file\.download\(\{ destination: tmp \}\)/.test(src), true);
+    ok('the storage input is passed to ffmpeg as a path, not a stream',
+        /extractPeaks\(storageInput, null\)/.test(src), true);
+    ok('/sfx-library/ URLs are read from disk', /resolveStaticAudioFile\(proxyUrl\)/.test(src), true);
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);
