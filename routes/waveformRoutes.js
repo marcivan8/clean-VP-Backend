@@ -21,10 +21,12 @@ const { spawn }  = require('child_process');
 const ffmpegPath = require('ffmpeg-static');
 const path       = require('path');
 const fs         = require('fs');
+const os         = require('os');
+const crypto     = require('crypto');
 
 const storageConfig  = require('../config/storage');
 const { optionalAuth } = require('../middleware/auth');
-const { deriveGcsPath } = require('../utils/waveformPath');
+const { deriveGcsPath, resolveStaticAudioPath } = require('../utils/waveformPath');
 
 // ── External (non-storage) URL fallback ───────────────────────────────────
 // deriveGcsPath() can only translate OUR OWN proxy/raw URL shapes (the GCS
@@ -71,6 +73,54 @@ function fetchAsReadStream(url, redirectsLeft = EXTERNAL_FETCH_MAX_REDIRECTS) {
         req.on('timeout', () => { req.destroy(new Error(`external source timed out after ${EXTERNAL_FETCH_TIMEOUT_MS / 1000}s`)); });
         req.on('error', reject);
     });
+}
+
+// ── Storage source: seekable input, never a pipe ──────────────────────────
+// ffmpeg used to read GCS objects through `-i pipe:0`. A pipe cannot seek, so
+// an MP4/MOV with its moov atom at the END (raw phone uploads, R7/R25/R34)
+// cannot be demuxed until the whole object has streamed in, and often not at
+// all. That is the 500 ("decode timed out" / "no output") on clips that fall
+// back to the raw upload. A signed URL lets ffmpeg seek with HTTP range
+// requests, the same input interviewRoutes.js gives ffmpeg. When the
+// credentials cannot sign (no private key), download to a temp file instead.
+const SIGNED_URL_TTL_MS = 15 * 60 * 1000;
+
+async function resolveStorageInput(gcsPath) {
+    const file = storageConfig.bucket.file(gcsPath);
+    try {
+        const [url] = await file.getSignedUrl({
+            version: 'v4',
+            action:  'read',
+            expires: Date.now() + SIGNED_URL_TTL_MS,
+        });
+        return { inputPath: url, cleanup: null };
+    } catch (signErr) {
+        console.warn(`[waveformRoutes] cannot sign ${gcsPath} (${signErr.message}) — downloading to a temp file`);
+        const tmp = path.join(os.tmpdir(), `waveform-${crypto.randomUUID()}${path.extname(gcsPath)}`);
+        const cleanup = () => fs.promises.unlink(tmp).catch(() => {});
+        try {
+            await file.download({ destination: tmp });
+        } catch (dlErr) {
+            await cleanup();
+            throw dlErr;
+        }
+        return { inputPath: tmp, cleanup };
+    }
+}
+
+// Bundled static audio (`/sfx-library/<file>`) is read from the SPA build, or
+// from client/public when there is no build (dev).
+const STATIC_AUDIO_ROOTS = [
+    path.resolve(__dirname, '../client/dist'),
+    path.resolve(__dirname, '../client/public'),
+];
+
+function resolveStaticAudioFile(rel) {
+    for (const root of STATIC_AUDIO_ROOTS) {
+        const candidate = path.join(root, rel);
+        if (fs.existsSync(candidate)) return candidate;
+    }
+    return null;
 }
 
 // ─── Peak extraction ──────────────────────────────────────────────────────────
@@ -166,7 +216,8 @@ function withWaveformSlot(fn) {
 }
 
 /**
- * Run ffmpeg on inputPath (file) or inputStream (GCS read stream).
+ * Run ffmpeg on inputPath (local file or signed URL) or inputStream (external
+ * http(s) response body).
  * Returns { peaks: number[], duration: number }.
  */
 function extractPeaks(inputPath, inputStream) {
@@ -343,10 +394,12 @@ router.post('/extract', optionalAuth, async (req, res) => {
         // ── 2. Build ffmpeg source ────────────────────────────────────────────
         let inputPath   = null;
         let inputStream = null;
+        let storagePath = null;
+        const staticRel = gcsPath ? null : resolveStaticAudioPath(proxyUrl);
 
         if (useGCS && gcsPath) {
-            // Stream directly from GCS — no local copy needed
-            inputStream = storageConfig.bucket.file(gcsPath).createReadStream();
+            // Resolved inside the concurrency slot below — see resolveStorageInput.
+            storagePath = gcsPath;
         } else if (gcsPath) {
             // Local storage: resolve from uploads dir
             const uploadsDir = path.resolve(__dirname, '../uploads');
@@ -355,6 +408,9 @@ router.post('/extract', optionalAuth, async (req, res) => {
                 return res.status(403).json({ error: 'Invalid gcsPath' });
             }
             inputPath = resolved;
+        } else if (staticRel) {
+            inputPath = resolveStaticAudioFile(staticRel);
+            if (!inputPath) return res.status(404).json({ error: 'Static audio file not found' });
         } else if (proxyUrl && /^https?:\/\//i.test(proxyUrl)) {
             // Not one of our own storage shapes — see the external-URL
             // fallback comment above the imports.
@@ -371,7 +427,15 @@ router.post('/extract', optionalAuth, async (req, res) => {
         }
 
         // ── 3. Extract peaks (queued — see WAVEFORM_MAX_CONCURRENT above) ─────
-        const peaksData = await withWaveformSlot(() => extractPeaks(inputPath, inputStream));
+        const peaksData = await withWaveformSlot(async () => {
+            if (!storagePath) return extractPeaks(inputPath, inputStream);
+            const { inputPath: storageInput, cleanup } = await resolveStorageInput(storagePath);
+            try {
+                return await extractPeaks(storageInput, null);
+            } finally {
+                if (cleanup) await cleanup();
+            }
+        });
 
         // ── 3b. NEVER persist an empty result ─────────────────────────────────
         // The cache check in step 1 is an `exists()` test — it does not inspect

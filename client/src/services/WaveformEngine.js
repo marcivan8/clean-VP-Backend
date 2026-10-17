@@ -84,13 +84,18 @@ function _schedule(fn) {
 const _sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 /**
- * A URL is only useful to the server if the server can fetch it. `blob:` and
- * `data:` URLs exist only in this tab — the extract route's deriveGcsPath()
- * cannot resolve them to a storage object and answers 400 every time. Passing
- * one through burned an attempt and produced a permanently waveform-less clip.
+ * A URL is only useful to the server if the server can read it. The extract
+ * route accepts exactly these shapes (utils/waveformPath.js): an absolute
+ * http(s) URL, our storage URLs (`/api/proxy/gcs-media/…`, `/uploads/…`), a
+ * bare storage key, and bundled `/sfx-library/<file>` audio. Anything else —
+ * `blob:`/`data:` URLs that exist only in this tab, or another relative path —
+ * gets a 400 every time, and a 4xx is never retried, so passing one through
+ * left the clip without a waveform for the whole session.
  */
+const SERVER_URL_SHAPE = /^(https?:\/\/|\/api\/proxy\/gcs-media\/|\/uploads\/|\/sfx-library\/[^/?#]+(?:[?#]|$)|(raw|proxies|uploads|waveforms)\/)/i;
+
 function isServerResolvable(url) {
-    return !!url && !/^(blob|data):/i.test(url);
+    return typeof url === 'string' && SERVER_URL_SHAPE.test(url);
 }
 
 /** Read the reload-surviving cache written by a previous session. */
