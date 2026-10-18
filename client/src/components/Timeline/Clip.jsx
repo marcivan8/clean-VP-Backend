@@ -10,7 +10,6 @@ import classNames from 'classnames';
 import Waveform from './Waveform';
 import ClipContextMenu from './ClipContextMenu';
 import ClipWaveform from '../ClipWaveform';
-import { colorForTrackType } from './trackColors';
 import { usePeaks } from '../../hooks/usePeaks';
 import { getAssetUploadStatus, UPLOAD_PHASES, isProblemPhase } from '../../utils/uploadStatus.js';
 import { getMainVideoTrackId } from '../../timeline/rippleDelete.js';
@@ -49,7 +48,7 @@ const fmtLen = (s) => {
     return `${m}:${r < 10 ? '0' : ''}${r.toFixed(1)}`;
 };
 
-const Clip = ({ clip, trackId, trackType }) => {
+const Clip = ({ clip, trackId }) => {
     const { t } = useTranslation('editor');
     const { isMobile } = useDeviceType();
     const { zoomLevel, deleteClipWithMagnet, activeClipId, selectedClipIds, setActiveClip, toggleClipSelection, assets } = useTimelineStore(useShallow(state => ({
@@ -143,16 +142,9 @@ const Clip = ({ clip, trackId, trackType }) => {
         const slice = wsPeaks.slice(from, to);
         return slice.length >= 2 ? slice : wsPeaks;
     }, [wsPeaks, wsDuration, clip.offset, clip.duration]);
-    // Previously hardcoded to one of two fixed rgba literals keyed only on
-    // clip.type ('audio' vs everything else) — every audio clip got the same
-    // orange approximation regardless of which track it sat on, and a video
-    // clip's embedded-audio waveform got a green that didn't match that
-    // track's own colour anywhere else in the UI (Track.jsx's mobile strip
-    // uses --accent/cyan for video, not green). Deriving from the track's own
-    // type — the same lookup Track.jsx uses for its strip indicator — means
-    // the waveform tint always matches what the rest of the UI calls "this
-    // track's colour", including for a track type added later.
-    const wsColor = `color-mix(in srgb, ${colorForTrackType(trackType ?? (clip.type === 'audio' ? 'audio' : 'video'))} 60%, transparent)`;
+    const wsColor = clip.type === 'audio'
+        ? 'rgba(251,146,60,0.6)'
+        : 'rgba(52,211,153,0.6)';
 
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: clip.id,

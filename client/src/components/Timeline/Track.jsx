@@ -8,7 +8,6 @@ import { Video, Music, Type, Volume2, VolumeX, Headphones, X } from 'lucide-reac
 import classNames from 'classnames';
 import useTimelineStore from '../../store/useTimelineStore';
 import MobileSheet, { SheetLabel, SheetRow } from '../MobileSheet';
-import { colorForTrackType } from './trackColors';
 
 const TrackIcon = ({ type }) => {
     switch (type) {
@@ -36,12 +35,12 @@ const TRACK_H_TEXT_MOBILE        = 22;
  * icon opens the track options sheet: mute, solo, volume, delete. A muted or
  * solo track shows it on the strip so the state is never hidden.
  */
-// Colour tokens now live in trackColors.js (shared with Clip.jsx's waveform tint).
+const STRIP_COLORS = { video: 'var(--accent)', audio: 'var(--coral)', text: 'var(--mint)', image: 'var(--accent)' };
 const TrackStrip = ({ track, width }) => {
     const { t } = useTranslation('editor');
     const [open, setOpen] = React.useState(false);
     const isText = track.type === 'text';
-    const color = colorForTrackType(track.type);
+    const color = STRIP_COLORS[track.type] || 'var(--fg-3)';
     const typeLabel = track.type === 'audio' ? t('mobileUi.trackAudio') : isText ? t('mobileUi.trackText') : t('mobileUi.trackVideo');
     const Icon = track.type === 'audio' ? Music : isText ? Type : Video;
     const st = () => useTimelineStore.getState();
@@ -223,7 +222,7 @@ const Track = ({ track, labelWidth = 128, compact = false }) => {
                 <div className="absolute inset-0 pointer-events-none opacity-10 bg-[linear-gradient(90deg,transparent_99%,#fff_100%)] bg-[length:100px_100%]"></div>
 
                 {track.clips.map(clip => (
-                    <Clip key={clip.id} clip={clip} trackId={track.id} trackType={track.type} />
+                    <Clip key={clip.id} clip={clip} trackId={track.id} />
                 ))}
             </div>
             {emptyMenu && (
