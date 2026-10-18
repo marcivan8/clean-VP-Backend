@@ -18,6 +18,25 @@ async function currentUserId() {
 }
 
 /**
+ * Sanitize timeline state before sending to Supabase / PostgreSQL.
+ *
+ * PostgreSQL stores timeline_state in a jsonb column. Waveform peak arrays
+ * contain hundreds of thousands of floats per asset and can reach 10-30 MB.
+ * Sending that over PostgREST on every autosave causes:
+ *   1) PostgreSQL statement_timeout: "canceling statement due to statement timeout" (HTTP 500)
+ *   2) Upstream gateway timeout (HTTP 504)
+ *
+ * Waveforms are reconstructible from audio files and cached in GCS/local
+ * as waveform.json, so they never belong in the database row. Transcripts,
+ * scene analysis, diarization, edit history, and timeline tracks remain intact.
+ */
+export function sanitizeTimelineForCloud(projectData) {
+    if (!projectData || typeof projectData !== 'object') return projectData;
+    const { waveforms: _w, waveformsByAsset: _wba, ...clean } = projectData;
+    return clean;
+}
+
+/**
  * Build the slim metadata object stored alongside the full timeline_state.
  * Extracted so it is consistent between create and update calls.
  */
@@ -41,12 +60,14 @@ export async function createProject(name, projectData) {
     const userId = await currentUserId();
     if (!userId) return null;
 
+    const cleanData = sanitizeTimelineForCloud(projectData);
+
     const { data, error } = await supabase
         .from('projects')
         .insert({
             user_id:        userId,
             name:           name || 'Untitled Project',
-            timeline_state: projectData ?? {},
+            timeline_state: cleanData ?? {},
             ...buildMeta(projectData ?? {}),
         })
         .select('id')
@@ -110,8 +131,9 @@ export async function listProjects() {
  * @returns {Promise<boolean>}  true on success
  */
 export async function updateProject(projectId, projectData, name, thumbnailUrl) {
+    const cleanData = sanitizeTimelineForCloud(projectData);
     const updates = {
-        timeline_state: projectData,
+        timeline_state: cleanData,
         updated_at:     new Date().toISOString(),
         ...buildMeta(projectData),
     };

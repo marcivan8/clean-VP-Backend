@@ -48,8 +48,78 @@ export function useSupabasePersistence() {
     const timerRef         = useRef(null);
     const thumbTimerRef    = useRef(null);
     const thumbnailDoneRef = useRef(false); // captures at most once per editor session
+    const isSavingRef      = useRef(false);
+    const pendingSaveRef   = useRef(false);
 
     useEffect(() => {
+        const executeSave = async () => {
+            if (isSavingRef.current) {
+                pendingSaveRef.current = true;
+                return;
+            }
+            isSavingRef.current = true;
+            pendingSaveRef.current = false;
+
+            try {
+                const { projectId, projectName, setProjectId, saveProject } = useTimelineStore.getState();
+
+                // Build the payload from LIVE store state rather than reading
+                // back what saveProject() wrote to localStorage. Two reasons:
+                //
+                // 1. CORRECTNESS — saveProject() progressively drops the heavy
+                //    AI blobs (transcripts, waveforms, diarization) when
+                //    localStorage is over its ~5 MB quota. Round-tripping
+                //    through localStorage meant Supabase received that
+                //    STRIPPED copy, so the one store with no size ceiling was
+                //    silently capped by the one that has it — and the
+                //    transcript would be missing from the cloud project too.
+                // 2. FRESHNESS — the old code snapshotted localStorage at
+                //    subscribe time but wrote it 3 s later, so any edit made
+                //    inside that window was omitted from the cloud copy.
+                //
+                // saveProject() returns the complete payload and is cheap +
+                // idempotent; calling it here also guarantees localStorage and
+                // Supabase are generated from the same instant of state.
+                const projectData = saveProject();
+                if (!projectData) return;
+
+                const savedId = await _supabaseSave(projectData, projectId, projectName, (newId) => {
+                    setProjectId(newId);
+                });
+
+                // ── Thumbnail capture (one-shot) ──────────────────────────────
+                // Trigger after the first successful save that has video clips.
+                if (!thumbnailDoneRef.current && savedId) {
+                    const { tracks } = useTimelineStore.getState();
+                    const hasVideoClips = tracks.some(
+                        t => t.type === 'video' && t.clips?.length > 0
+                    );
+                    if (hasVideoClips) {
+                        thumbnailDoneRef.current = true; // lock immediately to prevent re-entry
+                        clearTimeout(thumbTimerRef.current);
+                        thumbTimerRef.current = setTimeout(async () => {
+                            try {
+                                const { captureProjectThumbnail } = await import(
+                                    '../utils/captureProjectThumbnail.js'
+                                );
+                                const { tracks: t, assets: a } = useTimelineStore.getState();
+                                await captureProjectThumbnail(savedId, t, a);
+                            } catch (err) {
+                                console.warn('[useSupabasePersistence] Thumbnail capture failed:', err.message);
+                                thumbnailDoneRef.current = false; // allow retry next save
+                            }
+                        }, THUMB_DELAY_MS);
+                    }
+                }
+            } finally {
+                isSavingRef.current = false;
+                if (pendingSaveRef.current) {
+                    pendingSaveRef.current = false;
+                    executeSave();
+                }
+            }
+        };
+
         // R91: the editing style is saved with the project too, so picking one
         // syncs even when the timeline itself did not change.
         const unsub = useTimelineStore.subscribe(
@@ -57,58 +127,7 @@ export function useSupabasePersistence() {
             (state) => [state.tracks, state.editingStyle, state.shorts],
             () => {
                 clearTimeout(timerRef.current);
-                timerRef.current = setTimeout(async () => {
-                    const { projectId, projectName, setProjectId, saveProject } = useTimelineStore.getState();
-
-                    // Build the payload from LIVE store state rather than reading
-                    // back what saveProject() wrote to localStorage. Two reasons:
-                    //
-                    // 1. CORRECTNESS — saveProject() progressively drops the heavy
-                    //    AI blobs (transcripts, waveforms, diarization) when
-                    //    localStorage is over its ~5 MB quota. Round-tripping
-                    //    through localStorage meant Supabase received that
-                    //    STRIPPED copy, so the one store with no size ceiling was
-                    //    silently capped by the one that has it — and the
-                    //    transcript would be missing from the cloud project too.
-                    // 2. FRESHNESS — the old code snapshotted localStorage at
-                    //    subscribe time but wrote it 3 s later, so any edit made
-                    //    inside that window was omitted from the cloud copy.
-                    //
-                    // saveProject() returns the complete payload and is cheap +
-                    // idempotent; calling it here also guarantees localStorage and
-                    // Supabase are generated from the same instant of state.
-                    const projectData = saveProject();
-                    if (!projectData) return;
-
-                    const savedId = await _supabaseSave(projectData, projectId, projectName, (newId) => {
-                        setProjectId(newId);
-                    });
-
-                    // ── Thumbnail capture (one-shot) ──────────────────────────────
-                    // Trigger after the first successful save that has video clips.
-                    if (!thumbnailDoneRef.current && savedId) {
-                        const { tracks, assets } = useTimelineStore.getState();
-                        const hasVideoClips = tracks.some(
-                            t => t.type === 'video' && t.clips?.length > 0
-                        );
-                        if (hasVideoClips) {
-                            thumbnailDoneRef.current = true; // lock immediately to prevent re-entry
-                            clearTimeout(thumbTimerRef.current);
-                            thumbTimerRef.current = setTimeout(async () => {
-                                try {
-                                    const { captureProjectThumbnail } = await import(
-                                        '../utils/captureProjectThumbnail.js'
-                                    );
-                                    const { tracks: t, assets: a } = useTimelineStore.getState();
-                                    await captureProjectThumbnail(savedId, t, a);
-                                } catch (err) {
-                                    console.warn('[useSupabasePersistence] Thumbnail capture failed:', err.message);
-                                    thumbnailDoneRef.current = false; // allow retry next save
-                                }
-                            }, THUMB_DELAY_MS);
-                        }
-                    }
-                }, DEBOUNCE_MS);
+                timerRef.current = setTimeout(executeSave, DEBOUNCE_MS);
             },
             { equalityFn: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2] }
         );

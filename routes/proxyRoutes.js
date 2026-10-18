@@ -441,9 +441,20 @@ router.get('/gcs-media/*', mediaAccess.requireMediaAccess(req => req.params[0]),
             const openRangeStream = (attempt = 1) => new Promise((resolve, reject) => {
                 const stream = file.createReadStream({ start, end });
                 let piped = false;
+                let clientClosed = false;
+
+                const onClose = () => {
+                    clientClosed = true;
+                    stream.destroy();
+                };
+                res.once('close', onClose);
 
                 stream.on('error', (err) => {
                     stream.destroy();
+                    res.removeListener('close', onClose);
+                    if (clientClosed || res.destroyed) {
+                        return resolve();
+                    }
                     // Only safe to retry while nothing has been written yet.
                     if (!piped && !res.headersSent && attempt < 3) {
                         console.warn(
@@ -459,18 +470,21 @@ router.get('/gcs-media/*', mediaAccess.requireMediaAccess(req => req.params[0]),
                 });
 
                 stream.once('data', () => { piped = true; });
-                stream.on('end', resolve);
+                stream.on('end', () => {
+                    res.removeListener('close', onClose);
+                    resolve();
+                });
 
                 res.status(206);
                 res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
                 res.setHeader('Content-Length', chunkLen);
-                res.on('close', () => stream.destroy());
                 stream.pipe(res);
             });
 
             try {
                 await openRangeStream();
             } catch (err) {
+                if (res.destroyed || res.writableEnded) return;
                 console.error('[proxy/gcs-media] Range stream error', gcsPath, ':', err.message);
                 // ALWAYS end the response. If headers went out we can only
                 // destroy the socket — the client sees a truncated body and
@@ -502,7 +516,15 @@ router.get('/gcs-media/*', mediaAccess.requireMediaAccess(req => req.params[0]),
             // because it can't frame the response correctly over a multiplexed connection.
             res.setHeader('Content-Length', fileSize);
             const stream = file.createReadStream();
+            let clientClosed = false;
+            const onClose = () => {
+                clientClosed = true;
+                stream.destroy();
+            };
+            res.once('close', onClose);
             stream.on('error', (err) => {
+                res.removeListener('close', onClose);
+                if (clientClosed || res.destroyed) return;
                 console.error('[proxy/gcs-media] Video stream error', gcsPath, ':', err.message);
                 // Same fix as the range-request branch above: Content-Length is
                 // already set and piping may have started, so headersSent is
@@ -513,7 +535,9 @@ router.get('/gcs-media/*', mediaAccess.requireMediaAccess(req => req.params[0]),
                 if (!res.headersSent) res.status(500).end();
                 else res.destroy();
             });
-            res.on('close', () => stream.destroy());
+            stream.on('end', () => {
+                res.removeListener('close', onClose);
+            });
             stream.pipe(res);
         }
     } catch (err) {
