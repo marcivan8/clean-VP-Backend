@@ -189,6 +189,13 @@ export function polishShort(built, profile, opts = {}) {
     // accent), composed for the real frame and safe zone rather than a flat
     // text clip over a hardcoded-width underline.
     const hookDur = Math.min(Math.max(2.2, (profile?.hookSeconds || 1.5) + 1.4), Math.max(1.2, duration * 0.35));
+    // The hook's ACTUAL on-screen span. `hookDur` above is the budget for ONE
+    // title, which is what the hook has always been; a directed sequence of
+    // two beats needs more room, and the sections below (captions, moment
+    // graphics, the CTA collision check) must all key off what the hook really
+    // occupies rather than recomputing the single-title formula -- otherwise a
+    // stretched hook silently overlaps the captions again.
+    let hookSpan = hookDur;
     // composeSceneFromBrief places every beat via SceneDirector's own
     // placementAvoiding(subject, frame, safeZone), which defaults to dead
     // centre with no subject -- unlike the single-title path above (and
@@ -213,10 +220,55 @@ export function polishShort(built, profile, opts = {}) {
         // it falls straight through to the original single-title treatment,
         // unchanged below.
         const scenePlan = opts.scenePlan && typeof opts.scenePlan === 'object' ? opts.scenePlan : null;
-        const introBeats = scenePlan ? [
+
+        // R103 -- PASS THE PLAN'S OWN BEATS THROUGH, do not rebuild them.
+        //
+        // This block used to synthesise its own beats from `scenePlan.title`
+        // and `scenePlan.points[0]`, which silently discarded every other
+        // field the beat carried -- including `motion`, which is where a
+        // knowledge-base technique's verbs live after the route resolved them
+        // (motionRoutes.cleanBeat). The result looked completely correct in
+        // review and in every unit test: a designed multi-beat hook appeared,
+        // the plan was consulted, nothing errored. But `beat.motion` was never
+        // set, so SceneComposer.resolveLook fell back to the look's own motion
+        // every single time, and the entire technique library was inert on the
+        // one path that matters. Caught by test_pro_finish_chain.mjs asserting
+        // the verb on the CLIP (`composed:slam-in`) rather than anywhere
+        // upstream of it.
+        //
+        // So: when the plan has beats, those beats ARE the hook. Only the
+        // closing beats are held back, because section 1b places those at the
+        // end of the short rather than inside the hook window.
+        const planBeats = Array.isArray(scenePlan?.beats) ? scenePlan.beats : [];
+        const usable = (b) => !!(b && (
+            (typeof b.text === 'string' && b.text.trim())
+            || (b.kind === 'stat' && typeof b.value === 'string' && b.value.trim())
+        ));
+        const openingBeats = planBeats.filter(b => b.kind !== 'cta' && b.kind !== 'outro').filter(usable);
+        // Fall back to the flat title/points shape for a plan that has no
+        // beats array (an older response, or the rules path).
+        const flatBeats = scenePlan && openingBeats.length === 0 ? [
             { kind: 'intro', text: (scenePlan.title && String(scenePlan.title).trim()) || null },
-            ...((scenePlan.points?.[0] && hookDur > 3.2) ? [{ kind: 'point', text: String(scenePlan.points[0]).trim(), kicker: '01' }] : []),
-        ].filter(b => b.text) : [];
+            ...(scenePlan.points?.[0] ? [{ kind: 'point', text: String(scenePlan.points[0]).trim(), kicker: '01' }] : []),
+        ].filter(usable) : [];
+        // One beat unless the hook budget can actually hold two: beats share
+        // `hookDur` between them, so a second beat halves the time the first
+        // one is readable.
+        // Two beats when the plan has two and the short can afford them.
+        //
+        // This used to gate on `hookDur > 3.2`, which looked reasonable and was
+        // unreachable: `hookDur` tops out at `hookSeconds + 1.4`, so the
+        // ceiling is 2.9s on TikTok and 2.4s on Shorts. The second beat could
+        // therefore only ever appear on Reels -- a dead path on two of three
+        // platforms, which is the failure class CLAUDE.md keeps counting.
+        //
+        // Squeezing two beats into the one-title budget is the wrong fix: at
+        // ~1.2s each neither is readable. So the window stretches instead,
+        // bounded so the hook can never eat half the short.
+        const offered = openingBeats.length > 0 ? openingBeats : flatBeats;
+        const roomForTwo = offered.length > 1 && duration >= 8;
+        const introBeats = offered.slice(0, roomForTwo ? 2 : 1);
+        if (introBeats.length > 1) hookSpan = Math.min(duration * 0.45, hookDur * 1.8);
 
         let hookApplied = false;
         if (introBeats.length) {
@@ -225,7 +277,7 @@ export function polishShort(built, profile, opts = {}) {
                 {
                     plan: { beats: introBeats },
                     tone: 'viral',
-                    duration: hookDur,
+                    duration: hookSpan,
                     aspectRatio: built?.aspectRatio || '9:16',
                     safeZone: profile?.safeZone,
                     subject: SYNTHETIC_SPEAKER_SUBJECT,
@@ -285,14 +337,21 @@ export function polishShort(built, profile, opts = {}) {
     // gap before: the hook title and the moment graphics in section 4 never
     // covered the close of a short. Skipped outright when the short is too
     // short to fit both the hook and a CTA without them overlapping.
-    if (want.title && opts.scenePlan?.cta) {
+    // R103 -- prefer the plan's own closing beat, with whatever motion the
+    // route resolved onto it, over a beat synthesised from `scenePlan.cta`.
+    // Same bug as the hook above: rebuilding the beat threw the technique away.
+    const planCtaBeat = (Array.isArray(opts.scenePlan?.beats) ? opts.scenePlan.beats : [])
+        .find(b => (b?.kind === 'cta' || b?.kind === 'outro') && typeof b.text === 'string' && b.text.trim());
+    const ctaBeat = planCtaBeat
+        || (opts.scenePlan?.cta ? { kind: 'cta', text: String(opts.scenePlan.cta).trim() } : null);
+    if (want.title && ctaBeat) {
         const ctaDur = Math.max(1.2, Math.min(2.2, duration * 0.12));
         const ctaStart = Math.max(0, duration - ctaDur);
-        if (ctaStart > hookDur + 0.2) {
+        if (ctaStart > hookSpan + 0.2) {
             const designed = composeSceneFromBrief(
                 'A short, direct call to action to close a short-form video.',
                 {
-                    plan: { beats: [{ kind: 'cta', text: String(opts.scenePlan.cta).trim() }] },
+                    plan: { beats: [ctaBeat] },
                     tone: 'viral',
                     duration: ctaDur,
                     aspectRatio: built?.aspectRatio || '9:16',
@@ -378,9 +437,10 @@ export function polishShort(built, profile, opts = {}) {
         // both landing in the same region of the frame -- this is what
         // produced visibly overlapping text (hook headline + word-highlight
         // caption stacked on screen) for the opening seconds of a short.
-        const hookDurForCaptions = want.title
-            ? Math.min(Math.max(2.2, (profile?.hookSeconds || 1.5) + 1.4), Math.max(1.2, duration * 0.35))
-            : 0;
+        // hookSpan, not a third copy of the budget formula: a directed
+        // two-beat hook runs longer than one title, and a caption keyed off
+        // the old formula would start overlapping it partway through.
+        const hookDurForCaptions = want.title ? hookSpan : 0;
         // Below the safe-zone top margin the hook occupies, clamped so it
         // never pushes past the bottom safe zone either.
         const belowHookY = Math.min(100 - (profile?.safeZone?.bottom || 0.3) * 100, Math.max(profile.captionY, 38));
@@ -441,9 +501,7 @@ export function polishShort(built, profile, opts = {}) {
     // short; Marc asked for the engine to carry the whole short, not just
     // its opening couple of seconds.
     if (want.numbers) {
-        const hookEnd = want.title
-            ? Math.min(Math.max(2.2, (profile?.hookSeconds || 1.5) + 1.4), Math.max(1.2, duration * 0.35))
-            : 0;
+        const hookEnd = want.title ? hookSpan : 0;
         const nums = spokenNumbers(words).filter(n => n.t > 0.3 && n.t < duration - 1);
         let momentTextN = 0, momentGfxN = 0, momentsCount = 0;
         const pushCallout = (scene, atStart) => {

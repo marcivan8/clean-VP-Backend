@@ -139,7 +139,10 @@ await check('briefs map to the named motions', () => {
     assert.deepEqual(verbs('slide in from the left and fly out'), ['slide-in', 'fly-out']);
     assert.deepEqual(verbs('typewriter'), ['typewriter']);
     assert.deepEqual(verbs('elegant'), ['blur-in', 'breathe', 'fade-out']);
-    assert.deepEqual(verbs('animate it'), ['slam-in', 'punch', 'whip-out']);
+    // R103 round F — the punchy mood gained a `follow-through` beat right
+    // after the entrance. A slam that stops dead is the thing the principle
+    // exists to fix, and this mood is the loudest in the set.
+    assert.deepEqual(verbs('animate it'), ['slam-in', 'follow-through', 'punch', 'whip-out']);
     assert.equal(C.planMotionFromBrief('slide in from the left').beats[0].direction, 'right');
 });
 await check('"subtle" lowers energy and "very" raises it', () => {

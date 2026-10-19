@@ -133,8 +133,18 @@ class IterationEngineClass {
         this.variations = results;
         this.isGenerating = false;
 
-        // FIX: was useEditorStore.getState().setVariations(results)
-        useTimelineStore.getState().setVariations?.(results);
+        // Roadmap item 1 — this was `setVariations?.(results)`, and
+        // `setVariations` did not exist on useTimelineStore at all. Optional
+        // chaining turned "the store cannot accept these" into a silent
+        // no-op, so the engine reported "3 variations ready" while publishing
+        // them nowhere. The slice now exists on the store, and the call is
+        // unguarded on purpose: if it is ever renamed again, this should
+        // throw where the mistake is rather than quietly do nothing.
+        const store = useTimelineStore.getState();
+        if (typeof store.setVariations !== 'function') {
+            throw new TypeError('useTimelineStore.setVariations is missing — A/B variations cannot be published');
+        }
+        store.setVariations(results);
 
         EventBus.emit(EVENT_TYPES.ITERATION_COMPLETE, { variations: results });
 
@@ -213,6 +223,11 @@ class IterationEngineClass {
         });
 
         this.activeVariationId = variationId;
+        // Keep the store in step: the panel renders ACTIVE, Load and Unload
+        // from `activeVariationId`, and it used to be set by the panel itself
+        // against the other store — so anything loading a variation outside
+        // the panel (chat, a command) left the UI showing the wrong one.
+        useTimelineStore.getState().setActiveVariation?.(variationId);
 
         useAIStore.getState().addLog({
             id: `iter-load-${Date.now()}`,
@@ -239,6 +254,7 @@ class IterationEngineClass {
         });
 
         this.activeVariationId = null;
+        useTimelineStore.getState().setActiveVariation?.(null);
         return true;
     }
 
@@ -267,8 +283,11 @@ class IterationEngineClass {
         this.variations = [];
         this._originalSnapshot = null;
         this.activeVariationId = null;
-        // FIX: was useEditorStore.getState().setVariations([])
-        useTimelineStore.getState().setVariations?.([]);
+        // One call that empties both the list and the active id, so the
+        // panel cannot be left holding an active variation that no longer
+        // exists (Clear used to reset the engine's own fields and leave the
+        // store's `activeVariationId` pointing at a deleted variation).
+        useTimelineStore.getState().clearVariations?.();
     }
 
     _snapshotState(state) {

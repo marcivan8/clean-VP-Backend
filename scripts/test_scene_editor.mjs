@@ -163,7 +163,12 @@ await check('R101 — a beat\'s own motion overrides the look\'s, verb by verb, 
     // directly and not only inferred from a composed scene.
     const fallback = { enter: 'pop-in', emphasis: 'wobble', exit: 'shrink-out', energy: 0.7 };
     assert.deepEqual(SC.cleanMotionOverride(null, fallback), fallback, 'no override at all keeps the look exactly');
-    assert.deepEqual(SC.cleanMotionOverride({ enter: 'glitch-in' }, fallback), { enter: 'glitch-in', emphasis: 'wobble', exit: 'shrink-out', energy: 0.7 });
+    // R103 round F — `anticipate` joined this contract. A fallback that does
+    // not mention it means false, so a look written before the principle
+    // existed gets exactly the motion it got before.
+    assert.deepEqual(SC.cleanMotionOverride({ enter: 'glitch-in' }, fallback), { enter: 'glitch-in', emphasis: 'wobble', exit: 'shrink-out', energy: 0.7, anticipate: false });
+    assert.equal(SC.cleanMotionOverride({ anticipate: true }, fallback).anticipate, true, 'a caller can ask for a wind-up');
+    assert.equal(SC.cleanMotionOverride({ anticipate: 'yes' }, fallback).anticipate, false, 'a non-boolean falls back like every other field here');
     assert.equal(SC.cleanMotionOverride({ energy: -3 }, fallback).energy, 0, 'energy clamps at the floor too');
 });
 

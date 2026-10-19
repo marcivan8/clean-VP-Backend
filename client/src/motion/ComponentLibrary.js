@@ -239,7 +239,16 @@ export function buildComponent(componentId, presetId, params = {}, opts = {}) {
     // caller gets the better layout unchanged. `opts.aspectRatio` is what
     // makes it frame-aware — without it a graphic is laid out for 16:9, which
     // is how an accent ended up 83 % of the width of a vertical frame.
-    if (COMPOSED_COMPONENTS.includes(componentId)) {
+    // R103 round B — Callout, QuoteCard and CTAWidget joined COMPOSED_COMPONENTS.
+    // QuoteCard and CTAWidget hardcoded their own y positions, so they lose
+    // nothing by being laid out properly. Callout was the one component that
+    // HONOURED an explicit `params.y`, and the composed path decides y from
+    // the anchor and the measured stack instead — so an explicit y keeps the
+    // hand-built path. Explicit placement from a caller should win over the
+    // design system, not be silently overridden by it.
+    const explicitlyPlaced = componentId === 'Callout' && Number.isFinite(Number(params.y));
+
+    if (COMPOSED_COMPONENTS.includes(componentId) && !explicitlyPlaced) {
         const scene = composeComponentScene(componentId, presetId, params, opts);
         if (scene) return { placements: flattenScene(scene).placements, scene };
         // A composer that could not run must not lose the graphic: fall
@@ -350,11 +359,15 @@ export function buildComponent(componentId, presetId, params = {}, opts = {}) {
         }
 
         case 'Callout': {
-            if (!params.text) return { placements: [], error: 'Callout requires params.text' };
+            // Accept the same names the composed path accepts. This used to
+            // require `params.text` exactly, so a caller (or an assistant)
+            // that wrote `content` got zero placements back.
+            const line = params.text || params.content || params.label || params.title;
+            if (!line) return { placements: [], error: 'Callout needs some text (params.text)' };
             return { placements: [
                 graphicPlacement({ graphicKey: preset.bar, x, y, duration, motionId: preset.motion }),
                 textPlacement({
-                    content: params.text, x, y, duration, motionId: preset.motion,
+                    content: line, x, y, duration, motionId: preset.motion,
                     color: preset.textColor, fontSize: fontSize || 36,
                 }),
             ] };

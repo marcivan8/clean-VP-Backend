@@ -27,6 +27,11 @@
  */
 
 import { composeComponentScene, LOOKS } from './SceneComposer.js';
+// R103 round E — a palette sampled from the footage is a SUGGESTION, not an
+// instruction. paletteFromPixels takes the most saturated hue bin of one
+// frame as the accent, so it can be any hue at any lightness; passing it
+// straight through meant the shot decided legibility by luck.
+import { harmonisePalette } from './ColorTheory.js';
 import { contentRectFor, resolveFrame } from './SceneLayout.js';
 import { createScene, createGroup, normalizeScene, sceneContentDuration } from './SceneSchema.js';
 
@@ -340,6 +345,15 @@ export function composeSceneFromBrief(brief, opts = {}) {
 
     const wantsBackdrop = Boolean(opts.backdrop || /\bbackdrop\b/i.test(brief));
 
+    // The shot's colour wins on HUE — that is what makes a graphic feel like
+    // it belongs to the footage it sits on — while the tone's palette wins
+    // wherever the suggestion would be illegible, or so close to the text
+    // colour that the accent stops reading as an accent.
+    const suggested = opts.palette
+        ? { text: opts.palette.text, sub: opts.palette.sub, accent: opts.palette.accent || opts.palette.primary }
+        : null;
+    const palette = harmonisePalette(suggested, plan.tone.palette);
+
     const placeholders = [];
     const groups = [];
     let cursor = 0;
@@ -367,9 +381,9 @@ export function composeSceneFromBrief(brief, opts = {}) {
             x: placement.x,
             anchor: placement.anchor,
             backdrop: wantsBackdrop && beat.kind === 'intro',
-            color: opts.palette?.text || plan.tone.palette.text,
-            subColor: opts.palette?.sub || plan.tone.palette.sub,
-            accentColor: opts.palette?.accent || opts.palette?.primary || plan.tone.palette.accent,
+            color: palette.text,
+            subColor: palette.sub,
+            accentColor: palette.accent,
             // R101 — a per-beat motion suggestion (from an AI-decided plan)
             // overrides the look's own verbs; resolveLook validates it and
             // falls back field-by-field, so an absent or invalid value never
@@ -415,7 +429,7 @@ export function composeSceneFromBrief(brief, opts = {}) {
             tone: plan.tone.label,
             pacing: plan.pacing,
             beats: plan.beats.map(b => b.kind),
-            rationale: [...plan.rationale, placement.reason],
+            rationale: [...plan.rationale, placement.reason, ...(palette.notes || [])],
             placeholders: placeholders.length,
         },
     }));

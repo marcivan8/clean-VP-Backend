@@ -122,7 +122,8 @@
       "interview": "interview",
       "marketplace": "marketplace",
       "motion": "motion",
-      "shorts": "shorts"
+      "shorts": "shorts",
+      "iterations": "iterations"
     },
     "colorGrading": {
       "title": "Color Grading",

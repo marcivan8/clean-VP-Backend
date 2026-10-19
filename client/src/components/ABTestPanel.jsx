@@ -3,14 +3,17 @@
  * A/B variation panel for generating and comparing up to 3 timeline variations.
  */
 import React, { useState, useEffect } from 'react';
-import useEditorStore from '../store/useEditorStore.js';
+// The engine writes to useTimelineStore (see IterationEngine's own header).
+// This panel read from the legacy useTimelineStore, which nothing writes to any
+// more, so it rendered its empty state no matter how many variations existed.
+import useTimelineStore from '../store/useTimelineStore.js';
 import { IterationEngine } from '../agent/IterationEngine.js';
 
 const VARIATION_COLORS = ['#6366f1', '#a855f7', '#ec4899'];
 
 export function ABTestPanel({ currentPrompt = '' }) {
-    const variations = useEditorStore(s => s.variations);
-    const activeVariationId = useEditorStore(s => s.activeVariationId);
+    const variations = useTimelineStore(s => s.variations) || [];
+    const activeVariationId = useTimelineStore(s => s.activeVariationId);
     const [isGenerating, setIsGenerating] = useState(false);
     const [prompt, setPrompt] = useState(currentPrompt);
     const [count, setCount] = useState(3);
@@ -26,12 +29,12 @@ export function ABTestPanel({ currentPrompt = '' }) {
 
     const handleLoad = (id) => {
         IterationEngine.loadVariation(id);
-        useEditorStore.getState().setActiveVariation(id);
+        useTimelineStore.getState().setActiveVariation(id);
     };
 
     const handleRestore = () => {
         IterationEngine.restoreOriginal();
-        useEditorStore.getState().setActiveVariation(null);
+        useTimelineStore.getState().setActiveVariation(null);
     };
 
     const handleClear = () => {

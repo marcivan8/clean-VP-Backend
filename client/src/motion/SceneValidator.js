@@ -22,6 +22,7 @@
  */
 
 import { measureTextBounds, fitTextToBox } from './TextMeasurement.js';
+import { parseColor, contrastRatio, luminance } from './ColorTheory.js';
 import { TEMPLATE_KINDS, SHAPE_KINDS } from './TemplateGraphics.js';
 import {
     NODE_TYPES,
@@ -157,38 +158,13 @@ function visibleLeaves(scene, opts) {
 
 // ─── Colour ──────────────────────────────────────────────────────────────────
 
-function parseColor(value) {
-    const s = String(value || '').trim();
-    let m = /^#([0-9a-f]{3})$/i.exec(s);
-    if (m) return [0, 1, 2].map(i => parseInt(m[1][i] + m[1][i], 16));
-    m = /^#([0-9a-f]{6})$/i.exec(s);
-    if (m) return [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16));
-    m = /^rgba?\(([^)]+)\)$/i.exec(s);
-    if (m) {
-        const parts = m[1].split(',').map(p => parseFloat(p));
-        if (parts.length >= 3 && parts.every(p => Number.isFinite(p))) return parts.slice(0, 3);
-    }
-    return null;
-}
-
-/** WCAG relative luminance, 0 (black) to 1 (white). */
-export function luminance(color) {
-    const rgb = parseColor(color);
-    if (!rgb) return null;
-    const [r, g, b] = rgb.map(c => {
-        const v = Math.min(1, Math.max(0, c / 255));
-        return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
-    });
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-/** WCAG contrast ratio, 1 to 21. null when either colour cannot be read. */
-export function contrastRatio(a, b) {
-    const la = luminance(a);
-    const lb = luminance(b);
-    if (la === null || lb === null) return null;
-    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
-}
+// Colour maths lives in ColorTheory.js — the colour module is where it
+// belongs, and a second copy of a WCAG formula is exactly the drift this
+// codebase keeps paying for. Re-exported so every existing importer of
+// `SceneValidator.contrastRatio` and `.luminance` keeps working unchanged.
+// Re-exported from the local imports (not `export … from`), because this
+// module's own default-export object references them as bindings.
+export { luminance, contrastRatio };
 
 // ─── Geometry ────────────────────────────────────────────────────────────────
 

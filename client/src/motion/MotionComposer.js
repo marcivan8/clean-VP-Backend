@@ -29,6 +29,7 @@
 
 import { createAnimation, createKeyframe, validateMotionLayer, ANIMATION_TYPES, ANIMATABLE_PROPS, LAYER_KINDS } from './MotionSchema.js';
 import { isKnownEasing } from './Easing.js';
+import { anticipationFor } from './MotionPrinciples.js';
 
 /** Tag on animations written by this module. */
 export const COMPOSED = 'composed';
@@ -261,6 +262,24 @@ export const VERBS = {
         group: 'emphasis', describe: 'Hops up and lands on a spring.',
         build: ({ at, duration, energy }) => [anim([[0, { y: 0 }], [duration * 0.35, { y: -lerp(3, 9, energy) }, 'easeOutQuart'], [duration, { y: 0 }, 'springWobbly']], { at, verb: 'bounce' })],
     },
+    'follow-through': {
+        group: 'emphasis',
+        describe: 'The move does not stop dead: it overshoots and settles, with the parts trailing the body.',
+        // The principle, as one layer can express it. Placed right after an
+        // entrance it is the entrance's settle; placed after a camera move
+        // it is the weight catching up. The counter-rotation is what makes
+        // it read as PARTS trailing rather than the whole thing wobbling.
+        build: ({ at, duration, energy, easing }) => {
+            const d = lerp(1.2, 3.5, energy);
+            const r = lerp(0.8, 2.4, energy);
+            return [anim([
+                [0, { y: 0, rotation: 0 }],
+                [duration * 0.3, { y: -d, rotation: -r }, 'easeOutQuad'],
+                [duration * 0.62, { y: d * 0.38, rotation: r * 0.35 }, 'easeInOutSine'],
+                [duration, { y: 0, rotation: 0 }, easing || 'springGentle'],
+            ], { at, verb: 'follow-through' })];
+        },
+    },
 
     // ── Holds (play across a span) ──
     'float': {
@@ -424,8 +443,21 @@ export function composeMotion(script, { duration = 3, kind, source = COMPOSED } 
         }
         d = Math.min(d, Math.max(0.1, clipDur - at));
         const easing = isKnownEasing(beat.easing) ? beat.easing : undefined;
+        const dir = dirOf(beat.direction);
         try {
-            built.push(...verb.build({ at, duration: round3(d), energy, dir: dirOf(beat.direction), kind, easing }));
+            // ANTICIPATION (R103 round F): a small move against the main move,
+            // just before it. Opt-in per beat, and only where the principle
+            // applies — see MotionPrinciples.ANTICIPATION, which records a
+            // reason for every verb that cannot have one rather than leaving
+            // the gap to be rediscovered.
+            if (beat.anticipate === true || (Number.isFinite(Number(beat.anticipate)) && Number(beat.anticipate) > 0)) {
+                const strength = beat.anticipate === true ? 1 : clampNum(beat.anticipate, 0, 1, 1);
+                const a = anticipationFor(name, { at, duration: round3(d), energy: energy * strength, dir, group: verb.group });
+                if (a) {
+                    built.push(anim(a.frames, { at: a.at, easing: a.easing, anchor: a.anchor, verb: `${name}-anticipate` }));
+                }
+            }
+            built.push(...verb.build({ at, duration: round3(d), energy, dir, kind, easing }));
         } catch {
             dropped.push(name);
         }
@@ -447,13 +479,13 @@ export function composeMotion(script, { duration = 3, kind, source = COMPOSED } 
 
 /** Moods → a full beat program. Used when no LLM is configured or it fails. */
 export const MOODS = {
-    punchy:    ({ d }) => [{ verb: 'slam-in', energy: 0.8 }, { verb: 'punch', at: Math.min(d * 0.5, 1.6), energy: 0.7 }, { verb: 'whip-out', energy: 0.7 }],
+    punchy:    ({ d }) => [{ verb: 'slam-in', energy: 0.8 }, { verb: 'follow-through', at: 0.42, energy: 0.6, duration: 0.5 }, { verb: 'punch', at: Math.min(d * 0.5, 1.6), energy: 0.7, anticipate: true }, { verb: 'whip-out', energy: 0.7, anticipate: true }],
     elegant:   ({ d }) => [{ verb: 'blur-in', energy: 0.5, duration: 0.7 }, { verb: 'breathe', at: 0.7, energy: 0.3, duration: Math.max(0.5, d - 1.1) }, { verb: 'fade-out', duration: 0.45 }],
     cinematic: ({ d }) => [{ verb: 'zoom-in', energy: 0.5, duration: 0.8 }, { verb: 'push-in', at: 0.8, energy: 0.4, duration: Math.max(0.5, d - 1.2) }, { verb: 'blur-out', duration: 0.4 }],
-    playful:   ({ d }) => [{ verb: 'pop-in', energy: 0.8 }, { verb: 'wobble', at: Math.min(d * 0.45, 1.4), energy: 0.6 }, { verb: 'shrink-out' }],
+    playful:   ({ d }) => [{ verb: 'pop-in', energy: 0.8 }, { verb: 'bounce', at: 0.5, energy: 0.5, duration: 0.45, anticipate: true }, { verb: 'wobble', at: Math.min(d * 0.45, 1.4), energy: 0.6 }, { verb: 'shrink-out' }],
     techy:     ({ d }) => [{ verb: 'glitch-in', energy: 0.6, duration: 0.45 }, { verb: 'flash', at: Math.min(d * 0.5, 1.5), energy: 0.5 }, { verb: 'fade-out', duration: 0.2 }],
     calm:      ({ d }) => [{ verb: 'fade-in', duration: 0.6 }, { verb: 'float', at: 0.6, energy: 0.4, duration: Math.max(0.5, d - 1) }, { verb: 'fade-out', duration: 0.4 }],
-    bold:      ({ d }) => [{ verb: 'drop-in', energy: 0.7 }, { verb: 'pulse', at: Math.min(d * 0.5, 1.6), energy: 0.6 }, { verb: 'sink-out' }],
+    bold:      ({ d }) => [{ verb: 'drop-in', energy: 0.7 }, { verb: 'follow-through', at: 0.45, energy: 0.7, duration: 0.55 }, { verb: 'pulse', at: Math.min(d * 0.5, 1.6), energy: 0.6, anticipate: true }, { verb: 'sink-out', anticipate: true }],
 };
 
 const ENTRANCE_WORDS = [
@@ -464,6 +496,7 @@ const ENTRANCE_WORDS = [
     [/\bzooms? in/, 'zoom-in'], [/\bfades? in/, 'fade-in'], [/word by word|reveal/, 'word-reveal'],
 ];
 const EMPHASIS_WORDS = [
+    [/follow.?through|overshoot|settles?\b|\bcatch(?:es)? up/, 'follow-through'],
     [/\bpunch/, 'punch'], [/\bpulse|heartbeat/, 'pulse'], [/\bshake|shaking/, 'shake'], [/\bwobble/, 'wobble'],
     [/\bflash|\bglow/, 'flash'], [/\bjiggle|squash/, 'jiggle'], [/\bbounce/, 'bounce'], [/\bnod\b/, 'nod'],
 ];
@@ -491,6 +524,11 @@ export function planMotionFromBrief(brief, { duration = 3 } = {}) {
     const d = Math.max(0.3, Number(duration) || 3);
     const energy = /\b(very|super|really|extremely|huge|massive|crazy)\b/.test(s) ? 0.9
         : /\b(subtle|slight|slightly|light|little|gentle|soft)\b/.test(s) ? 0.25 : 0.55;
+    // ANTICIPATION asked for in words. It is only ever applied to the beats
+    // that can carry it (emphasis and exit), so asking for it on a brief that
+    // names only an entrance quietly does nothing rather than inventing a
+    // gesture the layer cannot make.
+    const anticipate = /anticipat|wind(?:s|ing)? up|winds? back|pulls? back|crouch|coil|lean(?:s|ing)? back|brace/.test(s);
     const from = (s.match(/\bfrom (?:the )?(left|right|top|bottom|above|below)\b/) || [])[1];
     const toward = { left: 'right', right: 'left', top: 'down', above: 'down', bottom: 'up', below: 'up' };
     const direction = from ? toward[from] : undefined;
@@ -505,8 +543,18 @@ export function planMotionFromBrief(brief, { duration = 3 } = {}) {
         const beats = [];
         if (entrance) beats.push({ verb: entrance, energy, direction });
         if (hold) beats.push({ verb: hold, at: entrance ? 0.5 : 0, energy });
-        if (emphasis) beats.push({ verb: emphasis, at: entrance ? Math.min(d * 0.5, 1.5) : 0, energy });
-        if (exit) beats.push({ verb: exit, energy, direction });
+        if (emphasis) {
+            // Follow-through is defined by WHERE it sits: it is the tail of a
+            // move, so it attaches to the end of the entrance rather than
+            // landing mid-clip like a punch or a shake. Placed at the usual
+            // emphasis time it stops being follow-through and becomes a
+            // random wobble halfway through the shot.
+            const at = emphasis === 'follow-through'
+                ? (entrance ? Math.max(0, DEFAULT_DURATION.in - 0.08) : 0)
+                : (entrance ? Math.min(d * 0.5, 1.5) : 0);
+            beats.push({ verb: emphasis, at, energy, ...(anticipate ? { anticipate: true } : {}) });
+        }
+        if (exit) beats.push({ verb: exit, energy, direction, ...(anticipate ? { anticipate: true } : {}) });
         return { beats, mood: null };
     }
     const mood = pick(MOOD_WORDS) || 'punchy';

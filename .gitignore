@@ -25,3 +25,6 @@ Claude outputs/
 # Raw SFX source pack (converted output lives in client/public/sfx-library/)
 Social SFX Pack - Collection 1/
 
+# Diagnostic SVG preview output
+render-previews/
+

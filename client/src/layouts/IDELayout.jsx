@@ -36,6 +36,7 @@ import InterviewEditPanel from '../components/InterviewEditPanel';
 // old 'effects' branch did exactly that). Add both halves or the panel is dead
 // on arrival.
 import MotionPanel from '../components/MotionPanel';
+import ABTestPanel from '../components/ABTestPanel.jsx';
 import TransformPanel from '../components/TransformPanel';
 import ShortsPanel from '../components/ShortsPanel'; // R92 round B: repurposed shorts
 import SnapGuidesLayer from '../components/Player/SnapGuidesLayer.jsx'; // R92 round C
@@ -2112,7 +2113,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                         <div className="relative border-b" style={{ borderColor: "var(--line-soft)" }}>
                             <div ref={tabBarRef} className="p-2 flex gap-1 overflow-x-auto no-scrollbar">
-                                {['media', 'captions', 'transcript', 'color', 'motion', 'shorts', 'assets', 'audio', 'transform', 'settings'].map(tab => (
+                                {['media', 'captions', 'transcript', 'color', 'motion', 'shorts', 'iterations', 'assets', 'audio', 'transform', 'settings'].map(tab => (
                                     <button
                                         key={tab}
                                         onClick={() => setActiveTab(tab)}
@@ -2124,6 +2125,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         {tab === 'color'      && <Palette  className="w-2.5 h-2.5" />}
                                         {tab === 'motion'     && <Zap      className="w-2.5 h-2.5" />}
                                         {tab === 'shorts'     && <Smartphone className="w-2.5 h-2.5" />}
+                                        {tab === 'iterations' && <span style={{ fontSize: 9 }}>🔁</span>}
                                         {tab === 'assets'     && <Sparkles className="w-2.5 h-2.5" />}
                                         {tab === 'audio'      && <span style={{ fontSize: 9 }}>🎤</span>}
                                         {tab === 'transform'  && <Move     className="w-2.5 h-2.5" />}
@@ -2298,6 +2300,16 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 The tab button for this lives in the array above;
                                 both halves are required. */}
                             {activeTab === 'motion' && <MotionPanel />}
+                            {/* Roadmap item 3 — the A/B panel had no entry point at all, so
+                                item 1's engine fix would have stayed invisible. Mounted as a
+                                tab here; the roadmap's "in the chat flow, with per-variation
+                                edit/export buttons" is the fuller version and is not this.
+                                NOTE: the scene-editor panel is deliberately NOT mounted
+                                beside it. That tab was removed on purpose (it rendered an
+                                untranslated label and was not earning its slot), and
+                                test_scene_editor.mjs asserts this file never references it
+                                again — by name, so do not name it here either. */}
+                            {activeTab === 'iterations' && <ABTestPanel />}
                             {activeTab === 'shorts' && <ShortsPanel onExport={(settings, override) => handleFfmpegExport(settings, override)} />}
 
                             {activeTab === 'interview' && <section className="border-b border-border/50"><InterviewEditPanel /></section>}

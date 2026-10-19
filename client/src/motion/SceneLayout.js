@@ -262,11 +262,65 @@ export function accentFor(item, opts = {}) {
     const offsetRatio = num(opts.offsetRatio, shapeKind === 'underline' ? 0.62 : 0);
     const dy = (num(item?.height, 0) / 2 + num(accent.h, 0) * offsetRatio) * (offsetRatio > 0 ? 1 : 0);
     const y = round(num(item?.y, 50) + (dy / frame.h) * 100);
+
+    // R103 round C — cover the text that was ACTUALLY laid out.
+    //
+    // computeAccentBounds re-measures the string on its own, independently of
+    // the measurement layoutStack already did, and the two disagree as soon as
+    // the text wraps. Measured on a 9:16 frame: a three-line headline laid out
+    // at 494x319 got a highlight-box of 365x254 — a box sized to sit INSIDE
+    // the headline rather than around it, and an underline spanning 71% of the
+    // words above it. Two lines could come out either way (one case +14/+34,
+    // another -43/-5), so the error was not even consistent in direction.
+    //
+    // When the caller passes an item that layoutStack has already measured
+    // (`width`/`height` present), those bounds ARE the truth and are used
+    // directly.
+    //
+    // Round C took the larger of the two instead, which was the cautious
+    // choice at the time but assumed computeAccentBounds could only ever
+    // under-estimate. It can over-estimate too, and badly: it measures the
+    // string as ONE unwrapped line. "Launch Day" laid out as two lines of
+    // 587px got an accent sized for its 978px single-line width — 1012px of
+    // a 1080px frame, breaching the safe area and tripping the validator's
+    // repair pass. Growing-only could not correct that, because the error
+    // was in the other direction.
+    //
+    // An unmeasured item (the legacy callers that pass a bare string) is
+    // unaffected and still uses computeAccentBounds as before.
+    const measuredW = num(item?.width, 0);
+    const measuredH = num(item?.height, 0);
+    let w = num(accent.w, 0);
+    let h = num(accent.h, 0);
+    if (measuredW > 0) {
+        const fontSize = num(item?.fontSize, 40);
+        // The accent may never exceed the measure its text was laid out to.
+        // Clamping to the frame is not enough: the content rect is not
+        // centred in the frame (on 9:16 it runs 54..994, so its midpoint sits
+        // 16px left of the frame's), which means a shape centred at x=50% and
+        // wider than the measure overruns the right edge while still being
+        // "inside the frame". That is how a 924px box in a 940px rect still
+        // breached the safe area. The measure is always safely inside it.
+        const limit = Math.min(frame.w, num(item?.maxWidth, frame.w));
+        if (shapeKind === 'underline') {
+            // A rule under the words spans the words — no padding, and the
+            // widest line is what it should span, not the unwrapped string.
+            w = Math.min(limit, measuredW);
+        } else {
+            // A box, burst or circle wraps the block, with breathing room
+            // proportional to the type rather than a fixed pixel pad.
+            w = Math.min(limit, measuredW + fontSize * 0.6);
+            h = measuredH + fontSize * 0.4;
+        }
+    }
+
     return {
         kind: shapeKind,
-        w: accent.w,
-        h: accent.h,
-        scale: accent.scale,
+        w,
+        h,
+        // scale is the factor from the renderer's base overlay width up to w,
+        // so it has to be derived from the final width, not carried over.
+        scale: round(w / (frame.w * OVERLAY_WIDTH_FRACTION), 4),
         thickness: accent.thickness,
         x: round(num(opts.x, 50)),
         y,

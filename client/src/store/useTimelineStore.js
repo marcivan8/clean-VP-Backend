@@ -182,6 +182,27 @@ const useTimelineStore = create(
             activeClipId: null,
             selectedClipIds: [],
 
+            // ── A/B variations (roadmap item 1) ────────────────────────────
+            // This slice existed only on the legacy `useEditorStore`. The
+            // engine (agent/IterationEngine.js) was moved to this store, but
+            // the slice never came with it and `ABTestPanel.jsx` was never
+            // repointed — so the engine published variations into a store
+            // that had no `setVariations`, and the panel read them from a
+            // store nobody wrote to. Both halves failed silently and the
+            // panel sat permanently on its empty state.
+            //
+            // Deliberately OUTSIDE the undo snapshot: a variation list is
+            // workspace state, not timeline content. Loading a variation
+            // mutates the timeline and saves its own history entry, so
+            // putting the list in history too would make one undo both
+            // restore the clips AND forget the variations that produced them.
+            variations: [],
+            activeVariationId: null,
+            // Capped at 3, matching the legacy store and the panel's UI.
+            setVariations: (list) => set({ variations: Array.isArray(list) ? list.slice(0, 3) : [] }),
+            setActiveVariation: (id) => set({ activeVariationId: id ?? null }),
+            clearVariations: () => set({ variations: [], activeVariationId: null }),
+
             // Cloud project identity (set by EditorPage on load, or by autosave hook on first save)
             projectId:   localStorage.getItem('vp_project_id') || null,
             projectName: localStorage.getItem('vp_project_name') || 'Untitled Project',
