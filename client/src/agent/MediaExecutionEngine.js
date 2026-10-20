@@ -4281,10 +4281,9 @@ export class MediaExecutionEngine {
                         pauses: pauses.map(({ i, dur, before, after }) => ({ i, dur, before, after })),
                     }),
                 });
-                if (!resp.ok) throw new Error(`classify-pauses ${resp.status}`);
-                const { decisions = [] } = await resp.json();
+                const { decisions = [], fallback } = await resp.json();
                 decisions.forEach(d => { decisionByIdx[d.i] = d.action; });
-                console.log(`[MediaExecutionEngine] pause intelligence: ${decisions.length} decisions from GPT`);
+                console.log(`[MediaExecutionEngine] pause intelligence: ${decisions.length} decisions (${fallback ? 'editorial heuristics' : 'from GPT'})`);
             } catch (apiErr) {
                 console.warn(`[MediaExecutionEngine] classify-pauses unavailable (${apiErr.message}) — using heuristics`);
                 for (const p of pauses) {

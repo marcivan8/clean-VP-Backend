@@ -37,6 +37,9 @@ export default function PlanSheet({ open, reason = 'ai_ops', plan = 'free', upgr
         body = meter.unlimited
             ? t('planSheet.plansBodyUnlimited', { plan: planLabel })
             : t('planSheet.plansBody', { plan: planLabel, date: resetDate });
+    } else if (reason === 'paid_feature') {
+        title = t('planSheet.paidFeatureTitle', 'Upgrade to unlock');
+        body = t('planSheet.paidFeatureBody', 'Editing styles and Auto mode are available on Creator and Pro plans.');
     } else {
         title = t('planSheet.aiOpsTitle');
         body = t('planSheet.aiOpsBody', { date: resetDate });

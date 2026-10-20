@@ -42,7 +42,7 @@ export function atLimit(plan, projectCount) {
 // plan sheet copy. Keep in sync with usageGate.js and the pricing page.
 
 export const AI_OPS_LIMITS = {
-    free:    10,
+    free:    3,
     creator: 100,
     pro:     Infinity,
 };

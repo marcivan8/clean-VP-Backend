@@ -34,6 +34,12 @@ const { aiGate }     = require('../middleware/usageGate');
 const { audioQueue } = require('../queue/queues');
 const storageConfig  = require('../config/storage');
 
+let ffmpegPath = null;
+try {
+    ffmpegPath = require('ffmpeg-static');
+} catch (_) {}
+const FFMPEG_BIN = ffmpegPath || 'ffmpeg';
+
 // ── Host-side detection helpers ───────────────────────────────────────────────
 
 /**
@@ -126,34 +132,41 @@ function pathOwnedBy(gcsPath, requestUserId) {
  * itself, never from a request body.
  */
 async function resolveFfmpegInputArg(gcsPath, requestUserId) {
-    if (!pathOwnedBy(gcsPath, requestUserId)) {
-        console.warn(`[interviewRoutes] resolveFfmpegInputArg: user "${requestUserId}" is not the owner of "${gcsPath}" — denied`);
+    if (!gcsPath) return null;
+    const cleanPath = String(gcsPath)
+        .replace(/^\/?api\/proxy\/gcs-media\//, '')
+        .replace(/^\/?uploads\//, '')
+        .replace(/^\/+/, '');
+
+    if (!pathOwnedBy(cleanPath, requestUserId)) {
+        console.warn(`[interviewRoutes] resolveFfmpegInputArg: user "${requestUserId}" is not the owner of "${cleanPath}" — denied`);
         return null;
     }
     if (storageConfig.bucket && !storageConfig.useLocalStorage) {
-        const [signedUrl] = await storageConfig.bucket.file(gcsPath).getSignedUrl({
-            version: 'v4',
-            action:  'read',
-            expires: Date.now() + 5 * 60 * 1000,
-        });
-        return signedUrl;
+        try {
+            const [signedUrl] = await storageConfig.bucket.file(cleanPath).getSignedUrl({
+                version: 'v4',
+                action:  'read',
+                expires: Date.now() + 5 * 60 * 1000,
+            });
+            return signedUrl;
+        } catch (signErr) {
+            console.warn(`[interviewRoutes] resolveFfmpegInputArg: cannot sign ${cleanPath} (${signErr.message})`);
+            return null;
+        }
     }
     const uploadsDir = path.resolve(__dirname, '../uploads');
-    const localPath  = path.resolve(uploadsDir, gcsPath.replace(/^raw\//, ''));
-    // SECURITY: gcsPath is client-supplied (request body) on every caller of
-    // this helper (refine-cut-frames, extractVideoFrame's callers, etc.).
-    // path.resolve() happily walks ".." segments out of uploadsDir, and
-    // nothing downstream re-checked that before this fix — a filename like
-    // "../../../../etc/passwd" would resolve outside uploads/ and get handed
-    // straight to ffmpeg. Only reachable in local-storage/dev mode (the GCS
-    // branch above uses the GCS SDK's object-key semantics, not a filesystem
-    // path, so it isn't affected the same way).
+    const localPath  = path.resolve(uploadsDir, cleanPath.replace(/^raw\//, ''));
     if (!localPath.startsWith(uploadsDir + path.sep) && localPath !== uploadsDir) {
-        console.warn(`[interviewRoutes] resolveFfmpegInputArg: rejected out-of-bounds path "${gcsPath}"`);
+        console.warn(`[interviewRoutes] resolveFfmpegInputArg: rejected out-of-bounds path "${cleanPath}"`);
         return null;
     }
-    if (!fs.existsSync(localPath)) return null;
-    return localPath;
+    if (fs.existsSync(localPath)) return localPath;
+    const directLocalPath = path.resolve(uploadsDir, cleanPath);
+    if (directLocalPath.startsWith(uploadsDir + path.sep) && fs.existsSync(directLocalPath)) {
+        return directLocalPath;
+    }
+    return null;
 }
 
 /**
@@ -169,7 +182,7 @@ async function extractVideoFrame(gcsPath, timestampSec, requestUserId) {
         if (!inputArg) return null;
 
         // -ss before -i = fast seek; -vframes 1 = single frame; pipe: = stdout
-        const cmd = `ffmpeg -ss ${timestampSec.toFixed(2)} -i "${inputArg}" -vframes 1 -f image2pipe -vcodec mjpeg -q:v 5 pipe:1`;
+        const cmd = `"${FFMPEG_BIN}" -ss ${timestampSec.toFixed(2)} -i "${inputArg}" -vframes 1 -f image2pipe -vcodec mjpeg -q:v 5 pipe:1`;
         const buf = execSync(cmd, {
             maxBuffer: 8 * 1024 * 1024,
             timeout:   20000,
@@ -508,11 +521,10 @@ function resolveUploadPath(filename, filePath, requestUserId) {
 // Pipes one frame to stdout at the given seek position — no temp files.
 // Returns base64-encoded JPEG string, or null on any error / timeout.
 function _extractFrame(filePath, seekSeconds) {
-    const { spawn } = require('child_process');
     return new Promise((resolve) => {
         if (!filePath || !fs.existsSync(filePath)) { resolve(null); return; }
         const chunks = [];
-        const ff = spawn('ffmpeg', [
+        const ff = spawn(FFMPEG_BIN, [
             '-ss', String(Math.max(0, seekSeconds)),
             '-i', filePath,
             '-frames:v', '1',
@@ -1551,7 +1563,7 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
             if (!isRemote && !fs.existsSync(inputArg)) { resolve(null); return; }
 
             const chunks = [];
-            const ff = spawn('ffmpeg', [
+            const ff = spawn(FFMPEG_BIN, [
                 '-ss', String(Math.max(0, seekSeconds)),
                 '-i', inputArg,
                 '-frames:v', '1',
@@ -2340,20 +2352,37 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
 //   keep    — intentional beat (dramatic pause, emphasis): leave untouched
 //   shorten — thinking pause with editorial value: keep a short natural beat
 //
-// Falls back are the CALLER's job (heuristics in MediaExecutionEngine) — this
-// endpoint returns 503 rather than guessing when GPT is unavailable.
-// ─────────────────────────────────────────────────────────────────────────────
+// Editorial heuristic classifier used when AI is unconfigured or unavailable.
+// Mirrors MediaExecutionEngine's client-side fallback so decisions remain consistent.
+function classifyPausesHeuristically(pauses) {
+    return (pauses || []).map(p => {
+        const beforeStr = String(p.before || '').trim();
+        const endsMidSentence = beforeStr && !/[.!?…]\s*$/.test(beforeStr);
+        const dur = Number(p.dur || 0);
+        let action = 'cut';
+        if (dur > 2.5) {
+            action = 'cut';
+        } else if (endsMidSentence && dur < 1.5) {
+            action = 'shorten';
+        } else {
+            action = 'cut';
+        }
+        return { i: p.i, action };
+    });
+}
+
 router.post('/classify-pauses', ...authAndGate, async (req, res) => {
     const { pauses = [] } = req.body || {};
     if (!Array.isArray(pauses) || pauses.length === 0) {
         return res.status(400).json({ error: 'pauses array is required' });
     }
     if (!isAIConfigured()) {
-        return res.status(503).json({ error: 'OPENAI_API_KEY not configured' });
+        const decisions = classifyPausesHeuristically(pauses);
+        console.log(`[interviewRoutes] classify-pauses: AI not configured — classified ${pauses.length} pause(s) via heuristics`);
+        return res.json({ decisions, fallback: true, source: 'heuristics' });
     }
 
     try {
-        const OpenAI = require('openai');
         const openai = getAIClient({ timeout: 20_000 });
 
         // Compact per-pause objects — cap context length to keep the prompt small
@@ -2398,17 +2427,20 @@ Pauses: ${JSON.stringify(compact)}`,
                 action: ['cut', 'keep', 'shorten'].includes(d.a) ? d.a : 'cut',
             }));
         } catch (parseErr) {
-            return res.status(502).json({ error: 'Could not parse pause classification' });
+            console.warn(`[interviewRoutes] classify-pauses: parse failure (${parseErr.message}) — falling back to heuristics`);
+            decisions = classifyPausesHeuristically(pauses);
+            return res.json({ decisions, fallback: true, source: 'heuristics' });
         }
 
         const counts = { cut: 0, keep: 0, shorten: 0 };
-        decisions.forEach(d => { counts[d.action]++; });
-        console.log(`[interviewRoutes] classify-pauses: ${pauses.length} pauses → ${counts.cut} cut / ${counts.keep} keep / ${counts.shorten} shorten`);
+        decisions.forEach(d => { counts[d.action] = (counts[d.action] || 0) + 1; });
+        console.log(`[interviewRoutes] classify-pauses: ${pauses.length} pauses → ${counts.cut || 0} cut / ${counts.keep || 0} keep / ${counts.shorten || 0} shorten`);
 
-        res.json({ decisions });
+        res.json({ decisions, fallback: false });
     } catch (err) {
-        console.error('[interviewRoutes] /classify-pauses error:', err.message);
-        res.status(500).json({ error: err.message });
+        console.warn(`[interviewRoutes] /classify-pauses AI error (${err.message}) — falling back to heuristics`);
+        const decisions = classifyPausesHeuristically(pauses);
+        res.json({ decisions, fallback: true, source: 'heuristics', error: err.message });
     }
 });
 
@@ -2485,7 +2517,11 @@ router.post('/refine-cut-frames', ...authOnly, async (req, res) => {
     try {
         const inputArg = await resolveFfmpegInputArg(filename, requestUserId);
         if (!inputArg) {
-            return res.status(404).json({ error: `Could not locate source video: ${filename}` });
+            console.warn(`[interviewRoutes] refine-cut-frames: could not locate source video: ${filename} — preserving original cut points`);
+            return res.json({
+                picks: capped.map(p => ({ id: p.id, offsetSec: 0, reason: 'no_data' })),
+                fallback: true,
+            });
         }
 
         // Decode only the span the points actually cover, with headroom for the
@@ -2509,7 +2545,7 @@ router.post('/refine-cut-frames', ...authOnly, async (req, res) => {
             // was shipping blind (stdio: [..., 'ignore']) and every production
             // failure came back as a bare 500 with no way to tell a missing binary
             // from a bad seek from a source that doesn't support HTTP range reads.
-            const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+            const proc = spawn(FFMPEG_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
             const chunks = [];
             let total = 0;
             let settled = false;
@@ -2622,8 +2658,12 @@ router.post('/refine-cut-frames', ...authOnly, async (req, res) => {
 
         res.json({ picks });
     } catch (err) {
-        console.error('[interviewRoutes] /refine-cut-frames error:', err.message);
-        res.status(500).json({ error: err.message });
+        console.warn('[interviewRoutes] /refine-cut-frames degraded gracefully:', err.message);
+        res.json({
+            picks: capped.map(p => ({ id: p.id, offsetSec: 0, reason: 'error_fallback' })),
+            fallback: true,
+            error: err.message,
+        });
     }
 });
 

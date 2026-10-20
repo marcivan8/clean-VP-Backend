@@ -431,11 +431,12 @@ You MUST respond by calling the execute_video_edit function — never as plain t
 
         const enrichedContext = {
             ProjectContext: {
-                editingMode: proj.editingMode,
+                editingMode: req.userPlan === 'free' ? 'normal' : proj.editingMode,
                 // R91: editing style picked under the chat box. Id from a fixed
                 // list, guidance capped: it is the user's own setting, but it
                 // must not become a channel for arbitrary prompt text.
-                ...(proj.editingStyle && EDITING_STYLE_IDS.includes(proj.editingStyle.id) ? {
+                // Accessible only in paid subscriptions (Creator and Pro).
+                ...(req.userPlan !== 'free' && proj.editingStyle && EDITING_STYLE_IDS.includes(proj.editingStyle.id) ? {
                     editingStyle: {
                         id: proj.editingStyle.id,
                         guidance: String(proj.editingStyle.guidance || '').slice(0, 300),

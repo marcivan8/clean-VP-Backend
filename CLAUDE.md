@@ -532,7 +532,7 @@ anonymous_sessions
 **Plan limits (middleware/usageGate.js):**
 ```
 plan      ai_ops/month   max_duration(s)   projects   storage_days
-free         10              1200             2            7
+free          3              1200             2            7
 creator     100              5400            ∞           30
 pro          ∞              14400            ∞           90
 ```

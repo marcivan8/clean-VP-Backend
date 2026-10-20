@@ -11,13 +11,13 @@ import { setPendingNewVideo, takePendingNewVideo } from '../client/src/utils/pen
 
 // limits mirror the server gate (middleware/usageGate.js)
 const gate = readFileSync(new URL('../middleware/usageGate.js', import.meta.url), 'utf8');
-for (const [plan, n] of Object.entries({ free: 10, creator: 100 })) {
+for (const [plan, n] of Object.entries({ free: 3, creator: 100 })) {
     assert.match(gate, new RegExp(`${plan}:\\s*\\{\\s*ai_ops:\\s*${n}\\b`), `server ${plan} ai_ops is ${n}`);
     assert.equal(AI_OPS_LIMITS[plan], n);
 }
 assert.match(gate, /pro:\s*\{\s*ai_ops:\s*-1\b/);
 assert.equal(getAiOpsLimit('pro'), Infinity);
-assert.equal(getAiOpsLimit('weird'), 10, 'unknown plan falls back to free');
+assert.equal(getAiOpsLimit('weird'), 3, 'unknown plan falls back to free');
 assert.equal(nextPlan('free'), 'creator');
 assert.equal(nextPlan(undefined), 'creator');
 assert.equal(nextPlan('creator'), 'pro');
@@ -32,9 +32,9 @@ assert.equal(nextUsageReset(new Date('2026-12-31T23:59:00Z')).toISOString(), '20
 assert.equal(startOfUsageMonth(new Date('2026-11-01T00:30:00+02:00')).toISOString(), '2026-10-01T00:00:00.000Z', 'UTC, not local time');
 console.log('✓ usage month and reset date (UTC, year rollover)');
 
-assert.deepEqual(aiOpsMeter(7, 'free'), { used: 7, limit: 10, unlimited: false, ratio: 0.7, exhausted: false });
-assert.equal(aiOpsMeter(10, 'free').exhausted, true);
-assert.equal(aiOpsMeter(14, 'free').ratio, 1, 'bar never overflows');
+assert.deepEqual(aiOpsMeter(2, 'free'), { used: 2, limit: 3, unlimited: false, ratio: 2 / 3, exhausted: false });
+assert.equal(aiOpsMeter(3, 'free').exhausted, true);
+assert.equal(aiOpsMeter(5, 'free').ratio, 1, 'bar never overflows');
 assert.equal(aiOpsMeter(null, 'creator').used, 0);
 assert.equal(aiOpsMeter(-3, 'creator').used, 0);
 assert.equal(aiOpsMeter(500, 'pro').unlimited, true);

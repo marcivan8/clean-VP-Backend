@@ -102,6 +102,11 @@ async function resolveStorageInput(gcsPath) {
             await file.download({ destination: tmp });
         } catch (dlErr) {
             await cleanup();
+            if (dlErr.code === 404 || /no such object/i.test(dlErr.message)) {
+                const notFoundErr = new Error(`Media file not found in storage: ${gcsPath}`);
+                notFoundErr.statusCode = 404;
+                throw notFoundErr;
+            }
             throw dlErr;
         }
         return { inputPath: tmp, cleanup };
@@ -288,7 +293,8 @@ function extractPeaks(inputPath, inputStream) {
 
             if (code !== 0 && pcm.length === 0) {
                 const noAudio = /does not contain any stream|matches no streams|no audio stream/i.test(stderrTail);
-                if (noAudio) {
+                const noAudioExtra = /Stream map.*matches no streams|Output file.*does not contain any stream|Output file #0 does not contain any stream/i.test(stderrTail);
+                if (noAudio || noAudioExtra) {
                     return finish(null, {
                         peaks: [],
                         duration: 0,
@@ -296,7 +302,10 @@ function extractPeaks(inputPath, inputStream) {
                         extractionFailed: false,
                     });
                 }
-                return finish(new Error(`ffmpeg exited with code ${code} and no output. stderr: ${stderrTail.slice(-300)}`));
+                const isNotFound = /server returned 404|no such file or directory/i.test(stderrTail);
+                const err = new Error(`ffmpeg exited with code ${code} and no output. stderr: ${stderrTail.slice(-300)}`);
+                if (isNotFound) err.statusCode = 404;
+                return finish(err);
             }
 
             const sampleCount = Math.floor(pcm.length / 2); // s16le = 2 bytes/sample
@@ -403,9 +412,16 @@ router.post('/extract', optionalAuth, async (req, res) => {
         } else if (gcsPath) {
             // Local storage: resolve from uploads dir
             const uploadsDir = path.resolve(__dirname, '../uploads');
-            const resolved   = path.resolve(uploadsDir, gcsPath);
+            let resolved     = path.resolve(uploadsDir, gcsPath);
             if (!resolved.startsWith(uploadsDir)) {
                 return res.status(403).json({ error: 'Invalid gcsPath' });
+            }
+            if (rawGcsPath && rawGcsPath !== gcsPath && !fs.existsSync(resolved)) {
+                const rawCandidate = path.resolve(uploadsDir, rawGcsPath);
+                if (rawCandidate.startsWith(uploadsDir) && fs.existsSync(rawCandidate)) {
+                    console.log(`[waveformRoutes] proxy ${gcsPath} not on disk — falling back to raw ${rawGcsPath}`);
+                    resolved = rawCandidate;
+                }
             }
             if (!fs.existsSync(resolved)) {
                 return res.status(404).json({ error: 'Media file not found on disk', assetId });
@@ -430,13 +446,25 @@ router.post('/extract', optionalAuth, async (req, res) => {
         }
 
         // ── 3. Extract peaks (queued — see WAVEFORM_MAX_CONCURRENT above) ─────
-        const peaksData = await withWaveformSlot(async () => {
-            if (!storagePath) return extractPeaks(inputPath, inputStream);
-            const { inputPath: storageInput, cleanup } = await resolveStorageInput(storagePath);
+        const doExtract = async (targetStoragePath, targetInputPath, targetStream) => {
+            if (!targetStoragePath) return extractPeaks(targetInputPath, targetStream);
+            const { inputPath: storageInput, cleanup } = await resolveStorageInput(targetStoragePath);
             try {
                 return await extractPeaks(storageInput, null);
             } finally {
                 if (cleanup) await cleanup();
+            }
+        };
+
+        const peaksData = await withWaveformSlot(async () => {
+            try {
+                return await doExtract(storagePath, inputPath, inputStream);
+            } catch (primaryErr) {
+                if (useGCS && storagePath && rawGcsPath && rawGcsPath !== storagePath) {
+                    console.warn(`[waveformRoutes] extraction for ${storagePath} failed (${primaryErr.message}) — falling back to raw ${rawGcsPath}`);
+                    return await doExtract(rawGcsPath, null, null);
+                }
+                throw primaryErr;
             }
         });
 
@@ -543,7 +571,10 @@ router.post('/extract', optionalAuth, async (req, res) => {
         // usePeaks retry handles it. Distinguishing it matters because the
         // symptom it replaced (holding the socket until Railway's edge 502s)
         // was unattributable from either side.
-        const status = err.statusCode || 500;
+        let status = err.statusCode || (typeof err.code === 'number' && err.code >= 400 && err.code < 600 ? err.code : 500);
+        if (/no such (object|file)|not found|404|server returned 404/i.test(err.message)) {
+            status = 404;
+        }
         if (status === 503) {
             console.warn(`[waveformRoutes] extract busy (queue depth ${_waveformQueue.length}, active ${_waveformActive}) for asset ${assetId}`);
             res.set('Retry-After', '5');

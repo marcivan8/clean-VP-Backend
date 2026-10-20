@@ -571,10 +571,14 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     // That event used to go nowhere — the only visible result was a plain
     // error string in a log/chat panel, with no way to act on it. This
     // listener is the one place that turns it into a real upgrade modal.
-    const [quotaModal, setQuotaModal] = React.useState(null); // null | { message, upgradeRequired }
+    const [quotaModal, setQuotaModal] = React.useState(null); // null | { message, upgradeRequired, reason }
     useEffect(() => {
         const unsubscribe = EventBus.on(EVENT_TYPES.QUOTA_EXCEEDED, (payload) => {
-            setQuotaModal({ message: payload?.message, upgradeRequired: payload?.upgradeRequired || 'creator' });
+            setQuotaModal({
+                message: payload?.message,
+                upgradeRequired: payload?.upgradeRequired || 'creator',
+                reason: payload?.reason || 'ai_ops',
+            });
             if (!payload?.reason || payload.reason === 'ai_ops') {
                 useAIStore.getState().setAiOpsExhausted({ upgradeRequired: payload?.upgradeRequired || 'creator' });
             }
@@ -1897,6 +1901,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 <UpgradeModal
                     message={quotaModal.message}
                     upgradeRequired={quotaModal.upgradeRequired}
+                    reason={quotaModal.reason}
                     onClose={() => setQuotaModal(null)}
                 />
             )}

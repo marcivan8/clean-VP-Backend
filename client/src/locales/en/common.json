@@ -59,6 +59,8 @@
     "plansTitle": "Your plan",
     "plansBody": "You're on {{plan}}. AI operations reset on {{date}}.",
     "plansBodyUnlimited": "You're on {{plan}}, with unlimited AI operations.",
+    "paidFeatureTitle": "Upgrade to unlock",
+    "paidFeatureBody": "Editing styles and Auto mode are available on Creator and Pro plans.",
     "perMonth": "{{price}} / month",
     "upgradeTo": "Upgrade to {{plan}}",
     "notNow": "Not now",

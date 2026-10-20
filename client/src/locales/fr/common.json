@@ -59,6 +59,8 @@
     "plansTitle": "Votre plan",
     "plansBody": "Vous êtes sur le plan {{plan}}. Les opérations IA se réinitialisent le {{date}}.",
     "plansBodyUnlimited": "Vous êtes sur le plan {{plan}}, avec des opérations IA illimitées.",
+    "paidFeatureTitle": "Passez à l'offre supérieure",
+    "paidFeatureBody": "Les styles de montage et le mode Auto sont disponibles avec les abonnements Creator et Pro.",
     "perMonth": "{{price}} / mois",
     "upgradeTo": "Passer à {{plan}}",
     "notNow": "Pas maintenant",

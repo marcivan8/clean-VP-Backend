@@ -5,7 +5,7 @@
 const { supabaseAdmin } = require('../config/database');
 
 const PLAN_LIMITS = {
-    free:    { ai_ops: 10,  max_duration: 1200,  projects: 2,  storage_days: 7  },
+    free:    { ai_ops: 3,   max_duration: 1200,  projects: 2,  storage_days: 7  },
     creator: { ai_ops: 100, max_duration: 5400,  projects: -1, storage_days: 30 },
     // storage_days is informational: services/retentionJob.js applies it.
     // Pro (null) keeps projects while the subscription is active.
@@ -41,7 +41,7 @@ async function getMonthlyOpsCount(userId) {
         console.error('[usageGate] count error:', error.message);
         return 0;
     }
-    return count ?? 0;
+    return count || 0;
 }
 
 async function recordUsageEvent(userId, operation) {
@@ -82,6 +82,14 @@ const aiGate = async (req, res, next) => {
                     upgradeRequired: plan === 'free' ? 'creator' : 'pro',
                 });
             }
+        }
+
+        req.userPlan = plan;
+        if (plan === 'free' && req.body) {
+            if (req.body.editingStyle) req.body.editingStyle = null;
+            if (req.body.ProjectContext?.editingStyle) req.body.ProjectContext.editingStyle = null;
+            if (req.body.editingMode === 'auto') req.body.editingMode = 'normal';
+            if (req.body.ProjectContext?.editingMode === 'auto') req.body.ProjectContext.editingMode = 'normal';
         }
 
         // Record before forwarding so the count is accurate even if the

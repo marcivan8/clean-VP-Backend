@@ -41,7 +41,7 @@ async function startCheckout(plan) {
     }
 }
 
-const UpgradeModal = ({ message, upgradeRequired = 'creator', onClose }) => {
+const UpgradeModal = ({ message, upgradeRequired = 'creator', reason = 'ai_ops', onClose }) => {
     const { t } = useTranslation('editor');
     const [loading, setLoading] = useState(false);
     const nextPlanLabel = upgradeRequired === 'pro' ? 'Pro' : 'Creator';
@@ -59,7 +59,7 @@ const UpgradeModal = ({ message, upgradeRequired = 'creator', onClose }) => {
 
     // Mobile: the plan sheet from the redesign (reset date, plan card).
     if (isMobile) {
-        return <PlanSheet open reason="ai_ops" upgradeTo={upgradeRequired} onClose={onClose} />;
+        return <PlanSheet open reason={reason} upgradeTo={upgradeRequired} onClose={onClose} />;
     }
 
     return (
@@ -103,7 +103,7 @@ const UpgradeModal = ({ message, upgradeRequired = 'creator', onClose }) => {
                         </div>
                         <div>
                             <h2 style={{ fontFamily: 'var(--f-sans)', fontSize: 15, fontWeight: 700, color: 'var(--fg)', lineHeight: 1.3 }}>
-                                {t('quotaModal.heading')}
+                                {reason === 'paid_feature' ? (t('editingStyles.featureUpgradeHeading', 'Upgrade to unlock')) : t('quotaModal.heading')}
                             </h2>
                             <p className="mt-1" style={{ fontFamily: 'var(--f-sans)', fontSize: isMobile ? 14 : 12, color: 'var(--fg-3)', lineHeight: 1.6 }}>
                                 {message || t('quotaModal.bodyFallback')}

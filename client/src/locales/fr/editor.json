@@ -916,7 +916,12 @@
     "auto": "Auto",
     "normalHint": "Roka fait ce que vous demandez, dans votre style",
     "autoHint": "Roka monte toute la vidéo dans votre style. Une seule annulation suffit à tout retirer.",
-    "autoPlaceholder": "Auto : dites « monte la vidéo » ou décrivez-la, Roka fait tout le montage"
+    "autoPlaceholder": "Auto : dites « monte la vidéo » ou décrivez-la, Roka fait tout le montage",
+    "featureUpgradeHeading": "Passez à l'offre supérieure",
+    "styleUpgradeRequired": "Les styles de montage sont disponibles avec les abonnements Creator et Pro.",
+    "autoUpgradeRequired": "Le mode Auto est disponible avec les abonnements Creator et Pro.",
+    "autoUpgradeTooltip": "Le mode Auto nécessite un abonnement Creator ou Pro",
+    "styleUpgradeTooltip": "Les styles nécessitent un abonnement Creator ou Pro"
   },
   "motionDirector": {
     "title": "Écrire le mouvement",

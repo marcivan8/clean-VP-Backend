@@ -916,7 +916,12 @@
     "auto": "Auto",
     "normalHint": "Roka does what you ask, in your style",
     "autoHint": "Roka edits the whole video in your style. One undo reverts it.",
-    "autoPlaceholder": "Auto: say \"edit it\" or describe the video, Roka edits it end to end"
+    "autoPlaceholder": "Auto: say \"edit it\" or describe the video, Roka edits it end to end",
+    "featureUpgradeHeading": "Upgrade to unlock",
+    "styleUpgradeRequired": "Editing styles are available on Creator and Pro plans.",
+    "autoUpgradeRequired": "Auto mode is available on Creator and Pro plans.",
+    "autoUpgradeTooltip": "Auto mode requires a Creator or Pro plan",
+    "styleUpgradeTooltip": "Styles require a Creator or Pro plan"
   },
   "motionDirector": {
     "title": "Write the motion",

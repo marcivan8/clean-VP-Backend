@@ -161,11 +161,11 @@
           "2 projets actifs",
           "Vidéos jusqu'à 20 minutes",
           "Stockage 7 jours",
-          "10 opérations IA / mois",
+          "3 opérations IA / mois",
           "Suppression des silences & coupe — illimité",
           "Export MP4 — sans filigrane"
         ],
-        "locked": ["Export NLE", "Intelligence de transcription"]
+        "locked": ["Styles de montage et mode Auto", "Export NLE", "Intelligence de transcription"]
       },
       "creator": {
         "tagline": "Montez chaque semaine. Exportez vers n'importe quel outil que vous utilisez déjà.",
@@ -175,6 +175,7 @@
           "Vidéos jusqu'à 90 minutes",
           "Stockage 30 jours",
           "100 opérations IA / mois",
+          "Tous les styles de montage et mode Auto",
           "Toutes les commandes IA — parasites, sous-titres, meilleurs moments",
           "Transcription complète + intelligence de contenu",
           "Export MP4",
