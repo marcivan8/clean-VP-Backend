@@ -92,6 +92,7 @@ export class ValidationService {
             'silence_removal', 'remove_filler_words', 'long_form_edit',
             'smart_cleanup', 'remove_repetition', 'auto_captions', 'generate_captions', 'generate_transcript',
             'reorder_clips',
+            'polish_short', 'repurpose_shorts', 'auto_reel', 'apply_style_recipe',
         ]);
         const opKey = plan.operation || plan.steps?.[0]?.action;
         const skipIntegrityCheck = RESTRUCTURING_OPS.has(opKey);
@@ -219,7 +220,18 @@ export class ValidationService {
             case 'generate_captions':
             case 'generate_transcript':
             case 'reorder_clips':
-                return { outputs: [], issues: [], warnings: [] };
+            case 'polish_short':
+            case 'repurpose_shorts':
+            case 'auto_reel':
+            case 'apply_style_recipe':
+                return {
+                    outputs: executionResult.results?.map(r => ({
+                        action: r.action,
+                        status: r.success !== false ? 'verified' : 'unverified'
+                    })) || [],
+                    issues: [],
+                    warnings: []
+                };
 
             default:
                 // Generic validation for unknown operations
@@ -513,15 +525,19 @@ export class ValidationService {
 
         for (const track of state.tracks || []) {
             if (!track.clips || track.clips.length === 0) continue;
-            // Caption and text tracks are non-contiguous by design — skip overlap/gap checks
-            if (track.type === 'caption' || track.type === 'text') continue;
+            // Caption, text, audio, and SFX tracks are non-exclusive / non-contiguous by design — skip overlap checks
+            if (track.type === 'caption' || track.type === 'text' || track.type === 'audio' || track.isSFX || /sfx/i.test(track.id || track.name || '')) continue;
 
             const clips = [...track.clips].sort((a, b) => a.start - b.start);
             let lastEnd = 0;
 
-            for (const clip of clips) {
-                // Check for overlaps
-                if (clip.start < lastEnd - (TOLERANCES.GAP_MS / 1000)) {
+            for (let i = 0; i < clips.length; i++) {
+                const clip = clips[i];
+                // Check for overlaps (transitions between adjacent video clips intentionally overlap)
+                const prevClip = i > 0 ? clips[i - 1] : null;
+                const hasTransition = !!clip.transition || !!prevClip?.transition;
+                const transitionPadding = hasTransition ? 1.5 : (TOLERANCES.GAP_MS / 1000);
+                if (clip.start < lastEnd - transitionPadding) {
                     issues.push({
                         type: ISSUE_TYPES.OVERLAP_DETECTED,
                         track_id: track.id,

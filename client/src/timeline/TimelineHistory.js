@@ -485,21 +485,123 @@ export class TimelineHistory {
     }
 
     /**
-     * Persist history to storage
+     * Clean state before persisting to localStorage to prevent QuotaExceededError.
+     * Strips transient caches (waveforms, frames, UI transient selections, blob URLs).
+     */
+    _cleanStateForStorage(state) {
+        if (!state || typeof state !== 'object') return state;
+        try {
+            const clean = { ...state };
+
+            // Omit transient UI state from storage
+            if (clean.ui) {
+                const { selectedIds, activeClipId, isPlaying, ...restUi } = clean.ui;
+                clean.ui = restUi;
+            }
+
+            // Strip heavy transient fields from clips/assets if present
+            if (clean.entities?.clips && typeof clean.entities.clips === 'object') {
+                const cleanedClips = {};
+                for (const [id, clip] of Object.entries(clean.entities.clips)) {
+                    if (!clip) continue;
+                    const c = { ...clip };
+                    if (c.waveform) delete c.waveform;
+                    if (c.waveformData) delete c.waveformData;
+                    if (c.peaks) delete c.peaks;
+                    if (c.thumbnails) delete c.thumbnails;
+                    if (c.frameCache) delete c.frameCache;
+                    if (typeof c.url === 'string' && c.url.startsWith('blob:')) c.url = null;
+                    if (typeof c.src === 'string' && c.src.startsWith('blob:')) c.src = null;
+                    cleanedClips[id] = c;
+                }
+                clean.entities = { ...clean.entities, clips: cleanedClips };
+            }
+
+            if (Array.isArray(clean.tracks)) {
+                clean.tracks = clean.tracks.map(track => {
+                    if (!track || !Array.isArray(track.clips)) return track;
+                    return {
+                        ...track,
+                        clips: track.clips.map(clip => {
+                            if (!clip) return clip;
+                            const c = { ...clip };
+                            if (c.waveform) delete c.waveform;
+                            if (c.waveformData) delete c.waveformData;
+                            if (c.peaks) delete c.peaks;
+                            if (c.thumbnails) delete c.thumbnails;
+                            if (c.frameCache) delete c.frameCache;
+                            if (typeof c.url === 'string' && c.url.startsWith('blob:')) c.url = null;
+                            if (typeof c.src === 'string' && c.src.startsWith('blob:')) c.src = null;
+                            return c;
+                        })
+                    };
+                });
+            }
+
+            if (Array.isArray(clean.assets)) {
+                clean.assets = clean.assets.map(asset => {
+                    if (!asset) return asset;
+                    const a = { ...asset };
+                    if (typeof a.url === 'string' && a.url.startsWith('blob:')) a.url = null;
+                    if (a.waveform) delete a.waveform;
+                    if (a.peaks) delete a.peaks;
+                    return a;
+                });
+            }
+
+            return clean;
+        } catch (_) {
+            return state;
+        }
+    }
+
+    /**
+     * Persist history to storage with progressive quota reduction
      */
     persist() {
-        try {
+        if (!this.currentState) return;
+
+        const serialize = (pastLimit, versionLimit) => {
             const data = {
-                past: this.past.slice(-20), // Only persist last 20 entries
-                versions: Array.from(this.versions.entries()),
-                currentState: this.currentState,
+                past: this.past.slice(-pastLimit).map(entry => ({
+                    ...entry,
+                    state: this._cleanStateForStorage(entry.state)
+                })),
+                versions: Array.from(this.versions.entries()).slice(-versionLimit).map(([k, v]) => [
+                    k,
+                    { ...v, state: this._cleanStateForStorage(v.state) }
+                ]),
+                currentState: this._cleanStateForStorage(this.currentState),
                 timestamp: Date.now()
             };
+            return JSON.stringify(data);
+        };
 
-            localStorage.setItem(this.options.persistenceKey, JSON.stringify(data));
-            console.log('[TimelineHistory] Persisted to storage');
-        } catch (err) {
-            console.error('[TimelineHistory] Failed to persist:', err);
+        // Try progressively smaller history payloads to fit within browser quota
+        const attemptLimits = [
+            { past: 5, versions: 3 },
+            { past: 2, versions: 1 },
+            { past: 1, versions: 0 },
+            { past: 0, versions: 0 } // Just currentState
+        ];
+
+        for (let i = 0; i < attemptLimits.length; i++) {
+            const { past, versions } = attemptLimits[i];
+            try {
+                const serialized = serialize(past, versions);
+                // Clear existing item first to avoid exceeding quota during in-place expansion
+                localStorage.removeItem(this.options.persistenceKey);
+                localStorage.setItem(this.options.persistenceKey, serialized);
+                return;
+            } catch (err) {
+                const isQuota = err.name === 'QuotaExceededError' ||
+                    err.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+                    /quota/i.test(err.message);
+                if (!isQuota || i === attemptLimits.length - 1) {
+                    console.warn('[TimelineHistory] Storage quota exceeded; retaining full history in memory:', err.message);
+                    return;
+                }
+            }
         }
     }
 
