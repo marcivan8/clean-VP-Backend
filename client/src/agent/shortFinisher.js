@@ -146,8 +146,11 @@ export async function fetchScenePlanResult(text, platform, duration) {
         const source = String(data.source || (plan ? 'ai' : 'rules'));
         const techniques = Array.isArray(data.techniques) ? data.techniques : [];
         if (!plan) {
-            const why = SCENE_PLAN_FAILURES[data.failureCategory]
-                || (data.failureCategory ? `the motion model failed (${data.failureCategory})` : null);
+            const is404 = /404|not found/i.test(data.failureCategory || '');
+            const why = is404
+                ? `the motion model was not found on the provider (verify ${data.provider === 'gemini' ? 'GEMINI_MODEL' : 'model configuration'})`
+                : (SCENE_PLAN_FAILURES[data.failureCategory]
+                    || (data.failureCategory ? `the motion model failed (${data.failureCategory})` : null));
             const named = data.provider ? ` [provider: ${data.provider}]` : '';
             console.warn(`[shortFinisher] no AI scene plan (source=${source}, reason=${data.failureCategory || 'unreported'}${named}); `
                 + `${techniques.length} knowledge-base technique(s) were offered and none could be used. `

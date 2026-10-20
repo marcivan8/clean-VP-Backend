@@ -266,7 +266,25 @@ async function generateScenePlan({
             requestParams.response_format = { type: 'json_object' };
         }
 
-        const completion = await ai.chat.completions.create(requestParams, { signal });
+        let completion = null;
+        try {
+            completion = await ai.chat.completions.create(requestParams, { signal });
+        } catch (err) {
+            // R104e: If Gemini 404s on the model (e.g. an unrecognised or deprecated model name),
+            // attempt automatic recovery using the universal gemini-1.5-flash fallback before giving up.
+            if (effectiveProvider === 'gemini' && (err.status === 404 || /404/i.test(err.message)) && model !== 'gemini-1.5-flash') {
+                const fallbackModel = 'gemini-1.5-flash';
+                console.warn(`[motionProvider] Model "${model}" was not found (404) on Gemini; retrying with stable fallback "${fallbackModel}"...`);
+                try {
+                    const fallbackParams = { ...requestParams, model: fallbackModel };
+                    completion = await ai.chat.completions.create(fallbackParams, { signal });
+                } catch (_) {
+                    throw err; // preserve original error if fallback also fails
+                }
+            } else {
+                throw err;
+            }
+        }
 
         rawOutput = completion?.choices?.[0]?.message?.content || null;
         // Distinguish "the model answered with nothing" from "the model ran

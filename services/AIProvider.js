@@ -225,6 +225,37 @@ function getAIClient(opts = {}) {
         if (!env.GEMINI_API_KEY) return null;
         config.baseURL = env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/';
         config.apiKey  = env.GEMINI_API_KEY;
+        // Google's OpenAI-compatible endpoint wraps errors in a root array:
+        // `[{ "error": { "code": 404, "message": "..." } }]`.
+        // The OpenAI npm SDK expects `{ "error": { ... } }` and silently
+        // discards array-wrapped error bodies, turning every failure into
+        // an uninformative `${status} status code (no body)`.
+        // This custom fetch unwraps the array so the SDK extracts the genuine
+        // error message (e.g. model not found, invalid key, quota exhausted).
+        config.fetch = async (url, fetchOpts) => {
+            const res = await fetch(url, fetchOpts);
+            if (!res.ok) {
+                try {
+                    const text = await res.text();
+                    const parsed = JSON.parse(text);
+                    if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.error) {
+                        return new Response(JSON.stringify(parsed[0]), {
+                            status: res.status,
+                            statusText: res.statusText,
+                            headers: res.headers,
+                        });
+                    }
+                    return new Response(text, {
+                        status: res.status,
+                        statusText: res.statusText,
+                        headers: res.headers,
+                    });
+                } catch (_) {
+                    // Fall back to original response if body cannot be parsed
+                }
+            }
+            return res;
+        };
     } else {
         if (!env.OPENAI_API_KEY) return null;
         config.apiKey = env.OPENAI_API_KEY;
@@ -291,7 +322,7 @@ function resolveModel(requestedModel, capability) {
     }
 
     if (provider === 'gemini') {
-        return process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+        return process.env.GEMINI_MODEL || 'gemini-2.0-flash';
     }
 
     return requestedModel;
@@ -505,12 +536,16 @@ function describeAIError(err) {
         body = body[0]?.error ?? body[0];
     }
 
-    const realMessage =
+    let realMessage =
         body?.message ??
         body?.error?.message ??
         (typeof body === 'string' ? body : null) ??
         err.message ??
         'Unknown error';
+
+    if (status === 404 && /404 status code \(no body\)/i.test(realMessage)) {
+        realMessage = 'model not found or endpoint unavailable (verify GEMINI_MODEL / GEMINI_API_KEY)';
+    }
 
     return `[${status ?? '?'}] ${realMessage}`;
 }
