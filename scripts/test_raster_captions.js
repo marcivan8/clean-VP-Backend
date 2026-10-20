@@ -145,13 +145,24 @@ section('4 · Server helpers');
     check('a word not yet revealed is transparent (keeps its space)', hidden.opacity === 0);
     check('parses every text-shadow layer', R.parseAllTextShadows('3px 3px 0 #000, -3px -3px 0 #000, 0 2px 8px rgba(0,0,0,0.5)').length === 3);
     check('compileRasterOverlays(nothing) is null', R.compileRasterOverlays([], {}) === null);
+    const dummyPrep = [{ clipId: 'c1', listPath: '/tmp/c1.ffconcat', geometry: [{ t: 0, x: 50, y: 50, rotation: 0, scale: 1, opacity: 1 }], outputStart: 0, outputEnd: 2 }];
+    const dummyGraph = R.compileRasterOverlays(dummyPrep, { frameWidth: 1080, frameHeight: 1920, fps: 30 });
+    check('compileRasterOverlays specifies fps=30 explicitly to prevent fps:default auto-insertion', dummyGraph.filterComplex.includes('[1:v]fps=30,setpts='));
+    check('compileRasterOverlays specifies eof_action=pass on overlay', dummyGraph.filterComplex.includes('eof_action=pass:enable='));
 }
 
 section('5 · Real render through ffmpeg (decoded pixels)');
 {
     let Canvas = null;
     try { Canvas = require('@napi-rs/canvas'); } catch (_) { Canvas = null; }
-    const ffmpeg = ['ffmpeg', '/usr/bin/ffmpeg'].find(b => spawnSync(b, ['-version']).status === 0) || null;
+    const ffmpeg = [
+        process.env.FFMPEG_PATH,
+        '/opt/homebrew/bin/ffmpeg',
+        '/usr/local/bin/ffmpeg',
+        'ffmpeg',
+        '/usr/bin/ffmpeg',
+        (() => { try { return require('@ffmpeg-installer/ffmpeg').path; } catch (_) { return null; } })(),
+    ].find(b => b && fs.existsSync(b) && spawnSync(b, ['-version']).status === 0) || null;
     const font = path.join(ROOT, 'render-worker/revideo/src/fonts/Anton-Regular.ttf');
     if (!Canvas || !ffmpeg || !fs.existsSync(font)) {
         skip('render checks', !Canvas ? '@napi-rs/canvas not installed for this platform' : !ffmpeg ? 'no ffmpeg' : 'no font');
@@ -230,7 +241,14 @@ section('6 · Export wiring and fail-open fallback');
 section('7 · Sticker rotation in the compositor: centred, and animated');
 {
     const C = require(path.join(ROOT, 'server/compositor/CompositorCompiler.js'));
-    const ffmpeg = ['ffmpeg', '/usr/bin/ffmpeg'].find(b => spawnSync(b, ['-version']).status === 0) || null;
+    const ffmpeg = [
+        process.env.FFMPEG_PATH,
+        '/opt/homebrew/bin/ffmpeg',
+        '/usr/local/bin/ffmpeg',
+        'ffmpeg',
+        '/usr/bin/ffmpeg',
+        (() => { try { return require('@ffmpeg-installer/ffmpeg').path; } catch (_) { return null; } })(),
+    ].find(b => b && fs.existsSync(b) && spawnSync(b, ['-version']).status === 0) || null;
     const geo = (rotA, rotB) => [
         { t: 0, x: 0.4, y: 0.4, w: 0.2, h: 0.2 * (540 / 960), rotation: rotA, opacity: 1, blur: 0 },
         { t: 2, x: 0.4, y: 0.4, w: 0.2, h: 0.2 * (540 / 960), rotation: rotB, opacity: 1, blur: 0 },

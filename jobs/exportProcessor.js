@@ -58,7 +58,7 @@ function runFfmpegArgs(bin, args) {
         proc.on('error', reject);
         proc.on('close', code => {
             if (code === 0) return resolve();
-            const errTail = Buffer.concat(stderrChunks).toString('utf-8').slice(-1200);
+            const errTail = Buffer.concat(stderrChunks).toString('utf-8').slice(-8000);
             reject(new Error(`ffmpeg exited ${code}:\n${errTail}`));
         });
     });
@@ -2274,7 +2274,7 @@ module.exports = async function processExportJob(job) {
                             if (code === 0) {
                                 resolve();
                             } else {
-                                const errTail = Buffer.concat(stderrChunks).toString('utf-8').slice(-1200);
+                                const errTail = Buffer.concat(stderrChunks).toString('utf-8').slice(-8000);
                                 reject(new Error(`ffmpeg drawtext exited ${code}:\n${errTail}`));
                             }
                         });
@@ -2324,7 +2324,11 @@ module.exports = async function processExportJob(job) {
                     finalVideoPath = rasterOutPath;
                     console.log('  ✅ Raster captions applied');
                 } catch (rasterErr) {
-                    console.warn(`[ExportJob ${job.id}] raster caption pass failed, drawing them as text:`, rasterErr.message.slice(0, 600));
+                    console.warn(
+                        `[ExportJob ${job.id}] raster caption pass failed, drawing them as text:\n` +
+                        `  Diagnosis: ${firstFfmpegError(rasterErr.message)}\n` +
+                        `  Stderr tail: ${rasterErr.message.slice(-1500)}`
+                    );
                     // The REASON used to stop here, in a worker log nobody
                     // watching an export can see. With PARITY_ALL_TEXT every
                     // text clip is a raster entry, so this one failure takes

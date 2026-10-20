@@ -545,7 +545,10 @@ function compileRasterOverlays(items, opts) {
         const dense = rotAnimated || scaleAnimated || opacityAnimated;
 
         const parts = [];
-        if (dense) parts.push(`fps=${fps}`);
+        // Explicitly set the stream fps to match the target frame rate. Concat demuxer
+        // streams have no fixed fps; without this, FFmpeg auto-inserts an fps filter
+        // defaulting to 25 fps, causing timebase mismatches against 30/60 fps base video.
+        parts.push(`fps=${fps}`);
         parts.push(`setpts=PTS-STARTPTS+${n4(it.outputStart)}/TB`);
         parts.push('format=rgba');
 
@@ -588,7 +591,7 @@ function compileRasterOverlays(items, opts) {
         const outLabel = i === list.length - 1 ? 'rcout' : `rcb${i}`;
         chains.push(
             `[${current}][rc${i}]overlay=x='${xExpr}-overlay_w/2':y='${yExpr}-overlay_h/2'` +
-            `:eval=frame:enable='between(t,${n4(it.outputStart)},${n4(it.outputEnd)})'[${outLabel}]`
+            `:eval=frame:eof_action=pass:enable='between(t,${n4(it.outputStart)},${n4(it.outputEnd)})'[${outLabel}]`
         );
         current = outLabel;
     });
