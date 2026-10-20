@@ -33,6 +33,12 @@ const {
     motionForTechnique,
     promptLines,
 } = require('../audio-engine/library/MotionTechniqueIndex.js');
+const {
+    VIBED_MOTION_KNOWLEDGE_VERSION,
+    getKnowledgeForBrief,
+    classifyPromptSkills,
+    searchMotionKnowledge,
+} = require('../knowledge/vibedMotionKnowledge.js');
 
 const router = express.Router();
 
@@ -61,10 +67,17 @@ function cleanLayers(layers) {
  * Build the LLM prompt. PURE, so the regression can assert on what the model
  * is told (vocabulary, limits, style rules).
  */
-function buildMotionPrompt({ brief, layers, catalog, editingStyle }) {
+function buildMotionPrompt({ brief, layers, catalog, editingStyle, useVibedStandards = false }) {
     const verbs = catalog.map(v => `- ${v.verb} (${v.group}): ${v.describe}`).join('\n');
     const layerLines = layers.map(l => `- id "${l.id}": ${l.kind}, ${l.duration.toFixed(2)} s${l.content ? `, text "${l.content}"` : ''}`).join('\n');
     const calm = editingStyle && isCalmStyle(editingStyle);
+
+    let standardsBlock = '';
+    if (useVibedStandards) {
+        const knowledge = getKnowledgeForBrief(brief, { editingStyle });
+        standardsBlock = `\n\n${knowledge.promptBlock}\n`;
+    }
+
     return `You are a senior motion designer. Write the animation for each layer below.
 
 BRIEF FROM THE EDITOR: "${brief}"
@@ -77,7 +90,7 @@ VERB VOCABULARY (prefer these, they are tuned with real spring physics):
 ${verbs}
 
 Each beat: {"verb": string, "at": seconds from the layer start (for "out" verbs: seconds BEFORE the end, usually 0), "duration": seconds (optional), "energy": 0..1, "direction": "up"|"down"|"left"|"right" (optional), "easing": optional}.
-"anticipate": true (optional) adds a wind-up AGAINST the move just before it — a crouch before a hop, a lean right before flying left. It applies to emphasis and exit verbs only: an entrance has nothing on screen yet to pull back. Use it to give a move weight, not on every beat.
+"anticipate": true (optional) adds a wind-up AGAINST the move just before it - a crouch before a hop, a lean right before flying left. It applies to emphasis and exit verbs only: an entrance has nothing on screen yet to pull back. Use it to give a move weight, not on every beat.
 
 You may also add raw "animations" when no verb fits: {"startTime": s, "anchor": "in"|"out", "easing": name, "keyframes": [{"time": s from the animation start, "properties": {...}, "easing": optional}]}.
 Animatable properties: x and y (offset in % of the frame, -120..120), scale (multiplier, 0..6), rotation (degrees), opacity (0..1), blur (px, 0..60), glow (px, 0..60), reveal (0..1, text type-on).
@@ -87,10 +100,10 @@ Design rules:
 - Every layer gets ONE entrance at 0, and an exit unless it is shorter than 1 s.
 - Emphasis beats land on meaning (the key word, a number), not at random.
 - Vary the motion between layers so the edit does not feel templated, but keep one visual language.
-- Follow-through: a stack that arrives one line at a time must LEAVE one line at a time too, in reverse — whatever arrived last goes first. Lines that vanish together on one frame are the clearest sign of machine-made motion.
+- Follow-through: a stack that arrives one line at a time must LEAVE one line at a time too, in reverse: whatever arrived last goes first. Lines that vanish together on one frame are the clearest sign of machine-made motion.
 - Secondary action: when two layers move together, do not give them the same verb at the same instant. A backdrop arrives first and quieter; a decoration lands after the words it punctuates.
 - Respect the brief's energy. "subtle" or "elegant" means small values and sine or gentle springs; "punchy" means fast entrances, springSnappy and overshoot.
-- Keep everything inside each layer's duration.
+- Keep everything inside each layer's duration.${standardsBlock}
 
 Reply with JSON only: {"layers": {"<layer id>": {"beats": [...], "animations": [...]}}, "notes": "one short sentence on the motion idea"}`;
 }
@@ -106,7 +119,7 @@ router.post('/compose', authenticateUser, async (req, res) => {
             layers,
             editingStyle: style,
             composer,
-            buildPrompt: buildMotionPrompt,
+            buildPrompt: (args) => buildMotionPrompt({ ...args, useVibedStandards: true }),
             cleanLayers,
         });
         return res.json({
@@ -186,7 +199,7 @@ const EXIT_VERBS = ['fade-out', 'sink-out', 'fly-out', 'shrink-out', 'blur-out',
  * placeholders, so the feature degrades to "structure only" rather than
  * breaking.
  */
-function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techniques = [] }) {
+function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techniques = [], useVibedStandards = false }) {
     // R103 — the shortlist retrieved from the knowledge base for THIS brief.
     // Absent (an older caller, or nothing scored) means the block is simply
     // not in the prompt and the model free-forms verbs exactly as before.
@@ -195,12 +208,20 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techni
         ? [
             '',
             'These are motion techniques from the library, with the craft reason for each.',
-            'Prefer giving a beat a "technique" (its id) over writing your own verbs — the',
+            'Prefer giving a beat a "technique" (its id) over writing your own verbs - the',
             'technique carries timing and energy that have already been judged to work:',
             ...techLines,
             '',
             'Put the id in the beat as "technique": "<id>". Only fall back to writing your own',
             '"motion" object when none of these fits what the beat has to do.',
+        ]
+        : [];
+
+    const standardsLines = useVibedStandards
+        ? [
+            '',
+            `--- VIBED Motion & Video Standards (v${VIBED_MOTION_KNOWLEDGE_VERSION}) ---`,
+            getKnowledgeForBrief(brief, { transcript, platform, tone }).promptBlock,
         ]
         : [];
 
@@ -228,6 +249,7 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techni
             '- Invent nothing that is not in the brief or the transcript. Leave a field out rather than guess.',
             '',
             ...techBlock,
+            ...standardsLines,
             '',
             'Reply as JSON only:',
             '{"title":"...","points":["...","..."],"cta":"...","stat":{"value":"...","label":"..."}}',
@@ -237,7 +259,7 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techni
     // ordered beat sequence together with the words, instead of only ever
     // filling in text for a shape SceneDirector's regex already fixed.
     return [
-        'You are a motion-graphics director for short social videos. Decide the tone, the ordered sequence of on-screen beats, and write the words for them — all from the brief. Short, concrete, no hype.',
+        'You are a motion-graphics director for short social videos. Decide the tone, the ordered sequence of on-screen beats, and write the words for them - all from the brief. Short, concrete, no hype.',
         '',
         `The brief: "${brief}"`,
         platform ? `It will be posted on ${platform}.` : '',
@@ -245,14 +267,14 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techni
         '',
         `Pick ONE tone from: ${TONE_KEYS.join(', ')}.`,
         `Each beat has a "kind", one of: ${BEAT_KINDS.join(', ')}. Typical sequences open with "intro", use "point" for benefits, features or steps, "stat" for one figure worth a callout, "quote" for a testimonial, and close with "cta" when the brief implies a call to action.`,
-        'Decide how many beats and which kinds actually fit the brief — do not force a shape it does not ask for.',
+        'Decide how many beats and which kinds actually fit the brief - do not force a shape it does not ask for.',
         '',
-        'A beat MAY also suggest its own "motion" when the tone\'s usual treatment would undersell it (a standout number, the final call to action) — most beats should leave "motion" out and let the tone\'s own default carry them:',
+        'A beat MAY also suggest its own "motion" when the tone\'s usual treatment would undersell it (a standout number, the final call to action) - most beats should leave "motion" out and let the tone\'s own default carry them:',
         `  "enter" (required if "motion" is given): one of ${ENTER_VERBS.join(', ')}`,
         `  "emphasis" (optional): one of ${EMPHASIS_VERBS.join(', ')}, or omit it`,
         `  "exit" (optional): one of ${EXIT_VERBS.join(', ')}, or omit it`,
         '  "energy": 0 (subtle) to 1 (maximal), omit for a moderate default',
-        '  "anticipate": true (optional) — the beat winds up against its own move just before it, which gives a punch or a whip-out weight. Leave it out for calm treatments, where it reads as a stutter.',
+        '  "anticipate": true (optional) - the beat winds up against its own move just before it, which gives a punch or a whip-out weight. Leave it out for calm treatments, where it reads as a stutter.',
         '',
         'Rules:',
         '- At most 8 beats.',
@@ -260,9 +282,10 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techni
         '- A "cta" beat\'s "text" is 2 to 5 words, an instruction.',
         '- A "stat" beat needs a short "value" ("+184%", "3x", "12 min") and a "label" of 2 to 4 words.',
         '- No full stops, hashtags or emoji anywhere.',
-        '- Invent nothing that is not in the brief or the transcript. Leave a field, or a whole beat\'s "text", out rather than guess — an empty "text" is fine and becomes an editable placeholder.',
+        '- Invent nothing that is not in the brief or the transcript. Leave a field, or a whole beat\'s "text", out rather than guess - an empty "text" is fine and becomes an editable placeholder.',
         '',
         ...techBlock,
+        ...standardsLines,
         '',
         'Reply as JSON only:',
         '{"tone":"...","beats":[{"kind":"intro","text":"...","technique":"hook-slam-headline"},{"kind":"point","text":"...","kicker":"01"},{"kind":"cta","text":"...","motion":{"enter":"slam-in","emphasis":"punch","energy":0.8}}]}',
@@ -472,7 +495,7 @@ router.post('/scene-plan', authenticateUser, async (req, res) => {
             beats: beatList,
             tone: cleanTone,
             platform: cleanPlatform,
-            buildPrompt: (args) => buildScenePlanPrompt({ ...args, techniques }),
+            buildPrompt: (args) => buildScenePlanPrompt({ ...args, techniques, useVibedStandards: true }),
             cleanPlan: cleanScenePlan,
         });
         return res.json({
@@ -567,3 +590,7 @@ module.exports.cleanScenePlan = cleanScenePlan;
 module.exports.buildMotionPrompt = buildMotionPrompt;
 module.exports.cleanLayers = cleanLayers;
 module.exports.loadComposer = loadComposer;
+module.exports.getKnowledgeForBrief = getKnowledgeForBrief;
+module.exports.classifyPromptSkills = classifyPromptSkills;
+module.exports.searchMotionKnowledge = searchMotionKnowledge;
+module.exports.VIBED_MOTION_KNOWLEDGE_VERSION = VIBED_MOTION_KNOWLEDGE_VERSION;
