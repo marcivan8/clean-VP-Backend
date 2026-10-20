@@ -97,6 +97,26 @@ export async function fetchShortPlan(text, platform, duration) {
  * instead of only ever filling words into a fixed shape -- shortPolish then
  * picks just the intro/point/cta beats it has room for.
  */
+/**
+ * Why the motion route had no plan, in words an operator can act on.
+ *
+ * All three of these used to arrive as the same `source: 'rules'`, which is
+ * why "the provider is set and it STILL says rules" was impossible to debug
+ * from the app: a provider deliberately set to deterministic, a provider set
+ * to a real model with no working credentials, and a model that was called
+ * and errored are three different jobs for whoever owns the deployment.
+ */
+const SCENE_PLAN_FAILURES = Object.freeze({
+    rules_requested: 'the motion provider is set to the deterministic rules (AI_MOTION_PROVIDER=rules), so no model was called',
+    provider_unconfigured: 'the motion provider has no working credentials on the server, so no model was called',
+    client_initialization_failed: 'the motion model could not be initialised on the server',
+    timeout: 'the motion model timed out',
+    cancelled: 'the request was cancelled before the model answered',
+    no_output: 'the motion model returned nothing usable',
+    api_error: 'the motion model returned an error',
+    route_error: 'the motion route itself failed',
+});
+
 export async function fetchScenePlanResult(text, platform, duration) {
     const none = (reason, source = 'none', techniques = []) => ({ plan: null, source, techniques, reason });
     if (!text) return none('there was no transcript text to plan from');
@@ -125,12 +145,16 @@ export async function fetchScenePlanResult(text, platform, duration) {
         const source = String(data.source || (plan ? 'ai' : 'rules'));
         const techniques = Array.isArray(data.techniques) ? data.techniques : [];
         if (!plan) {
-            console.warn(`[shortFinisher] no AI scene plan (source=${source}); `
+            const why = SCENE_PLAN_FAILURES[data.failureCategory]
+                || (data.failureCategory ? `the motion model failed (${data.failureCategory})` : null);
+            const named = data.provider ? ` [provider: ${data.provider}]` : '';
+            console.warn(`[shortFinisher] no AI scene plan (source=${source}, reason=${data.failureCategory || 'unreported'}${named}); `
                 + `${techniques.length} knowledge-base technique(s) were offered and none could be used. `
                 + 'The hook falls back to a single title.');
-            return none(source === 'rules'
-                ? 'the motion AI is not answering, so the deterministic rules were used'
-                : `no plan came back (source: ${source})`, source, techniques);
+            return none(why
+                || (source === 'rules'
+                    ? 'the motion AI is not answering, so the deterministic rules were used'
+                    : `no plan came back (source: ${source})`), source, techniques);
         }
         return { plan, source, techniques, reason: null };
     } catch (err) {

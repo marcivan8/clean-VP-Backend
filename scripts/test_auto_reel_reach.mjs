@@ -178,5 +178,85 @@ await check('the Reel auto playbook really does ask for b-roll', () => {
     assert.match(styles, /style\.id === 'vlog' \|\| style\.id === 'reel'/, 'reel no longer reaches the b-roll step');
 });
 
+log('\n── 4. "The provider IS set and it still says rules" ──');
+
+await check('the route reports WHICH kind of failure, not just "rules"', () => {
+    // Three completely different operator problems used to arrive as one
+    // indistinguishable `source: 'rules'`: the provider is deliberately
+    // deterministic, the provider names a real model but has no working
+    // credentials, or the model was called and failed.
+    const provider = read('services/motionProvider.js');
+    const rulesReturns = [...provider.matchAll(/return \{ source: 'rules', plan: null[^}]*\}/g)];
+    assert.ok(rulesReturns.length >= 3, `expected several rules-fallback returns, found ${rulesReturns.length}`);
+    for (const m of rulesReturns) {
+        assert.match(m[0], /failureCategory/, `a rules fallback still reports no category:\n${m[0]}`);
+    }
+    const route = read('server/routes/motionRoutes.js');
+    assert.match(route, /failureCategory: result\.failureCategory/, 'the route drops the category');
+    assert.match(route, /failureCategory: 'route_error'/, 'the route\'s own catch reports no category');
+});
+
+await check('the category becomes a sentence an operator can act on', async () => {
+    const cases = [
+        ['rules_requested', /AI_MOTION_PROVIDER=rules/],
+        ['provider_unconfigured', /no working credentials/],
+        ['timeout', /timed out/],
+        ['api_error', /returned an error/],
+    ];
+    for (const [failureCategory, expect] of cases) {
+        nextResponse = { ok: true, status: 200, body: { source: 'rules', plan: null, techniques: ['a'], failureCategory, provider: 'openai' } };
+        const r = await SF.fetchScenePlanResult('some transcript words', 'reels', 20);
+        assert.match(r.reason, expect, `${failureCategory} produced "${r.reason}"`);
+    }
+    // A category this client has never heard of still says something true.
+    nextResponse = { ok: true, status: 200, body: { source: 'rules', plan: null, techniques: [], failureCategory: 'brand_new_thing' } };
+    const r = await SF.fetchScenePlanResult('some transcript words', 'reels', 20);
+    assert.match(r.reason, /brand_new_thing/, `an unknown category was swallowed: "${r.reason}"`);
+});
+
+await check('no credentials or prompts ride along with the category', () => {
+    const route = read('server/routes/motionRoutes.js');
+    const at = route.indexOf('failureCategory: result.failureCategory');
+    const block = route.slice(Math.max(0, at - 600), at + 400);
+    for (const leak of ['apiKey', 'api_key', 'OPENAI_API_KEY', 'prompt:', 'transcript:']) {
+        assert.ok(!block.includes(leak), `the failure payload carries ${leak}`);
+    }
+});
+
+log('\n── 5. Stock media is allowed past the Content Security Policy ──');
+
+await check('every stock provider wired into services/ is in the CSP', () => {
+    // The search works, the key is valid, and the browser blocks every
+    // thumbnail and every preview: "Loading the image '<URL>' violates the
+    // following Content Security Policy directive: img-src ...". That reads
+    // exactly like "the provider doesn't work".
+    const index = read('index.js');
+    assert.match(index, /const STOCK_MEDIA_HOSTS = \[/, 'there is no single list of provider hosts');
+    const list = /const STOCK_MEDIA_HOSTS = \[([\s\S]*?)\];/.exec(index)[1];
+    for (const host of ['pexels.com', 'vecteezy.com']) {
+        assert.ok(list.includes(host), `${host} is not allowed by the CSP`);
+    }
+});
+
+await check('the hosts are allowed for MEDIA as well as images', () => {
+    // A thumbnail that loads over a <video> that does not is a worse failure
+    // than neither working: the panel looks fine and nothing plays.
+    const index = read('index.js');
+    assert.match(index, /imgSrc:[^\n]*\.\.\.STOCK_MEDIA_HOSTS/, 'imgSrc does not include the providers');
+    assert.match(index, /mediaSrc:[^\n]*\.\.\.STOCK_MEDIA_HOSTS/, 'mediaSrc does not include the providers');
+});
+
+await check('a provider service with no CSP entry is a visible omission', () => {
+    // The guard that keeps this from rotting: every *Service.js that talks to
+    // a stock provider must have its host allowed.
+    const index = read('index.js');
+    const list = /const STOCK_MEDIA_HOSTS = \[([\s\S]*?)\];/.exec(index)[1];
+    const services = ['VecteezyService.js', 'PexelsService.js'];
+    const missing = services
+        .map(s => s.replace('Service.js', '').toLowerCase())
+        .filter(name => !list.toLowerCase().includes(name));
+    assert.deepEqual(missing, [], `provider service(s) with no CSP host: ${missing.join(', ')}`);
+});
+
 log(failures === 0 ? '\n✅ auto/reel reachability: all checks passed\n' : `\n❌ ${failures} check(s) failed\n`);
 process.exit(failures === 0 ? 0 : 1);

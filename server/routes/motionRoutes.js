@@ -481,10 +481,28 @@ router.post('/scene-plan', authenticateUser, async (req, res) => {
             // What the KB offered, so the client (and the tests) can see the
             // library was consulted even when the model ignored it.
             techniques: techniques.map(t => t.technique.name),
+            // R104b — WHY there is no plan. The three rules-fallback paths are
+            // completely different problems with identical output: the
+            // provider is deliberately set to "rules", the provider is set to
+            // a real model but has no credentials, or the model was called and
+            // failed. Only the operator can act on the difference, and until
+            // now that difference existed only in a server telemetry line.
+            // No credentials, keys or prompts are included — just the category
+            // and the provider name the operator configured.
+            ...(result.plan ? {} : {
+                failureCategory: result.failureCategory || 'unknown',
+                provider: result.provider || null,
+            }),
         });
     } catch (err) {
         console.warn('[motionRoutes /scene-plan] generation failed, falling back to rules:', err.message);
-        return res.json({ source: 'rules', plan: null, techniques: techniques.map(t => t.technique.name) });
+        return res.json({
+            source: 'rules',
+            plan: null,
+            techniques: techniques.map(t => t.technique.name),
+            failureCategory: 'route_error',
+            provider: null,
+        });
     }
 });
 

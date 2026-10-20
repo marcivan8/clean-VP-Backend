@@ -45,6 +45,22 @@ try {
 }
 
 // ── Security headers ─────────────────────────────────────────────────────────
+//
+// Stock-media provider CDNs. A stock clip is previewed, scrubbed and
+// thumbnailed DIRECTLY from the provider before the user imports it — nothing
+// is proxied through us at that stage — so every provider wired into
+// services/ needs its hosts here or the browser blocks the lot:
+// "Loading the image '<URL>' violates the following Content Security Policy
+// directive: img-src ...". The search succeeds, the API key is fine, and the
+// panel shows nothing, which reads as "the provider doesn't work".
+//
+// ONE list for img and media, so adding a provider is a single edit. A new
+// provider in services/ must be added here in the same change.
+const STOCK_MEDIA_HOSTS = [
+    'https://*.pexels.com',     // images.pexels.com, videos.pexels.com
+    'https://*.vecteezy.com',   // static.vecteezy.com and its download hosts
+];
+
 app.use(helmet({
   // Allow cross-origin loads for media served from /uploads and GCS signed URLs.
   // Setting the header explicitly (cross-origin) is safer than disabling it (false).
@@ -58,8 +74,12 @@ app.use(helmet({
       // Editor fonts come from Bunny Fonts (EU), not Google Fonts.
       styleSrc:                ["'self'", "'unsafe-inline'", "https://fonts.bunny.net"],
       fontSrc:                 ["'self'", "https://fonts.bunny.net"],
-      imgSrc:                  ["'self'", "data:", "blob:", "https://storage.googleapis.com", "https://*.posthog.com", "https://*.i.posthog.com"],
-      mediaSrc:                ["'self'", "blob:", "https://storage.googleapis.com"],
+      imgSrc:                  ["'self'", "data:", "blob:", "https://storage.googleapis.com", "https://*.posthog.com", "https://*.i.posthog.com", ...STOCK_MEDIA_HOSTS],
+      // Stock clips are previewed and scrubbed straight from the provider's
+      // CDN before anything is imported, so the same hosts have to be allowed
+      // for media as for images — a thumbnail that loads over a <video> that
+      // does not is a worse failure than neither working.
+      mediaSrc:                ["'self'", "blob:", "https://storage.googleapis.com", ...STOCK_MEDIA_HOSTS],
       connectSrc: [
         "'self'",
         "https://*.supabase.co",

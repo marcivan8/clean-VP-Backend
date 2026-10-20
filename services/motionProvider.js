@@ -182,7 +182,7 @@ async function generateScenePlan({
             status: 'rules_fallback',
             failureCategory: 'rules_requested',
         });
-        return { source: 'rules', plan: null, provider: 'rules', model: 'deterministic', latencyMs: 0 };
+        return { source: 'rules', plan: null, provider: 'rules', model: 'deterministic', latencyMs: 0, failureCategory: 'rules_requested' };
     }
 
     // Determine actual AI client
@@ -212,7 +212,7 @@ async function generateScenePlan({
             status: 'rules_fallback',
             failureCategory: 'provider_unconfigured',
         });
-        return { source: 'rules', plan: null, provider: effectiveProvider, model: 'none', latencyMs: Date.now() - startTime };
+        return { source: 'rules', plan: null, provider: effectiveProvider, model: 'none', latencyMs: Date.now() - startTime, failureCategory: 'provider_unconfigured' };
     }
 
     if (signal?.aborted) {
@@ -224,7 +224,7 @@ async function generateScenePlan({
             status: 'rules_fallback',
             failureCategory: 'cancelled',
         });
-        return { source: 'rules', plan: null, provider: effectiveProvider, model: 'none', latencyMs: Date.now() - startTime };
+        return { source: 'rules', plan: null, provider: effectiveProvider, model: 'none', latencyMs: Date.now() - startTime, failureCategory: 'cancelled' };
     }
 
     const timeout = Number(timeoutMs) > 0 ? Number(timeoutMs) : (Number(process.env.MOTION_AI_TIMEOUT_MS) || DEFAULT_SCENE_TIMEOUT_MS);
@@ -281,7 +281,7 @@ async function generateScenePlan({
             status: 'rules_fallback',
             failureCategory: failureCategory || 'no_output',
         });
-        return { source: 'rules', plan: null, provider: effectiveProvider, model, latencyMs };
+        return { source: 'rules', plan: null, provider: effectiveProvider, model, latencyMs, failureCategory: failureCategory || 'no_output' };
     }
 
     const parseResult = repairAndParseJSON(rawOutput);

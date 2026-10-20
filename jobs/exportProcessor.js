@@ -577,6 +577,44 @@ function getVideoRotation(filePath) {
  * size of the finished export (metadata.resolution). Returns null on any
  * probe failure.
  */
+/**
+ * The audio-mix filtergraph: the base's own audio (when it has any) plus one
+ * delayed segment per audio clip.
+ *
+ * Pure and exported so the two cases can be pinned by a test. The silent-base
+ * case is not a nicety: `[0:a]` against an input with no audio stream makes
+ * ffmpeg refuse the WHOLE graph ("Stream specifier ':a' matches no streams" /
+ * "Error binding filtergraph inputs/outputs: Invalid argument") and the entire
+ * export fails. It stayed hidden for as long as it did because every bundled
+ * sound effect was dropped before reaching this step, so with no segments the
+ * mix never ran at all.
+ *
+ * @param {Array<{path:string, startTime:number}>} segments
+ * @param {boolean} baseHasAudio
+ * @returns {string}
+ */
+function buildAudioMixGraph(segments, baseHasAudio) {
+    const ms = (t) => Math.round((Number(t) || 0) * 1000);
+    const delayed = segments.map((seg, i) => `[${i + 1}:a]adelay=${ms(seg.startTime)}|${ms(seg.startTime)}[da${i}]`).join(';');
+    const labels = segments.map((_, i) => `[da${i}]`).join('');
+    return baseHasAudio
+        // `duration=first` is the base's own audio length, so a sound effect
+        // landing near the end can never extend the video.
+        ? `[0:a]volume=1[va];${delayed};[va]${labels}amix=inputs=${1 + segments.length}:duration=first:dropout_transition=0[aout]`
+        // Nothing to anchor to, so the mix is the segments alone; the copied
+        // video stream still governs the container's length.
+        : `${delayed};${labels}amix=inputs=${segments.length}:duration=longest:dropout_transition=0[aout]`;
+}
+
+function hasAudioStream(filePath) {
+    return new Promise((resolve) => {
+        ffmpeg.ffprobe(filePath, (err, metadata) => {
+            if (err) { resolve(false); return; }
+            resolve((metadata?.streams || []).some(s => s.codec_type === 'audio'));
+        });
+    });
+}
+
 function getVideoDimensions(filePath) {
     return new Promise((resolve) => {
         ffmpeg.ffprobe(filePath, (err, metadata) => {
@@ -1730,19 +1768,33 @@ module.exports = async function processExportJob(job) {
         }
 
         if (audioSegments.length > 0) {
+            // Does the base actually HAVE an audio stream? `[0:a]` on a silent
+            // base is not an empty mix — ffmpeg refuses the whole filtergraph
+            // ("Stream specifier ':a' matches no streams" / "Error binding
+            // filtergraph inputs/outputs: Invalid argument") and the ENTIRE
+            // EXPORT fails. This stayed hidden for as long as it did because
+            // every bundled sound effect used to be dropped before reaching
+            // here (see fetchClipSource's /sfx-library/ branch): with no
+            // segments this block never ran at all. Fixing that resolution
+            // made this step start running, and it took the export with it.
+            const baseHasAudio = await hasAudioStream(finalVideoPath);
             const mixedPath = path.join(tmpDir, 'mixed.mp4');
             await new Promise((resolve, reject) => {
                 let cmd = ffmpeg(finalVideoPath);
                 for (const seg of audioSegments) cmd = cmd.input(seg.path);
 
-                const amixInputs  = 1 + audioSegments.length;
-                const filterComplex =
-                    `[0:a]volume=1[va];` +
-                    audioSegments.map((seg, i) => `[${i + 1}:a]adelay=${Math.round(seg.startTime * 1000)}|${Math.round(seg.startTime * 1000)}[da${i}]`).join(';') +
-                    `;[va]${audioSegments.map((_, i) => `[da${i}]`).join('')}amix=inputs=${amixInputs}:duration=first:dropout_transition=0[aout]`;
+                const filterComplex = buildAudioMixGraph(audioSegments, baseHasAudio);
 
                 cmd
-                    .complexFilter(filterComplex, 'aout')
+                    .complexFilter(filterComplex)
+                    // BOTH maps, video first. Any `-map` at all turns OFF
+                    // ffmpeg's default stream selection, so mapping only the
+                    // mixed audio — which is what `complexFilter(fc, 'aout')`
+                    // does on its own — produced an AUDIO-ONLY file with
+                    // `.videoCodec('copy')` silently a no-op. Every project
+                    // that reached this step (a music track, a voice-over,
+                    // and now a sound effect) lost its picture entirely.
+                    .outputOptions(['-map', '0:v', '-map', '[aout]'])
                     .videoCodec('copy')
                     .audioBitrate(audioBitrate)
                     .output(mixedPath)
@@ -1750,7 +1802,7 @@ module.exports = async function processExportJob(job) {
                     .on('error', reject)
                     .run();
             });
-            console.log('  ✅ Audio tracks mixed');
+            console.log(`  ✅ Audio tracks mixed (${audioSegments.length} segment(s)${baseHasAudio ? '' : ', silent base'})`);
         }
     }
 
@@ -2431,6 +2483,9 @@ module.exports.atempoChain = atempoChain;
 module.exports.fitContainSizePx = fitContainSizePx;
 module.exports.hasBaseClipTransform = hasBaseClipTransform;
 module.exports.buildTransformFilters = buildTransformFilters;
+// R104b — the audio-mix filtergraph, so both branches can be pinned without
+// standing up a whole export.
+module.exports.buildAudioMixGraph = buildAudioMixGraph;
 
 
 
