@@ -113,6 +113,7 @@ const SCENE_PLAN_FAILURES = Object.freeze({
     timeout: 'the motion model timed out',
     cancelled: 'the request was cancelled before the model answered',
     no_output: 'the motion model returned nothing usable',
+    output_truncated: 'the motion model ran out of output budget mid-answer (raise MOTION_AI_MAX_TOKENS)',
     api_error: 'the motion model returned an error',
     route_error: 'the motion route itself failed',
 });

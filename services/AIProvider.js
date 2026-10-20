@@ -267,7 +267,19 @@ function resolveModel(requestedModel, capability) {
 
     if (provider === 'groq') {
         if (capability === 'audio') return process.env.GROQ_AUDIO_MODEL || 'whisper-large-v3';
-        if (capability === 'motion') return process.env.GROQ_MOTION_MODEL || 'gemma2-9b-it';
+        // `gemma2-9b-it` was the default here until Groq decommissioned it.
+        // The failure was a 400 on every motion call — "The model
+        // `gemma2-9b-it` has been decommissioned and is no longer supported"
+        // — which the scene-plan route turned into its rules fallback, so the
+        // entire Motion Design Knowledge Base went unused while the app
+        // reported a clean success. A hardcoded model name is a dated
+        // assertion about someone else's service; defaulting to the SAME
+        // model the chat capability already uses means there is one name to
+        // keep current instead of two, and it is a name that is exercised on
+        // every other request rather than only here.
+        if (capability === 'motion') {
+            return process.env.GROQ_MOTION_MODEL || process.env.GROQ_CHAT_MODEL || 'openai/gpt-oss-120b';
+        }
         // gpt-oss-120b (not the smaller -20b) — OpenAI's own open-weight
         // flagship, still served free by Groq: 117B params, Apache 2.0,
         // 128K context, built for structured outputs/agentic/function-

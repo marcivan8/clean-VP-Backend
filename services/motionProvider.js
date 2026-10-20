@@ -252,7 +252,15 @@ async function generateScenePlan({
             model,
             messages: [{ role: 'user', content: promptContent }],
             temperature: 0.6,
-            max_tokens: 700,
+            // A reasoning model spends part of this budget THINKING before it
+            // writes anything, and those tokens count here. At 700 a scene
+            // plan can finish with `finish_reason: 'length'` and an empty
+            // string, which arrives as the same silent rules fallback as "no
+            // model configured". Overridable, with more headroom for the
+            // models that reason by default.
+            max_tokens: Number(process.env.MOTION_AI_MAX_TOKENS) > 0
+                ? Number(process.env.MOTION_AI_MAX_TOKENS)
+                : (/gemini|^o\d|gpt-5/i.test(model) ? 2000 : 700),
         };
         if (!/gemma/i.test(model)) {
             requestParams.response_format = { type: 'json_object' };
@@ -261,6 +269,12 @@ async function generateScenePlan({
         const completion = await ai.chat.completions.create(requestParams, { signal });
 
         rawOutput = completion?.choices?.[0]?.message?.content || null;
+        // Distinguish "the model answered with nothing" from "the model ran
+        // out of budget mid-answer". Both produce an empty string, and only
+        // one of them is fixed by raising MOTION_AI_MAX_TOKENS.
+        if (!rawOutput && completion?.choices?.[0]?.finish_reason === 'length') {
+            failureCategory = 'output_truncated';
+        }
     } catch (err) {
         if (err.name === 'AbortError' || signal?.aborted) {
             failureCategory = 'cancelled';

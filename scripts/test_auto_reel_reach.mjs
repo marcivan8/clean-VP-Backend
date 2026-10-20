@@ -223,6 +223,46 @@ await check('no credentials or prompts ride along with the category', () => {
     }
 });
 
+await check('no hardcoded model default is a known-dead model', () => {
+    // The whole knowledge base sat unused because `gemma2-9b-it` — Groq's
+    // default for the motion capability — had been decommissioned. Every
+    // motion call 400'd, the route fell back to rules, and the app reported
+    // success. A hardcoded model name is a dated assertion about someone
+    // else's service, so motion now tracks the chat model: ONE name to keep
+    // current, and one that is exercised on every other request.
+    const ai = read('services/AIProvider.js');
+    const motionLine = /capability === 'motion'\)\s*\{[\s\S]{0,300}?\}/.exec(ai);
+    assert.ok(motionLine, 'the motion model branch is gone');
+    assert.ok(!/return[^;]*'gemma2-9b-it'/.test(ai), 'a decommissioned model is still a default');
+    assert.match(motionLine[0], /GROQ_MOTION_MODEL \|\| process\.env\.GROQ_CHAT_MODEL/,
+        'the motion model no longer tracks the chat model');
+});
+
+await check('gemini can serve motion, and is documented as the way to', () => {
+    const ai = read('services/AIProvider.js');
+    assert.match(ai, /motion:\s*\[[^\]]*'gemini'/, 'gemini is not an allowed motion provider');
+    assert.match(ai, /if \(provider === 'gemini'\) return !!process\.env\.GEMINI_API_KEY;/,
+        'gemini motion has no configuration check');
+    const motion = read('services/motionProvider.js');
+    assert.match(motion, /MOTION_PROVIDERS = \[[^\]]*'gemini'/, 'gemini is not a valid AI_MOTION_PROVIDER');
+    const env = read('.env.example');
+    assert.match(env, /AI_MOTION_PROVIDER=gemini/, '.env.example does not show the gemini setup');
+    assert.ok(!/^# GROQ_MOTION_MODEL=gemma2-9b-it/m.test(env), '.env.example still recommends the dead model');
+});
+
+await check('a truncated answer is its own reason, not "returned nothing"', () => {
+    // A reasoning model spends part of max_tokens thinking, so a budget that
+    // was fine for a small instruct model can finish with
+    // `finish_reason: 'length'` and an empty string — which looks exactly
+    // like "no model configured" unless it is named.
+    const motion = read('services/motionProvider.js');
+    assert.match(motion, /finish_reason === 'length'/, 'truncation is not detected');
+    assert.match(motion, /output_truncated/, 'truncation has no category');
+    assert.match(motion, /MOTION_AI_MAX_TOKENS/, 'the budget is not overridable');
+    const sf = read('client/src/agent/shortFinisher.js');
+    assert.match(sf, /output_truncated:.*MOTION_AI_MAX_TOKENS/, 'the client cannot explain a truncated answer');
+});
+
 log('\n── 5. Stock media is allowed past the Content Security Policy ──');
 
 await check('every stock provider wired into services/ is in the CSP', () => {

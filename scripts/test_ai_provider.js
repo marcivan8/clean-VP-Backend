@@ -288,12 +288,23 @@ async function main() {
                 resolveModel('gpt-4o', 'chat') !== 'gpt-4o' && !!resolveModel('gpt-4o', 'chat'));
             check('groq maps audio to whisper-large-v3',
                 resolveModel('whisper-1', 'audio') === 'whisper-large-v3');
-            check('groq maps motion to gemma2-9b-it',
-                resolveModel('gpt-4o', 'motion') === 'gemma2-9b-it');
+            // R104d — this used to assert `gemma2-9b-it`, and so pinned a bug:
+            // Groq decommissioned that model, every motion call 400'd, and the
+            // scene-plan route silently fell back to its rules — which meant
+            // the whole Motion Design Knowledge Base went unused while the app
+            // reported success. Motion now tracks the CHAT model, so there is
+            // one Groq model name to keep current instead of two, and it is
+            // one that every other request already exercises.
+            check('groq maps motion to the same model as chat (no second name to keep current)',
+                resolveModel('gpt-4o', 'motion') === resolveModel('gpt-4o', 'chat'));
+            check('groq no longer defaults motion to the decommissioned gemma2-9b-it',
+                resolveModel('gpt-4o', 'motion') !== 'gemma2-9b-it');
         });
         withEnv({ AI_PROVIDER: 'groq', NODE_ENV: undefined, GROQ_CHAT_MODEL: 'llama-3.3-70b-versatile' }, () => {
             check('GROQ_CHAT_MODEL overrides the default',
                 resolveModel('gpt-4o', 'chat') === 'llama-3.3-70b-versatile');
+            check('...and motion follows it, with no GROQ_MOTION_MODEL set',
+                resolveModel('gpt-4o', 'motion') === 'llama-3.3-70b-versatile');
         });
         withEnv({ AI_PROVIDER: 'groq', NODE_ENV: undefined, GROQ_MOTION_MODEL: 'custom-motion-model' }, () => {
             check('GROQ_MOTION_MODEL overrides the default',
