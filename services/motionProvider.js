@@ -140,7 +140,111 @@ function logMotionTelemetry({ operation, provider, model, latencyMs, status, fai
 }
 
 /**
- * Generate a structured scene plan from a creative brief and optional transcript.
+ * Execute a chat completion with automatic failover for capacity spikes (503),
+ * rate limits (429), or missing models (404).
+ *
+ * If Gemini experiences high demand (503) or rate limits (429), cascades across
+ * Google's high-capacity flash-lite models (gemini-3.1-flash-lite,
+ * gemini-flash-lite-latest, gemini-flash-latest).
+ * If all Gemini models fail and a secondary provider (e.g. Groq or OpenAI via
+ * AI_PROVIDER) is configured, falls back to the secondary provider before
+ * giving up to deterministic rules.
+ */
+async function executeChatCompletionWithFailover({
+    ai,
+    requestParams,
+    provider,
+    model,
+    timeout,
+    signal,
+}) {
+    let completion = null;
+    let activeProvider = provider;
+    let activeModel = model;
+
+    try {
+        completion = await ai.chat.completions.create(requestParams, { signal });
+        return { completion, activeProvider, activeModel };
+    } catch (err) {
+        const status = err.status ?? err.statusCode ?? err.response?.status;
+        const msg = String(err.message || '');
+        const isRetryable = status === 503 || status === 429 || status === 404 ||
+            /503|429|404|demand|capacity|overloaded|rate limit|quota|not found/i.test(msg);
+
+        if (!isRetryable) {
+            throw err;
+        }
+
+        // 1. Try Gemini model fallbacks
+        if (provider === 'gemini') {
+            const is404 = status === 404 || /404|not found/i.test(msg);
+            const geminiFallbacks = is404
+                ? ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-flash-lite-latest']
+                : ['gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemini-flash-latest', 'gemini-3.8-flash'];
+
+            const candidateModels = geminiFallbacks.filter(m => m !== model);
+            for (const fallbackModel of candidateModels) {
+                if (signal?.aborted) break;
+                console.warn(
+                    `[motionProvider] Gemini model "${activeModel}" failed (${status || msg}); ` +
+                    `retrying with fallback "${fallbackModel}"...`
+                );
+                try {
+                    const fallbackParams = { ...requestParams, model: fallbackModel };
+                    completion = await ai.chat.completions.create(fallbackParams, { signal });
+                    if (completion?.choices?.[0]?.message?.content) {
+                        return { completion, activeProvider: 'gemini', activeModel: fallbackModel };
+                    }
+                } catch (fbErr) {
+                    console.warn(`[motionProvider] Fallback model "${fallbackModel}" failed: ${describeAIError(fbErr)}`);
+                }
+            }
+        }
+
+        // 2. Try secondary AI provider if configured (e.g. Groq, OpenAI)
+        const baseProvider = resolveProvider({ capability: 'chat' });
+        if (baseProvider !== provider && isAIConfigured({ capability: 'chat' })) {
+            console.warn(
+                `[motionProvider] Provider "${provider}" exhausted all models; ` +
+                `failing over to secondary provider "${baseProvider}"...`
+            );
+            try {
+                const secondaryAi = getAIClient({ timeout, provider: baseProvider });
+                if (secondaryAi) {
+                    const secondaryModel = resolveModel('gpt-4o', { provider: baseProvider, capability: 'motion' });
+                    const secondaryParams = {
+                        ...requestParams,
+                        model: secondaryModel,
+                        max_tokens: Number(process.env.MOTION_AI_MAX_TOKENS) > 0
+                            ? Number(process.env.MOTION_AI_MAX_TOKENS)
+                            : (/gemini|^o\d|gpt-5/i.test(secondaryModel) ? 2000 : 700),
+                    };
+                    if (/gemma/i.test(secondaryModel)) {
+                        delete secondaryParams.response_format;
+                    } else {
+                        secondaryParams.response_format = { type: 'json_object' };
+                    }
+                    completion = await secondaryAi.chat.completions.create(secondaryParams, { signal });
+                    if (completion?.choices?.[0]?.message?.content) {
+                        return { completion, activeProvider: baseProvider, activeModel: secondaryModel };
+                    }
+                }
+            } catch (secondaryErr) {
+                console.warn(`[motionProvider] Secondary provider "${baseProvider}" failed: ${describeAIError(secondaryErr)}`);
+            }
+        }
+
+        throw err;
+    }
+}
+
+/**
+ * Generate a high-level editorial/scene plan for a short video or sequence.
+ *
+ * Coordinates with the configured AI provider to produce:
+ *   - visual hook headline and key animated terms
+ *   - structured beats with recommended visual techniques
+ *   - optional call to action
  *
  * @param {Object} opts
  * @param {string} opts.brief - creative brief
@@ -233,6 +337,9 @@ async function generateScenePlan({
     let rawOutput = null;
     let failureCategory = null;
 
+    let activeModel = model;
+    let activeProvider = effectiveProvider;
+
     try {
         const ai = getAIClient({ timeout, capability: targetCapability });
         if (!ai) {
@@ -266,25 +373,18 @@ async function generateScenePlan({
             requestParams.response_format = { type: 'json_object' };
         }
 
-        let completion = null;
-        try {
-            completion = await ai.chat.completions.create(requestParams, { signal });
-        } catch (err) {
-            // R104e: If Gemini 404s on the model (e.g. an unrecognised, regional, or deprecated model name),
-            // attempt automatic recovery using gemini-3.8-flash or gemini-flash-latest before giving up.
-            if (effectiveProvider === 'gemini' && (err.status === 404 || /404/i.test(err.message))) {
-                const fallbackModel = model !== 'gemini-3.8-flash' ? 'gemini-3.8-flash' : 'gemini-flash-latest';
-                console.warn(`[motionProvider] Model "${model}" was not found (404) on Gemini; retrying with fallback "${fallbackModel}"...`);
-                try {
-                    const fallbackParams = { ...requestParams, model: fallbackModel };
-                    completion = await ai.chat.completions.create(fallbackParams, { signal });
-                } catch (_) {
-                    throw err; // preserve original error if fallback also fails
-                }
-            } else {
-                throw err;
-            }
-        }
+        const failoverResult = await executeChatCompletionWithFailover({
+            ai,
+            requestParams,
+            provider: effectiveProvider,
+            model,
+            timeout,
+            signal,
+        });
+
+        const completion = failoverResult.completion;
+        activeProvider = failoverResult.activeProvider;
+        activeModel = failoverResult.activeModel;
 
         rawOutput = completion?.choices?.[0]?.message?.content || null;
         // Distinguish "the model answered with nothing" from "the model ran
@@ -307,13 +407,13 @@ async function generateScenePlan({
         const latencyMs = Date.now() - startTime;
         logMotionTelemetry({
             operation: 'scene-plan',
-            provider: effectiveProvider,
-            model,
+            provider: activeProvider,
+            model: activeModel,
             latencyMs,
             status: 'rules_fallback',
             failureCategory: failureCategory || 'no_output',
         });
-        return { source: 'rules', plan: null, provider: effectiveProvider, model, latencyMs, failureCategory: failureCategory || 'no_output' };
+        return { source: 'rules', plan: null, provider: activeProvider, model: activeModel, latencyMs, failureCategory: failureCategory || 'no_output' };
     }
 
     const parseResult = repairAndParseJSON(rawOutput);
@@ -326,8 +426,8 @@ async function generateScenePlan({
 
     logMotionTelemetry({
         operation: 'scene-plan',
-        provider: effectiveProvider,
-        model,
+        provider: activeProvider,
+        model: activeModel,
         latencyMs,
         status: isSuccess ? 'success' : 'rules_fallback',
         failureCategory: isSuccess ? null : (failureCategory || parseResult.error || 'validation_failed'),
@@ -336,8 +436,8 @@ async function generateScenePlan({
     return {
         source: isSuccess ? 'llm' : 'rules',
         plan: validatedPlan,
-        provider: effectiveProvider,
-        model,
+        provider: activeProvider,
+        model: activeModel,
         latencyMs,
     };
 }
@@ -460,6 +560,9 @@ async function generateMotionScript({
     let rawOutput = null;
     let failureCategory = null;
 
+    let activeModel = model;
+    let activeProvider = effectiveProvider;
+
     try {
         const ai = getAIClient({ timeout, capability: targetCapability });
         if (!ai) {
@@ -484,7 +587,18 @@ async function generateMotionScript({
             requestParams.response_format = { type: 'json_object' };
         }
 
-        const completion = await ai.chat.completions.create(requestParams, { signal });
+        const failoverResult = await executeChatCompletionWithFailover({
+            ai,
+            requestParams,
+            provider: effectiveProvider,
+            model,
+            timeout,
+            signal,
+        });
+
+        const completion = failoverResult.completion;
+        activeProvider = failoverResult.activeProvider;
+        activeModel = failoverResult.activeModel;
 
         rawOutput = completion?.choices?.[0]?.message?.content || null;
     } catch (err) {
@@ -501,8 +615,8 @@ async function generateMotionScript({
         const latencyMs = Date.now() - startTime;
         logMotionTelemetry({
             operation: 'motion-compose',
-            provider: effectiveProvider,
-            model,
+            provider: activeProvider,
+            model: activeModel,
             latencyMs,
             status: 'rules',
             failureCategory: failureCategory || 'no_output',
@@ -511,8 +625,8 @@ async function generateMotionScript({
             source: 'rules',
             layers: rulesScripts(),
             notes: null,
-            provider: effectiveProvider,
-            model,
+            provider: activeProvider,
+            model: activeModel,
             latencyMs,
         };
     }
@@ -540,8 +654,8 @@ async function generateMotionScript({
 
     logMotionTelemetry({
         operation: 'motion-compose',
-        provider: effectiveProvider,
-        model,
+        provider: activeProvider,
+        model: activeModel,
         latencyMs,
         status: finalSource,
         failureCategory: usedLLM > 0 ? null : (failureCategory || parseResult.error || 'validation_failed'),
@@ -551,8 +665,8 @@ async function generateMotionScript({
         source: finalSource,
         layers: out,
         notes: typeof parsedData?.notes === 'string' ? parsedData.notes.slice(0, 200) : null,
-        provider: effectiveProvider,
-        model,
+        provider: activeProvider,
+        model: activeModel,
         latencyMs,
     };
 }

@@ -273,6 +273,16 @@ await check('gemini unrolls array error bodies and motion falls back on 404 mode
     assert.match(sf, /is404/, 'shortFinisher does not explain 404 model errors');
 });
 
+await check('gemini 503 capacity spikes recover via flash-lite and secondary provider failover', () => {
+    const motion = read('services/motionProvider.js');
+    assert.match(motion, /gemini-3\.1-flash-lite/, 'motionProvider has no flash-lite fallback for 503 capacity spikes');
+    assert.match(motion, /503/, 'motionProvider does not handle 503 errors');
+    assert.match(motion, /executeChatCompletionWithFailover/, 'motionProvider does not wrap completion in failover');
+    assert.match(motion, /baseProvider/, 'motionProvider does not fall back to secondary AI provider');
+    const sf = read('client/src/agent/shortFinisher.js');
+    assert.match(sf, /is503/, 'shortFinisher does not explain 503 capacity spikes');
+});
+
 log('\n── 5. Stock media is allowed past the Content Security Policy ──');
 
 await check('every stock provider wired into services/ is in the CSP', () => {

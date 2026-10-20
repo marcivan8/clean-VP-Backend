@@ -147,8 +147,11 @@ export async function fetchScenePlanResult(text, platform, duration) {
         const techniques = Array.isArray(data.techniques) ? data.techniques : [];
         if (!plan) {
             const is404 = /404|not found/i.test(data.failureCategory || '');
+            const is503 = /503|high demand|overloaded|capacity/i.test(data.failureCategory || '');
             const why = is404
                 ? `the motion model was not found on the provider (verify ${data.provider === 'gemini' ? 'GEMINI_MODEL' : 'model configuration'})`
+                : is503
+                ? `the motion model is experiencing a temporary capacity spike on ${data.provider || 'the provider'} (try again in a moment)`
                 : (SCENE_PLAN_FAILURES[data.failureCategory]
                     || (data.failureCategory ? `the motion model failed (${data.failureCategory})` : null));
             const named = data.provider ? ` [provider: ${data.provider}]` : '';

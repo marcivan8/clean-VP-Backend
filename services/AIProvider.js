@@ -181,9 +181,9 @@ function resolveProvider(opts = {}) {
  * @returns {Object|null} client, or null when no API key is configured
  */
 function getAIClient(opts = {}) {
-    const { timeout, maxRetries, capability = 'chat' } = opts;
+    const { timeout, maxRetries, capability = 'chat', provider: overrideProvider } = opts;
     const env = process.env;
-    let provider = resolveProvider({ capability });
+    let provider = overrideProvider || resolveProvider({ capability });
 
     // A provider that cannot serve this capability at all falls back to the
     // real openai client — see CAPABILITY_PROVIDERS above for the full matrix
@@ -280,8 +280,12 @@ function getAIClient(opts = {}) {
  *                                   name (legacy behaviour, kept for callers
  *                                   that don't pass it).
  */
-function resolveModel(requestedModel, capability) {
-    const provider = resolveProvider({ capability });
+function resolveModel(requestedModel, capabilityOrOpts) {
+    const opts = (typeof capabilityOrOpts === 'object' && capabilityOrOpts !== null)
+        ? capabilityOrOpts
+        : { capability: capabilityOrOpts };
+    const capability = opts.capability;
+    const provider = opts.provider || resolveProvider({ capability });
     if (provider === 'openai') return requestedModel;
 
     if (provider === 'gemma-local') {
@@ -486,7 +490,7 @@ function mockBodyFor(prompt = '') {
  * environments this factory exists to enable.
  */
 function isAIConfigured(opts = {}) {
-    const provider = resolveProvider(opts);
+    const provider = opts.provider || resolveProvider(opts);
     if (provider === 'mock' || provider === 'ollama' || provider === 'gemma-local') return true;
     if (provider === 'groq') return !!process.env.GROQ_API_KEY;
     if (provider === 'gemini') return !!process.env.GEMINI_API_KEY;
