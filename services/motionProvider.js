@@ -270,11 +270,11 @@ async function generateScenePlan({
         try {
             completion = await ai.chat.completions.create(requestParams, { signal });
         } catch (err) {
-            // R104e: If Gemini 404s on the model (e.g. an unrecognised or deprecated model name),
-            // attempt automatic recovery using the universal gemini-1.5-flash fallback before giving up.
-            if (effectiveProvider === 'gemini' && (err.status === 404 || /404/i.test(err.message)) && model !== 'gemini-1.5-flash') {
-                const fallbackModel = 'gemini-1.5-flash';
-                console.warn(`[motionProvider] Model "${model}" was not found (404) on Gemini; retrying with stable fallback "${fallbackModel}"...`);
+            // R104e: If Gemini 404s on the model (e.g. an unrecognised, regional, or deprecated model name),
+            // attempt automatic recovery using gemini-3.8-flash or gemini-flash-latest before giving up.
+            if (effectiveProvider === 'gemini' && (err.status === 404 || /404/i.test(err.message))) {
+                const fallbackModel = model !== 'gemini-3.8-flash' ? 'gemini-3.8-flash' : 'gemini-flash-latest';
+                console.warn(`[motionProvider] Model "${model}" was not found (404) on Gemini; retrying with fallback "${fallbackModel}"...`);
                 try {
                     const fallbackParams = { ...requestParams, model: fallbackModel };
                     completion = await ai.chat.completions.create(fallbackParams, { signal });

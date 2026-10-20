@@ -266,9 +266,9 @@ await check('a truncated answer is its own reason, not "returned nothing"', () =
 await check('gemini unrolls array error bodies and motion falls back on 404 model errors', () => {
     const ai = read('services/AIProvider.js');
     assert.match(ai, /config\.fetch = async \(url, fetchOpts\)/, 'AIProvider does not unwrap Gemini array errors');
-    assert.match(ai, /gemini-2\.0-flash/, 'AIProvider still defaults to nonexistent gemini-2.5-flash');
+    assert.match(ai, /gemini-3\.8-flash/, 'AIProvider does not default to gemini-3.8-flash');
     const motion = read('services/motionProvider.js');
-    assert.match(motion, /gemini-1\.5-flash/, 'motionProvider has no fallback model when Gemini 404s');
+    assert.match(motion, /gemini-3\.8-flash/, 'motionProvider has no fallback model when Gemini 404s');
     const sf = read('client/src/agent/shortFinisher.js');
     assert.match(sf, /is404/, 'shortFinisher does not explain 404 model errors');
 });
