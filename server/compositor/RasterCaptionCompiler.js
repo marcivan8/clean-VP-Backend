@@ -394,15 +394,37 @@ function prepareRasterCaptions(entries, opts) {
         const fam = entry.style?.fontFamily;
         return (fam && opts.resolveFont(fam)) || opts.fallbackFontPath || null;
     };
+    // Register every font up front (node-canvas requires registration BEFORE a
+    // canvas that uses it is created). One unregisterable file used to throw
+    // straight out of this function, past the per-entry try/catch below — so a
+    // single bad font file lost EVERY caption in the export, not one. With
+    // PARITY_ALL_TEXT that is the whole look of the video: wrapping, the
+    // keyword highlight, rotation, weight and alignment all revert to one
+    // unwrapped drawtext line. The per-entry `skipped` list exists precisely so
+    // one caption can fail alone; this loop defeated it.
+    //
+    // A font that will not register is recorded against the entries that wanted
+    // it and they fall back individually, which is what the rest of this
+    // function was already written to do.
+    const unusableFonts = new Map();
     for (const e of list) {
         const f = fontFor(e);
-        if (f) aliasFor(f);
+        if (!f) continue;
+        try {
+            aliasFor(f);
+        } catch (fontErr) {
+            unusableFonts.set(f, fontErr.message);
+        }
     }
 
     list.forEach((entry, idx) => {
         try {
             const fontPath = fontFor(entry);
             if (!fontPath) { out.skipped.push({ clipId: entry.clipId, reason: 'no font' }); return; }
+            if (unusableFonts.has(fontPath)) {
+                out.skipped.push({ clipId: entry.clipId, reason: unusableFonts.get(fontPath) });
+                return;
+            }
             const alias = aliasFor(fontPath);
             const metrics = readFontMetrics(fontPath);
 

@@ -102,6 +102,8 @@ async function runTests() {
         check('default provider resolves to "current"', resolveMotionProvider({}) === 'current');
         check('AI_MOTION_PROVIDER="gemma" normalizes to "gemma-local"', resolveMotionProvider({ AI_MOTION_PROVIDER: 'gemma' }) === 'gemma-local');
         check('AI_MOTION_PROVIDER="gemma-local" resolves to "gemma-local"', resolveMotionProvider({ AI_MOTION_PROVIDER: 'gemma-local' }) === 'gemma-local');
+        check('AI_MOTION_PROVIDER="gemma-groq" normalizes to "groq"', resolveMotionProvider({ AI_MOTION_PROVIDER: 'gemma-groq' }) === 'groq');
+        check('AI_MOTION_PROVIDER="groq" resolves to "groq"', resolveMotionProvider({ AI_MOTION_PROVIDER: 'groq' }) === 'groq');
         check('AI_MOTION_PROVIDER="rules" resolves to "rules"', resolveMotionProvider({ AI_MOTION_PROVIDER: 'rules' }) === 'rules');
         check('AI_MOTION_PROVIDER="mock" resolves to "mock"', resolveMotionProvider({ AI_MOTION_PROVIDER: 'mock' }) === 'mock');
         check('AI_PROVIDER fallback is respected when AI_MOTION_PROVIDER is unset', resolveMotionProvider({ AI_PROVIDER: 'mock' }) === 'mock');

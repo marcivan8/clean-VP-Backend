@@ -1820,12 +1820,15 @@ if (matches.length === 0 && titleCardsCreated === 0) {
                 kind: 'video',
             });
 
+            const providerLabel = (asset.provider === 'vecteezy' || data?.provider === 'vecteezy') ? 'Vecteezy' : 'Pexels';
+            const creditLabel = asset.attribution?.photographer || asset.photographer || asset.user?.name || `${providerLabel} Contributor`;
+
             return {
                 success: !!trackId,
                 message: trackId
-                    ? `✓ Added stock footage for "${q}" (Pexels, credit: ${asset.photographer || asset.user?.name || 'Pexels'}).`
+                    ? `✓ Added stock footage for "${q}" (${providerLabel}, credit: ${creditLabel}).`
                     : `Found stock footage for "${q}" but could not place it on a track.`,
-                details: { query: q, assetId: asset.id, provider: 'pexels' },
+                details: { query: q, assetId: asset.id, provider: asset.provider || data?.provider || 'vecteezy' },
             };
         } catch (error) {
             console.error('[VideoEditorTools] fetchStockBroll error:', error);

@@ -138,6 +138,7 @@ function resolveProvider(opts = {}) {
 
     raw = String(raw || 'openai').toLowerCase().trim();
     if (raw === 'gemma' || raw === 'gemma2') raw = 'gemma-local';
+    if (raw === 'gemma-groq' || raw === 'groq-gemma') raw = 'groq';
     let requested = VALID_PROVIDERS.includes(raw) ? raw : 'openai';
 
     if (raw && !VALID_PROVIDERS.includes(raw)) {
@@ -266,6 +267,7 @@ function resolveModel(requestedModel, capability) {
 
     if (provider === 'groq') {
         if (capability === 'audio') return process.env.GROQ_AUDIO_MODEL || 'whisper-large-v3';
+        if (capability === 'motion') return process.env.GROQ_MOTION_MODEL || 'gemma2-9b-it';
         // gpt-oss-120b (not the smaller -20b) — OpenAI's own open-weight
         // flagship, still served free by Groq: 117B params, Apache 2.0,
         // 128K context, built for structured outputs/agentic/function-

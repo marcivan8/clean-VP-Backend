@@ -97,8 +97,9 @@ export async function fetchShortPlan(text, platform, duration) {
  * instead of only ever filling words into a fixed shape -- shortPolish then
  * picks just the intro/point/cta beats it has room for.
  */
-export async function fetchScenePlan(text, platform, duration) {
-    if (!text) return null;
+export async function fetchScenePlanResult(text, platform, duration) {
+    const none = (reason, source = 'none', techniques = []) => ({ plan: null, source, techniques, reason });
+    if (!text) return none('there was no transcript text to plan from');
     const brief = 'A short-form video: open with a strong hook, surface the single most '
         + 'important point or figure, and close with a call to action if the video asks for one.';
     try {
@@ -107,11 +108,45 @@ export async function fetchScenePlan(text, platform, duration) {
             body: JSON.stringify({ brief, transcript: text, platform, duration }),
         });
         const data = await res.json().catch(() => ({}));
-        return res.ok ? (data.plan || null) : null;
+        if (!res.ok) {
+            // This branch used to `return null` with no log at all. Only a
+            // thrown network error was ever reported, so a 500/502/503 from
+            // the motion route made the entire scene plan — and with it every
+            // technique in the knowledge base — vanish in complete silence.
+            console.warn(`[shortFinisher] scene plan request failed (${res.status}); the hook falls back to a single title.`);
+            return none(`the motion service answered ${res.status}`, 'error');
+        }
+        const plan = data.plan || null;
+        // The route answers 200 with `plan: null, source: 'rules'` whenever the
+        // model is unconfigured or the call failed — so "no techniques because
+        // the model chose none" and "no techniques because there was no model"
+        // looked identical to the caller. They are not, and only one of them
+        // is a motion problem.
+        const source = String(data.source || (plan ? 'ai' : 'rules'));
+        const techniques = Array.isArray(data.techniques) ? data.techniques : [];
+        if (!plan) {
+            console.warn(`[shortFinisher] no AI scene plan (source=${source}); `
+                + `${techniques.length} knowledge-base technique(s) were offered and none could be used. `
+                + 'The hook falls back to a single title.');
+            return none(source === 'rules'
+                ? 'the motion AI is not answering, so the deterministic rules were used'
+                : `no plan came back (source: ${source})`, source, techniques);
+        }
+        return { plan, source, techniques, reason: null };
     } catch (err) {
         console.warn('[shortFinisher] scene plan unavailable, hook stays a single title:', err.message);
-        return null;
+        return none(`the motion service could not be reached (${err.message})`, 'error');
     }
+}
+
+/**
+ * The plan alone. Kept as the original contract for every existing caller and
+ * for injected test doubles; `fetchScenePlanResult` is what a caller uses when
+ * it needs to tell the user WHY there is no plan.
+ */
+export async function fetchScenePlan(text, platform, duration) {
+    const { plan } = await fetchScenePlanResult(text, platform, duration);
+    return plan;
 }
 
 /**

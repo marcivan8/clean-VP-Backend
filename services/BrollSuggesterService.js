@@ -16,6 +16,16 @@
  */
 
 const { pexelsService } = require('./PexelsService');
+const { vecteezyService } = require('./VecteezyService');
+
+function getActiveStockService() {
+    const pref = String(process.env.STOCK_PROVIDER || '').toLowerCase().trim();
+    if (pref === 'vecteezy' && vecteezyService.isConfigured()) return vecteezyService;
+    if (pref === 'pexels' && pexelsService.isConfigured()) return pexelsService;
+    if (vecteezyService.isConfigured()) return vecteezyService;
+    if (pexelsService.isConfigured()) return pexelsService;
+    return pref === 'pexels' ? pexelsService : vecteezyService;
+}
 
 // Stopwords to ignore when scanning for visual concepts
 const VISUAL_STOPWORDS = new Set([
@@ -170,7 +180,8 @@ class BrollSuggesterService {
      * @returns {Promise<{ suggestions: Array }>}
      */
     async suggestBroll({ words = [], chapters = [], maxSuggestions = 4 } = {}) {
-        if (!pexelsService.isConfigured()) {
+        const activeService = getActiveStockService();
+        if (!activeService.isConfigured() && !pexelsService.isConfigured()) {
             const err = new Error('Stock media service is not configured.');
             err.code = 'NOT_CONFIGURED';
             err.status = 503;
@@ -195,8 +206,8 @@ class BrollSuggesterService {
         for (let idx = 0; idx < moments.length; idx++) {
             const moment = moments[idx];
             try {
-                // Query Pexels for top 3 progressive video candidates
-                const searchRes = await pexelsService.searchVideos(moment.query, {
+                // Query active stock provider (Vecteezy or Pexels) for top 3 video candidates
+                const searchRes = await activeService.searchVideos(moment.query, {
                     perPage: 3,
                     orientation: 'landscape',
                 });
@@ -234,7 +245,7 @@ class BrollSuggesterService {
         return {
             suggestions,
             totalFound: suggestions.length,
-            provider: 'pexels',
+            provider: activeService.providerName || 'vecteezy',
         };
     }
 }

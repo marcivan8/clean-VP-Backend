@@ -115,6 +115,8 @@ export default function AssetPanel({ onClose }) {
         applyPreset,
     } = useAudioEngine();
 
+    const [stockProvider, setStockProvider] = useState('vecteezy');
+
     // Search stock media
     const searchStock = useCallback(async (q, mediaType = stockMediaType) => {
         setStockLoading(true);
@@ -125,6 +127,7 @@ export default function AssetPanel({ onClose }) {
                 type: mediaType,
                 perPage: 20,
             });
+            if (data.provider) setStockProvider(data.provider);
             setStockResults(data.results || []);
         } catch (err) {
             console.error('[AssetPanel] Stock search failed:', err.message);
@@ -659,12 +662,12 @@ export default function AssetPanel({ onClose }) {
                                         <div style={{ fontSize: 9.5, color: 'var(--fg-3)', display: 'flex', alignItems: 'center', gap: 3 }}>
                                             <span>Photos & Videos by</span>
                                             <a
-                                                href="https://www.pexels.com"
+                                                href={stockProvider === 'vecteezy' ? 'https://www.vecteezy.com' : 'https://www.pexels.com'}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
-                                                style={{ color: '#05a081', fontWeight: 600, textDecoration: 'none' }}
+                                                style={{ color: stockProvider === 'vecteezy' ? '#ff6c00' : '#05a081', fontWeight: 600, textDecoration: 'none' }}
                                             >
-                                                Pexels
+                                                {stockProvider === 'vecteezy' ? 'Vecteezy' : 'Pexels'}
                                             </a>
                                         </div>
                                     </div>

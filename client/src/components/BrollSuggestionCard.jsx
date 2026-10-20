@@ -226,7 +226,7 @@ export function BrollSuggestionCard({
                                     <ExternalLink size={7} />
                                 </a>
                             ) : (
-                                <span>{activeAsset.attribution?.photographer || 'Pexels Creator'}</span>
+                                <span>{activeAsset.attribution?.photographer || (activeAsset.provider === 'vecteezy' ? 'Vecteezy Contributor' : 'Stock Creator')}</span>
                             )}
                         </div>
                     </div>

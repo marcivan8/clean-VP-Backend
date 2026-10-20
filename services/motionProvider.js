@@ -52,6 +52,7 @@ function resolveMotionProvider(env = process.env) {
     raw = String(raw || 'current').toLowerCase().trim();
 
     if (raw === 'gemma' || raw === 'gemma2' || raw === 'gemma-local') return 'gemma-local';
+    if (raw === 'gemma-groq' || raw === 'groq-gemma') return 'groq';
     if (raw === 'rules' || raw === 'none' || raw === 'deterministic') return 'rules';
     if (raw === 'mock') return 'mock';
     if (MOTION_PROVIDERS.includes(raw)) return raw;
@@ -247,13 +248,17 @@ async function generateScenePlan({
             platform: platform ? String(platform).slice(0, 40) : '',
         });
 
-        const completion = await ai.chat.completions.create({
+        const requestParams = {
             model,
             messages: [{ role: 'user', content: promptContent }],
-            response_format: { type: 'json_object' },
             temperature: 0.6,
             max_tokens: 700,
-        }, { signal });
+        };
+        if (!/gemma/i.test(model)) {
+            requestParams.response_format = { type: 'json_object' };
+        }
+
+        const completion = await ai.chat.completions.create(requestParams, { signal });
 
         rawOutput = completion?.choices?.[0]?.message?.content || null;
     } catch (err) {
@@ -437,13 +442,17 @@ async function generateMotionScript({
             editingStyle,
         });
 
-        const completion = await ai.chat.completions.create({
+        const requestParams = {
             model,
             messages: [{ role: 'user', content: promptContent }],
-            response_format: { type: 'json_object' },
             temperature: 0.6,
             max_tokens: 2500,
-        }, { signal });
+        };
+        if (!/gemma/i.test(model)) {
+            requestParams.response_format = { type: 'json_object' };
+        }
+
+        const completion = await ai.chat.completions.create(requestParams, { signal });
 
         rawOutput = completion?.choices?.[0]?.message?.content || null;
     } catch (err) {

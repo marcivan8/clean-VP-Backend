@@ -26,7 +26,7 @@ const crypto     = require('crypto');
 
 const storageConfig  = require('../config/storage');
 const { optionalAuth } = require('../middleware/auth');
-const { deriveGcsPath, resolveStaticAudioPath } = require('../utils/waveformPath');
+const { deriveGcsPath, resolveStaticAudioPath, resolveStaticAudioFile } = require('../utils/waveformPath');
 
 // ── External (non-storage) URL fallback ───────────────────────────────────
 // deriveGcsPath() can only translate OUR OWN proxy/raw URL shapes (the GCS
@@ -109,19 +109,10 @@ async function resolveStorageInput(gcsPath) {
 }
 
 // Bundled static audio (`/sfx-library/<file>`) is read from the SPA build, or
-// from client/public when there is no build (dev).
-const STATIC_AUDIO_ROOTS = [
-    path.resolve(__dirname, '../client/dist'),
-    path.resolve(__dirname, '../client/public'),
-];
-
-function resolveStaticAudioFile(rel) {
-    for (const root of STATIC_AUDIO_ROOTS) {
-        const candidate = path.join(root, rel);
-        if (fs.existsSync(candidate)) return candidate;
-    }
-    return null;
-}
+// from client/public when there is no build (dev). Both the root list and the
+// lookup now live in utils/waveformPath.js, because jobs/exportProcessor.js
+// needs the identical resolution — it could not resolve these URLs at all and
+// dropped every generated sound effect from the render.
 
 // ─── Peak extraction ──────────────────────────────────────────────────────────
 

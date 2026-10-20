@@ -40,8 +40,10 @@ export default function StockCard({
     const isVideo = item.type === 'video';
     const resBadge = formatResolution(item.resolution);
     const durBadge = isVideo && item.duration > 0 ? formatDuration(item.duration) : null;
-    const authorName = item.attribution?.photographer || 'Pexels Creator';
-    const authorUrl = item.attribution?.photographerUrl || item.attribution?.providerUrl;
+    const providerName = (item.attribution?.provider === 'vecteezy' || item.provider === 'vecteezy') ? 'Vecteezy' : 'Pexels';
+    const defaultUrl = providerName === 'Vecteezy' ? 'https://www.vecteezy.com' : 'https://www.pexels.com';
+    const authorName = item.attribution?.photographer || `${providerName} Creator`;
+    const authorUrl = item.attribution?.photographerUrl || item.attribution?.providerUrl || defaultUrl;
 
     return (
         <div
@@ -156,7 +158,7 @@ export default function StockCard({
                         pointerEvents: 'none',
                     }}
                 >
-                    Pexels
+                    {providerName}
                 </div>
             </div>
 
@@ -177,11 +179,11 @@ export default function StockCard({
                     {item.name}
                 </div>
 
-                {/* Attribution link (Required by Pexels Terms) */}
+                {/* Attribution link (Required by Stock Terms) */}
                 <div style={{ fontSize: 10, color: 'var(--fg-3)', display: 'flex', alignItems: 'center', gap: 3 }}>
                     <span>By</span>
                     <a
-                        href={authorUrl || 'https://www.pexels.com'}
+                        href={authorUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         style={{

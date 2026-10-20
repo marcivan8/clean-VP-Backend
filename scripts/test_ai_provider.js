@@ -141,6 +141,10 @@ async function main() {
             check('AI_MOTION_PROVIDER wins for capability:motion',
                 resolveProvider({ capability: 'motion' }) === 'gemma-local');
         });
+        withEnv({ AI_PROVIDER: 'openai', AI_MOTION_PROVIDER: 'gemma-groq', NODE_ENV: 'production' }, () => {
+            check('AI_MOTION_PROVIDER="gemma-groq" normalizes to "groq" and is allowed in production',
+                resolveProvider({ capability: 'motion' }) === 'groq');
+        });
     }
 
     // ── 3 · Capability routing ───────────────────────────────────────────────
@@ -284,10 +288,16 @@ async function main() {
                 resolveModel('gpt-4o', 'chat') !== 'gpt-4o' && !!resolveModel('gpt-4o', 'chat'));
             check('groq maps audio to whisper-large-v3',
                 resolveModel('whisper-1', 'audio') === 'whisper-large-v3');
+            check('groq maps motion to gemma2-9b-it',
+                resolveModel('gpt-4o', 'motion') === 'gemma2-9b-it');
         });
         withEnv({ AI_PROVIDER: 'groq', NODE_ENV: undefined, GROQ_CHAT_MODEL: 'llama-3.3-70b-versatile' }, () => {
             check('GROQ_CHAT_MODEL overrides the default',
                 resolveModel('gpt-4o', 'chat') === 'llama-3.3-70b-versatile');
+        });
+        withEnv({ AI_PROVIDER: 'groq', NODE_ENV: undefined, GROQ_MOTION_MODEL: 'custom-motion-model' }, () => {
+            check('GROQ_MOTION_MODEL overrides the default',
+                resolveModel('gpt-4o', 'motion') === 'custom-motion-model');
         });
         withEnv({ AI_PROVIDER: 'gemini', NODE_ENV: undefined }, () => {
             check('gemini maps a vision model to a real default (not a bare passthrough)',

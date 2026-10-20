@@ -9,6 +9,9 @@
 
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
+
 /**
  * Derive a storage-relative path from proxyUrl when gcsPath is not stored on
  * the asset. proxyUrl comes from jobs/videoProcessor.js's uploadToStorage(),
@@ -125,4 +128,37 @@ function stripQuery(p) {
     return p.split('?')[0].split('#')[0];
 }
 
-module.exports = { deriveGcsPath, resolveStaticAudioPath };
+/**
+ * Where bundled static audio actually lives on disk: the SPA build, or
+ * client/public when there is no build (dev).
+ *
+ * This list used to be a private const inside routes/waveformRoutes.js. It
+ * moved here because a SECOND consumer appeared — jobs/exportProcessor.js,
+ * whose `fetchClipSource` could not resolve a `/sfx-library/<file>` URL at
+ * all and therefore dropped every generated sound effect out of the render
+ * ("Could not find: Cinematic Impact, Metal Impact, ..."). Two copies of
+ * "where the library lives" is the drift class this codebase keeps counting,
+ * so there is one.
+ */
+const STATIC_AUDIO_ROOTS = [
+    path.resolve(__dirname, '../client/dist'),
+    path.resolve(__dirname, '../client/public'),
+];
+
+/**
+ * Absolute path of a bundled static audio file, or null when it is not on
+ * this machine.
+ *
+ * @param {string|null} rel the value returned by resolveStaticAudioPath()
+ * @returns {string|null}
+ */
+function resolveStaticAudioFile(rel) {
+    if (!rel) return null;
+    for (const root of STATIC_AUDIO_ROOTS) {
+        const candidate = path.join(root, rel);
+        if (fs.existsSync(candidate)) return candidate;
+    }
+    return null;
+}
+
+module.exports = { deriveGcsPath, resolveStaticAudioPath, resolveStaticAudioFile, STATIC_AUDIO_ROOTS };

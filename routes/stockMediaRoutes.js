@@ -15,6 +15,16 @@ const router = express.Router();
 const rateLimit = require('express-rate-limit');
 const { authenticateUser, optionalAuth } = require('../middleware/auth');
 const { pexelsService } = require('../services/PexelsService');
+const { vecteezyService } = require('../services/VecteezyService');
+
+function getActiveStockService() {
+    const pref = String(process.env.STOCK_PROVIDER || '').toLowerCase().trim();
+    if (pref === 'vecteezy' && vecteezyService.isConfigured()) return vecteezyService;
+    if (pref === 'pexels' && pexelsService.isConfigured()) return pexelsService;
+    if (vecteezyService.isConfigured()) return vecteezyService;
+    if (pexelsService.isConfigured()) return pexelsService;
+    return pref === 'pexels' ? pexelsService : vecteezyService;
+}
 
 // Stock media search rate limiter (30 requests per minute per IP)
 const stockLimiter = rateLimit({
@@ -32,9 +42,10 @@ const authMiddleware = process.env.NODE_ENV === 'production' ? authenticateUser 
  * Returns provider readiness status without exposing any secrets.
  */
 router.get('/status', (req, res) => {
-    const isConfigured = pexelsService.isConfigured();
+    const service = getActiveStockService();
+    const isConfigured = service.isConfigured() || pexelsService.isConfigured();
     res.json({
-        provider: 'pexels',
+        provider: service.providerName || 'vecteezy',
         configured: isConfigured,
         supportedMedia: ['video', 'photo'],
     });
@@ -60,22 +71,25 @@ router.get('/search', stockLimiter, authMiddleware, async (req, res) => {
         return res.status(400).json({ error: 'Search query is required.' });
     }
 
-    if (!pexelsService.isConfigured()) {
+    const service = getActiveStockService();
+    if (!service.isConfigured() && !pexelsService.isConfigured()) {
         return res.status(503).json({
             error: 'Stock media search is currently not configured.',
             code: 'NOT_CONFIGURED',
-            provider: 'pexels',
+            provider: service.providerName || 'vecteezy',
         });
     }
 
+    const providerToUse = service.isConfigured() ? service : pexelsService;
+
     try {
         if (type === 'photo' || type === 'image') {
-            const data = await pexelsService.searchPhotos(query, { page, perPage, orientation });
+            const data = await providerToUse.searchPhotos(query, { page, perPage, orientation });
             return res.json(data);
         }
 
         // Default: video search
-        const data = await pexelsService.searchVideos(query, { page, perPage, orientation });
+        const data = await providerToUse.searchVideos(query, { page, perPage, orientation });
         return res.json(data);
     } catch (err) {
         console.error('[stockMediaRoutes /search] error:', err.message);
@@ -84,7 +98,7 @@ router.get('/search', stockLimiter, authMiddleware, async (req, res) => {
         return res.status(status).json({
             error: err.message || 'Failed to search stock media.',
             code: err.code || 'SEARCH_FAILED',
-            provider: 'pexels',
+            provider: providerToUse.providerName || 'vecteezy',
         });
     }
 });
@@ -107,11 +121,12 @@ router.post('/suggest-broll', stockLimiter, authMiddleware, async (req, res) => 
         return res.status(400).json({ error: 'Transcript words array is required.' });
     }
 
-    if (!pexelsService.isConfigured()) {
+    const service = getActiveStockService();
+    if (!service.isConfigured() && !pexelsService.isConfigured()) {
         return res.status(503).json({
             error: 'Stock media service is currently not configured.',
             code: 'NOT_CONFIGURED',
-            provider: 'pexels',
+            provider: service.providerName || 'vecteezy',
         });
     }
 
@@ -130,7 +145,7 @@ router.post('/suggest-broll', stockLimiter, authMiddleware, async (req, res) => 
         return res.status(status).json({
             error: err.message || 'Failed to generate B-roll suggestions.',
             code: err.code || 'SUGGESTION_FAILED',
-            provider: 'pexels',
+            provider: service.providerName || 'vecteezy',
         });
     }
 });

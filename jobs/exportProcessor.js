@@ -25,6 +25,9 @@ const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
 const storageConfig = require('../config/storage');
+// Shared with routes/waveformRoutes.js: one definition of where the bundled
+// sound-effect library lives and how its root-relative URLs resolve to disk.
+const { resolveStaticAudioPath, resolveStaticAudioFile } = require('../utils/waveformPath');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -67,6 +70,29 @@ const gcsBucket = storageConfig.bucket;
 // ─── Helpers (mirrors exportRoutes.js) ───────────────────────────────────────
 
 const isServerUsableUrl = (u) => u && !u.startsWith('blob:');
+
+/**
+ * The line of an FFmpeg failure that actually says what went wrong.
+ *
+ * `runFfmpegArgs` rejects with the whole stderr tail, which is mostly banner
+ * and stream metadata. Surfacing all of it in a user-facing warning is as
+ * useless as surfacing none of it, so take the first line that looks like a
+ * diagnosis and cap it.
+ */
+function firstFfmpegError(message) {
+    const text = String(message || '').trim();
+    if (!text) return 'no error message';
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    const noise = /^(ffmpeg version|built with|configuration:|lib[a-z]+ +\d|\s*Stream #|\s*Metadata:|\s*encoder\s*:|Input #|Output #|\s*Duration:)/i;
+    // "Conversion failed!" is the trailer ffmpeg prints after the line that
+    // actually explains the failure, so it is the LAST resort, not the first
+    // match — reporting it would be the same dead end as reporting nothing.
+    const generic = /^(conversion failed|error while filtering)/i;
+    const diagnostic = /error|invalid|no such|cannot|unable|impossible|failed|unrecognized|unknown|not found|permission|killed|out of memory|too many/i;
+    const useful = lines.filter(l => !noise.test(l) && diagnostic.test(l));
+    const best = useful.find(l => !generic.test(l)) || useful[0] || lines[lines.length - 1];
+    return String(best || text).slice(0, 300);
+}
 
 async function downloadToTemp(url, destPath, headers = undefined) {
     const response = await axios({ url, method: 'GET', responseType: 'stream', timeout: 120_000, headers });
@@ -982,6 +1008,37 @@ module.exports = async function processExportJob(job) {
         // ── 3. Local filesystem (monolith / dev mode) ────────────────────────
         const localSrc = resolveSourcePath(c, uploadsDir);
         if (localSrc) return localSrc;
+
+        // ── 3b. Bundled static audio (`/sfx-library/<file>`) ─────────────────
+        // Every generated sound effect carries this URL shape: the SFX library
+        // ships as static files next to the SPA build (client/public/sfx-library,
+        // the same pattern as the bundled fonts), so `preview_url` is a ROOT-
+        // RELATIVE path, not an absolute URL and not a storage object.
+        //
+        // It therefore matched nothing: step 1 has no asset row, step 2 has no
+        // GCS object, step 4 requires `startsWith('http')`, and step 5 requires
+        // `/api/proxy/`. `fetchClipSource` returned null and every placed sound
+        // effect was dropped from the render with "Could not find: Cinematic
+        // Impact, Metal Impact, ..." — a complete, silent loss of the sound
+        // design on a path that otherwise worked end to end.
+        //
+        // routes/waveformRoutes.js already had to solve exactly this to extract
+        // waveforms for the same clips; the resolver is now shared rather than
+        // reimplemented (utils/waveformPath.js).
+        for (const candidateUrl of [c.sourceUrl, c.url, c.src, clip.sourceUrl, clip.url, clip.src]) {
+            const staticRel = resolveStaticAudioPath(candidateUrl);
+            if (!staticRel) continue;
+            const staticFile = resolveStaticAudioFile(staticRel);
+            if (staticFile) {
+                console.log(`[ExportJob] bundled static audio: ${staticRel}`);
+                return staticFile;
+            }
+            // The URL was the right shape but the file is not on this machine —
+            // worth saying out loud, because it means the worker image shipped
+            // without the SPA's static assets and EVERY sound effect will be
+            // missing, not just this one.
+            console.warn(`[ExportJob] "${staticRel}" is not present on the worker — is the SPA build included in this image?`);
+        }
 
         // ── 4. Absolute HTTP URLs (signed GCS URLs, CDN, etc.) ───────────────
         for (const raw of [c.sourceUrl, c.url, c.src, c.videoUrl]) {
@@ -1941,6 +1998,15 @@ module.exports = async function processExportJob(job) {
                                 });
                                 if (rasterPrepared.skipped.length > 0) {
                                     console.warn(`  ⚠️  ${rasterPrepared.skipped.length} raster caption(s) fell back to text:`, rasterPrepared.skipped.slice(0, 3));
+                                    // Surfaced, not only logged: a skipped entry
+                                    // still ships, but as one unwrapped drawtext
+                                    // line with no highlight and no rotation. The
+                                    // user sees that difference immediately and
+                                    // had no way to know it was expected.
+                                    const reasons = [...new Set(rasterPrepared.skipped.map(s => s.reason).filter(Boolean))];
+                                    captionProgramWarning =
+                                        `${rasterPrepared.skipped.length} of ${wanted.length} caption(s) were exported as plain text`
+                                        + (reasons.length ? ` (${reasons.slice(0, 3).join('; ')})` : '') + '.';
                                 }
                                 console.log(`🖼️  [ExportJob ${job.id}] raster captions: ${rasterPrepared.items.length}/${wanted.length} prepared`);
                             }
@@ -2207,7 +2273,18 @@ module.exports = async function processExportJob(job) {
                     console.log('  ✅ Raster captions applied');
                 } catch (rasterErr) {
                     console.warn(`[ExportJob ${job.id}] raster caption pass failed, drawing them as text:`, rasterErr.message.slice(0, 600));
-                    captionProgramWarning = 'Rotated/highlighted captions were exported as plain text.';
+                    // The REASON used to stop here, in a worker log nobody
+                    // watching an export can see. With PARITY_ALL_TEXT every
+                    // text clip is a raster entry, so this one failure takes
+                    // the whole look of the video with it — wrapping, the
+                    // keyword highlight, rotation, weight and alignment all
+                    // revert to one unwrapped drawtext line — and the user was
+                    // told only that it happened, never why. A warning without
+                    // a cause cannot be acted on by the person reading it or
+                    // by whoever they report it to.
+                    captionProgramWarning =
+                        `Rotated/highlighted captions were exported as plain text (${rasterPrepared.items.length} caption(s)): `
+                        + `${firstFfmpegError(rasterErr.message)}`;
                     try {
                         const { compileCaptionProgram } = require('../server/compositor/CaptionCompiler.js');
                         const fallback = compileCaptionProgram({ version: rawCaptionProgram.version, entries: rasterProgramEntries }, {

@@ -1597,15 +1597,27 @@ export class MediaExecutionEngine {
                 let plan = null;
                 let scenePlan = null;
                 const text = words.slice(0, 400).map(w => String(w.word ?? w.text ?? '')).join(' ');
+                let sceneResult = null;
                 if (text) {
-                    const { fetchShortPlan, fetchScenePlan } = await import('./shortFinisher.js');
+                    const { fetchShortPlan, fetchScenePlanResult } = await import('./shortFinisher.js');
                     // R102 -- the full SceneDirector plan, auto-triggered
                     // alongside the existing short-plan fetch (same
                     // transcript, same graceful "null on failure" contract).
-                    [plan, scenePlan] = await Promise.all([
+                    //
+                    // R104 -- ...but "graceful" had become "silent". The route
+                    // answers 200 with `plan: null, source: 'rules'` when the
+                    // motion model is unconfigured or fails, and the client
+                    // dropped `source` and `techniques` on the floor. A Pro
+                    // Finish then reported success having used NONE of the
+                    // knowledge base, with nothing anywhere saying why. Take
+                    // the full result so the message below can be honest.
+                    const [p, r] = await Promise.all([
                         fetchShortPlan(text, platform, total),
-                        fetchScenePlan(text, platform, total),
+                        fetchScenePlanResult(text, platform, total),
                     ]);
+                    plan = p;
+                    sceneResult = r;
+                    scenePlan = r.plan;
                 }
                 // Earlier finish replaced, not stacked.
                 const before = JSON.parse(JSON.stringify(st.tracks || []));
@@ -1650,7 +1662,25 @@ export class MediaExecutionEngine {
                     }
                 }
                 const by = plan?.headline ? `AI headline "${plan.headline}", ` : '';
-                return { action, success: true, message: `Finished for ${profile.label}: ${by}${polished.applied.join(', ')}${sfxNote}. One undo reverts it.`, details: { applied: polished.applied, platform } };
+                // Say which knowledge-base techniques actually drove the beats,
+                // or why none did. Without this the only honest answer to "are
+                // the techniques being used?" was to read the server logs.
+                const usedTechniques = [...new Set((Array.isArray(scenePlan?.beats) ? scenePlan.beats : [])
+                    .map(b => b?.technique).filter(Boolean))];
+                let sceneNote = '';
+                if (usedTechniques.length > 0) {
+                    sceneNote = ` Motion techniques: ${usedTechniques.slice(0, 4).join(', ')}.`;
+                } else if (sceneResult && !sceneResult.plan) {
+                    sceneNote = ` The AI scene direction was skipped — ${sceneResult.reason}`
+                        + (sceneResult.techniques?.length ? `, so none of the ${sceneResult.techniques.length} matching motion techniques were applied.` : '.');
+                } else if (scenePlan) {
+                    sceneNote = ' The scene was directed without naming a motion technique.';
+                }
+                return {
+                    action, success: true,
+                    message: `Finished for ${profile.label}: ${by}${polished.applied.join(', ')}${sfxNote}. One undo reverts it.${sceneNote}`,
+                    details: { applied: polished.applied, platform, sceneSource: sceneResult?.source || null, techniques: usedTechniques },
+                };
             }
 
             // ── R92 round B: several shorts from one long video ──────────────

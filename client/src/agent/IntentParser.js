@@ -190,6 +190,7 @@ const NLP_MAP = {
     ],
     fetchStockBroll: [
         'stock footage', 'stock video', 'stock clip', 'stock clips',
+        'vecteezy footage', 'vecteezy video', 'vecteezy clip', 'from vecteezy', 'search vecteezy',
         'pexels footage', 'pexels video', 'pexels clip', 'from pexels',
         'from stock', 'search pexels', 'search stock',
     ],
@@ -1710,16 +1711,16 @@ export class IntentParser {
     static extractStockQuery(prompt) {
         const p = String(prompt || '').trim();
 
-        // "b-roll of X from stock/pexels" / "footage of X from stock/pexels"
-        let m = p.match(/\b(?:b-?roll|footage|video|clip)\s+(?:of|for|showing|about)\s+(.+?)\s+from\s+(?:stock|pexels)\b/i);
+        // "b-roll of X from stock/vecteezy/pexels" / "footage of X from stock/vecteezy/pexels"
+        let m = p.match(/\b(?:b-?roll|footage|video|clip)\s+(?:of|for|showing|about)\s+(.+?)\s+from\s+(?:stock|vecteezy|pexels)\b/i);
         if (m && m[1].trim()) return m[1].trim().replace(/[.?!]+$/, '');
 
-        // "search pexels/stock for X"
-        m = p.match(/\bsearch\s+(?:stock|pexels)\s+for\s+(.+)$/i);
+        // "search vecteezy/pexels/stock for X"
+        m = p.match(/\bsearch\s+(?:stock|vecteezy|pexels)\s+for\s+(.+)$/i);
         if (m && m[1].trim()) return m[1].trim().replace(/[.?!]+$/, '');
 
-        // "find/get/add/fetch/insert/grab [me] [some] stock/pexels footage/video/clip/b-roll (of|for|showing|about) X"
-        m = p.match(/\b(?:find|get|fetch|add|insert|grab|pull)\b[^.?!]*?\b(?:stock|pexels)\b[^.?!]*?\b(?:footage|video|clip|clips|b-?roll)\b\s*(?:of|for|showing|about)?\s*(.*)$/i);
+        // "find/get/add/fetch/insert/grab [me] [some] stock/vecteezy/pexels footage/video/clip/b-roll (of|for|showing|about) X"
+        m = p.match(/\b(?:find|get|fetch|add|insert|grab|pull)\b[^.?!]*?\b(?:stock|vecteezy|pexels)\b[^.?!]*?\b(?:footage|video|clip|clips|b-?roll)\b\s*(?:of|for|showing|about)?\s*(.*)$/i);
         if (m && m[1].trim()) return m[1].trim().replace(/[.?!]+$/, '');
 
         return null;

@@ -1859,7 +1859,7 @@ const useTimelineStore = create(
                 if (!options.skipHistory) get()._saveHistory();
                 const layers = timelineManager.getEntitiesArray(ENTITY_TYPES.LAYER);
                 const count = layers.filter(l => l.type === type).length;
-                const id = `track-${Date.now()}`;
+                const id = `track-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
                 const name = `${type.charAt(0).toUpperCase() + type.slice(1)} Track ${count + 1}`;
 
                 // Video tracks stack upward  → new track gets a lower order (floats above existing)
@@ -1890,7 +1890,7 @@ const useTimelineStore = create(
                 get()._saveHistory();
                 const layers = timelineManager.getEntitiesArray(ENTITY_TYPES.LAYER);
                 const count = layers.filter(l => l.type === 'text').length;
-                const id = `track-${Date.now()}`;
+                const id = `track-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
                 timelineManager.dispatch(TimelineActions.addLayer({
                     id,
                     name: `Text Layer ${count + 1}`,
