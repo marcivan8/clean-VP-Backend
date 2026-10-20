@@ -155,6 +155,7 @@ async function executeChatCompletionWithFailover({
     requestParams,
     provider,
     model,
+    capability = 'motion',
     timeout,
     signal,
 }) {
@@ -211,7 +212,7 @@ async function executeChatCompletionWithFailover({
             try {
                 const secondaryAi = getAIClient({ timeout, provider: baseProvider });
                 if (secondaryAi) {
-                    const secondaryModel = resolveModel('gpt-4o', { provider: baseProvider, capability: 'motion' });
+                    const secondaryModel = resolveModel(model || 'gpt-4o', { provider: baseProvider, capability });
                     const secondaryParams = {
                         ...requestParams,
                         model: secondaryModel,
@@ -677,5 +678,6 @@ module.exports = {
     generateScenePlan,
     generateMotionScript,
     logMotionTelemetry,
+    executeChatCompletionWithFailover,
     MOTION_PROVIDERS,
 };

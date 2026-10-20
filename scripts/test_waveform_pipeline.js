@@ -228,5 +228,23 @@ console.log('\n=== waveformRoutes: storage objects are read through a seekable i
     ok('/sfx-library/ URLs are read from disk', /resolveStaticAudioFile\(staticRel\)/.test(src), true);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// A silent source or video without an audio stream must be recognized as
+// hasAudio:false rather than failing with an unhandled ffmpeg exit error (500).
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n=== waveformRoutes: silent / no audio stream detection ===');
+{
+    const fs   = require('fs');
+    const path = require('path');
+    const src  = fs.readFileSync(path.resolve(__dirname, '../routes/waveformRoutes.js'), 'utf8');
+
+    ok('detects no audio stream from ffmpeg stderr without throwing 500',
+        /const noAudio = \/does not contain any stream\|matches no streams\|no audio stream\/i\.test\(stderrTail\)/.test(src), true);
+    ok('returns hasAudio:false on missing audio stream',
+        /hasAudio:\s*false,\s*\n\s*extractionFailed:\s*false/.test(src), true);
+    ok('guards local media file existence with a clean 404',
+        /!fs\.existsSync\(resolved\)[\s\S]{1,80}status\(404\)/.test(src), true);
+}
+
 console.log(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

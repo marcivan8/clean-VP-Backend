@@ -7,7 +7,8 @@ const { authenticateUser } = require('../middleware/auth');
 const { aiGate } = require('../middleware/usageGate');
 const storageConfig = require('../config/storage');
 const rateLimit = require('express-rate-limit');
-const { getAIClient, isAIConfigured, resolveModel } = require('../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel, resolveProvider } = require('../services/AIProvider');
+const { executeChatCompletionWithFailover } = require('../services/motionProvider');
 
 /**
  * POST /api/captions/generate
@@ -110,15 +111,17 @@ router.post('/keywords', authenticateUser, keywordsLimiter, async (req, res) => 
     }
     if (clean.length === 0) return res.status(400).json({ error: 'no usable phrases' });
 
-    if (!isAIConfigured()) return res.status(503).json({ error: 'AI provider not configured', fallback: true });
+    if (!isAIConfigured({ capability: 'chat' })) return res.status(503).json({ error: 'AI provider not configured', fallback: true });
 
     try {
-        const client = getAIClient({ capability: 'chat' });
+        const provider = resolveProvider({ capability: 'chat' });
+        const model = resolveModel('gpt-4o-mini', { capability: 'chat', provider });
+        const client = getAIClient({ capability: 'chat', provider });
         const listing = clean
             .map(c => `[id: ${c.id}] ${c.words.map((w, i) => `${i}:${w}`).join(' ')}`)
             .join('\n');
-        const response = await client.chat.completions.create({
-            model: resolveModel('gpt-4o-mini', 'chat'),
+        const requestParams = {
+            model,
             max_tokens: 800,
             response_format: { type: 'json_object' },
             messages: [
@@ -131,8 +134,15 @@ router.post('/keywords', authenticateUser, keywordsLimiter, async (req, res) => 
                 },
                 { role: 'user', content: listing },
             ],
+        };
+        const { completion } = await executeChatCompletionWithFailover({
+            ai: client,
+            requestParams,
+            provider,
+            model,
+            capability: 'chat',
         });
-        const raw = response?.choices?.[0]?.message?.content || '{}';
+        const raw = completion?.choices?.[0]?.message?.content || '{}';
         let parsed;
         try { parsed = JSON.parse(raw); } catch (_) { parsed = {}; }
         const byId = new Map(clean.map(c => [c.id, c.words.length]));
@@ -141,8 +151,8 @@ router.post('/keywords', authenticateUser, keywordsLimiter, async (req, res) => 
             .filter(p => byId.has(p.id) && Number.isInteger(p.index) && p.index >= 0 && p.index < byId.get(p.id));
         return res.json({ picks });
     } catch (err) {
-        console.error('[captionRoutes] /keywords error:', err.message);
-        return res.status(502).json({ error: 'keyword service unavailable', fallback: true });
+        console.warn('[captionRoutes] /keywords error; falling back to rule picks:', err.message);
+        return res.json({ picks: [], fallback: true });
     }
 });
 

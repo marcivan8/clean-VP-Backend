@@ -287,6 +287,15 @@ function extractPeaks(inputPath, inputStream) {
             const pcm = Buffer.concat(chunks);
 
             if (code !== 0 && pcm.length === 0) {
+                const noAudio = /does not contain any stream|matches no streams|no audio stream/i.test(stderrTail);
+                if (noAudio) {
+                    return finish(null, {
+                        peaks: [],
+                        duration: 0,
+                        hasAudio: false,
+                        extractionFailed: false,
+                    });
+                }
                 return finish(new Error(`ffmpeg exited with code ${code} and no output. stderr: ${stderrTail.slice(-300)}`));
             }
 
@@ -397,6 +406,9 @@ router.post('/extract', optionalAuth, async (req, res) => {
             const resolved   = path.resolve(uploadsDir, gcsPath);
             if (!resolved.startsWith(uploadsDir)) {
                 return res.status(403).json({ error: 'Invalid gcsPath' });
+            }
+            if (!fs.existsSync(resolved)) {
+                return res.status(404).json({ error: 'Media file not found on disk', assetId });
             }
             inputPath = resolved;
         } else if (staticRel) {

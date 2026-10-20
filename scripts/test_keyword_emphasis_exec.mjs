@@ -88,4 +88,14 @@ useTimelineStore.setState({ tracks: tm.toLegacyTracks() });
 assert.deepEqual(clip('c2').emphasis?.indices, [1]);
 assert.equal(clip('c2').rotation, -8);
 ok('emphasis and rotation survive a project save/reload');
+
+// Verify captionRoutes.js wires failover and returns graceful fallback
+const fs = await import('fs');
+const path = await import('path');
+const captionSrc = fs.readFileSync(path.resolve('./routes/captionRoutes.js'), 'utf8');
+assert.ok(/executeChatCompletionWithFailover/.test(captionSrc), 'captionRoutes must use executeChatCompletionWithFailover');
+assert.ok(!/return res\.status\(502\)\.json/.test(captionSrc), 'captionRoutes must not throw 502 on keywords failure');
+assert.ok(/return res\.json\(\{\s*picks:\s*\[\],\s*fallback:\s*true\s*\}\)/.test(captionSrc), 'captionRoutes must return { picks: [], fallback: true }');
+ok('captionRoutes.js has robust AI failover and graceful fallback');
+
 log('\nALL KEYWORD EMPHASIS EXECUTION CHECKS PASSED');
