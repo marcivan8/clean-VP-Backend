@@ -13,7 +13,8 @@ jest.mock('../middleware/auth', () => ({
 }));
 jest.mock('../middleware/usageGate', () => ({
     aiGate: (req, res, next) => next(),
-    nleGate: (req, res, next) => next()
+    nleGate: (req, res, next) => next(),
+    stockGate: (req, res, next) => next(),
 }));
 
 const app = require('../index');

@@ -46,8 +46,8 @@ class PolarService {
             ? new Polar({ accessToken: process.env.POLAR_ACCESS_TOKEN })
             : null;
 
-        if (!this._client) {
-            console.warn('[PolarService] POLAR_ACCESS_TOKEN not set — all users default to explorer tier');
+        if (!this._client && process.env.NODE_ENV !== 'test') {
+            console.warn('[PolarService] POLAR_ACCESS_TOKEN not set - all users default to explorer tier');
         }
     }
 

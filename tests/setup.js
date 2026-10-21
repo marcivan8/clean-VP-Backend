@@ -4,7 +4,8 @@
  * in package.json (more reliable than jest.mock() for deeply nested requires).
  */
 
-// Fake key so OpenAI client instantiates inside controllers
+// Ensure tests use mocked OpenAI client
+process.env.AI_PROVIDER = 'openai';
 process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || 'sk-test-fake-key-for-jest';
 
 // ── Supabase mock ──────────────────────────────────────────────────────────────

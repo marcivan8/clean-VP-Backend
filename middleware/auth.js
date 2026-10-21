@@ -4,7 +4,9 @@ const authenticateUser = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.error('No valid authorization header');
+      if (process.env.NODE_ENV !== 'test') {
+        console.warn('No valid authorization header');
+      }
       return res.status(401).json({ 
         error: 'No valid authorization header',
         code: 'MISSING_AUTH_HEADER' 
@@ -14,7 +16,9 @@ const authenticateUser = async (req, res, next) => {
     const token = authHeader.replace('Bearer ', '');
     
     if (!token || token === 'null' || token === 'undefined') {
-      console.error('Invalid token provided');
+      if (process.env.NODE_ENV !== 'test') {
+        console.warn('Invalid token provided');
+      }
       return res.status(401).json({ 
         error: 'Invalid token provided',
         code: 'INVALID_TOKEN'
@@ -25,8 +29,10 @@ const authenticateUser = async (req, res, next) => {
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
 
     if (error) {
-      // Log a compact warning — avoid printing the full stack for routine expired tokens
-      console.warn(`⚠️ [auth] Token rejected: ${error.code || error.status} – ${error.message}`);
+      // Log a compact warning - avoid printing the full stack for routine expired tokens
+      if (process.env.NODE_ENV !== 'test') {
+        console.warn(`⚠️ [auth] Token rejected: ${error.code || error.status} - ${error.message}`);
+      }
       return res.status(401).json({ 
         error: 'Invalid or expired token',
         code: 'TOKEN_VALIDATION_FAILED',
@@ -35,7 +41,9 @@ const authenticateUser = async (req, res, next) => {
     }
 
     if (!user || !user.id) {
-      console.error('No user returned from token validation');
+      if (process.env.NODE_ENV !== 'test') {
+        console.warn('No user returned from token validation');
+      }
       return res.status(401).json({ 
         error: 'Invalid or expired token',
         code: 'NO_USER_FROM_TOKEN' 
