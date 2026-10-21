@@ -136,7 +136,10 @@ router.get('/:id', async (req, res) => {
     if (!id) return res.status(400).json({ error: 'id is required' });
 
     try {
-        const preset = await taxonomy.getPresetByName(id);
+        let preset = await taxonomy.getPresetByName(id);
+        if (!preset && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+            preset = await taxonomy.getPresetById(id);
+        }
         if (!preset) return res.status(404).json({ error: 'Preset not found' });
         return res.json({ preset });
     } catch (err) {

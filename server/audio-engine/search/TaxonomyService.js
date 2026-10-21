@@ -104,7 +104,7 @@ class TaxonomyService {
                 .eq('type', AssetType.SOUND_EFFECT)
                 .single();
 
-            if (error) return null;
+            if (error || !data) return null;
             const merged = this._mergeSFX([data]);
             return merged[0] || null;
         } catch (err) {
@@ -194,7 +194,7 @@ class TaxonomyService {
                 .eq('type', AssetType.LUT)
                 .single();
 
-            if (error) return null;
+            if (error || !data) return null;
             const merged = this._mergeLUTs([data]);
             return merged[0] || null;
         } catch (err) {
@@ -282,11 +282,36 @@ class TaxonomyService {
                 .eq('name', name)
                 .single();
 
-            if (error) return null;
+            if (error || !data) return null;
             const merged = this._mergePresets([data]);
             return merged[0] || null;
         } catch (err) {
             console.error('[TaxonomyService.getPresetByName]', err.message);
+            return null;
+        }
+    }
+
+    /**
+     * Fetch a single preset by UUID.
+     *
+     * @param {string} id
+     * @returns {Promise<Object|null>}
+     */
+    async getPresetById(id) {
+        if (!id) return null;
+
+        try {
+            const { data, error } = await this.db
+                .from('assets')
+                .select(`*, presets (*)`)
+                .eq('id', id)
+                .single();
+
+            if (error || !data) return null;
+            const merged = this._mergePresets([data]);
+            return merged[0] || null;
+        } catch (err) {
+            console.error('[TaxonomyService.getPresetById]', err.message);
             return null;
         }
     }
@@ -378,7 +403,7 @@ class TaxonomyService {
                 .eq('type', AssetType.STICKER)
                 .single();
 
-            if (error) return null;
+            if (error || !data) return null;
             const merged = this._mergeStickers([data]);
             return merged[0] || null;
         } catch (err) {
@@ -432,7 +457,7 @@ class TaxonomyService {
      * @private
      */
     _mergeSFX(rows) {
-        return rows.map(row => {
+        return (rows || []).filter(Boolean).map(row => {
             const sfx = Array.isArray(row.sound_effects)
                 ? row.sound_effects[0]
                 : row.sound_effects;
@@ -446,7 +471,7 @@ class TaxonomyService {
      * @private
      */
     _mergeLUTs(rows) {
-        return rows.map(row => {
+        return (rows || []).filter(Boolean).map(row => {
             const lut = Array.isArray(row.luts) ? row.luts[0] : row.luts;
             const { luts: _ignored, ...base } = row;
             return {
@@ -463,7 +488,7 @@ class TaxonomyService {
      * @private
      */
     _mergePresets(rows) {
-        return rows.map(row => {
+        return (rows || []).filter(Boolean).map(row => {
             const preset = Array.isArray(row.presets) ? row.presets[0] : row.presets;
             const { presets: _ignored, ...base } = row;
             return { ...base, ...(preset || {}) };
@@ -475,7 +500,7 @@ class TaxonomyService {
      * @private
      */
     _mergeStickers(rows) {
-        return rows.map(row => {
+        return (rows || []).filter(Boolean).map(row => {
             const sticker = Array.isArray(row.stickers) ? row.stickers[0] : row.stickers;
             const { stickers: _ignored, ...base } = row;
             return { ...base, ...(sticker || {}) };
