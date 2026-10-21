@@ -48,3 +48,24 @@ export function useUserPlan() {
 
     return { plan, loading };
 }
+
+/**
+ * Direct async lookup of current user plan outside React component lifecycle.
+ * @returns {Promise<'free'|'creator'|'pro'>}
+ */
+export async function getUserPlanDirect() {
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return 'free';
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('plan')
+            .eq('id', user.id)
+            .single();
+        if (!error && data?.plan) return data.plan;
+        return 'free';
+    } catch {
+        return 'free';
+    }
+}
+

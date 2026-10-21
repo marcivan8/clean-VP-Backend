@@ -12,12 +12,14 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Search, Music2, Palette, Layers, Loader2, RefreshCw, Upload, Film, Sparkles } from 'lucide-react';
+import { Search, Music2, Palette, Layers, Loader2, RefreshCw, Upload, Film, Sparkles, Lock } from 'lucide-react';
 import { useAudioEngine }        from '../hooks/useAudioEngine.js';
 import useTimelineStore          from '../store/useTimelineStore.js';
 import { audioEngineAPI }        from '../audio-engine/AudioEngineAPI.js';
 import { stockMediaApi }          from '../services/stockMediaApi.js';
 import { lutToGrading }          from '../utils/lutGrading.js';
+import { useUserPlan }           from '../hooks/useUserPlan.js';
+import { EventBus, EVENT_TYPES } from '../utils/EventBus.js';
 import SoundCard                 from './SoundCard.jsx';
 import LUTCard                   from './LUTCard.jsx';
 import PresetCard                from './PresetCard.jsx';
@@ -29,7 +31,7 @@ const TABS = [
     { key: 'sfx',     labelKey: 'assetPanel.tabSfx',     icon: Music2  },
     { key: 'luts',    labelKey: 'assetPanel.tabColor',   icon: Palette },
     { key: 'presets', labelKey: 'assetPanel.tabPresets', icon: Layers  },
-    { key: 'stock',   labelKey: 'assetPanel.tabStock',   icon: Film    },
+    { key: 'stock',   labelKey: 'assetPanel.tabStock',   icon: Film, isPaid: true },
 ];
 
 const PANEL = {
@@ -44,9 +46,15 @@ const PANEL = {
     height:     '100%',
 };
 
-export default function AssetPanel({ onClose }) {
+export default function AssetPanel({ onClose, initialTab = 'sfx' }) {
     const { t } = useTranslation('editor');
-    const [tab,          setTab]          = useState('sfx');
+    const { plan: userPlan } = useUserPlan();
+    const isFree = userPlan === 'free';
+    const [tab,          setTab]          = useState(initialTab);
+
+    useEffect(() => {
+        if (initialTab) setTab(initialTab);
+    }, [initialTab]);
     const [query,        setQuery]        = useState('');
     const [approvalPreset, setApprovalPreset] = useState(null);
     const [applyResult,  setApplyResult]  = useState(null); // { success, executed }
@@ -119,6 +127,14 @@ export default function AssetPanel({ onClose }) {
 
     // Search stock media
     const searchStock = useCallback(async (q, mediaType = stockMediaType) => {
+        if (isFree) {
+            EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
+                reason: 'paid_feature',
+                message: t('assetPanel.stockLockedMessage', 'Stock media is available on Creator and Pro plans.'),
+                upgradeRequired: 'creator',
+            });
+            return;
+        }
         setStockLoading(true);
         setStockError(null);
         try {
@@ -136,16 +152,16 @@ export default function AssetPanel({ onClose }) {
         } finally {
             setStockLoading(false);
         }
-    }, [stockMediaType]);
+    }, [stockMediaType, isFree, t]);
 
     // Load defaults on tab change
     useEffect(() => {
         if (tab === 'sfx'     && sfxResults.length === 0)     searchSFX('');
         if (tab === 'luts'    && lutResults.length === 0)     searchLUTs('');
         if (tab === 'presets' && presetResults.length === 0)  searchPresets();
-        if (tab === 'stock'   && stockResults.length === 0)   searchStock(query || 'landscape');
+        if (tab === 'stock'   && stockResults.length === 0 && !isFree)   searchStock(query || 'landscape');
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [tab]);
+    }, [tab, isFree]);
 
     // ── Custom .cube LUT import ───────────────────────────────────────────────
     const [lutUploading,   setLutUploading]   = useState(false);
@@ -216,6 +232,14 @@ export default function AssetPanel({ onClose }) {
 
     // Level 2: Context-Aware B-Roll suggestion handlers
     const handleGenerateBrollSuggestions = useCallback(async () => {
+        if (isFree) {
+            EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
+                reason: 'paid_feature',
+                message: t('assetPanel.stockLockedMessage', 'Stock media is available on Creator and Pro plans.'),
+                upgradeRequired: 'creator',
+            });
+            return;
+        }
         const store = useTimelineStore.getState();
         const words = store.captions || [];
         if (!Array.isArray(words) || words.length === 0) {
@@ -241,7 +265,7 @@ export default function AssetPanel({ onClose }) {
         } finally {
             setSuggestionsLoading(false);
         }
-    }, []);
+    }, [isFree, t]);
 
     const handleApproveBrollSuggestion = useCallback((suggestion, asset) => {
         const store = useTimelineStore.getState();
@@ -419,10 +443,20 @@ export default function AssetPanel({ onClose }) {
                     {TABS.map(tabItem => {
                         const Icon    = tabItem.icon;
                         const active  = tab === tabItem.key;
+                        const isLocked = tabItem.isPaid && isFree;
                         return (
                             <button
                                 key={tabItem.key}
-                                onClick={() => setTab(tabItem.key)}
+                                onClick={() => {
+                                    setTab(tabItem.key);
+                                    if (isLocked) {
+                                        EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
+                                            reason: 'paid_feature',
+                                            message: t('assetPanel.stockLockedMessage', 'Stock media is available on Creator and Pro plans.'),
+                                            upgradeRequired: 'creator',
+                                        });
+                                    }
+                                }}
                                 style={{
                                     flex:         1,
                                     padding:      '5px 0 7px',
@@ -437,53 +471,56 @@ export default function AssetPanel({ onClose }) {
                                     display:      'flex',
                                     alignItems:   'center',
                                     justifyContent: 'center',
-                                    gap:          5,
+                                    gap:          4,
                                     transition:   'color 0.15s',
                                 }}
                             >
                                 <Icon size={11} /> {t(tabItem.labelKey)}
+                                {isLocked && <Lock size={9} style={{ color: 'var(--accent)' }} />}
                             </button>
                         );
                     })}
                 </div>
 
                 {/* Search bar */}
-                <form onSubmit={handleSearch} style={{ padding: '10px 12px 8px', display: 'flex', gap: 6 }}>
-                    <div style={{ flex: 1, position: 'relative' }}>
-                        <Search size={11} color="var(--fg-3)" style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)' }} />
-                        <input
-                            value={query}
-                            onChange={e => setQuery(e.target.value)}
-                            placeholder={
-                                tab === 'sfx'     ? t('assetPanel.searchPlaceholderSfx')   :
-                                tab === 'luts'    ? t('assetPanel.searchPlaceholderLuts')  :
-                                tab === 'stock'   ? t('assetPanel.searchPlaceholderStock') :
-                                                   t('assetPanel.searchPlaceholderPresets')
-                            }
+                {!(tab === 'stock' && isFree) && (
+                    <form onSubmit={handleSearch} style={{ padding: '10px 12px 8px', display: 'flex', gap: 6 }}>
+                        <div style={{ flex: 1, position: 'relative' }}>
+                            <Search size={11} color="var(--fg-3)" style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)' }} />
+                            <input
+                                value={query}
+                                onChange={e => setQuery(e.target.value)}
+                                placeholder={
+                                    tab === 'sfx'     ? t('assetPanel.searchPlaceholderSfx')   :
+                                    tab === 'luts'    ? t('assetPanel.searchPlaceholderLuts')  :
+                                    tab === 'stock'   ? t('assetPanel.searchPlaceholderStock') :
+                                                       t('assetPanel.searchPlaceholderPresets')
+                                }
+                                style={{
+                                    width:        '100%',
+                                    padding:      '5px 8px 5px 26px',
+                                    boxSizing:    'border-box',
+                                    background:   'rgba(255,255,255,0.05)',
+                                    border:       '0.5px solid rgba(255,255,255,0.1)',
+                                    borderRadius: 6,
+                                    color:        'var(--fg)',
+                                    fontSize:     11,
+                                    fontFamily:   'var(--f-sans)',
+                                    outline:      'none',
+                                }}
+                            />
+                        </div>
+                        <button
+                            type="submit"
                             style={{
-                                width:        '100%',
-                                padding:      '5px 8px 5px 26px',
-                                boxSizing:    'border-box',
-                                background:   'rgba(255,255,255,0.05)',
-                                border:       '0.5px solid rgba(255,255,255,0.1)',
-                                borderRadius: 6,
-                                color:        'var(--fg)',
-                                fontSize:     11,
-                                fontFamily:   'var(--f-sans)',
-                                outline:      'none',
+                                padding: '0 10px', border: 'none', borderRadius: 6, cursor: 'pointer',
+                                background: 'rgba(0,229,255,0.12)', color: 'var(--accent)',
                             }}
-                        />
-                    </div>
-                    <button
-                        type="submit"
-                        style={{
-                            padding: '0 10px', border: 'none', borderRadius: 6, cursor: 'pointer',
-                            background: 'rgba(0,229,255,0.12)', color: 'var(--accent)',
-                        }}
-                    >
-                        <Search size={12} />
-                    </button>
-                </form>
+                        >
+                            <Search size={12} />
+                        </button>
+                    </form>
+                )}
 
                 {/* Custom .cube LUT import — Color tab only.
                     The server route (POST /api/luts/upload) was already built,
@@ -612,6 +649,80 @@ export default function AssetPanel({ onClose }) {
 
                             {/* Stock tab */}
                             {tab === 'stock' && (
+                                isFree ? (
+                                    <div style={{
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        textAlign: 'center',
+                                        padding: '40px 20px',
+                                        background: 'linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)',
+                                        borderRadius: 12,
+                                        border: '0.5px solid rgba(255,255,255,0.08)',
+                                        margin: '12px 4px',
+                                    }}>
+                                        <div style={{
+                                            width: 44,
+                                            height: 44,
+                                            borderRadius: '50%',
+                                            background: 'color-mix(in oklch, var(--accent) 18%, transparent)',
+                                            border: '1px solid color-mix(in oklch, var(--accent) 35%, transparent)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            marginBottom: 12,
+                                            color: 'var(--accent)',
+                                        }}>
+                                            <Lock size={20} />
+                                        </div>
+                                        <h3 style={{
+                                            fontSize: 13,
+                                            fontWeight: 700,
+                                            color: 'var(--fg)',
+                                            marginBottom: 6,
+                                            fontFamily: 'var(--f-sans)',
+                                        }}>
+                                            {t('assetPanel.stockLockedTitle')}
+                                        </h3>
+                                        <p style={{
+                                            fontSize: 11,
+                                            color: 'var(--fg-3)',
+                                            lineHeight: 1.5,
+                                            maxWidth: 260,
+                                            marginBottom: 16,
+                                            fontFamily: 'var(--f-sans)',
+                                        }}>
+                                            {t('assetPanel.stockLockedDescription')}
+                                        </p>
+                                        <button
+                                            type="button"
+                                            onClick={() => EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
+                                                reason: 'paid_feature',
+                                                message: t('assetPanel.stockLockedMessage', 'Stock media is available on Creator and Pro plans.'),
+                                                upgradeRequired: 'creator',
+                                            })}
+                                            style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: 6,
+                                                padding: '8px 16px',
+                                                borderRadius: 8,
+                                                background: 'var(--accent)',
+                                                color: '#000',
+                                                fontSize: 11.5,
+                                                fontWeight: 600,
+                                                fontFamily: 'var(--f-sans)',
+                                                border: 'none',
+                                                cursor: 'pointer',
+                                                boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                                            }}
+                                        >
+                                            <Sparkles size={12} />
+                                            <span>{t('assetPanel.stockLockedCta')}</span>
+                                        </button>
+                                    </div>
+                                ) : (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 4 }}>
                                     {/* View Mode Toggle: Search vs AI Suggestions */}
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 4 }}>
@@ -840,6 +951,7 @@ export default function AssetPanel({ onClose }) {
                                         </div>
                                     )}
                                 </div>
+                                )
                             )}
                         </>
                     )}

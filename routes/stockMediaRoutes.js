@@ -14,6 +14,7 @@ const express = require('express');
 const router = express.Router();
 const rateLimit = require('express-rate-limit');
 const { authenticateUser, optionalAuth } = require('../middleware/auth');
+const { stockGate } = require('../middleware/usageGate');
 const { pexelsService } = require('../services/PexelsService');
 const { vecteezyService } = require('../services/VecteezyService');
 
@@ -60,7 +61,7 @@ router.get('/status', (req, res) => {
  *   - perPage: number (default 15, max 30)
  *   - orientation: 'landscape' | 'portrait' | 'square' (optional)
  */
-router.get('/search', stockLimiter, authMiddleware, async (req, res) => {
+router.get('/search', stockLimiter, authMiddleware, stockGate, async (req, res) => {
     const query = String(req.query.query || '').trim();
     const type = String(req.query.type || 'video').toLowerCase();
     const page = parseInt(req.query.page, 10) || 1;
@@ -114,7 +115,7 @@ const { brollSuggesterService } = require('../services/BrollSuggesterService');
  *   - chapters: Array<number> (optional)
  *   - maxSuggestions: number (optional, default 4)
  */
-router.post('/suggest-broll', stockLimiter, authMiddleware, async (req, res) => {
+router.post('/suggest-broll', stockLimiter, authMiddleware, stockGate, async (req, res) => {
     const { words = [], chapters = [], maxSuggestions = 4 } = req.body || {};
 
     if (!Array.isArray(words) || words.length === 0) {

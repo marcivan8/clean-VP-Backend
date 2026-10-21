@@ -382,7 +382,11 @@
     "approveCutaway": "Approuver l'incrustation",
     "dismiss": "Ignorer",
     "replace": "Remplacer",
-    "scanTranscript": "Analyser la transcription"
+    "scanTranscript": "Analyser la transcription",
+    "stockLockedTitle": "Banque de médias libres de droits",
+    "stockLockedDescription": "Accédez à des millions de vidéos et photos HD de Pexels et Vecteezy avec suggestions de plans de coupe IA sur les forfaits Creator et Pro.",
+    "stockLockedCta": "Débloquer les médias Stock",
+    "stockLockedMessage": "Les médias de stock sont disponibles sur les forfaits Creator et Pro."
   },
   "saveAsPreset": {
     "giveItAName": "Donnez-lui d'abord un nom",
@@ -1035,7 +1039,11 @@
     "previewReplay": "Rejouer",
     "previewStop": "Arrêter l’aperçu",
     "previewPreparing": "Préparation…",
-    "previewFailed": "Le short n’a pas pu être chargé dans le lecteur."
+    "previewFailed": "Le short n’a pas pu être chargé dans le lecteur.",
+    "lockedTitle": "Les Shorts IA sont réservés aux abonnements payants",
+    "lockedDescription": "Trouvez automatiquement les moments viraux et découpez vos vidéos au format 9:16 avec cadrage intelligent, sous-titres et bruitages sur les forfaits Creator et Pro.",
+    "lockedCta": "Débloquer les Shorts",
+    "lockedMessage": "La découpe en shorts IA est disponible sur les forfaits Creator et Pro."
   },
   "scenePanel": {
     "title": "Scène",

@@ -18,13 +18,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Smartphone, Play, Square, Download, Loader2, Trash2, Wand2, ExternalLink, Sparkles, Volume2, UserCheck, AlertTriangle } from 'lucide-react';
+import { Smartphone, Play, Square, Download, Loader2, Trash2, Wand2, ExternalLink, Sparkles, Volume2, UserCheck, AlertTriangle, Lock } from 'lucide-react';
 
 import useTimelineStore from '../store/useTimelineStore';
 import { PLATFORM_IDS, PLATFORM_PROFILES, profileNotes } from '../agent/PlatformProfiles.js';
 import { finishShort } from '../agent/shortFinisher.js';
 import { createProject } from '../lib/projectsApi.js';
 import { captureShortThumbnail, getCachedShortThumbnail, thumbnailKey } from '../utils/captureShortThumbnail.js';
+import { useUserPlan } from '../hooks/useUserPlan.js';
+import { EventBus, EVENT_TYPES } from '../utils/EventBus.js';
 
 const fmt = (s) => {
     const n = Math.max(0, Math.round(Number(s) || 0));
@@ -58,6 +60,8 @@ async function ensureMattesFor(short) {
 export default function ShortsPanel({ onExport }) {
     const { t } = useTranslation('editor');
     const navigate = useNavigate();
+    const { plan } = useUserPlan();
+    const isFree = plan === 'free';
     const shorts = useTimelineStore(s => s.shorts) || [];
     const previewId = useTimelineStore(s => s.shortPreview?.shortId || null);
     const hasCaptions = useTimelineStore(s => (s.shortPreview?.saved?.tracks || s.tracks || []).some(tr => tr.type === 'text' && (tr.clips || []).length > 0));
@@ -101,15 +105,31 @@ export default function ShortsPanel({ onExport }) {
     }, [thumbKeys]);
 
     const handleFind = useCallback(async () => {
+        if (isFree) {
+            EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
+                reason: 'paid_feature',
+                message: t('shortsPanel.lockedMessage', 'AI Shorts repurposing is available on Creator and Pro plans.'),
+                upgradeRequired: 'creator',
+            });
+            return;
+        }
         try {
             const { workflowController } = await import('../agent/WorkflowController.js');
             workflowController.processUserPrompt(t('shortsPanel.findPrompt'));
         } catch (err) {
             console.error('[ShortsPanel] find failed:', err.message);
         }
-    }, [t]);
+    }, [t, isFree]);
 
     const handlePreview = useCallback(async (short) => {
+        if (isFree) {
+            EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
+                reason: 'paid_feature',
+                message: t('shortsPanel.lockedMessage', 'AI Shorts repurposing is available on Creator and Pro plans.'),
+                upgradeRequired: 'creator',
+            });
+            return;
+        }
         const st = useTimelineStore.getState();
         if (st.shortPreview?.shortId === short.id) { st.exitShortPreview(); return; }
         if (preparing) return;
@@ -127,9 +147,17 @@ export default function ShortsPanel({ onExport }) {
         } finally {
             setPreparing(null);
         }
-    }, [preparing, polish, popOut, sfx, t]);
+    }, [preparing, polish, popOut, sfx, t, isFree]);
 
     const handleExport = useCallback(async (short) => {
+        if (isFree) {
+            EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
+                reason: 'paid_feature',
+                message: t('shortsPanel.lockedMessage', 'AI Shorts repurposing is available on Creator and Pro plans.'),
+                upgradeRequired: 'creator',
+            });
+            return;
+        }
         if (!onExport || busy[short.id] !== undefined) return;
         const profile = PLATFORM_PROFILES[short.platform] || PLATFORM_PROFILES.tiktok;
         setBusy(b => ({ ...b, [short.id]: 0 }));
@@ -153,9 +181,17 @@ export default function ShortsPanel({ onExport }) {
         } finally {
             setBusy(b => { const n = { ...b }; delete n[short.id]; return n; });
         }
-    }, [onExport, busy, polish, popOut, sfx]);
+    }, [onExport, busy, polish, popOut, sfx, isFree, t]);
 
     const handleOpenAsProject = useCallback(async (short) => {
+        if (isFree) {
+            EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
+                reason: 'paid_feature',
+                message: t('shortsPanel.lockedMessage', 'AI Shorts repurposing is available on Creator and Pro plans.'),
+                upgradeRequired: 'creator',
+            });
+            return;
+        }
         const profile = PLATFORM_PROFILES[short.platform] || PLATFORM_PROFILES.tiktok;
         try {
             // The project is built from the main edit, so the preview ends first.
@@ -183,7 +219,7 @@ export default function ShortsPanel({ onExport }) {
             console.error('[ShortsPanel] open as project failed:', err.message);
             setErrors(e => ({ ...e, [short.id]: err.message }));
         }
-    }, [navigate, polish, popOut, sfx, t]);
+    }, [navigate, polish, popOut, sfx, t, isFree]);
 
     const handleRemove = useCallback((short) => {
         const st = useTimelineStore.getState();
@@ -192,18 +228,31 @@ export default function ShortsPanel({ onExport }) {
     }, []);
 
     const handleExportAll = useCallback(async () => {
+        if (isFree) {
+            EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
+                reason: 'paid_feature',
+                message: t('shortsPanel.lockedMessage', 'AI Shorts repurposing is available on Creator and Pro plans.'),
+                upgradeRequired: 'creator',
+            });
+            return;
+        }
         for (const s of sorted) {
             // One at a time: the render worker is the concurrency limit.
             // eslint-disable-next-line no-await-in-loop
             await handleExport(s);
         }
-    }, [sorted, handleExport]);
+    }, [sorted, handleExport, isFree, t]);
 
     return (
         <section className="p-4 border-b border-border/50">
             <div className="flex items-center justify-between mb-3">
                 <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold flex items-center gap-1.5">
                     <Smartphone className="w-3 h-3" /> {t('shortsPanel.title')}
+                    {isFree && (
+                        <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] bg-primary/20 text-primary border border-primary/30 flex items-center gap-1 font-mono">
+                            <Lock className="w-2.5 h-2.5" /> PRO
+                        </span>
+                    )}
                 </div>
                 {sorted.length > 1 && (
                     <button type="button" onClick={handleExportAll} disabled={Object.keys(busy).length > 0}
@@ -213,9 +262,32 @@ export default function ShortsPanel({ onExport }) {
                 )}
             </div>
 
+            {isFree && (
+                <div className="mb-3.5 p-3.5 rounded-xl border border-primary/30 bg-primary/10 flex flex-col items-center text-center">
+                    <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center mb-2 text-primary border border-primary/40">
+                        <Lock className="w-4 h-4" />
+                    </div>
+                    <h4 className="text-xs font-semibold text-foreground mb-1">
+                        {t('shortsPanel.lockedTitle')}
+                    </h4>
+                    <p className="text-[11px] text-muted-foreground mb-2.5 leading-relaxed">
+                        {t('shortsPanel.lockedDescription')}
+                    </p>
+                    <button
+                        type="button"
+                        onClick={() => EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, { reason: 'paid_feature', upgradeRequired: 'creator' })}
+                        className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm flex items-center gap-1.5"
+                    >
+                        <Sparkles className="w-3 h-3" />
+                        {t('shortsPanel.lockedCta')}
+                    </button>
+                </div>
+            )}
+
             <button type="button" onClick={handleFind}
                 className="w-full mb-3 px-2 py-1.5 rounded text-[11px] bg-primary/15 border border-primary/40 text-primary flex items-center justify-center gap-1.5">
                 <Wand2 className="w-3 h-3" /> {sorted.length ? t('shortsPanel.findAgain') : t('shortsPanel.find')}
+                {isFree && <Lock className="w-2.5 h-2.5 ml-1 text-primary" />}
             </button>
 
             {/* Finish treatment toggles */}

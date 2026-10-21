@@ -125,4 +125,35 @@ const nleGate = async (req, res, next) => {
     }
 };
 
-module.exports = { aiGate, nleGate, PLAN_LIMITS, getUserPlan };
+// Blocks stock media searches and B-roll suggestions for free-tier users.
+const stockGate = async (req, res, next) => {
+    if (process.env.BYPASS_USAGE_GATE === 'true') {
+        return next();
+    }
+
+    if (!req.user?.id) {
+        if (process.env.NODE_ENV === 'production') {
+            return res.status(401).json({ error: 'Authentication required', code: 'AUTH_REQUIRED' });
+        }
+        return next();
+    }
+
+    try {
+        const plan = await getUserPlan(req.user.id);
+        if (plan === 'free') {
+            return res.status(402).json({
+                error:           'STOCK_MEDIA_PAID',
+                message:         'Stock media is available on the Creator plan and above.',
+                plan,
+                upgradeRequired: 'creator',
+            });
+        }
+        next();
+    } catch (err) {
+        console.error('[usageGate] stockGate error:', err.message);
+        next(); // fail open
+    }
+};
+
+module.exports = { aiGate, nleGate, stockGate, PLAN_LIMITS, getUserPlan };
+

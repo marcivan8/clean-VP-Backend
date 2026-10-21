@@ -165,7 +165,7 @@
           "Silence removal & trim — unlimited",
           "MP4 export — no watermark"
         ],
-        "locked": ["Editing styles & Auto mode", "NLE export", "Transcript intelligence"]
+        "locked": ["Editing styles & Auto mode", "Shorts & Stock panels", "NLE export", "Transcript intelligence"]
       },
       "creator": {
         "tagline": "Edit every week. Export to any tool you already use.",
@@ -176,6 +176,7 @@
           "30-day storage",
           "100 AI operations / month",
           "All editing styles & Auto mode",
+          "Shorts repurposing & Stock media",
           "All AI commands — filler, captions, best moments",
           "Full transcript + content intelligence",
           "MP4 export",

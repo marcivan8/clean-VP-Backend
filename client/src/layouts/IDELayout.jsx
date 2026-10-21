@@ -1,11 +1,12 @@
 import { useShallow } from 'zustand/react/shallow';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap, Smartphone, Film } from 'lucide-react';
+import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap, Smartphone, Film, Lock } from 'lucide-react';
 import classNames from 'classnames';
 import { Player } from '@revideo/player-react';
 import { Video as RevideoVideo, Audio as RevideoAudio, Media as RevideoMedia } from '@revideo/2d';
 import { installIosMediaUnlock } from '../utils/iosMediaUnlock.js';
+import { useUserPlan } from '../hooks/useUserPlan.js';
 import project from '../revideo/project';
 import SettingsPanel from '../components/SettingsPanel';
 import useTimelineStore from '../store/useTimelineStore';
@@ -644,6 +645,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
     const activeTab    = useAIStore(s => s.activeTab);
     const setActiveTab = useAIStore(s => s.setActiveTab);
+    const { plan: userPlan } = useUserPlan();
+    const isFree = userPlan === 'free';
+    const [assetInitialTab, setAssetInitialTab] = useState('sfx');
 
     // Toggle a mobile bottom sheet. 'audio' maps to the media panel with the audio tab pre-selected.
     const handleMobileSheet = useCallback((sheet) => {
@@ -2121,7 +2125,17 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 {['media', 'captions', 'transcript', 'color', 'motion', 'shorts', 'iterations', 'assets', 'audio', 'transform', 'settings'].map(tab => (
                                     <button
                                         key={tab}
-                                        onClick={() => setActiveTab(tab)}
+                                        onClick={() => {
+                                            if (tab === 'shorts' && isFree) {
+                                                EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
+                                                    reason: 'paid_feature',
+                                                    message: t('shortsPanel.lockedMessage', 'AI Shorts repurposing is available on Creator and Pro plans.'),
+                                                    upgradeRequired: 'creator',
+                                                });
+                                            }
+                                            if (tab === 'assets') setAssetInitialTab('sfx');
+                                            setActiveTab(tab);
+                                        }}
                                         className={classNames("studio-tab-btn", activeTab === tab && "active")}
                                     >
                                         {tab === 'media'      && <Layers   className="w-2.5 h-2.5" />}
@@ -2129,7 +2143,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         {tab === 'transcript' && <span style={{ fontSize: 9 }}>📝</span>}
                                         {tab === 'color'      && <Palette  className="w-2.5 h-2.5" />}
                                         {tab === 'motion'     && <Zap      className="w-2.5 h-2.5" />}
-                                        {tab === 'shorts'     && <Smartphone className="w-2.5 h-2.5" />}
+                                        {tab === 'shorts'     && (
+                                            <>
+                                                <Smartphone className="w-2.5 h-2.5" />
+                                                {isFree && <Lock className="w-2 h-2 text-primary" />}
+                                            </>
+                                        )}
                                         {tab === 'iterations' && <span style={{ fontSize: 9 }}>🔁</span>}
                                         {tab === 'assets'     && <Sparkles className="w-2.5 h-2.5" />}
                                         {tab === 'audio'      && <span style={{ fontSize: 9 }}>🎤</span>}
@@ -2184,10 +2203,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             </div>
                         )}
 
-                        {/* Assets panel (SFX · LUTs · Presets) — managed its own scroll */}
+                        {/* Assets panel (SFX · LUTs · Presets · Stock) - managed its own scroll */}
                         {activeTab === 'assets' && (
                             <div className="flex-1 overflow-hidden" style={{ minHeight: 0 }}>
-                                <AssetPanel onClose={() => setActiveTab('media')} />
+                                <AssetPanel onClose={() => setActiveTab('media')} initialTab={assetInitialTab} />
                             </div>
                         )}
 
@@ -2197,15 +2216,26 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     <div className="flex items-center justify-between mb-4">
                                         <div className="studio-mono-label" style={{ color: 'var(--fg-2)' }}>{t('ideLayout.bin', { count: assets.length })}</div>
                                         <div className="flex items-center gap-1.5">
-                                            {/* Stock media button — opens Stock tab in AssetPanel */}
+                                            {/* Stock media button - opens Stock tab in AssetPanel */}
                                             <button
                                                 type="button"
-                                                onClick={() => setActiveTab('assets')}
+                                                onClick={() => {
+                                                    if (isFree) {
+                                                        EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
+                                                            reason: 'paid_feature',
+                                                            message: t('assetPanel.stockLockedMessage', 'Stock media is available on Creator and Pro plans.'),
+                                                            upgradeRequired: 'creator',
+                                                        });
+                                                    }
+                                                    setAssetInitialTab('stock');
+                                                    setActiveTab('assets');
+                                                }}
                                                 className="text-[10px] bg-accent/10 hover:bg-accent/20 text-accent px-2 py-1 rounded transition-colors flex items-center gap-1 border border-accent/20"
                                                 style={{ fontFamily: "var(--f-mono)" }}
                                                 title="Pexels Stock Media"
                                             >
                                                 <Film className="w-3 h-3" /> Stock
+                                                {isFree && <Lock className="w-2.5 h-2.5 ml-0.5" />}
                                             </button>
                                             {/* Import button — input overlaid directly so Android taps hit the input itself */}
                                             <div className="relative text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-colors flex items-center gap-1" style={{ fontFamily: "var(--f-mono)" }}>

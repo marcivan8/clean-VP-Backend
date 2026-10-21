@@ -1748,6 +1748,7 @@ if (matches.length === 0 && titleCardsCreated === 0) {
                 signal,
             });
             if (!response.ok) {
+                if (response.status === 402) return { inserted: 0, placements: [], reason: 'stock footage is available on Creator and Pro plans' };
                 if (response.status === 503) return { inserted: 0, placements: [], reason: 'stock footage search is not configured' };
                 const errText = await response.text().catch(() => '');
                 return { inserted: 0, placements: [], reason: `stock footage search failed (${errText || response.status})` };
@@ -1797,6 +1798,15 @@ if (matches.length === 0 && titleCardsCreated === 0) {
             const params = new URLSearchParams({ query: q, type: 'video', page: '1', perPage: '5' });
             const response = await authFetch(`/api/stock/search?${params.toString()}`, { signal });
             if (!response.ok) {
+                if (response.status === 402) {
+                    const { EventBus, EVENT_TYPES } = await import('./EventBus.js');
+                    EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
+                        reason: 'paid_feature',
+                        message: 'Stock footage is available on Creator and Pro plans.',
+                        upgradeRequired: 'creator',
+                    });
+                    return { success: false, message: 'Stock footage is available on Creator and Pro plans. Please upgrade to unlock.' };
+                }
                 if (response.status === 503) {
                     return { success: false, message: 'Stock footage search is not configured (no Pexels API key set up on the server).' };
                 }

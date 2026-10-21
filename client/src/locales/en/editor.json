@@ -382,7 +382,11 @@
     "approveCutaway": "Approve Cutaway",
     "dismiss": "Dismiss",
     "replace": "Replace",
-    "scanTranscript": "Scan transcript"
+    "scanTranscript": "Scan transcript",
+    "stockLockedTitle": "Royalty-Free Stock Media",
+    "stockLockedDescription": "Access millions of high-definition stock videos and photos from Pexels and Vecteezy with AI b-roll suggestions on Creator and Pro plans.",
+    "stockLockedCta": "Upgrade to unlock Stock",
+    "stockLockedMessage": "Stock media is available on Creator and Pro plans."
   },
   "saveAsPreset": {
     "giveItAName": "Give it a name first",
@@ -1035,7 +1039,11 @@
     "previewReplay": "Replay",
     "previewStop": "Stop preview",
     "previewPreparing": "Preparing…",
-    "previewFailed": "The short could not be loaded in the player."
+    "previewFailed": "The short could not be loaded in the player.",
+    "lockedTitle": "AI Shorts is a paid feature",
+    "lockedDescription": "Automatically find viral moments and repurpose your long-form videos into 9:16 Shorts with smart framing, captions, and sound effects on Creator and Pro plans.",
+    "lockedCta": "Upgrade to unlock Shorts",
+    "lockedMessage": "AI Shorts repurposing is available on Creator and Pro plans."
   },
   "scenePanel": {
     "title": "Scene",

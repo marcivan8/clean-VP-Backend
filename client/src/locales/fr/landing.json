@@ -165,7 +165,7 @@
           "Suppression des silences & coupe — illimité",
           "Export MP4 — sans filigrane"
         ],
-        "locked": ["Styles de montage et mode Auto", "Export NLE", "Intelligence de transcription"]
+        "locked": ["Styles de montage et mode Auto", "Panneaux Shorts et Stock", "Export NLE", "Intelligence de transcription"]
       },
       "creator": {
         "tagline": "Montez chaque semaine. Exportez vers n'importe quel outil que vous utilisez déjà.",
@@ -176,6 +176,7 @@
           "Stockage 30 jours",
           "100 opérations IA / mois",
           "Tous les styles de montage et mode Auto",
+          "Découpe en Shorts et Médias de stock",
           "Toutes les commandes IA — parasites, sous-titres, meilleurs moments",
           "Transcription complète + intelligence de contenu",
           "Export MP4",
