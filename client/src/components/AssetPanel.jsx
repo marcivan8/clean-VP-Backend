@@ -19,7 +19,7 @@ import { audioEngineAPI }        from '../audio-engine/AudioEngineAPI.js';
 import { stockMediaApi }          from '../services/stockMediaApi.js';
 import { lutToGrading }          from '../utils/lutGrading.js';
 import { useUserPlan }           from '../hooks/useUserPlan.js';
-import { EventBus, EVENT_TYPES } from '../utils/EventBus.js';
+import { EventBus, EVENT_TYPES } from '../agent/EventBus.js';
 import SoundCard                 from './SoundCard.jsx';
 import LUTCard                   from './LUTCard.jsx';
 import PresetCard                from './PresetCard.jsx';

@@ -26,7 +26,7 @@ import { finishShort } from '../agent/shortFinisher.js';
 import { createProject } from '../lib/projectsApi.js';
 import { captureShortThumbnail, getCachedShortThumbnail, thumbnailKey } from '../utils/captureShortThumbnail.js';
 import { useUserPlan } from '../hooks/useUserPlan.js';
-import { EventBus, EVENT_TYPES } from '../utils/EventBus.js';
+import { EventBus, EVENT_TYPES } from '../agent/EventBus.js';
 
 const fmt = (s) => {
     const n = Math.max(0, Math.round(Number(s) || 0));
