@@ -1,5 +1,5 @@
 const OpenAI = require('openai');
-const { getAIClient, isAIConfigured, resolveModel } = require('../services/AIProvider');
+const { getAIClient, isAIConfigured, resolveModel, resolveProvider } = require('../services/AIProvider');
 const { analyzeStructure } = require('../viralEngine/structure.js');
 
 // R91 — editing styles accepted in ProjectContext.editingStyle (client: agent/EditingStyles.js).
@@ -108,7 +108,8 @@ Write every user-facing text you return (message, questions, explanations) in th
 
 const parseIntentHandler = async (req, res) => {
     try {
-        const { prompt, context, conversationHistory = [], matchUserLanguage = false } = req.body;
+        const prompt = req.body.prompt || req.body.command || '';
+        const { context, conversationHistory = [], matchUserLanguage = false } = req.body;
         console.log("📝 [CRL] Parsing intent:", prompt);
 
 
@@ -135,7 +136,7 @@ Before responding, you MUST read the injected context:
 - Detect editing mode from ProjectContext.editingMode
 - Detect if the request is logically possible
 
-If ANY duration mismatch is detected (sourceDuration >> timelineDuration, or vice versa, or unit inconsistency), you MUST say:
+If ANY duration mismatch is detected (sourceDuration >> timelineDuration, or vice versa, or unit inconsistency), you MUST request clarification by calling execute_video_edit with type "CLARIFICATION" and message:
 "There appears to be a duration mismatch between the source media and the timeline. I need clarification before proceeding."
 
 ═══════════════════════════════════════════════════
@@ -215,6 +216,8 @@ Just return type: "READY" with the specific "edit" operation and confidence "HIG
 ═══════════════════════════════════════════════════
 📤 OUTPUT FORMAT
 ═══════════════════════════════════════════════════
+
+CRITICAL: You MUST ALWAYS call the execute_video_edit function for ALL responses, including clarifications, follow-up questions, and conversational chat. Do not reply in plain text; wrap every response in execute_video_edit.
 
 When still clarifying (confidence not HIGH):
 {
@@ -560,6 +563,13 @@ USER REQUEST:
                 .slice(-10)
             : [];
 
+        const activeProvider = resolveProvider({ capability: 'chat' });
+        // Non-OpenAI providers (e.g. Groq, Gemini) may fail with 400 tool_use_failed if tool_choice is forced
+        // and the model outputs natural language. Use 'auto' for non-OpenAI models.
+        const toolChoice = activeProvider === 'openai'
+            ? { type: "function", function: { name: "execute_video_edit" } }
+            : 'auto';
+
         const completion = await openai.chat.completions.create({
             messages: [
                 { role: "system", content: systemPrompt + (matchUserLanguage === true ? LANGUAGE_RULE : '') },
@@ -568,17 +578,49 @@ USER REQUEST:
             ],
             model: resolveModel('gpt-4o', 'chat'),
             tools: tools,
-            tool_choice: { type: "function", function: { name: "execute_video_edit" } },
+            tool_choice: toolChoice,
             temperature: 0.15
         }, { timeout: 15000 }); // 15s strict timeout to trigger fallback fast on network errors
 
-        const toolCall = completion.choices[0].message.tool_calls?.[0];
-        if (!toolCall) {
-            throw new Error("Model failed to call the execute_video_edit function.");
+        const choice = completion.choices?.[0];
+        const message = choice?.message;
+        const toolCall = message?.tool_calls?.[0];
+
+        let raw = null;
+        if (toolCall?.function?.arguments) {
+            try {
+                raw = JSON.parse(toolCall.function.arguments);
+                console.log("✅ [CRL] Structured Function Call response:", raw);
+            } catch (err) {
+                console.warn("⚠️ [CRL] Failed to parse tool arguments JSON:", err.message);
+            }
         }
 
-        const raw = JSON.parse(toolCall.function.arguments);
-        console.log("✅ [CRL] Structured Function Call response:", raw);
+        // If tool call is absent or invalid, inspect message.content for JSON or conversational text
+        if (!raw) {
+            if (message?.content && typeof message.content === 'string' && message.content.trim()) {
+                const trimmed = message.content.trim();
+                try {
+                    const parsed = JSON.parse(trimmed);
+                    if (parsed && typeof parsed === 'object') {
+                        raw = parsed;
+                        console.log("✅ [CRL] Parsed JSON from message.content:", raw);
+                    }
+                } catch {
+                    // Plain text response - treat as clarification or conversational reply
+                    console.log("ℹ️ [CRL] Model returned text message without tool call:", trimmed);
+                    return res.json({
+                        intent: 'clarification_required',
+                        message: trimmed,
+                        intentDraft: null
+                    });
+                }
+            }
+        }
+
+        if (!raw) {
+            throw new Error("Model failed to call the execute_video_edit function.");
+        }
 
         // Normalize CRL envelope to existing pipeline format
         if (raw.type === 'CLARIFICATION') {
@@ -607,29 +649,70 @@ USER REQUEST:
     } catch (error) {
         console.error("❌ [CRL] Parse Intent Error:", error);
 
-        // For 429 / quota errors: don't surface a 500 — try the local parser first,
+        // Intercept tool_use_failed errors (e.g. from Groq) where the model text is in failed_generation
+        const failedGen = error?.error?.failed_generation ||
+                          error?.failed_generation ||
+                          error?.body?.error?.failed_generation ||
+                          error?.body?.failed_generation;
+
+        if (failedGen && typeof failedGen === 'string' && failedGen.trim()) {
+            const trimmed = failedGen.trim();
+            console.log("ℹ️ [CRL] Recovered failed_generation from tool call error:", trimmed);
+            try {
+                const parsed = JSON.parse(trimmed);
+                if (parsed.type === 'CLARIFICATION') {
+                    return res.json({
+                        intent: 'clarification_required',
+                        message: parsed.message,
+                        intentDraft: parsed.intentDraft || null
+                    });
+                }
+                if (parsed.type === 'READY' && parsed.intent) {
+                    return res.json(parsed.intent);
+                }
+                if (parsed.type === 'CHAT') {
+                    return res.json({
+                        intent: 'chat',
+                        operation: 'chat',
+                        message: parsed.message
+                    });
+                }
+                if (parsed.intent) {
+                    return res.json(parsed);
+                }
+            } catch {
+                // Not JSON - treat as clarification message
+            }
+            return res.json({
+                intent: 'clarification_required',
+                message: trimmed,
+                intentDraft: null
+            });
+        }
+
+        // For 429 / quota errors: don't surface a 500 - try the local parser first,
         // then return a safe CLEAN_EDIT intent so the client can still proceed.
         const isQuotaError = error?.status === 429 ||
                              error?.code === 'insufficient_quota' ||
                              (error?.message || '').includes('quota');
 
         try {
-            const localResult = localParseIntent(req.body.prompt, req.body.context);
+            const localResult = localParseIntent(prompt, req.body.context);
             if (isQuotaError) {
-                console.warn('[CRL] OpenAI quota exceeded — using local parser fallback');
+                console.warn('[CRL] OpenAI quota exceeded - using local parser fallback');
             }
             return res.json(localResult);
         } catch (e) {
             if (isQuotaError) {
                 // Quota error: return a best-effort CLEAN_EDIT so the client isn't stuck
-                console.warn('[CRL] Local parser also failed — returning CLEAN_EDIT fallback for quota error');
+                console.warn('[CRL] Local parser also failed - returning CLEAN_EDIT fallback for quota error');
                 return res.json({
                     intent: 'long_form_build',
                     operation: 'long_form_edit',
                     parameters: {
                         editMode: 'CLEAN_EDIT',
                         actions: ['silence_removal', 'remove_filler_words'],
-                        reason: 'OpenAI quota exceeded — best-effort CLEAN_EDIT fallback',
+                        reason: 'OpenAI quota exceeded - best-effort CLEAN_EDIT fallback',
                     },
                     confidence: 'MEDIUM',
                     missingParameters: [],

@@ -45,6 +45,8 @@ describe('POST /api/ai/chat', () => {
     });
 });
 
+const { getAIClient } = require('../services/AIProvider');
+
 describe('POST /api/ai/parse-intent', () => {
     it('200 with intent object', async () => {
         const res = await request(app)
@@ -56,6 +58,40 @@ describe('POST /api/ai/parse-intent', () => {
     it('400 or 200 when body is empty', async () => {
         const res = await request(app).post('/api/ai/parse-intent').send({});
         expect([200, 400]).toContain(res.status);
+    });
+
+    it('handles direct text response as clarification when model does not call tool', async () => {
+        const openai = getAIClient();
+        openai.chat.completions.create.mockResolvedValueOnce({
+            choices: [{ message: { content: 'Please clarify your duration preference.' } }],
+        });
+
+        const res = await request(app)
+            .post('/api/ai/parse-intent')
+            .send({ prompt: 'make it fit', context: {} });
+
+        expect(res.status).toBe(200);
+        expect(res.body.intent).toBe('clarification_required');
+        expect(res.body.message).toBe('Please clarify your duration preference.');
+    });
+
+    it('recovers failed_generation from Groq tool_use_failed error as clarification', async () => {
+        const openai = getAIClient();
+        const groqError = new Error('Tool choice is required, but model did not call a tool');
+        groqError.status = 400;
+        groqError.error = {
+            code: 'tool_use_failed',
+            failed_generation: 'There appears to be a duration mismatch between the source media and the timeline. I need clarification before proceeding.',
+        };
+        openai.chat.completions.create.mockRejectedValueOnce(groqError);
+
+        const res = await request(app)
+            .post('/api/ai/parse-intent')
+            .send({ prompt: 'u do ur own way', context: {} });
+
+        expect(res.status).toBe(200);
+        expect(res.body.intent).toBe('clarification_required');
+        expect(res.body.message).toBe('There appears to be a duration mismatch between the source media and the timeline. I need clarification before proceeding.');
     });
 });
 
