@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" translate="no">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vibed-logo.svg" />
@@ -24,6 +24,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="description" content="Vibed — AI-powered video editing for creators. Edit faster, vibe harder." />
     <meta name="theme-color" content="#0a0e1a" />
+    <!-- The app ships its own FR/EN translations. Browser auto-translate wraps
+         React-managed text nodes in <font> elements, and the next re-render
+         (e.g. the FR/EN switcher) crashes with removeChild NotFoundError. -->
+    <meta name="google" content="notranslate" />
     <title>Vibed — Vibe Editing</title>
 
     <!-- Consent: src/components/ConsentBanner.jsx (no third-party CMP). -->
