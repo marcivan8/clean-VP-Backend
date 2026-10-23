@@ -84,7 +84,10 @@ const EditingStylePicker = ({ disabled = false }) => {
     const options = [null, ...EDITING_STYLE_IDS];
 
     return (
-        <div ref={rootRef} className="flex items-center gap-1.5">
+        // R105 anchors: the walkthrough's Auto step and the `auto_available`
+        // hint both point here. One element, both systems, so the control can
+        // move without either of them following it by hand.
+        <div ref={rootRef} data-tour="style-picker" data-hint="style-picker" className="flex items-center gap-1.5">
             <div className="relative">
                 <button type="button" disabled={disabled} onClick={() => setOpen(o => !o)}
                     aria-haspopup="listbox" aria-expanded={open}

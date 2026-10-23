@@ -73,6 +73,8 @@ import { sfxQueryFromText } from './sfxCues.js'; // R92 round A
 import { stickerQueryFromText } from './stickerQuery.js'; // R97
 import { zoneFromText } from './zoneQuery.js'; // R99
 import { platformsFromText, shortCountFromText, autoShortCount, getPlatformProfile } from './PlatformProfiles.js'; // R92 round B
+// R106 — the one-minute floor for anything presented as a "short".
+import { MIN_SHORT_SECONDS } from './shortLength.js';
 
 export class EditPlanner {
 
@@ -257,14 +259,22 @@ export class EditPlanner {
                 const styleMax = activeStyle?.maxDuration;
                 // R92 round B: "a short for TikTok" → the middle of TikTok's sweet spot.
                 const named = getPlatformProfile(platformsFromText(intent.originalPrompt)[0]);
-                const platformTarget = named ? Math.round((named.length.ideal[0] + named.length.ideal[1]) / 2) : null;
-                const target = m ? Math.min(180, Math.max(10, Number(m[1]))) : (platformTarget || styleTarget || 60);
-                // An explicit number in the request ("a 30 second short") is
-                // an exact ask and overrides the style's cap; otherwise the
-                // style's cap (when it has one) is the hard ceiling.
-                const max = m ? target : (styleMax || target);
+                // R106 — a short runs a minute at minimum, so the platform's
+                // attention-span midpoint (TikTok's was 27 s) is no longer the
+                // target. `shortForm.min` is the floor the Shorts panel uses;
+                // this path trims the main edit but produces the same kind of
+                // artefact, and leaving it at 27 s while the panel makes 90 s
+                // would be two answers to one question.
+                const platformTarget = named ? (named.shortForm?.min || MIN_SHORT_SECONDS) : null;
+                // An explicit number in the request ("a 30 second short") is an
+                // exact ask and wins over the floor as well as over the style's
+                // cap. A minimum the user cannot override is not a default.
+                const target = m
+                    ? Math.min(180, Math.max(10, Number(m[1])))
+                    : Math.max(MIN_SHORT_SECONDS, platformTarget || styleTarget || MIN_SHORT_SECONDS);
+                const max = m ? target : Math.max(target, styleMax || target);
                 return this.buildPlan(planId, 'extract_short', [
-                    { step_id: 'step_1', action: 'extract_short', args: { target, max }, reason: max > target ? `Keep the strongest moment, up to ${max} s` : `Keep the strongest ${target} s as a short` },
+                    { step_id: 'step_1', action: 'extract_short', args: { target, max, explicit: Boolean(m) }, reason: max > target ? `Keep the strongest moment, up to ${max} s` : `Keep the strongest ${target} s as a short` },
                 ]);
             }
             case 'remove_background': {

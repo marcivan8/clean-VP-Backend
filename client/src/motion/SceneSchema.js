@@ -169,6 +169,25 @@ export function createNode(type, overrides = {}) {
         /** Per-word timings for a caption node. See CaptionModel.js. */
         words: Array.isArray(overrides.words) ? overrides.words : null,
 
+        /**
+         * R107 — a text node whose content cycles through alternatives
+         * ("Made for Reels / Shorts / TikTok").
+         *
+         *   alternatives  the words, in order. Two or more makes it a cycle.
+         *   slotWidth     reference px reserved for the slot, measured from
+         *                 the WIDEST alternative. Without it the slot is
+         *                 sized by whichever word is in it and everything
+         *                 beside it jumps on every swap, which is why
+         *                 SceneValidator auto-fixes a missing value rather
+         *                 than only reporting it (TextCraft.swapSlotWidth).
+         *   dwell         seconds per word. 0 shares the duration evenly.
+         */
+        alternatives: Array.isArray(overrides.alternatives)
+            ? overrides.alternatives.map(w => String(w == null ? '' : w)).filter(w => w.trim().length > 0)
+            : null,
+        slotWidth: num(overrides.slotWidth, 0) > 0 ? num(overrides.slotWidth, 0) : null,
+        dwell: num(overrides.dwell, 0) > 0 ? num(overrides.dwell, 0) : null,
+
         /** Shape nodes: `{ kind, params }` for TemplateGraphics.drawTemplate or vector definition. */
         vector: overrides.vector && typeof overrides.vector === 'object' ? { ...overrides.vector } : null,
         template: overrides.template && overrides.template.kind

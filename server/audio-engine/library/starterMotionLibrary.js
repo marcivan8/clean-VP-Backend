@@ -872,6 +872,57 @@ const MOTION_TECHNIQUES = [
         tones: ['viral', 'technology'],
         note: 'The only emphasis verb here that does not move anything, which makes it the safe choice when the text sits tight against a safe-zone edge or another layer and has nowhere to travel.',
     },
+    // ── R107: text craft ──────────────────────────────────────────────────────
+    //
+    // Two techniques whose point is a measurement, not a verb. The verbs they
+    // use were already here; what was missing is the rule that makes each one
+    // look made rather than generated, which is why the note carries a number.
+    {
+        name: 'list-word-cycle',
+        displayName: 'Cycling word slot',
+        description: 'One line whose middle word changes: "Made for Reels / Shorts / TikTok".',
+        type: A,
+        editingIntents: [EditingIntent.TEXT_ANIMATION, EditingIntent.REVEAL, EditingIntent.MINIMAL],
+        emotionTags: [EmotionTag.MODERN, EmotionTag.CONFIDENT, EmotionTag.PLAYFUL],
+        energyLevel: 3,
+        style: ['creator', 'brand', 'saas'],
+        searchKeywords: ['cycle', 'rotate', 'alternate', 'list', 'words', 'swap', 'carousel', 'audience', 'platforms', 'use cases'],
+        bestUseCases: ['naming several audiences or platforms in one line', 'a feature list with no room for a list', 'the beat after a hook, before the proof'],
+        category: 'title',
+        subCategory: 'list',
+        compatibleTimelineEvents: [TimelineEventType.TEXT_APPEARS],
+        motion: { enter: 'rise-in', emphasis: null, exit: 'fade-out', energy: 0.45 },
+        mood: 'bold',
+        component: 'KineticTitle',
+        preset: 'creator',
+        stagger: 0,
+        beatKinds: ['point', 'intro', 'cta'],
+        tones: ['technology', 'viral', 'editorial'],
+        note: 'The slot must be as wide as the LONGEST word, never the current one, or the words beside it jump on every swap. Overlap the outgoing and incoming word for about 0.22s - replacing the text in place leaves no frame in which the change is visible. Give every word at least 0.45s and drop words rather than speed the cycle up.',
+    },
+    {
+        name: 'type-on-caret',
+        displayName: 'Type-on with a caret',
+        description: 'A line arrives a character at a time behind a caret that keeps breathing after it lands.',
+        type: A,
+        editingIntents: [EditingIntent.TEXT_ANIMATION, EditingIntent.TECHNOLOGY, EditingIntent.REVEAL],
+        emotionTags: [EmotionTag.MODERN, EmotionTag.SERIOUS, EmotionTag.TENSE],
+        energyLevel: 2,
+        style: ['technology', 'creator', 'explainer'],
+        searchKeywords: ['typewriter', 'typing', 'caret', 'cursor', 'terminal', 'code', 'prompt', 'reveal'],
+        bestUseCases: ['a command, prompt or search query', 'a claim the viewer should read as it forms', 'anything where the typing IS the subject'],
+        category: 'title',
+        subCategory: 'reveal',
+        compatibleTimelineEvents: [TimelineEventType.TEXT_APPEARS],
+        motion: { enter: 'typewriter', emphasis: null, exit: 'fade-out', energy: 0.35 },
+        mood: 'techy',
+        component: 'KineticTitle',
+        preset: 'futurist',
+        stagger: 0,
+        beatKinds: ['point', 'intro', 'quote'],
+        tones: ['technology', 'editorial'],
+        note: 'Hold the caret solid while the line is still arriving and let it breathe over about 0.53s once it lands, down to roughly 0.12 alpha rather than to nothing - a caret that switches off between two frames reads as a dropped frame, and its return is what tells the viewer the typing is finished. The line must finish typing at least 0.6s before the layer starts to leave, or the sentence animates and is never read.',
+    },
 ];
 
 module.exports = { MOTION_TECHNIQUES };

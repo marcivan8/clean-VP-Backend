@@ -73,10 +73,15 @@ await check('loose names and requests are understood', () => {
     assert.deepEqual(P.assignPlatforms(2, ['reels']), ['reels', 'reels']);
 });
 await check('notes say whether a short fits its platform', () => {
+    // R106 — judged against `shortForm` (60 s to the platform ceiling), not
+    // the old attention-span range. These notes render in the Shorts panel on
+    // windows the picker chose, so measuring an 80 s short against a 60 s
+    // ceiling labelled the panel's own output a mistake.
     const tt = P.PLATFORM_PROFILES.tiktok;
-    assert.equal(P.profileNotes({ start: 0, end: 28 }, tt)[0].level, 'ok');
-    assert.equal(P.profileNotes({ start: 0, end: 80 }, tt)[0].code, 'too_long');
-    assert.ok(P.profileNotes({ start: 0, end: 28 }, tt, { hasCaptions: false }).some(n => n.code === 'captions'));
+    assert.equal(P.profileNotes({ start: 0, end: 90 }, tt)[0].level, 'ok', 'a 90 s TikTok short is now in range');
+    assert.equal(P.profileNotes({ start: 0, end: 28 }, tt)[0].code, 'too_short', 'under a minute is now the flagged case');
+    assert.equal(P.profileNotes({ start: 0, end: 200 }, tt)[0].code, 'too_long', 'past the ceiling is still flagged');
+    assert.ok(P.profileNotes({ start: 0, end: 90 }, tt, { hasCaptions: false }).some(n => n.code === 'captions'));
 });
 
 // ── 2. Several shorts ────────────────────────────────────────────────────────
@@ -198,7 +203,10 @@ await check('"make a short for tiktok" keeps one short sized for TikTok', async 
     loadTracks(LONG, { captions: WORDS });
     const r = await plan('make a short for tiktok');
     assert.equal(r.op, 'extract_short');
-    assert.equal(r.steps[0].args.target, 28);
+    // R106 — was 28, the midpoint of TikTok's 21-34 s attention-span range.
+    // A named platform no longer sets the length; the one-minute floor does,
+    // and the content decides how far past it to go.
+    assert.equal(r.steps[0].args.target, 60, 'a named platform no longer shrinks a short below a minute');
 });
 const engine = new MediaExecutionEngine();
 await check('the command saves one short per platform and leaves the edit alone', async () => {

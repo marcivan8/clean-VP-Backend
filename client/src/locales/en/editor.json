@@ -575,25 +575,32 @@
     "stillWorks": "Manual editing and video export keep working."
   },
   "onboardingTour": {
-    "media": {
-      "title": "Import your footage",
-      "body": "Drag video, audio, or images in here — or click to upload. Every project starts with media."
+    "import": {
+      "title": "Start with your footage",
+      "body": "Drag in video, audio or images. Long takes are fine; the mess gets cleaned up later."
     },
-    "assistant": {
-      "title": "Ask the AI to edit for you",
-      "body": "Type things like “add captions” or “remove the pauses” — the assistant edits your timeline directly."
+    "say": {
+      "title": "Say what you want, in plain words",
+      "body": "“Remove the pauses.” “Add captions.” “Zoom on the punchline.” The assistant edits the timeline directly, and one undo reverts anything."
     },
-    "timeline": {
-      "title": "Your timeline",
-      "body": "Clips land here once imported. Trim, split, and reorder them freely."
+    "auto": {
+      "title": "Or let it do the whole edit",
+      "body": "Pick the kind of video you are making, switch to Auto, and Vibed runs the full pass: cuts, captions, motion design, sound and a finish for the platform.",
+      "locked": "Pick the kind of video you are making, switch to Auto, and Vibed runs the full pass: cuts, captions, motion design, sound and a finish for the platform. Auto and editing styles come with Creator."
+    },
+    "shorts": {
+      "title": "Get a week of posts out of one take",
+      "body": "Shorts finds the moments that stand on their own and cuts each into its own vertical version, finished for TikTok, Reels or Shorts.",
+      "locked": "Shorts finds the moments that stand on their own and cuts each into its own vertical version, finished for TikTok, Reels or Shorts. Available on Creator."
     },
     "export": {
-      "title": "Export when you're ready",
-      "body": "One click renders your final video."
+      "title": "Export, or take it with you",
+      "body": "Render an MP4, or hand the timeline to Premiere, Final Cut or Resolve with your bins and names intact."
     },
     "next": "Next",
-    "done": "Done",
-    "skip": "Skip tour",
+    "done": "Start editing",
+    "skip": "Skip",
+    "creatorBadge": "Creator",
     "stepCount": "{{current}} / {{total}}"
   },
   "mobileUpload": {
@@ -1064,5 +1071,38 @@
     "editFailed": "That change could not be applied.",
     "placeholders": "{{count}} to fill in",
     "footnote": "Changes apply straight away and each one is a single undo. Dragging the same layer on the player keeps this in step."
+  },
+  "hints": {
+    "dismiss": "Dismiss",
+    "first_upload": {
+      "title": "Now just ask",
+      "body": "Type what you want changed. “Cut the silences” is a good first thing to try."
+    },
+    "first_clip": {
+      "title": "Your timeline",
+      "body": "Drag to move, drag an edge to trim. Every AI edit lands here too, and one undo takes it back."
+    },
+    "first_ai_edit": {
+      "title": "Not what you meant?",
+      "body": "One undo reverts the whole edit, however many clips it touched. Say it differently and run it again."
+    },
+    "first_captions": {
+      "title": "Captions are editable text",
+      "body": "Fix a word here and the burned-in caption changes with it. No re-render needed to correct a name."
+    },
+    "auto_available": {
+      "title": "Stop editing by hand",
+      "body": "Pick a style, switch to Auto, and the whole pass runs: cuts, captions, motion design and sound.",
+      "locked": "Pick a style and switch to Auto to run the whole pass at once: cuts, captions, motion design and sound. Comes with Creator."
+    },
+    "shorts_ready": {
+      "title": "This one could be several posts",
+      "body": "Shorts pulls the strongest moments out of a long take and finishes each one vertically.",
+      "locked": "Shorts pulls the strongest moments out of a long take and finishes each one vertically. Available on Creator."
+    },
+    "before_export": {
+      "title": "Before you export",
+      "body": "Pro Finish adds the hook title, caption emphasis and sound design in one pass. Worth a click first."
+    }
   }
 }

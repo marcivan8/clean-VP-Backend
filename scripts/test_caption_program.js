@@ -54,7 +54,9 @@ const {
 // Build programs with the REAL client CaptionCompiler + its motion-engine
 // dependencies, so this exercises the true client→worker path.
 function loadClientModules() {
-    const order = ['Easing', 'MotionSchema', 'MotionResolver', 'MotionPresets', 'CaptionModel', 'ClipAdapter', 'Compositor', 'CaptionCompiler'];
+    // TextCraft before CaptionCompiler: the compiler imports its highlight-ramp
+    // rules, and this loader resolves imports by concatenation order.
+    const order = ['Easing', 'MotionSchema', 'MotionResolver', 'MotionPresets', 'TextCraft', 'CaptionModel', 'ClipAdapter', 'Compositor', 'CaptionCompiler'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);
@@ -422,8 +424,11 @@ section('11 · Wired into the export job, guarded and fail-open');
         /CAPTION_PROGRAM_DISABLED/.test(src));
     check('the program is validated before execution',
         /validateCaptionProgramShape\(rawCaptionProgram\)/.test(src));
+    // The guard gained a second clause (the sandwich layer) after this check
+    // was written, which made it fail on a correct line. What it is really
+    // pinning is that the static loop skips what the program already drew.
     check('covered clips are SKIPPED by the static per-clip loop, never rendered twice',
-        /programClipIds\.has\(clip\.id\)\) continue/.test(src));
+        /if \(programClipIds\.has\(clip\.id\)[^)]*\)?[^;]*\) continue/.test(src));
     check('it FAILS OPEN — a program error does not fail the export',
         /catch \(progErr\)/.test(src) && /falling back to static captions/.test(src));
     check('on failure, programClipIds is cleared so EVERY caption uses the static path',

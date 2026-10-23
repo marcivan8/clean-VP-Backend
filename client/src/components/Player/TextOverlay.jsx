@@ -12,6 +12,8 @@ import useTimelineStore from '../../store/useTimelineStore';
 import { clipToMotionLayer } from '../../motion/ClipAdapter.js';
 import { resolveMotionAt }   from '../../motion/MotionResolver.js';
 import { revealedWordCount, activeWordIndex, resolveEmphasis } from '../../motion/CaptionModel.js';
+import { highlightMixAt } from '../../motion/TextCraft.js';
+import { mixColor, withAlpha } from '../../motion/ColorTheory.js';
 // R66 — clip grouping. See the identical import in GraphicOverlay.jsx: a
 // LowerThird's title (this component) and its background bar (GraphicOverlay,
 // a different track) share a `groupId`; dragging either one must move both.
@@ -106,8 +108,10 @@ const FONT_MAP = {
  * @param {number} time      current timeline time
  * @param {number} reveal    0..1 from a reveal animation (typewriter / word-reveal)
  * @param {object} highlight the style pack's wordHighlight config, or null
+ * @param {string} baseColor the caption's own colour, which the highlight
+ *                 blends FROM (R107 — see `highlightMixAt`)
  */
-const CaptionWords = ({ content, words, time, reveal, highlight, emphasis }) => {
+const CaptionWords = ({ content, words, time, reveal, highlight, emphasis, baseColor }) => {
     const tokens = (content || '').split(' ').filter(Boolean);
     if (tokens.length === 0) return null;
 
@@ -129,6 +133,18 @@ const CaptionWords = ({ content, words, time, reveal, highlight, emphasis }) => 
     // active-word highlight, when it lands on the same word, wins on colour.
     const emphasised = new Set(emphasis?.indices || []);
     const emStyle = emphasis?.style || null;
+
+    // R107 — the active-word highlight BLENDS in over a few frames instead of
+    // switching colour, box and scale on one. The mix is quantised
+    // (TextCraft.HIGHLIGHT_MIX_STEPS) so the export's pre-rendered word states
+    // can carry the same value and the two paths agree by construction.
+    // Without word timings there is no moment the highlight arrives, so there
+    // is nothing to ramp: it is simply on.
+    const activeWord = hasWords && activeIdx >= 0 ? words[activeIdx] : null;
+    const hlMix = activeWord
+        ? highlightMixAt(time, Number(activeWord.start), Number(activeWord.end) - Number(activeWord.start))
+        : 1;
+    const fromColor = baseColor || '#ffffff';
 
     return (
         <span>
@@ -157,33 +173,41 @@ const CaptionWords = ({ content, words, time, reveal, highlight, emphasis }) => 
                 }
 
                 if (isActive) {
+                    // Each of these is the end state multiplied by the ramp:
+                    // a colour blended from the word's own, a box faded up
+                    // from nothing (there is no colour to blend a background
+                    // from), and a scale that grows from 1.
+                    const blend = (c) => mixColor(style.color || fromColor, c, hlMix);
+                    const box = (c) => withAlpha(c, hlMix) || c;
+                    const grow = (to) => Math.max(scale, 1 + (Number(to) - 1) * hlMix);
                     if (highlight.scale && highlight.scale !== 1) {
-                        scale = Math.max(scale, highlight.scale);
+                        scale = grow(highlight.scale);
                     }
                     if (mode === 'color' && highlight.color) {
-                        style.color = highlight.color;
+                        style.color = blend(highlight.color);
                     } else if (mode === 'box') {
-                        if (highlight.background) style.background = highlight.background;
-                        if (highlight.color) style.color = highlight.color;
+                        if (highlight.background) style.background = box(highlight.background);
+                        if (highlight.color) style.color = blend(highlight.color);
                         style.padding = '0 0.12em';
                         style.borderRadius = '0.08em';
                     } else if (mode === 'vox-marker') {
-                        style.background = highlight.background || '#FFE500';
-                        style.color = highlight.color || '#111827';
+                        style.background = box(highlight.background || '#FFE500');
+                        style.color = blend(highlight.color || '#111827');
                         style.padding = '0.04em 0.2em';
                         style.borderRadius = '0.12em';
-                        style.boxShadow = '0 2px 8px rgba(255,229,0,0.4)';
+                        style.boxShadow = `0 2px 8px ${withAlpha('#FFE500', 0.4 * hlMix) || 'rgba(255,229,0,0.4)'}`;
                     } else if (mode === 'bounce-box') {
-                        style.background = (i % 2 === 0 ? highlight.background : highlight.altBackground) || highlight.background || '#FFE500';
-                        style.color = highlight.color || '#000000';
+                        style.background = box((i % 2 === 0 ? highlight.background : highlight.altBackground) || highlight.background || '#FFE500');
+                        style.color = blend(highlight.color || '#000000');
                         style.padding = '0.06em 0.22em';
                         style.borderRadius = '0.15em';
-                        style.transform = `scale(${Math.max(scale, 1.15)}) rotate(${i % 2 === 0 ? '-2deg' : '2deg'})`;
+                        style.transform = `scale(${grow(highlight.scale || 1.15)}) rotate(${i % 2 === 0 ? '-2deg' : '2deg'})`;
                     } else if (mode === 'terminal-cursor') {
-                        style.color = highlight.color || '#34D399';
+                        style.color = blend(highlight.color || '#34D399');
                     } else if (mode === 'neon-glow') {
-                        style.color = highlight.color || '#00E5FF';
-                        style.textShadow = `0 0 12px ${highlight.glowColor || '#00E5FF'}, 0 0 24px ${highlight.glowColor || '#00E5FF'}`;
+                        style.color = blend(highlight.color || '#00E5FF');
+                        const glow = highlight.glowColor || '#00E5FF';
+                        style.textShadow = `0 0 ${12 * hlMix}px ${glow}, 0 0 ${24 * hlMix}px ${glow}`;
                     } else if (mode === 'opacity') {
                         // Everything else dims instead of the active word brightening.
                         style.opacity = 1;
@@ -587,6 +611,7 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
                     >
                         {needsWordRender
                             ? <CaptionWords
+                                  baseColor={clip.color || '#ffffff'}
                                   content={content}
                                   words={clip.words}
                                   time={currentTime}

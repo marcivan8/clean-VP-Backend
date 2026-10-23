@@ -60,6 +60,10 @@ import { resolveRetakeSource, retakeReviewLines, makeRetakeT, findTranscript } f
 import { clipSourceWords, buildRhythmRequest, shotsToKeyframes } from './rhythmShots.js';
 import { findBestShortWindow, findShortCandidates, findShortCandidatesFallback, rangesOutside } from './shortPicker.js';
 import { PLATFORM_PROFILES, MAX_SHORT_COUNT, assignPlatforms, platformsFromText } from './PlatformProfiles.js'; // R92 round B
+// R106 — a short's length comes from the content (speech density, payoffs,
+// source length, editing style) above a one-minute floor, not from a
+// per-platform constant. See agent/shortLength.js.
+import { planShortLength, fitShortCount, MIN_SHORT_SECONDS } from './shortLength.js';
 import { polishShort } from './shortPolish.js'; // R92 round C
 import { packSegments } from './segmentPacking.js';
 
@@ -1270,9 +1274,15 @@ export class MediaExecutionEngine {
                 if (words.length === 0) {
                     return { action, success: false, message: 'Picking the best moment needs a transcript. Run "add captions" first.' };
                 }
-                const target = Math.min(180, Math.max(10, Number(args.target) || 60));
+                // R106 — a short runs a minute at minimum unless the user named
+                // a length themselves ("a 30 second short"), which `explicit`
+                // carries down from the planner. A floor nobody can override
+                // is not a default, it is a cage.
+                const explicitLen = args.explicit === true;
+                const floor = explicitLen ? 10 : MIN_SHORT_SECONDS;
+                const target = Math.min(180, Math.max(floor, Number(args.target) || MIN_SHORT_SECONDS));
                 const cap = Number.isFinite(Number(args.max)) && Number(args.max) > 0
-                    ? Math.min(180, Math.max(10, Number(args.max)))
+                    ? Math.min(180, Math.max(floor, Number(args.max)))
                     : target;
                 const tracks = st.tracks || [];
                 const total = tracks.reduce((m, t) => Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
@@ -1723,20 +1733,39 @@ export class MediaExecutionEngine {
                 // R101: ceiling raised from 5 to MAX_SHORT_COUNT -- EditPlanner's
                 // autoShortCount() can now legitimately ask for more than 5 on a long
                 // upload, and a direct count request should not be silently clipped.
-                const count = Math.max(1, Math.min(MAX_SHORT_COUNT, Number(args.count) || 3));
-                const platforms = assignPlatforms(count, Array.isArray(args.platforms) ? args.platforms : []);
+                const requested = Math.max(1, Math.min(MAX_SHORT_COUNT, Number(args.count) || 3));
                 const total = (st.tracks || []).reduce((m, t) => Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
                 if (total < 10) {
                     return { action, success: false, message: `The video is ${Math.round(total)} s long, too short to cut shorts out of.` };
                 }
 
-                const slots = platforms.map(id => {
-                    const p = PLATFORM_PROFILES[id];
-                    const [lo, hi] = p.length.ideal;
-                    return { platform: id, min: Math.max(p.length.min, lo * 0.75), max: Math.min(p.length.max, hi * 1.3), target: (lo + hi) / 2 };
-                });
-
+                // R106 — shorts run a minute at minimum. That changes how many
+                // fit: three non-overlapping minutes need better than three
+                // minutes of source. Asking for more than the material holds
+                // used to come back as "2 more could not fit without
+                // overlapping", which reads like a failure rather than
+                // arithmetic. Cut the count to what fits and say so once.
                 const events = await this._fetchSemanticEvents();
+                const editingStyle = st.editingStyle || null;
+
+                // Length is decided from what is actually in the video: how
+                // densely it is spoken, how many payoffs it has, how much
+                // source there is, and the editing style in play. See
+                // agent/shortLength.js for the weighting.
+                //
+                // Planned FIRST, because the count depends on it: three
+                // two-minute shorts need six minutes of source, and promising
+                // three from four minutes would have the picker silently drop
+                // two of them.
+                const sizing = planShortLength({ platform: platformsFromText(String(args.brief || ''))[0] || 'tiktok', totalDuration: total, words, events, style: editingStyle });
+                const count = fitShortCount(total, requested, sizing.target);
+                const platforms = assignPlatforms(count, Array.isArray(args.platforms) ? args.platforms : []);
+
+                const plans = platforms.map(id => ({
+                    id,
+                    plan: planShortLength({ platform: id, totalDuration: total, words, events, style: editingStyle }),
+                }));
+                const slots = plans.map(({ id, plan }) => ({ platform: id, min: plan.min, max: plan.max, target: plan.target }));
                 let found = words.length > 0 ? findShortCandidates(words, { events, slots }) : [];
 
                 let fallbackUsed = false;
@@ -1770,12 +1799,22 @@ export class MediaExecutionEngine {
                 const lines = shorts.map(s => `${PLATFORM_PROFILES[s.platform].label}: ${Math.round(s.end - s.start)} s from ${s.start.toFixed(0)} s, "${s.title.slice(0, 50)}"`);
                 const missing = count - shorts.length;
                 const missText = missing > 0 ? ` ${missing} more could not fit without overlapping.` : '';
+                // Why these lengths, in the user's words. Without this the new
+                // minute-plus shorts look arbitrary next to the old 30 s ones.
+                const trimmed = requested > count
+                    ? ` ${requested} were asked for, but at about ${sizing.target} s each only ${count} fit in ${Math.round(total)} s of video without overlapping.`
+                    : '';
+                const why = plans[0]?.plan?.floored
+                    ? ` They are under a minute: ${plans[0].plan.reasons[0]}.`
+                    : (plans[0]?.plan?.reasons?.length
+                        ? ` Lengths follow the content: ${plans[0].plan.reasons.slice(0, 2).join(', and ')}.`
+                        : '');
                 const transcriptNote = fallbackUsed
                     ? (words.length ? ' (no full sentences fitted, so they follow the cuts)' : ' (there is no transcript yet, so they follow the cuts, not what is said; add captions and ask again for picks by content)')
                     : '';
                 return {
                     action, success: true,
-                    message: `Found ${shorts.length} short(s)${transcriptNote}: ${lines.join('; ')}.${missText} In the Shorts tab each one exports finished: AI hook title with motion, platform captions, camera punch-ins, number pops, transitions and sound effects. Your main edit is unchanged.`,
+                    message: `Found ${shorts.length} short(s)${transcriptNote}: ${lines.join('; ')}.${trimmed}${why}${missText} In the Shorts tab each one exports finished: AI hook title with motion, platform captions, camera punch-ins, number pops, transitions and sound effects. Your main edit is unchanged.`,
                     details: { count: shorts.length, platforms: shorts.map(s => s.platform) },
                 };
             }

@@ -23,10 +23,12 @@
  * in Anton at 100px measures 516px (PIL, Skia) but 757px through `canvas`.
  *
  * ─── STATES ────────────────────────────────────────────────────────────────
- * `raster.wordStates` is a list of runs { from, to, shown, active } in OUTPUT
+ * `raster.wordStates` is a list of runs { from, to, shown, active, mix } in OUTPUT
  * time, computed client-side with the preview's own functions. Each distinct
  * (shown, active) pair is one PNG; an ffconcat list plays them back with the
  * right durations. A caption with no states (rotation only) is one image.
+ * R107 added `mix`: the quantised strength of the active-word highlight, so a
+ * highlight that blends in costs one image per step rather than per frame.
  *
  * ─── SAME CANVAS SIZE FOR EVERY STATE ──────────────────────────────────────
  * All images of one caption share one size and one anchor (the box centre at
@@ -126,8 +128,55 @@ function parseAllTextShadows(value) {
 // ─── Layout ────────────────────────────────────────────────────────────────
 
 /**
+ * R107 — blend two colours, `p` of the way from `a` to `b`, in sRGB.
+ *
+ * A deliberate mirror of `ColorTheory.mixColor` / `withAlpha`: those are ESM
+ * in client/src/motion and this file is CommonJS, so it cannot require them.
+ * `scripts/test_text_craft.mjs` asserts the two agree on a table of inputs,
+ * the same way `wordLook` below mirrors CaptionWords.
+ */
+function parseRgb(value) {
+    const s = String(value || '').trim();
+    let m = /^#([0-9a-f]{3})$/i.exec(s);
+    if (m) return [0, 1, 2].map(i => parseInt(m[1][i] + m[1][i], 16));
+    m = /^#([0-9a-f]{6})$/i.exec(s);
+    if (m) return [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16));
+    m = /^rgba?\(([^)]+)\)$/i.exec(s);
+    if (m) {
+        const parts = m[1].split(',').map(x => parseFloat(x));
+        if (parts.length >= 3 && parts.every(x => Number.isFinite(x))) return parts.slice(0, 3);
+    }
+    return null;
+}
+
+function mixColor(a, b, p) {
+    const t = Math.min(1, Math.max(0, Number(p)));
+    const ca = parseRgb(a);
+    const cb = parseRgb(b);
+    if (!ca) return b;
+    if (!cb) return a;
+    if (t <= 0) return a;
+    if (t >= 1) return b;
+    const hex = (v) => Math.round(Math.min(255, Math.max(0, v))).toString(16).padStart(2, '0');
+    return `#${hex(ca[0] + (cb[0] - ca[0]) * t)}${hex(ca[1] + (cb[1] - ca[1]) * t)}${hex(ca[2] + (cb[2] - ca[2]) * t)}`;
+}
+
+function withAlpha(color, a) {
+    const t = Math.min(1, Math.max(0, Number(a)));
+    const c = parseRgb(color);
+    if (!c) return null;
+    return `rgba(${Math.round(c[0])}, ${Math.round(c[1])}, ${Math.round(c[2])}, ${Number(t.toFixed(3))})`;
+}
+
+/**
  * Style of word `i` in a given state. Mirrors CaptionWords (TextOverlay.jsx):
  * emphasis first, then the active-word highlight on top.
+ *
+ * R107 — `state.mix` is the quantised strength of the active-word highlight,
+ * computed client-side by CaptionCompiler with the preview's own function, so
+ * the blend here reproduces the preview rather than approximating it. An older
+ * program with no `mix` on its states is read as a fully-on highlight, which
+ * is exactly what it used to render.
  */
 function wordLook(i, state, raster, baseColor) {
     const look = { color: baseColor, background: null, scale: 1, opacity: 1, boxed: false };
@@ -145,25 +194,29 @@ function wordLook(i, state, raster, baseColor) {
     const hl = raster.highlight;
     const mode = hl?.mode || 'none';
     if (mode !== 'none' && i === state.active) {
-        if (hl.scale && hl.scale !== 1) look.scale = Math.max(look.scale, hl.scale);
-        if (mode === 'color' && hl.color) look.color = hl.color;
+        const mix = Number.isFinite(Number(state.mix)) ? Math.min(1, Math.max(0, Number(state.mix))) : 1;
+        const blend = (c) => mixColor(look.color, c, mix);
+        const box = (c) => withAlpha(c, mix) || c;
+        const grow = (to) => Math.max(look.scale, 1 + (Number(to) - 1) * mix);
+        if (hl.scale && hl.scale !== 1) look.scale = grow(hl.scale);
+        if (mode === 'color' && hl.color) look.color = blend(hl.color);
         else if (mode === 'box') {
-            if (hl.background) look.background = hl.background;
-            if (hl.color) look.color = hl.color;
+            if (hl.background) look.background = box(hl.background);
+            if (hl.color) look.color = blend(hl.color);
             look.boxed = true;
         } else if (mode === 'vox-marker') {
-            look.background = hl.background || '#FFE500';
-            look.color = hl.color || '#111827';
+            look.background = box(hl.background || '#FFE500');
+            look.color = blend(hl.color || '#111827');
             look.boxed = true;
         } else if (mode === 'bounce-box') {
-            look.background = (i % 2 === 0 ? hl.background : hl.altBackground) || hl.background || '#FFE500';
-            look.color = hl.color || '#000000';
+            look.background = box((i % 2 === 0 ? hl.background : hl.altBackground) || hl.background || '#FFE500');
+            look.color = blend(hl.color || '#000000');
             look.boxed = true;
-            look.scale = Math.max(look.scale, hl.scale || 1.15);
+            look.scale = grow(hl.scale || 1.15);
         } else if (mode === 'terminal-cursor') {
-            look.color = hl.color || '#34D399';
+            look.color = blend(hl.color || '#34D399');
         } else if (mode === 'neon-glow') {
-            look.color = hl.color || '#00E5FF';
+            look.color = blend(hl.color || '#00E5FF');
         } else if (mode === 'opacity') look.opacity = 1;
     } else if (visible && mode === 'opacity' && state.active >= 0) {
         look.opacity = 0.55;
@@ -446,12 +499,16 @@ function prepareRasterCaptions(entries, opts) {
 
             const states = Array.isArray(entry.raster.wordStates) && entry.raster.wordStates.length > 0
                 ? entry.raster.wordStates
-                : [{ from: entry.outputStart, to: entry.outputEnd, shown: Number.MAX_SAFE_INTEGER, active: -1 }];
+                : [{ from: entry.outputStart, to: entry.outputEnd, shown: Number.MAX_SAFE_INTEGER, active: -1, mix: 1 }];
 
             // Draw each distinct state once, then pad all to one common size.
+            // R107 — the key includes `mix`: two steps of one highlight ramp
+            // differ ONLY in mix, so leaving it out would collapse them into a
+            // single image and the ramp would never reach the screen.
+            const stateKey = (st) => `${st.shown}|${st.active}|${Number.isFinite(Number(st.mix)) ? Number(st.mix) : 1}`;
             const drawn = new Map();
             for (const st of states) {
-                const key = `${st.shown}|${st.active}`;
+                const key = stateKey(st);
                 if (drawn.has(key)) continue;
                 drawn.set(key, drawState(Canvas, entry, st, {
                     fontAlias: alias, metrics, renderScale, pxScale, boxWidth, padding,
@@ -475,7 +532,7 @@ function prepareRasterCaptions(entries, opts) {
             // ffconcat timeline, relative to the caption's own start.
             const t0 = Number(entry.outputStart) || 0;
             const runs = states
-                .map(st => ({ file: files.get(`${st.shown}|${st.active}`), from: Math.max(t0, Number(st.from)), to: Math.min(Number(entry.outputEnd), Number(st.to)) }))
+                .map(st => ({ file: files.get(stateKey(st)), from: Math.max(t0, Number(st.from)), to: Math.min(Number(entry.outputEnd), Number(st.to)) }))
                 .filter(r => r.file && r.to > r.from);
             if (runs.length === 0) { out.skipped.push({ clipId: entry.clipId, reason: 'empty time window' }); return; }
 
@@ -613,4 +670,6 @@ module.exports = {
     parseAllTextShadows,
     layoutLines,
     wordLook,
+    mixColor,
+    withAlpha,
 };

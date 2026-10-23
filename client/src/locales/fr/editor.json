@@ -575,25 +575,32 @@
     "stillWorks": "Le montage manuel et l'export vidéo continuent de fonctionner."
   },
   "onboardingTour": {
-    "media": {
-      "title": "Importez vos rushes",
-      "body": "Glissez vidéo, audio ou images ici — ou cliquez pour importer. Chaque projet commence par les médias."
+    "import": {
+      "title": "Commencez par vos rushes",
+      "body": "Glissez vidéo, audio ou images. Les prises longues ne posent pas de problème, le ménage vient après."
     },
-    "assistant": {
-      "title": "Demandez à l'IA de monter pour vous",
-      "body": "Tapez par exemple « ajoute des sous-titres » ou « supprime les silences » — l'assistant modifie directement votre montage."
+    "say": {
+      "title": "Dites ce que vous voulez, simplement",
+      "body": "« Enlève les blancs. » « Ajoute les sous-titres. » L'assistant modifie directement la timeline, et une annulation suffit pour revenir en arrière."
     },
-    "timeline": {
-      "title": "Votre montage",
-      "body": "Les clips arrivent ici une fois importés. Coupez, découpez et réorganisez-les librement."
+    "auto": {
+      "title": "Ou laissez-le monter à votre place",
+      "body": "Choisissez le type de vidéo, passez en Auto, et Vibed fait tout : coupes, sous-titres, motion design, son et finition pour la plateforme.",
+      "locked": "Choisissez le type de vidéo, passez en Auto, et Vibed fait tout : coupes, sous-titres, motion design, son et finition. Auto et les styles sont inclus avec Creator."
+    },
+    "shorts": {
+      "title": "Une prise, une semaine de posts",
+      "body": "Shorts repère les moments qui tiennent seuls et en fait des verticales finies pour TikTok, Reels ou Shorts.",
+      "locked": "Shorts repère les moments qui tiennent seuls et en fait des verticales finies pour TikTok, Reels ou Shorts. Disponible avec Creator."
     },
     "export": {
-      "title": "Exportez quand vous êtes prêt",
-      "body": "Un clic pour générer votre vidéo finale."
+      "title": "Exportez, ou emportez le montage",
+      "body": "Rendez un MP4, ou passez la timeline à Premiere, Final Cut ou Resolve avec vos chutiers et vos noms."
     },
     "next": "Suivant",
-    "done": "Terminé",
-    "skip": "Passer la visite",
+    "done": "Commencer",
+    "skip": "Passer",
+    "creatorBadge": "Creator",
     "stepCount": "{{current}} / {{total}}"
   },
   "mobileUpload": {
@@ -1064,5 +1071,38 @@
     "editFailed": "Ce changement n’a pas pu être appliqué.",
     "placeholders": "{{count}} à compléter",
     "footnote": "Les changements s’appliquent tout de suite, chacun en une seule annulation. Déplacer le même calque sur le lecteur reste synchronisé."
+  },
+  "hints": {
+    "dismiss": "Fermer",
+    "first_upload": {
+      "title": "Maintenant, demandez",
+      "body": "Écrivez ce que vous voulez changer. « Coupe les silences » est un bon premier essai."
+    },
+    "first_clip": {
+      "title": "Votre timeline",
+      "body": "Glissez pour déplacer, tirez un bord pour rogner. Les montages de l'IA arrivent ici aussi, et une annulation les défait."
+    },
+    "first_ai_edit": {
+      "title": "Pas ce que vous vouliez ?",
+      "body": "Une annulation défait tout le montage, quel que soit le nombre de clips. Reformulez et relancez."
+    },
+    "first_captions": {
+      "title": "Les sous-titres sont du texte",
+      "body": "Corrigez un mot ici et le sous-titre incrusté suit. Pas besoin de refaire un rendu pour un nom mal écrit."
+    },
+    "auto_available": {
+      "title": "Arrêtez de monter à la main",
+      "body": "Choisissez un style, passez en Auto, et tout s'enchaîne : coupes, sous-titres, motion design et son.",
+      "locked": "Choisissez un style et passez en Auto pour tout enchaîner : coupes, sous-titres, motion design et son. Inclus avec Creator."
+    },
+    "shorts_ready": {
+      "title": "Il y a plusieurs posts là-dedans",
+      "body": "Shorts extrait les meilleurs moments d'une longue prise et finit chacun en vertical.",
+      "locked": "Shorts extrait les meilleurs moments d'une longue prise et finit chacun en vertical. Disponible avec Creator."
+    },
+    "before_export": {
+      "title": "Avant d'exporter",
+      "body": "Pro Finish ajoute le titre d'accroche, l'emphase des sous-titres et le sound design d'un coup. À essayer avant."
+    }
   }
 }

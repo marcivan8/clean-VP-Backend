@@ -1264,6 +1264,10 @@ const ReasoningPanel = ({ className }) => {
                     <textarea
                         ref={inputRef}
                         rows={3}
+                        // R105 anchor: the `first_upload` hint lands here, because
+                        // the moment footage exists the next move is to ask for
+                        // something, and that is the move people do not make.
+                        data-hint="assistant-input"
                         disabled={isAnalyzing}
                         onKeyDown={handleKeyDown}
                         onInput={handleInput}

@@ -1,6 +1,13 @@
 /**
- * shortPicker.js (R91): the strongest 15-60 s of a longer talk, for the Reel
+ * shortPicker.js (R91): the strongest passage of a longer talk, for the Reel
  * style ("short social cut and repurposing"). Pure, no imports.
+ *
+ * R106 — the windows it is asked for are now a minute and up, not 15-60 s.
+ * This module did not change: it takes min/max/target per slot and always
+ * did, so the move happened entirely in who decides those numbers
+ * (agent/shortLength.js). Worth knowing when reading the scoring below:
+ * `target` is now content-derived and can be anywhere from 60 s to about
+ * 165 s, so the closeness-to-target term matters more than it used to.
  *
  * Works on timeline-time words (store.captions). A window always starts and
  * ends on a sentence boundary (a pause or end punctuation), so the short

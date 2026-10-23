@@ -278,8 +278,52 @@ export function harmonisePalette(suggested, fallback, opts = {}) {
     return { text, sub, accent, onAccent, notes };
 }
 
+/**
+ * R107 — blend two colours, `p` of the way from `a` to `b`.
+ *
+ * In sRGB, deliberately. A perceptual blend would be more correct for a long
+ * cross-dissolve, but this is used for a two-to-three-frame highlight ramp
+ * where the endpoints are what the eye reads, and both ends are exact.
+ *
+ * Returns `b` when `a` cannot be parsed and `a` when `b` cannot: a blend that
+ * silently returned black would be worse than no blend at all.
+ */
+export function mixColor(a, b, p) {
+    const t = Math.min(1, Math.max(0, Number(p)));
+    const ca = parseColor(a);
+    const cb = parseColor(b);
+    if (!ca) return b;
+    if (!cb) return a;
+    // Identity at the ends: the endpoints come back as the caller wrote them,
+    // not reformatted. A blend that turned '#FFE500' into '#ffe500' at full
+    // strength would be correct and still break every caller comparing the
+    // string it passed in.
+    if (t <= 0) return a;
+    if (t >= 1) return b;
+    return rgbToHex(
+        ca[0] + (cb[0] - ca[0]) * t,
+        ca[1] + (cb[1] - ca[1]) * t,
+        ca[2] + (cb[2] - ca[2]) * t,
+    );
+}
+
+/**
+ * R107 — the same colour at `a` alpha, as an `rgba()` string.
+ *
+ * Used to ramp a highlight's box in rather than switching it on: there is no
+ * colour to blend a background FROM, so the box fades up from nothing.
+ */
+export function withAlpha(color, a) {
+    const t = Math.min(1, Math.max(0, Number(a)));
+    const c = parseColor(color);
+    if (!c) return null;
+    return `rgba(${Math.round(c[0])}, ${Math.round(c[1])}, ${Math.round(c[2])}, ${Number(t.toFixed(3))})`;
+}
+
 export default {
     parseColor,
+    mixColor,
+    withAlpha,
     rgbToHex,
     rgbToHsl,
     hslToHex,

@@ -12,6 +12,8 @@
  * - Zero network, zero React, zero store side effects
  */
 
+import { SWAP_SLOT_PAD, widestIndex } from './TextCraft.js';
+
 // Approximate character width factors per font family classification
 // Used as deterministic fallback when no canvas context is available.
 const FONT_WIDTH_FACTORS = {
@@ -349,9 +351,39 @@ export function computeAccentBounds(text, opts = {}) {
     };
 }
 
+/**
+ * R107 — the width a slot must reserve to hold any of its alternatives.
+ *
+ * Measured from the WIDEST alternative, never the current one: a slot sized by
+ * whichever word is in it makes everything beside it jump on every swap. The
+ * rule and the pad live in TextCraft.js; the measuring lives here.
+ *
+ * @param {string[]} alternatives
+ * @param {object} opts fontSize, fontFamily, fontWeight — as measureSingleLineWidth
+ * @returns {{ width:number, widest:string, widths:number[] }}
+ */
+export function reserveSlotWidth(alternatives, opts = {}) {
+    const words = (Array.isArray(alternatives) ? alternatives : [])
+        .map(w => String(w == null ? '' : w))
+        .filter(w => w.trim().length > 0);
+    if (words.length === 0) return { width: 0, widest: '', widths: [] };
+    const widths = words.map(w => {
+        const n = Number(measureSingleLineWidth(w, opts));
+        return Number.isFinite(n) ? n : 0;
+    });
+    const best = widestIndex(widths);
+    if (best < 0) return { width: 0, widest: '', widths };
+    return {
+        width: widths[best] * (1 + SWAP_SLOT_PAD),
+        widest: words[best],
+        widths,
+    };
+}
+
 export default {
     measureSingleLineWidth,
     measureTextBounds,
     fitTextToBox,
     computeAccentBounds,
+    reserveSlotWidth,
 };

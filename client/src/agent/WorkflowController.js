@@ -5,6 +5,10 @@ import useJobStore, { JOB_STATES, TERMINAL_STATES } from '../store/useJobStore.j
 import { EventBus, EVENT_TYPES } from './EventBus.js';
 import useTimelineStore from '../store/useTimelineStore.js';
 import { trackEvent } from '../utils/trackEvent.js';
+// R105 — first-run hints are fired from wherever the state actually
+// changes, so every entry point (chat, command, Auto playbook) teaches the
+// same lesson once.
+import { triggerHint } from '../components/FirstRunHint.jsx';
 import { countMetric, distributionMetric, nowMs } from '../utils/metrics.js';
 import { getNextAction, getQuickChips } from './SuggestionEngine.js';
 import { runAutopilot, stopAutopilot, isAutopilotRunning } from './StyleAutopilot.js';
@@ -206,6 +210,19 @@ const workflowMachine = createMachine({
                                 // Track every successful AI edit (not chat replies)
                                 if (result.operation && result.operation !== 'chat') {
                                     trackEvent(`ai_edit:${result.operation}`);
+
+                                    // R105 — teach undo the first time an AI edit
+                                    // lands. A user whose first instruction does
+                                    // not do quite what they meant, and who does
+                                    // not know one undo reverts all of it, is a
+                                    // user who closes the tab. Fired here rather
+                                    // than in the UI so it covers every surface
+                                    // that can run an edit.
+                                    triggerHint('first_ai_edit');
+                                    // The style picker and Auto are the step up
+                                    // from one instruction at a time. Offer it
+                                    // once they have seen a single edit work.
+                                    if (result.operation !== 'polish_short') triggerHint('auto_available');
                                 }
 
                                 if (result.operation === 'chat') {

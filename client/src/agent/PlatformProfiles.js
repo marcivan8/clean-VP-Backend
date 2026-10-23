@@ -25,6 +25,14 @@ export const PLATFORM_PROFILES = Object.freeze({
         fps: 30,
         uploadLimitSeconds: 3600,
         length: { min: 12, ideal: [21, 34], max: 60 },
+        // R106 — the editorial range for a REPURPOSED short, which is a
+        // different thing from `length` above. `length` is the attention-span
+        // guidance for a clip someone is cutting by hand; this is the window
+        // the shorts picker is allowed to choose from, and it starts at a
+        // minute because a shorter cut rarely has room to make a point.
+        // Under the 3600 s upload limit by a wide margin; the ceiling leaves
+        // room for the Pro Finish hook title and CTA outro on top.
+        shortForm: { min: 60, max: 165 },
         hookSeconds: 1.5,
         avgShotSeconds: [1.2, 2.5],
         // Fractions of the frame to keep text out of.
@@ -45,6 +53,9 @@ export const PLATFORM_PROFILES = Object.freeze({
         fps: 30,
         uploadLimitSeconds: 180,
         length: { min: 10, ideal: [15, 30], max: 90 },
+        // Upload limit is 180 s; the ceiling stays under it so the finish
+        // has room and a boosted Reel is not rejected on length.
+        shortForm: { min: 60, max: 150 },
         hookSeconds: 2,
         avgShotSeconds: [1.5, 3],
         safeZone: { top: 0.14, bottom: 0.32, left: 0.06, right: 0.14 },
@@ -64,6 +75,9 @@ export const PLATFORM_PROFILES = Object.freeze({
         fps: 60,
         uploadLimitSeconds: 180,
         length: { min: 15, ideal: [30, 50], max: 60 },
+        // Shorts accepts 180 s now, not the old 60 s; `length.max` above is
+        // still the attention-span figure, this is the upload reality.
+        shortForm: { min: 60, max: 165 },
         hookSeconds: 1,
         avgShotSeconds: [1.5, 3.5],
         safeZone: { top: 0.12, bottom: 0.28, left: 0.06, right: 0.14 },
@@ -163,12 +177,15 @@ export function assignPlatforms(count, named = []) {
 export function profileNotes(short, profile, facts = {}) {
     if (!short || !profile) return [];
     const len = Math.max(0, (Number(short.end) || 0) - (Number(short.start) || 0));
-    const [lo, hi] = profile.length.ideal;
+    // R106 — judged against the SHORT-FORM range. These notes are shown in the
+    // Shorts panel, on windows the picker chose, so measuring them against the
+    // hand-editing attention-span range made every repurposed short read as
+    // "too long" the moment the floor moved to a minute.
+    const sf = profile.shortForm || { min: profile.length.min, max: profile.length.max };
     const notes = [];
-    if (len > profile.length.max) notes.push({ level: 'warn', code: 'too_long', text: `${Math.round(len)} s is long for ${profile.label}; ${hi} s or less works best.` });
-    else if (len < profile.length.min) notes.push({ level: 'warn', code: 'too_short', text: `${Math.round(len)} s is short for ${profile.label}; aim for ${lo} to ${hi} s.` });
-    else if (len >= lo && len <= hi) notes.push({ level: 'ok', code: 'length', text: `${Math.round(len)} s is in the ${profile.label} sweet spot (${lo} to ${hi} s).` });
-    else notes.push({ level: 'info', code: 'length', text: `${Math.round(len)} s fits ${profile.label}; the sweet spot is ${lo} to ${hi} s.` });
+    if (len > sf.max) notes.push({ level: 'warn', code: 'too_long', text: `${Math.round(len)} s is past what ${profile.label} will carry; ${sf.max} s or less is safer.` });
+    else if (len < sf.min) notes.push({ level: 'info', code: 'too_short', text: `${Math.round(len)} s is under the ${sf.min} s minimum — the source had no longer passage to cut.` });
+    else notes.push({ level: 'ok', code: 'length', text: `${Math.round(len)} s suits ${profile.label} (${sf.min} to ${sf.max} s).` });
     if (short.hookEvent) notes.push({ level: 'ok', code: 'hook', text: 'Opens on a key moment.' });
     else notes.push({ level: 'info', code: 'hook', text: `No strong moment in the first ${profile.hookSeconds} s: a text hook on screen will help.` });
     if (facts.hasCaptions === false) notes.push({ level: 'warn', code: 'captions', text: 'No captions yet: most people watch with the sound off.' });

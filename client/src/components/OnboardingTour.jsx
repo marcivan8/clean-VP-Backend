@@ -1,53 +1,82 @@
 /**
  * OnboardingTour.jsx
  *
- * A short, four-step spotlight walkthrough shown once to a new user the
- * first time they land in the editor — desktop only. The mobile layout
- * hides these same panels behind bottom sheets (see IDELayout.jsx's
- * `isMobile` branching), so the fixed-position anchors this component
- * relies on don't apply there; IDELayout only mounts this when the initial
- * viewport is desktop-width.
+ * A spotlight walkthrough shown once to a new user the first time they land
+ * in the editor — desktop only. The mobile layout hides these same panels
+ * behind bottom sheets (see IDELayout.jsx's `isMobile` branching), so the
+ * fixed-position anchors this component relies on don't apply there;
+ * IDELayout only mounts this when the initial viewport is desktop-width.
  *
- * Targets are found by `[data-tour="..."]` attributes already placed on the
- * relevant panels in IDELayout.jsx, so this component never needs to know
- * their internal structure — just their ids:
- *   media-panel   — left sidebar (import/media library)
- *   ai-assistant  — right sidebar (chat/assistant panel)
- *   timeline      — the timeline strip
- *   export-button — the export button in the top bar
+ * ── R105: WHAT CHANGED, AND WHY ─────────────────────────────────────────
+ *
+ * The first version pointed at four panels and named them: media, chat,
+ * timeline, export. It taught the user where things ARE. It never said what
+ * the product does that another editor does not, because every step was
+ * about furniture.
+ *
+ * The numbers argued against it. Three quarters of new users create a
+ * project, so arriving and starting is not the problem. Roughly one in
+ * fourteen ever signs in on a second day. People try it once, get a result
+ * they could have got elsewhere, and leave. A tour that labels panels does
+ * nothing about that.
+ *
+ * So the steps now walk the shortest path to a FINISHED video — import, say
+ * what you want, let Auto run the whole playbook, take a short out of it,
+ * export — and the one in the middle is deliberately the loudest, because
+ * one instruction producing a cut, captions, motion design and sound is the
+ * only step a competitor does not have.
+ *
+ * ── PLAN AWARENESS, HONESTLY ────────────────────────────────────────────
+ *
+ * Auto mode, editing styles and the Shorts tab are Creator and Pro only
+ * (EditingStylePicker.jsx, and the `shorts` tab's gate in IDELayout). A free
+ * user is still shown those steps, because hiding the reason to upgrade is
+ * not a kindness, but the copy says plainly what they cost. A step that
+ * needs a plan the user does not have is marked `Creator` in the card
+ * rather than pretending to be available.
+ *
+ * Targets are `[data-tour="..."]` attributes on controls in IDELayout.jsx,
+ * so this component never needs to know how those controls are built. A step
+ * whose target is not mounted is skipped rather than stranding the user.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { ArrowRight, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { hasSeen, isProgressReady, markSeen } from '../services/onboardingProgress.js';
 
 const STEPS = [
-    { target: 'media-panel',   key: 'media',     placement: 'right' },
-    { target: 'ai-assistant',  key: 'assistant', placement: 'left' },
-    { target: 'timeline',      key: 'timeline',  placement: 'top' },
+    { target: 'media-panel',   key: 'import',    placement: 'right' },
+    { target: 'ai-assistant',  key: 'say',       placement: 'left' },
+    { target: 'style-picker',  key: 'auto',      placement: 'top',    plan: 'creator' },
+    { target: 'tab-shorts',    key: 'shorts',    placement: 'right',  plan: 'creator' },
     { target: 'export-button', key: 'export',    placement: 'bottom' },
 ];
 
-const STORAGE_KEY = 'vp_onboarding_tour_seen';
+/**
+ * R105 — progress moved to `profiles.usage_data.onboarding`, per user rather
+ * than per browser, so a returning user is not taught twice on a second
+ * device. The key is versioned: changing the steps means `tour_v2`, and
+ * someone who completed `tour_v1` is NOT shown the new one. Re-teaching an
+ * existing user is exactly the interruption this module exists to avoid; a
+ * new walkthrough is for new users, and everyone else can replay it from
+ * settings if they want it.
+ */
+export const TOUR_KEY = 'tour_v2';
 
-/** Whether the tour should be offered — false once it's been shown or skipped. */
+/** Whether the tour should be offered. Progress must be loaded first. */
 export function shouldShowOnboardingTour() {
-    try {
-        return !window.localStorage.getItem(STORAGE_KEY);
-    } catch (_) {
-        // Private-browsing / blocked storage — don't nag every reload if we
-        // can't remember it was seen; just skip the tour entirely.
-        return false;
-    }
+    if (!isProgressReady()) return false;
+    return !hasSeen(TOUR_KEY) && !hasSeen('tour_v1');
 }
 
-export default function OnboardingTour({ onDone }) {
+export default function OnboardingTour({ onDone, plan = 'free' }) {
     const { t } = useTranslation('editor');
     const [stepIndex, setStepIndex] = useState(0);
     const [rect, setRect] = useState(null);
 
     const finish = useCallback(() => {
-        try { window.localStorage.setItem(STORAGE_KEY, '1'); } catch (_) {}
+        markSeen(TOUR_KEY);
         onDone?.();
     }, [onDone]);
 
@@ -83,6 +112,7 @@ export default function OnboardingTour({ onDone }) {
 
     const step = STEPS[stepIndex];
     const isLast = stepIndex >= STEPS.length - 1;
+    const needsUpgrade = Boolean(step.plan) && plan === 'free';
 
     // Tooltip position — a fixed offset from the spotlighted rect on
     // whichever side has room, clamped inside the viewport.
@@ -134,8 +164,20 @@ export default function OnboardingTour({ onDone }) {
                     <div className="h-0.5 w-full" style={{ background: 'linear-gradient(90deg, var(--accent), var(--violet))' }} />
                     <div className="p-4">
                         <div className="flex items-start justify-between gap-2 mb-2">
-                            <h3 style={{ fontFamily: 'var(--f-sans)', fontSize: 14, fontWeight: 700, color: 'var(--fg)', margin: 0 }}>
+                            <h3 style={{ fontFamily: 'var(--f-sans)', fontSize: 14, fontWeight: 700, color: 'var(--fg)', margin: 0, display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
                                 {t(`onboardingTour.${step.key}.title`)}
+                                {/* A step the user's plan cannot reach says so here
+                                    rather than in the body, so the limit is read
+                                    before the promise instead of after it. */}
+                                {needsUpgrade && (
+                                    <span style={{
+                                        fontFamily: 'var(--f-mono)', fontSize: 9, letterSpacing: '0.08em',
+                                        textTransform: 'uppercase', color: 'var(--violet)',
+                                        border: '0.5px solid var(--violet)', borderRadius: 999, padding: '2px 6px',
+                                    }}>
+                                        {t('onboardingTour.creatorBadge')}
+                                    </span>
+                                )}
                             </h3>
                             <button
                                 onClick={finish}
@@ -146,7 +188,9 @@ export default function OnboardingTour({ onDone }) {
                             </button>
                         </div>
                         <p style={{ fontFamily: 'var(--f-sans)', fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.6, margin: 0 }}>
-                            {t(`onboardingTour.${step.key}.body`)}
+                            {needsUpgrade
+                                ? t(`onboardingTour.${step.key}.locked`, { defaultValue: t(`onboardingTour.${step.key}.body`) })
+                                : t(`onboardingTour.${step.key}.body`)}
                         </p>
                         <div className="flex items-center justify-between mt-4">
                             <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)', letterSpacing: '0.06em' }}>

@@ -8,12 +8,23 @@
  *   - the preview (Player/TemplateCanvas.jsx) draws every frame on a <canvas>;
  *   - the export (server/compositor/TemplateRenderer.js) imports this same file
  *     and draws every output frame with @napi-rs/canvas (Skia, like Chrome).
- * Only standard Canvas 2D calls, no imports, no DOM: it must run in both.
+ * Only standard Canvas 2D calls and no DOM: it must run in both. R107 added
+ * the one import this file has — `TextCraft.js`, which is pure arithmetic with
+ * no imports of its own, so the dynamic import() in TemplateRenderer resolves
+ * it in Node exactly as Vite does in the browser. Anything that reaches for a
+ * canvas, the DOM or a measurement context still does not belong here.
  *
  * Sizes are in REFERENCE pixels (a 1080-wide frame). A template clip lives on
  * the overlay track; its box (x, y, scale, rotation, motion presets) is placed
  * exactly like a sticker, and these functions only draw INSIDE the box.
  */
+
+import {
+    caretOpacity,
+    planWordCycle,
+    crossfadeWeights,
+    MIN_SWAP_DWELL_S,
+} from './TextCraft.js';
 
 export const TEMPLATE_KINDS = ['counter', 'price-pop', 'logo-card', 'code-window',
     // R92: vector shapes
@@ -25,7 +36,9 @@ export const TEMPLATE_KINDS = ['counter', 'price-pop', 'logo-card', 'code-window
     // Expanded Motion Catalog (Editorial, Social Proof, Comparison, KPI)
     'comparison-card', 'social-notification', 'comment-bubble', 'kpi-stat-callout', 'newspaper-headline', 'search-bar',
     // R95 PHASE 2: a sized, gradient-filled backdrop for a block of text
-    'panel'];
+    'panel',
+    // R107: a slot that cycles through words in a reserved box
+    'word-cycle'];
 
 /** R92: the shape kinds (drawn strokes and charts, not cards). */
 export const SHAPE_KINDS = ['highlight-box', 'underline', 'circle-callout', 'arrow', 'progress-bar', 'bar-chart', 'burst',
@@ -73,6 +86,10 @@ export const TEMPLATE_DEFAULTS = {
     // the layout (`w`/`h` in reference px) rather than guessed. Two colours
     // make a real gradient; `opacity` keeps the footage readable through it.
     'panel': { color: '#0E0F11', color2: null, angle: 160, opacity: 0.72, radius: 28, border: 0, borderColor: '#FFFFFF', reveal: 'wipe', w: 0, h: 0 },
+    // R107 PHASE 2 - `word-cycle`: one line whose middle word changes. The
+    // slot is sized from the WIDEST word in `words`, so the prefix and the
+    // suffix never move. `dwell` of 0 means "share the duration evenly".
+    'word-cycle': { prefix: 'Made for', words: 'Reels,Shorts,TikTok,Ads', suffix: '', dwell: 0, fontSize: 86, color: '#FFFFFF', accent: '#00E5FF' },
 };
 
 /** Width as a fraction of the frame, the size a new template is dropped at. */
@@ -86,9 +103,11 @@ export const TEMPLATE_WIDTH_FRACTION = {
     'comparison-card': 0.85, 'social-notification': 0.72, 'comment-bubble': 0.82,
     'kpi-stat-callout': 0.78, 'newspaper-headline': 0.86, 'search-bar': 0.80,
     'panel': 0.8,
+    'word-cycle': 0.86,
 };
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
 const easeOutBack = (x) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
 const easeOutCubic = (x) => 1 - Math.pow(1 - x, 3);
 
@@ -138,6 +157,7 @@ export function templateSize(kind, params) {
         case 'kpi-stat-callout': return { w: 760, h: 210 };
         case 'newspaper-headline': return { w: 880, h: 260 };
         case 'search-bar': return { w: 780, h: 130 };
+        case 'word-cycle': return { w: 980, h: 240 };
         default: return { w: 400, h: 200 };
     }
 }
@@ -457,11 +477,18 @@ function drawCodeWindow(ctx, p, t, duration, F) {
         if (budget < 0) break;
         y += 54;
     }
-    // Blinking cursor (solid while typing)
+    // R107 - the caret fades rather than toggling. A caret that switches on
+    // and off between two frames reads as a dropped frame, because nothing
+    // else in a rendered frame changes state instantly. It stays solid while
+    // the line is still arriving: a blink during typing competes with the
+    // letters, and its return is the cue that the typing is done.
     const typing = budget < 0;
-    if (cursor && (typing || Math.floor(t * 2) % 2 === 0)) {
+    if (cursor) {
+        const prev = ctx.globalAlpha;
+        ctx.globalAlpha = prev * caretOpacity(t, { typing });
         ctx.fillStyle = '#F5E0DC';
         ctx.fillRect(cursor.x + 2, cursor.y - 32, 18, 40);
+        ctx.globalAlpha = prev;
     }
     ctx.restore();
 }
@@ -1625,6 +1652,100 @@ function drawSearchBar(ctx, p, t, duration, F) {
  * @param {number} duration
  * @param {{scale?:number, fonts?:object, images?:object}} opts images: url → loaded image
  */
+/**
+ * R107 PHASE 2 - `word-cycle`: "Made for [Reels | Shorts | TikTok]".
+ *
+ * The device is everywhere in social video and VIBED had no way to draw it.
+ * What makes the difference between the version that looks made and the
+ * version that looks generated is one measurement: the slot is as wide as
+ * the WIDEST word, not as wide as the word currently in it. Size it from the
+ * current word and the prefix shifts on every swap, which is the content
+ * driving the layout instead of the layout reserving room for the content.
+ *
+ * The swap itself overlaps the two words for `TextCraft.SWAP_CROSSFADE_S`: one
+ * leaves upward, the next arrives from below. Replacing the string in place
+ * gives no frame in which the change is visible, so the slot just stutters.
+ *
+ * Words that would get less than `TextCraft.MIN_SWAP_DWELL_S` on screen are
+ * dropped rather than rushed, because a word nobody can read is a word
+ * nobody read however well it animates.
+ */
+function drawWordCycle(ctx, p, t, duration, F) {
+    const { w, h } = templateSize('word-cycle', p);
+    const { tin, tout } = envelope(t, duration, 0.35, 0.3);
+    if (tin <= 0 || tout <= 0) return;
+
+    const all = String(p.words || '').split(/[,|\n]/).map((s) => s.trim()).filter(Boolean);
+    if (all.length === 0) return;
+
+    const size = clamp(Number(p.fontSize) || 86, 24, 220);
+    const prefix = String(p.prefix || '');
+    const suffix = String(p.suffix || '');
+
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, tin * 2.5) * tout;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.font = `${size}px "${F.display}"`;
+
+    // How many of the words actually fit at a readable dwell, and when each
+    // one holds and swaps — one plan, shared with the validator's rules.
+    const maxWords = Math.max(1, Math.floor(duration / MIN_SWAP_DWELL_S));
+    const words = all.slice(0, maxWords);
+    const plan = planWordCycle(words, duration, { dwell: Number(p.dwell) || 0 });
+
+    const prefixText = prefix ? `${prefix} ` : '';
+    const suffixText = suffix ? ` ${suffix}` : '';
+    const prefixW = prefixText ? ctx.measureText(prefixText).width : 0;
+    const suffixW = suffixText ? ctx.measureText(suffixText).width : 0;
+    // The reserved slot: widest word, plus a little room so a word that
+    // exactly fills it is not clipped by the arrival offset.
+    let slotW = 0;
+    for (const word of words) slotW = Math.max(slotW, ctx.measureText(word).width);
+    slotW *= 1.04;
+
+    const x0 = (w - (prefixW + slotW + suffixW)) / 2;
+    const y = h / 2;
+    const slotX = x0 + prefixW;
+
+    ctx.fillStyle = p.color || '#FFFFFF';
+    if (prefixText) ctx.fillText(prefixText, x0, y);
+    if (suffixText) ctx.fillText(suffixText, slotX + slotW, y);
+
+    // Which word, and whether it is mid-swap.
+    const idx = clamp(Math.floor(t / plan.dwell), 0, words.length - 1);
+    const step = plan.steps[idx];
+    const weights = step && step.swapAt !== null && t >= step.swapAt
+        ? crossfadeWeights(t, step.swapAt, plan.crossfade)
+        : { out: 1, in: 0 };
+
+    const base = ctx.globalAlpha;
+    const rise = size * 0.26;
+    const drawWord = (word, alpha, dy) => {
+        if (alpha <= 0.01) return;
+        ctx.globalAlpha = base * alpha;
+        ctx.fillStyle = p.accent || '#00E5FF';
+        ctx.fillText(word, slotX, y + dy);
+    };
+    // Outgoing leaves upward, incoming arrives from below: the eye is handed
+    // from one word to the next instead of being shown a substitution.
+    drawWord(words[idx], weights.out, -rise * weights.in);
+    if (weights.in > 0) drawWord(words[idx + 1], weights.in, rise * weights.out);
+
+    // The accent rule under the slot marks the box as a slot rather than a
+    // word that happens to be a different colour. It is drawn at the
+    // reserved width, so it never changes length.
+    ctx.globalAlpha = base * 0.85;
+    ctx.fillStyle = p.accent || '#00E5FF';
+    const ruleH = Math.max(4, size * 0.07);
+    const ruleW = slotW * easeOutCubic(clamp(t / 0.45, 0, 1));
+    roundRect(ctx, slotX, y + size * 0.62, ruleW, ruleH, ruleH / 2);
+    ctx.fill();
+
+    ctx.globalAlpha = base;
+    ctx.restore();
+}
+
 export function drawTemplate(ctx, kind, params, t, duration, opts = {}) {
     if (!ctx || !TEMPLATE_KINDS.includes(kind)) return;
     const p = templateParams(kind, params);
@@ -1663,6 +1784,7 @@ export function drawTemplate(ctx, kind, params, t, duration, opts = {}) {
         else if (kind === 'newspaper-headline') drawNewspaperHeadline(ctx, p, tt, d, F);
         else if (kind === 'search-bar') drawSearchBar(ctx, p, tt, d, F);
         else if (kind === 'panel') drawPanel(ctx, p, tt, d);
+        else if (kind === 'word-cycle') drawWordCycle(ctx, p, tt, d, F);
     } finally {
         ctx.restore();
     }
@@ -1680,6 +1802,24 @@ export function templateFromText(text) {
     // R92: shapes first, so "bar chart 10 of 30" is not read as a counter.
     const shape = shapeFromText(s, raw, quoted);
     if (shape) return shape;
+    // R107 - a cycling word slot. Needs the alternatives, so it only matches
+    // when the request actually lists them ("cycle through reels, shorts,
+    // tiktok"); a bare "cycle" is left for whatever else wants it.
+    const cycle = s.match(/(?:cycle|rotate|alternate|flip)(?:\s+\w+){0,3}?\s*(?:through|between|entre)?\s*:?\s*(.+)$/);
+    if (cycle) {
+        const listRaw = (quoted || cycle[1] || '');
+        const list = listRaw.split(/[,|]|\bor\b|\band\b|\bou\b/).map((x) => x.trim()).filter(Boolean);
+        if (list.length >= 2) {
+            const lead = raw.match(/^\s*(.*?)\s*(?:cycle|rotate|alternate|flip)/i);
+            return {
+                kind: 'word-cycle',
+                params: {
+                    words: list.slice(0, 8).join(','),
+                    ...(lead && lead[1] && lead[1].length <= 40 ? { prefix: lead[1] } : {}),
+                },
+            };
+        }
+    }
     if (/counter|compteur|day \d|jour \d|\d+\s*(?:\/|of|sur)\s*\d+/.test(s) && !/code/.test(s)) {
         const m = s.match(/(\d+)\s*(?:\/|of|sur|out of)\s*(\d+)/);
         const lab = s.match(/\b(day|jour|week|semaine|step|etape|episode|ep|part|partie)\b/);

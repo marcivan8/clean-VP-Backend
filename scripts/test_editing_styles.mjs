@@ -191,9 +191,15 @@ await check('defaults follow the style, explicit requests win', async () => {
     setTimeline();
     S.getState().setEditingStyle('reel');
     let r = await plan('make a short');
-    assert.equal(r.steps[0].args.target, 22, 'Reel defaults to its own 22s target (Instagram Reels\' 15-30s ideal), not a bare fallback');
+    // R106 — this used to assert 22 s, the Reel style's own target. Shorts
+    // now run a minute at minimum whatever the style or platform says, so a
+    // bare "make a short" is floored. The style still decides everything
+    // else about the cut; it no longer decides that a short is 22 seconds.
+    assert.equal(r.steps[0].args.target, 60, 'a bare "make a short" should be floored at one minute');
+    assert.equal(r.steps[0].args.explicit, false, 'nothing explicit was asked for');
     r = await plan('make a 30 second short');
-    assert.equal(r.steps[0].args.target, 30);
+    assert.equal(r.steps[0].args.target, 30, 'an explicit length must win over the floor');
+    assert.equal(r.steps[0].args.explicit, true, 'the explicit ask is not flagged for the engine');
     r = await plan('apply the style recipe');
     assert.equal(r.steps[0].args.recipeId, 'punchy');
     r = await plan('apply the podcast style recipe');

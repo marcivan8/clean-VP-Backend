@@ -46,6 +46,7 @@
 import { clipToMotionLayer } from './ClipAdapter.js';
 import { resolveMotionAt } from './MotionResolver.js';
 import { revealedWordCount, activeWordIndex, resolveEmphasis } from './CaptionModel.js';
+import { highlightBreakpoints, highlightMixAt } from './TextCraft.js';
 import { buildTimeMap, timelineToOutputTime, simplifySamples, GEOMETRY_SAMPLE_STEP } from './Compositor.js';
 
 export const CAPTION_PROGRAM_VERSION = 1;
@@ -135,9 +136,17 @@ function activeHighlight(clip) {
  * cadence (for reveal animations without word timings), then collapsed into
  * runs. Each run becomes one pre-rendered image on the server.
  *
- * @returns {Array<{from:number,to:number,shown:number,active:number}>}
+ * R107 — each run also carries `mix`, the quantised strength of the
+ * active-word highlight (TextCraft.highlightMixAt). The highlight blends in
+ * over two or three frames instead of switching on one, and because the mix is
+ * quantised the ramp is a step function whose breakpoints are sampled here:
+ * the export renders one image per step and the preview reads the same step at
+ * any time inside it, so the two cannot diverge. The cost is bounded — at most
+ * `HIGHLIGHT_MIX_STEPS.length - 1` extra images per highlighted word.
+ *
+ * @returns {Array<{from:number,to:number,shown:number,active:number,mix:number}>}
  */
-function buildWordStates(clip, layer, timeMap, tokenCount, highlight) {
+export function buildWordStates(clip, layer, timeMap, tokenCount, highlight) {
     const start = Number(layer.startTime) || 0;
     const end = start + (Number(layer.duration) || 0);
     const words = Array.isArray(clip.words) && clip.words.length > 0 ? clip.words : null;
@@ -152,6 +161,18 @@ function buildWordStates(clip, layer, timeMap, tokenCount, highlight) {
                 // uses an inclusive end, so `end` itself still shows that word).
                 for (const tt of [edge, edge + 0.0005]) if (tt >= start && tt < end) times.add(Number(tt.toFixed(4)));
             }
+            // R107 — and at each step of this word's highlight ramp, so the
+            // export has an image for every value the preview will show.
+            if (highlight && Number.isFinite(w?.start)) {
+                for (const tt of highlightBreakpoints(w.start, Number(w.end) - Number(w.start))) {
+                    // Rounded UP, not to nearest: every other time here is
+                    // rounded to 4 dp, and a breakpoint rounded DOWN lands a
+                    // hair inside the previous step, so the export would render
+                    // that step twice and never render this one.
+                    const at = Math.ceil(tt * 10000) / 10000;
+                    if (at >= start && at < end) times.add(at);
+                }
+            }
         }
     }
 
@@ -163,9 +184,15 @@ function buildWordStates(clip, layer, timeMap, tokenCount, highlight) {
         const revealing = m.reveal < 1 || (!!highlight && !!words);
         const shown = revealing ? revealedWordCount(words, t, m.reveal, tokenCount) : tokenCount;
         const active = highlight && words ? activeWordIndex(words, t) : -1;
+        // The same rule CaptionWords uses: no word timing means no moment the
+        // highlight arrives, so there is nothing to ramp and it is simply on.
+        const aw = active >= 0 && words ? words[active] : null;
+        const mix = aw
+            ? highlightMixAt(t, Number(aw.start), Number(aw.end) - Number(aw.start))
+            : 1;
         const prev = runs[runs.length - 1];
-        if (prev && prev.shown === shown && prev.active === active) continue;
-        runs.push({ fromTimeline: t, shown, active });
+        if (prev && prev.shown === shown && prev.active === active && prev.mix === mix) continue;
+        runs.push({ fromTimeline: t, shown, active, mix });
     }
 
     const out = [];
@@ -173,7 +200,7 @@ function buildWordStates(clip, layer, timeMap, tokenCount, highlight) {
         const from = timelineToOutputTime(timeMap, runs[i].fromTimeline);
         const to = i + 1 < runs.length ? timelineToOutputTime(timeMap, runs[i + 1].fromTimeline) : timelineToOutputTime(timeMap, end);
         if (!(to > from)) continue;
-        out.push({ from: Number(from.toFixed(4)), to: Number(to.toFixed(4)), shown: runs[i].shown, active: runs[i].active });
+        out.push({ from: Number(from.toFixed(4)), to: Number(to.toFixed(4)), shown: runs[i].shown, active: runs[i].active, mix: runs[i].mix });
     }
     return out;
 }

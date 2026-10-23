@@ -36,7 +36,9 @@ const read = (rel) => {
 // The real client modules, concatenated with imports/exports stripped — the
 // same loader test_caption_program.js uses, so this is the true client path.
 function loadClientModules() {
-    const order = ['Easing', 'MotionSchema', 'MotionResolver', 'MotionPresets', 'CaptionModel', 'ClipAdapter', 'Compositor', 'CaptionCompiler'];
+    // TextCraft before CaptionCompiler: the compiler imports its highlight-ramp
+    // rules, and this loader resolves imports by concatenation order.
+    const order = ['Easing', 'MotionSchema', 'MotionResolver', 'MotionPresets', 'TextCraft', 'CaptionModel', 'ClipAdapter', 'Compositor', 'CaptionCompiler'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);

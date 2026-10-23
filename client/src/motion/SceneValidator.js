@@ -21,9 +21,10 @@
  * test and in the render worker.
  */
 
-import { measureTextBounds, fitTextToBox } from './TextMeasurement.js';
+import { measureTextBounds, fitTextToBox, reserveSlotWidth } from './TextMeasurement.js';
 import { parseColor, contrastRatio, luminance } from './ColorTheory.js';
 import { TEMPLATE_KINDS, SHAPE_KINDS } from './TemplateGraphics.js';
+import { auditScene as auditTextCraft, ruleById as craftRuleById } from './TextCraft.js';
 import {
     NODE_TYPES,
     isOverlayType,
@@ -56,6 +57,10 @@ export const ISSUE_CODES = {
     EXIT_BEFORE_ENTRANCE: 'exit_before_entrance',
     STARTS_AFTER_SCENE:   'starts_after_scene',
     LOW_CONTRAST:         'low_contrast',
+    // R107 - the text-craft rules whose symptom is visible before render.
+    READ_HOLD:            'read_hold',
+    SWAP_DWELL:           'swap_dwell',
+    SWAP_SLOT_UNRESERVED: 'swap_slot_unreserved',
 };
 
 /** Codes `autoFixScene` can resolve on its own. */
@@ -66,6 +71,10 @@ export const AUTO_FIXABLE = Object.freeze([
     ISSUE_CODES.UNSUPPORTED_EFFECT,
     ISSUE_CODES.TIMING_OUT_OF_RANGE,
     ISSUE_CODES.ZERO_DURATION,
+    // R107 - reserving the slot is arithmetic (the widest alternative), so it
+    // belongs here. Dropping a word that has no time to be read, or retiming
+    // a reveal, are design choices and stay in the report.
+    ISSUE_CODES.SWAP_SLOT_UNRESERVED,
 ]);
 
 /** Minimum legible text on a phone, as a fraction of frame height. */
@@ -415,6 +424,32 @@ const SEVERITY_ORDER = { error: 0, warn: 1, info: 2 };
  *           backdropColor?:string, skipContrast?:boolean, skipCollisions?:boolean }} [opts]
  * @returns {{ ok:boolean, issues:Array, counts:{error:number,warn:number,info:number}, shapeErrors:string[] }}
  */
+/**
+ * R107 - the text-craft rules, checked per layer.
+ *
+ * `TextCraft.auditScene` owns the measurements; this only turns its findings
+ * into validator issues, so the thresholds live in exactly one file. All three
+ * are warnings: each one is a layer that will render and be read wrong, not a
+ * layer that will fail to render.
+ */
+const CRAFT_ISSUE_CODE = {
+    'read-hold': ISSUE_CODES.READ_HOLD,
+    'swap-dwell': ISSUE_CODES.SWAP_DWELL,
+    'swap-slot-reserved': ISSUE_CODES.SWAP_SLOT_UNRESERVED,
+};
+
+function checkTextCraft(entry, issues) {
+    const { node } = entry;
+    if (!node) return;
+    for (const finding of auditTextCraft([node])) {
+        const code = CRAFT_ISSUE_CODE[finding.rule];
+        if (!code) continue;
+        const rule = craftRuleById(finding.rule);
+        const message = rule ? `${rule.defect} ${rule.rule}` : finding.detail;
+        issues.push(issue(code, SEVERITY.WARN, node, message, { detail: finding.detail, rule: finding.rule }));
+    }
+}
+
 export function validateScene(scene, opts = {}) {
     const issues = [];
     const shape = validateSceneShape(scene);
@@ -432,6 +467,7 @@ export function validateScene(scene, opts = {}) {
         checkPlacement(scene, entry, issues, opts);
         checkSource(entry, issues, opts);
         checkEffects(entry, issues);
+        checkTextCraft(entry, issues);
     }
     if (!opts.skipCollisions) checkCollisions(leaves, issues);
 
@@ -458,6 +494,28 @@ function fixTextOverflow(scene, node, detail, opts) {
     return {
         patch: { style: { ...style, fontSize: next } },
         message: `"${node.name}" was shrunk from ${Math.round(num(style.fontSize, 48))} px to ${next} px so the words fit.`,
+    };
+}
+
+/**
+ * R107 - reserve the slot of a cycling word layer.
+ *
+ * Measured from the widest alternative, which is the only width at which the
+ * words beside it hold still. Nothing to measure means no fix rather than a
+ * zero: a slot of width 0 would be a worse scene than an unreserved one.
+ */
+function fixSwapSlot(node) {
+    const style = node.style || {};
+    const { width, widest } = reserveSlotWidth(node.alternatives, {
+        fontSize: num(style.fontSize, 48),
+        fontFamily: style.fontFamily || 'Inter',
+        fontWeight: style.fontWeight || 'normal',
+    });
+    if (!(width > 0)) return null;
+    const next = Math.ceil(width);
+    return {
+        patch: { slotWidth: next },
+        message: `"${node.name}" reserved ${next} px for its word slot, the width of "${widest}".`,
     };
 }
 
@@ -557,6 +615,8 @@ export function autoFixScene(scene, opts = {}) {
                     : { x: 0, y: 0, w: current.frame.w, h: current.frame.h };
                 // Too big is a different fault from in the wrong place: size first.
                 applied = fixOverlayFit(node, box, target) || fixPlacement(current, node, box, target);
+            } else if (item.code === ISSUE_CODES.SWAP_SLOT_UNRESERVED) {
+                applied = fixSwapSlot(node);
             } else if (item.code === ISSUE_CODES.TIMING_OUT_OF_RANGE) {
                 applied = fixTiming(node);
             } else if (item.code === ISSUE_CODES.UNSUPPORTED_EFFECT) {

@@ -71,6 +71,10 @@ import MobileExportSheet from '../components/MobileExportSheet';
 import { Logo } from '../components/Logo.jsx';
 import { summarizeUploads } from '../utils/uploadStatus.js';
 import OnboardingTour, { shouldShowOnboardingTour } from '../components/OnboardingTour';
+// R105 — first-run teaching: the once-only walkthrough above, plus small
+// contextual hints fired the first time a user reaches a given state.
+import FirstRunHint, { triggerHint } from '../components/FirstRunHint';
+import { loadOnboardingProgress } from '../services/onboardingProgress.js';
 import { EventBus, EVENT_TYPES } from '../agent/EventBus';
 import { useSupabasePersistence } from '../hooks/useSupabasePersistence';
 
@@ -597,12 +601,26 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     // the panels this points at actually mount before the tour measures
     // their position, rather than racing first paint.
     const [showTour, setShowTour] = React.useState(false);
+    // R105 — progress is per USER now (profiles.usage_data.onboarding), so it
+    // has to be fetched before anything can be decided. Until it resolves,
+    // `shouldShowOnboardingTour()` answers false and `triggerHint` is a no-op,
+    // which is the right default: showing nothing for half a second beats
+    // flashing a tour at someone who finished it last week on another machine.
+    const [progressReady, setProgressReady] = React.useState(false);
     useEffect(() => {
-        if (isMobile || !shouldShowOnboardingTour()) return;
+        let cancelled = false;
+        loadOnboardingProgress()
+            .then(() => { if (!cancelled) setProgressReady(true); })
+            .catch(() => { if (!cancelled) setProgressReady(true); });
+        return () => { cancelled = true; };
+    }, []);
+
+    useEffect(() => {
+        if (!progressReady || isMobile || !shouldShowOnboardingTour()) return undefined;
         const timer = setTimeout(() => setShowTour(true), 600);
         return () => clearTimeout(timer);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [progressReady]);
 
     // Ensure a session exists from the moment they open the editor
     // sessionChecked: the anonymous-session check has finished. Signed-in
@@ -1342,6 +1360,18 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             // factual fallback only if the Brain produces nothing.
 
             console.log("✅ Store updated with assets and metadata", processedAssets);
+
+            // R105 — the first import is the moment the product becomes usable
+            // and also the moment people stall: the footage is in, and nothing
+            // says that the next move is to ASK for something. Point at the
+            // chat box once. `triggerHint` is a no-op after the first time, on
+            // any device, and while onboarding progress is still loading.
+            triggerHint('first_upload');
+            // A long single take is the repurposing case. Say so here, where
+            // the user can see how long their clip is, rather than hoping they
+            // find a locked tab on their own.
+            const longest = processedAssets.reduce((m, a) => Math.max(m, Number(a?.duration) || 0), 0);
+            if (longest > 180) triggerHint('shorts_ready');
         }
     };
 
@@ -1911,7 +1941,13 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             )}
 
             {/* First-run onboarding tour — desktop only, shown once */}
-            {showTour && <OnboardingTour onDone={() => setShowTour(false)} />}
+            {showTour && <OnboardingTour onDone={() => setShowTour(false)} plan={userPlan} />}
+
+            {/* R105 — contextual first-time hints. Mounted on mobile too: these
+                are anchored cards rather than a fixed-position spotlight, so
+                they work wherever their control is on screen. Never shown while
+                the tour is up; one lesson at a time. */}
+            {!showTour && <FirstRunHint plan={userPlan} />}
 
             {/* Session countdown — show when < 24 h remain and user is anonymous */}
             {isAnonymous && hoursLeft() !== null && hoursLeft() < 24 && (
@@ -2023,7 +2059,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         <button onClick={() => { useTimelineStore.getState().exitShortPreview(); const data = useTimelineStore.getState().saveProject(); if (!data) return; const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `project-${Date.now()}.json`; a.click(); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.saveProject')}</button>
                                         <div className="h-px bg-border my-1" />
                                         <button onClick={() => { triggerImport(); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.importMedia')}</button>
-                                        <button onClick={() => { setShowExportModal(true); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.exportVideo')}</button>
+                                        <button onClick={() => { triggerHint('before_export'); setShowExportModal(true); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.exportVideo')}</button>
                                     </div>
                                 </>
                             )}
@@ -2073,6 +2109,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                         <button
                             data-tour="export-button"
+                            data-hint="export-button"
                             onClick={() => {
                                 if (isAnonymous) { showAuthPrompt('export'); }
                                 // Mobile: export sheet (also reopens a running export's progress)
@@ -2125,6 +2162,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 {['media', 'captions', 'transcript', 'color', 'motion', 'shorts', 'iterations', 'assets', 'audio', 'transform', 'settings'].map(tab => (
                                     <button
                                         key={tab}
+                                        // R105 anchors: the tour points at `tab-shorts`, hints at
+                                        // `tab-captions`. Every tab carries one so a new hint needs
+                                        // no markup change here, only an entry in HINTS.
+                                        data-tour={`tab-${tab}`}
+                                        data-hint={`tab-${tab}`}
                                         onClick={() => {
                                             if (tab === 'shorts' && isFree) {
                                                 EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
@@ -2516,6 +2558,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         {mode === 'editor' && (
                             <div
                                 data-tour="timeline"
+                                data-hint="timeline-strip"
                                 className={classNames(
                                     "border-t flex flex-col overflow-hidden shrink-0",
                                     isMobile ? "h-36" : "h-48 md:h-72"
