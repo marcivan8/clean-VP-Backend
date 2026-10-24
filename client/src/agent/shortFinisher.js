@@ -30,6 +30,68 @@ import { PLATFORM_PROFILES } from './PlatformProfiles.js';
 // effect in the whole video was the literal same clip.
 const sfxCache = new Map();
 
+/**
+ * R109 — how long the preview will wait for a planning model.
+ *
+ * Both plan calls had no timeout at all. A model that hangs (rather than
+ * erroring) left the preview spinning with nothing on screen and no way to
+ * tell whether it was thinking or dead, for as long as the browser kept the
+ * socket. Every caller already degrades to the deterministic rules when a
+ * plan does not arrive, so a bounded wait loses the AI headline and keeps the
+ * short — the right trade for something a person is watching.
+ */
+export const PLAN_TIMEOUT_MS = 12000;
+
+/** authFetch with a deadline. Aborting reads as a normal failure to the caller. */
+async function fetchWithTimeout(url, options, ms = PLAN_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try {
+        return await authFetch(url, { ...options, signal: controller.signal });
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+/**
+ * R109 — the plans for one short, kept for the session.
+ *
+ * Previewing a short ran both planning calls again every single time, so
+ * closing a preview and reopening it paid the full model latency twice for an
+ * answer that cannot have changed: both calls are a pure function of the
+ * transcript text, the platform and the duration. Keyed on exactly those.
+ */
+const planCache = new Map();
+const planKey = (kind, text, platform, duration) => `${kind}|${platform}|${Math.round(Number(duration) * 100)}|${text}`;
+
+async function cachedPlan(kind, text, platform, duration, run) {
+    const key = planKey(kind, text, platform, duration);
+    if (planCache.has(key)) return planCache.get(key);
+    const promise = run();
+    // The PROMISE is cached, not its result: two previews started at once
+    // share one request instead of racing two identical ones.
+    planCache.set(key, promise);
+    try {
+        const result = await promise;
+        // Only a real answer is kept. Caching a failure for the session would
+        // mean a model that was briefly down, or one request that timed out,
+        // stays "down" for this transcript until the tab is reloaded — and the
+        // user's only visible symptom would be a short that never gets its
+        // headline, with a retry that cannot possibly help.
+        const useful = kind === 'scene' ? !!result?.plan : !!result;
+        if (!useful) planCache.delete(key);
+        return result;
+    } catch (err) {
+        planCache.delete(key);
+        throw err;
+    }
+}
+
+/** Forget the cached plans (the transcript changed, or a retry is wanted). */
+export function clearPlanCache() {
+    planCache.clear();
+}
+
 /** Best library sound for a query, rotating through real candidates on repeat calls for the same query (cached for the session). */
 export async function fetchSfxAsset(query) {
     let entry = sfxCache.get(query);
@@ -74,14 +136,22 @@ export async function addSfxTrack(tracks, cues, level, fetchAsset = fetchSfxAsse
 
 /** The AI plan for a short, or null (rules then apply). */
 export async function fetchShortPlan(text, platform, duration) {
-    try {
-        const res = await authFetch('/api/motion/short-plan', { method: 'POST', body: JSON.stringify({ text, platform, duration }) });
-        const data = await res.json().catch(() => ({}));
-        return res.ok ? (data.plan || null) : null;
-    } catch (err) {
-        console.warn('[shortFinisher] short plan unavailable, using rules:', err.message);
-        return null;
-    }
+    return cachedPlan('short', text, platform, duration, async () => {
+        try {
+            const res = await fetchWithTimeout('/api/motion/short-plan', {
+                method: 'POST',
+                body: JSON.stringify({ text, platform, duration }),
+            });
+            const data = await res.json().catch(() => ({}));
+            return res.ok ? (data.plan || null) : null;
+        } catch (err) {
+            const why = err.name === 'AbortError'
+                ? `it did not answer within ${PLAN_TIMEOUT_MS / 1000}s`
+                : err.message;
+            console.warn(`[shortFinisher] short plan unavailable, using rules: ${why}`);
+            return null;
+        }
+    });
 }
 
 /**
@@ -123,8 +193,12 @@ export async function fetchScenePlanResult(text, platform, duration) {
     if (!text) return none('there was no transcript text to plan from');
     const brief = 'A short-form video: open with a strong hook, surface the single most '
         + 'important point or figure, and close with a call to action if the video asks for one.';
+    return cachedPlan('scene', text, platform, duration, () => runScenePlan(brief, text, platform, duration, none));
+}
+
+async function runScenePlan(brief, text, platform, duration, none) {
     try {
-        const res = await authFetch('/api/motion/scene-plan', {
+        const res = await fetchWithTimeout('/api/motion/scene-plan', {
             method: 'POST',
             body: JSON.stringify({ brief, transcript: text, platform, duration }),
         });
@@ -165,6 +239,10 @@ export async function fetchScenePlanResult(text, platform, duration) {
         }
         return { plan, source, techniques, reason: null };
     } catch (err) {
+        if (err.name === 'AbortError') {
+            console.warn(`[shortFinisher] the motion model did not answer within ${PLAN_TIMEOUT_MS / 1000}s; the hook stays a single title.`);
+            return none(`the motion model did not answer within ${PLAN_TIMEOUT_MS / 1000}s`, 'timeout');
+        }
         console.warn('[shortFinisher] scene plan unavailable, hook stays a single title:', err.message);
         return none(`the motion service could not be reached (${err.message})`, 'error');
     }
@@ -213,4 +291,4 @@ export async function finishShort(state, short, opts = {}) {
     return { ...polished, words };
 }
 
-export default { finishShort, fetchShortPlan, fetchScenePlan, fetchSfxAsset, addSfxTrack };
+export default { finishShort, fetchShortPlan, fetchScenePlan, fetchSfxAsset, addSfxTrack, clearPlanCache, PLAN_TIMEOUT_MS };

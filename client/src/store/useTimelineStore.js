@@ -701,6 +701,27 @@ const useTimelineStore = create(
                     timelineManager.fromLegacyTracks(saved.tracks);
                     return false;
                 }
+                // R109 — the preview has to START the picture, not just say it is
+                // playing.
+                //
+                // This used to set `currentTime: 0, isPlaying: true` straight into
+                // the store. Neither reaches the playback engine:
+                //
+                //   · `seek()` is what tells the engine (and the Revideo player)
+                //     to move. A raw `set({ currentTime: 0 })` moves the number
+                //     and nothing else, so `PlaybackEngine.play()` began decoding
+                //     from `clock.getCurrentTime()` — wherever the MAIN edit was.
+                //   · `PlaybackEngine.play()` returns immediately when it is
+                //     already PLAYING. Clicking preview while the main edit (or
+                //     another short) was playing therefore did nothing at all:
+                //     the short's timeline loaded, the button flipped, and the
+                //     picture carried on with the old buffers.
+                //
+                // So: land paused and at zero first, let the engine seek there,
+                // then start. The timeout is the sequencing — React commits this
+                // state and VideoPlayer's effect runs `engine.seek(0)` before the
+                // task below flips playback on, which is what makes `play()`
+                // start from the top instead of returning early.
                 set({
                     shortPreview: { shortId: short.id, platform: short.platform, label: info.label || short.platform, saved },
                     tracks: timelineManager.toLegacyTracks(),
@@ -709,8 +730,15 @@ const useTimelineStore = create(
                     captions: Array.isArray(built.words) ? built.words : [],
                     past: [], future: [],
                     currentTime: 0, activeClipId: null, selectedClipIds: [],
-                    isPlaying: true,
+                    isPlaying: false,
                 });
+                get().seek(0);
+                setTimeout(() => {
+                    const now = get();
+                    // Still this short? A fast second click must not start a
+                    // preview the user has already moved on from.
+                    if (now.shortPreview?.shortId === short.id && !now.isPlaying) now.setIsPlaying(true);
+                }, 0);
                 return true;
             },
             exitShortPreview: () => {
@@ -729,6 +757,10 @@ const useTimelineStore = create(
                     currentTime: s.currentTime || 0, activeClipId: s.activeClipId || null, selectedClipIds: s.selectedClipIds || [],
                     isPlaying: false,
                 });
+                // R109 — and the same on the way out: the engine is still sitting
+                // wherever the short left it, so without this the main edit comes
+                // back showing a frame from somewhere else entirely.
+                get().seek(s.currentTime || 0);
                 return true;
             },
             /**

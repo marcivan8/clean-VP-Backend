@@ -115,7 +115,13 @@ function grabFrame(url, sourceTime, crop) {
         video.crossOrigin = 'anonymous';
         video.muted = true;
         video.playsInline = true;
-        video.preload = 'auto';
+        // R109 — 'metadata', not 'auto'. This wants ONE frame, and `auto` asks
+        // the browser to buffer the whole source: the panel grabs a picture per
+        // short, one after another, so on a long edit that was several hundred
+        // megabytes of download racing the editor's own playback for bandwidth
+        // and decoders. With 'metadata' the browser fetches the header, then
+        // whatever the seek needs.
+        video.preload = 'metadata';
         let done = false;
         const finish = (result) => {
             if (done) return;
@@ -125,7 +131,10 @@ function grabFrame(url, sourceTime, crop) {
             try { video.load(); } catch (err) { console.warn('[captureShortThumbnail] release failed:', err.message); }
             resolve(result);
         };
-        const timer = setTimeout(() => finish(null), 10000);
+        // 10s per URL, per short, in series, was long enough that a handful of
+        // unreachable sources could hold the panel for a minute with nothing on
+        // screen. A frame that has not arrived in 5s is not arriving in 10.
+        const timer = setTimeout(() => finish(null), 5000);
         video.onloadedmetadata = () => {
             const d = Number(video.duration);
             video.currentTime = Number.isFinite(d) && d > 0 ? Math.min(sourceTime, Math.max(0, d - 0.2)) : sourceTime;

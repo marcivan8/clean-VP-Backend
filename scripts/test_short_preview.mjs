@@ -54,8 +54,17 @@ await check('Preview loads the finished 9:16 short; Back puts the main edit, und
     assert.equal(p.aspectRatio, '9:16');
     assert.ok(Math.abs(p.duration - built.duration) < 1e-6);
     assert.equal(p.past.length, 0, 'undo cannot reach into the main edit while previewing');
-    assert.equal(p.isPlaying, true);
+    // R109 — playback starts one task later, on purpose, and this is the shape
+    // of the fix rather than an implementation detail: the preview has to land
+    // PAUSED at 0 first so VideoPlayer's effect runs `engine.seek(0)`, because
+    // `PlaybackEngine.play()` returns immediately when it is already PLAYING
+    // and would otherwise carry on decoding from wherever the main edit was.
+    assert.equal(p.isPlaying, false, 'the preview must land paused so the engine can seek to 0');
+    assert.equal(p.currentTime, 0, 'the playhead must be at the top of the short');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(S.getState().isPlaying, true, 'the preview never actually started playing');
     assert.ok(p.tracks.some(t => t.clips.some(c => String(c.id).startsWith('short-hook-text-'))), 'the hook title is on the player timeline');
+    assert.equal(S.getState().shortPreview.shortId, SHORT.id, 'the preview was dropped by the deferred start');
     assert.ok(p.tracks.find(t => t.type === 'video').clips[0].virtualCam, 'speaker framing travels to the player');
     assert.equal(p.shortPreview.label, 'TikTok');
     assert.equal(S.getState().exitShortPreview(), true);
@@ -136,6 +145,131 @@ await check('proxy first, then the live file, then the stored source; key change
         ['/api/proxy/gcs-media/raw/u/p.mp4', 'blob:x', '/api/proxy/gcs-media/raw/u/s.mp4']);
     assert.notEqual(TH.thumbnailKey(SHORT), TH.thumbnailKey({ ...SHORT, start: 31 }));
     assert.doesNotMatch(read('client/src/utils/captureShortThumbnail.js'), /updateShort/, 'pictures are not saved into the project');
+});
+
+log('\nR109 — the preview actually starts, and stops waiting');
+
+await check('entering a preview puts the playhead at 0 before anything plays', async () => {
+    loadMain();
+    const built = await SF.finishShort(S.getState(), SHORT, { sfx: false, plan: null });
+    S.setState({ currentTime: 47, isPlaying: true });
+    S.getState().startShortPreview(SHORT, built, {});
+    // The engine decodes from its own clock. A preview that leaves the clock
+    // at the main edit's position plays the wrong part of the file, or
+    // nothing at all when that position is past the short's end.
+    assert.equal(S.getState().currentTime, 0, 'the playhead stayed where the main edit was');
+    assert.equal(S.getState().isPlaying, false, 'it never paused, so the engine could not seek');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(S.getState().isPlaying, true);
+    S.getState().exitShortPreview();
+});
+
+await check('leaving a preview puts the playhead back where the edit was', async () => {
+    loadMain();
+    const built = await SF.finishShort(S.getState(), SHORT, { sfx: false, plan: null });
+    S.getState().startShortPreview(SHORT, built, {});
+    await new Promise(resolve => setTimeout(resolve, 0));
+    S.setState({ currentTime: 9 });
+    S.getState().exitShortPreview();
+    assert.equal(S.getState().currentTime, 12, "the main edit came back at the short's position");
+    assert.equal(S.getState().isPlaying, false);
+});
+
+await check('a preview dropped before it starts does not strand playback', async () => {
+    loadMain();
+    const built = await SF.finishShort(S.getState(), SHORT, { sfx: false, plan: null });
+    S.getState().startShortPreview(SHORT, built, {});
+    S.getState().exitShortPreview();          // before the deferred start fires
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(S.getState().shortPreview, null);
+    assert.equal(S.getState().isPlaying, false, 'the main edit was left playing a preview that is gone');
+});
+
+await check('the thumbnail grab asks for metadata, not the whole file', () => {
+    // `preload = 'auto'` asks the browser to buffer the entire source for ONE
+    // frame, once per short, in series — competing with the editor's own
+    // playback for bandwidth and decoders on exactly the screen where someone
+    // is waiting to watch something.
+    const src = read('client/src/utils/captureShortThumbnail.js');
+    assert.match(src, /video\.preload = 'metadata'/, 'the grab still preloads the whole video');
+    assert.ok(!/video\.preload = 'auto'/.test(src), "'auto' is still there");
+    const m = src.match(/setTimeout\(\(\) => finish\(null\), (\d+)\)/);
+    assert.ok(m, 'the grab has no timeout at all');
+    assert.ok(Number(m[1]) <= 5000, `${m[1]}ms per source, per short, in series`);
+});
+
+await check('a planning model that hangs cannot hold the preview open', async () => {
+    const saved = globalThis.fetch;
+    SF.clearPlanCache();
+    let aborted = false;
+    globalThis.fetch = (url, options) => new Promise((resolve, reject) => {
+        // Never resolves on its own: only the abort can end this.
+        options?.signal?.addEventListener('abort', () => {
+            aborted = true;
+            const err = new Error('aborted');
+            err.name = 'AbortError';
+            reject(err);
+        });
+    });
+    try {
+        const started = Date.now();
+        const result = await Promise.race([
+            SF.fetchScenePlanResult('some transcript words', 'tiktok', 20),
+            new Promise(resolve => setTimeout(() => resolve('NEVER_RETURNED'), SF.PLAN_TIMEOUT_MS + 2000)),
+        ]);
+        assert.notEqual(result, 'NEVER_RETURNED', 'the preview would spin forever');
+        assert.ok(aborted, 'the request was left running');
+        assert.equal(result.plan, null);
+        assert.match(result.reason, /did not answer within/i, `reason was ${JSON.stringify(result.reason)}`);
+        assert.ok(Date.now() - started <= SF.PLAN_TIMEOUT_MS + 1500, 'it waited longer than its own budget');
+    } finally {
+        globalThis.fetch = saved;
+        SF.clearPlanCache();
+    }
+});
+
+await check('the same short does not re-ask a model that already answered', async () => {
+    const saved = globalThis.fetch;
+    SF.clearPlanCache();
+    let calls = 0;
+    globalThis.fetch = async () => {
+        calls += 1;
+        return { ok: true, status: 200, json: async () => ({ source: 'ai', plan: { title: 'Hook', beats: [] }, techniques: [] }), text: async () => '' };
+    };
+    try {
+        const a = await SF.fetchScenePlanResult('same words every time', 'tiktok', 20);
+        const b = await SF.fetchScenePlanResult('same words every time', 'tiktok', 20);
+        assert.equal(calls, 1, `re-previewing paid for the model ${calls} times`);
+        assert.equal(b.plan.title, a.plan.title);
+        // A different short is a different question.
+        await SF.fetchScenePlanResult('other words entirely', 'tiktok', 20);
+        assert.equal(calls, 2, 'the cache answered a question it was never asked');
+    } finally {
+        globalThis.fetch = saved;
+        SF.clearPlanCache();
+    }
+});
+
+await check('a failure is never cached, so a retry is a real retry', async () => {
+    const saved = globalThis.fetch;
+    SF.clearPlanCache();
+    let calls = 0;
+    globalThis.fetch = async () => {
+        calls += 1;
+        return calls === 1
+            ? { ok: false, status: 503, json: async () => ({}), text: async () => '' }
+            : { ok: true, status: 200, json: async () => ({ source: 'ai', plan: { title: 'Back up', beats: [] }, techniques: [] }), text: async () => '' };
+    };
+    try {
+        const first = await SF.fetchScenePlanResult('retry me', 'tiktok', 20);
+        assert.equal(first.plan, null);
+        const second = await SF.fetchScenePlanResult('retry me', 'tiktok', 20);
+        assert.equal(calls, 2, 'the retry was answered from a cached failure');
+        assert.equal(second.plan.title, 'Back up', 'a model that recovered stayed broken for the session');
+    } finally {
+        globalThis.fetch = saved;
+        SF.clearPlanCache();
+    }
 });
 
 log(failures ? `\n${failures} FAILURE(S)` : '\nALL SHORT PREVIEW CHECKS PASSED');

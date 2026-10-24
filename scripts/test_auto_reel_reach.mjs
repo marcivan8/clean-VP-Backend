@@ -109,9 +109,14 @@ await check('a real plan comes back clean, with no reason attached', async () =>
 await check('the plain fetchScenePlan contract is unchanged', async () => {
     // Every existing caller and every injected test double still gets a plan
     // or null — the envelope is additive, not a breaking change.
+    // R109 — successful plans are cached for the session (same transcript,
+    // platform and duration cannot produce a different answer in
+    // production). Each case mocks its own response, so each starts clean.
+    SF.clearPlanCache();
     nextResponse = { ok: true, status: 200, body: { source: 'ai', plan: { title: 'A Title Here', beats: [] }, techniques: [] } };
     const plan = await SF.fetchScenePlan('some transcript words', 'reels', 20);
     assert.equal(plan.title, 'A Title Here');
+    SF.clearPlanCache();
     nextResponse = { ok: false, status: 502, body: {} };
     assert.equal(await SF.fetchScenePlan('some transcript words', 'reels', 20), null);
 });
@@ -204,6 +209,7 @@ await check('the category becomes a sentence an operator can act on', async () =
         ['api_error', /returned an error/],
     ];
     for (const [failureCategory, expect] of cases) {
+        SF.clearPlanCache();
         nextResponse = { ok: true, status: 200, body: { source: 'rules', plan: null, techniques: ['a'], failureCategory, provider: 'openai' } };
         const r = await SF.fetchScenePlanResult('some transcript words', 'reels', 20);
         assert.match(r.reason, expect, `${failureCategory} produced "${r.reason}"`);
