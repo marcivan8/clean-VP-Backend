@@ -44,6 +44,10 @@ import SnapGuidesLayer from '../components/Player/SnapGuidesLayer.jsx'; // R92 r
 import ShortPreviewBar from '../components/Player/ShortPreviewBar.jsx'; // R93
 import LayoutPresetPicker from '../components/LayoutPresetPicker.jsx';
 import AssetPanel from '../components/AssetPanel';
+// R108 — the desktop panel switcher. Adding a panel still means BOTH an entry
+// in RAIL_TABS there AND a render branch below, exactly as the R61 note above
+// warns: half of the pair is a dead panel.
+import PanelRail from '../components/PanelRail';
 import ExportModal from '../components/ExportModal';
 import { Type } from 'lucide-react';
 import { ClarificationDialog } from '../components/ClarificationDialog';
@@ -615,8 +619,31 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         return () => { cancelled = true; };
     }, []);
 
+    /**
+     * R108 — the panel is collapsed when the rail's active icon is clicked
+     * again, which hands the preview and the timeline the whole width. Kept
+     * per browser: a collapsed workspace the user set up should still be
+     * collapsed tomorrow. Reading it can throw in a private window, and an
+     * unreadable preference is simply "not collapsed".
+     */
+    const [panelCollapsed, setPanelCollapsed] = useState(() => {
+        try { return localStorage.getItem('vp_panel_collapsed') === '1'; }
+        catch { return false; }
+    });
+    const persistCollapsed = useCallback((next) => {
+        setPanelCollapsed(next);
+        try { localStorage.setItem('vp_panel_collapsed', next ? '1' : '0'); }
+        catch { /* storage unavailable — the session still honours the choice */ }
+    }, []);
+
     useEffect(() => {
         if (!progressReady || isMobile || !shouldShowOnboardingTour()) return undefined;
+        // R108 — the walkthrough points at controls inside the panel, so a
+        // workspace left collapsed from a previous session has to open before
+        // it starts. A tour that spotlights a hidden element measures zero and
+        // silently gives up, which is the failure mode this codebase keeps
+        // finding.
+        setPanelCollapsed(false);
         const timer = setTimeout(() => setShowTour(true), 600);
         return () => clearTimeout(timer);
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -667,6 +694,34 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const isFree = userPlan === 'free';
     const [assetInitialTab, setAssetInitialTab] = useState('sfx');
 
+
+    /**
+     * One click handler for both switchers. Selecting a different panel always
+     * opens it; selecting the one already open closes it. The paid gate and
+     * the assets sub-tab default stay where they were.
+     */
+    const handleSelectTab = useCallback((tab) => {
+        if (tab === 'shorts' && isFree) {
+            EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
+                reason: 'paid_feature',
+                message: t('shortsPanel.lockedMessage', 'AI Shorts repurposing is available on Creator and Pro plans.'),
+                upgradeRequired: 'creator',
+            });
+        }
+        if (tab === 'assets') setAssetInitialTab('sfx');
+        if (tab === activeTab) {
+            const next = !panelCollapsed;
+            persistCollapsed(next);
+            // R108 — the first time the panel disappears, say how to bring it
+            // back. The icon loses its ring and nothing else changes, which is
+            // not enough on its own to read as "this is still here".
+            if (next) triggerHint('panel_collapsed');
+            return;
+        }
+        setActiveTab(tab);
+        persistCollapsed(false);
+    }, [activeTab, panelCollapsed, persistCollapsed, setActiveTab, isFree, t]);
+
     // Toggle a mobile bottom sheet. 'audio' maps to the media panel with the audio tab pre-selected.
     const handleMobileSheet = useCallback((sheet) => {
         setMobileSheet(prev => {
@@ -686,7 +741,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const handleClipAction = useCallback((tabName) => {
         setActiveTab(tabName);
         setMobileSheet('media');
-    }, [setActiveTab]);
+        // R108 — asking to edit a clip is asking to see the panel, so a
+        // collapsed workspace opens rather than sending the action nowhere.
+        persistCollapsed(false);
+    }, [setActiveTab, persistCollapsed]);
 
     // Called when user taps Done in the context toolbar.
     // Closes any open panel and deselects the clip.
@@ -2129,6 +2187,20 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 {/* Main Workspace */}
                 <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative pb-14 md:pb-0">
 
+                    {/* R108 — the desktop panel switcher. Mounted instead of the
+                        horizontal strip below, never alongside it, so only one
+                        copy of each `data-tour` / `data-hint` anchor is ever in
+                        the DOM for the walkthrough to find. */}
+                    {!isMobile && (
+                        <PanelRail
+                            activeTab={activeTab}
+                            collapsed={panelCollapsed}
+                            onSelect={handleSelectTab}
+                            isFree={isFree}
+                            t={t}
+                        />
+                    )}
+
                     {/* Left Sidebar (Media/Effects) — bottom sheet on mobile, static sidebar on desktop */}
                     <aside
                         data-tour="media-panel"
@@ -2139,6 +2211,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             "fixed inset-x-0 bottom-14 z-40 h-[65vh] max-h-[65vh] rounded-t-2xl border-t overflow-hidden",
                             // Desktop: revert to static left sidebar
                             "md:static md:inset-auto md:bottom-auto md:z-30 md:max-h-none md:rounded-none md:border-t-0 md:border-r md:w-72 md:shadow-none md:overflow-y-auto md:translate-y-0",
+                            // R108 — collapsed by the rail: the panel leaves, the
+                            // rail stays. Desktop only; the mobile sheet has its
+                            // own open/closed state just below.
+                            !isMobile && panelCollapsed && "md:hidden",
                             // Mobile visibility + disable pointer events when hidden (prevents touch bleed-through)
                             ['media', 'audio', 'more'].includes(mobileSheet) ? "translate-y-0" : "translate-y-full pointer-events-none md:pointer-events-auto"
                         )}
@@ -2157,86 +2233,94 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                         <input id="media-file-input" type="file" ref={fileInputRef} onChange={handleFileImport} className="hidden" accept="video/*,audio/*,image/*" multiple />
 
-                        <div className="relative border-b" style={{ borderColor: "var(--line-soft)" }}>
-                            <div ref={tabBarRef} className="p-2 flex gap-1 overflow-x-auto no-scrollbar">
-                                {['media', 'captions', 'transcript', 'color', 'motion', 'shorts', 'iterations', 'assets', 'audio', 'transform', 'settings'].map(tab => (
-                                    <button
-                                        key={tab}
-                                        // R105 anchors: the tour points at `tab-shorts`, hints at
-                                        // `tab-captions`. Every tab carries one so a new hint needs
-                                        // no markup change here, only an entry in HINTS.
-                                        data-tour={`tab-${tab}`}
-                                        data-hint={`tab-${tab}`}
-                                        onClick={() => {
-                                            if (tab === 'shorts' && isFree) {
-                                                EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
-                                                    reason: 'paid_feature',
-                                                    message: t('shortsPanel.lockedMessage', 'AI Shorts repurposing is available on Creator and Pro plans.'),
-                                                    upgradeRequired: 'creator',
-                                                });
-                                            }
-                                            if (tab === 'assets') setAssetInitialTab('sfx');
-                                            setActiveTab(tab);
-                                        }}
-                                        className={classNames("studio-tab-btn", activeTab === tab && "active")}
-                                    >
-                                        {tab === 'media'      && <Layers   className="w-2.5 h-2.5" />}
-                                        {tab === 'captions'   && <Type     className="w-2.5 h-2.5" />}
-                                        {tab === 'transcript' && <span style={{ fontSize: 9 }}>📝</span>}
-                                        {tab === 'color'      && <Palette  className="w-2.5 h-2.5" />}
-                                        {tab === 'motion'     && <Zap      className="w-2.5 h-2.5" />}
-                                        {tab === 'shorts'     && (
-                                            <>
-                                                <Smartphone className="w-2.5 h-2.5" />
-                                                {isFree && <Lock className="w-2 h-2 text-primary" />}
-                                            </>
-                                        )}
-                                        {tab === 'iterations' && <span style={{ fontSize: 9 }}>🔁</span>}
-                                        {tab === 'assets'     && <Sparkles className="w-2.5 h-2.5" />}
-                                        {tab === 'audio'      && <span style={{ fontSize: 9 }}>🎤</span>}
-                                        {tab === 'transform'  && <Move     className="w-2.5 h-2.5" />}
-                                        {tab === 'settings'   && <Settings className="w-2.5 h-2.5" />}
-                                        {t(`ideLayout.tabs.${tab}`)}
-                                    </button>
-                                ))}
+                        {/* R108 — the horizontal strip is now the MOBILE switcher only.
+                            On desktop it is replaced by PanelRail above: eleven
+                            panels in a scrolling strip meant five sat past the
+                            fold behind a 3px chevron. In the bottom sheet the
+                            strip is right, because the sheet is already the full
+                            width of the screen and a rail would cost it a column. */}
+                        {isMobile && (
+                            <div className="relative border-b" style={{ borderColor: "var(--line-soft)" }}>
+                                <div ref={tabBarRef} className="p-2 flex gap-1 overflow-x-auto no-scrollbar">
+                                    {['media', 'captions', 'transcript', 'color', 'motion', 'shorts', 'iterations', 'assets', 'audio', 'transform', 'settings'].map(tab => (
+                                        <button
+                                            key={tab}
+                                            // R105 anchors: the tour points at `tab-shorts`, hints at
+                                            // `tab-captions`. Every tab carries one so a new hint needs
+                                            // no markup change here, only an entry in HINTS.
+                                            data-tour={`tab-${tab}`}
+                                            data-hint={`tab-${tab}`}
+                                            onClick={() => {
+                                                if (tab === 'shorts' && isFree) {
+                                                    EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
+                                                        reason: 'paid_feature',
+                                                        message: t('shortsPanel.lockedMessage', 'AI Shorts repurposing is available on Creator and Pro plans.'),
+                                                        upgradeRequired: 'creator',
+                                                    });
+                                                }
+                                                if (tab === 'assets') setAssetInitialTab('sfx');
+                                                setActiveTab(tab);
+                                            }}
+                                            className={classNames("studio-tab-btn", activeTab === tab && "active")}
+                                        >
+                                            {tab === 'media'      && <Layers   className="w-2.5 h-2.5" />}
+                                            {tab === 'captions'   && <Type     className="w-2.5 h-2.5" />}
+                                            {tab === 'transcript' && <span style={{ fontSize: 9 }}>📝</span>}
+                                            {tab === 'color'      && <Palette  className="w-2.5 h-2.5" />}
+                                            {tab === 'motion'     && <Zap      className="w-2.5 h-2.5" />}
+                                            {tab === 'shorts'     && (
+                                                <>
+                                                    <Smartphone className="w-2.5 h-2.5" />
+                                                    {isFree && <Lock className="w-2 h-2 text-primary" />}
+                                                </>
+                                            )}
+                                            {tab === 'iterations' && <span style={{ fontSize: 9 }}>🔁</span>}
+                                            {tab === 'assets'     && <Sparkles className="w-2.5 h-2.5" />}
+                                            {tab === 'audio'      && <span style={{ fontSize: 9 }}>🎤</span>}
+                                            {tab === 'transform'  && <Move     className="w-2.5 h-2.5" />}
+                                            {tab === 'settings'   && <Settings className="w-2.5 h-2.5" />}
+                                            {t(`ideLayout.tabs.${tab}`)}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {/* Left scroll fade + arrow — only visible when scrolled away from the start */}
+                                {tabScroll.left && (
+                                    <>
+                                        <div
+                                            className="pointer-events-none absolute inset-y-0 left-0 w-6"
+                                            style={{ background: "linear-gradient(90deg, var(--bg-2, #111), transparent)" }}
+                                        />
+                                        <button
+                                            onClick={() => scrollTabBar(-1)}
+                                            className="absolute left-0 top-0 bottom-0 flex items-center justify-center w-5"
+                                            style={{ color: "var(--fg-3)" }}
+                                            aria-label={t('ideLayout.scrollTabsLeft')}
+                                        >
+                                            <ChevronLeft className="w-3 h-3" />
+                                        </button>
+                                    </>
+                                )}
+
+                                {/* Right scroll fade + arrow — only visible when more tabs overflow to the right */}
+                                {tabScroll.right && (
+                                    <>
+                                        <div
+                                            className="pointer-events-none absolute inset-y-0 right-0 w-6"
+                                            style={{ background: "linear-gradient(270deg, var(--bg-2, #111), transparent)" }}
+                                        />
+                                        <button
+                                            onClick={() => scrollTabBar(1)}
+                                            className="absolute right-0 top-0 bottom-0 flex items-center justify-center w-5"
+                                            style={{ color: "var(--fg-3)" }}
+                                            aria-label={t('ideLayout.scrollTabsRight')}
+                                        >
+                                            <ChevronRight className="w-3 h-3" />
+                                        </button>
+                                    </>
+                                )}
                             </div>
-
-                            {/* Left scroll fade + arrow — only visible when scrolled away from the start */}
-                            {tabScroll.left && (
-                                <>
-                                    <div
-                                        className="pointer-events-none absolute inset-y-0 left-0 w-6"
-                                        style={{ background: "linear-gradient(90deg, var(--bg-2, #111), transparent)" }}
-                                    />
-                                    <button
-                                        onClick={() => scrollTabBar(-1)}
-                                        className="absolute left-0 top-0 bottom-0 flex items-center justify-center w-5"
-                                        style={{ color: "var(--fg-3)" }}
-                                        aria-label={t('ideLayout.scrollTabsLeft')}
-                                    >
-                                        <ChevronLeft className="w-3 h-3" />
-                                    </button>
-                                </>
-                            )}
-
-                            {/* Right scroll fade + arrow — only visible when more tabs overflow to the right */}
-                            {tabScroll.right && (
-                                <>
-                                    <div
-                                        className="pointer-events-none absolute inset-y-0 right-0 w-6"
-                                        style={{ background: "linear-gradient(270deg, var(--bg-2, #111), transparent)" }}
-                                    />
-                                    <button
-                                        onClick={() => scrollTabBar(1)}
-                                        className="absolute right-0 top-0 bottom-0 flex items-center justify-center w-5"
-                                        style={{ color: "var(--fg-3)" }}
-                                        aria-label={t('ideLayout.scrollTabsRight')}
-                                    >
-                                        <ChevronRight className="w-3 h-3" />
-                                    </button>
-                                </>
-                            )}
-                        </div>
+                        )}
 
                         {/* Transcript panel manages its own internal scroll */}
                         {activeTab === 'transcript' && (

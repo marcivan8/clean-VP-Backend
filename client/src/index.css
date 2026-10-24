@@ -1010,3 +1010,133 @@ section { padding: 96px 0; position: relative; }
   border-color: var(--glass-stroke);
   color: var(--fg);
 }
+
+/* ── R108: the desktop panel rail ─────────────────────────────────────────
+ *
+ * A vertical column of icons at the left edge of the workspace, replacing the
+ * horizontally-scrolling tab strip that hid five of eleven panels past the
+ * fold. Desktop only — IDELayout mounts the strip instead on mobile.
+ *
+ * The active item is marked with a ring rather than a fill: a filled square
+ * at this size reads as a button that is pressed, and the rail is a place,
+ * not a control. */
+.panel-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  width: 56px;
+  padding: 10px 0;
+  gap: 10px;
+  /* NOT a scroll container. `overflow: auto` here clips the hover label,
+   * which is absolutely positioned outside the rail's 56px — caught by
+   * rendering it, not by reading it. Eleven items have to fit instead, so
+   * the compact rule below shrinks them on a short window. */
+  overflow: visible;
+  background: linear-gradient(180deg, var(--glass), transparent);
+  border-right: 1px solid var(--line-soft);
+}
+
+.panel-rail-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+/* Pushed to the bottom, and separated: settings is not part of the edit. */
+.panel-rail-footer {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.panel-rail-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  /* --fg-2, not --fg-3: these eleven icons are the only way into most of the
+   * app, and --fg-3 (0.48 alpha) measures under 4.5:1 on the ground — the
+   * same shortfall R103e flagged for eyebrow text. */
+  color: var(--fg-2);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.panel-rail-btn:hover {
+  background: var(--glass-2);
+  color: var(--fg);
+}
+.panel-rail-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* The ring has to be legible at a glance from the far side of the screen:
+ * --glass-stroke (0.08 alpha) is right for a panel edge and invisible as a
+ * selection mark. The color-mix line takes --fg, so it follows the theme on
+ * its own; the rgba above it is the dark-theme fallback for a browser
+ * without color-mix. */
+.panel-rail-btn.active {
+  color: var(--fg);
+  border-color: rgba(237, 234, 227, 0.42);
+  border-color: color-mix(in srgb, var(--fg) 45%, transparent);
+  background: var(--glass-2);
+}
+
+.panel-rail-lock {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 9px;
+  height: 9px;
+  color: var(--accent);
+}
+
+/* The name, shown beside the icon on hover. Pointer-events off so moving
+ * toward it never counts as leaving the button. */
+.panel-rail-label {
+  position: absolute;
+  left: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%) translateX(-4px);
+  padding: 5px 9px;
+  border-radius: 7px;
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--fg);
+  background: var(--bg-2, #16171a);
+  border: 1px solid var(--glass-stroke);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 60;
+}
+.panel-rail-btn:hover .panel-rail-label,
+.panel-rail-btn:focus-visible .panel-rail-label {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+/* Eleven 44px rows plus the footer need ~555px. Below that the rail has to
+ * shrink rather than scroll, because a scroll container would clip the hover
+ * label and a hidden panel icon is the problem this whole rail exists to fix. */
+@media (max-height: 760px) {
+  .panel-rail { padding: 6px 0; gap: 6px; width: 52px; }
+  .panel-rail-group { gap: 2px; }
+  .panel-rail-footer { padding-top: 6px; }
+  .panel-rail-btn { width: 36px; height: 36px; border-radius: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-rail-btn,
+  .panel-rail-label { transition: none; }
+}

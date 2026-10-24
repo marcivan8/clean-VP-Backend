@@ -173,12 +173,16 @@ await check('every hint points at an anchor that exists in the markup', () => {
         'client/src/layouts/IDELayout.jsx',
         'client/src/components/Assistant/ReasoningPanel.jsx',
         'client/src/components/Assistant/EditingStylePicker.jsx',
+        // R108 — the desktop panel switcher moved here, and took the tab
+        // anchors with it.
+        'client/src/components/PanelRail.jsx',
     ].map(read).join('\n');
 
     const missing = anchors.filter(a => {
         if (markup.includes(`data-hint="${a}"`)) return false;
-        // Tab anchors are generated: data-hint={`tab-${tab}`}
-        if (/^tab-/.test(a) && markup.includes('data-hint={`tab-${tab}`}')) return false;
+        // Tab anchors are generated, in both switchers: the mobile strip
+        // writes data-hint={`tab-${tab}`}, the desktop rail data-hint={`tab-${id}`}.
+        if (/^tab-/.test(a) && /data-hint=\{`tab-\$\{(tab|id)\}`\}/.test(markup)) return false;
         return true;
     });
     assert.deepEqual(missing, [], `hints point at anchors nothing renders: ${missing.join(', ')}`);

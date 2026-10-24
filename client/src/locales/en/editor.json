@@ -109,6 +109,7 @@
       "paste": "Paste",
       "delete": "Delete"
     },
+    "panelsRail": "Panels",
     "tabs": {
       "media": "media",
       "captions": "captions",
@@ -254,7 +255,9 @@
     "addFilterCinematic": "Add Filter (Cinematic)",
     "aspectRatio": "Aspect Ratio",
     "playbackSpeed": "Playback Speed",
-    "beatN": "Beat {{n}}"
+    "beatN": "Beat {{n}}",
+    "stepBack": "Previous frame (←)",
+    "stepForward": "Next frame (→)"
   },
   "effects": {
     "searchEffects": "Search effects...",
@@ -1103,6 +1106,10 @@
     "before_export": {
       "title": "Before you export",
       "body": "Pro Finish adds the hook title, caption emphasis and sound design in one pass. Worth a click first."
+    },
+    "panel_collapsed": {
+      "title": "The panel is tucked away",
+      "body": "Your tools are still here. Click any icon to bring the panel back, or the same icon again to hide it."
     }
   }
 }

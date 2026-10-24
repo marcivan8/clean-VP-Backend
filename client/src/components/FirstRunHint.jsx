@@ -69,6 +69,9 @@ export const HINTS = Object.freeze({
     auto_available: { anchor: 'style-picker',    placement: 'top', plan: 'creator' },
     shorts_ready:   { anchor: 'tab-shorts',      placement: 'right', plan: 'creator' },
     before_export:  { anchor: 'export-button',   placement: 'bottom' },
+    // R108 — collapsing the panel leaves the rail and nothing else, and the
+    // active icon only loses its ring. Said once, the first time it happens.
+    panel_collapsed: { anchor: 'panel-rail',    placement: 'right' },
 });
 
 /**

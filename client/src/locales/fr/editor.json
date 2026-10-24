@@ -109,6 +109,7 @@
       "paste": "Coller",
       "delete": "Supprimer"
     },
+    "panelsRail": "Panneaux",
     "tabs": {
       "media": "médias",
       "captions": "sous-titres",
@@ -254,7 +255,9 @@
     "addFilterCinematic": "Ajouter un filtre (cinématique)",
     "aspectRatio": "Format d'image",
     "playbackSpeed": "Vitesse de lecture",
-    "beatN": "Temps {{n}}"
+    "beatN": "Temps {{n}}",
+    "stepBack": "Image précédente (←)",
+    "stepForward": "Image suivante (→)"
   },
   "effects": {
     "searchEffects": "Rechercher des effets...",
@@ -1103,6 +1106,10 @@
     "before_export": {
       "title": "Avant d'exporter",
       "body": "Pro Finish ajoute le titre d'accroche, l'emphase des sous-titres et le sound design d'un coup. À essayer avant."
+    },
+    "panel_collapsed": {
+      "title": "Le panneau est replié",
+      "body": "Vos outils sont toujours là. Cliquez sur une icône pour le rouvrir, ou sur la même icône pour le replier."
     }
   }
 }

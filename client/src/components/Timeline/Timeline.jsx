@@ -5,7 +5,7 @@ import Track from './Track';
 import useTimelineStore from '../../store/useTimelineStore';
 import useDeviceType from '../../hooks/useDeviceType';
 import { TRANSITION_TYPES, TRANSITION_DEFAULT_DURATION } from '../../motion/TransitionFX.js';
-import { Scissors, ZoomIn, ZoomOut, Copy, Type, Palette, Undo2, Redo2, ChevronsRight, Magnet } from 'lucide-react';
+import { Scissors, ZoomIn, ZoomOut, Copy, Type, Palette, Undo2, Redo2, ChevronsRight, Magnet, ChevronLeft, ChevronRight } from 'lucide-react';
 
 const RULER_H    = 24;   // h-6 = 24px (ruler height)
 const LABEL_W         = 128; // w-32 = 128px (track label column) — desktop
@@ -265,6 +265,12 @@ const Timeline = () => {
     // useLayoutEffect (not useEffect) so the first position is painted
     // synchronously, with no one-frame flash at mount while waiting for the
     // first requestAnimationFrame callback.
+    // R108 — the last time this loop drew, so the view only follows the
+    // playhead when the playhead actually MOVED. Without that test, every
+    // frame would rewrite scrollLeft and the user could never scroll away
+    // from the playhead to look at another part of the timeline.
+    const lastDrawnTimeRef = React.useRef(null);
+
     React.useLayoutEffect(() => {
         let rafId;
         const updatePlayhead = () => {
@@ -287,6 +293,34 @@ const Timeline = () => {
             if (playheadHandleRef.current && !isNaN(px)) {
                 playheadHandleRef.current.style.left = `${px}px`;
             }
+
+            // R108 — keep the playhead in view.
+            //
+            // The position above is written in CONTENT coordinates, inside a
+            // container that scrolls. Nothing ever scrolled it, so once the
+            // playhead passed the right edge it simply left the screen: during
+            // playback it vanished, and stepping frame by frame past that point
+            // moved a playhead nobody could see. The frame-step shortcut was
+            // not broken — the view just never followed it.
+            //
+            // Only on a real move, so a user who scrolls away while paused is
+            // left alone. No smooth scrolling: this runs every frame during
+            // playback, and an animated scroll would lag a frame behind itself.
+            const area = tracksAreaRef.current;
+            const moved = lastDrawnTimeRef.current === null || Math.abs(time - lastDrawnTimeRef.current) > 1e-6;
+            if (area && moved && !isNaN(px)) {
+                const contentX = labelWRef.current + px;
+                const view = area.clientWidth;
+                // A margin, so the playhead is never pinned to the very edge
+                // with no sight of what it is about to reach.
+                const margin = Math.min(140, Math.max(48, view * 0.12));
+                if (contentX < area.scrollLeft + margin) {
+                    area.scrollLeft = Math.max(0, contentX - margin);
+                } else if (contentX > area.scrollLeft + view - margin) {
+                    area.scrollLeft = contentX - view + margin;
+                }
+            }
+            lastDrawnTimeRef.current = time;
 
             rafId = requestAnimationFrame(updatePlayhead);
         };
@@ -405,6 +439,30 @@ const Timeline = () => {
             >
                 <div className="flex items-center gap-4 shrink-0">
                     <span ref={timeDisplayRef} className="text-xs w-16 text-center studio-mono-label shrink-0" style={{ color: "var(--accent)" }}>0.00s</span>
+
+                    {/* R108 — frame step. The ←/→ shortcut existed and nothing
+                        on screen said so, which is the same reason the panel
+                        tabs went unnoticed: a feature nobody can see is a
+                        feature nobody has. The tooltip names the key. */}
+                    <div className="flex items-center shrink-0">
+                        <button
+                            className="p-1 rounded group transition-colors hover:bg-white/5"
+                            title={t('timeline.stepBack')}
+                            aria-label={t('timeline.stepBack')}
+                            onClick={() => useTimelineStore.getState().stepFrames(-1)}
+                        >
+                            <ChevronLeft className="w-3 h-3 text-muted-foreground group-hover:text-primary" />
+                        </button>
+                        <button
+                            className="p-1 rounded group transition-colors hover:bg-white/5"
+                            title={t('timeline.stepForward')}
+                            aria-label={t('timeline.stepForward')}
+                            onClick={() => useTimelineStore.getState().stepFrames(1)}
+                        >
+                            <ChevronRight className="w-3 h-3 text-muted-foreground group-hover:text-primary" />
+                        </button>
+                    </div>
+
                     <div className="h-4 w-px mx-2" style={{ background: "var(--line-soft)" }}></div>
                     {/* Undo / Redo */}
                     <button
