@@ -4,5 +4,21 @@
 # so COPY . . would bake all 303MB into the image).
 Social SFX Pack - Collection 1/
 .git
+.gitignore
+.DS_Store
+*.log
+.env*
+.claude
+.agents
+
 ML_Dataset/
 ML_Models/
+_to_delete/
+Claude outputs/
+Vibed Design System/
+vibed-design-extracted/
+*.zip
+silent_video.mp4
+output.mp4
+tests/
+
