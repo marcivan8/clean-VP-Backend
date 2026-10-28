@@ -26,7 +26,7 @@
 import React, { useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, RotateCcw, Diamond } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 
 import useTimelineStore from '../store/useTimelineStore';
 import { MOTION_PRESETS, PRESET_GROUPS } from '../motion/MotionPresets.js';
@@ -38,6 +38,7 @@ import {
     CUSTOM_ANIMATION_ID,
 } from '../motion/KeyframeBridge.js';
 import KeyframeEditor from './Effects/KeyframeEditor.jsx';
+import { PanelSection } from './ui/PanelControls.jsx';
 import TemplatePanel from './TemplatePanel.jsx';
 import StyleRecipePanel from './StyleRecipePanel.jsx';
 import MotionDirectorPanel from './MotionDirectorPanel.jsx';
@@ -196,74 +197,92 @@ export default function MotionPanel() {
             {/* R92: free background removal for video clips */}
             {trackType === 'video' && <BackgroundPanel clip={clip} trackId={trackId} />}
 
-            {/* Presets — grouped by what the selected layer actually is */}
-            {presetIds.map(({ group, ids }) => (
-                <div key={group} className="mb-4">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
-                        {t(`motionPanel.group.${group}`)}
-                    </div>
-                    <div className="grid grid-cols-2 gap-1.5">
+            {/* R118 - preset groups are collapsible sections on the shared kit
+                (components/ui/PanelControls.jsx), and each is a radiogroup:
+                one preset is active at a time, so a row of plain buttons
+                announced nothing about which. The status line and Clear moved
+                into the FIRST group's header, where the thing being cleared
+                is in view. */}
+            {presetIds.map(({ group, ids }, groupIndex) => (
+                <PanelSection
+                    key={group}
+                    title={t(`motionPanel.group.${group}`)}
+                    collapsible
+                    onReset={groupIndex === 0 && (isCustom || activePresetId) ? handleClear : null}
+                    resetLabel={t('motionPanel.clear')}
+                    right={groupIndex === 0 ? (
+                        <span style={{
+                            maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap', fontFamily: 'var(--f-sans)', fontSize: 10,
+                            color: (isCustom || activePresetId) ? 'var(--accent)' : 'var(--fg-4)',
+                        }}>
+                            {isCustom
+                                ? t('motionPanel.customKeyframes')
+                                : activePresetId
+                                    ? t('motionPanel.usingPreset', { name: MOTION_PRESETS[activePresetId]?.label || activePresetId })
+                                    : t('motionPanel.noAnimation')}
+                        </span>
+                    ) : null}
+                >
+                    <div
+                        role="radiogroup"
+                        aria-label={t(`motionPanel.group.${group}`)}
+                        style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}
+                    >
                         {ids.map(id => {
                             const active = activePresetId === id;
                             return (
                                 <button
                                     key={id}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={active}
                                     onClick={() => handleApplyPreset(id)}
-                                    className={`px-2 py-1.5 rounded text-[11px] text-left transition-colors border ${
-                                        active
-                                            ? 'bg-primary/15 border-primary/40 text-primary'
-                                            : 'bg-secondary border-transparent hover:bg-white/10 text-foreground'
-                                    }`}
+                                    title={MOTION_PRESETS[id]?.label || id}
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: 5,
+                                        height: 28, padding: '0 8px', cursor: 'pointer',
+                                        borderRadius: 'var(--r-xs)', textAlign: 'left',
+                                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                        fontFamily: 'var(--f-sans)', fontSize: 11,
+                                        fontWeight: active ? 600 : 500,
+                                        border: `0.5px solid ${active ? 'var(--accent)' : 'var(--line)'}`,
+                                        background: active ? 'var(--accent-soft)' : 'var(--glass)',
+                                        color: active ? 'var(--accent)' : 'var(--fg-2)',
+                                        transition: 'background 0.12s, color 0.12s, border-color 0.12s',
+                                    }}
                                 >
-                                    <Sparkles className="w-2.5 h-2.5 inline mr-1 opacity-70" />
-                                    {MOTION_PRESETS[id]?.label || id}
+                                    <Sparkles className="w-2.5 h-2.5 shrink-0" style={{ opacity: 0.7 }} />
+                                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                        {MOTION_PRESETS[id]?.label || id}
+                                    </span>
                                 </button>
                             );
                         })}
                     </div>
-                </div>
+                </PanelSection>
             ))}
-
-            {/* Status + clear */}
-            <div className="flex items-center justify-between gap-2 mb-4">
-                <span className="text-[10px] text-muted-foreground truncate">
-                    {isCustom
-                        ? t('motionPanel.customKeyframes')
-                        : activePresetId
-                            ? t('motionPanel.usingPreset', { name: MOTION_PRESETS[activePresetId]?.label || activePresetId })
-                            : t('motionPanel.noAnimation')}
-                </span>
-                {(isCustom || activePresetId) && (
-                    <button
-                        onClick={handleClear}
-                        className="shrink-0 px-2 py-1 text-[10px] bg-secondary hover:bg-white/10 rounded text-muted-foreground transition-colors flex items-center gap-1"
-                    >
-                        <RotateCcw className="w-2.5 h-2.5" /> {t('motionPanel.clear')}
-                    </button>
-                )}
-            </div>
 
             {/* Hand-authored keyframes.
                 Values are OFFSETS and MULTIPLIERS against the clip's own
                 transform, because that is how the resolver composes them —
                 showing an absolute that silently behaves as an offset would be
                 worse than showing the truth. */}
-            <div className="pt-3 border-t border-border">
-                <div className="flex items-center gap-1.5 mb-2">
-                    <Diamond className="w-2.5 h-2.5 text-primary" />
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                        {t('motionPanel.keyframes')}
-                    </div>
-                </div>
-
+            <PanelSection title={t('motionPanel.keyframes')} collapsible>
                 {unanimatedParams.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mb-3">
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                         {unanimatedParams.map(param => (
                             <button
                                 key={param}
+                                type="button"
                                 onClick={() => handleStartAnimating(param)}
-                                className="px-1.5 py-1 text-[10px] rounded bg-secondary hover:bg-white/10 text-muted-foreground transition-colors"
                                 title={t('motionPanel.startAnimating', { param: t(`motionPanel.param.${param}`) })}
+                                style={{
+                                    height: 24, padding: '0 8px', cursor: 'pointer',
+                                    borderRadius: 'var(--r-xs)',
+                                    border: '0.5px solid var(--line)', background: 'var(--glass)',
+                                    color: 'var(--fg-3)', fontFamily: 'var(--f-sans)', fontSize: 10.5,
+                                }}
                             >
                                 + {t(`motionPanel.param.${param}`)}
                             </button>
@@ -282,7 +301,7 @@ export default function MotionPanel() {
                         onRemoveKeyframe={handleRemoveKeyframe}
                     />
                 )}
-            </div>
+            </PanelSection>
         </section>
     );
 }

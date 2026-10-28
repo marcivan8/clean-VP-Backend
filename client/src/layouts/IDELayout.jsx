@@ -39,6 +39,7 @@ import InterviewEditPanel from '../components/InterviewEditPanel';
 import MotionPanel from '../components/MotionPanel';
 import ABTestPanel from '../components/ABTestPanel.jsx';
 import TransformPanel from '../components/TransformPanel';
+import { PanelSection, ControlRow, TrackSlider } from '../components/ui/PanelControls.jsx';
 import ShortsPanel from '../components/ShortsPanel'; // R92 round B: repurposed shorts
 import SnapGuidesLayer from '../components/Player/SnapGuidesLayer.jsx'; // R92 round C
 import ShortPreviewBar from '../components/Player/ShortPreviewBar.jsx'; // R93
@@ -456,6 +457,23 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             backendUrl: window.location.origin
         };
     }, [deferredTracks, duration, aspectRatio, assets, toProxyUrl]);
+
+    // R118 - the Colour panel's Reset is live only when something differs from
+    // the neutral grade, so a header offering to undo nothing is never shown.
+    // `_lutId`/`_lutName`/`_manuallyAdjusted` are bookkeeping, not grade, so
+    // they are not part of the comparison — otherwise a clip a LUT merely
+    // TOUCHED would read as adjusted forever.
+    const GRADING_NEUTRAL = { brightness: 100, contrast: 100, saturate: 100, hueRotate: 0 };
+    const gradingIsDefault = Object.entries(GRADING_NEUTRAL)
+        .every(([k, v]) => (activeClip?.grading?.[k] ?? v) === v);
+
+    const handleGradingReset = () => {
+        if (!activeClip || !activeTrackId) return;
+        updateClip(activeTrackId, activeClip.id, {
+            grading: { ...GRADING_NEUTRAL },
+            filter: 'none',
+        });
+    };
 
     const handleGradingChange = (key, value) => {
         if (!activeClip || !activeTrackId) return;
@@ -2429,28 +2447,45 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                                         )}
                                                     </div>
                                                 )}
-                                                {[
-                                                    { key: 'brightness', label: t('ideLayout.colorGrading.brightness'), min: 0, max: 200, unit: '%' },
-                                                    { key: 'contrast', label: t('ideLayout.colorGrading.contrast'), min: 0, max: 200, unit: '%' },
-                                                    { key: 'saturate', label: t('ideLayout.colorGrading.saturation'), min: 0, max: 200, unit: '%' },
-                                                    // -180..180, not 0..360: lutToGrading (AssetPanel.jsx) can produce
-                                                    // a NEGATIVE hueRotate from a LUT's warmth column. A 0-based range
-                                                    // can't represent that — the thumb clamped to 0 while the number
-                                                    // beside it kept showing the true negative value, and the first
-                                                    // drag would jump the clip's hue instead of nudging it.
-                                                    { key: 'hueRotate', label: t('ideLayout.colorGrading.hueRotate'), min: -180, max: 180, unit: '°' },
-                                                ].map(({ key, label, min, max, unit }) => (
-                                                    <div key={key} className="space-y-2">
-                                                        <div className="flex justify-between text-xs">
-                                                            <span>{label}</span>
-                                                            <span className="text-muted-foreground">{(activeClip.grading?.[key] ?? (key === 'hueRotate' ? 0 : 100))}{unit}</span>
-                                                        </div>
-                                                        <input type="range" min={min} max={max} value={activeClip.grading?.[key] ?? (key === 'hueRotate' ? 0 : 100)} onChange={(e) => handleGradingChange(key, parseInt(e.target.value))} className="w-full accent-primary h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer" />
-                                                    </div>
-                                                ))}
-                                                <div className="pt-4 border-t border-border">
-                                                    <button onClick={() => updateClip(activeTrackId, activeClip.id, { grading: { brightness: 100, contrast: 100, saturate: 100, hueRotate: 0 }, filter: 'none' })} className="w-full py-1.5 text-xs bg-secondary hover:bg-white/10 rounded text-muted-foreground transition-colors">{t('ideLayout.colorGrading.reset')}</button>
-                                                </div>
+                                                {/* R118 - on the shared panel kit
+                                                    (components/ui/PanelControls.jsx), like every
+                                                    other control panel. Two things came with it:
+                                                    a typed numeric box beside each slider, because
+                                                    dragging to exactly 112% is not realistic, and
+                                                    a colour ramp under the sliders where one says
+                                                    something - a saturation bar that is plain grey
+                                                    does not tell you which way is more. */}
+                                                <PanelSection
+                                                    title={t('ideLayout.colorGrading.tone', 'Tone & colour')}
+                                                    onReset={gradingIsDefault ? null : handleGradingReset}
+                                                    resetLabel={t('ideLayout.colorGrading.reset')}
+                                                >
+                                                    {[
+                                                        { key: 'brightness', label: t('ideLayout.colorGrading.brightness'), min: 0, max: 200, unit: '%', tint: ['#1b1b1b', '#f5f5f5'] },
+                                                        { key: 'contrast', label: t('ideLayout.colorGrading.contrast'), min: 0, max: 200, unit: '%', tint: null },
+                                                        { key: 'saturate', label: t('ideLayout.colorGrading.saturation'), min: 0, max: 200, unit: '%', tint: ['#9E9E9E', '#FF4081'] },
+                                                        // -180..180, not 0..360: lutToGrading (AssetPanel.jsx) can produce
+                                                        // a NEGATIVE hueRotate from a LUT's warmth column. A 0-based range
+                                                        // can't represent that — the thumb clamped to 0 while the number
+                                                        // beside it kept showing the true negative value, and the first
+                                                        // drag would jump the clip's hue instead of nudging it.
+                                                        { key: 'hueRotate', label: t('ideLayout.colorGrading.hueRotate'), min: -180, max: 180, unit: '°', tint: ['#FF5252', '#FFD740', '#69F0AE', '#40C4FF', '#7C4DFF', '#FF5252'] },
+                                                    ].map(({ key, label, min, max, unit, tint }) => (
+                                                        <ControlRow key={key} label={label} labelWidth={72}>
+                                                            <TrackSlider
+                                                                ariaLabel={label}
+                                                                value={activeClip.grading?.[key] ?? (key === 'hueRotate' ? 0 : 100)}
+                                                                min={min}
+                                                                max={max}
+                                                                step={1}
+                                                                unit={unit}
+                                                                tint={tint}
+                                                                scrub
+                                                                onChange={(v) => handleGradingChange(key, Math.round(v))}
+                                                            />
+                                                        </ControlRow>
+                                                    ))}
+                                                </PanelSection>
                                             </>
                                         )}
                                     </div>

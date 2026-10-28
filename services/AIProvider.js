@@ -172,6 +172,54 @@ function resolveProvider(opts = {}) {
 }
 
 /**
+ * The provider that will ACTUALLY serve a capability.
+ *
+ * `resolveProvider` answers "what did the env ask for". This answers "what
+ * will happen", by also applying the CAPABILITY_PROVIDERS fallback — a
+ * provider that cannot serve the capability is replaced by openai.
+ *
+ * The two must be asked the same question or the client and the model name
+ * come from DIFFERENT providers, and the call goes out as (say) a Gemini
+ * model name to Groq's endpoint. That is not a theoretical risk: it is
+ * exactly what `AI_PROVIDER=groq` + `AI_VISION_PROVIDER=gemini` did to every
+ * vision call in routes/interviewRoutes.js, which asked `getAIClient()` for a
+ * CHAT client and `resolveModel(..., 'vision')` for a VISION model.
+ *
+ * @param {Object} [opts]
+ * @param {string} [opts.capability]
+ * @param {Object} [opts.env]
+ * @returns {string} one of VALID_PROVIDERS
+ */
+function effectiveProvider(opts = {}) {
+    const capability = opts.capability || 'chat';
+    const requested = opts.provider || resolveProvider(opts);
+    if (requested === 'mock') return 'mock';
+    const allowed = CAPABILITY_PROVIDERS[capability] || CAPABILITY_PROVIDERS.chat;
+    return allowed.includes(requested) ? requested : 'openai';
+}
+
+/**
+ * The client AND the model for one capability, resolved together.
+ *
+ * Prefer this over calling `getAIClient` and `resolveModel` separately: it is
+ * impossible to get a client from one provider and a model name from another,
+ * which is the one mistake this module makes easy and expensive.
+ *
+ * @param {string} capability      - 'chat' | 'vision' | 'motion' | 'audio' | 'embeddings'
+ * @param {string} requestedModel  - the OpenAI model name the call site wants
+ * @param {Object} [opts]          - passed through to getAIClient (timeout, maxRetries)
+ * @returns {{ client: Object|null, model: string, provider: string }}
+ */
+function getAIFor(capability, requestedModel, opts = {}) {
+    const provider = effectiveProvider({ capability });
+    return {
+        client: getAIClient({ ...opts, capability, provider }),
+        model: resolveModel(requestedModel, { capability, provider }),
+        provider,
+    };
+}
+
+/**
  * Build (or return a cached) OpenAI-compatible client.
  *
  * @param {Object}  [opts]
@@ -183,19 +231,19 @@ function resolveProvider(opts = {}) {
 function getAIClient(opts = {}) {
     const { timeout, maxRetries, capability = 'chat', provider: overrideProvider } = opts;
     const env = process.env;
-    let provider = overrideProvider || resolveProvider({ capability });
+    const requested = overrideProvider || resolveProvider({ capability });
 
     // A provider that cannot serve this capability at all falls back to the
     // real openai client — see CAPABILITY_PROVIDERS above for the full matrix
     // (audio never reaches ollama/gemini, vision never reaches groq,
-    // embeddings never reach anything but openai).
-    const allowed = CAPABILITY_PROVIDERS[capability] || CAPABILITY_PROVIDERS.chat;
-    if (provider !== 'mock' && !allowed.includes(provider)) {
+    // embeddings never reach anything but openai). `effectiveProvider` is the
+    // ONE place that rule lives, so resolveModel below reaches the same answer.
+    const provider = effectiveProvider({ capability, provider: requested });
+    if (provider !== requested) {
         console.warn(
-            `[AIProvider] capability "${capability}" cannot be served by ${provider} — ` +
+            `[AIProvider] capability "${capability}" cannot be served by ${requested} — ` +
             'using the real OpenAI API for this call.'
         );
-        provider = 'openai';
     }
 
     if (provider === 'mock') {
@@ -285,7 +333,10 @@ function resolveModel(requestedModel, capabilityOrOpts) {
         ? capabilityOrOpts
         : { capability: capabilityOrOpts };
     const capability = opts.capability;
-    const provider = opts.provider || resolveProvider({ capability });
+    // effectiveProvider, not resolveProvider: a model name for a provider that
+    // cannot serve this capability would be sent to the openai client the
+    // fallback hands back.
+    const provider = opts.provider || effectiveProvider({ capability });
     if (provider === 'openai') return requestedModel;
 
     if (provider === 'gemma-local') {
@@ -326,6 +377,18 @@ function resolveModel(requestedModel, capabilityOrOpts) {
     }
 
     if (provider === 'gemini') {
+        // Per capability, like groq and ollama above. gemini-3.8-flash is
+        // multimodal, so one model CAN serve chat, motion and vision — but
+        // pinning vision to its own variable is what lets the vision model be
+        // changed (or held back on a known-good version) without moving every
+        // other call off it. It is also the model Google's own
+        // OpenAI-compatibility docs use for the image example.
+        if (capability === 'vision') {
+            return process.env.GEMINI_VISION_MODEL || process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+        }
+        if (capability === 'motion') {
+            return process.env.GEMINI_MOTION_MODEL || process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+        }
         return process.env.GEMINI_MODEL || 'gemini-3.8-flash';
     }
 
@@ -556,8 +619,10 @@ function describeAIError(err) {
 
 module.exports = {
     getAIClient,
+    getAIFor,
     isAIConfigured,
     resolveProvider,
+    effectiveProvider,
     resolveModel,
     describeAIError,
     mockBodyFor,

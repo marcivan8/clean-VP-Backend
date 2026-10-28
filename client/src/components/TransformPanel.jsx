@@ -26,7 +26,7 @@
  *    - "Keyframe Curves" (visual timeline for curve & timing editing).
  */
 
-import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
 import {
@@ -34,11 +34,8 @@ import {
     ChevronLeft,
     ChevronRight,
     RotateCcw,
-    Sparkles,
-    ChevronDown,
     Layers,
     Move,
-    Maximize2,
     Clock
 } from 'lucide-react';
 
@@ -59,12 +56,56 @@ import {
 } from '../motion/MotionPresets.js';
 import KeyframeEditor from './Effects/KeyframeEditor.jsx';
 import LayoutPresetPicker from './LayoutPresetPicker.jsx';
+import { PanelSection, NumberField, TrackSlider, Segmented } from './ui/PanelControls.jsx';
+import { clampTo } from './ui/panelControls.js';
 
 /**
  * Scrubbable & Directly-Typed Number Input
  * - Drag left/right to scrub smoothly.
  * - Click to type exact number.
  * - Mini track slider below for broad scrubbing.
+ */
+/**
+ * One ◀ / ▶ keyframe stepper. Disabled, not hidden, so the row never reflows
+ * as keyframes are added and removed.
+ *
+ * The icon is chosen from `dir` rather than passed in: this project's eslint
+ * has no `react/jsx-uses-vars`, so a component ARRIVING as a prop and rendered
+ * as JSX is reported as an unused variable. Picking it here keeps the lint
+ * honest instead of silencing it.
+ */
+function StepperBtn({ to, onJump, title, dir }) {
+    return (
+        <button
+            type="button"
+            disabled={!to}
+            onClick={() => onJump(to)}
+            title={title}
+            aria-label={title}
+            style={{
+                display: 'flex', padding: 1, border: 0, background: 'none',
+                cursor: to ? 'pointer' : 'default',
+                color: 'var(--fg-3)', opacity: to ? 1 : 0.2,
+            }}
+        >
+            {dir === 'prev' ? <ChevronLeft className="w-2.5 h-2.5" /> : <ChevronRight className="w-2.5 h-2.5" />}
+        </button>
+    );
+}
+
+/**
+ * One transform property: keyframe diamond, label, scrubbable value, track.
+ *
+ * R118 — rebuilt on the shared panel kit (components/ui/PanelControls.jsx).
+ * What this component used to own and now gets from the kit: the number box,
+ * the drag-to-scrub behaviour (moved INTO `NumberField`, so every numeric
+ * control in the app has it now, not just this panel), the track, and the
+ * label row.
+ *
+ * What stays here, because nothing else in the app has it: the keyframe
+ * diamond and the ◀ ▶ steppers. They are about TIME, not value — the one
+ * piece of state that explains why a property changes mid-clip — so they sit
+ * beside the label rather than being folded into a generic control.
  */
 function ScrubbableField({
     label,
@@ -81,215 +122,107 @@ function ScrubbableField({
     onJumpKf,
     qualityBadge,
 }) {
-    const [isEditing, setIsEditing] = useState(false);
-    const [tempText, setTempText] = useState('');
-    const [isDragging, setIsDragging] = useState(false);
-    const dragRef = useRef({ startX: 0, startVal: 0, didMove: false });
-    const inputRef = useRef(null);
-
-    const displayVal = Number.isFinite(value)
-        ? (value * displayFactor).toFixed(precision)
-        : '0';
-
-    // Focus input on edit start
-    useEffect(() => {
-        if (isEditing && inputRef.current) {
-            inputRef.current.focus();
-            inputRef.current.select();
-        }
-    }, [isEditing]);
-
-    const handlePointerDown = (e) => {
-        if (isEditing) return;
-        // Only primary click
-        if (e.button !== 0) return;
-
-        dragRef.current = {
-            startX: e.clientX,
-            startVal: Number.isFinite(value) ? value : 0,
-            didMove: false,
-        };
-
-        const handlePointerMove = (moveEvent) => {
-            const dx = moveEvent.clientX - dragRef.current.startX;
-            if (Math.abs(dx) > 2) {
-                dragRef.current.didMove = true;
-                setIsDragging(true);
-            }
-
-            if (dragRef.current.didMove) {
-                const multiplier = moveEvent.shiftKey ? 5 : moveEvent.altKey ? 0.2 : 1;
-                const changeAmount = (dx / displayFactor) * step * multiplier * 0.5;
-                const rawNewVal = dragRef.current.startVal + changeAmount;
-                const clamped = Math.max(min, Math.min(max, rawNewVal));
-                onChange(clamped, false);
-            }
-        };
-
-        const handlePointerUp = () => {
-            window.removeEventListener('pointermove', handlePointerMove);
-            window.removeEventListener('pointerup', handlePointerUp);
-            setIsDragging(false);
-
-            if (!dragRef.current.didMove) {
-                // Was just a click -> switch to typing mode
-                setTempText(displayVal);
-                setIsEditing(true);
-            } else {
-                // Finished drag -> commit to history
-                onChange(value, true);
-            }
-        };
-
-        window.addEventListener('pointermove', handlePointerMove);
-        window.addEventListener('pointerup', handlePointerUp);
-    };
-
-    const handleInputCommit = () => {
-        setIsEditing(false);
-        const parsed = parseFloat(tempText);
-        if (!isNaN(parsed)) {
-            const raw = parsed / displayFactor;
-            const clamped = Math.max(min, Math.min(max, raw));
-            onChange(clamped, true);
-        }
-    };
-
-    const handleKeyDown = (e) => {
-        if (e.key === 'Enter') {
-            handleInputCommit();
-        } else if (e.key === 'Escape') {
-            setIsEditing(false);
-        }
-    };
-
-    // Range slider percentage
-    const hasRange = Number.isFinite(min) && Number.isFinite(max) && max > min;
-    const progressPct = hasRange
-        ? Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100))
-        : 50;
-
+    const { t } = useTranslation('editor');
     const isKfAtPlayhead = !!kfState?.atPlayhead;
     const hasAnyKf = !!kfState?.hasAny;
+    const hasRange = Number.isFinite(min) && Number.isFinite(max) && max > min;
+
+    // The store keeps raw values (scale 0..5); the panel shows them in the
+    // unit a person thinks in (100%). The kit works in DISPLAY units, so the
+    // conversion happens at this boundary and nowhere else.
+    const shown = Number.isFinite(value) ? value * displayFactor : 0;
+    const toRaw = (v) => clampTo(v / displayFactor, min, max);
+    const dStep = step * displayFactor;
+    const dMin = hasRange ? min * displayFactor : -Infinity;
+    const dMax = hasRange ? max * displayFactor : Infinity;
 
     return (
-        <div className="flex flex-col gap-1 bg-secondary/30 hover:bg-secondary/45 border border-border/40 rounded-md p-1.5 transition-colors">
-            {/* Header: Label + Keyframe Diamond + Steppers */}
-            <div className="flex items-center justify-between text-[11px]">
-                <div className="flex items-center gap-1">
-                    {/* Keyframe diamond */}
-                    {onToggleKf && (
-                        <button
-                            type="button"
-                            onClick={onToggleKf}
-                            title={isKfAtPlayhead ? 'Remove keyframe' : 'Add keyframe at playhead'}
-                            className={`p-0.5 rounded transition-all ${
-                                isKfAtPlayhead
-                                    ? 'text-primary fill-current scale-110'
-                                    : hasAnyKf
-                                        ? 'text-primary/70 hover:text-primary'
-                                        : 'text-muted-foreground/60 hover:text-foreground'
-                            }`}
-                        >
-                            <Diamond className="w-2.5 h-2.5 fill-current" />
-                        </button>
-                    )}
-
-                    {/* Steppers */}
-                    {hasAnyKf && onJumpKf && (
-                        <div className="flex items-center">
-                            <button
-                                type="button"
-                                disabled={!kfState.prev}
-                                onClick={() => onJumpKf(kfState.prev)}
-                                title="Previous keyframe"
-                                className={`p-0.5 ${kfState.prev ? 'text-muted-foreground hover:text-foreground' : 'opacity-20'}`}
-                            >
-                                <ChevronLeft className="w-2.5 h-2.5" />
-                            </button>
-                            <button
-                                type="button"
-                                disabled={!kfState.next}
-                                onClick={() => onJumpKf(kfState.next)}
-                                title="Next keyframe"
-                                className={`p-0.5 ${kfState.next ? 'text-muted-foreground hover:text-foreground' : 'opacity-20'}`}
-                            >
-                                <ChevronRight className="w-2.5 h-2.5" />
-                            </button>
-                        </div>
-                    )}
-
-                    <span className="font-medium text-muted-foreground select-none">
-                        {label}
+        <div style={{ display: 'grid', gap: 5 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, minHeight: 16 }}>
+                {onToggleKf && (
+                    <button
+                        type="button"
+                        onClick={onToggleKf}
+                        aria-pressed={isKfAtPlayhead}
+                        title={isKfAtPlayhead ? t('transform.kfRemove', 'Remove keyframe') : t('transform.kfAdd', 'Add keyframe at playhead')}
+                        aria-label={isKfAtPlayhead ? t('transform.kfRemove', 'Remove keyframe') : t('transform.kfAdd', 'Add keyframe at playhead')}
+                        style={{
+                            display: 'flex', padding: 1, border: 0, background: 'none', cursor: 'pointer',
+                            color: isKfAtPlayhead ? 'var(--accent)' : hasAnyKf ? 'var(--fg-2)' : 'var(--fg-4)',
+                            transform: isKfAtPlayhead ? 'scale(1.15)' : 'none',
+                            transition: 'color 0.12s, transform 0.12s',
+                        }}
+                    >
+                        <Diamond className="w-2.5 h-2.5" fill="currentColor" />
+                    </button>
+                )}
+                {hasAnyKf && onJumpKf && (
+                    <span style={{ display: 'flex' }}>
+                        <StepperBtn
+                            to={kfState.prev}
+                            onJump={onJumpKf}
+                            title={t('transform.kfPrev', 'Previous keyframe')}
+                            dir="prev"
+                        />
+                        <StepperBtn
+                            to={kfState.next}
+                            onJump={onJumpKf}
+                            title={t('transform.kfNext', 'Next keyframe')}
+                            dir="next"
+                        />
                     </span>
-                </div>
-
-                {/* Quality dot (for scale) */}
+                )}
+                <span style={{
+                    flex: 1, minWidth: 0, fontFamily: 'var(--f-sans)', fontSize: 11,
+                    color: 'var(--fg-3)', userSelect: 'none',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                    {label}
+                </span>
                 {qualityBadge && (
                     <span
-                        className="w-1.5 h-1.5 rounded-full shrink-0"
-                        style={{ background: qualityBadge.color, boxShadow: `0 0 3px ${qualityBadge.color}` }}
                         title={qualityBadge.label}
+                        style={{
+                            width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                            background: qualityBadge.color,
+                            boxShadow: `0 0 3px ${qualityBadge.color}`,
+                        }}
                     />
                 )}
             </div>
 
-            {/* Value box (drag-scrubbable or text editable) */}
-            <div
-                onPointerDown={handlePointerDown}
-                title="Drag left/right to adjust, or click to type"
-                className={`relative flex items-center justify-between h-7 px-2 rounded bg-black/25 border border-border/50 text-xs font-mono select-none ${
-                    isDragging ? 'cursor-ew-resize border-primary ring-1 ring-primary/40' : 'cursor-ew-resize hover:border-border'
-                }`}
-            >
-                {/* Visual fill indicator */}
-                {hasRange && (
-                    <div
-                        className="absolute left-0 top-0 bottom-0 bg-primary/10 rounded-l pointer-events-none"
-                        style={{ width: `${progressPct}%` }}
-                    />
-                )}
-
-                {isEditing ? (
-                    <input
-                        ref={inputRef}
-                        type="text"
-                        value={tempText}
-                        onChange={(e) => setTempText(e.target.value)}
-                        onBlur={handleInputCommit}
-                        onKeyDown={handleKeyDown}
-                        className="w-full bg-transparent text-foreground text-xs font-mono outline-none p-0 m-0 z-10"
-                    />
-                ) : (
-                    <>
-                        <span className="text-foreground font-semibold tracking-tight z-10">
-                            {displayVal}
-                        </span>
-                        <span className="text-muted-foreground text-[10px] ml-1 z-10">
-                            {unit}
-                        </span>
-                    </>
-                )}
-            </div>
-
-            {/* Slim range slider */}
+            {/* The box sits ABOVE the track, not beside it. Four of these share
+                two columns in a ~320px panel: side by side, the slider gets
+                about 85px and stops being draggable with any precision, which
+                is the whole point of having one. Stacked, both are full width. */}
+            <NumberField
+                ariaLabel={label}
+                value={shown}
+                min={dMin}
+                max={dMax}
+                step={dStep}
+                unit={unit}
+                decimals={precision}
+                scrub
+                onChange={(v) => onChange(toRaw(v), false)}
+                onCommit={() => onChange(value, true)}
+            />
             {hasRange && (
-                <input
-                    type="range"
-                    min={min}
-                    max={max}
-                    step={step}
-                    value={Number.isFinite(value) ? value : 0}
-                    onChange={(e) => onChange(parseFloat(e.target.value), false)}
-                    onPointerUp={(e) => onChange(parseFloat(e.target.value), true)}
-                    className="w-full accent-primary h-1 bg-secondary/80 rounded appearance-none cursor-pointer mt-0.5"
+                <TrackSlider
+                    ariaLabel={label}
+                    value={shown}
+                    min={dMin}
+                    max={dMax}
+                    step={dStep}
+                    box={false}
+                    onChange={(v) => onChange(toRaw(v), false)}
+                    onCommit={(v) => onChange(v === undefined ? value : toRaw(v), true)}
                 />
             )}
         </div>
     );
 }
 
-// 9-point spatial positions
 const QUICK_ALIGN_POINTS = [
     { id: 'tl', label: 'TL', x: 15, y: 15, title: 'Top Left' },
     { id: 'tc', label: 'TC', x: 50, y: 15, title: 'Top Center' },
@@ -304,9 +237,6 @@ const QUICK_ALIGN_POINTS = [
 
 export default function TransformPanel() {
     const { t } = useTranslation('editor');
-    const [showKeyframeTimeline, setShowKeyframeTimeline] = useState(false);
-    const [showPresets, setShowPresets] = useState(false);
-    const [showAlign, setShowAlign] = useState(false);
 
     const {
         tracks,
@@ -648,153 +578,159 @@ export default function TransformPanel() {
                 />
             </div>
 
-            {/* ─── STREAMLINED ALIGN & DEPTH (Expandable Bar) ─── */}
-            <div className="pt-2 border-t border-border/40">
-                <div className="flex items-center justify-between text-xs mb-1.5">
-                    <button
-                        type="button"
-                        onClick={() => setShowAlign(!showAlign)}
-                        className="text-[11px] font-medium text-foreground hover:text-primary flex items-center gap-1 transition-colors"
-                    >
-                        <Move className="w-3 h-3 text-primary" />
-                        Align & Depth
-                        <ChevronDown className={`w-3 h-3 transition-transform ${showAlign ? 'rotate-180' : ''}`} />
-                    </button>
-
-                    {/* Depth toggle pill */}
+            {/* ─── ALIGN & DEPTH ─── */}
+            <PanelSection
+                title={t('transform.alignDepth', 'Align & Depth')}
+                collapsible
+                defaultOpen={false}
+                right={(
                     <button
                         type="button"
                         onClick={handleToggleDepthPlacement}
-                        className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors flex items-center gap-1 border ${
-                            isBehindSubject
-                                ? 'bg-primary/20 border-primary text-primary'
-                                : 'bg-secondary/60 border-border/50 text-muted-foreground hover:text-foreground'
-                        }`}
-                        title="Toggle subject depth (render behind speaker using SAM2)"
+                        aria-pressed={isBehindSubject}
+                        title={t('transform.depthHint', 'Render behind the speaker (SAM2 segmentation)')}
+                        style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            height: 20, padding: '0 7px', borderRadius: 'var(--r-xs)',
+                            cursor: 'pointer', fontFamily: 'var(--f-sans)', fontSize: 10,
+                            border: `0.5px solid ${isBehindSubject ? 'var(--accent)' : 'var(--line)'}`,
+                            background: isBehindSubject ? 'var(--accent-soft)' : 'var(--glass)',
+                            color: isBehindSubject ? 'var(--accent)' : 'var(--fg-3)',
+                        }}
                     >
                         <Layers className="w-2.5 h-2.5" />
-                        {isBehindSubject ? 'Behind Subject' : 'Foreground'}
+                        {isBehindSubject
+                            ? t('transform.behindSubject', 'Behind Subject')
+                            : t('transform.foreground', 'Foreground')}
                     </button>
-                </div>
-
-                {showAlign && (
-                    <div className="flex items-center gap-2 p-2 rounded bg-secondary/25 border border-border/30 mt-1.5">
-                        {/* Compact 3x3 alignment dots */}
-                        <div className="grid grid-cols-3 gap-1 bg-black/30 p-1 rounded border border-border/40 shrink-0">
-                            {QUICK_ALIGN_POINTS.map(pt => {
-                                const isSelected = Math.abs(xVal - pt.x) < 4 && Math.abs(yVal - pt.y) < 4;
-                                return (
-                                    <button
-                                        key={pt.id}
-                                        type="button"
-                                        onClick={() => handleApplyPosition(pt.x, pt.y)}
-                                        title={pt.title}
-                                        className={`w-4 h-4 rounded text-[8px] font-mono flex items-center justify-center transition-all ${
-                                            isSelected
-                                                ? 'bg-primary text-primary-foreground font-bold shadow-sm'
-                                                : 'text-muted-foreground hover:bg-white/10 hover:text-foreground'
-                                        }`}
-                                    >
-                                        {pt.label}
-                                    </button>
-                                );
-                            })}
-                        </div>
-
-                        {/* Quick role pills */}
-                        <div className="grid grid-cols-2 gap-1 flex-1">
-                            {[
-                                { label: 'Center', x: 50, y: 50, scale: 1 },
-                                { label: 'Lower 3rd', x: 50, y: 82, scale: null },
-                                { label: 'Headline', x: 50, y: 18, scale: null },
-                                { label: 'PiP', x: 82, y: 22, scale: 0.35 },
-                            ].map(role => (
-                                <button
-                                    key={role.label}
-                                    type="button"
-                                    onClick={() => handleApplyPosition(role.x, role.y, role.scale)}
-                                    className="px-2 py-1 rounded bg-secondary/50 hover:bg-white/10 text-[10px] text-foreground text-center border border-border/30 transition-colors"
-                                >
-                                    {role.label}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
                 )}
-            </div>
-
-            {/* ─── COLLAPSIBLE MOTION PRESETS DRAWER ─── */}
-            <div className="pt-2 border-t border-border/40">
-                <div className="flex items-center justify-between text-xs">
-                    <button
-                        type="button"
-                        onClick={() => setShowPresets(!showPresets)}
-                        className="text-[11px] font-medium text-foreground hover:text-primary flex items-center gap-1 transition-colors"
+            >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    {/* 9-point anchor. A real radiogroup: one tab stop, arrows
+                        inside it, and the selected anchor announced. */}
+                    <div
+                        role="radiogroup"
+                        aria-label={t('transform.anchor', 'Anchor')}
+                        style={{
+                            display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2,
+                            padding: 3, flexShrink: 0, borderRadius: 'var(--r-xs)',
+                            background: 'var(--glass)', border: '0.5px solid var(--line)',
+                        }}
                     >
-                        <Sparkles className="w-3 h-3 text-primary" />
-                        Motion Presets
-                        <ChevronDown className={`w-3 h-3 transition-transform ${showPresets ? 'rotate-180' : ''}`} />
-                    </button>
-
-                    {activePresetId && (
-                        <div className="flex items-center gap-1">
-                            <span className="text-[10px] text-primary truncate max-w-[100px]">
-                                {MOTION_PRESETS[activePresetId]?.label || activePresetId}
-                            </span>
-                            <button
-                                type="button"
-                                onClick={handleClearAnimations}
-                                title="Clear animation"
-                                className="p-0.5 text-muted-foreground hover:text-foreground"
-                            >
-                                <RotateCcw className="w-2.5 h-2.5" />
-                            </button>
-                        </div>
-                    )}
-                </div>
-
-                {showPresets && (
-                    <div className="pt-2 space-y-1.5">
-                        <div className="grid grid-cols-3 gap-1">
-                            {availablePresets.slice(0, 9).map(presetId => {
-                                const preset = MOTION_PRESETS[presetId];
-                                const isActive = activePresetId === presetId;
-                                return (
-                                    <button
-                                        key={presetId}
-                                        type="button"
-                                        onClick={() => handleApplyPreset(presetId)}
-                                        className={`px-1.5 py-1 rounded text-[10px] truncate text-center transition-all border ${
-                                            isActive
-                                                ? 'bg-primary/20 border-primary text-primary font-semibold'
-                                                : 'bg-secondary/40 border-border/30 hover:bg-white/10 text-foreground'
-                                        }`}
-                                    >
-                                        {preset?.label || presetId}
-                                    </button>
-                                );
-                            })}
-                        </div>
+                        {QUICK_ALIGN_POINTS.map(pt => {
+                            const isSelected = Math.abs(xVal - pt.x) < 4 && Math.abs(yVal - pt.y) < 4;
+                            return (
+                                <button
+                                    key={pt.id}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={isSelected}
+                                    onClick={() => handleApplyPosition(pt.x, pt.y)}
+                                    title={pt.title}
+                                    style={{
+                                        width: 20, height: 20, border: 0, cursor: 'pointer',
+                                        borderRadius: 'calc(var(--r-xs) - 2px)',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontFamily: 'var(--f-mono)', fontSize: 8,
+                                        fontWeight: isSelected ? 700 : 500,
+                                        background: isSelected ? 'var(--accent)' : 'transparent',
+                                        color: isSelected ? '#fff' : 'var(--fg-3)',
+                                        transition: 'background 0.12s, color 0.12s',
+                                    }}
+                                >
+                                    {pt.label}
+                                </button>
+                            );
+                        })}
                     </div>
-                )}
-            </div>
 
-            {/* ─── COLLAPSIBLE KEYFRAME TIMELINE DRAWER ─── */}
-            <div className="pt-2 border-t border-border/40">
-                <button
-                    type="button"
-                    onClick={() => setShowKeyframeTimeline(!showKeyframeTimeline)}
-                    className="text-[11px] font-medium text-foreground hover:text-primary flex items-center justify-between w-full transition-colors"
-                >
-                    <span className="flex items-center gap-1">
-                        <Diamond className="w-3 h-3 text-primary" />
-                        Keyframe Curves & Timeline
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, flex: 1 }}>
+                        {[
+                            { key: 'center',   label: t('transform.roleCenter', 'Center'),     x: 50, y: 50, scale: 1 },
+                            { key: 'lower3rd', label: t('transform.roleLower3rd', 'Lower 3rd'), x: 50, y: 82, scale: null },
+                            { key: 'headline', label: t('transform.roleHeadline', 'Headline'),  x: 50, y: 18, scale: null },
+                            { key: 'pip',      label: t('transform.rolePip', 'PiP'),            x: 82, y: 22, scale: 0.35 },
+                        ].map(role => (
+                            <button
+                                key={role.key}
+                                type="button"
+                                onClick={() => handleApplyPosition(role.x, role.y, role.scale)}
+                                style={{
+                                    height: 26, borderRadius: 'var(--r-xs)', cursor: 'pointer',
+                                    border: '0.5px solid var(--line)', background: 'var(--glass)',
+                                    color: 'var(--fg-2)', fontFamily: 'var(--f-sans)', fontSize: 10.5,
+                                }}
+                            >
+                                {role.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            </PanelSection>
+
+            {/* ─── MOTION PRESETS ─── */}
+            <PanelSection
+                title={t('transform.motionPresets', 'Motion Presets')}
+                collapsible
+                defaultOpen={false}
+                onReset={activePresetId ? handleClearAnimations : null}
+                resetLabel={t('transform.clearAnimation', 'Clear')}
+                right={activePresetId ? (
+                    <span style={{
+                        maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap', fontFamily: 'var(--f-sans)', fontSize: 10,
+                        color: 'var(--accent)',
+                    }}>
+                        {MOTION_PRESETS[activePresetId]?.label || activePresetId}
                     </span>
-                    <ChevronDown className={`w-3 h-3 transition-transform ${showKeyframeTimeline ? 'rotate-180' : ''}`} />
-                </button>
+                ) : null}
+            >
+                <div
+                    role="radiogroup"
+                    aria-label={t('transform.motionPresets', 'Motion Presets')}
+                    style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 4 }}
+                >
+                    {availablePresets.slice(0, 9).map(presetId => {
+                        const preset = MOTION_PRESETS[presetId];
+                        const isActive = activePresetId === presetId;
+                        return (
+                            <button
+                                key={presetId}
+                                type="button"
+                                role="radio"
+                                aria-checked={isActive}
+                                onClick={() => handleApplyPreset(presetId)}
+                                title={preset?.label || presetId}
+                                style={{
+                                    height: 28, padding: '0 6px', cursor: 'pointer',
+                                    borderRadius: 'var(--r-xs)',
+                                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                    fontFamily: 'var(--f-sans)', fontSize: 10.5,
+                                    fontWeight: isActive ? 600 : 500,
+                                    border: `0.5px solid ${isActive ? 'var(--accent)' : 'var(--line)'}`,
+                                    background: isActive ? 'var(--accent-soft)' : 'var(--glass)',
+                                    color: isActive ? 'var(--accent)' : 'var(--fg-2)',
+                                    transition: 'background 0.12s, color 0.12s, border-color 0.12s',
+                                }}
+                            >
+                                {preset?.label || presetId}
+                            </button>
+                        );
+                    })}
+                </div>
+            </PanelSection>
 
-                {showKeyframeTimeline && editorModel && (
-                    <div className="mt-2 bg-black/30 p-2 rounded-lg border border-border/40">
+            {/* ─── KEYFRAME CURVES ─── */}
+            <PanelSection
+                title={t('transform.keyframeCurves', 'Keyframe Curves & Timeline')}
+                collapsible
+                defaultOpen={false}
+            >
+                {editorModel && (
+                    <div style={{
+                        padding: 8, borderRadius: 'var(--r-sm)',
+                        background: 'var(--glass)', border: '0.5px solid var(--line)',
+                    }}>
                         <KeyframeEditor
                             effect={editorModel.effect}
                             definition={editorModel.definition}
@@ -806,7 +742,7 @@ export default function TransformPanel() {
                         />
                     </div>
                 )}
-            </div>
+            </PanelSection>
         </section>
     );
 }

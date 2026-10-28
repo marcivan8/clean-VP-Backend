@@ -10,7 +10,7 @@
 'use strict';
 
 const { execFile } = require('child_process');
-const { getAIClient, isAIConfigured, resolveModel, describeAIError } = require('../../../services/AIProvider');
+const { getAIFor, isAIConfigured, describeAIError } = require('../../../services/AIProvider');
 const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
@@ -63,7 +63,14 @@ class VisualAnalyzer {
         // capability: 'vision' — frames go out as image_url content parts.
         // Under AI_VISION_PROVIDER=gemini this is served free; groq has no
         // free vision model, so vision never routes there (see AIProvider.js).
-        this.openai = getAIClient({ capability: 'vision' });
+        //
+        // R117 - the client and the model name are taken TOGETHER. Fetching
+        // them separately is what sent a Gemini model name to Groq's endpoint
+        // from the interview routes; this was already consistent, and
+        // `getAIFor` makes it impossible to drift.
+        const vision = getAIFor('vision', 'gpt-4o');
+        this.openai = vision.client;
+        this.visionModel = vision.model;
     }
 
     /**
@@ -216,7 +223,7 @@ class VisualAnalyzer {
 Return ONLY the JSON object, no explanation.`;
 
             const response = await this.openai.chat.completions.create({
-                model: resolveModel('gpt-4o', 'vision'),
+                model: this.visionModel,
                 max_tokens: 400,
                 response_format: { type: 'json_object' },
                 messages: [

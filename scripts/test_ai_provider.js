@@ -42,7 +42,7 @@ function section(t) { console.log(`\n${t}`); }
 
 const provider = require(path.resolve(__dirname, '../services/AIProvider.js'));
 const {
-    getAIClient, isAIConfigured, resolveProvider, resolveModel,
+    getAIClient, getAIFor, effectiveProvider, isAIConfigured, resolveProvider, resolveModel,
     mockBodyFor, VALID_PROVIDERS, REAL_ONLY_CAPABILITIES,
     PRODUCTION_REFUSED_PROVIDERS, CAPABILITY_PROVIDERS, _resetForTests,
 } = provider;
@@ -460,6 +460,177 @@ async function main() {
             check(`${rel.split('/').pop()} has no !process.env.OPENAI_API_KEY gate`,
                 !/!process\.env\.OPENAI_API_KEY/.test(src),
                 'that gate 503s every AI route under mock/ollama, which need no key');
+        }
+    }
+
+    // ── R117 · The client and the model must come from ONE provider ────────
+    section('R117 · Vision: one provider for the client AND the model');
+    {
+        // The live .env is AI_PROVIDER=groq with AI_VISION_PROVIDER=gemini.
+        // Under that config the interview routes took a CHAT client (groq)
+        // and a VISION model name (gemini-3.8-flash) and sent one to the
+        // other — a model-not-found on every call, swallowed by the route as
+        // "no result". These checks are that bug, pinned.
+        const VISION_ENV = {
+            AI_PROVIDER: 'groq', AI_VISION_PROVIDER: 'gemini',
+            GROQ_API_KEY: 'test-groq', GEMINI_API_KEY: 'test-gemini',
+            OPENAI_API_KEY: 'test-openai', NODE_ENV: undefined,
+            GEMINI_MODEL: undefined, GEMINI_VISION_MODEL: undefined,
+        };
+
+        withEnv(VISION_ENV, () => {
+            const v = getAIFor('vision', 'gpt-4o-mini', { timeout: 1000 });
+            check('getAIFor(vision) returns a gemini client',
+                String(v.client?.baseURL || '').includes('generativelanguage.googleapis.com'),
+                `baseURL was ${v.client?.baseURL}`);
+            check('getAIFor(vision) returns a gemini model',
+                /^gemini-/.test(v.model), `model was ${v.model}`);
+            check('the client and the model agree on the provider',
+                v.provider === 'gemini');
+
+            // Chat is unaffected: it still goes to groq.
+            const c = getAIFor('chat', 'gpt-4o-mini', { timeout: 1000 });
+            check('chat still routes to groq',
+                c.provider === 'groq' && String(c.client?.baseURL || '').includes('groq.com'),
+                `chat went to ${c.provider}`);
+            check('a groq model name is never sent to gemini',
+                c.model !== v.model);
+        });
+
+        // effectiveProvider applies the capability matrix, which resolveProvider
+        // deliberately does not.
+        withEnv({ ...VISION_ENV, AI_VISION_PROVIDER: 'groq' }, () => quiet(() => {
+            check('vision asked of groq falls back to openai',
+                effectiveProvider({ capability: 'vision' }) === 'openai');
+            // The real trap: resolveProvider still says "groq", so a
+            // resolveModel that used IT would hand a groq model name to the
+            // openai client the fallback just returned.
+            check('resolveProvider still reports the raw request',
+                resolveProvider({ capability: 'vision' }) === 'groq');
+            check('resolveModel follows the FALLBACK, not the request',
+                resolveModel('gpt-4o-mini', 'vision') === 'gpt-4o-mini',
+                'a groq model name would be sent to api.openai.com');
+        }));
+
+        withEnv({ ...VISION_ENV, AI_PROVIDER: 'gemini', AI_VISION_PROVIDER: undefined }, () => quiet(() => {
+            check('audio asked of gemini falls back to openai',
+                effectiveProvider({ capability: 'audio' }) === 'openai');
+            check('embeddings always fall back to openai',
+                effectiveProvider({ capability: 'embeddings' }) === 'openai');
+        }));
+
+        // Per-capability Gemini models, like groq and ollama already had.
+        withEnv({ ...VISION_ENV, AI_PROVIDER: 'gemini', GEMINI_MODEL: 'gemini-chat' }, () => {
+            check('gemini vision falls back to GEMINI_MODEL when no vision model is set',
+                resolveModel('gpt-4o-mini', 'vision') === 'gemini-chat');
+        });
+        withEnv({ ...VISION_ENV, AI_PROVIDER: 'gemini', GEMINI_MODEL: 'gemini-chat', GEMINI_VISION_MODEL: 'gemini-eyes' }, () => {
+            check('GEMINI_VISION_MODEL overrides for vision only',
+                resolveModel('gpt-4o-mini', 'vision') === 'gemini-eyes'
+                && resolveModel('gpt-4o-mini', 'chat') === 'gemini-chat');
+        });
+        withEnv({ ...VISION_ENV, AI_PROVIDER: 'gemini' }, () => {
+            // Google's own OpenAI-compatibility docs use this model for the
+            // image example. A default here is a dated claim about someone
+            // else's service, so it is asserted rather than assumed.
+            check('the gemini default is gemini-3.8-flash',
+                resolveModel('gpt-4o-mini', 'vision') === 'gemini-3.8-flash');
+        });
+
+        withEnv({ ...VISION_ENV, GEMINI_API_KEY: undefined }, () => {
+            check('no GEMINI_API_KEY means no vision client, not a broken one',
+                getAIFor('vision', 'gpt-4o-mini').client === null);
+            check('isAIConfigured(vision) reports the VISION provider\'s key',
+                isAIConfigured({ capability: 'vision' }) === false
+                && isAIConfigured({ capability: 'chat' }) === true);
+        });
+    }
+
+    // ── R117 · No call site may split the client from the model ────────────
+    section('R117 · Vision is requested through getAIFor, never piecemeal');
+    {
+        // A file-level "does this file also take a vision client somewhere?"
+        // check was the first attempt, and it was worthless: the interview
+        // routes have THREE vision call sites, so one correct one masked a
+        // broken one. Proven by reintroducing the bug and watching the check
+        // still pass.
+        //
+        // So the rule is absolute instead of statistical: outside AIProvider
+        // itself, nothing calls `resolveModel(..., 'vision')` at all. The
+        // client and the model come back from one call to `getAIFor`, which
+        // cannot return a mismatched pair. A rule that can be read off one
+        // line is a rule a reviewer can enforce.
+        const roots = ['routes', 'services', 'server', 'jobs', 'controllers'];
+        const walk = (dir, out = []) => {
+            let entries = [];
+            try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+            for (const e of entries) {
+                const full = path.join(dir, e.name);
+                if (e.isDirectory()) { if (e.name !== 'node_modules') walk(full, out); }
+                else if (e.name.endsWith('.js')) out.push(full);
+            }
+            return out;
+        };
+        const ROOT = path.resolve(__dirname, '..');
+        const files = walk(path.join(ROOT, roots[0]));
+        for (const r of roots.slice(1)) walk(path.join(ROOT, r), files);
+
+        const offenders = [];
+        for (const file of files) {
+            const rel = path.relative(ROOT, file);
+            if (rel === path.join('services', 'AIProvider.js')) continue;
+            const src = fs.readFileSync(file, 'utf8');
+            // Comments stripped: the explanation of this rule would match it.
+            const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+            const hits = code.match(/resolveModel\([^)]*['"]vision['"]/g);
+            if (hits) offenders.push(`${rel} (${hits.length})`);
+        }
+        check('no file outside AIProvider resolves a vision model by hand',
+            offenders.length === 0,
+            offenders.length ? `use getAIFor('vision', …) in: ${offenders.join(', ')}` : '');
+
+        // And the pairing getAIFor returns is actually consistent, for every
+        // capability, under a split-provider config.
+        withEnv({
+            AI_PROVIDER: 'groq', AI_VISION_PROVIDER: 'gemini', AI_MOTION_PROVIDER: 'gemini',
+            GROQ_API_KEY: 'g', GEMINI_API_KEY: 'k', OPENAI_API_KEY: 'o', NODE_ENV: undefined,
+        }, () => quiet(() => {
+            for (const cap of ['chat', 'vision', 'motion', 'audio']) {
+                const r = getAIFor(cap, 'gpt-4o-mini', { timeout: 1000 });
+                const host = String(r.client?.baseURL || 'https://api.openai.com');
+                const expected = {
+                    openai: 'api.openai.com', groq: 'groq.com',
+                    gemini: 'generativelanguage.googleapis.com',
+                }[r.provider];
+                check(`${cap}: the client host matches the reported provider (${r.provider})`,
+                    host.includes(expected), `${r.provider} client was ${host}`);
+            }
+        }));
+    }
+
+    // ── R117 · Frames must be inline, because Gemini rejects remote URLs ───
+    section('R117 · Vision frames go out as base64, never as a remote URL');
+    {
+        // Gemini's OpenAI-compatibility layer accepts a base64 data URI in
+        // `image_url` and returns 400 INVALID_ARGUMENT for a public https://
+        // one (reported on Google's own AI Developers forum, and reproduced
+        // with the official OpenAI SDK). Every call site happens to send
+        // base64 today; this pins it, because switching one to a signed URL
+        // would be a reasonable-looking change that breaks vision only on
+        // Gemini, and only in production.
+        const ROOT = path.resolve(__dirname, '..');
+        const visionFiles = [
+            'routes/interviewRoutes.js',
+            'server/brain/media/VisualAnalyzer.js',
+        ];
+        for (const rel of visionFiles) {
+            const src = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+            const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+            const urls = code.match(/image_url:\s*\{[^}]*url:\s*[`'"]([^`'"]*)/g) || [];
+            const remote = urls.filter(u => !/data:image\//.test(u));
+            check(`${rel.split('/').pop()} sends only inline base64 frames`,
+                remote.length === 0,
+                remote.length ? `remote url in: ${remote.join(' | ')}` : '');
         }
     }
 

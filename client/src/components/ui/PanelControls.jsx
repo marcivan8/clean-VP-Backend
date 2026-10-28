@@ -2,7 +2,7 @@ import React, { useId, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Minus, Plus, Upload } from 'lucide-react';
 import {
     clampTo, percentOf, snapTo, formatValue, normalizeHex, hexLuminance,
-    segmentedKeyMove, trackBackground,
+    segmentedKeyMove, trackBackground, scrubDelta, DRAG_THRESHOLD_PX,
 } from './panelControls.js';
 
 /**
@@ -245,11 +245,57 @@ export const ToggleGroup = ({ items, ariaLabel }) => (
  * box therefore keeps its own draft and commits on blur or Enter.
  */
 export const NumberField = ({
-    value, onChange, min = -Infinity, max = Infinity, step = 1,
-    unit = '', subLabel = null, width = '100%',
+    value, onChange, onCommit, min = -Infinity, max = Infinity, step = 1,
+    unit = '', subLabel = null, width = '100%', scrub = false, ariaLabel,
+    decimals = null,
 }) => {
     const [draft, setDraft] = useState(null);
-    const shown = draft !== null ? draft : formatValue(value, step);
+    const [dragging, setDragging] = useState(false);
+    const dragRef = useRef(null);
+    // `decimals` overrides the precision formatValue infers from the step.
+    // A caller can want 1 decimal on a whole-number step (a percentage scrubbed
+    // in 1s but shown as 12.5), and inferring from the step alone cannot say so.
+    const shown = draft !== null
+        ? draft
+        : formatValue(value, decimals === null ? step : 10 ** -decimals);
+
+    /**
+     * Drag horizontally to scrub, click to type.
+     *
+     * The two have to share one pointer-down, and the distinction is movement:
+     * under DRAG_THRESHOLD_PX it was a click and the field takes focus to be
+     * typed into; past it the field never focuses, because a text caret
+     * appearing mid-drag steals the keystrokes that follow.
+     */
+    const onPointerDown = (e) => {
+        if (!scrub || e.button !== 0 || draft !== null) return;
+        dragRef.current = {
+            x: e.clientX,
+            from: Number.isFinite(Number(value)) ? Number(value) : 0,
+            moved: false,
+        };
+        const move = (ev) => {
+            const d = dragRef.current;
+            if (!d) return;
+            const dx = ev.clientX - d.x;
+            if (!d.moved && Math.abs(dx) <= DRAG_THRESHOLD_PX) return;
+            d.moved = true;
+            setDragging(true);
+            onChange(snapTo(d.from + scrubDelta(dx, step, { shift: ev.shiftKey, alt: ev.altKey }), min, max, step));
+        };
+        const up = () => {
+            window.removeEventListener('pointermove', move);
+            window.removeEventListener('pointerup', up);
+            const moved = dragRef.current?.moved;
+            dragRef.current = null;
+            setDragging(false);
+            // A scrub is one history entry, committed at the end — not one per
+            // pixel of pointer movement.
+            if (moved) onCommit?.();
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+    };
     const commit = (raw) => {
         setDraft(null);
         const n = Number(String(raw).replace(',', '.').replace(unit, '').trim());
@@ -265,7 +311,10 @@ export const NumberField = ({
                 <input
                     type="text"
                     inputMode="decimal"
+                    aria-label={ariaLabel}
                     value={shown}
+                    title={scrub ? 'Drag to adjust, or click to type' : undefined}
+                    onPointerDown={onPointerDown}
                     onChange={(e) => setDraft(e.target.value)}
                     onBlur={(e) => commit(e.target.value)}
                     onKeyDown={(e) => {
@@ -283,6 +332,8 @@ export const NumberField = ({
                         ...FIELD, width: '100%', height: 26,
                         padding: unit ? '0 22px 0 8px' : '0 8px',
                         fontFamily: 'var(--f-mono)', fontSize: 11,
+                        cursor: scrub ? 'ew-resize' : 'text',
+                        borderColor: dragging ? 'var(--accent)' : undefined,
                     }}
                 />
                 {unit && (
@@ -348,7 +399,7 @@ export const Stepper = ({ value, onChange, min = 0, max = Infinity, step = 1, su
  */
 export const TrackSlider = ({
     value, onChange, onCommit, min = 0, max = 100, step = 1,
-    tint = null, unit = '', box = true, ariaLabel,
+    tint = null, unit = '', box = true, ariaLabel, scrub = false, decimals = null,
 }) => {
     const pct = percentOf(value, min, max);
     const ramp = trackBackground(tint);
@@ -392,7 +443,11 @@ export const TrackSlider = ({
                 // mono, and the unit is drawn OVER the value rather than
                 // wrapping, so the overflow is silent.
                 <div style={{ width: 58, flexShrink: 0 }}>
-                    <NumberField value={value} onChange={onChange} min={min} max={max} step={step} unit={unit} />
+                    <NumberField
+                        value={value} onChange={onChange} onCommit={onCommit}
+                        min={min} max={max} step={step} unit={unit}
+                        scrub={scrub} ariaLabel={ariaLabel} decimals={decimals}
+                    />
                 </div>
             )}
         </div>

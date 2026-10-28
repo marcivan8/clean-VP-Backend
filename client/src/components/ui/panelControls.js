@@ -138,7 +138,37 @@ export function changedKeys(values, defaults) {
     return Object.keys(defaults).filter(k => !isDefault(values[k], defaults[k]));
 }
 
+/**
+ * How far a horizontal drag moves a value.
+ *
+ * Dragging a number field is the fastest way to set one and TransformPanel has
+ * had it for a while; it belongs in the kit so every numeric control gets it
+ * rather than one panel keeping its own input.
+ *
+ * `0.5` keeps a drag from outrunning the pointer: at 1 step per pixel a
+ * 0..100 slider crosses its whole range in a 100px drag, which feels like a
+ * flick rather than a scrub.
+ *
+ * @param {number} dx          pixels moved since the drag began
+ * @param {number} step        the control's step
+ * @param {object} [mods]      { shift, alt } — coarse and fine
+ * @returns {number} the amount to ADD to the value the drag started from
+ */
+export function scrubDelta(dx, step, mods = {}) {
+    const d = Number(dx);
+    const s = Number(step);
+    if (!Number.isFinite(d) || !Number.isFinite(s) || s === 0) return 0;
+    // Shift and Alt together would otherwise multiply out to 1x, which reads
+    // as the modifiers being ignored. Shift wins.
+    const multiplier = mods.shift ? 5 : mods.alt ? 0.2 : 1;
+    return d * s * multiplier * 0.5;
+}
+
+/** A pointer movement big enough to be a drag rather than a click. */
+export const DRAG_THRESHOLD_PX = 2;
+
 export default {
     clampTo, percentOf, snapTo, formatValue, normalizeHex, hexLuminance,
     segmentedKeyMove, trackBackground, isDefault, changedKeys,
+    scrubDelta, DRAG_THRESHOLD_PX,
 };

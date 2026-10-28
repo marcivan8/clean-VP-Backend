@@ -136,7 +136,8 @@
       "contrast": "Contrast",
       "saturation": "Saturation",
       "hueRotate": "Hue Rotate",
-      "reset": "Reset Color"
+      "reset": "Reset Color",
+      "tone": "Tone & colour"
     },
     "transform": {
       "title": "Transform",

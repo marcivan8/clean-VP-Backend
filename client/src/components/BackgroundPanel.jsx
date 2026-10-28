@@ -7,6 +7,7 @@
  * export follows (client/src/motion/MatteSettings.js).
  */
 import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { ControlRow, TrackSlider } from './ui/PanelControls.jsx';
 import { useTranslation } from 'react-i18next';
 import { Loader2, UserRound, X } from 'lucide-react';
 
@@ -82,17 +83,32 @@ export default function BackgroundPanel({ clip, trackId }) {
 
     if (!clip || clip.type === 'image') return null;
 
-    const slider = (key, min, max, step = 1) => (
-        <label className="block mb-2">
-            <div className="flex justify-between text-[10px] text-muted-foreground">
-                <span>{t(`backgroundPanel.${key}`)}</span>
-                <span className="font-mono">{key === 'threshold' || key === 'softness' || key === 'dim' ? Math.round(settings[key] * 100) : Math.round(settings[key])}</span>
-            </div>
-            <input type="range" min={min} max={max} step={step} value={settings[key]}
-                onChange={e => set({ [key]: Number(e.target.value) })}
-                className="w-full accent-primary" aria-label={t(`backgroundPanel.${key}`)} />
-        </label>
-    );
+    /**
+     * R118 - on the shared panel kit, like every other control panel.
+     *
+     * `threshold`, `softness` and `dim` are stored 0..1 and shown as a
+     * percentage, so the conversion happens here rather than being baked into
+     * the control: the kit works in the units the person reads.
+     */
+    const slider = (key, min, max, step = 1) => {
+        const asPercent = key === 'threshold' || key === 'softness' || key === 'dim';
+        const factor = asPercent ? 100 : 1;
+        const label = t(`backgroundPanel.${key}`);
+        return (
+            <ControlRow key={key} label={label} labelWidth={70}>
+                <TrackSlider
+                    ariaLabel={label}
+                    value={settings[key] * factor}
+                    min={min * factor}
+                    max={max * factor}
+                    step={Math.max(1, step * factor)}
+                    unit={asPercent ? '%' : ''}
+                    scrub
+                    onChange={v => set({ [key]: v / factor })}
+                />
+            </ControlRow>
+        );
+    };
 
     return (
         <div className="mb-4">

@@ -197,6 +197,103 @@ await check('the menu and the mode toggle are styled, and share the composer she
     assert.ok(!css.includes('chat-composer__styles-grid'), 'dead caption-pack CSS is still shipping');
 });
 
+log('\n-- 2b. Every MOUNTED panel is on the kit --');
+
+// The panels a person can actually open, and where each one is mounted. The
+// point of the list is the MOUNTED part: EffectsPanel/EffectControls were
+// converted in R116 and are referenced by nothing, so that work is invisible
+// and does not belong here.
+const MOUNTED_PANELS = [
+    ['TextPanel',        'client/src/components/TextPanel.jsx'],
+    ['TransformPanel',   'client/src/components/TransformPanel.jsx'],
+    ['MotionPanel',      'client/src/components/MotionPanel.jsx'],
+    ['BackgroundPanel',  'client/src/components/BackgroundPanel.jsx'],
+    ['colour grading',   'client/src/layouts/IDELayout.jsx'],
+];
+
+await check('every mounted control panel imports the kit', () => {
+    for (const [name, rel] of MOUNTED_PANELS) {
+        const src = read(`../${rel}`);
+        assert.ok(/from ['"][^'"]*ui\/PanelControls\.jsx['"]/.test(src),
+            `${name} does not use the shared kit`);
+    }
+});
+
+await check('no mounted panel still hand-rolls a range input', () => {
+    // A raw <input type="range"> is the tell that a panel kept its own
+    // slider: no numeric box beside it, no tinted track, and a different
+    // thumb from every other panel.
+    for (const [name, rel] of MOUNTED_PANELS) {
+        const src = read(`../${rel}`);
+        const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+        const raw = (code.match(/type="range"/g) || []).length;
+        assert.equal(raw, 0, `${name} still has ${raw} hand-rolled slider(s)`);
+    }
+});
+
+await check('the panels that mount others are wired to the real components', () => {
+    // MotionPanel is the host for four sub-panels. A conversion that quietly
+    // dropped one would look fine in a screenshot of the parent.
+    const motion = read('../client/src/components/MotionPanel.jsx');
+    for (const child of ['StyleRecipePanel', 'TemplatePanel', 'MotionDirectorPanel', 'BackgroundPanel']) {
+        assert.ok(new RegExp(`<${child}\\b`).test(motion), `MotionPanel no longer renders ${child}`);
+    }
+    // And the transform panel still mounts the keyframe editor it owns.
+    assert.ok(/<KeyframeEditor\b/.test(read('../client/src/components/TransformPanel.jsx')));
+});
+
+await check('EffectsPanel is NOT claimed as shipped UI', () => {
+    // R116 converted it; nothing mounts it. Saying so in the test is cheaper
+    // than someone re-deriving it from a grep in six months.
+    const all = ['client/src/layouts/IDELayout.jsx', 'client/src/components/MotionPanel.jsx']
+        .map(f => read(`../${f}`)).join('\n');
+    assert.ok(!/EffectsPanel/.test(all),
+        'EffectsPanel is mounted now - add it to MOUNTED_PANELS above');
+});
+
+log('\n-- 2c. The transform panel keeps what only it had --');
+
+await check('scrubbing moved INTO the kit rather than being lost', () => {
+    const tp = read('../client/src/components/TransformPanel.jsx');
+    const kitCodeLocal = code(read('../client/src/components/ui/PanelControls.jsx'));
+    // The drag-to-scrub behaviour used to live in TransformPanel's own
+    // ScrubbableField. Deleting that component without moving the behaviour
+    // would be a silent downgrade of the panel the user looks at most.
+    assert.ok(/scrubDelta\(/.test(kitCodeLocal), 'the kit cannot scrub');
+    assert.ok(/scrub/.test(tp), 'the transform panel no longer scrubs');
+    assert.ok(!/pointermove/.test(code(tp)), 'the panel still has its own drag handler');
+});
+
+await check('the keyframe diamond and steppers survived', () => {
+    const tp = read('../client/src/components/TransformPanel.jsx');
+    assert.ok(/Diamond/.test(tp), 'the keyframe diamond is gone');
+    assert.ok(/onToggleKf/.test(tp) && /onJumpKf/.test(tp), 'keyframe controls lost their wiring');
+    // They are about TIME, not value, so they are NOT in the generic kit.
+    assert.ok(!/Diamond/.test(read('../client/src/components/ui/PanelControls.jsx')),
+        'a keyframe concept leaked into the generic control kit');
+});
+
+await check('a scrub is one history entry, not one per pixel', () => {
+    const kitCodeLocal = code(read('../client/src/components/ui/PanelControls.jsx'));
+    // onCommit fires on pointer-up only. Committing on every move would make
+    // one drag take hundreds of undo presses to reverse - the same defect the
+    // caption packs had at a smaller scale.
+    assert.ok(/if \(moved\) onCommit\?\.\(\)/.test(kitCodeLocal),
+        'the scrub does not commit once at the end');
+});
+
+await check('scrub arithmetic: modifiers, junk, and a zero step', () => {
+    assert.equal(PC.scrubDelta(100, 1), 50);
+    assert.equal(PC.scrubDelta(100, 1, { shift: true }), 250, 'shift is not coarse');
+    assert.equal(PC.scrubDelta(100, 1, { alt: true }), 10, 'alt is not fine');
+    // Both held would otherwise multiply out to 1x, which reads as the
+    // modifiers being ignored.
+    assert.equal(PC.scrubDelta(100, 1, { shift: true, alt: true }), 250, 'shift must win');
+    assert.equal(PC.scrubDelta('x', 1), 0);
+    assert.equal(PC.scrubDelta(10, 0), 0, 'a zero step must not move the value');
+    assert.equal(PC.scrubDelta(0, 1), 0);
+});
+
 log('\n-- 3. The control kit arithmetic --');
 
 await check('a track percentage is never NaN, however bad the range', () => {

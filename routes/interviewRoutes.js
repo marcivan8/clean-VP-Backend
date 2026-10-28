@@ -23,7 +23,7 @@
  */
 
 const express        = require('express');
-const { getAIClient, isAIConfigured, resolveModel } = require('../services/AIProvider');
+const { getAIClient, getAIFor, isAIConfigured, resolveModel } = require('../services/AIProvider');
 const { sanitizeEditingStyle, rhythmZoomStyle, keepsRecordedOrder } = require('../server/brain/editingStyles');
 const router         = express.Router();
 const path           = require('path');
@@ -215,7 +215,13 @@ async function detectHostSideViaVision(words, speakers, filename, requestUserId)
 
     try {
         const OpenAI = require('openai');
-        const openai = getAIClient({ timeout: 20_000 });
+        // R117 - `getAIFor('vision', ...)`, not getAIClient() + resolveModel().
+        // This used to take a CHAT client and a VISION model: with
+        // AI_PROVIDER=groq and AI_VISION_PROVIDER=gemini that sent the model
+        // name `gemini-3.8-flash` to api.groq.com, so every call here failed
+        // with a model-not-found the route swallowed as "no result".
+        const { client: openai, model: visionModel } = getAIFor('vision', 'gpt-4o-mini', { timeout: 20_000 });
+        if (!openai) return null;
 
         // Extract one frame per speaker at the midpoint of their longest solo turn.
         // Both images go in a single API call to keep latency and cost low.
@@ -255,7 +261,7 @@ async function detectHostSideViaVision(words, speakers, filename, requestUserId)
         ];
 
         const resp = await openai.chat.completions.create({
-            model:       resolveModel('gpt-4o-mini', 'vision'),
+            model:       visionModel,
             messages:    [{ role: 'user', content }],
             max_tokens:  30,
             temperature: 0,
@@ -381,7 +387,8 @@ async function detectSceneLayout(words, speakers, filename, requestUserId) {
 
     try {
         const OpenAI = require('openai');
-        const openai = getAIClient({ timeout: 25_000 });
+        const { client: openai, model: visionModel } = getAIFor('vision', 'gpt-4o-mini', { timeout: 25_000 });
+        if (!openai) return null;
 
         // ── Pick sample timestamps ──────────────────────────────────────────
         const samples = []; // { speaker, t }
@@ -429,7 +436,7 @@ async function detectSceneLayout(words, speakers, filename, requestUserId) {
         ];
 
         const resp = await openai.chat.completions.create({
-            model:       resolveModel('gpt-4o-mini', 'vision'),
+            model:       visionModel,
             messages:    [{ role: 'user', content }],
             max_tokens:  200,
             temperature: 0,
@@ -1455,8 +1462,9 @@ router.post('/organize-clips', ...authAndGate, async (req, res) => {
         }
 
         const OpenAI = require('openai');
-        const openai = getAIClient({ timeout: 60_000 });
-
+        // R117 - the client is built further down, once `useVision` is known:
+        // a vision call needs the VISION provider's client, and this route
+        // only pays for vision when a clip actually has a frame.
         const uploadsDir = path.resolve(__dirname, '../uploads');
 
         // ── 1. Stored asset profiles — the primary signal (Organize v2) ─────────
@@ -1799,8 +1807,23 @@ Return ONLY valid JSON:
                 }
             }
 
+            // Client AND model from the same capability. Resolving them
+            // separately is what broke the two vision calls above: with
+            // AI_PROVIDER=groq and AI_VISION_PROVIDER=gemini, a chat client
+            // was handed a Gemini model name.
+            const { client: openai, model: aiModel } = useVision
+                ? getAIFor('vision', 'gpt-4o-mini', { timeout: 60_000 })
+                : getAIFor('chat', 'gpt-4o', { timeout: 60_000 });
+            if (!openai) {
+                return res.status(503).json({
+                    error: useVision
+                        ? 'No vision provider configured on the server.'
+                        : 'No AI provider configured on the server.',
+                });
+            }
+
             const completion = await openai.chat.completions.create({
-                model:           useVision ? resolveModel('gpt-4o-mini', 'vision') : resolveModel('gpt-4o', 'chat'),
+                model:           aiModel,
                 messages:        [{ role: 'user', content }],
                 response_format: { type: 'json_object' },
                 temperature:     0.15,
