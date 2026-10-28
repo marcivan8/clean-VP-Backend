@@ -4,8 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { Scissors, Merge, Play, Type, Trash2 } from 'lucide-react';
 import useAIStore from '../store/useAIStore';
 import useTimelineStore from '../store/useTimelineStore';
-import { CAPTION_STYLES, FONT_STACK } from './Assistant/captionStylePacks.js';
-import { legacyPackToCaptionStyle } from '../motion/CaptionModel.js';
+import { CAPTION_STYLES, FONT_STACK, captionPackUpdates } from './Assistant/captionStylePacks.js';
 import { submitRokaPrompt } from '../agent/rokaPromptQueue.js';
 import MobileSheet, { SheetLabel, SheetRow, SheetChip } from './MobileSheet';
 
@@ -55,21 +54,12 @@ function StyleSheet({ onClose }) {
     const hasWords = textClips.some(c => Array.isArray(c.words) && c.words.length > 0);
 
     const applyPack = (style) => {
-        const captionStyle = legacyPackToCaptionStyle(style.id);
-        // Keep the user's highlight choice when switching packs.
-        if (first && !highlightOn) captionStyle.wordHighlight = { mode: 'none', scale: 1 };
-        // Same fields the desktop Roka card sets (CaptionStylesCard).
-        useTimelineStore.getState().applyCaptionStyleToAll({
-            fontFamily: style.font,
-            fontWeight: style.weight,
-            color: style.color,
-            stroke: style.stroke || null,
-            textShadow: style.textShadow || null,
-            fontStyle: style.style || 'normal',
-            captionStyle,
-            animations: [],
-            animation: 'none',
-        });
+        // R116 - the fields come from captionStylePacks.js, shared with the
+        // desktop Roka card and the chat box's Styles menu. Keep the user's
+        // highlight choice when switching packs.
+        const updates = captionPackUpdates(style, { highlight: !(first && !highlightOn) });
+        if (!updates) return;
+        useTimelineStore.getState().applyCaptionStyleToAll(updates);
     };
 
     if (textClips.length === 0) {

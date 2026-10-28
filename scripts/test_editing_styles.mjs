@@ -411,7 +411,9 @@ await check('engine extract_short cuts outside the picked window', () => {
 });
 await check('picker is in the desktop chat box, style syncs to the cloud', () => {
     const rp = read('../client/src/components/Assistant/ReasoningPanel.jsx');
-    assert.ok(/hidden md:block">\s*<EditingStylePicker/.test(rp));
+    // R110: the picker moved into ChatComposer's desktop-only bar.
+    const cc = read('../client/src/components/Assistant/ChatComposer.jsx');
+    assert.ok(/<ChatComposer/.test(rp) && /hidden md:flex[^"]*">[\s\S]*?<EditingStylePicker/.test(cc));
     // R92 round B: the shorts list syncs in the same selector.
     assert.ok(/\[state\.tracks, state\.editingStyle(?:, state\.shorts)?\]/.test(read('../client/src/hooks/useSupabasePersistence.js')));
     for (const lang of ['en', 'fr']) {

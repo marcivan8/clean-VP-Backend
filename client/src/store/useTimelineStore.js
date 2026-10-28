@@ -26,10 +26,15 @@ import { clipsInGroup, computeGroupMoveUpdates, computeGroupDuplicateSpecs } fro
 import { sceneFromPlacements, flattenScene, normalizeScene } from '../motion/SceneSchema.js';
 import { autoFixScene, safeZoneForAspect } from '../motion/SceneValidator.js';
 import { composeSceneFromBrief } from '../motion/SceneDirector.js';
+import { planStoryboard, KIND_PLAN } from '../motion/Storyboard.js';
+import { placementsFor } from '../motion/StoryboardBridge.js';
+import { framingPlan } from '../motion/StoryboardFraming.js';
+import { inspect as inspectStoryboard, repair as repairStoryboard, describe as describeQa } from '../motion/StoryboardQA.js';
 import { findNode, updateNode, removeNode as removeSceneNodeFrom, listNodes } from '../motion/SceneSchema.js';
 import { deriveSpeakerCrop, deriveTrackingSegments } from '../motion/ObjectLayers.js';
 import { frameForPreset, splitSpeakerCrop, fillFrameCrop, computeReframePlan, LAYOUT_PRESETS } from '../motion/LayoutPresets.js';
-import { TEMPLATE_KINDS, TEMPLATE_WIDTH_FRACTION, templateParams, templateSize } from '../motion/TemplateGraphics.js';
+import { TEMPLATE_KINDS, TEMPLATE_WIDTH_FRACTION, TEMPLATE_DEFAULTS, templateParams, templateSize } from '../motion/TemplateGraphics.js';
+import { applyBrand, normalizeBrand, brandFromProject } from '../motion/BrandKit.js';
 import { normalizeMatte } from '../motion/MatteSettings.js'; // R92
 import { ledgerEntry } from '../agent/EditRecap.js'; // R92 round B
 import { getPlayerDimensions } from '../utils/playerDimensions.js';
@@ -124,6 +129,24 @@ function pruneScenes(scenes, tracks) {
 /**
  * Zustand store that syncs with TimelineStateManager
  */
+/**
+ * A timeline name for a template clip, for every kind rather than the four
+ * that were special-cased. Falls back to the kind itself, so a new template
+ * is never nameless on the timeline.
+ */
+function templateClipName(kind, p) {
+    const first = (...vals) => {
+        for (const v of vals) {
+            const s = String(v ?? '').trim();
+            if (s) return s.length > 42 ? `${s.slice(0, 40)}…` : s;
+        }
+        return '';
+    };
+    if (kind === 'counter') return `${p.label} ${p.value}`;
+    const named = first(p.title, p.text, p.label, p.headline, p.quote, p.question, p.stat, p.name, p.query, p.steps, p.items, p.values, p.left);
+    return named || kind;
+}
+
 const useTimelineStore = create(
     subscribeWithSelector((set, get) => {
         // Subscribe to timeline events to update Zustand state
@@ -225,6 +248,10 @@ const useTimelineStore = create(
 
             // Assets & uploads — pre-filled from autosave so proxyUrls are available immediately
             assets: _preRestoredProject?.assets || [],
+            // R114 - the project's brand kit: colours, fonts, radius, pace.
+            // Null until the user sets one; every graphic falls back to the
+            // catalogue's own defaults, exactly as before.
+            brandKit: _preRestoredProject?.brandKit || null,
             uploadedFile: _preRestoredProject?.uploadedFilePath ? { name: _preRestoredProject.uploadedFilePath } : null,
             uploadedFilePath: _preRestoredProject?.uploadedFilePath || null,
             pacingSegments: _preRestoredProject?.pacingSegments || [],
@@ -1959,7 +1986,7 @@ const useTimelineStore = create(
                 // find-or-create shape) would cost the user two undos to remove
                 // one overlay instead of one.
                 let track = get().tracks.find(t => t.type === 'overlay');
-                const trackId = track ? track.id : get().addTrack('overlay');
+                const trackId = track ? track.id : get().addTrack('overlay', opts.skipHistory ? { skipHistory: true } : undefined);
 
                 const start = Number.isFinite(opts.start) ? opts.start : get().currentTime;
                 const duration = Number.isFinite(opts.duration) ? opts.duration : (asset.duration || 5);
@@ -2193,7 +2220,10 @@ const useTimelineStore = create(
              * an unchecked graphic.
              *
              * @param {object} scene a Scene (SceneSchema)
-             * @param {{start?:number, label?:string}} [opts]
+             * @param {{start?:number, label?:string, skipHistory?:boolean}} [opts]
+             *        `skipHistory` is for a caller placing SEVERAL scenes that
+             *        must undo together (applyStoryboard); it takes the one
+             *        snapshot itself before the first call.
              * @returns {{success:boolean, clipCount?:number, groupId?:string, sceneId?:string, fixes?:Array, issues?:Array, error?:string}}
              */
             _placeScene: (rawScene, opts = {}) => {
@@ -2216,7 +2246,7 @@ const useTimelineStore = create(
                     return { success: false, error: `"${label}" produced nothing that can be shown`, issues };
                 }
 
-                get()._saveHistory();
+                if (!opts.skipHistory) get()._saveHistory();
 
                 // skipHistory on every track and clip: the whole graphic is one undo.
                 let textTrackId = null;
@@ -2313,6 +2343,203 @@ const useTimelineStore = create(
             },
 
             /**
+             * R112 round B — plan the whole video, then place it.
+             *
+             * `designScene` (R95) takes a BRIEF and builds one sequence
+             * wherever the playhead happens to be. This takes the project's
+             * own TRANSCRIPT and plans the whole timeline: which seconds get
+             * a graphic, which graphic, carrying which of the speaker's
+             * words, and which seconds stay clean.
+             *
+             * Round A built the planner and wired it to nothing — stated as
+             * such in its own doc. This is the wire.
+             *
+             * THE WHOLE STORYBOARD IS ONE UNDO. The snapshot is taken here,
+             * once, and every placement runs with `skipHistory`. Without that
+             * a person undoing a storyboard they disliked would press ⌘Z
+             * eight times and watch it come apart a card at a time.
+             *
+             * Nothing is written for the user: every string on screen is a
+             * slice of what they said (MomentAnalyzer), and a beat whose
+             * graphic cannot be filled from those words is skipped with a
+             * reason rather than placed empty.
+             *
+             * @param {{ words?:Array, cuts?:number[], duration?:number,
+             *           start?:number, opts?:object, dryRun?:boolean }} [input]
+             * @returns {{success:boolean, placed?:number, skipped?:Array,
+             *           beats?:Array, reasoning?:string[], error?:string}}
+             */
+            /**
+             * R114 - set (or clear) the project's brand kit.
+             *
+             * Changing it does NOT restyle graphics already on the timeline:
+             * their colours were baked in when they were placed, which is the
+             * deliberate choice made in `addTemplateClip`. New graphics take
+             * the new kit.
+             */
+            setBrandKit: (kit) => {
+                const next = kit === null ? null : normalizeBrand(kit);
+                get()._saveHistory();
+                set({ brandKit: next });
+                return { success: true, brandKit: next };
+            },
+
+            /**
+             * R114 - a kit from whatever the project knows: the user's own
+             * fields first, then a palette read off the footage, then the
+             * catalogue defaults. Does not SET anything.
+             */
+            suggestBrandKit: (palette = null) => brandFromProject({ brand: get().brandKit, palette }),
+
+            applyStoryboard: (input = {}) => {
+                const st = get();
+                const aspectRatio = st.aspectRatio || '16:9';
+                const words = Array.isArray(input.words) && input.words.length ? input.words : (st.captions || []);
+                if (!Array.isArray(words) || words.length === 0) {
+                    return { success: false, error: 'There is no transcript to plan from yet — transcribe the video first.' };
+                }
+                const duration = Number(input.duration) > 0 ? Number(input.duration) : Number(st.duration) || 0;
+                if (!(duration > 0)) return { success: false, error: 'The project has no duration to plan over.' };
+
+                let plan;
+                try {
+                    plan = planStoryboard({
+                        words,
+                        cuts: Array.isArray(input.cuts) ? input.cuts : (st.shotCuts || []),
+                        duration,
+                        opts: input.opts || {},
+                    });
+                } catch (err) {
+                    console.error('[applyStoryboard] planning failed:', err);
+                    return { success: false, error: `The storyboard could not be planned: ${err.message}` };
+                }
+                if (!plan.beats.length) {
+                    return { success: false, error: plan.reasoning[0] || 'Nothing in this video reads as a moment worth a graphic.', reasoning: plan.reasoning };
+                }
+
+                let bridged;
+                try {
+                    // The project's own images: when the speaker names a
+                    // thing and an asset is called that, the card shows the
+                    // real picture instead of its placeholder.
+                    bridged = placementsFor(plan.beats, { kindPlan: KIND_PLAN, assets: st.assets || [] });
+                } catch (err) {
+                    console.error('[applyStoryboard] could not build the placements:', err);
+                    return { success: false, error: `The beats could not be turned into graphics: ${err.message}` };
+                }
+                if (bridged.placements.length === 0) {
+                    return { success: false, error: 'None of the moments carried words a graphic could show.', reasoning: plan.reasoning, skipped: bridged.skipped };
+                }
+
+                // R112 round C — inspect, then repair ONLY what is wrong.
+                //
+                // Every graphic here is individually valid; what nothing
+                // checked is the plan as a whole — two cards on screen at
+                // once, a card over the speaker's face, one that flashes past.
+                // Those are properties of the storyboard, not of any one
+                // graphic, which is why they survived SceneValidator.
+                //
+                // A placement with no finding against it comes back
+                // unchanged. A repair pass that rewrote everything would be
+                // the whole-video regeneration this is meant to replace.
+                const qaOpts = {
+                    frame: getPlayerDimensions(aspectRatio),
+                    safeZone: safeZoneForAspect(aspectRatio),
+                    subject: input.subject || null,
+                    // The density check measures against the VIDEO; without
+                    // this it cannot run at all (and must not guess a span).
+                    duration,
+                    maxPerMinute: Number(input.opts?.maxPerMinute) || undefined,
+                };
+                let qa = { placements: bridged.placements, repairs: [], unresolved: [] };
+                let foundBefore = [];
+                try {
+                    foundBefore = inspectStoryboard(bridged.placements, qaOpts).findings;
+                    if (foundBefore.length > 0) qa = repairStoryboard(bridged.placements, qaOpts);
+                } catch (err) {
+                    // A QA pass that throws must not cost the user their
+                    // storyboard: the unrepaired placements are still valid.
+                    console.error('[applyStoryboard] the quality pass failed, placing unrepaired:', err);
+                }
+                const finalPlacements = qa.placements;
+
+                // A review pass is a real use of this: show the plan without
+                // touching the timeline.
+                if (input.dryRun) {
+                    const baseForReview = (st.tracks || [])
+                        .filter(t => t.type === 'video')
+                        .flatMap(t => (t.clips || []).map(c => ({ ...c, _trackId: t.id })));
+                    let reviewFraming = { applied: 0, refused: [] };
+                    try { reviewFraming = framingPlan(plan.beats, baseForReview); } catch { /* reported as 0 */ }
+                    return {
+                        success: true, placed: 0, dryRun: true, beats: plan.beats, reasoning: plan.reasoning,
+                        skipped: bridged.skipped, placements: finalPlacements,
+                        framing: { applied: reviewFraming.applied, refused: reviewFraming.refused },
+                        qa: { found: foundBefore.length, repaired: qa.repairs, unresolved: qa.unresolved, notes: describeQa(foundBefore) },
+                    };
+                }
+
+                const offset = Math.max(0, Number(input.start) || 0);
+
+                // R112 round C — the camera, planned before anything is
+                // touched so a refusal costs no history entry. `punch` beats
+                // push in on the speaker using the same `keyframes.scale`
+                // field rhythm_zoom writes; a clip that already has one is
+                // left alone rather than quietly overwritten.
+                const baseClips = (st.tracks || [])
+                    .filter(t => t.type === 'video')
+                    .flatMap(t => (t.clips || []).map(c => ({ ...c, _trackId: t.id })));
+                let framing = { work: [], applied: 0, refused: [] };
+                try {
+                    framing = framingPlan(plan.beats, baseClips);
+                } catch (err) {
+                    console.error('[applyStoryboard] the framing could not be planned:', err);
+                }
+
+                get()._saveHistory();
+
+                for (const w of framing.work) {
+                    try {
+                        const clip = baseClips.find(c => c.id === w.clipId);
+                        get().updateClip(w.trackId, w.clipId, {
+                            keyframes: { ...(clip?.keyframes || {}), scale: w.keyframes },
+                        }, { skipHistory: true });
+                    } catch (err) {
+                        console.error(`[applyStoryboard] could not reframe ${w.clipId}:`, err);
+                    }
+                }
+
+                let placed = 0;
+                const failed = [...bridged.skipped];
+                for (const p of finalPlacements) {
+                    try {
+                        const at = offset + p.start;
+                        const r = p.source === 'component'
+                            ? get().addMotionComponent(p.id, p.preset, { ...p.params, start: at, duration: p.duration }, { skipHistory: true })
+                            : get().addTemplateClip(p.id, p.params, { start: at, duration: p.duration, x: p.x, y: p.y, select: false, skipHistory: true });
+                        if (r?.success) placed++;
+                        else failed.push({ beatId: p.beatId, reason: r?.error || `"${p.graphic}" could not be placed` });
+                    } catch (err) {
+                        // One graphic that throws must not abandon the rest of
+                        // the storyboard half-placed and unreported.
+                        console.error(`[applyStoryboard] ${p.graphic} at ${p.start}s threw:`, err);
+                        failed.push({ beatId: p.beatId, reason: `"${p.graphic}" threw: ${err.message}` });
+                    }
+                }
+
+                if (placed === 0) {
+                    // Nothing landed, so the snapshot taken above is the state
+                    // we are already in; undoing it would surprise the user.
+                    return { success: false, error: 'The storyboard was planned but nothing could be placed.', reasoning: plan.reasoning, skipped: failed };
+                }
+                return {
+                    success: true, placed, beats: plan.beats, reasoning: plan.reasoning, skipped: failed,
+                    framing: { applied: framing.applied, refused: framing.refused },
+                    qa: { found: foundBefore.length, repaired: qa.repairs, unresolved: qa.unresolved },
+                };
+            },
+
+            /**
              * R65 — Motion Graphics Components.
              *
              * The store-side half of `client/src/motion/ComponentLibrary.js`.
@@ -2340,7 +2567,7 @@ const useTimelineStore = create(
              * @param {object} [params] component-specific content (text/url/emoji/...)
              * @returns {{success:boolean, error?:string, clipCount?:number}}
              */
-            addMotionComponent: (componentId, presetId, params = {}) => {
+            addMotionComponent: (componentId, presetId, params = {}, opts = {}) => {
                 let result;
                 try {
                     // R95: the frame is what lets a designed component lay
@@ -2372,7 +2599,7 @@ const useTimelineStore = create(
                 const scene = result.scene || sceneFromPlacements(result.placements, {
                     componentId, presetId, aspectRatio: get().aspectRatio || '16:9', name: params.name || componentId,
                 });
-                return get()._placeScene(scene, { start, label: componentId });
+                return get()._placeScene(scene, { start, label: componentId, skipHistory: !!opts.skipHistory });
             },
 
             /**
@@ -2595,10 +2822,20 @@ const useTimelineStore = create(
              */
             addTemplateClip: (kind, params = {}, opts = {}) => {
                 if (!TEMPLATE_KINDS.includes(kind)) return { success: false, error: `unknown template "${kind}"` };
-                const p = templateParams(kind, params);
+                // R114 - the brand is BAKED IN here, not applied at draw time.
+                //
+                // Two reasons, both load-bearing. It reaches the preview and
+                // the export with no change to either, because the params
+                // travel with the clip — passing a live brand into two
+                // renderers is two places to forget it and a silent parity
+                // break. And a graphic keeps the look it had when it was
+                // placed: changing the brand later must not repaint work the
+                // user already approved without being asked.
+                const kit = opts.brand === null ? null : (opts.brand || get().brandKit);
+                const p = templateParams(kind, kit ? applyBrand(kind, params, kit, TEMPLATE_DEFAULTS[kind]) : params);
                 const size = templateSize(kind, p);
                 let track = get().tracks.find(t => t.type === 'overlay');
-                const trackId = track ? track.id : get().addTrack('overlay');
+                const trackId = track ? track.id : get().addTrack('overlay', opts.skipHistory ? { skipHistory: true } : undefined);
                 const start = Number.isFinite(Number(opts.start)) ? Number(opts.start) : get().currentTime;
                 const duration = Number(opts.duration) > 0 ? Number(opts.duration) : (kind === 'code-window' ? 5 : 3);
                 const defaultY = { 'counter': 20, 'price-pop': 42, 'logo-card': 78, 'code-window': 50 }[kind];
@@ -2606,7 +2843,10 @@ const useTimelineStore = create(
                 get().addClip(trackId, {
                     id,
                     type: 'template',
-                    name: kind === 'counter' ? `${p.label} ${p.value}` : kind === 'price-pop' ? String(p.text) : kind === 'logo-card' ? String(p.label) : String(p.title),
+                    // Every kind needs a name, not just the four that had one:
+                    // a clip reading "undefined" on the timeline is how a
+                    // template nobody named looks to the person editing it.
+                    name: templateClipName(kind, p),
                     template: { kind, params: p },
                     metadata: { resolution: { w: size.w, h: size.h } },
                     start,
@@ -2618,7 +2858,7 @@ const useTimelineStore = create(
                     scale: (TEMPLATE_WIDTH_FRACTION[kind] || 0.5) / 0.25,
                     rotation: 0,
                     opacity: 1,
-                });
+                }, opts.skipHistory ? { skipHistory: true } : undefined);
                 const placed = get().tracks.find(t => t.id === trackId)?.clips?.find(c => c.clipId === id || c.id === id) || null;
                 if (placed && opts.select !== false) get().setActiveClip?.(placed.id);
                 return { success: true, trackId, clipId: placed?.id || id };
@@ -3400,6 +3640,11 @@ const useTimelineStore = create(
                     transcriptVerified:   state.transcriptVerified || {},
                     contentAnalysis:      state.contentAnalysis || null,
                     editingStyle:         state.editingStyle || null,
+                    // R114: the brand kit belongs in the save for exactly the
+                    // reason the note above gives. Omitted, it would reset on
+                    // every refresh and read as "it forgot my colours" — one
+                    // more instance of the single bug described there.
+                    brandKit:             state.brandKit || null,
                     shorts:               Array.isArray(state.shorts) ? state.shorts : [],
                     // R94: only the scenes a clip still points at. Without the
                     // prune, every undone or deleted graphic would stay in the

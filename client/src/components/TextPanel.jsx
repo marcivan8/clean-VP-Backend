@@ -1,11 +1,15 @@
 import { useShallow } from 'zustand/react/shallow';
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../store/useTimelineStore';
 import { AlignLeft, AlignCenter, AlignRight, Plus, Bold, Italic, Underline, RotateCcw, Type } from 'lucide-react';
 import SaveAsPresetButton from './SaveAsPresetButton.jsx';
 import { autoEmphasizeCaptions, clearAllEmphasis, toggleEmphasisWord } from '../utils/captionEmphasis.js';
 import { resolveEmphasis } from '../motion/CaptionModel.js';
+import {
+    PanelSection, ControlRow, Segmented, ToggleGroup, NumberField,
+    TrackSlider, SwatchRow, SelectField,
+} from './ui/PanelControls.jsx';
 
 const FONT_GROUPS = [
     { group: 'Talking Head',       groupKey: 'textPanel.fontGroupTalkingHead',    fonts: ['Anton', 'Bebas Neue', 'Montserrat', 'Inter', 'Barlow Condensed'] },
@@ -111,43 +115,45 @@ const KeywordSection = ({ clip, showWords }) => {
     );
 };
 
+/**
+ * R116 — rebuilt on the shared panel kit (components/ui/PanelControls.jsx).
+ *
+ * The layout follows the typography references: a label on the left, its
+ * control on the right, a fixed label column so every row lines up, sections
+ * that carry their own heading, and numbers in boxes with the unit inside
+ * them rather than floating next to a slider.
+ *
+ * Two deliberate omissions, because a control that writes to a field nothing
+ * renders is the ADR-001 shape in miniature:
+ *  - no letter-spacing / line-height trio, even though the reference has one.
+ *    Text clips have no such field: it is a hard-coded `0.06em` in one place
+ *    in TextOverlay, so a box here would move a number nobody reads.
+ *  - no opacity next to the colour. `clip.opacity` renders in the preview,
+ *    but only on the branch that is NOT animated, and the export path derives
+ *    opacity from the animation instead — so the control would work on screen
+ *    and silently do nothing in half the exports.
+ */
 const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true, showReset = false, onReset }) => {
     const { t } = useTranslation('editor');
     // Fall back to onUpdate if no live variant provided
     const live = onLiveUpdate || onUpdate;
 
-    // Local state for number inputs — prevents fan-out on every keystroke.
-    // Committed to the store on blur or Enter; cleared when clip identity changes.
-    const [localFontSize, setLocalFontSize] = useState(null);
-    const [localScale,    setLocalScale]    = useState(null);
-    const prevClipRef = useRef(null);
-
-    useEffect(() => {
-        // When a different clip is displayed, discard any locally typed-but-uncommitted values
-        if (prevClipRef.current !== clip?.id) {
-            setLocalFontSize(null);
-            setLocalScale(null);
-            prevClipRef.current = clip?.id;
-        }
-    });
-
     if (!clip) return null;
 
-    const activeAnim   = clip.animation || 'none';
-    const displayX     = livePos?.x ?? clip.x ?? 50;
-    const displayY     = livePos?.y ?? clip.y ?? 50;
+    const activeAnim = clip.animation || 'none';
+    const displayX = livePos?.x ?? clip.x ?? 50;
+    const displayY = livePos?.y ?? clip.y ?? 50;
+    const rotation = Math.round(Number(clip.rotation) || 0);
 
-    const commitFontSize = () => {
-        if (localFontSize !== null) { onUpdate({ fontSize: localFontSize }); setLocalFontSize(null); }
-    };
-    const commitScale = () => {
-        if (localScale !== null) { onUpdate({ scale: localScale }); setLocalScale(null); }
-    };
+    const fontOptions = FONT_GROUPS.map(g => ({
+        label: t(g.groupKey),
+        options: g.fonts.map(f => ({ value: f, label: f })),
+    }));
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
             {showContent && (
-                <div style={{ marginBottom: 12 }}>
+                <div style={{ marginBottom: 10 }}>
                     <div style={{ ...S.label, marginBottom: 4 }}>{t('textPanel.content')}</div>
                     <textarea
                         value={clip.content || ''}
@@ -158,176 +164,131 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true
                 </div>
             )}
 
-            <div style={{ ...S.row, marginBottom: 12 }}>
-                <div style={{ flex: 1 }}>
-                    <div style={{ ...S.label, marginBottom: 4 }}>{t('textPanel.size')}</div>
-                    <input
-                        type="number"
-                        value={localFontSize ?? (clip.fontSize || 48)}
-                        onChange={(e) => setLocalFontSize(parseInt(e.target.value) || 1)}
-                        onBlur={commitFontSize}
-                        onKeyDown={(e) => { if (e.key === 'Enter') { commitFontSize(); e.target.blur(); } }}
-                        style={S.input} />
-                </div>
-                <div style={{ flex: 1 }}>
-                    <div style={{ ...S.label, marginBottom: 4 }}>{t('textPanel.scale')}</div>
-                    <input
-                        type="number" step="0.1" min="0.1" max="5.0"
-                        value={localScale ?? (clip.scale || 1.0)}
-                        onChange={(e) => setLocalScale(parseFloat(e.target.value) || 0.1)}
-                        onBlur={commitScale}
-                        onKeyDown={(e) => { if (e.key === 'Enter') { commitScale(); e.target.blur(); } }}
-                        style={S.input} />
-                </div>
-            </div>
+            <PanelSection title={t('textPanel.text', 'Text')}>
+                <ControlRow label={t('textPanel.font')}>
+                    <SelectField
+                        ariaLabel={t('textPanel.font')}
+                        value={clip.fontFamily || 'Inter'}
+                        options={fontOptions}
+                        onChange={(v) => onUpdate({ fontFamily: v })}
+                    />
+                </ControlRow>
 
-            <div style={{ marginBottom: 12 }}>
-                <div style={{ ...S.label, marginBottom: 4 }}>{t('textPanel.font')}</div>
-                <select value={clip.fontFamily || 'Inter'}
-                    onChange={(e) => onUpdate({ fontFamily: e.target.value })}
-                    style={S.select}>
-                    {FONT_GROUPS.map(g => (
-                        <optgroup key={g.group} label={t(g.groupKey)}>
-                            {g.fonts.map(f => <option key={f} value={f}>{f}</option>)}
-                        </optgroup>
-                    ))}
-                </select>
-            </div>
+                {/* Size and scale sit side by side under one label, each with
+                    its own sub-label — the reference's number trio, minus the
+                    field this app does not have. */}
+                <ControlRow label={t('textPanel.size')}>
+                    <NumberField
+                        value={clip.fontSize || 48}
+                        onChange={(v) => onUpdate({ fontSize: v })}
+                        min={1} max={400} step={1} unit="px"
+                        subLabel={t('textPanel.size')}
+                    />
+                    <NumberField
+                        value={clip.scale ?? 1}
+                        onChange={(v) => onUpdate({ scale: v })}
+                        min={0.1} max={5} step={0.1}
+                        subLabel={t('textPanel.scale')}
+                    />
+                </ControlRow>
 
-            {/* Style buttons */}
-            <div style={{ display: 'flex', gap: 4, padding: '6px 8px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '0.5px solid var(--line)', marginBottom: 12, flexWrap: 'wrap' }}>
-                <button style={S.iconBtn(clip.fontWeight === 'bold')}
-                    onClick={() => onUpdate({ fontWeight: clip.fontWeight === 'bold' ? 'normal' : 'bold' })}>
-                    <Bold size={13} />
-                </button>
-                <button style={S.iconBtn(clip.fontStyle === 'italic')}
-                    onClick={() => onUpdate({ fontStyle: clip.fontStyle === 'italic' ? 'normal' : 'italic' })}>
-                    <Italic size={13} />
-                </button>
-                <button style={S.iconBtn(clip.textDecoration === 'underline')}
-                    onClick={() => onUpdate({ textDecoration: clip.textDecoration === 'underline' ? 'none' : 'underline' })}>
-                    <Underline size={13} />
-                </button>
-                <div style={{ width: '0.5px', background: 'var(--line)', margin: '0 2px' }} />
-                <button
-                    style={{ ...S.iconBtn(!!clip.textShadow), padding: '4px 8px', fontSize: 10, fontFamily: 'var(--f-mono)' }}
-                    onClick={() => onUpdate({ textShadow: clip.textShadow ? null : '2px 2px 4px rgba(0,0,0,0.8)' })}>
-                    {t('textPanel.shadow')}
-                </button>
-                <button
-                    style={{ ...S.iconBtn(!!clip.stroke), padding: '4px 8px', fontSize: 10, fontFamily: 'var(--f-mono)' }}
-                    onClick={() => onUpdate({ stroke: clip.stroke ? null : { width: 1, color: '#000000' } })}>
-                    {t('textPanel.stroke')}
-                </button>
-            </div>
+                <ControlRow label={t('textPanel.weight', 'Weight')}>
+                    <ToggleGroup
+                        ariaLabel={t('textPanel.weight', 'Weight')}
+                        items={[
+                            { id: 'bold', icon: Bold, label: t('textPanel.bold', 'Bold'), on: clip.fontWeight === 'bold',
+                              onToggle: () => onUpdate({ fontWeight: clip.fontWeight === 'bold' ? 'normal' : 'bold' }) },
+                            { id: 'italic', icon: Italic, label: t('textPanel.italic', 'Italic'), on: clip.fontStyle === 'italic',
+                              onToggle: () => onUpdate({ fontStyle: clip.fontStyle === 'italic' ? 'normal' : 'italic' }) },
+                            { id: 'underline', icon: Underline, label: t('textPanel.underline', 'Underline'), on: clip.textDecoration === 'underline',
+                              onToggle: () => onUpdate({ textDecoration: clip.textDecoration === 'underline' ? 'none' : 'underline' }) },
+                            { id: 'shadow', divider: true, label: t('textPanel.shadow'), on: !!clip.textShadow,
+                              onToggle: () => onUpdate({ textShadow: clip.textShadow ? null : '2px 2px 4px rgba(0,0,0,0.8)' }) },
+                            { id: 'stroke', label: t('textPanel.stroke'), on: !!clip.stroke,
+                              onToggle: () => onUpdate({ stroke: clip.stroke ? null : { width: 1, color: '#000000' } }) },
+                        ]}
+                    />
+                </ControlRow>
 
-            {/* Color */}
-            <div style={{ marginBottom: 12 }}>
-                <div style={{ ...S.label, marginBottom: 6 }}>{t('textPanel.color')}</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <input type="color" value={clip.color || '#ffffff'}
-                        onChange={(e) => onUpdate({ color: e.target.value })}
-                        style={{ width: 28, height: 28, border: '0.5px solid var(--line)', borderRadius: 6, cursor: 'pointer', background: 'none', padding: 2 }} />
-                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)' }}>{clip.color || '#ffffff'}</span>
-                </div>
-            </div>
+                <ControlRow label={t('textPanel.alignment')}>
+                    <Segmented
+                        ariaLabel={t('textPanel.alignment')}
+                        value={clip.textAlign || 'center'}
+                        onChange={(v) => onUpdate({ textAlign: v })}
+                        options={[
+                            { value: 'left', icon: AlignLeft, title: t('textPanel.alignLeft', 'Left') },
+                            { value: 'center', icon: AlignCenter, title: t('textPanel.alignCenter', 'Center') },
+                            { value: 'right', icon: AlignRight, title: t('textPanel.alignRight', 'Right') },
+                        ]}
+                    />
+                </ControlRow>
 
-            {/* Alignment */}
-            <div style={{ marginBottom: 12 }}>
-                <div style={{ ...S.label, marginBottom: 6 }}>{t('textPanel.alignment')}</div>
-                <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)', borderRadius: 6, border: '0.5px solid var(--line)', padding: 3, gap: 2 }}>
-                    {[
-                        { align: 'left',   Icon: AlignLeft },
-                        { align: 'center', Icon: AlignCenter },
-                        { align: 'right',  Icon: AlignRight },
-                    ].map(({ align, Icon }) => (
-                        <button key={align} onClick={() => onUpdate({ textAlign: align })}
-                            style={{ flex: 1, padding: 5, borderRadius: 4, border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center',
-                                background: clip.textAlign === align ? 'rgba(255,255,255,0.10)' : 'transparent',
-                                color: clip.textAlign === align ? 'var(--fg)' : 'var(--fg-4)' }}>
-                            <Icon size={13} />
-                        </button>
-                    ))}
-                </div>
-            </div>
+                <ControlRow label={t('textPanel.color')}>
+                    <SwatchRow
+                        ariaLabel={t('textPanel.color')}
+                        color={clip.color || '#FFFFFF'}
+                        onColor={(hex) => onUpdate({ color: hex })}
+                    />
+                </ControlRow>
+            </PanelSection>
 
-            {/* Position */}
-            <div style={S.section}>
-                <div style={{ ...S.label, marginBottom: 10 }}>{t('textPanel.position')}</div>
-                {[{ key: 'x', label: t('textPanel.xAxis'), display: displayX }, { key: 'y', label: t('textPanel.yAxis'), display: displayY }].map(({ key, label, display }) => (
-                    <div key={key} style={{ marginBottom: 10 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                            <span style={{ fontFamily: 'var(--f-sans)', fontSize: 11, color: 'var(--fg-3)' }}>{label}</span>
-                            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)' }}>{display}%</span>
-                        </div>
-                        <input type="range" min="0" max="100" value={display}
-                            onChange={(e) => live({ [key]: parseInt(e.target.value) })}
-                            onPointerUp={(e) => onUpdate({ [key]: parseInt(e.target.value) })}
-                            style={{ width: '100%', accentColor: 'var(--accent)', height: 3, cursor: 'pointer' }} />
-                    </div>
+            <PanelSection
+                title={t('textPanel.position')}
+                onReset={rotation || displayX !== 50 || displayY !== 50
+                    ? () => onUpdate({ x: 50, y: 50, rotation: 0 })
+                    : null}
+                resetLabel={t('textPanel.reset', 'Reset')}
+            >
+                {[{ key: 'x', label: t('textPanel.xAxis'), display: displayX },
+                  { key: 'y', label: t('textPanel.yAxis'), display: displayY }].map(({ key, label, display }) => (
+                    <ControlRow key={key} label={label}>
+                        <TrackSlider
+                            ariaLabel={label}
+                            value={display}
+                            min={0} max={100} step={1} unit="%"
+                            onChange={(v) => live({ [key]: v })}
+                            onCommit={(v) => onUpdate({ [key]: v })}
+                        />
+                    </ControlRow>
                 ))}
                 {/* Rotation (A3) — base rotation in degrees; the on-canvas rotate
                     handle edits the same field. Presets animate on top of it. */}
-                <div style={{ marginBottom: 10 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                        <span style={{ fontFamily: 'var(--f-sans)', fontSize: 11, color: 'var(--fg-3)' }}>{t('textPanel.rotation')}</span>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)' }}>{Math.round(Number(clip.rotation) || 0)}°</span>
-                            {Number(clip.rotation) ? (
-                                <button type="button" onClick={() => onUpdate({ rotation: 0 })}
-                                    title={t('textPanel.resetRotation')}
-                                    aria-label={t('textPanel.resetRotation')}
-                                    style={{ background: 'none', border: 'none', color: 'var(--fg-4)', cursor: 'pointer', padding: 0, display: 'flex' }}>
-                                    <RotateCcw size={10} />
-                                </button>
-                            ) : null}
-                        </span>
-                    </div>
-                    <input type="range" min="-180" max="180" step="1" value={Math.round(Number(clip.rotation) || 0)}
-                        onChange={(e) => live({ rotation: parseInt(e.target.value, 10) || 0 })}
-                        onPointerUp={(e) => onUpdate({ rotation: parseInt(e.target.value, 10) || 0 })}
-                        onKeyUp={(e) => onUpdate({ rotation: parseInt(e.target.value, 10) || 0 })}
-                        aria-label={t('textPanel.rotation')}
-                        style={{ width: '100%', accentColor: 'var(--accent)', height: 3, cursor: 'pointer' }} />
-                </div>
+                <ControlRow label={t('textPanel.rotation')}>
+                    <TrackSlider
+                        ariaLabel={t('textPanel.rotation')}
+                        value={rotation}
+                        min={-180} max={180} step={1} unit="°"
+                        onChange={(v) => live({ rotation: v })}
+                        onCommit={(v) => onUpdate({ rotation: v })}
+                    />
+                </ControlRow>
 
-                {/* Depth / Placement: In Front vs Behind Subject (Sandwich) */}
-                <div style={{ marginTop: 10, paddingTop: 10, borderTop: '0.5px solid var(--line-soft)' }}>
-                    <div style={{ ...S.label, marginBottom: 6 }}>{t('textPanel.depthPlacement', 'Depth & Layer')}</div>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                        <button
-                            type="button"
-                            onClick={() => onUpdate({ placement: 'front' })}
-                            style={S.pill(clip.placement !== 'behind_subject')}
-                        >
-                            {t('textPanel.placementFront', 'In Front')}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => onUpdate({ placement: 'behind_subject' })}
-                            style={S.pill(clip.placement === 'behind_subject')}
-                        >
-                            {t('textPanel.placementBehind', '✨ Behind Subject')}
-                        </button>
-                    </div>
-                </div>
-            </div>
+                <ControlRow label={t('textPanel.depthPlacement', 'Depth & Layer')} labelWidth={62}>
+                    <Segmented
+                        grow
+                        ariaLabel={t('textPanel.depthPlacement', 'Depth & Layer')}
+                        value={clip.placement === 'behind_subject' ? 'behind_subject' : 'front'}
+                        onChange={(v) => onUpdate({ placement: v })}
+                        options={[
+                            { value: 'front', label: t('textPanel.placementFront', 'In Front') },
+                            { value: 'behind_subject', label: t('textPanel.placementBehind', 'Behind') },
+                        ]}
+                    />
+                </ControlRow>
+            </PanelSection>
 
             <KeywordSection clip={clip} showWords={showContent} />
 
-            {/* Animation */}
-            <div style={S.section}>
-                <div style={{ ...S.label, marginBottom: 8 }}>{t('textPanel.animation')}</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                    {ANIMATION_PRESETS.map(preset => (
-                        <button key={preset.id}
-                            onClick={() => onUpdate({ animation: preset.id === 'none' ? null : preset.id })}
-                            style={S.pill(activeAnim === preset.id)}>
-                            {t(preset.labelKey)}
-                        </button>
-                    ))}
-                </div>
-            </div>
+            <PanelSection title={t('textPanel.animation')}>
+                <ControlRow label={t('textPanel.animation')}>
+                    <SelectField
+                        ariaLabel={t('textPanel.animation')}
+                        value={activeAnim}
+                        options={ANIMATION_PRESETS.map(p => ({ value: p.id, label: t(p.labelKey) }))}
+                        onChange={(v) => onUpdate({ animation: v === 'none' ? null : v })}
+                    />
+                </ControlRow>
+            </PanelSection>
 
             {showReset && onReset && (
                 <button onClick={onReset}
@@ -343,7 +304,7 @@ const StyleEditor = ({ clip, onUpdate, onLiveUpdate, livePos, showContent = true
     );
 };
 
-// ── Per-segment row ────────────────────────────────────────────────────────────
+
 const SegmentRow = ({ clip, trackId, globalStyle, onActivate, isActive }) => {
     const { t } = useTranslation('editor');
     const [expanded, setExpanded] = useState(false);

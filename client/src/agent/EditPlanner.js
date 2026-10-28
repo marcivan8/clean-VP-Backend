@@ -376,6 +376,62 @@ export class EditPlanner {
                     { step_id: 'step_1', action: 'add_template', args: tpl, reason: `Add a ${tpl.kind} template` },
                 ]);
             }
+            case 'set_brand_kit': {
+                // The colour IS in the sentence. Hex first, then a small table
+                // of names — enough to cover "make it red" without pretending
+                // to be a colour parser.
+                const said = String(intent.originalPrompt || '');
+                const NAMED = {
+                    red: '#ff3b30', orange: '#ff9500', yellow: '#ffe500', green: '#10b981',
+                    teal: '#00e5ff', cyan: '#00e5ff', blue: '#2f6bff', indigo: '#5856d6',
+                    purple: '#a855f7', violet: '#8a2be2', pink: '#ff3b5c', magenta: '#ff3b5c',
+                    white: '#ffffff', black: '#0b0e14', gold: '#c8a96a',
+                    rouge: '#ff3b30', orange_fr: '#ff9500', jaune: '#ffe500', vert: '#10b981',
+                    bleu: '#2f6bff', violet_fr: '#8a2be2', rose: '#ff3b5c', noir: '#0b0e14', blanc: '#ffffff',
+                };
+                const hex = (said.match(/#[0-9a-fA-F]{6}\b/) || [])[0] || null;
+                let named = null;
+                if (!hex) {
+                    const low = said.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                    for (const [word, value] of Object.entries(NAMED)) {
+                        const bare = word.replace(/_fr$/, '');
+                        if (new RegExp(`\\b${bare}\\b`).test(low)) { named = value; break; }
+                    }
+                }
+                const accent = hex || named;
+                return this.buildPlan(planId, 'set_brand_kit', [
+                    {
+                        step_id: 'step_1',
+                        action: 'set_brand_kit',
+                        args: { ...(accent ? { accent } : {}), said },
+                        reason: accent ? `Set the brand accent to ${accent}` : 'Report what the brand kit needs',
+                    },
+                ]);
+            }
+            case 'storyboard_video': {
+                // Nothing about the CONTENT is decided here: the planner reads
+                // the project's own transcript and duration from the store at
+                // execution time, so there is no brief to parse.
+                //
+                // One thing IS decided — whether to place the storyboard or
+                // only show it. Dropping a dozen graphics onto someone's
+                // timeline is a big edit, and "show me the storyboard" is a
+                // request to look, not to act. The same command answers both;
+                // a review run touches nothing.
+                const asked = String(intent.originalPrompt || '').toLowerCase();
+                const dryRun = /\b(show|preview|plan(?!\s+to)|what would|suggest|montre|planifie|propose)\b/.test(asked)
+                    && !/\b(do it|apply|place|add them|go ahead|fais le|applique)\b/.test(asked);
+                return this.buildPlan(planId, 'storyboard_video', [
+                    {
+                        step_id: 'step_1',
+                        action: 'storyboard_video',
+                        args: { dryRun },
+                        reason: dryRun
+                            ? 'Plan a graphic for each moment worth showing, and report the plan without changing the edit'
+                            : 'Plan a graphic for each moment worth showing, across the whole video',
+                    },
+                ]);
+            }
             case 'design_scene': {
                 // The brief IS the prompt: the director reads its tone and
                 // beats (motion/SceneDirector.js), so nothing is decided here

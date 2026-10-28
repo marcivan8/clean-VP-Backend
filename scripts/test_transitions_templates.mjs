@@ -142,8 +142,13 @@ if (!Canvas) {
 } else {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'r89-'));
     for (const kind of G.TEMPLATE_KINDS) {
-        const a = await TR.renderTemplateFrames({ kind, params: {} }, { durationSec: 1, fps: 10, widthPx: 400, tmpDir: tmp, name: `${kind}-a` });
-        const b = await TR.renderTemplateFrames({ kind, params: {} }, { durationSec: 1, fps: 10, widthPx: 400, tmpDir: tmp, name: `${kind}-b` });
+        // R114: a few kinds depict real data (audio amplitudes) and refuse to
+        // draw a shape they invented. They are not exempted here — they are
+        // given the preview sample the catalogue exports for exactly this, so
+        // the check still proves they draw, deterministically, from input.
+        const params = G.previewParams(kind);
+        const a = await TR.renderTemplateFrames({ kind, params }, { durationSec: 1, fps: 10, widthPx: 400, tmpDir: tmp, name: `${kind}-a` });
+        const b = await TR.renderTemplateFrames({ kind, params }, { durationSec: 1, fps: 10, widthPx: 400, tmpDir: tmp, name: `${kind}-b` });
         assert.equal(a.frames, 10);
         assert.ok(a.files.every((f, i) => Buffer.compare(fs.readFileSync(f), fs.readFileSync(b.files[i])) === 0), `${kind} not deterministic`);
         const img = await Canvas.loadImage(fs.readFileSync(a.files[6]));
@@ -153,11 +158,36 @@ if (!Canvas) {
         // so the footage still reads through it. Every other kind is drawn to
         // be seen on its own and must still be near-opaque, so the floor is
         // per-kind rather than relaxed for all of them.
-        const alphaFloor = kind === 'panel' ? 120 : 200;
+        //
+        // R113: the FRAME EFFECTS are a third class. A spotlight is a dim
+        // layer with a hole ERASED out of it, a magnifier dims at a quarter
+        // alpha, and a crosshair is strokes covering well under a percent of
+        // the frame. Counting near-opaque pixels over 3% of the box is the
+        // right question for a card and the wrong one for these, so they get
+        // their own floor and share instead of the assertion being loosened
+        // for all 52 kinds.
+        const isEffect = G.FRAME_EFFECT_KINDS.includes(kind);
+        const alphaFloor = isEffect ? 30 : (kind === 'panel' ? 120 : 200);
+        const minShare = isEffect ? 0.002 : 0.03;
         let opaque = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > alphaFloor) opaque++;
-        assert.ok(opaque > img.width * img.height * 0.03, `${kind} draws nothing`);
+        assert.ok(opaque > img.width * img.height * minShare, `${kind} draws nothing`);
     }
     ok('every template draws, deterministically (same frames twice)');
+    {
+        // The relaxed floor must not become a way to hide a broken card, so
+        // every kind claiming it has to actually BE a frame-sized effect.
+        for (const kind of G.FRAME_EFFECT_KINDS) {
+            assert.ok(G.TEMPLATE_KINDS.includes(kind), `${kind} is not a template`);
+            assert.equal(G.TEMPLATE_WIDTH_FRACTION[kind], 1.0, `${kind} is not frame-width`);
+        }
+        // And a data-required kind must genuinely draw NOTHING without input,
+        // or the refusal is a claim rather than a behaviour.
+        for (const kind of G.DATA_REQUIRED_KINDS) {
+            assert.ok(G.TEMPLATE_KINDS.includes(kind), `${kind} is not a template`);
+            assert.ok(Object.keys(G.previewParams(kind)).length > 0, `${kind} has no preview sample`);
+        }
+    }
+    ok('the frame-effect and data-required classes hold what they claim');
     {
         // Counter ends on its value: the last frame equals a frame drawn straight at the end.
         const cv1 = Canvas.createCanvas(540, 300); G.drawTemplate(cv1.getContext('2d'), 'counter', { value: 7, total: 9, from: 1 }, 2.0, 3);

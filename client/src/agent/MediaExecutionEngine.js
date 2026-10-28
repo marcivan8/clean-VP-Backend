@@ -994,6 +994,160 @@ export class MediaExecutionEngine {
             // from the AI when there is a transcript to work from; without
             // them the beats carry editable placeholders, and the reply says
             // so rather than inventing claims.
+            case 'set_brand_kit': {
+                // R114 - one kit, taken by every graphic placed from now on.
+                const wanted = {};
+                if (args.accent) wanted.accent = args.accent;
+                if (args.text) wanted.text = args.text;
+                for (const key of ['display', 'label', 'body', 'mono', 'name', 'logoUrl']) {
+                    if (args[key]) wanted[key] = args[key];
+                }
+                if (Number.isFinite(Number(args.pace))) wanted.pace = Number(args.pace);
+                if (Number.isFinite(Number(args.radius))) wanted.radius = Number(args.radius);
+
+                if (Object.keys(wanted).length === 0) {
+                    // Nothing usable was said. Asking is better than storing a
+                    // default kit the user never chose and then repainting
+                    // every graphic they ask for afterwards.
+                    return {
+                        action, success: false,
+                        error: 'no brand values',
+                        message: 'Tell me the colour and I will use it everywhere — a hex like #FF0033, or just "make my brand red". I can also take a font name.',
+                    };
+                }
+
+                const result = this._callStore(store, 'setBrandKit', wanted);
+                if (!result?.success) {
+                    return { action, success: false, error: result?.error, message: result?.error || 'The brand kit could not be set.' };
+                }
+                const kit = result.brandKit || {};
+                let message = `Brand set: accent ${kit.accent}, text ${kit.text}, ${kit.display}/${kit.body} for type.`;
+                // The one thing a person would otherwise discover the hard way.
+                message += ' Every graphic from here takes it automatically. Graphics already on the timeline keep the colours they were placed with — tell me if you want those redone.';
+                return { action, success: true, message, details: { brandKit: kit } };
+            }
+
+            case 'storyboard_video': {
+                // R112 round B — the whole-video path.
+                //
+                // Two reads happen here that the store cannot do itself,
+                // because both need a <video> element: the shot boundaries,
+                // and (through designScene's own path) the footage palette.
+                // Both are optional by design — the storyboard plans on the
+                // speech alone if the footage cannot be decoded, which is
+                // exactly what it did before ShotSampler existed.
+                const st = useTimelineStore.getState();
+                const words = Array.isArray(st.captions) ? st.captions : [];
+                if (words.length === 0) {
+                    return {
+                        action, success: false,
+                        error: 'no transcript',
+                        message: 'I need the transcript first — transcribe the video and ask again, and I will plan a graphic for each moment worth showing.',
+                    };
+                }
+
+                let cuts = [];
+                const videoClips = (st.tracks || []).filter(t => t.type === 'video').flatMap(t => t.clips || []);
+                const base = videoClips.slice().sort((a, b) => (Number(a.start) || 0) - (Number(b.start) || 0))[0] || null;
+                if (base) {
+                    const sourceUrl = this._clipSourceUrl(st, base);
+                    if (sourceUrl) {
+                        try {
+                            const { sampleShots } = await import('../vision/ShotSampler.js');
+                            const read = await sampleShots({
+                                sourceUrl,
+                                duration: Number(base.duration) > 0 ? Number(base.duration) : Number(st.duration) || 0,
+                            });
+                            // Boundaries come back in SOURCE time; the beats are
+                            // in TIMELINE time, so the clip's own offset and
+                            // speed have to be undone or every snap lands on the
+                            // wrong second of a trimmed clip.
+                            const offset = Number(base.offset) || 0;
+                            const speed = Number(base.speed) > 0 ? Number(base.speed) : 1;
+                            const startAt = Number(base.start) || 0;
+                            cuts = (read?.cuts || [])
+                                .map(c => startAt + (c - offset) / speed)
+                                .filter(c => c > startAt);
+                        } catch (err) {
+                            console.warn('[storyboard_video] shot detection unavailable, planning on the speech alone:', err.message);
+                        }
+                    }
+                }
+
+                const dryRun = !!args.dryRun;
+                const result = this._callStore(store, 'applyStoryboard', { words, cuts, dryRun });
+                if (!result?.success) {
+                    return { action, success: false, error: result?.error, message: result?.error || 'The storyboard could not be placed.' };
+                }
+
+                if (dryRun) {
+                    // A review run: the plan in words, and the timeline
+                    // untouched. Each line is one beat, so a person can say
+                    // which ones they disagree with before anything is placed.
+                    const lines = (result.beats || []).map((b, i) => {
+                        const at = `${Math.floor(b.start / 60)}:${String(Math.floor(b.start % 60)).padStart(2, '0')}`;
+                        return `${i + 1}. ${at} — ${b.graphic} (${b.kind}${b.onCut ? ', on a cut' : ''}): "${b.text}"`;
+                    });
+                    const notes = [];
+                    if (result.framing?.applied) notes.push(`${result.framing.applied} of them push in on you.`);
+                    if (result.qa?.found) {
+                        notes.push(`${result.qa.found} ${result.qa.found === 1 ? 'problem' : 'problems'} found and ${result.qa.repaired?.length || 0} repaired before showing you this.`);
+                    }
+                    if (result.qa?.unresolved?.length) notes.push(`Still not right: ${result.qa.unresolved[0].reason}.`);
+                    return {
+                        action, success: true,
+                        message: [
+                            result.reasoning?.[0] || `${lines.length} beats planned.`,
+                            ...lines,
+                            ...notes,
+                            'Nothing has been placed. Say "storyboard it" and I will add these.',
+                        ].join('\n'),
+                        details: {
+                            dryRun: true, beats: result.beats, reasoning: result.reasoning,
+                            skipped: result.skipped?.length || 0,
+                            framing: result.framing, qa: result.qa,
+                        },
+                    };
+                }
+
+                const headline = result.reasoning?.[0] || `Placed ${result.placed} graphics.`;
+                let message = `${headline}`;
+                const kinds = [...new Set((result.beats || []).map(b => b.kind))];
+                if (kinds.length) message += ` Moments found: ${kinds.join(', ')}.`;
+                if (cuts.length) message += ` ${cuts.length} shot ${cuts.length === 1 ? 'change' : 'changes'} were used to land the graphics on the cut.`;
+                else message += ' No shot changes were detected, so the graphics follow the speech alone.';
+                if (result.framing?.applied) {
+                    message += ` ${result.framing.applied} ${result.framing.applied === 1 ? 'beat pushes' : 'beats push'} in on you.`;
+                } else if (result.framing?.refused?.length) {
+                    message += ` No push-ins: ${result.framing.refused[0].reason}.`;
+                }
+                if (result.qa?.found) {
+                    // The quality pass is worth reporting even when it fixed
+                    // everything: a silent repair is indistinguishable from
+                    // not having checked at all.
+                    const n = result.qa.repaired?.length || 0;
+                    message += ` The quality pass found ${result.qa.found} ${result.qa.found === 1 ? 'problem' : 'problems'} and repaired ${n} of them in place.`;
+                    if (result.qa.unresolved?.length) message += ` One it could not fix: ${result.qa.unresolved[0].reason}.`;
+                }
+                if (result.skipped?.length) {
+                    message += ` ${result.skipped.length} ${result.skipped.length === 1 ? 'moment was' : 'moments were'} left clean: ${result.skipped[0].reason}.`;
+                }
+                message += ' Every word on screen is your own, and one undo reverts the whole storyboard.';
+
+                return {
+                    action, success: true, message,
+                    details: {
+                        placed: result.placed,
+                        beats: (result.beats || []).map(b => ({ start: b.start, end: b.end, kind: b.kind, graphic: b.graphic, layout: b.layout, onCut: b.onCut })),
+                        cuts: cuts.length,
+                        skipped: result.skipped?.length || 0,
+                        reasoning: result.reasoning,
+                        framing: result.framing,
+                        qa: result.qa,
+                    },
+                };
+            }
+
             case 'design_scene': {
                 const st = useTimelineStore.getState();
                 const brief = String(args.brief || '').trim();

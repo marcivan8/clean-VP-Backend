@@ -214,7 +214,41 @@
     "noFileSelected": "ROKA: No file selected. Please import a file first.",
     "rokaError": "ROKA error: {{message}}",
     "clipsReadyHeader_one": "{{count}} clip ready:",
-    "clipsReadyHeader_other": "{{count}} clips ready:"
+    "clipsReadyHeader_other": "{{count}} clips ready:",
+    "tools": "Tools",
+    "send": "Send",
+    "stop": "Stop",
+    "contextLabel": "Selected on the timeline",
+    "contextHint": "Selected on the timeline - clip-level requests apply to it",
+    "contextRemove": "Remove {{name}} from the selection",
+    "tool": {
+      "silences": "Remove silences",
+      "fillers": "Remove filler words",
+      "retakes": "Remove retakes",
+      "denoise": "Remove background noise",
+      "captions": "Add captions",
+      "keywords": "Highlight key words",
+      "overlay": "Add a text overlay",
+      "rhythm": "Add zoom rhythm",
+      "storyboard": "Storyboard the video",
+      "design": "Design a scene",
+      "chart": "Add a chart",
+      "sticker": "Add a sticker",
+      "speaker": "Zoom on the speaker",
+      "split": "Split screen",
+      "pip": "Picture in picture",
+      "nobg": "Remove the background",
+      "grade": "Colour grade",
+      "polish": "Pro finish",
+      "shorts": "Repurpose into shorts"
+    },
+    "toolGroup": {
+      "cleanup": "Clean up",
+      "captions": "Captions",
+      "graphics": "Motion & graphics",
+      "framing": "Framing",
+      "finish": "Finish"
+    }
   },
   "timeline": {
     "removeFromFavorites": "Remove from favorites",
@@ -325,7 +359,9 @@
     "easingSpringWobbly": "Wobbly spring",
     "easingSpringSnappy": "Snappy spring",
     "easingExpoOut": "Expo out",
-    "easingBackOut": "Overshoot"
+    "easingBackOut": "Overshoot",
+    "parameters": "Parameters",
+    "reset": "Reset"
   },
   "player": {
     "pacingAlert": "Pacing Alert",
@@ -458,7 +494,16 @@
     "keywordsDone": "Key words set on {{count}} caption(s).",
     "keywordsFailed": "Could not pick key words. Try again.",
     "keywordsCleared": "Removed from {{count}} caption(s).",
-    "keywordsWordsHint": "Tap a word to emphasise it"
+    "keywordsWordsHint": "Tap a word to emphasise it",
+    "text": "Text",
+    "weight": "Weight",
+    "bold": "Bold",
+    "italic": "Italic",
+    "underline": "Underline",
+    "alignLeft": "Left",
+    "alignCenter": "Center",
+    "alignRight": "Right",
+    "reset": "Reset"
   },
   "interviewPanel": {
     "styleSubtle": "Subtle",

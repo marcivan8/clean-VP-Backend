@@ -214,7 +214,41 @@
     "noFileSelected": "ROKA : Aucun fichier sélectionné. Importez d'abord un fichier.",
     "rokaError": "Erreur ROKA : {{message}}",
     "clipsReadyHeader_one": "{{count}} clip prêt :",
-    "clipsReadyHeader_other": "{{count}} clips prêts :"
+    "clipsReadyHeader_other": "{{count}} clips prêts :",
+    "tools": "Outils",
+    "send": "Envoyer",
+    "stop": "Arrêter",
+    "contextLabel": "Sélectionné sur la timeline",
+    "contextHint": "Sélectionné sur la timeline - les demandes sur un clip s'appliquent à lui",
+    "contextRemove": "Retirer {{name}} de la sélection",
+    "tool": {
+      "silences": "Supprimer les silences",
+      "fillers": "Supprimer les hésitations",
+      "retakes": "Supprimer les reprises",
+      "denoise": "Supprimer le bruit de fond",
+      "captions": "Ajouter des sous-titres",
+      "keywords": "Mettre les mots clés en avant",
+      "overlay": "Ajouter un texte",
+      "rhythm": "Ajouter du rythme au zoom",
+      "storyboard": "Storyboard de la vidéo",
+      "design": "Composer une scène",
+      "chart": "Ajouter un graphique",
+      "sticker": "Ajouter un sticker",
+      "speaker": "Zoomer sur la personne",
+      "split": "Écran partagé",
+      "pip": "Incrustation",
+      "nobg": "Supprimer l'arrière-plan",
+      "grade": "Étalonner les couleurs",
+      "polish": "Finition pro",
+      "shorts": "Transformer en shorts"
+    },
+    "toolGroup": {
+      "cleanup": "Nettoyer",
+      "captions": "Sous-titres",
+      "graphics": "Motion & graphismes",
+      "framing": "Cadrage",
+      "finish": "Finition"
+    }
   },
   "timeline": {
     "removeFromFavorites": "Retirer des favoris",
@@ -325,7 +359,9 @@
     "easingSpringWobbly": "Ressort souple",
     "easingSpringSnappy": "Ressort vif",
     "easingExpoOut": "Expo sortie",
-    "easingBackOut": "Dépassement"
+    "easingBackOut": "Dépassement",
+    "parameters": "Paramètres",
+    "reset": "Réinitialiser"
   },
   "player": {
     "pacingAlert": "Alerte de rythme",
@@ -458,7 +494,16 @@
     "keywordsDone": "Mots clés appliqués à {{count}} sous-titre(s).",
     "keywordsFailed": "Impossible de choisir les mots clés. Réessayez.",
     "keywordsCleared": "Retirés de {{count}} sous-titre(s).",
-    "keywordsWordsHint": "Touchez un mot pour le mettre en valeur"
+    "keywordsWordsHint": "Touchez un mot pour le mettre en valeur",
+    "text": "Texte",
+    "weight": "Graisse",
+    "bold": "Gras",
+    "italic": "Italique",
+    "underline": "Souligné",
+    "alignLeft": "Gauche",
+    "alignCenter": "Centré",
+    "alignRight": "Droite",
+    "reset": "Réinitialiser"
   },
   "interviewPanel": {
     "styleSubtle": "Subtil",

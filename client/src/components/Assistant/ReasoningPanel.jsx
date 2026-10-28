@@ -12,12 +12,11 @@ import { useBrain } from '../../hooks/useBrain.js';
 import { buildProposals } from '../../agent/DirectorIntelligence.js';
 // R61 — motion behaviour for this card's caption style packs. See
 // LEGACY_PACK_MOTION for why the mapping lives there rather than a second picker.
-import { legacyPackToCaptionStyle } from '../../motion/CaptionModel.js';
-import { CAPTION_STYLES, FONT_STACK } from './captionStylePacks.js';
+import { CAPTION_STYLES, FONT_STACK, captionPackUpdates, previewStyle } from './captionStylePacks.js';
 import BrainPanel from '../BrainPanel.jsx';
 import { useTranslation } from 'react-i18next';
 import { enqueueIfVideoNotReady, drainPromptQueue } from '../../agent/rokaPromptQueue.js';
-import EditingStylePicker from './EditingStylePicker.jsx';
+import ChatComposer from './ChatComposer.jsx';
 
 
 // --- Sub-components ---
@@ -519,39 +518,14 @@ const CaptionStylesCard = ({ log }) => {
     const { t } = useTranslation('editor');
     const [applied, setApplied] = useState(null);
     const applyStyle = (style) => {
-        const { tracks, updateClip } = useTimelineStore.getState();
-        // Apply to EVERY text track, not just the first match. tracks.find()
-        // here used to silently leave clips on any second text track (e.g. a
-        // separate title/lower-third track alongside the auto-captions track)
-        // on their old fontFamily — a project with two text tracks would only
-        // ever see the style change apply to one of them, and the export would
-        // then burn in whatever stale font the untouched track still had.
-        const textTracks = tracks.filter(t => t.type === 'text');
-        if (textTracks.length === 0) return;
-        const updates = {
-            fontFamily: style.font,
-            fontWeight: style.weight,
-            color: style.color,
-            stroke: style.stroke || null,
-            textShadow: style.textShadow || null,
-            fontStyle: style.style || 'normal',
-            // R61 — the MOTION half of a style pack. This card has only ever set
-            // visual properties, which is why every pack above defines a
-            // `transform: 'uppercase'` that was applied to nothing, and why
-            // picking a style never changed how captions animated.
-            // `captionStyle` carries the uppercase flag, the motion preset the
-            // captions animate with, and how the currently-spoken word is
-            // highlighted — all read by TextOverlay.
-            captionStyle: legacyPackToCaptionStyle(style.id),
-            // Clear any hand-authored per-clip animation so the pack's own
-            // preset is what actually renders. Leaving one behind would make the
-            // style the user just picked visibly fail to take effect.
-            animations: [],
-            animation: 'none',
-        };
-        textTracks.forEach(track => {
-            track.clips.forEach(clip => updateClip(track.id, clip.id, updates));
-        });
+        // R116 - one builder, one apply path (captionStylePacks.js). This used
+        // to loop `updateClip` per clip, which meant no transaction: undoing a
+        // style change took one undo PER CAPTION, and a failure halfway left
+        // half the captions restyled. `applyCaptionStyleToAll` is one
+        // transaction with a rollback, and it is what mobile already used.
+        const updates = captionPackUpdates(style);
+        if (!updates) return;
+        if (!useTimelineStore.getState().applyCaptionStyleToAll(updates)) return;
         setApplied(style.id);
         useAIStore.getState().setActiveTab('captions');
     };
@@ -624,20 +598,10 @@ const CaptionStylesCard = ({ log }) => {
                                         backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px)',
                                         pointerEvents: 'none',
                                     }} />
-                                    <span style={{
-                                        fontFamily: FONT_STACK(style.font),
-                                        fontWeight: style.weight,
-                                        fontStyle:  style.style || 'normal',
-                                        fontSize:   style.id === 'handwritten' ? 22 : 20,
-                                        color:      style.color,
-                                        textShadow: style.textShadow || 'none',
-                                        WebkitTextStroke: style.stroke ? `${style.stroke.width}px ${style.stroke.color}` : 'none',
-                                        textTransform: style.transform || 'none',
-                                        letterSpacing: style.id === 'bold-impact' || style.id === 'motivational' ? '0.04em' : 'normal',
-                                        lineHeight: 1,
-                                        position: 'relative',
-                                        zIndex: 1,
-                                    }}>
+                                    {/* R116 - one preview, shared with the mobile sheet
+                                        and the chat box's Styles menu, so the same pack
+                                        cannot look like three different packs. */}
+                                    <span style={{ ...previewStyle(style, 20), position: 'relative', zIndex: 1 }}>
                                         {style.sample}
                                     </span>
                                 </div>
@@ -1064,10 +1028,16 @@ const ReasoningPanel = ({ className }) => {
         }
     };
 
-    const handleInput = (e) => {
-        const el = e.target;
-        el.style.height = 'auto';
-        el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+    // One cancel path for the in-feed "Cancel" and the composer's stop button.
+    const cancelRun = () => {
+        workflowController.cancelCurrentJob();
+        setIsAnalyzing(false);
+        addLog({
+            id: 'cancelled-' + Date.now(),
+            type: 'info',
+            message: t('assistant.operationCancelled'),
+            timestamp: new Date().toLocaleTimeString()
+        });
     };
 
     return (
@@ -1202,16 +1172,7 @@ const ReasoningPanel = ({ className }) => {
                                 {t('assistant.rokaWorkingNoEllipsis')}
                             </span>
                             <button
-                                onClick={() => {
-                                    workflowController.cancelCurrentJob();
-                                    setIsAnalyzing(false);
-                                    addLog({
-                                        id: 'cancelled-' + Date.now(),
-                                        type: 'info',
-                                        message: t('assistant.operationCancelled'),
-                                        timestamp: new Date().toLocaleTimeString()
-                                    });
-                                }}
+                                onClick={cancelRun}
                                 className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-colors hover:opacity-80"
                                 style={{ background: 'rgba(255,255,255,0.07)', color: 'var(--fg-3)', fontFamily: 'var(--f-mono)', border: '0.5px solid var(--line)' }}
                                 title={t('assistant.cancelOperation')}
@@ -1254,50 +1215,17 @@ const ReasoningPanel = ({ className }) => {
                 </div>
             )}
 
-            {/* Input Area */}
+            {/* Input Area (R110: ChatComposer) */}
             <div className="p-4 border-t" style={{ borderColor: 'var(--line-soft)', background: 'var(--glass)' }}>
-                <div className="relative group rounded-lg transition-all"
-                    style={{ border: '1px solid var(--line)', background: 'rgba(0,0,0,0.35)' }}
-                    onFocusCapture={e => e.currentTarget.style.border = '1px solid var(--accent)'}
-                    onBlurCapture={e => e.currentTarget.style.border = '1px solid var(--line)'}
-                >
-                    <textarea
-                        ref={inputRef}
-                        rows={3}
-                        // R105 anchor: the `first_upload` hint lands here, because
-                        // the moment footage exists the next move is to ask for
-                        // something, and that is the move people do not make.
-                        data-hint="assistant-input"
-                        disabled={isAnalyzing}
-                        onKeyDown={handleKeyDown}
-                        onInput={handleInput}
-                        placeholder={isAnalyzing ? t('assistant.rokaWorking') : editingMode === 'auto' ? t('editingStyles.autoPlaceholder') : contextualSuggestion ? t('assistant.tryPlaceholder', { suggestion: contextualSuggestion }) : t('assistant.tellRokaPlaceholder')}
-                        // text-[16px] md:text-sm: this panel is also the mobile AI bar's
-                        // "expanded" view (see MobileAIBar's onExpand). Below 16px, iOS
-                        // Safari auto-zooms the whole page on focus — same fix as
-                        // MobileAIBar.jsx's own textarea. Desktop keeps the original
-                        // text-sm (14px) via the md: breakpoint since it doesn't have
-                        // the zoom behavior.
-                        className="w-full resize-none px-4 pt-3 pb-10 text-[16px] md:text-sm focus:outline-none transition-all disabled:opacity-50 placeholder:opacity-40"
-                        style={{ background: 'transparent', color: 'var(--fg)', fontFamily: 'var(--f-sans)', lineHeight: '1.5', minHeight: '88px', maxHeight: '160px' }}
-                    />
-                    {/* R91: editing style + Normal/Auto, like a model picker */}
-                    {/* Desktop only (this panel is also the mobile expanded view). */}
-                    <div className="absolute bottom-2 left-2.5 hidden md:block">
-                        <EditingStylePicker disabled={isAnalyzing} />
-                    </div>
-                    <div className="absolute bottom-2.5 right-2.5 flex items-center gap-2">
-                        <span className="text-[10px] opacity-30 hidden 2xl:inline" style={{ color: 'var(--fg)', fontFamily: 'var(--f-mono)' }}>{t('assistant.newlineHint')}</span>
-                        <button
-                            onClick={processCommand}
-                            disabled={isAnalyzing}
-                            className="p-1.5 rounded-md transition-all disabled:opacity-40 hover:opacity-90"
-                            style={{ background: 'var(--accent)' }}
-                        >
-                            <ArrowRight className="w-3.5 h-3.5 text-white" />
-                        </button>
-                    </div>
-                </div>
+                <ChatComposer
+                    inputRef={inputRef}
+                    busy={isAnalyzing}
+                    placeholder={isAnalyzing ? t('assistant.rokaWorking') : editingMode === 'auto' ? t('editingStyles.autoPlaceholder') : contextualSuggestion ? t('assistant.tryPlaceholder', { suggestion: contextualSuggestion }) : t('assistant.tellRokaPlaceholder')}
+                    onKeyDown={handleKeyDown}
+                    onSend={processCommand}
+                    onStop={cancelRun}
+                    newlineHint={t('assistant.newlineHint')}
+                />
             </div>
 
         </aside>

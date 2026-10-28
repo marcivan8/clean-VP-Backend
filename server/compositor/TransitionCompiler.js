@@ -147,15 +147,21 @@ function compileTransitions(windows, opts) {
             chain.push(`eq=contrast='1-(${A})':brightness='${n4(k)}*(${A})':saturation='1-(${A})':eval=frame:enable='${enable}'`);
         }
 
-        // 5. Speed lines: one transparent PNG per output frame of the window.
-        if (samples.some(s => s.fx.lines != null)) {
+        // 5. The overlay: one transparent PNG per output frame of the window.
+        //
+        // R115 — this used to test `fx.lines` and call `drawSpeedLines`
+        // directly, and the preview did the same in its own file. Adding a
+        // second overlay (the wipe shapes) would have meant the same special
+        // case in two places. Both now ask TransitionFX what to draw, so a
+        // third overlay needs no change here at all.
+        if (samples.some(s => FX.hasOverlay(s.fx))) {
             const Canvas = opts.canvasModule || require('@napi-rs/canvas');
             const dir = path.join(opts.tmpDir, `tlines-${i}`);
             fs.mkdirSync(dir, { recursive: true });
             const frames = samples.slice(0, -1);
             frames.forEach((s, k) => {
                 const c = Canvas.createCanvas(W, H);
-                FX.drawSpeedLines(c.getContext('2d'), W, H, s.fx.lines);
+                FX.drawTransitionOverlay(c.getContext('2d'), W, H, s.fx);
                 const file = path.join(dir, `f${String(k).padStart(4, '0')}.png`);
                 fs.writeFileSync(file, c.toBuffer('image/png'));
                 tempFiles.push(file);

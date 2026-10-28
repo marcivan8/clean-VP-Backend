@@ -492,9 +492,15 @@ function compileIdentifyQuotableMoments(step, ctx) {
 // in motion/TransitionFX.js (this file stays import-free; the regression suite
 // checks the two tables agree). EditPlanner resolves free text ("whip",
 // "speed lines") before it gets here.
+// This table MUST match TransitionFX.TRANSITION_DEFAULT_DURATION. It is
+// duplicated here because the compiler must not import a client module, and
+// scripts/test_transitions_templates.mjs asserts the two are deep-equal —
+// which is exactly what caught R115 adding four types to one and not the
+// other. Add a transition in both places or not at all.
 const TRANSITION_PACK_DURATIONS = {
     'flash': 0.3, 'dip': 0.6, 'whip-left': 0.36, 'whip-right': 0.36,
     'zoom-punch': 0.4, 'glitch': 0.32, 'speed-lines': 0.5,
+    'circle-wipe': 0.52, 'bar-wipe': 0.44, 'blinds': 0.5, 'diagonal-wipe': 0.46,
 };
 const TRANSITION_LEGACY = { fade: 'dip', crossfade: 'dip', dissolve: 'dip', slide: 'whip-left', wipe: 'whip-left', zoom: 'zoom-punch' };
 
@@ -1098,6 +1104,8 @@ const COMMAND_REGISTRY = new Map([
     ['add_template',              { compiler: compileAtomicStore('add_template', 'Add an animated template') }],
     ['addMotionComponent',        { compiler: compileAtomicStore('addMotionComponent', 'Add a motion graphics component') }],
     ['design_scene',              { compiler: compileAtomicStore('design_scene', 'Design a graphics sequence from the brief') }],
+    ['set_brand_kit',             { compiler: compileAtomicStore('set_brand_kit', 'Store the brand colours and fonts') }],
+    ['storyboard_video',          { compiler: compileAtomicStore('storyboard_video', 'Plan and place graphics across the whole video') }],
     ['sync_cutaways',             { compiler: compileAtomicStore('sync_cutaways', 'Place cutaways and number pops on the words') }],
     ['extract_short',             { compiler: compileAtomicStore('extract_short', 'Keep the strongest moment as a short') }],
     ['apply_style_recipe',        { compiler: compileAtomicStore('apply_style_recipe', 'Apply a style recipe') }],

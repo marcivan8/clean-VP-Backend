@@ -4,15 +4,17 @@
  * color pickers, dropdowns, and keyframe indicators.
  */
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
     Key,
     Circle,
-    CircleDot,
-    RotateCcw,
-    ChevronDown
+    CircleDot
 } from 'lucide-react';
+import {
+    PanelSection, ControlRow, TrackSlider, ToggleSwitch, SelectField, SwatchRow,
+} from '../ui/PanelControls.jsx';
+import { normalizeHex, changedKeys } from '../ui/panelControls.js';
 
 // ============================================================================
 // CONTROL COMPONENTS
@@ -20,6 +22,46 @@ import {
 
 /**
  * Slider control for numeric parameters
+ */
+/**
+ * R116 — these five controls now sit on the shared panel kit
+ * (components/ui/PanelControls.jsx). Their props are unchanged, so the
+ * dispatcher below and every caller are untouched; what changed is that an
+ * effect parameter, a text property and a transform property finally look and
+ * behave like the same control.
+ *
+ * Three things came with the move rather than being written here again:
+ *  - the numeric box beside every slider, so a value can be TYPED. Dragging a
+ *    0..1 float to exactly 0.35 with a mouse is not realistically possible;
+ *  - typed hex on the colour control;
+ *  - a real `<select>` in place of the hand-rolled dropdown, which had no
+ *    listbox role, no arrow keys and no way to close on Escape.
+ */
+
+/**
+ * The colour ramps that belong under a slider.
+ *
+ * A temperature slider that is a plain grey bar tells you nothing about which
+ * way is warm. Keyed by parameter NAME (lowercased) because effect
+ * definitions do not declare this — matching on name is a guess, so it is a
+ * small, explicit list rather than a pattern, and an unknown parameter simply
+ * gets the ordinary accent-filled track.
+ */
+const PARAM_TINTS = {
+    temperature: ['#4FC3F7', '#9E9E9E', '#FFD54F'],
+    tint: ['#66BB6A', '#9E9E9E', '#CE93D8'],
+    hue: ['#FF5252', '#FFD740', '#69F0AE', '#40C4FF', '#7C4DFF', '#FF5252'],
+    saturation: ['#9E9E9E', '#FF4081'],
+};
+
+const tintFor = (name) => PARAM_TINTS[String(name || '').toLowerCase()] || null;
+
+/**
+ * Slider control for numeric parameters.
+ *
+ * The keyframe dot stays exactly where it was — it is the only control in
+ * this panel that is about TIME rather than value, and moving it would hide
+ * the one piece of state that explains why a parameter changes mid-clip.
  */
 const SliderControl = ({
     name,
@@ -35,181 +77,101 @@ const SliderControl = ({
     canAnimate = true
 }) => {
     const { t } = useTranslation('editor');
-    const percentage = ((value - min) / (max - min)) * 100;
-
     return (
-        <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-                <label className="text-xs text-muted-foreground">{label}</label>
-                <div className="flex items-center gap-1">
-                    {canAnimate && (
-                        <button
-                            onClick={() => onAddKeyframe(name, value)}
-                            className={`p-1 rounded hover:bg-white/10 ${hasKeyframe ? 'text-yellow-400' : 'text-muted-foreground'}`}
-                            title={hasKeyframe ? t('effects.keyframeAtCurrentTime') : t('effects.addKeyframe')}
-                        >
-                            {hasKeyframe ? <CircleDot className="w-3 h-3" /> : <Circle className="w-3 h-3" />}
-                        </button>
-                    )}
-                    <span className="text-xs font-mono text-muted-foreground w-14 text-right">
-                        {typeof value === 'number' ? value.toFixed(step < 1 ? 2 : 0) : value}{unit}
-                    </span>
-                </div>
-            </div>
-            <div className="relative h-1.5 bg-secondary rounded-full overflow-hidden">
-                <div
-                    className="absolute top-0 left-0 h-full bg-primary rounded-full transition-all"
-                    style={{ width: `${percentage}%` }}
-                />
-                <input
-                    type="range"
-                    min={min}
-                    max={max}
-                    step={step}
-                    value={value}
-                    onChange={(e) => onChange(name, parseFloat(e.target.value))}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                />
-            </div>
-        </div>
-    );
-};
-
-/**
- * Toggle/switch control for boolean parameters
- */
-const ToggleControl = ({ name, label, value, onChange }) => {
-    return (
-        <div className="flex items-center justify-between py-1">
-            <label className="text-xs text-muted-foreground">{label}</label>
-            <button
-                onClick={() => onChange(name, !value)}
-                className={`
-                    w-10 h-5 rounded-full transition-colors relative
-                    ${value ? 'bg-primary' : 'bg-secondary'}
-                `}
-            >
-                <div className={`
-                    absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform
-                    ${value ? 'translate-x-5' : 'translate-x-0.5'}
-                `} />
-            </button>
-        </div>
-    );
-};
-
-/**
- * Dropdown/select control for enum parameters
- */
-const SelectControl = ({ name, label, value, options, onChange }) => {
-    const [isOpen, setIsOpen] = useState(false);
-
-    const selectedOption = options.find(o => o.value === value) || options[0];
-
-    return (
-        <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground">{label}</label>
-            <div className="relative">
+        <ControlRow label={label} labelWidth={74}>
+            <TrackSlider
+                ariaLabel={label}
+                value={value}
+                min={min}
+                max={max}
+                step={step}
+                unit={unit}
+                tint={tintFor(name)}
+                onChange={(v) => onChange(name, v)}
+            />
+            {canAnimate && (
                 <button
-                    onClick={() => setIsOpen(!isOpen)}
-                    className="w-full flex items-center justify-between px-3 py-2 bg-secondary border border-border rounded-lg hover:border-primary/50 transition-colors text-sm"
+                    type="button"
+                    onClick={() => onAddKeyframe(name, value)}
+                    className={`p-1 rounded hover:bg-white/10 shrink-0 ${hasKeyframe ? 'text-yellow-400' : 'text-muted-foreground'}`}
+                    title={hasKeyframe ? t('effects.keyframeAtCurrentTime') : t('effects.addKeyframe')}
+                    aria-label={hasKeyframe ? t('effects.keyframeAtCurrentTime') : t('effects.addKeyframe')}
                 >
-                    <span>{selectedOption?.label || value}</span>
-                    <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                    {hasKeyframe ? <CircleDot className="w-3 h-3" /> : <Circle className="w-3 h-3" />}
                 </button>
-
-                {isOpen && (
-                    <div className="absolute z-10 top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-xl overflow-hidden">
-                        {options.map(option => (
-                            <button
-                                key={option.value}
-                                onClick={() => { onChange(name, option.value); setIsOpen(false); }}
-                                className={`
-                                    w-full text-left px-3 py-2 text-sm hover:bg-white/5 transition-colors
-                                    ${option.value === value ? 'bg-primary/20 text-primary' : ''}
-                                `}
-                            >
-                                {option.label}
-                            </button>
-                        ))}
-                    </div>
-                )}
-            </div>
-        </div>
+            )}
+        </ControlRow>
     );
 };
 
+/** Toggle/switch control for boolean parameters */
+const ToggleControl = ({ name, label, value, onChange }) => (
+    <ControlRow label={label} labelWidth={74}>
+        <span style={{ flex: 1 }} />
+        <ToggleSwitch ariaLabel={label} checked={!!value} onChange={(on) => onChange(name, on)} />
+    </ControlRow>
+);
+
+/** Dropdown/select control for enum parameters */
+const SelectControl = ({ name, label, value, options, onChange }) => (
+    <ControlRow label={label} labelWidth={74}>
+        <SelectField
+            ariaLabel={label}
+            value={value ?? options[0]?.value}
+            options={options.map(o => ({ value: o.value, label: o.label ?? o.value }))}
+            onChange={(v) => onChange(name, v)}
+        />
+    </ControlRow>
+);
+
 /**
- * Color picker control
+ * Colour picker control.
+ *
+ * Effects store colour as an RGB array of 0..1 floats for the shader, so this
+ * converts both ways; the kit's swatch speaks hex.
  */
 const ColorControl = ({ name, label, value, onChange }) => {
-    // Parse value - could be hex, rgb array, or object
-    const colorValue = useMemo(() => {
+    const hex = useMemo(() => {
         if (typeof value === 'string') return value;
         if (Array.isArray(value)) {
-            const [r, g, b] = value.map(v => Math.round(v * 255));
-            return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+            const [r, g, b] = value.map(v => Math.round(Math.min(1, Math.max(0, Number(v) || 0)) * 255));
+            return `#${[r, g, b].map(c => c.toString(16).padStart(2, '0')).join('')}`;
         }
-        return '#ffffff';
+        return '#FFFFFF';
     }, [value]);
 
-    const handleChange = (e) => {
-        const hex = e.target.value;
-        // Convert to RGB array for shader compatibility
-        const r = parseInt(hex.slice(1, 3), 16) / 255;
-        const g = parseInt(hex.slice(3, 5), 16) / 255;
-        const b = parseInt(hex.slice(5, 7), 16) / 255;
-        onChange(name, [r, g, b]);
+    const handleChange = (next) => {
+        const h = normalizeHex(next);
+        if (!h) return;
+        // Back to the 0..1 triple the shader wants. Writing the hex string
+        // straight through would be accepted here and render as black.
+        onChange(name, [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255));
     };
 
     return (
-        <div className="flex items-center justify-between py-1">
-            <label className="text-xs text-muted-foreground">{label}</label>
-            <div className="flex items-center gap-2">
-                <input
-                    type="color"
-                    value={colorValue}
-                    onChange={handleChange}
-                    className="w-8 h-8 border-0 bg-transparent cursor-pointer"
-                />
-                <span className="text-xs font-mono text-muted-foreground">{colorValue}</span>
-            </div>
-        </div>
+        <ControlRow label={label} labelWidth={74}>
+            <SwatchRow ariaLabel={label} color={hex} onColor={handleChange} />
+        </ControlRow>
     );
 };
 
-/**
- * Position/XY control
- */
+/** Position/XY control */
 const PositionControl = ({ name, label, value, onChange }) => {
     const x = value?.x ?? value?.[0] ?? 0.5;
     const y = value?.y ?? value?.[1] ?? 0.5;
-
     return (
-        <div className="space-y-2">
-            <label className="text-xs text-muted-foreground">{label}</label>
-            <div className="grid grid-cols-2 gap-2">
-                <SliderControl
-                    name={`${name}_x`}
-                    label="X"
-                    value={x}
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    onChange={(_, val) => onChange(name, { x: val, y })}
-                    canAnimate={false}
-                />
-                <SliderControl
-                    name={`${name}_y`}
-                    label="Y"
-                    value={y}
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    onChange={(_, val) => onChange(name, { x, y: val })}
-                    canAnimate={false}
-                />
-            </div>
+        <div style={{ display: 'grid', gap: 6 }}>
+            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--fg-4)' }}>
+                {label}
+            </span>
+            <SliderControl
+                name={`${name}_x`} label="X" value={x} min={0} max={1} step={0.01}
+                onChange={(_, val) => onChange(name, { x: val, y })} canAnimate={false}
+            />
+            <SliderControl
+                name={`${name}_y`} label="Y" value={y} min={0} max={1} step={0.01}
+                onChange={(_, val) => onChange(name, { x, y: val })} canAnimate={false}
+            />
         </div>
     );
 };
@@ -273,6 +235,16 @@ const EffectControls = ({
         });
         onUpdateParams(effect.id, defaults);
     };
+
+    // R116 - the section's Reset is live only when something actually differs
+    // from the definition's defaults, so a header that offers to undo nothing
+    // is never shown. `changedKeys` compares numbers with a tolerance: without
+    // that, a slider that has landed on 0.1 + 0.2 reads as "changed" forever.
+    const defaults = Object.fromEntries(Object.entries(params).map(([k, d]) => [k, d.value]));
+    const current = Object.fromEntries(Object.keys(params).map(k => [
+        k, currentValues[k]?.value ?? currentValues[k] ?? params[k].value,
+    ]));
+    const dirty = changedKeys(current, defaults).length > 0;
 
     // Render controls based on parameter type
     const renderControl = (paramName, paramDef) => {
@@ -369,26 +341,27 @@ const EffectControls = ({
     };
 
     return (
-        <div className="space-y-3">
+        <div>
             {/* Keyframe indicator */}
             {Object.keys(keyframes).length > 0 && (
-                <div className="flex items-center gap-2 text-xs text-yellow-400 bg-yellow-500/10 px-2 py-1 rounded">
+                <div className="flex items-center gap-2 text-xs text-yellow-400 bg-yellow-500/10 px-2 py-1 rounded mb-2">
                     <Key className="w-3 h-3" />
                     <span>{t('effects.animatedParams', { count: Object.keys(keyframes).length })}</span>
                 </div>
             )}
 
-            {/* Parameter controls */}
-            {Object.entries(params).map(([name, def]) => renderControl(name, def))}
-
-            {/* Reset button */}
-            <button
-                onClick={handleReset}
-                className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            {/* R116 - one collapsible section carrying its own Reset, the way
+                the reference panels group adjustments. Collapsing matters here
+                because a stack of three effects is otherwise a wall of
+                sliders with no way to put one away. */}
+            <PanelSection
+                title={definition.name || definition.label || t('effects.parameters', 'Parameters')}
+                collapsible
+                onReset={dirty ? handleReset : null}
+                resetLabel={t('effects.reset', 'Reset')}
             >
-                <RotateCcw className="w-3 h-3" />
-                {t('effects.resetToDefaults')}
-            </button>
+                {Object.entries(params).map(([name, def]) => renderControl(name, def))}
+            </PanelSection>
         </div>
     );
 };

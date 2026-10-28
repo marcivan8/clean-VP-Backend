@@ -173,6 +173,8 @@ await check('every hint points at an anchor that exists in the markup', () => {
         'client/src/layouts/IDELayout.jsx',
         'client/src/components/Assistant/ReasoningPanel.jsx',
         'client/src/components/Assistant/EditingStylePicker.jsx',
+        // R110 - the chat box's textarea (the `assistant-input` anchor) lives here.
+        'client/src/components/Assistant/ChatComposer.jsx',
         // R108 — the desktop panel switcher moved here, and took the tab
         // anchors with it.
         'client/src/components/PanelRail.jsx',

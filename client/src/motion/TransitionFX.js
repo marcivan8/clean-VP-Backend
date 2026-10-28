@@ -32,7 +32,13 @@
  *   lines   0..1 progress of the speed-line sweep, or null
  */
 
-export const TRANSITION_TYPES = ['flash', 'dip', 'whip-left', 'whip-right', 'zoom-punch', 'glitch', 'speed-lines'];
+export const TRANSITION_TYPES = ['flash', 'dip', 'whip-left', 'whip-right', 'zoom-punch', 'glitch', 'speed-lines',
+    // R115 — the SHAPE family. A wipe is an opaque shape travelling across
+    // the cut: closed over the outgoing frame, open over the incoming one.
+    // It works inside this pack's one-stream model because the shape hides
+    // the cut rather than needing both clips on screen, which is what a true
+    // dissolve or push would need (see the note at the top of this file).
+    'circle-wipe', 'bar-wipe', 'blinds', 'diagonal-wipe'];
 
 export const TRANSITION_DEFAULT_DURATION = {
     'flash': 0.3,
@@ -42,6 +48,10 @@ export const TRANSITION_DEFAULT_DURATION = {
     'zoom-punch': 0.4,
     'glitch': 0.32,
     'speed-lines': 0.5,
+    'circle-wipe': 0.52,
+    'bar-wipe': 0.44,
+    'blinds': 0.5,
+    'diagonal-wipe': 0.46,
 };
 
 /** Values written by the old timeline menu, never rendered until R89. */
@@ -49,7 +59,13 @@ export const LEGACY_TRANSITIONS = { fade: 'dip', crossfade: 'dip', slide: 'whip-
 
 export const MAX_TRANSITION_DURATION = 1.5;
 
-export const NEUTRAL_FX = Object.freeze({ tx: 0, scale: 1, blurX: 0, blurY: 0, flash: 0, dip: 0, chroma: 0, lines: null });
+export const NEUTRAL_FX = Object.freeze({ tx: 0, scale: 1, blurX: 0, blurY: 0, flash: 0, dip: 0, chroma: 0, lines: null, wipe: null });
+
+/**
+ * R115: the shapes a wipe can take. `wipe` on an fx is
+ * `{ shape, p, color }` with p in 0..1 — 0 fully open, 1 fully covering.
+ */
+export const WIPE_SHAPES = Object.freeze(['circle', 'bar', 'blinds', 'diagonal']);
 
 /**
  * The transition named in free text ("add a whip", "speed lines between the
@@ -59,6 +75,12 @@ export const NEUTRAL_FX = Object.freeze({ tx: 0, scale: 1, blurX: 0, blurY: 0, f
 export function transitionFromText(text) {
     const s = String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const table = [
+        // R115 — the shape family goes FIRST: "circle wipe" contains "wipe",
+        // and a looser entry below would claim it.
+        [/circle[\s-]?wipe|iris|cercle|volet circulaire/, 'circle-wipe'],
+        [/diagonal[\s-]?wipe|diagonale/, 'diagonal-wipe'],
+        [/blinds?|stores?|persiennes?/, 'blinds'],
+        [/bar[\s-]?wipe|volet|barres?/, 'bar-wipe'],
         [/speed[\s-]?lines?|lignes? de vitesse/, 'speed-lines'],
         [/whip[\s-]?right|file droite|filé droite/, 'whip-right'],
         [/whip[\s-]?left|file gauche/, 'whip-left'],
@@ -142,6 +164,21 @@ export function fxAt(type, u) {
             out.flash = noise(step + 7) > 0.82 ? 0.25 * peak : 0;
             break;
         }
+        case 'circle-wipe':
+        case 'bar-wipe':
+        case 'blinds':
+        case 'diagonal-wipe': {
+            const shape = t === 'circle-wipe' ? 'circle'
+                : t === 'bar-wipe' ? 'bar'
+                    : t === 'blinds' ? 'blinds' : 'diagonal';
+            // Closes over the outgoing half, opens over the incoming one, so
+            // the frame is fully covered exactly AT the cut and the join is
+            // never visible. smooth() on each half keeps the edges neutral.
+            out.wipe = { shape, p: smooth(peak), color: '#05070B' };
+            // A little scale keeps the frame alive under the shape.
+            out.scale = 1 + 0.02 * peak;
+            break;
+        }
         case 'speed-lines': {
             out.lines = (u + 1) / 2;
             const travel = u < 0 ? easeIn(u + 1) : -(1 - easeOut(u));
@@ -159,7 +196,11 @@ export function fxAt(type, u) {
 /** True when fx changes nothing (the renderers skip work). */
 export function fxIsNeutral(fx) {
     return !fx || (Math.abs(fx.tx) < 1e-5 && Math.abs(fx.scale - 1) < 1e-5 && fx.blurX < 1e-6 && fx.blurY < 1e-6
-        && fx.flash < 1e-4 && fx.dip < 1e-4 && Math.abs(fx.chroma) < 1e-6 && fx.lines == null);
+        && fx.flash < 1e-4 && fx.dip < 1e-4 && Math.abs(fx.chroma) < 1e-6 && fx.lines == null
+        // R115: a wipe must be counted, or both renderers skip the frame as
+        // "nothing to do" and the transition never appears. Both of them use
+        // this to decide whether to work at all.
+        && !(fx.wipe && Number(fx.wipe.p) > 0));
 }
 
 /**
@@ -240,7 +281,76 @@ export function drawSpeedLines(ctx, w, h, p, seed = 7) {
     ctx.restore();
 }
 
+/**
+ * R115 — draw a wipe shape covering `p` (0..1) of a w×h context.
+ *
+ * Same contract as `drawSpeedLines`: pure canvas calls, identical in Chrome
+ * and @napi-rs/canvas, called by the preview layer and by the export
+ * compiler so there is one implementation and no parity question.
+ */
+export function drawWipe(ctx, w, h, wipe) {
+    if (!ctx || !wipe) return;
+    const p = Number(wipe.p);
+    if (!(p > 0)) return;
+    const k = Math.min(1, p);
+    const color = wipe.color || '#05070B';
+    ctx.save();
+    ctx.fillStyle = color;
+    if (wipe.shape === 'circle') {
+        // Grows from the centre to the far corner, so it covers completely
+        // at p=1 whatever the aspect.
+        const r = Math.hypot(w, h) / 2 * k;
+        ctx.beginPath();
+        ctx.arc(w / 2, h / 2, r, 0, Math.PI * 2);
+        ctx.fill();
+    } else if (wipe.shape === 'bar') {
+        // Two bars closing on the middle: one edge would read as a slide.
+        const bh = (h / 2) * k;
+        ctx.fillRect(0, 0, w, bh);
+        ctx.fillRect(0, h - bh, w, bh);
+    } else if (wipe.shape === 'blinds') {
+        const slats = 7;
+        const slat = h / slats;
+        for (let i = 0; i < slats; i++) ctx.fillRect(0, i * slat, w, slat * k);
+    } else {
+        // A diagonal band wide enough to cover the frame at p=1.
+        const span = w + h;
+        ctx.beginPath();
+        ctx.moveTo(-h + span * k * 2 - span, 0);
+        ctx.lineTo(span * k * 2 - span, 0);
+        ctx.lineTo(span * k * 2 - span + h, h);
+        ctx.lineTo(span * k * 2 - span - w, h);
+        ctx.closePath();
+        ctx.fill();
+        // The leading wedge alone cannot cover a rectangle, so once past the
+        // halfway point the already-passed side is filled solid behind it.
+        if (k > 0.5) ctx.fillRect(0, 0, w, h * ((k - 0.5) * 2));
+    }
+    ctx.restore();
+}
+
+/**
+ * The ONE overlay a transition wants drawn on top of the frame, or nothing.
+ *
+ * Both renderers call this instead of testing `fx.lines` themselves, so a
+ * future overlay needs no change in either of them. That indirection is the
+ * whole point: `lines` was special-cased in two files, and a second
+ * special case would have been two more places to forget.
+ */
+export function drawTransitionOverlay(ctx, w, h, fx) {
+    if (!ctx || !fx) return false;
+    if (fx.wipe) { drawWipe(ctx, w, h, fx.wipe); return true; }
+    if (fx.lines != null) { drawSpeedLines(ctx, w, h, fx.lines); return true; }
+    return false;
+}
+
+/** True when a transition wants an overlay drawn at all. */
+export function hasOverlay(fx) {
+    return !!(fx && (fx.wipe || fx.lines != null));
+}
+
 export default {
-    TRANSITION_TYPES, TRANSITION_DEFAULT_DURATION, LEGACY_TRANSITIONS, NEUTRAL_FX,
-    normalizeTransitionType, transitionFromText, fxAt, fxIsNeutral, transitionWindows, fxAtTime, drawSpeedLines,
+    TRANSITION_TYPES, TRANSITION_DEFAULT_DURATION, LEGACY_TRANSITIONS, NEUTRAL_FX, WIPE_SHAPES,
+    normalizeTransitionType, transitionFromText, fxAt, fxIsNeutral, transitionWindows, fxAtTime,
+    drawSpeedLines, drawWipe, drawTransitionOverlay, hasOverlay,
 };

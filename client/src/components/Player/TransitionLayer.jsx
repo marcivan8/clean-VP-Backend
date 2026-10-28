@@ -1,5 +1,5 @@
 import React from 'react';
-import { drawSpeedLines } from '../../motion/TransitionFX.js';
+import { drawTransitionOverlay, hasOverlay } from '../../motion/TransitionFX.js';
 import { TFX_FILTER_ID } from './transitionStyle.js';
 
 /**
@@ -20,7 +20,10 @@ const TransitionLayer = ({ fx, frameWidth }) => {
     const by = fx ? fx.blurY * w : 0;
     const c = fx ? fx.chroma * w : 0;
 
-    const lines = fx ? fx.lines : null;
+    // R115: the overlay is whatever the transition wants drawn on top — speed
+    // lines, or a wipe shape. The key is what makes the effect re-render, so
+    // it has to change whenever the overlay does.
+    const overlayKey = fx ? JSON.stringify(fx.wipe ?? fx.lines ?? null) : null;
     React.useEffect(() => {
         const cv = linesRef.current;
         if (!cv) return;
@@ -33,10 +36,11 @@ const TransitionLayer = ({ fx, frameWidth }) => {
         const ctx = cv.getContext('2d');
         if (!ctx) return;
         ctx.clearRect(0, 0, W, H);
-        if (lines != null) {
-            try { drawSpeedLines(ctx, W, H, lines); } catch (err) { console.warn('[TransitionLayer] speed lines failed:', err?.message); }
+        if (hasOverlay(fx)) {
+            try { drawTransitionOverlay(ctx, W, H, fx); } catch (err) { console.warn('[TransitionLayer] overlay failed:', err?.message); }
         }
-    }, [lines]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [overlayKey]);
 
     return (
         <>
@@ -65,7 +69,7 @@ const TransitionLayer = ({ fx, frameWidth }) => {
             <canvas
                 ref={linesRef}
                 aria-hidden="true"
-                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', display: fx && fx.lines != null ? 'block' : 'none' }}
+                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', display: hasOverlay(fx) ? 'block' : 'none' }}
             />
         </>
     );
