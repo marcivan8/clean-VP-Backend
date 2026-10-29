@@ -82,6 +82,7 @@ import FirstRunHint, { triggerHint } from '../components/FirstRunHint';
 import { loadOnboardingProgress } from '../services/onboardingProgress.js';
 import { EventBus, EVENT_TYPES } from '../agent/EventBus';
 import { useSupabasePersistence } from '../hooks/useSupabasePersistence';
+import { runExportWithAutoRetry } from '../utils/exportAutoRetry.js';
 
 // Screen distance (px) within which a dragged clip clicks onto a neighbour's
 // edge, the playhead or 0. Zoom-independent: converted to seconds per drag.
@@ -1750,7 +1751,23 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             // be configured before it worked at all, applied no colour grade
             // (R55) and no multicam crop (R14), and duplicated a pipeline FFmpeg
             // already does correctly. See CLAUDE.md R56.
-            const result = await handleFfmpegExport(settings);
+            // R126/R127 QC loop Slice 1: revideoWarning/compositorWarning mean
+            // the overlay/motion-graphics compositing pass (or the whole
+            // Revideo path) failed outright — the export "succeeds" but ships
+            // without captions/motion-graphics/stickers entirely. Those read
+            // as transient worker-health failures far more often than a real
+            // content defect, so this gets exactly one free automatic retry
+            // before the user ever sees the warning. See exportAutoRetry.js
+            // for why the OTHER warning fields are deliberately not retried.
+            const { result, retried, resolvedBy } = await runExportWithAutoRetry(handleFfmpegExport, settings, {
+                onRetry: (warningKey) => {
+                    console.warn(`[Export] ${warningKey} on the first attempt — retrying once automatically`);
+                    captureEvent('editor_export_auto_retry', { ...exportAttrs, warning_key: warningKey });
+                },
+            });
+            if (retried) {
+                countMetric('export.auto_retry', { ...exportAttrs, resolved: String(!!resolvedBy) });
+            }
 
             // FIX: same pick-and-drop bug as handleFfmpegExport's own return
             // above — carry the four warning fields through to exportResult
@@ -1777,7 +1794,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 duration_ms: nowMs() - exportStartedAt,
             });
             // A "successful" export can still be degraded (captions/overlays
-            // silently missing) — count each warning kind separately.
+            // silently missing) — count each warning kind separately. These
+            // only fire for whatever's still present AFTER the auto-retry
+            // above, so a transient failure the retry actually cleared is not
+            // double-counted as a user-facing warning.
             [['caption', result.captionWarning], ['compositor', result.compositorWarning],
              ['caption_program', result.captionProgramWarning], ['revideo', result.revideoWarning],
              ['clip', result.clipWarning]]

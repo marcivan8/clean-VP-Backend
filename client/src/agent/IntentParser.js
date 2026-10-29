@@ -18,6 +18,8 @@ import { FallbackParser } from './FallbackParser.js';
 import { EventBus, EVENT_TYPES } from './EventBus.js';
 import { IntentValidator } from './IntentValidator.js';
 import { INTENT_TYPES, OPERATIONS } from './CommandConstants.js';
+import { CaptionBriefParser } from './CaptionBriefParser.js';
+import { VisualBriefParser } from './VisualBriefParser.js';
 import { extractEditIntent } from '../utils/nlpFallback.js';
 import useAIStore from '../store/useAIStore.js';
 
@@ -187,6 +189,16 @@ const NLP_MAP = {
         'add the b-roll', 'add the b-rolls', 'add more b-roll', 'add more b-rolls',
         'add relevant b-roll', 'add matching b-roll',
         'add cutaway footage', 'add some cutaway footage',
+        // R123: "illustrate ... with b-roll/footage/stock" and bare
+        // "insert/add stock footage" requests — previously these either got
+        // hijacked by animate_automatically's bare "illustrate this" phrase
+        // (CommandRegistry) or matched nothing at all here.
+        'illustrate this with b-roll', 'illustrate the video with b-roll', 'illustrate it with b-roll',
+        'illustrate this with footage', 'illustrate the video with footage',
+        'illustrate this with stock footage', 'illustrate the video with stock footage',
+        'illustrate with b-roll', 'illustrate with footage', 'illustrate with stock footage',
+        'add stock footage', 'add some stock footage', 'insert b-roll', 'insert some b-roll',
+        'insert stock footage', 'add stock b-roll', 'add b-roll footage',
     ],
     fetchStockBroll: [
         'stock footage', 'stock video', 'stock clip', 'stock clips',
@@ -441,20 +453,35 @@ export class IntentParser {
         const combinedCleanup = this.tryCombinedCleanup(prompt);
         if (combinedCleanup) {
             console.log('[IntentParser] Combined clean-up:', combinedCleanup.parameters.actions.join(' + '));
-            return this.validateAndNormalize(combinedCleanup);
+            return this.validateAndNormalize(combinedCleanup, prompt);
+        }
+
+        // R124: a long, multi-section creative brief ("Act as a senior YouTube
+        // editor... [12 sections of detailed creative direction]...") must NOT
+        // be handed to CommandRegistry. Registry's phrase matching was built
+        // for short commands, and any ONE narrow phrase buried anywhere in a
+        // long brief — "captions", "color grade", "crop" — wins outright and
+        // silently executes just that single, isolated operation while every
+        // other instruction in the brief is discarded. A brief this size is
+        // never a request to run exactly one atomic command; checked before
+        // Registry, same as tryCombinedCleanup above.
+        const longFormBrief = this.tryLongFormCreativeBrief(prompt);
+        if (longFormBrief) {
+            console.log('[IntentParser] Long-form creative brief detected — routing to long_form_edit (FULL_BUILD), bypassing Registry');
+            return this.validateAndNormalize(longFormBrief, prompt);
         }
 
         const reg = this.tryRegistry(prompt);
         if (reg) {
             if (reg.needs_clarification) return reg;
             console.log('[IntentParser] Registry match:', reg.operation, `(confidence: ${reg._confidence})`);
-            return this.validateAndNormalize(reg);
+            return this.validateAndNormalize(reg, prompt);
         }
 
         const localFirst = this.tryLocalFirst(prompt);
         if (localFirst) {
             console.log('[IntentParser] Local-first match (skipped API):', localFirst.operation);
-            return this.validateAndNormalize(localFirst);
+            return this.validateAndNormalize(localFirst, prompt);
         }
 
         try {
@@ -462,7 +489,7 @@ export class IntentParser {
             const apiResult = await this.parseViaAPI(prompt, structuredContext, signal);
             if (apiResult) {
                 console.log('[IntentParser] API parse successful:', apiResult.operation);
-                return this.validateAndNormalize(apiResult);
+                return this.validateAndNormalize(apiResult, prompt);
             }
         } catch (error) {
             if (signal && signal.aborted) throw error;
@@ -481,7 +508,7 @@ export class IntentParser {
                         parsedBy: 'fallback',
                         confidence: fallbackResult.confidence || 'medium'
                     }
-                });
+                }, prompt);
             }
         }
 
@@ -618,6 +645,51 @@ export class IntentParser {
                 editMode: 'CLEAN_EDIT',
                 actions,
                 reason: 'Combined clean-up request — only the named clean-up actions',
+            },
+            confidence: 'HIGH',
+            missingParameters: [],
+        };
+    }
+
+    /**
+     * R124 — detect a long, multi-section creative brief that should become
+     * ONE long_form_edit (FULL_BUILD) request, never a single narrow
+     * CommandRegistry match. See the call site in parse() for why this has
+     * to run before tryRegistry at all, not just win a tie-break after it.
+     *
+     * Deliberately conservative on BOTH axes — length alone isn't enough (a
+     * long rambling single-purpose request is still a single request), and
+     * role-play language alone isn't enough (a short "act as my editor and
+     * crop this" is still one short command) — so this only fires when a
+     * genuinely long message ALSO carries the kind of role/production
+     * language that marks a from-scratch creative brief rather than a
+     * verbose way of asking for one thing.
+     *
+     * The caption-specific detail in such a brief is captured separately by
+     * CaptionBriefParser, attached in validateAndNormalize() — this method
+     * only has to recognize that the request AS A WHOLE is a full creative
+     * build, not extract every individual instruction in it.
+     */
+    static tryLongFormCreativeBrief(prompt) {
+        const text = String(prompt || '');
+        if (text.length < 300) return null;
+
+        const lower = text.toLowerCase();
+        const briefSignals = [
+            'act as a senior', 'act as a professional', 'act as an experienced',
+            'creative director', 'motion designer', 'visual storyteller',
+            'professionally edited', 'production team', 'editing structure',
+            'overall visual style', 'full creative edit', 'final objective',
+            'complete, polished', 'dynamic creator edit',
+        ];
+        if (!briefSignals.some(s => lower.includes(s))) return null;
+
+        return {
+            intent: 'long_form_build',
+            operation: 'long_form_edit',
+            parameters: {
+                editMode: 'FULL_BUILD',
+                reason: 'Long, multi-section creative brief — full ContentAnalyzer-driven rebuild rather than one isolated command',
             },
             confidence: 'HIGH',
             missingParameters: [],
@@ -1849,16 +1921,48 @@ export class IntentParser {
         };
     }
 
-    static validateAndNormalize(result) {
+    /**
+     * @param {object} result
+     * @param {string} [prompt] — the user's original, raw request text. Passed
+     *        explicitly by every call site in parse() rather than relying on
+     *        result.originalPrompt, which not every upstream path sets (the
+     *        server LLM's JSON response, for one, never echoes it back).
+     */
+    static validateAndNormalize(result, prompt) {
+        const operation = result.operation || null;
+        const constraints = { ...(result.parameters || {}), ...(result.constraints || {}) };
+
+        // R124: a long_form_edit request can be a single short phrase ("edit
+        // this for me") or an entire multi-paragraph creative brief. Neither
+        // CommandRegistry's phrase matching nor the server LLM's flat
+        // operation+parameters schema has anywhere for caption-specific detail
+        // ("highlight important keywords with an accent color", "keep clear of
+        // the speaker's face") to land, so it was silently dropped before ever
+        // reaching the long-form planner. Attaching it here — unconditionally,
+        // from the ORIGINAL prompt text, regardless of which path resolved the
+        // operation — means that detail survives no matter how the request got
+        // classified. An explicit constraints.captionBrief from upstream (none
+        // currently sets one, but if that changes) is left untouched.
+        if (operation === 'long_form_edit' && constraints.captionBrief === undefined) {
+            const text = prompt || result.originalPrompt || '';
+            if (text) constraints.captionBrief = CaptionBriefParser.parseCaptionBrief(text);
+        }
+        // R125: same reasoning, for the visual-direction half of a brief —
+        // see VisualBriefParser.js.
+        if (operation === 'long_form_edit' && constraints.visualBrief === undefined) {
+            const text = prompt || result.originalPrompt || '';
+            if (text) constraints.visualBrief = VisualBriefParser.parseVisualBrief(text);
+        }
+
         return {
             intent: result.intent || null,
-            operation: result.operation || null,
+            operation,
             targets: result.targets || [],
             target_track_id: result.target_track_id || null,
             // Local-first intents put their settings in `parameters` (e.g. the
             // CLEAN_EDIT actions list); the planner reads `constraints`. They
             // were silently dropped here. `constraints` wins on a clash.
-            constraints: { ...(result.parameters || {}), ...(result.constraints || {}) },
+            constraints,
             needs_clarification: result.needs_clarification || false,
             reason: result.reason || null,
             message: result.message || null,
@@ -1866,7 +1970,7 @@ export class IntentParser {
                 ? String(result.confidence).toUpperCase()
                 : (result.needs_clarification ? 'LOW' : 'HIGH'),
             missingParameters: result.missingParameters || [],
-            originalPrompt: result.originalPrompt || null,
+            originalPrompt: result.originalPrompt || prompt || null,
             intentDraft: result.intentDraft || null
         };
     }

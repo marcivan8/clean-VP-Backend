@@ -553,15 +553,35 @@ const TextPanel = () => {
     }
 
     // ── Shared header (always shown when captions exist) ───────────────────────
+    // R129 — `flexShrink: 0` right next to `minWidth: 0` on this same div was
+    // self-defeating: flexShrink:0 forbids shrinking outright, so the
+    // minWidth:0 beside it never did anything. In French (and any language
+    // whose translations run longer than English — "Global"/"Individual"
+    // vs. "GLOBAL"/"PAR SEGMENT") the label+count group and ModeToggle's two
+    // buttons together exceed a narrow panel's width with nowhere to give,
+    // so the row — and with it every row below it in the panel, since
+    // nothing clips the overflow — renders wider than the panel and gets
+    // cut off (ModeToggle's second button pushed off entirely; see
+    // claude/textpanel-header-overflow-R129.md for the screenshot that
+    // caught this). Fix: let the label GROUP shrink (minWidth: 0 now
+    // actually applies) and let the label TEXT itself truncate with an
+    // ellipsis if it's still too long, while keeping the count pill and
+    // ModeToggle's buttons — both of which would look broken if squeezed —
+    // at their natural size (flexShrink: 0) so they're always fully legible
+    // and clickable.
     const Header = () => (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, gap: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, minWidth: 0 }}>
-                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, overflow: 'hidden' }}>
+                <span style={{
+                    fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.1em',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
+                }}>
                     {editMode === 'global' ? t('textPanel.captionStyle') : t('textPanel.segments')}
                 </span>
                 {editMode === 'global' && captionClips.length > 0 && (
                     <span style={{
                         fontFamily: 'var(--f-mono)', fontSize: 8, padding: '1px 6px', borderRadius: 99,
+                        flexShrink: 0,
                         background: globalFlash
                             ? 'color-mix(in oklch, var(--accent) 30%, transparent)'
                             : 'color-mix(in oklch, var(--accent) 12%, transparent)',

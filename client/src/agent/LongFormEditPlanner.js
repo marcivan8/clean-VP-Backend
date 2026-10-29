@@ -37,7 +37,13 @@ export class LongFormEditPlanner {
 
         console.log(`[LongFormEditPlanner] Building atomic plan for mode: ${editMode}`);
 
-        const steps = this._buildAtomicSteps(editMode, editPlan, segments, structure, state);
+        // R124: a captions brief parsed from the user's ORIGINAL request text
+        // (see CaptionBriefParser.js / IntentParser.validateAndNormalize()).
+        // Threaded through so FULL_BUILD/YOUTUBE_OPTIMIZED can actually
+        // generate styled, keyword-emphasized captions when the brief asked
+        // for them — previously neither mode ever produced captions at all,
+        // regardless of what the user's request said.
+        const steps = this._buildAtomicSteps(editMode, editPlan, segments, structure, state, options.captionBrief || null, options.visualBrief || null);
 
         const plan = {
             plan_id: planId,
@@ -57,7 +63,7 @@ export class LongFormEditPlanner {
 
     // ── Step Builder by Edit Mode ─────────────────────────────────────────────
 
-    static _buildAtomicSteps(editMode, editPlan, segments, structure, state) {
+    static _buildAtomicSteps(editMode, editPlan, segments, structure, state, captionBrief = null, visualBrief = null) {
         const steps = [];
         let stepNum = 1;
         const S = (action, params) => ({
@@ -75,13 +81,140 @@ export class LongFormEditPlanner {
                 break;
             case EDIT_MODES.YOUTUBE_OPTIMIZED:
                 steps.push(...this._youtubeOptimizedSteps(editPlan, segments || [], structure, state, S));
+                steps.push(...this._captionSteps(captionBrief, S));
+                // R125: YOUTUBE_OPTIMIZED is for an existing long-form video, not
+                // raw rushes — unlike FULL_BUILD, contextual b-roll/motion
+                // graphics are opt-in here (the brief has to actually ask),
+                // rather than unconditional, so a plain "optimize this for
+                // YouTube" request doesn't start adding graphics no one asked for.
+                if (visualBrief?.wantsContextualBroll || visualBrief?.wantsMotionGraphics) {
+                    steps.push(...this._visualSteps(visualBrief, S));
+                }
                 break;
             case EDIT_MODES.FULL_BUILD:
                 steps.push(...this._fullBuildSteps(editPlan, segments || [], structure, state, S));
+                steps.push(...this._captionSteps(captionBrief, S));
+                steps.push(...this._visualSteps(visualBrief, S));
                 break;
             default:
                 steps.push(...this._cleanEditSteps(editPlan, state, segments || [], S));
         }
+
+        return steps;
+    }
+
+    // ── Contextual motion graphics (R125) ───────────────────────────────────
+    /**
+     * FULL_BUILD is "turn raw footage into a finished, visually engaging
+     * edit" by definition — the brief this was built for says so explicitly
+     * ("Do not simply add subtitles... Make the video visually communicate
+     * the ideas being spoken"), so for FULL_BUILD this runs unconditionally,
+     * same default-on reasoning as _captionSteps' keyword emphasis. Runs
+     * AFTER _captionSteps: animate_automatically's REVEAL/keyword-emphasis
+     * detection reads the caption/text clips this step's silence_removal and
+     * _captionSteps already produced, so captions must exist first.
+     *
+     * place_contextual_broll needs the project's media bin / stock fallback
+     * to actually have something to place — on a source with nothing
+     * matchable it is a no-op ("Nothing to place"), not an error, so it's
+     * safe to always attempt rather than require the caller to know in
+     * advance whether assets exist.
+     */
+    static _visualSteps(visualBrief, S) {
+        const steps = [];
+
+        // An EXPLICITLY named brand/accent color runs FIRST, before any
+        // graphics are placed, so place_contextual_broll/animate_automatically
+        // pick it up immediately (BrandKit.js: "an explicit value always
+        // wins" — every graphic takes the brand's accent unless it names its
+        // own color). This is the AI-reachable equivalent of the existing
+        // `set_brand_kit` command (see CommandRegistry.js) — same store
+        // action, just driven by the brief's own language instead of a
+        // dedicated "set my brand color" request.
+        if (visualBrief?.accentColorHex) {
+            steps.push(S('set_brand_kit', {
+                args: { accent: visualBrief.accentColorHex },
+                reason: `Apply the brief's named accent color (${visualBrief.accentColorHex}) across every graphic`,
+            }));
+        }
+
+        steps.push(S('place_contextual_broll', {
+            // R126 — automatic layout variety (brief section 6): without this,
+            // every placed cutaway implicitly covers the whole frame (the
+            // engine's default when a clip has no `.frame`), so a long
+            // explanation moment leaves the host fully hidden for its whole
+            // duration. decideAutoLayout() (VideoEditorTools.js) picks a
+            // per-clip preset from signals already available at placement
+            // time — duration and face-tracking data — rather than this
+            // planner guessing from segment labels the analyzer doesn't
+            // actually produce (SEGMENT_TYPES is only hook/intro/value/
+            // filler/transition/outro; there is no "comparison"/"stat"
+            // classification to key off today).
+            args: { autoLayout: true },
+            reason: 'Match b-roll/cutaways to what is being said, so the video does not stay a static talking head',
+        }));
+
+        steps.push(S('animate_automatically', {
+            args: {},
+            reason: 'Detect reveal/punchline/emphasis moments and apply motion graphics automatically',
+        }));
+
+        // Color mood is the one visual decision this makes NOT by default —
+        // changing how the user's own footage looks is a bigger default to
+        // take than adding graphics or captions, so it only runs when the
+        // brief actually used color/mood language (see VisualBriefParser).
+        if (visualBrief?.colorMoodQuery) {
+            steps.push(S('apply_lut', {
+                query: visualBrief.colorMoodQuery,
+                applyToAll: true,
+                reason: `Apply a "${visualBrief.colorMoodQuery}" look consistently across the edit`,
+            }));
+        }
+
+        return steps;
+    }
+
+    // ── Captions (R124) ──────────────────────────────────────────────────────
+    /**
+     * FULL_BUILD and YOUTUBE_OPTIMIZED are "build me a finished video" modes —
+     * neither ever generated captions before this, regardless of what the
+     * user actually asked for (see R124 project doc). Runs LAST, after the
+     * structural rebuild, so captions sync to the final cut rather than a
+     * pre-restructure timeline that's about to change underneath them.
+     *
+     * `captionBrief` (CaptionBriefParser.parseCaptionBrief output, or null for
+     * a request that never mentioned captions at all) decides the look, not
+     * whether captions happen — a full creative build gets captions by
+     * default; the brief only decides the style and whether keyword
+     * emphasis runs.
+     */
+    static _captionSteps(captionBrief, S) {
+        const steps = [];
+        const styleId = captionBrief?.stylePresetId || 'clean-modern';
+
+        steps.push(S('auto_captions', {
+            language: 'en',
+            style: styleId,
+            reason: 'Generate synchronized captions for the finished edit',
+        }));
+
+        steps.push(S('apply_caption_style', {
+            styleId,
+            reason: `Apply the "${styleId}" caption look consistently`,
+        }));
+
+        // Keyword emphasis runs unconditionally for a full creative build —
+        // "a complete, polished edit" names keyword highlighting as part of
+        // what captions means here (see R124 doc), not an opt-in extra that
+        // depends on the brief happening to use the word "emphasize".
+        // CaptionBriefParser has no NEGATIVE detection ("don't highlight
+        // anything") today, so there is deliberately no suppression path
+        // here either — adding one without the parser support behind it
+        // would be a flag nothing can ever set.
+        steps.push(S('emphasize_keywords', {
+            args: {},
+            reason: 'Highlight the key word of each caption',
+        }));
 
         return steps;
     }

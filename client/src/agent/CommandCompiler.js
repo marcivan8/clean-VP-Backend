@@ -18,6 +18,11 @@
  *  - Deterministic: same input → same output
  */
 
+// R124 — pure data lookup only (CAPTION_STYLES presets + the field builder
+// that turns one into clip-field updates); no store, no async, consistent
+// with this file's own "Pure & Synchronous" constraint above.
+import { packById, captionPackUpdates } from '../components/Assistant/captionStylePacks.js';
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // §1  TYPES & CONSTANTS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -561,6 +566,26 @@ function compileAutoCaptions(step, ctx) {
     ]);
 }
 
+// R124 — apply_caption_style: looks up a CAPTION_STYLES preset by id and runs
+// it through the SAME captionPackUpdates() builder the desktop/mobile style
+// pickers use (see captionStylePacks.js's own header comment on why there is
+// exactly one builder, not three divergent ones), so an AI-driven style pick
+// behaves identically to a human picking it from the Styles menu.
+function compileApplyCaptionStyle(step, ctx) {
+    const style = packById(step.styleId);
+    if (!style) {
+        return skip(step.step_id, `Unknown caption style id "${step.styleId}" — skipped`);
+    }
+    const updates = captionPackUpdates(style);
+    if (!updates) {
+        return skip(step.step_id, 'Caption style produced no field updates — skipped');
+    }
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'applyCaptionStyleToAll', updates,
+            { source_step_id: step.step_id, description: `Apply the "${style.name}" caption style` }),
+    ]);
+}
+
 // ── Export commands ─────────────────────────────────────────────────────────────
 
 function compileValidateExportSettings(step, ctx) {
@@ -659,7 +684,15 @@ function compileAnalyzeStructure(step, ctx) {
 
 function compileLongFormEdit(step, ctx) {
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'longFormEdit', { editMode: step.editMode || 'CLEAN_EDIT', platform: step.platform || null, targetDuration: step.targetDuration || null },
+        cmd(ENGINE.STORE, 'longFormEdit', {
+            editMode: step.editMode || 'CLEAN_EDIT',
+            platform: step.platform || null,
+            targetDuration: step.targetDuration || null,
+            // R124
+            captionBrief: step.captionBrief || null,
+            // R125
+            visualBrief: step.visualBrief || null,
+        },
             { source_step_id: step.step_id, description: `Long-form edit (${step.editMode || 'CLEAN_EDIT'})` }),
     ]);
 }
@@ -678,8 +711,15 @@ function compileFindHook(step, ctx) {
 }
 
 function compilePlaceContextualBroll(step, ctx) {
+    // R126 — this used to hardcode {} here, silently dropping ANY args a
+    // planner step set (wordSync, events, layout, and now autoLayout —
+    // see LongFormEditPlanner._visualSteps). There were no callers passing
+    // step.args through this path before R126, so this was latent rather
+    // than an active regression, but it meant step.args was dead on arrival
+    // for this action specifically while every sibling atomic-store action
+    // forwarded its args normally.
     return ok(step.step_id, [
-        cmd(ENGINE.STORE, 'placeContextualBroll', {}, { source_step_id: step.step_id, description: 'Match b-roll to spoken dialogue' }),
+        cmd(ENGINE.STORE, 'placeContextualBroll', step.args || {}, { source_step_id: step.step_id, description: 'Match b-roll to spoken dialogue' }),
     ]);
 }
 
@@ -1147,6 +1187,7 @@ const COMMAND_REGISTRY = new Map([
     ['add_caption', { compiler: compileAddCaption }],
     ['color_grade', { compiler: compileColorGrade }],
     ['auto_captions', { compiler: compileAutoCaptions }],
+    ['apply_caption_style', { compiler: compileApplyCaptionStyle }],
 
     // Export commands
     ['validate_export_settings', { compiler: compileValidateExportSettings }],

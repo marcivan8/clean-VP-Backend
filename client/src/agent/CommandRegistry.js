@@ -205,7 +205,14 @@ export const COMMANDS = [
                   // French (the tokenizer drops accents, so phrases avoid them)
                   'anime', 'anime la', 'animer', 'ajoute des animations', 'ajouter des animations',
                   'mets des animations', 'rajoute des animations', 'ajoute de l animation'],
-        negative: ['crop', 'silence', 'filler'],
+        // R123: 'illustrate this'/'illustrate the video' are legitimate
+        // animate_automatically phrasing on their own, but when the request is
+        // actually about b-roll/stock footage ("illustrate this with b-roll"),
+        // that sentence used to be hijacked here before b-roll placement ever
+        // got a chance to match — nothing got placed, because this command only
+        // animates existing clips. Veto on those terms so the b-roll-specific
+        // phrasing in sync_cutaways (below) wins instead.
+        negative: ['crop', 'silence', 'filler', 'roll', 'broll', 'footage', 'stock', 'cutaway', 'cutaways'],
         destructive: false,
     },
 
@@ -354,6 +361,16 @@ export const COMMANDS = [
         summary: 'Places b-roll on the words it illustrates and number pops on spoken prices and figures.',
         phrases: ['sync the b roll', 'sync b roll to the words', 'cutaways on the words', 'place b roll on the words',
                   'beat sync', 'add number pops', 'pop the numbers', 'show the prices', 'b roll on key moments',
+                  // R123: natural "illustrate ... with b-roll/footage/stock" phrasing, plus
+                  // bare "insert/add b-roll or stock footage" requests that previously matched
+                  // nothing in either the registry or IntentParser's NLP_MAP.
+                  'illustrate this with b roll', 'illustrate the video with b roll', 'illustrate it with b roll',
+                  'illustrate this with footage', 'illustrate the video with footage',
+                  'illustrate this with stock footage', 'illustrate the video with stock footage',
+                  'illustrate this with cutaways', 'illustrate with b roll', 'illustrate with footage',
+                  'illustrate with stock footage', 'add stock footage', 'add some stock footage',
+                  'insert b roll', 'insert some b roll', 'insert stock footage', 'add stock b roll',
+                  'add b roll footage', 'add footage to illustrate', 'add footage to match the dialogue',
                   'synchronise les plans de coupe', 'plans de coupe sur les mots', 'affiche les prix', 'affiche les chiffres'],
         negative: ['remove', 'clear', 'enleve', 'retire', 'supprime'],
         destructive: false,

@@ -929,6 +929,13 @@ export class EditPlanner {
                 editMode,
                 platform: constraints?.platform || null,
                 targetDuration: constraints?.targetDuration || null,
+                // R124: carried from IntentParser.validateAndNormalize() (via
+                // CaptionBriefParser) all the way through to
+                // LongFormEditPlanner, so a creative brief's caption
+                // instructions actually reach execution instead of being
+                // dropped at this step boundary.
+                captionBrief: constraints?.captionBrief || null,
+                visualBrief: constraints?.visualBrief || null, // R125
                 reason: `Full ${editMode} edit — content analysis + structural rebuild`,
             }],
         };

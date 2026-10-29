@@ -947,6 +947,15 @@ export class MediaExecutionEngine {
                 return { action, success: true };
             }
             case 'duplicateClip':  this._callStore(store, 'duplicateClip', args.trackId, args.clipId); return { action, success: true };
+            // R124 — applyCaptionStyleToAll: sets fonts/color/stroke/wordHighlight
+            // on every caption clip in one transaction. `args` here IS the
+            // fields object captionPackUpdates() built (see CommandCompiler's
+            // compileApplyCaptionStyle) — not a {trackId, clipId} shape like the
+            // cases around it, so it is passed straight through, not destructured.
+            case 'applyCaptionStyleToAll': {
+                const styled = this._callStore(store, 'applyCaptionStyleToAll', args);
+                return { action, success: styled !== false, message: styled !== false ? 'Applied caption style' : 'No caption clips to style' };
+            }
             case 'trimClip':       this._callStore(store, 'trimClip', args.trackId, args.clipId, args.trimFrom, args.amount); return { action, success: true };
             case 'rippleDelete':   this._callStore(store, 'rippleDelete', args.atTime); return { action, success: true };
             case 'addTransition': {
@@ -1398,7 +1407,7 @@ export class MediaExecutionEngine {
                 let broll = null, pops = null;
                 st.beginHistoryGroup();
                 try {
-                    if (args.broll !== false) broll = await tools.placeContextualBroll({ wordSync: true, events, layout: args.layout || 'fullscreen' }, job?.signal ?? null);
+                    if (args.broll !== false) broll = await tools.placeContextualBroll({ wordSync: true, events, layout: args.layout, autoLayout: !args.layout }, job?.signal ?? null); // R126 - an explicit args.layout (e.g. from a future "illustrate this as picture-in-picture" // phrasing) still wins outright; otherwise this used to hardcode 'fullscreen' for every cutaway // regardless of how long it ran, which is the exact default this slice is replacing with per-clip // variety (VideoEditorTools.decideAutoLayout).
                     if (args.numberPops !== false) pops = tools.placeNumberPops({ events });
                 } finally {
                     useTimelineStore.getState().endHistoryGroup();
@@ -4848,18 +4857,55 @@ export class MediaExecutionEngine {
             return;
         }
 
-        // Sanity guard: active duration < 10% of the source material → detection failed
-        const totalActiveTime = validSegs.reduce((t, s) => t + s.duration, 0);
-        if (totalOriginalDuration > 30 && totalActiveTime < totalOriginalDuration * 0.10) {
+        // ── Sanity guard (R122) ───────────────────────────────────────────────
+        // The OLD guard compared validSegs' raw durations — SOURCE-file scale,
+        // since silence/filler/retake detection always runs against the whole
+        // asset — against totalOriginalDuration, which is actually the CURRENT
+        // TIMELINE SPAN of the clips being replaced (rangeEnd - rangeStart over
+        // baseClips' own start/duration), not the original source length. Those
+        // two numbers are only the same scale on a clip that has never been cut
+        // before. After an earlier cut (silences already removed, or — the
+        // case that kept reaching Marc as "the video ends up almost completely
+        // chopped off" after running Auto mode, whose Reel playbook runs
+        // extract_short BEFORE this cleanup pass — a short already trimmed down
+        // to its "strongest moment") the server's kept segments are near-always
+        // >= 10% of the ORIGINAL file, so the old check could never fire, while
+        // this specific clip's narrow remaining source window could still end
+        // up with ZERO overlapping kept segment (e.g. retake detection decided
+        // THIS exact repeated line is the one to drop, keeping a different
+        // occurrence that now falls entirely outside what's left on the
+        // timeline) — packSegments()'s own intersection-with-current-coverage
+        // then legitimately returns zero pieces, and because the old guard
+        // never caught it, the clips were already removed below with nothing
+        // to replace them: a silent, total wipe.
+        //
+        // Fixed by packing FIRST (packSegments is pure — it only reads
+        // baseClips, which are already captured, so this is safe to do before
+        // any mutation) and measuring the REAL kept duration it produces,
+        // compared against the clips' own current duration — not the mis-scaled
+        // raw segment list. `> 3` (not `> 30`) keeps the percentage rule from
+        // false-rejecting a genuinely tiny fragment, while still covering the
+        // exact Reel-after-extract_short range (~22s) that reached zero
+        // protection before. The absolute check below additionally rejects a
+        // full wipe regardless of size — no cleanup step should legitimately
+        // leave nothing behind.
+        const { pieces: segOut, end: timelineEnd } = packSegments(validSegs, baseClips, effectiveRangeStart);
+        const keptDuration = Math.max(0, timelineEnd - effectiveRangeStart);
+        const wipedEverything = keptDuration < 0.1 && totalOriginalDuration > 0.5;
+        const wipedMostOfIt   = totalOriginalDuration > 3 && keptDuration < totalOriginalDuration * 0.10;
+        if (wipedEverything || wipedMostOfIt) {
             console.error(
-                `[MediaExecutionEngine] _applySegmentsToTimeline: REJECTED — active duration ` +
-                `${totalActiveTime.toFixed(1)}s is less than 10% of original ${totalOriginalDuration.toFixed(1)}s.`
+                `[MediaExecutionEngine] _applySegmentsToTimeline: REJECTED — kept duration ` +
+                `${keptDuration.toFixed(1)}s overlaps less than 10% of this clip's current ` +
+                `${totalOriginalDuration.toFixed(1)}s (the server's detection was run against the ` +
+                `whole source file and no longer lines up with what's left on the timeline).`
             );
             useAIStore.getState().addLog({
                 id: `step-sanity-${Date.now()}`,
                 type: 'error',
-                message: `Detection result rejected — only ${totalActiveTime.toFixed(1)}s active out of ` +
-                    `${totalOriginalDuration.toFixed(1)}s. Try running again or adjusting settings.`,
+                message: wipedEverything
+                    ? `Detection result rejected — it would have removed this clip entirely (kept ${keptDuration.toFixed(1)}s of ${totalOriginalDuration.toFixed(1)}s). Nothing was changed.`
+                    : `Detection result rejected — only ${keptDuration.toFixed(1)}s would survive out of ${totalOriginalDuration.toFixed(1)}s. Nothing was changed. Try running again or adjusting settings.`,
                 timestamp: new Date().toLocaleTimeString()
             });
             return;
@@ -4912,7 +4958,9 @@ export class MediaExecutionEngine {
         // clips still show take timeline space. Packing whole segments re-opened
         // every range an earlier cut removed as a gap ("remove filler words"
         // after "remove silences"). Uncut clips give the same result as before.
-        const { pieces: segOut, end: timelineEnd } = packSegments(validSegs, baseClips, effectiveRangeStart);
+        // segOut/timelineEnd were already computed above, by the R122 sanity
+        // guard, which needs them BEFORE any clip is removed — reused here
+        // rather than packing twice.
 
         let droppedZoomKfCount = 0; // clips whose stale zoom-rhythm keyframes had to be cleared (see below)
         let inserted = 0;

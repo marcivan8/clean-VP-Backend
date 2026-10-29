@@ -862,6 +862,40 @@ export function matchTranscriptToBroll(words, candidates, chapterBoundaries = []
     return placements;
 }
 
+/**
+ * R126 - pick a layout preset (R88 LAYOUT_PRESETS) for an automatically
+ * placed b-roll cutaway, based on signals already available at placement
+ * time (the clip's duration, whether the speaker footage it covers has
+ * face-tracking data). Pure function, independently testable without
+ * standing up the store.
+ *
+ * Returns null (no layout - the existing implicit default: the overlay
+ * covers the whole frame as a plain cutaway) for anything short enough
+ * that briefly hiding the speaker reads fine. Only a cutaway long enough
+ * to leave the host "gone" for a while gets a layout that keeps them
+ * visible - that's the actual problem the brief's "visual storytelling"
+ * ask is pointing at, not a 1-2s cutaway.
+ *
+ * 'split' is only chosen when the covering base clip actually has
+ * face-tracking data (`layerMask.bboxTrack`). applyLayout's own fallback
+ * for 'split' without that data is centre-framed and not face-aware - fine
+ * for a user who clicked a button and can see/undo the result, too big a
+ * visual gamble to apply silently inside an automatic plan. Without face
+ * data, 'pip' is the safer automatic choice: it keeps the speaker visible
+ * without depending on any face detection at all.
+ *
+ * @param {number} duration - the overlay clip's placed duration, seconds
+ * @param {boolean} hasFaceTracking - true when the covering base clip has layerMask.bboxTrack data
+ * @returns {string|null} one of LAYOUT_PRESETS ('split'|'pip'), or null for "no layout"
+ */
+export const AUTO_LAYOUT_MIN_DURATION_S = 3.5;
+
+export function decideAutoLayout(duration, hasFaceTracking) {
+    const d = Number(duration) || 0;
+    if (d < AUTO_LAYOUT_MIN_DURATION_S) return null;
+    return hasFaceTracking ? 'split' : 'pip';
+}
+
 export class VideoEditorTools {
     // Always read fresh state — never cache a snapshot
     get store() {
@@ -1373,7 +1407,7 @@ export class VideoEditorTools {
      *      so the video was always left unchanged. Now the sub-plan is compiled
      *      and executed directly here.
      */
-    async longFormEdit({ editMode, platform, targetDuration } = {}, signal = null) {
+    async longFormEdit({ editMode, platform, targetDuration, captionBrief = null, visualBrief = null } = {}, signal = null) {
         console.log('[VideoEditorTools] Building LongFormEditPlanner plan...');
 
         // Get or run content analysis — pass signal so the backend fetch is
@@ -1402,7 +1436,9 @@ export class VideoEditorTools {
         }
 
         // Generate the atomic step plan
-        const plan = LongFormEditPlanner.generatePlan(analysis, { platform, targetDuration });
+        // R124: captionBrief threaded from IntentParser's validateAndNormalize
+        // (via CaptionBriefParser) through EditPlanner → CommandCompiler → here.
+        const plan = LongFormEditPlanner.generatePlan(analysis, { platform, targetDuration, captionBrief, visualBrief });
 
         if (!plan || plan.error) {
             return {
@@ -1617,6 +1653,23 @@ export class VideoEditorTools {
             // R90 (A6): `wordSync` starts each cutaway on the word it
             // illustrates; `events` favours reveal/punchline/emphasis moments;
             // `layout` ('fullscreen' | 'split' | 'pip') frames it (R88 presets).
+            // R126: `autoLayout` instead decides a layout PER MATCH via
+            // decideAutoLayout() (duration + face-tracking availability) —
+            // used instead of `layout` when the caller wants automatic
+            // variety rather than one fixed preset applied to every cutaway.
+            // `layout` wins if both are set, so existing callers are unaffected.
+            const baseTrackForLayout = args.autoLayout
+                ? (state.tracks || []).find(t => t.type === 'video' && (t.clips || []).length > 0)
+                : null;
+            const hasFaceTrackingAt = (t) => {
+                if (!baseTrackForLayout) return false;
+                const covering = (baseTrackForLayout.clips || []).find(c => {
+                    const s = Number(c.start) || 0;
+                    const e = s + (Number(c.duration) || 0);
+                    return t >= s && t < e;
+                });
+                return !!(covering?.layerMask?.bboxTrack?.length);
+            };
             const matches = matchTranscriptToBroll(words, candidates, chapterBoundaries, {
                 wordSync: !!args.wordSync,
                 events: Array.isArray(args.events) ? args.events : null,
@@ -1639,10 +1692,12 @@ export class VideoEditorTools {
                     y: 50,
                     scale: 4,
                 });
-                if (args.layout && trackId) {
+                const layoutToApply = args.layout
+                    || (args.autoLayout ? decideAutoLayout(duration, hasFaceTrackingAt(match.timelineTime)) : null);
+                if (layoutToApply && trackId) {
                     const placed = (useTimelineStore.getState().tracks.find(t => t.id === trackId)?.clips || [])
                         .find(c => c.assetId === asset.id && Math.abs((Number(c.start) || 0) - match.timelineTime) < 0.01);
-                    if (placed) useTimelineStore.getState().applyLayout(trackId, placed.id, args.layout);
+                    if (placed) useTimelineStore.getState().applyLayout(trackId, placed.id, layoutToApply);
                 }
             }
 
