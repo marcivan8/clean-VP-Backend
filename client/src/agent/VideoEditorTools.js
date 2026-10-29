@@ -993,6 +993,7 @@ export class VideoEditorTools {
             case 'reorder_segment': return this.reorderSegment(action.args);
             case 'cut_segment': return this.cutSegment(action.args);
             case 'identify_quotable_moments': return await this.identifyQuotableMoments(action.args);
+            case 'add_transitions_to_sections': return await this.addTransitionsToSections(action.args);
 
             // Asset Engine — Creative Asset Intelligence System
             case 'search_assets':     return await this.searchAssets(action.args);
@@ -2492,6 +2493,85 @@ if (matches.length === 0 && titleCardsCreated === 0) {
         } catch (error) {
             console.error('[VideoEditorTools] applyLayoutPreset error:', error);
             return { success: false, message: `Could not apply the layout: ${error.message}` };
+        }
+    }
+
+    /**
+     * R130 — "add_transitions_to_sections" was compiled (CommandCompiler.js)
+     * and dispatched (MediaExecutionEngine.js's shared VideoEditorTools
+     * case) for both long-form edit modes since the action was first added,
+     * but had no case in this class's execute() switch at all — every call
+     * threw "Unknown tool: add_transitions_to_sections" and the whole
+     * long-form edit failed on this one step (reported by the user with a
+     * screenshot: a 2-step reel edit failed outright on exactly this error).
+     * This is the implementation that was always meant to be here.
+     *
+     * `apply_at`:
+     *   'section_boundaries' — only the cuts that land on an actual chapter
+     *      marker (extractChapterBoundaries — the same R77 markers
+     *      placeContextualBroll's title cards use), for YOUTUBE_OPTIMIZED's
+     *      "smooth transitions between main content sections" ask. No
+     *      chapter markers on the timeline is reported as a failure, not a
+     *      silent no-op (see scripts/test_no_silent_noop.js's contract).
+     *   'all_cuts' (default, and FULL_BUILD's own choice) — every cut on the
+     *      base video track, for a jump-cut-heavy rebuild that needs
+     *      something smoothing every one of them.
+     */
+    async addTransitionsToSections(args = {}) {
+        try {
+            const state = this.store;
+            const type = args.type || 'fade';
+            const duration = Number(args.duration) > 0 ? Number(args.duration) : 0.5;
+            const applyAt = args.apply_at || 'all_cuts';
+
+            const videoTrack = (state.tracks || []).find(t => t.type === 'video' && (t.clips || []).length > 0);
+            if (!videoTrack) {
+                return { success: false, message: 'There is no video track to add transitions to.' };
+            }
+            const clips = [...videoTrack.clips].sort((a, b) => (Number(a.start) || 0) - (Number(b.start) || 0));
+            if (clips.length < 2) {
+                return { success: false, message: 'Only one clip on the timeline — nothing to transition between.' };
+            }
+
+            let targets;
+            if (applyAt === 'section_boundaries') {
+                const boundaries = extractChapterBoundaries(state.tracks);
+                if (boundaries.length === 0) {
+                    return {
+                        success: false,
+                        message: 'No chapter/section boundaries found on the timeline — run content analysis first, or ask for transitions at every cut instead.',
+                    };
+                }
+                const BOUNDARY_MATCH_EPSILON_S = 0.3;
+                targets = clips.filter((c, i) => i > 0
+                    && boundaries.some(b => Math.abs((Number(c.start) || 0) - b) <= BOUNDARY_MATCH_EPSILON_S));
+                if (targets.length === 0) {
+                    return { success: false, message: 'No cuts line up with a chapter boundary closely enough to attach a transition.' };
+                }
+            } else {
+                targets = clips.slice(1);
+            }
+
+            // One undo step for the whole batch, not one per clip — addTransition
+            // itself calls _saveHistory() per call, which without this would turn
+            // "add transitions" into N separate undos.
+            useTimelineStore.getState().beginHistoryGroup();
+            try {
+                targets.forEach((c) => { useTimelineStore.getState().addTransition(c.id, type, duration); });
+            } finally {
+                useTimelineStore.getState().endHistoryGroup();
+            }
+
+            return {
+                success: true,
+                message: `Added ${type} transition(s) (${duration}s) to ${targets.length} cut(s).`,
+                count: targets.length,
+                type,
+                duration,
+            };
+        } catch (error) {
+            console.error('[VideoEditorTools] addTransitionsToSections error:', error);
+            return { success: false, message: `Could not add transitions: ${error.message}` };
         }
     }
 

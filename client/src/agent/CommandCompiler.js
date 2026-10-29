@@ -663,7 +663,12 @@ function compileCutSegment(step, ctx) {
 }
 
 /**
- * add_transitions_to_sections — skipped at compile time; runtime VideoEditorTools handles it.
+ * add_transitions_to_sections — compiles straight through to the store
+ * command; VideoEditorTools.addTransitionsToSections (R130) does the real
+ * work (picking which cuts get a transition). Before R130 this comment
+ * read "runtime VideoEditorTools handles it" when nothing there actually
+ * did — every call compiled fine and then threw "Unknown tool" at
+ * execution time. See claude/add-transitions-unknown-tool-R130.md.
  */
 function compileAddTransitionsToSections(step, ctx) {
     return ok(step.step_id, [
