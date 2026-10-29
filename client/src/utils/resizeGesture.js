@@ -1,13 +1,17 @@
 /**
- * resizeGesture.js — shared maths for the on-canvas resize handle (bottom-right
- * corner), for any draggable clip: overlay stickers (GraphicOverlay.jsx) and,
- * as of R100, base video/image layers too (BaseClipOverlay.jsx).
+ * resizeGesture.js — shared maths for the on-canvas resize handles, for any
+ * draggable clip: overlay stickers (GraphicOverlay.jsx), captions
+ * (TextOverlay.jsx) and, as of R100, base video/image layers too
+ * (BaseClipOverlay.jsx).
  *
- * Resize is stored on the clip as `clip.scale` — the SAME field the existing
- * two-finger pinch gesture already writes. The handle is a mouse/touch-
- * friendly, discoverable alternative to pinching, not a new model: both
- * anchor the scale on the clip's own centre (the wrapper is always rendered
- * with `transform: translate(-50%, -50%) ...`), so dragging the corner never
+ * Resize is stored on the clip as `clip.scale`. As of R119 the corner
+ * handles (ResizeHandle.jsx renders all four — nw/ne/sw/se) are the ONLY
+ * way to resize; the two-finger pinch gesture that used to also write
+ * `clip.scale` at each call site was removed so there is exactly one
+ * resize affordance. Distance-from-centre is what drives the ratio, not
+ * which corner was grabbed, so the same gesture serves every corner
+ * unchanged — the wrapper is always rendered with
+ * `transform: translate(-50%, -50%) ...`, so dragging any corner never
  * moves clip.x/clip.y.
  */
 

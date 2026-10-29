@@ -99,8 +99,27 @@ function overlayFilterCss(motionBlur, clipShadow) {
 // preview/export divergence this whole engine exists to prevent.
 const DEFAULT_WIDTH_FRACTION = 25; // as a CSS percent
 
-const pointerDist = (a, b) =>
-    Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+// Preview<->export shadow parity. CompositorCompiler.js's compileShadowSource
+// scales clip.shadow.{dx,dy,blur} by frame.width / REFERENCE_WIDTH (a FLAT,
+// aspect-ratio-INDEPENDENT reference, per Compositor.js's normalizeShadow doc
+// comment) so a shadow reads the same size at 720p and at 4K. The preview
+// here never implemented that scaling and applied the raw values as literal
+// CSS px, so a sticker's shadow rendered far larger/more diffuse in the
+// editor (where the overlay box is almost always much smaller than 1080px
+// wide) than in the export. Must stay a flat 1080, NOT
+// getPlayerDimensions(aspectRatio).width (that's the aspect-aware reference
+// TextOverlay.jsx uses for fontSize/stroke -- a different convention).
+const SHADOW_REFERENCE_WIDTH = 1080;
+
+function scaleShadow(shadow, scale) {
+    if (!shadow) return shadow;
+    return {
+        ...shadow,
+        dx: (Number(shadow.dx) || 0) * scale,
+        dy: (Number(shadow.dy) || 0) * scale,
+        blur: Math.max(0, (Number(shadow.blur) || 0) * scale),
+    };
+}
 
 const GraphicOverlay = ({ placementFilter = 'all' }) => {
     const containerRef = React.useRef(null);
@@ -131,6 +150,24 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
         const vidClips = tracks.filter(t => t.type === 'video' || t.type === 'image').flatMap(t => t.clips || []);
         return vidClips.some(c => c.layerTarget === 'background' && c.layerMask && currentTime >= c.start && currentTime < c.start + c.duration);
     }, [tracks, currentTime]);
+
+    // Preview<->export shadow parity (see SHADOW_REFERENCE_WIDTH above).
+    // Hook stays above the early return below for the same reason
+    // hasActiveMatte does (see its comment): every hook must run on every
+    // render or a timeline with no overlay track throws React error #310.
+    const [shadowScale, setShadowScale] = React.useState(1);
+    React.useLayoutEffect(() => {
+        const el = containerRef.current;
+        if (!el) return;
+        const recompute = () => {
+            const rect = el.getBoundingClientRect();
+            if (rect.width > 0) setShadowScale(rect.width / SHADOW_REFERENCE_WIDTH);
+        };
+        recompute();
+        const observer = new ResizeObserver(recompute);
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, []);
 
     const overlayTracks = tracks.filter(t => t.type === 'overlay');
     if (overlayTracks.length === 0) return null;
@@ -163,6 +200,7 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
             // A clip in a layout preset stays in its box; dragging pans the
             // picture inside the box (the crop focus) instead.
             saveToHistory();
+            state.primaryPointerId = e.pointerId;
             const box = clipElRefs.current[clip.id]?.getBoundingClientRect();
             state.dragStartX = e.clientX;
             state.dragStartY = e.clientY;
@@ -174,6 +212,7 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
             state.trackId = trackId;
         } else if (pointerCount === 1) {
             saveToHistory();
+            state.primaryPointerId = e.pointerId;
             state.dragStartX   = e.clientX;
             state.dragStartY   = e.clientY;
             state.initialClipX = typeof clip.x === 'number' ? clip.x : 78;
@@ -205,14 +244,10 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
                     initialY: typeof c.y === 'number' ? c.y : 18,
                 }))
                 : null;
-        } else if (pointerCount === 2) {
-            saveToHistory();
-            const pts = Object.values(state.pointers);
-            state.initialDist  = pointerDist(pts[0], pts[1]);
-            state.initialScale = clip.scale || 1;
-            state.mode         = 'pinch';
-            state.trackId      = trackId;
         }
+        // A second finger landing on the clip is tracked (so pointerUp's
+        // bookkeeping stays correct) but intentionally does nothing else —
+        // resize only happens via the corner handles now (R119).
     };
 
     const handlePointerMove = (e, clip) => {
@@ -221,6 +256,9 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
         const state = gs[clip.id];
         if (!state || !state.pointers[e.pointerId]) return;
         state.pointers[e.pointerId] = { clientX: e.clientX, clientY: e.clientY };
+        // Only the pointer that started the gesture drives it — a second
+        // finger resting on the clip must not hijack dragStartX/Y.
+        if (e.pointerId !== state.primaryPointerId) return;
 
         const rect = containerRef.current?.getBoundingClientRect();
         if (!rect) return;
@@ -234,18 +272,7 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
             return;
         }
 
-        if (state.mode === 'pinch' && Object.keys(state.pointers).length === 2) {
-            const pts = Object.values(state.pointers);
-            const ratio = pointerDist(pts[0], pts[1]) / (state.initialDist || 1);
-            const newScale = Math.max(0.1, Math.min(5, state.initialScale * ratio));
-            // skipHistory here: one undo step per whole drag/pinch gesture, not
-            // one per pointermove — matches TextOverlay's drag behaviour.
-            // pointerup does not commit again; updateClip has no liveOnly/global
-            // concept the way applyCaptionUpdate does (a sticker never fans out
-            // to "every sticker"), so the last live write during the gesture IS
-            // the committed value.
-            updateClip(state.trackId, clip.id, { scale: newScale }, { skipHistory: true });
-        } else if (state.mode === 'drag') {
+        if (state.mode === 'drag') {
             const deltaX = e.clientX - state.dragStartX;
             const deltaY = e.clientY - state.dragStartY;
             let deltaXPct = (deltaX / rect.width)  * 100;
@@ -317,7 +344,7 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
                 // as the export's scale+crop (CompositorCompiler, `fit`).
                 if (hasLayoutFrame(clip)) {
                     const css = frameToCss(clip.frame);
-                    const framedFilter = overlayFilterCss(0, clip.shadow);
+                    const framedFilter = overlayFilterCss(0, scaleShadow(clip.shadow, shadowScale));
                     const mediaStyle = {
                         ...css.media,
                         opacity: motion.opacity,
@@ -343,7 +370,7 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
                 // The wrapper carries position/size/rotation so the rotate
                 // handle (a child) can sit on the sticker's corner; opacity and
                 // blur stay on the media so the handle itself never fades.
-                const overlayFilter = overlayFilterCss(motion.blur, clip.shadow);
+                const overlayFilter = overlayFilterCss(motion.blur, scaleShadow(clip.shadow, shadowScale));
                 const mediaStyle = {
                     display: 'block',
                     width: '100%',

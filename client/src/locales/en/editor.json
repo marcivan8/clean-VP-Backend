@@ -367,7 +367,6 @@
   "player": {
     "pacingAlert": "Pacing Alert",
     "sceneIsDragging": "Scene is dragging ({{seconds}}s)",
-    "dragPinchToScale": "drag · pinch to scale",
     "generatingPreview": "Generating preview…",
     "rotate": "Rotate",
     "rotateHint": "Drag to rotate (Shift: 15° steps)"

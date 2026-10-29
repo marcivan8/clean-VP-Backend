@@ -24,9 +24,13 @@ import ResizeHandle from './ResizeHandle.jsx';
  * into canvas-pixel deltas before writing `clip.x`/`clip.y`. The resize
  * handle is unitless (`clip.scale`, same field and same meaning as overlay
  * clips) and needs no conversion — it is the exact same <ResizeHandle/>.
+ *
+ * R119: resize is now ONLY the four corner handles — the two-finger pinch
+ * path that used to also write `clip.scale` here was removed, so a second
+ * finger touching the clip no longer does anything. `state.primaryPointerId`
+ * pins the drag gesture to whichever pointer started it, so a stray second
+ * finger can't yank the drag's start reference out from under it.
  */
-const pointerDist = (a, b) => Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
-
 const BaseClipOverlay = () => {
     const containerRef = React.useRef(null);
     const gestureRef = React.useRef({});
@@ -67,6 +71,7 @@ const BaseClipOverlay = () => {
 
         if (pointerCount === 1) {
             saveToHistory();
+            state.primaryPointerId = e.pointerId;
             state.dragStartX   = e.clientX;
             state.dragStartY   = e.clientY;
             state.initialClipX = Number(clip.x) || 0;
@@ -74,14 +79,10 @@ const BaseClipOverlay = () => {
             state.mode          = 'drag';
             state.trackId       = trackId;
             state.containerRect = containerRef.current?.getBoundingClientRect() || null;
-        } else if (pointerCount === 2) {
-            saveToHistory();
-            const pts = Object.values(state.pointers);
-            state.initialDist  = pointerDist(pts[0], pts[1]);
-            state.initialScale = Number(clip.scale) || 1;
-            state.mode         = 'pinch';
-            state.trackId      = trackId;
         }
+        // A second finger landing on the clip is tracked (so pointerUp's
+        // bookkeeping stays correct) but intentionally does nothing else —
+        // resize only happens via the corner handles now.
     };
 
     const handlePointerMove = (e, clip) => {
@@ -90,13 +91,11 @@ const BaseClipOverlay = () => {
         const state = gs[clip.id];
         if (!state || !state.pointers[e.pointerId]) return;
         state.pointers[e.pointerId] = { clientX: e.clientX, clientY: e.clientY };
+        // Only the pointer that started the drag drives it — a second
+        // finger resting on the clip must not hijack dragStartX/Y.
+        if (e.pointerId !== state.primaryPointerId) return;
 
-        if (state.mode === 'pinch' && Object.keys(state.pointers).length === 2) {
-            const pts = Object.values(state.pointers);
-            const ratio = pointerDist(pts[0], pts[1]) / (state.initialDist || 1);
-            const newScale = Math.max(0.1, Math.min(5, state.initialScale * ratio));
-            updateClip(state.trackId, clip.id, { scale: newScale }, { skipHistory: true });
-        } else if (state.mode === 'drag' && state.containerRect) {
+        if (state.mode === 'drag' && state.containerRect) {
             const { dx, dy } = screenDeltaToCanvasDelta({
                 deltaScreenX: e.clientX - state.dragStartX,
                 deltaScreenY: e.clientY - state.dragStartY,

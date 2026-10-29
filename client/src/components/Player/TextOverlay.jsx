@@ -20,6 +20,7 @@ import { mixColor, withAlpha } from '../../motion/ColorTheory.js';
 import { clipsInGroup } from '../../motion/ClipGrouping.js';
 import { getPlayerDimensions } from '../../utils/playerDimensions.js';
 import RotateHandle from './RotateHandle.jsx';
+import ResizeHandle from './ResizeHandle.jsx';
 // R92 round C: alignment guides while dragging
 import { computeSnap, startPosition, measureOthers } from '../../motion/SnapGuides.js';
 import { useSnapGuides } from './SnapGuidesLayer.jsx';
@@ -231,10 +232,6 @@ const CaptionWords = ({ content, words, time, reveal, highlight, emphasis, baseC
     );
 };
 
-// Distance between two pointer positions (for pinch-to-scale)
-const pointerDist = (a, b) =>
-    Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
-
 const TextOverlay = ({ placementFilter = 'all' }) => {
     const { t } = useTranslation('editor');
     const containerRef = React.useRef(null);
@@ -307,10 +304,14 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
     const getTrackForClip = (clipId) =>
         allTracks.find(t => t.clips.some(c => c.id === clipId));
 
-    // ── Unified pointer handler (drag + pinch-to-scale) ────────────────────────
+    // ── Unified pointer handler (drag; resize is the corner handle below) ──
     // We use pointer events so the same code handles both mouse and touch.
     // `touch-action: none` on the element prevents the browser from stealing
     // the touch sequence before our handler can call setPointerCapture.
+    // R119: pinch-to-scale was removed — resize is now ONLY the corner
+    // handle, so a second finger landing here is tracked for bookkeeping
+    // but no longer starts a scale gesture. `primaryPointerId` pins the
+    // drag to whichever pointer started it.
 
     const handlePointerDown = (e, clip) => {
         e.stopPropagation();
@@ -332,6 +333,7 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
         if (pointerCount === 1) {
             // Single-finger drag setup
             saveToHistory();
+            state.primaryPointerId = e.pointerId;
             state.dragStartX    = e.clientX;
             state.dragStartY    = e.clientY;
             // R92: start where the element is DRAWN ('bottom' captions sit at
@@ -366,14 +368,10 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
                         initialY: typeof c.y === 'number' ? c.y : 50,
                     }))
                 : null;
-        } else if (pointerCount === 2) {
-            // Second finger arrived — switch to pinch-to-scale
-            saveToHistory();
-            const pts = Object.values(state.pointers);
-            state.initialDist   = pointerDist(pts[0], pts[1]);
-            state.initialScale  = clip.scale || 1;
-            state.mode          = 'pinch';
         }
+        // A second finger landing on the clip is tracked (so pointerUp's
+        // bookkeeping stays correct) but intentionally does nothing else —
+        // resize only happens via the corner handle now (R119).
     };
 
     const handlePointerMove = (e, clip) => {
@@ -385,6 +383,9 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
 
         // Update tracked position for this pointer
         state.pointers[e.pointerId] = { clientX: e.clientX, clientY: e.clientY };
+        // Only the pointer that started the drag drives it — a second
+        // finger resting on the clip must not hijack dragStartX/Y.
+        if (e.pointerId !== state.primaryPointerId) return;
 
         const track = getTrackForClip(clip.id);
         if (!track) return;
@@ -397,15 +398,7 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
         // store writes per pixel of travel. The real fan-out is committed once,
         // on pointer-up (see handlePointerUp), which is also what makes the
         // whole gesture a single undo entry.
-        if (state.mode === 'pinch' && Object.keys(state.pointers).length === 2) {
-            // Pinch-to-scale: adjust clip.scale
-            const pts = Object.values(state.pointers);
-            const currentDist = pointerDist(pts[0], pts[1]);
-            const ratio = currentDist / (state.initialDist || 1);
-            const newScale = Math.max(0.1, Math.min(5, state.initialScale * ratio));
-            state.pendingUpdate = { scale: newScale };
-            applyCaptionUpdate({ scale: newScale }, { clipId: clip.id, skipHistory: true, liveOnly: true });
-        } else if (state.mode === 'drag') {
+        if (state.mode === 'drag') {
             // Single-finger drag: reposition
             const deltaX = e.clientX - state.dragStartX;
             const deltaY = e.clientY - state.dragStartY;
@@ -458,56 +451,15 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
             useSnapGuides.getState().clear();
             // All fingers lifted — clean up
             delete gs[clip.id];
-        } else if (remaining === 1 && state.mode === 'pinch') {
-            // One finger lifted during pinch — revert to drag with the remaining finger
-            saveToHistory();
-            const [lastPt] = Object.values(state.pointers);
-            state.dragStartX   = lastPt.clientX;
-            state.dragStartY   = lastPt.clientY;
-            const resumePos    = startPosition(clip);
-            state.initialClipX = resumePos.x;
-            state.initialClipY = resumePos.y;
-            state.mode         = 'drag';
         }
     };
 
-    // ── Resize handle drag (desktop corner drag, still works on mobile too) ────
-    const handleResizePointerDown = (e, clip) => {
-        e.stopPropagation();
-        e.preventDefault();
-        e.currentTarget.setPointerCapture(e.pointerId);
-        saveToHistory();
-
-        const startY      = e.clientY;
-        const startX      = e.clientX;
-        const initialScale = clip.scale || 1;
-
-        let lastScale = initialScale;
-
-        const onMove = (moveE) => {
-            // Diagonal drag: both axes contribute to scale
-            const delta = ((moveE.clientX - startX) + (moveE.clientY - startY)) / 2;
-            const sensitivity = 0.008;
-            const newScale = Math.max(0.1, Math.min(5, initialScale + delta * sensitivity));
-            lastScale = newScale;
-            // liveOnly mid-drag (one write per move), real scope on release —
-            // same two-phase commit as the pointer drag/pinch above.
-            applyCaptionUpdate({ scale: newScale }, { clipId: clip.id, skipHistory: true, liveOnly: true });
-        };
-
-        const onUp = () => {
-            // Commit at the real scope so a global-mode resize reaches every caption.
-            applyCaptionUpdate({ scale: lastScale }, { clipId: clip.id, skipHistory: true });
-            e.currentTarget?.removeEventListener('pointermove', onMove);
-            e.currentTarget?.removeEventListener('pointerup', onUp);
-            window.removeEventListener('pointermove', onMove);
-            window.removeEventListener('pointerup', onUp);
-        };
-
-        // Use window so the pointer can leave the element without losing events
-        window.addEventListener('pointermove', onMove);
-        window.addEventListener('pointerup', onUp, { once: true });
-    };
+    // ── Resize gesture — corner handles (R119) ─────────────────────────────
+    // Delegated to the shared <ResizeHandle/> (see ResizeHandle.jsx /
+    // resizeGesture.js) instead of a bespoke per-file implementation, the
+    // same way RotateHandle is already shared below. liveOnly mid-drag (one
+    // write per move), real scope (global/individual) on release — same
+    // two-phase commit the pointer drag above uses.
 
     // Resolve percentage-based position
     const resolvePos = (clip) => {
@@ -630,42 +582,14 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
                             />
                         )}
 
-                        {/* Resize handle — large touch target (44×44) with small visual dot */}
                         {isActive && (
-                            <div
-                                onPointerDown={(e) => handleResizePointerDown(e, clip)}
-                                style={{
-                                    position: 'absolute',
-                                    bottom: -22,
-                                    right: -22,
-                                    width: 44,
-                                    height: 44,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    cursor: 'se-resize',
-                                    touchAction: 'none',
-                                    pointerEvents: 'auto',
-                                }}
-                            >
-                                {/* Visual indicator (smaller than touch zone) */}
-                                <div style={{
-                                    width: 18,
-                                    height: 18,
-                                    borderRadius: '50%',
-                                    background: 'var(--accent, #00E5FF)',
-                                    border: '2px solid white',
-                                    boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                }}>
-                                    {/* Diagonal resize arrows */}
-                                    <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-                                        <path d="M1 7L7 1M4 7h3V4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                                    </svg>
-                                </div>
-                            </div>
+                            <ResizeHandle
+                                getElement={() => clipElRefs.current[clip.id]}
+                                scale={Number(clip.scale) || 1}
+                                onStart={() => saveToHistory()}
+                                onLive={(s) => applyCaptionUpdate({ scale: s }, { clipId: clip.id, skipHistory: true, liveOnly: true })}
+                                onCommit={(s) => applyCaptionUpdate({ scale: s }, { clipId: clip.id, skipHistory: true })}
+                            />
                         )}
 
                         {/* Rotate handle (A3) — edits clip.rotation, the layer's base
@@ -682,22 +606,6 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
                             />
                         )}
 
-                        {/* Pinch hint — shown briefly when clip is first selected on mobile */}
-                        {isActive && (
-                            <div
-                                className="absolute -top-7 left-1/2 -translate-x-1/2 pointer-events-none"
-                                style={{
-                                    fontSize: 9,
-                                    fontFamily: 'var(--f-mono, monospace)',
-                                    color: 'rgba(0,229,255,0.7)',
-                                    whiteSpace: 'nowrap',
-                                    letterSpacing: '0.06em',
-                                    textTransform: 'uppercase',
-                                }}
-                            >
-                                {t('player.dragPinchToScale')}
-                            </div>
-                        )}
                     </div>
                 );
             })}

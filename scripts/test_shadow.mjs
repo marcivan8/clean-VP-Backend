@@ -129,6 +129,38 @@ await check('GraphicOverlay builds a CSS drop-shadow (not box-shadow) from clip.
     assert.match(src, /function overlayFilterCss/);
 });
 
+await check('R121 -- preview scales clip.shadow by the SAME flat 1080 reference the export uses, at both call sites (preview/export parity)', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'client/src/components/Player/GraphicOverlay.jsx'), 'utf8');
+    // Must be a flat constant, not the aspect-aware getPlayerDimensions()
+    // reference TextOverlay.jsx uses for fontSize/stroke -- a different,
+    // incompatible convention from the one CompositorCompiler.js's
+    // compileShadowSource uses for clip.shadow (REFERENCE_WIDTH = 1080).
+    assert.match(src, /SHADOW_REFERENCE_WIDTH\s*=\s*1080/, 'the preview-side shadow reference width must be the same flat 1080 the export uses');
+    assert.doesNotMatch(src, /scaleShadow\([^)]*getPlayerDimensions/, 'shadow scaling must not use the aspect-aware reference width');
+    // Both overlayFilterCss call sites (the layout-frame branch and the
+    // normal sticker branch) must route clip.shadow through the scale --
+    // passing clip.shadow unscaled to either one reintroduces the bug.
+    assert.doesNotMatch(src, /overlayFilterCss\(0,\s*clip\.shadow\)/, 'the layout-frame branch is passing clip.shadow unscaled to overlayFilterCss');
+    assert.doesNotMatch(src, /overlayFilterCss\(motion\.blur,\s*clip\.shadow\)/, 'the sticker branch is passing clip.shadow unscaled to overlayFilterCss');
+    assert.match(src, /overlayFilterCss\(0,\s*scaleShadow\(clip\.shadow,\s*shadowScale\)\)/, 'the layout-frame branch must scale clip.shadow before it reaches overlayFilterCss');
+    assert.match(src, /overlayFilterCss\(motion\.blur,\s*scaleShadow\(clip\.shadow,\s*shadowScale\)\)/, 'the sticker branch must scale clip.shadow before it reaches overlayFilterCss');
+});
+
+await check('R121 -- scaleShadow() itself scales dx/dy/blur proportionally and never produces a negative blur', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'client/src/components/Player/GraphicOverlay.jsx'), 'utf8');
+    const m = src.match(/function scaleShadow\(shadow, scale\) \{[\s\S]*?\n\}/);
+    assert.ok(m, 'scaleShadow function not found');
+    // eslint-disable-next-line no-new-func
+    const scaleShadow = new Function('Number', 'Math', `${m[0]}; return scaleShadow;`)(Number, Math);
+    assert.equal(scaleShadow(null, 0.5), null, 'scaleShadow must pass through a null shadow unchanged (no shadow set)');
+    const half = scaleShadow({ dx: 10, dy: -20, blur: 8, opacity: 0.6 }, 0.5);
+    assert.equal(half.dx, 5);
+    assert.equal(half.dy, -10);
+    assert.equal(half.blur, 4);
+    assert.equal(half.opacity, 0.6, 'opacity must pass through untouched -- it is not a px value');
+    assert.equal(scaleShadow({ dx: 0, dy: 0, blur: -5 }, 2).blur, 0, 'blur must never go negative even from a malformed shadow');
+});
+
 // ── 4 · Export (CompositorCompiler.js): the filter graph shape ──────────────
 log('\n4 \xb7 Export: a shadowed overlay compiles to TWO overlay ops; an unshadowed one still compiles to ONE');
 

@@ -272,5 +272,28 @@ await check('a failure is never cached, so a retry is a real retry', async () =>
     }
 });
 
+await check('R120 — the client never gives up on a plan before the server\'s own budget does', () => {
+    // R109 set the client deadline to 12s. motionProvider.js's own
+    // DEFAULT_SCENE_TIMEOUT_MS (what /api/motion/short-plan and
+    // /api/motion/scene-plan give the model before THEY give up) is 30s --
+    // so the client was guaranteed to abort first on any call slower than
+    // 12s but faster than 30s, discarding an answer the server would have
+    // delivered (and, for scene-plan, the whole knowledge-base shortlist
+    // that went with it) and reporting a generic "did not answer within
+    // 12s" instead of the server's own informative failureCategory. Read
+    // the server's real constant rather than hardcoding 30000 here, so this
+    // stays a real cross-file invariant instead of two numbers that happen
+    // to agree today.
+    const providerSrc = read('services/motionProvider.js');
+    // [\d_]+, not \d+: the source writes this as `30_000` (a numeric
+    // separator), which \d+ alone truncates to "30" -- silently turning
+    // this whole check into a no-op (12000 > 30 is also true).
+    const m = providerSrc.match(/DEFAULT_SCENE_TIMEOUT_MS\s*=\s*([\d_]+)/);
+    assert.ok(m, 'DEFAULT_SCENE_TIMEOUT_MS not found in motionProvider.js');
+    const serverBudgetMs = Number(m[1].replace(/_/g, ''));
+    assert.ok(SF.PLAN_TIMEOUT_MS > serverBudgetMs,
+        `client timeout (${SF.PLAN_TIMEOUT_MS}ms) must exceed the server's own budget (${serverBudgetMs}ms), or the client always loses the race`);
+});
+
 log(failures ? `\n${failures} FAILURE(S)` : '\nALL SHORT PREVIEW CHECKS PASSED');
 process.exit(failures ? 1 : 0);

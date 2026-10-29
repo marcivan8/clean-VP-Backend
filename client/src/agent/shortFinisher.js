@@ -39,8 +39,25 @@ const sfxCache = new Map();
  * socket. Every caller already degrades to the deterministic rules when a
  * plan does not arrive, so a bounded wait loses the AI headline and keeps the
  * short — the right trade for something a person is watching.
+ *
+ * R120 — this used to be 12000. Both server routes it bounds
+ * (/api/motion/short-plan and /api/motion/scene-plan, see motionRoutes.js)
+ * give the model itself up to 30s (DEFAULT_SCENE_TIMEOUT_MS /
+ * getAIClient({ timeout: 30_000 })) before THEY give up — and scene-plan can
+ * spend part of that budget on Gemini's own reasoning tokens (gemini-3.8-
+ * flash reasons by default; see MOTION_AI_MAX_TOKENS in motionProvider.js) or
+ * cascade through a couple of fallback models on a 503/429/404 before it
+ * answers. A client deadline of 12s was always SHORTER than the server's own
+ * budget, so on any request that took longer than 12s but would otherwise
+ * have succeeded, THIS timeout fired first — discarding the eventual answer,
+ * the whole Motion Design Knowledge Base shortlist that would have gone with
+ * it, and reporting it to the user as a generic "did not answer within 12s"
+ * instead of whatever the server would have said. Raised to comfortably
+ * clear the server's 30s budget (with slack for queueing/network) so the
+ * server's own timeout — which DOES return an informative failureCategory —
+ * is what fires first on a genuine stall, not this one racing ahead of it.
  */
-export const PLAN_TIMEOUT_MS = 12000;
+export const PLAN_TIMEOUT_MS = 35000;
 
 /** authFetch with a deadline. Aborting reads as a normal failure to the caller. */
 async function fetchWithTimeout(url, options, ms = PLAN_TIMEOUT_MS) {

@@ -367,7 +367,6 @@
   "player": {
     "pacingAlert": "Alerte de rythme",
     "sceneIsDragging": "La scène traîne en longueur ({{seconds}}s)",
-    "dragPinchToScale": "glisser · pincer pour redimensionner",
     "generatingPreview": "Génération de l'aperçu…",
     "rotate": "Pivoter",
     "rotateHint": "Glissez pour pivoter (Maj : pas de 15°)"
