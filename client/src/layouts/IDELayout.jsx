@@ -14,7 +14,7 @@ import { transcriptionManager } from '../agent/TranscriptionManager';
 import ErrorBoundary from '../components/ErrorBoundary';
 import Timeline from '../components/Timeline/Timeline';
 import ReasoningPanel from '../components/Assistant/ReasoningPanel';
-import { DndContext, useSensor, useSensors, MouseSensor, TouchSensor } from '@dnd-kit/core';
+import { DndContext, useSensor, useSensors, MouseSensor, TouchSensor, pointerWithin, rectIntersection } from '@dnd-kit/core';
 import DraggableAsset from '../components/DraggableAsset';
 import TextPanel from '../components/TextPanel';
 import TranscriptPanel from '../components/TranscriptPanel';
@@ -57,6 +57,7 @@ import { trackEvent } from '../utils/trackEvent';
 import { captureEvent } from '../lib/posthog';
 import { countMetric, distributionMetric, nowMs, timelineBucket, timelineSecondsFromTracks } from '../utils/metrics';
 import { computeDragSnap } from '../timeline/dragSnap.js';
+import { createClipCollisionDetection, getClipDropStart } from '../timeline/clipDrop.js';
 
 import { probeMedia, probeVideoUrlDimensions } from '../utils/mediaProbe';
 import { takePendingNewVideo } from '../utils/pendingNewVideo.js';
@@ -523,6 +524,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         });
         return { ...transform, x: deltaSec * zoom };
     }, []);
+    const clipCollisionDetection = React.useMemo(
+        () => createClipCollisionDetection({ pointerWithin, rectIntersection }),
+        [],
+    );
     const [showSidebar, setShowSidebar] = React.useState(false);
     const [showAI, setShowAI] = React.useState(false);
     
@@ -1938,14 +1943,15 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             // Snapping — the same in-place magnet the live drag used
             // (clipSnapModifier), so the drop matches what was on screen.
             // `delta` is normally already snapped; re-running it is a no-op then.
-            const { deltaSec } = computeDragSnap({
+            const newStart = getClipDropStart({
                 tracks: state.tracks,
                 movingIds: isMultiMove ? state.selectedClipIds : [activeClipId],
-                deltaSec: delta.x / state.zoomLevel,
-                thresholdSec: CLIP_SNAP_PX / state.zoomLevel,
+                clipStart: currentClip.start,
+                deltaX: delta.x,
+                zoomLevel: state.zoomLevel,
+                snapThresholdPx: CLIP_SNAP_PX,
                 currentTime: state.currentTime,
             });
-            const newStart = Math.max(0, currentClip.start + deltaSec);
 
             // Same-track single drags swap too (CapCut-style) instead of
             // spawning a new track on overlap. Dropping onto a DIFFERENT track
@@ -1992,7 +1998,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     };
 
     return (
-        <DndContext sensors={sensors} modifiers={[clipSnapModifier]} onDragEnd={handleDragEnd}>
+        <DndContext sensors={sensors} modifiers={[clipSnapModifier]} collisionDetection={clipCollisionDetection} onDragEnd={handleDragEnd}>
 
             <ExportModal
                 isOpen={showExportModal}
