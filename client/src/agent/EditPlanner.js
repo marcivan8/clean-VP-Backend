@@ -215,6 +215,8 @@ export class EditPlanner {
             case 'denoise_audio': return this.planAudioDenoise(planId, constraints);
             case 'normalize_audio': return this.planNormalizeAudio(planId, constraints);
             case 'auto_captions': return this.planAutoCaptions(planId, constraints);
+            case 'locate_visual_targets': return this.planLocateVisualTargets(planId, constraints);
+            case 'apply_target_ranges': return this.planApplyTargetRanges(planId, constraints);
             case 'adjust_volume': return this.planVolumeAdjust(planId, clip, constraints);
             case 'add_transition': return this.planAddTransition(planId, clip, constraints, intent.originalPrompt);
             case 'add_filter': return this.planAddFilter(planId, clip, constraints);
@@ -735,7 +737,36 @@ export class EditPlanner {
     }
 
     static planAutoCaptions(planId, constraints) {
-        return this.buildPlan(planId, 'auto_captions', [{ step_id: 'step_1', action: 'auto_captions', language: constraints?.language || 'en', style: constraints?.style || 'default' }]);
+        const selected = useTimelineStore.getState().selectedTimelineRange;
+        const rangeStart = Number(constraints?.range_start ?? (constraints?.scope === 'range' ? selected?.start : NaN));
+        const rangeEnd = Number(constraints?.range_end ?? (constraints?.scope === 'range' ? selected?.end : NaN));
+        const clipId = constraints?.clip_id || null;
+        return this.buildPlan(planId, 'auto_captions', [{
+            step_id: 'step_1', action: 'auto_captions',
+            language: constraints?.language || 'en', style: constraints?.style || 'default',
+            ...(Number.isFinite(rangeStart) && Number.isFinite(rangeEnd) && rangeEnd > rangeStart
+                ? { scope: 'range', range_start: rangeStart, range_end: rangeEnd }
+                : clipId ? { scope: 'clip', clip_id: clipId } : {}),
+        }]);
+    }
+
+    static planLocateVisualTargets(planId, constraints = {}) {
+        return this.buildPlan(planId, 'locate_visual_targets', [{
+            step_id: 'step_1', action: 'locate_visual_targets',
+            query: String(constraints.query || '').trim(),
+            ...(constraints.asset_id ? { asset_id: constraints.asset_id } : {}),
+            reason: 'Search video frames for timestamped visual matches and return them for review',
+        }], { requiresApproval: false });
+    }
+
+    static planApplyTargetRanges(planId, constraints = {}) {
+        return this.buildPlan(planId, 'apply_target_ranges', [{
+            step_id: 'step_1', action: 'apply_target_ranges',
+            operation: constraints.operation === 'broll' ? 'broll' : 'cut',
+            target_ids: Array.isArray(constraints.target_ids) ? constraints.target_ids : [],
+            confirmed: constraints.confirmed === true,
+            reason: 'Apply an explicitly confirmed edit only to reviewed target ranges',
+        }], { requiresApproval: false });
     }
 
     static planVolumeAdjust(planId, clip, constraints) {
@@ -1276,8 +1307,8 @@ export class EditPlanner {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    static buildPlan(planId, operation, steps) {
-        return { plan_id: planId, operation, step_count: steps.length, steps };
+    static buildPlan(planId, operation, steps, options = {}) {
+        return { plan_id: planId, operation, step_count: steps.length, ...options, steps };
     }
 
     static errorPlan(planId, error) {

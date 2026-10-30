@@ -355,7 +355,7 @@ section('9 · R78 — still-image content analysis (VisualAnalyzer + MediaIntell
     check('analyzeImageAsset never leaves status stuck at processing on failure', /analyzeImageAsset[\s\S]{0,3000}catch \(err\)[\s\S]{0,200}ASSET_ANALYSIS_FAILED/.test(mipSrc));
 
     const workerSrc = read('worker.js');
-    check('worker.js branches the asset-analysis job on job.data.imageBase64', /const \{ assetId, filePath, projectId, userId, name, imageBase64 \} = job\.data;/.test(workerSrc));
+    check('worker.js branches the asset-analysis job on job.data.imageBase64', /const \{(?: action,)? assetId, filePath, projectId, userId, name, imageBase64(?:, query, range)? \} = job\.data;/.test(workerSrc));
     check('worker.js calls analyzeImageAsset for the image branch, analyzeAsset otherwise', /if \(imageBase64\)[\s\S]{0,150}analyzeImageAsset\(assetId, imageBase64/.test(workerSrc) && /\} else \{[\s\S]{0,150}analyzeAsset\(assetId, filePath/.test(workerSrc));
 
     const brSrc2 = read('server/routes/brainRoutes.js');

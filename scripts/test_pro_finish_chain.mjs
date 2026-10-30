@@ -41,7 +41,7 @@ const { createRequire } = await import('module');
 const nodeRequire = createRequire(path.join(ROOT, 'package.json'));
 
 const { finishShort, clearPlanCache, SHORT_SCENE_PLAN_TIMEOUT_MS } = await import('../client/src/agent/shortFinisher.js');
-const { polishShort } = await import('../client/src/agent/shortPolish.js');
+const { polishShort, fallbackShortScenePlan } = await import('../client/src/agent/shortPolish.js');
 const { PLATFORM_PROFILES } = await import('../client/src/agent/PlatformProfiles.js');
 const SV = await import('../client/src/motion/SceneValidator.js');
 const SC = await import('../client/src/motion/SceneComposer.js');
@@ -204,6 +204,32 @@ await check('the fallback still animates, captions and finds the figure', () => 
     assert.ok(presetIdsOf(hook).some(p => /^composed:/.test(p)), 'the plain hook should still carry composed motion');
     assert.ok(idsStarting(finishedNoAi.tracks, 'short-caption-').length > 0);
     assert.ok(idsStarting(finishedNoAi.tracks, 'short-moment-').length > 0);
+});
+
+await check('the local planner adapts its direction and schedules spoken insights as timed scenes', () => {
+    const transcript = ('how to build a better workflow first remove the steps that waste your time '
+        + 'but the surprising lesson is that the small change made everything easier '
+        + 'i realized consistency matters more than speed so follow for more practical ideas').split(' ');
+    const words = transcript.map((word, i) => ({ word, start: i * 0.55, end: i * 0.55 + 0.45 }));
+    const local = fallbackShortScenePlan(words, { duration: 30 });
+    assert.equal(local.tone, 'editorial', 'instructional wording should select an editorial direction');
+    assert.ok(local.beats.some(b => b.kind === 'intro'), 'the plan needs an opening beat');
+    assert.ok(local.beats.some(b => b.kind === 'cta'), 'a spoken CTA should become a closing beat');
+    assert.ok(local.timedMoments.length > 0, 'transcript reveals should become timed supporting scenes');
+    assert.ok(local.timedMoments.every(m => m.start > 2 && m.start < 30), 'supporting scenes must preserve transcript timing');
+});
+
+await check('the no-AI finish renders transcript-led graphics at their spoken timestamps', async () => {
+    const transcript = ('how to build a better workflow first remove the steps that waste your time '
+        + 'but the surprising lesson is that the small change made everything easier '
+        + 'i realized consistency matters more than speed so follow for more practical ideas').split(' ');
+    const words = transcript.map((word, i) => ({ word, start: i * 0.55, end: i * 0.55 + 0.45 }));
+    const timed = await finishShort({ ...state(), captions: words }, { ...short, end: 30 }, { plan: null, scenePlan: null, sfx: false });
+    const clips = allClips(timed.tracks).filter(c => String(c.id).startsWith('short-timed-text-'));
+    assert.ok(clips.length > 0, 'no transcript-led timed graphic clips were rendered');
+    assert.ok(clips.some(c => Number(c.start) > 3), 'supporting graphics should be placed in the body, not all at time zero');
+    assert.ok(clips.some(c => Array.isArray(c.animations) && c.animations.some(a => /^composed:/.test(a.presetId || ''))), 'timed scenes should carry composed animation');
+    assert.ok(timed.applied.some(a => /timed story graphics/.test(a)), 'the applied summary should report the timed scenes');
 });
 
 await check('a timed-out scene model uses the offered KB motions in its local fallback', async () => {

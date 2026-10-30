@@ -112,6 +112,12 @@ const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","
     });
 
     const removeAsset = useTimelineStore(state => state.removeAsset);
+    const assetTargetFindings = useTimelineStore(state => state.assetTargetFindings);
+    const targetMatches = (assetTargetFindings || []).filter(hit => hit.assetId === asset.id);
+    const firstMatch = targetMatches[0];
+    const matchTime = firstMatch
+        ? `${String(Math.floor(firstMatch.sourceStart / 60)).padStart(2, '0')}:${String(Math.floor(firstMatch.sourceStart % 60)).padStart(2, '0')}`
+        : '';
 
     const style = transform ? {
         transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
@@ -142,6 +148,11 @@ const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","
                 </div>
                 <span className="flex-1 truncate" style={{ fontFamily: "var(--f-sans)", fontSize: 12, color: isActive ? "var(--fg)" : "var(--fg-2)" }}>{asset.name}</span>
                 <span style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--fg-4)", flexShrink: 0 }}>{mm}:{ss}</span>
+                {targetMatches.length > 0 && (
+                    <span title={`${targetMatches.length} visual match(es), first at ${matchTime}`} className="rounded px-1.5 py-0.5 text-[9px] font-medium" style={{ color: '#fcd34d', background: 'rgba(245,158,11,0.14)' }}>
+                        {targetMatches.length} match{targetMatches.length === 1 ? '' : 'es'} · {matchTime}
+                    </span>
+                )}
             </div>
         );
     }
@@ -238,6 +249,12 @@ const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","
             <div className="absolute bottom-0 inset-x-0 bg-black/70 px-2 py-1.5">
                 <p className="text-xs font-medium text-white truncate leading-tight" title={asset.name}>{asset.name}</p>
             </div>
+
+            {targetMatches.length > 0 && (
+                <div className="absolute top-1.5 left-1.5 z-10 rounded px-1.5 py-1 text-[9px] font-semibold shadow" style={{ color: '#fef3c7', background: 'rgba(120,53,15,0.92)' }} title={`${targetMatches.length} visual match(es); first at source ${matchTime}`}>
+                    {targetMatches.length} match{targetMatches.length === 1 ? '' : 'es'} · {matchTime}
+                </div>
+            )}
 
             {/* Proxying Overlay */}
             {asset.isProxying && (

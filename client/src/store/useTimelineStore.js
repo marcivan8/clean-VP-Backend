@@ -204,6 +204,9 @@ const useTimelineStore = create(
             // Selection
             activeClipId: null,
             selectedClipIds: [],
+            selectedTimelineRange: null,
+            targetFindings: [],
+            assetTargetFindings: [],
 
             // ── A/B variations (roadmap item 1) ────────────────────────────
             // This slice existed only on the legacy `useEditorStore`. The
@@ -432,7 +435,7 @@ const useTimelineStore = create(
             // SELECTION ACTIONS
             // ==============================================================
             setActiveClip: (clipId) => {
-                set({ activeClipId: clipId, selectedClipIds: [clipId] });
+                set({ activeClipId: clipId, selectedClipIds: [clipId], selectedTimelineRange: null });
                 timelineManager.dispatch(
                     TimelineActions.setActive(clipId),
                     { skipHistory: true }
@@ -451,15 +454,129 @@ const useTimelineStore = create(
                     ? (newSelection.length > 0 ? newSelection[newSelection.length - 1] : null)
                     : state.activeClipId;
                 const finalActive = !isSelected ? clipId : newActive;
-                return { selectedClipIds: newSelection, activeClipId: finalActive };
+                return { selectedClipIds: newSelection, activeClipId: finalActive, selectedTimelineRange: null };
             }),
 
             clearSelection: () => {
-                set({ selectedClipIds: [], activeClipId: null });
+                set({ selectedClipIds: [], activeClipId: null, selectedTimelineRange: null });
                 timelineManager.dispatch(
                     TimelineActions.select([]),
                     { skipHistory: true }
                 );
+            },
+
+            setSelectedTimelineRange: (range) => {
+                const start = Number(range?.start);
+                const end = Number(range?.end);
+                if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+                    set({ selectedTimelineRange: null });
+                    return;
+                }
+                set({ selectedTimelineRange: {
+                    start: Math.max(0, start), end,
+                    text: String(range?.text || '').slice(0, 500),
+                    wordCount: Math.max(0, Number(range?.wordCount) || 0),
+                    sourceKeys: Array.isArray(range?.sourceKeys) ? [...new Set(range.sourceKeys.filter(Boolean))] : [],
+                } });
+            },
+
+            setTargetFindings: (findings) => set({
+                targetFindings: (Array.isArray(findings) ? findings : [])
+                    .filter(item => Number.isFinite(Number(item?.timelineStart)) && Number.isFinite(Number(item?.timelineEnd)) && Number(item.timelineEnd) > Number(item.timelineStart))
+                    .map((item, index) => ({ ...item, id: item.id || `target-${index + 1}` })),
+            }),
+            setAssetTargetFindings: (findings) => set({
+                assetTargetFindings: (Array.isArray(findings) ? findings : [])
+                    .filter(item => item?.assetId && Number.isFinite(Number(item?.sourceStart)) && Number.isFinite(Number(item?.sourceEnd)) && Number(item.sourceEnd) > Number(item.sourceStart))
+                    .map((item, index) => ({ ...item, id: item.id || `asset-target-${index + 1}` })),
+            }),
+
+            /**
+             * Split the main video placements at a selected timeline range and
+             * detach the selected pieces from shared clip entities. A split
+             * normally shares its clip entity; detaching here lets a later
+             * effect or visual update affect only the chosen segment.
+             * Returns the isolated legacy placement clips.
+             */
+            isolateTimelineRange: (start, end) => {
+                const a = Math.max(0, Number(start) || 0);
+                const b = Number(end);
+                if (!Number.isFinite(b) || b - a < 0.1) return [];
+                const state = get();
+                const main = state.tracks.find(t => t.type === 'video');
+                if (!main?.clips?.length) return [];
+                const originals = main.clips.filter(c =>
+                    (Number(c.start) || 0) < b - 0.001
+                    && (Number(c.start) || 0) + (Number(c.duration) || 0) > a + 0.001
+                ).map(c => ({ ...c }));
+                if (!originals.length) return [];
+
+                get()._saveHistory();
+                timelineManager.beginTransaction();
+                const wantedPieces = [];
+                try {
+                    for (const original of originals) {
+                        const clipStart = Number(original.start) || 0;
+                        const clipEnd = clipStart + (Number(original.duration) || 0);
+                        const selectedStart = Math.max(a, clipStart);
+                        const selectedEnd = Math.min(b, clipEnd);
+                        // Cut the right boundary first, then the left boundary
+                        // on the original left piece. The wanted placement is
+                        // always the piece that begins at max(rangeStart, clipStart).
+                        if (b > clipStart + 0.1 && b < clipEnd - 0.1) {
+                            timelineManager.dispatch(TimelineActions.splitPlacement(original.id, b));
+                        }
+                        if (a > clipStart + 0.1 && a < Math.min(b, clipEnd) - 0.1) {
+                            timelineManager.dispatch(TimelineActions.splitPlacement(original.id, a));
+                        }
+                        wantedPieces.push({
+                            layerId: main.id,
+                            sourceClipId: original.clipId,
+                            start: selectedStart,
+                            duration: Math.max(0, selectedEnd - selectedStart),
+                        });
+                    }
+                    timelineManager.commitTransaction('Select Timeline Segment');
+                } catch (err) {
+                    timelineManager.rollbackTransaction();
+                    set(s => ({ past: s.past.slice(0, -1) }));
+                    console.error('[isolateTimelineRange] failed; timeline left unchanged:', err);
+                    return [];
+                }
+
+                // The transaction applies splits as a batch, so resolve the
+                // resulting placements only after commit. Then fork shared
+                // entities in a second transaction while keeping one store
+                // history snapshot for the whole operation.
+                const placements = Object.values(timelineManager.getState().entities.placements);
+                const isolatedIds = wantedPieces.map(wanted => placements.find(p =>
+                    p.layerId === wanted.layerId && p.clipId === wanted.sourceClipId
+                    && Math.abs((Number(p.startTime) || 0) - wanted.start) < 0.01
+                    && Math.abs((Number(p.duration) || 0) - wanted.duration) < 0.02
+                )?.id).filter(Boolean);
+                timelineManager.beginTransaction();
+                try {
+                    for (const placementId of isolatedIds) {
+                        const placement = timelineManager.getState().entities.placements[placementId];
+                        const usage = placements.filter(p => p.clipId === placement.clipId).length;
+                        if (usage <= 1) continue;
+                        const entity = timelineManager.getState().entities.clips[placement.clipId];
+                        if (!entity) continue;
+                        const newEntityId = `clip-segment-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                        timelineManager.dispatch(TimelineActions.addClip({ ...entity, id: newEntityId }));
+                        timelineManager.dispatch(TimelineActions.updatePlacement(placementId, { clipId: newEntityId }));
+                    }
+                    timelineManager.commitTransaction('Detach Timeline Segment');
+                } catch (err) {
+                    timelineManager.rollbackTransaction();
+                    set(s => ({ past: s.past.slice(0, -1) }));
+                    console.error('[isolateTimelineRange] could not detach selected clip entities:', err);
+                    return [];
+                }
+                const tracks = timelineManager.toLegacyTracks();
+                const selectedClipIds = isolatedIds.filter(id => tracks.some(t => t.clips.some(c => c.id === id)));
+                set({ tracks, selectedClipIds, activeClipId: selectedClipIds[0] || null });
+                return tracks.flatMap(t => t.clips || []).filter(c => selectedClipIds.includes(c.id));
             },
 
             // ==============================================================
@@ -1404,7 +1521,7 @@ const useTimelineStore = create(
                     if (mapped.length > 0) captions = mapped;
                 }
 
-                set({ tracks, activeClipId: null, selectedClipIds: [], captions });
+                set({ tracks, activeClipId: null, selectedClipIds: [], selectedTimelineRange: null, captions });
 
                 const newMaxEnd = maxEnd(tracks);
                 if (newMaxEnd > 0 && Math.abs((Number(state.duration) || 0) - oldMaxEnd) < 0.05) {
@@ -3225,7 +3342,7 @@ const useTimelineStore = create(
                 }
             },
 
-            addCaptionClips: (captions, { skipHistory = false } = {}) => {
+            addCaptionClips: (captions, { skipHistory = false, replaceRange = null } = {}) => {
                 if (!captions || captions.length === 0) return;
 
                 // Save history once (before any mutations). Callers that are
@@ -3283,8 +3400,48 @@ const useTimelineStore = create(
                 // "caption-" prefix is on the clip entity (`clipId`). Matching
                 // `id` found nothing, so regenerating never removed the old
                 // batch and captions stacked up.
-                const priorCaptionClips = (textTrack.clips || []).filter(c => String(c.clipId || c.id).startsWith('caption-'));
-                const existingTextClip = priorCaptionClips[0] || textTrack?.clips?.[0];
+                const rangeStart = Number(replaceRange?.[0]);
+                const rangeEnd = Number(replaceRange?.[1]);
+                const hasRange = Number.isFinite(rangeStart) && Number.isFinite(rangeEnd) && rangeEnd > rangeStart;
+                const allPriorCaptionClips = (textTrack.clips || []).filter(c => String(c.clipId || c.id).startsWith('caption-'));
+                const priorCaptionClips = hasRange
+                    ? allPriorCaptionClips.filter(c => (Number(c.start) || 0) < rangeEnd && (Number(c.start) || 0) + (Number(c.duration) || 0) > rangeStart)
+                    : allPriorCaptionClips;
+                const existingTextClip = priorCaptionClips[0] || allPriorCaptionClips[0] || textTrack?.clips?.[0];
+
+                // A scoped regeneration replaces only the selected interval.
+                // Preserve the words of any old caption that straddles one of
+                // its boundaries by regrouping the words outside that interval.
+                const captionBatch = [...captions];
+                if (hasRange) {
+                    const regroup = (input) => {
+                        const result = [];
+                        let group = [];
+                        const flush = () => {
+                            if (!group.length) return;
+                            result.push({
+                                text: group.map(w => w.word ?? w.text ?? '').join(' ').trim(),
+                                start: Number(group[0].start), end: Number(group[group.length - 1].end),
+                                words: group,
+                            });
+                            group = [];
+                        };
+                        for (const word of input) {
+                            if (group.length >= 6 || (group.length && Number(word.start) - Number(group[group.length - 1].end) >= 0.4)) flush();
+                            group.push(word);
+                        }
+                        flush();
+                        return result.filter(x => x.text && x.end > x.start);
+                    };
+                    for (const old of priorCaptionClips) {
+                        const outside = (Array.isArray(old.words) ? old.words : []).filter(w => {
+                            const start = Number(w?.start), end = Number(w?.end);
+                            return Number.isFinite(start) && Number.isFinite(end) && (end <= rangeStart || start >= rangeEnd);
+                        }).sort((a, b) => Number(a.start) - Number(b.start));
+                        captionBatch.push(...regroup(outside));
+                    }
+                    captionBatch.sort((a, b) => Number(a.start) - Number(b.start));
+                }
 
                 // ── ONE transaction → ONE timeline event → ONE React render ──
                 timelineManager.beginTransaction();
@@ -3293,11 +3450,11 @@ const useTimelineStore = create(
                         timelineManager.dispatch(TimelineActions.removePlacement(old.id));
                     }
 
-                    captions.forEach((cap, i) => {
+                    captionBatch.forEach((cap, i) => {
                         const clipId = `caption-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`;
                         // Clamp end to the next caption's start so ASR timing jitter never
                         // causes two clips to be active at the same time (overlap bug).
-                        const nextStart = captions[i + 1]?.start;
+                        const nextStart = captionBatch[i + 1]?.start;
                         const clampedEnd = nextStart != null
                             ? Math.min(cap.end || 0, nextStart)
                             : (cap.end || 0);
@@ -3746,6 +3903,8 @@ const useTimelineStore = create(
                     diarizationByAsset:   projectData.diarizationByAsset   ?? get().diarizationByAsset,
                     sceneAnalysisByAsset: projectData.sceneAnalysisByAsset ?? get().sceneAnalysisByAsset,
                     editHistory:          projectData.editHistory          ?? get().editHistory,
+                    targetFindings: [],
+                    assetTargetFindings: [],
                     waveforms:            projectData.waveforms            ?? get().waveforms,
                     waveformsByAsset:     projectData.waveformsByAsset     ?? get().waveformsByAsset,
 

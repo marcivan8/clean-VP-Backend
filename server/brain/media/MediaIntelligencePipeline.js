@@ -336,6 +336,27 @@ class MediaIntelligencePipeline {
         }
     }
 
+    /** Run an on-demand, query-specific visual scan for timed target candidates. */
+    async locateVisualTarget(assetId, filePath, query, range = null, job = null) {
+        let localPath = null;
+        let cleanupPath = null;
+        try {
+            ({ localPath, cleanupPath } = await this._resolveToLocalFile(filePath, assetId));
+            if (!localPath) throw new Error('Could not access the video asset for visual search.');
+            const result = await this.visualAnalyzer.locateTarget(localPath, {
+                query,
+                start: range?.start,
+                end: range?.end,
+                onProgress: progress => job?.updateProgress?.(progress),
+            });
+            return { assetId, ...result, ranges: result.ranges.map(hit => ({ ...hit, assetId })) };
+        } finally {
+            if (cleanupPath) {
+                try { fs.unlinkSync(cleanupPath); } catch { /* already gone */ }
+            }
+        }
+    }
+
     /**
      * Run bin classification once nothing in the project is still analysing.
      * @private

@@ -40,7 +40,7 @@ import { groupWordsIntoSegments, stylePackToClipFields } from '../motion/Caption
 import { STYLE_RECIPES, recipeTransitionForCut, pickTransitionCuts } from '../motion/StyleRecipes.js';
 import { TRANSITION_DEFAULT_DURATION } from '../motion/TransitionFX.js';
 import { autoEmphasizeCaptions } from '../utils/captionEmphasis.js';
-import { mapTranscriptToTimeline, listMainTrackSources } from '../timeline/transcriptMap.js';
+import { mapTranscriptToTimeline, listMainTrackSources, resolveClipSourcePath } from '../timeline/transcriptMap.js';
 import { transcriptionManager } from './TranscriptionManager.js';
 // R68 — AI Animation Intelligence. `animate_automatically` applies the
 // server's resolved plan (AnimationKnowledgeGraph.js) the exact same way
@@ -914,6 +914,32 @@ export class MediaExecutionEngine {
         const store  = useTimelineStore.getState();
         const action = command.action;
         const args   = command.args || {};
+
+        // Transcript selections are timeline ranges, not whole source-file
+        // clips. Isolate the range before applying clip-level visual edits so
+        // a request such as "warm this segment" never changes other uses of
+        // the same source clip elsewhere on a multi-clip timeline.
+        const selectedRange = store.selectedTimelineRange;
+        const rangeActions = new Set(['updateClip', 'applyColorGrade', 'addFilter', 'addTransition']);
+        if (rangeActions.has(action) && selectedRange?.end > selectedRange?.start) {
+            const pieces = store.isolateTimelineRange?.(selectedRange.start, selectedRange.end) || [];
+            if (!pieces.length) return { action, success: false, message: 'The selected segment no longer overlaps a video clip. Select it again and retry.' };
+            const fresh = useTimelineStore.getState();
+            for (const piece of pieces) {
+                const track = fresh.tracks.find(t => t.clips.some(c => c.id === piece.id));
+                if (!track) continue;
+                const updates = action === 'updateClip' ? args.updates
+                    : action === 'applyColorGrade' ? { grading: { ...(piece.grading || {}), ...(args.adjustments || {}) } }
+                        : action === 'addFilter' ? { filter: args.filterType, filterIntensity: args.intensity || 0.5 }
+                            : { transition: { type: args.type, duration: args.duration || 0.3 } };
+                fresh.updateClip(track.id, piece.id, updates, { skipHistory: true });
+            }
+            return {
+                action, success: true,
+                message: `Applied the edit to the selected ${selectedRange.start.toFixed(1)}–${selectedRange.end.toFixed(1)}s segment only. It is isolated from the rest of the source clip; one undo restores it.`,
+                details: { range: [selectedRange.start, selectedRange.end], clipIds: pieces.map(c => c.id) },
+            };
+        }
 
         switch (action) {
             case 'addClip':        this._callStore(store, 'addClip', args.trackId, args.clip); return { action, success: true, message: `Added clip to ${args.trackId}` };
@@ -2266,6 +2292,8 @@ export class MediaExecutionEngine {
             case 'smart_cleanup':
             case 'resume_failed_job': // R131
             case 'create_video_from_script': // R132
+            case 'locateVisualTargets':
+            case 'applyTargetRanges':
             case 'longFormEdit': {
                 let VideoEditorTools;
                 try {
@@ -2294,7 +2322,10 @@ export class MediaExecutionEngine {
                 // orphaned tools.execute() promise actually stops: ContentAnalyzer
                 // cancels its fetch and the inner mediaExecutionEngine job cancels
                 // its poller — preventing ghost _applySegmentsToTimeline calls.
-                const TOOL_TIMEOUT_MS = 120_000;
+                // Visual target scans are queued per asset and can make several
+                // bounded vision calls. Keep their client poll alive long enough
+                // for the worker queue; other interactive tools retain the 2 min cap.
+                const TOOL_TIMEOUT_MS = action === 'locateVisualTargets' ? 600_000 : 120_000;
                 const toolAbortController = new AbortController();
                 const timeoutPromise = new Promise((_, reject) =>
                     setTimeout(() => {
@@ -3882,9 +3913,16 @@ export class MediaExecutionEngine {
         }
 
         store.setTimelineTranscript?.(words);
-        const captions = groupWordsIntoCaptions(words);
+        const range = Array.isArray(opts.replaceRange) ? opts.replaceRange : null;
+        const scopedWords = range
+            ? words.filter(w => Number(w.start) >= range[0] - 0.01 && Number(w.end) <= range[1] + 0.01)
+            : words;
+        const captions = groupWordsIntoCaptions(scopedWords);
+        if (range && captions.length === 0) {
+            return { engine: 'api', success: false, endpoint, error: 'No transcribed words fall inside the selected segment, so no captions were changed.' };
+        }
         console.log(`[MediaExecutionEngine] 💬 captions: adding ${captions.length} caption clips`);
-        store.addCaptionClips(captions, { skipHistory: !!opts.skipHistory });
+        store.addCaptionClips(captions, { skipHistory: !!opts.skipHistory, replaceRange: range });
 
         // Files still without words, not counting ones that simply have no speech.
         const missing = Math.max(0, sources.filter(s => !isDone(s.key)).length - noSpeech);
@@ -3998,9 +4036,29 @@ export class MediaExecutionEngine {
             // one yet), then all of them are mapped through the clips. This
             // used to transcribe only $uploaded_file, so clips from any other
             // file got no captions at all.
-            const sources = listMainTrackSources(store.tracks, store.assets);
+            let sources = listMainTrackSources(store.tracks, store.assets);
+            let replaceRange = null;
+            if (resolvedPayload.scope === 'range') {
+                const a = Number(resolvedPayload.rangeStart), b = Number(resolvedPayload.rangeEnd);
+                if (Number.isFinite(a) && Number.isFinite(b) && b > a) replaceRange = [a, b];
+            } else if (resolvedPayload.scope === 'clip' && resolvedPayload.clipId) {
+                const main = (store.tracks || []).find(t => t.type === 'video');
+                const clip = main?.clips?.find(c => c.id === resolvedPayload.clipId);
+                if (clip) replaceRange = [Number(clip.start) || 0, (Number(clip.start) || 0) + (Number(clip.duration) || 0)];
+            }
+            if (replaceRange) {
+                const main = (store.tracks || []).find(t => t.type === 'video');
+                const scopedClips = (main?.clips || []).filter(c =>
+                    (Number(c.start) || 0) < replaceRange[1] && (Number(c.start) || 0) + (Number(c.duration) || 0) > replaceRange[0]
+                );
+                const sourceKeys = new Set(scopedClips.map(c => {
+                    const path = resolveClipSourcePath(c, store.assets);
+                    return path ? path.split(/[\\/]/).pop() : null;
+                }).filter(Boolean));
+                sources = sources.filter(s => sourceKeys.has(s.key));
+            }
             if (sources.length > 0) {
-                return await this._captionMainTrackSources(sources, resolvedPayload, job, endpoint);
+                return await this._captionMainTrackSources(sources, resolvedPayload, job, endpoint, { replaceRange });
             }
 
             const bname = (p) => (p || '').split(/[\\/]/).pop();

@@ -561,7 +561,11 @@ function compileAutoCaptions(step, ctx) {
         cmd(ENGINE.API, 'autoCaptions', {
             endpoint: '/api/captions/generate',
             method: 'POST',
-            payload: { filename: '$uploaded_file', language: step.language || 'en', style: step.style || 'default' },
+            payload: {
+                filename: '$uploaded_file', language: step.language || 'en', style: step.style || 'default',
+                ...(step.scope === 'range' ? { scope: 'range', rangeStart: step.range_start, rangeEnd: step.range_end } : {}),
+                ...(step.scope === 'clip' && step.clip_id ? { scope: 'clip', clipId: step.clip_id } : {}),
+            },
         }, { source_step_id: step.step_id, symbolic_refs: ['$uploaded_file'], description: 'Generate auto-captions' }),
     ]);
 }
@@ -699,6 +703,25 @@ function compileLongFormEdit(step, ctx) {
             visualBrief: step.visualBrief || null,
         },
             { source_step_id: step.step_id, description: `Long-form edit (${step.editMode || 'CLEAN_EDIT'})` }),
+    ]);
+}
+
+function compileLocateVisualTargets(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'locateVisualTargets', {
+            query: step.query,
+            ...(step.asset_id ? { assetId: step.asset_id } : {}),
+        }, { source_step_id: step.step_id, description: `Find visual matches for “${step.query || 'target'}”` }),
+    ]);
+}
+
+function compileApplyTargetRanges(step, ctx) {
+    return ok(step.step_id, [
+        cmd(ENGINE.STORE, 'applyTargetRanges', {
+            operation: step.operation,
+            targetIds: step.target_ids || [],
+            confirmed: step.confirmed === true,
+        }, { source_step_id: step.step_id, description: `Apply ${step.operation || 'edit'} to reviewed target ranges` }),
     ]);
 }
 
@@ -1202,6 +1225,8 @@ const COMMAND_REGISTRY = new Map([
     // Long-Form AI
     ['analyze_structure', { compiler: compileAnalyzeStructure }],
     ['long_form_edit', { compiler: compileLongFormEdit }],
+    ['locate_visual_targets', { compiler: compileLocateVisualTargets }],
+    ['apply_target_ranges', { compiler: compileApplyTargetRanges }],
     ['smart_cleanup', { compiler: compileSmartCleanup }],
     ['find_hook', { compiler: compileFindHook }],
     ['place_contextual_broll', { compiler: compilePlaceContextualBroll }],

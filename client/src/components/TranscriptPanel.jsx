@@ -5,6 +5,7 @@ import useTimelineStore from '../store/useTimelineStore';
 import { Scissors } from 'lucide-react';
 import classNames from 'classnames';
 import { mapTranscriptToTimeline } from '../timeline/transcriptMap.js';
+import { submitRokaPrompt } from '../agent/rokaPromptQueue.js';
 
 function fmtTime(s) {
     const m = Math.floor(s / 60);
@@ -24,7 +25,7 @@ const SPEAKER_PALETTE = [
 
 const TranscriptPanel = () => {
     const { t } = useTranslation('editor');
-    const { captions, tracks, assets, transcripts, transcriptVerified, currentTime, seek, cutTimelineRange } =
+    const { captions, tracks, assets, transcripts, transcriptVerified, currentTime, seek, cutTimelineRange, setSelectedTimelineRange } =
         useTimelineStore(useShallow(s => ({
             captions:       s.captions,
             tracks:         s.tracks,
@@ -34,6 +35,7 @@ const TranscriptPanel = () => {
             currentTime:    s.currentTime,
             seek:           s.seek,
             cutTimelineRange: s.cutTimelineRange,
+            setSelectedTimelineRange: s.setSelectedTimelineRange,
         })));
 
     // Re-derive timeline-mapped words from raw per-file transcripts + current
@@ -66,6 +68,19 @@ const TranscriptPanel = () => {
         ? [Math.min(selection.anchorIdx, selection.focusIdx),
            Math.max(selection.anchorIdx, selection.focusIdx)]
         : null;
+
+    useEffect(() => {
+        if (!selRange) { setSelectedTimelineRange?.(null); return; }
+        const selected = displayWords.slice(selRange[0], selRange[1] + 1);
+        if (!selected.length) { setSelectedTimelineRange?.(null); return; }
+        setSelectedTimelineRange?.({
+            start: selected[0].start,
+            end: selected[selected.length - 1].end,
+            text: selected.map(w => w.word || w.text || '').join(' '),
+            wordCount: selected.length,
+            sourceKeys: selected.map(w => w.sourceKey).filter(Boolean),
+        });
+    }, [selRange?.[0], selRange?.[1], displayWords, setSelectedTimelineRange]);
 
     // ── Speaker colour map ────────────────────────────────────────────────────
     const speakerColors = useMemo(() => {
@@ -150,13 +165,21 @@ const TranscriptPanel = () => {
                     {t('transcriptPanel.transcriptWordCount', { count: displayWords.length })}
                 </span>
                 {selRange && (
-                    <button
-                        onClick={cutRange}
-                        className="flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-red-500/20 hover:bg-red-500/30 text-red-400 transition-colors"
-                    >
-                        <Scissors className="w-3 h-3" />
-                        {t('transcriptPanel.cutWords', { count: selRange[1] - selRange[0] + 1 })}
-                    </button>
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={() => submitRokaPrompt('Add captions to the selected segment', t)}
+                            className="flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-primary/15 hover:bg-primary/25 text-primary transition-colors"
+                        >
+                            {t('mobileCaptions.addCaptions')}
+                        </button>
+                        <button
+                            onClick={cutRange}
+                            className="flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-red-500/20 hover:bg-red-500/30 text-red-400 transition-colors"
+                        >
+                            <Scissors className="w-3 h-3" />
+                            {t('transcriptPanel.cutWords', { count: selRange[1] - selRange[0] + 1 })}
+                        </button>
+                    </div>
                 )}
             </div>
 

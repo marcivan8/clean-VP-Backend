@@ -12,6 +12,15 @@
 const express = require('express');
 const router  = express.Router();
 const { videoQueue, audioQueue, analysisQueue, exportQueue, visionQueue } = require('../queue/queues');
+const { connection } = require('../queue/connection');
+let _assetAnalysisQueue = null;
+function getAssetAnalysisQueue() {
+    if (!_assetAnalysisQueue) {
+        const { Queue } = require('bullmq');
+        _assetAnalysisQueue = new Queue('asset-analysis', { connection });
+    }
+    return _assetAnalysisQueue;
+}
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
@@ -25,6 +34,8 @@ async function findJob(jobId) {
     job = await exportQueue.getJob(jobId);
     if (job) return job;
     job = await visionQueue.getJob(jobId); // R67 — object-segmentation (SAM2) jobs
+    if (job) return job;
+    job = await getAssetAnalysisQueue().getJob(jobId);
     return job;
 }
 

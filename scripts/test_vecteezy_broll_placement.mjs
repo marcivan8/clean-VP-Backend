@@ -91,4 +91,47 @@ assert.ok(mixed.placements.some(p => p.assetId === stockAsset.id));
 overlayClips = useTimelineStore.getState().tracks.filter(t => t.type === 'overlay').flatMap(t => t.clips || []);
 assert.equal(overlayClips.length, 2, 'both cutaways must be present on the timeline');
 
+// A selected semantic/timeline range constrains both the search words and
+// proposed stock placement; a result crossing the boundary is trimmed.
+timelineManager.fromLegacyTracks([{ id: 'base3', type: 'video', name: 'Camera', clips: [
+    { id: 'camera3', type: 'video', assetId: 'camera-asset-3', start: 0, duration: 30, offset: 0, speed: 1 },
+] }]);
+useTimelineStore.setState({
+    tracks: timelineManager.toLegacyTracks(), projectId: null, duration: 30, currentTime: 0,
+    assets: [], captions: [{ word: 'launch', start: 11, end: 11.5 }],
+    selectedTimelineRange: { start: 10, end: 14 }, past: [], future: [],
+});
+globalThis.fetch = async (url, options) => {
+    assert.equal(url, '/api/stock/suggest-broll');
+    const request = JSON.parse(options.body);
+    assert.deepEqual(request.words.map(w => w.word), ['launch'], 'stock search receives only selected-range transcript words');
+    return {
+        ok: true, status: 200,
+        json: async () => ({ provider: 'vecteezy', suggestions: [
+            { timelineTime: 9, duration: 5, asset: stockAsset },
+        ] }),
+    };
+};
+const targeted = await tools.placeContextualBroll();
+assert.equal(targeted.fromStock, 1);
+overlayClips = useTimelineStore.getState().tracks.filter(t => t.type === 'overlay').flatMap(t => t.clips || []);
+assert.equal(overlayClips.length, 1);
+assert.equal(overlayClips[0].start, 10, 'cutaway starts no earlier than the selected target');
+assert.equal(overlayClips[0].duration, 4, 'cutaway is clipped to the selected target bounds');
+
+useTimelineStore.setState({ selectedTimelineRange: { start: 12, end: 15 }, tracks: timelineManager.toLegacyTracks() });
+globalThis.fetch = async (url) => {
+    assert.match(url, /^\/api\/stock\/search\?query=red\+car/);
+    return { ok: true, status: 200, json: async () => ({ provider: 'vecteezy', results: [{
+        id: 'specific-car-broll', type: 'video', name: 'Red car', provider: 'vecteezy', duration: 8,
+        url: 'https://cdn.vecteezy.example/car.mp4', thumbnail: 'https://cdn.vecteezy.example/car.jpg',
+    }] }) };
+};
+const specific = await tools.fetchStockBroll({ query: 'red car' });
+assert.equal(specific.success, true);
+assert.deepEqual(specific.details.timelineRange, [12, 15], 'specific B-roll search places at selected interval and respects its length');
+overlayClips = useTimelineStore.getState().tracks.filter(t => t.type === 'overlay').flatMap(t => t.clips || []);
+assert.equal(overlayClips.at(-1).start, 12);
+assert.equal(overlayClips.at(-1).duration, 3);
+
 console.log('PASS: Vecteezy b-roll is inserted without a project id, fills uncovered moments, and reruns are idempotent');

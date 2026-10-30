@@ -108,28 +108,34 @@ export function fallbackShortScenePlan(words, { headline = '', duration = 0, tec
             end: Number(w?.end),
         }))
         .filter(w => w.word && Number.isFinite(w.start) && Number.isFinite(w.end));
-    const segments = groupWordsIntoSegments(timedWords, 5, 0.4)
-        .map(s => cleanText(s.text))
-        .filter(s => s.split(/\s+/).filter(Boolean).length >= 2);
+    const segments = groupWordsIntoSegments(timedWords, 8, 0.55)
+        .map(s => ({ ...s, text: cleanText(s.text) }))
+        .filter(s => s.text.split(/\s+/).filter(Boolean).length >= 2);
     const title = cleanText(headline)
         || headlineFromText(timedWords.slice(0, 18).map(w => w.word).join(' '), { maxWords: 6, upper: false });
     if (!title) return null;
 
     const wordsOf = value => value.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
     const titleWords = new Set(wordsOf(title));
-    const point = segments.find(segment => {
-        if (segment.toLowerCase() === title.toLowerCase()) return false;
-        const tokens = wordsOf(segment);
+    const pointSegment = segments.find(segment => {
+        if (segment.text.toLowerCase() === title.toLowerCase()) return false;
+        const tokens = wordsOf(segment.text);
         const overlap = tokens.filter(token => titleWords.has(token)).length;
-        return tokens.length >= 3 && overlap / tokens.length < 0.6;
+        return tokens.length >= 3 && overlap / tokens.length < 0.6 && segment.start >= 2;
     });
 
     const usableTechniques = Array.isArray(techniques) ? techniques.filter(t => t?.name) : [];
-    const chooseTechnique = (kind, exclude = null) => usableTechniques.find(t =>
-        t.name !== exclude && (!Array.isArray(t.beatKinds) || t.beatKinds.includes(kind))
-    ) || usableTechniques.find(t => t.name !== exclude) || null;
-    const introTechnique = chooseTechnique('intro');
-    const pointTechnique = chooseTechnique('point', introTechnique?.name);
+    const chooseTechnique = (kind, text, excluded = []) => {
+        const candidates = usableTechniques.filter(t => !excluded.includes(t.name)
+            && (!Array.isArray(t.beatKinds) || t.beatKinds.includes(kind)));
+        const tokens = new Set(wordsOf(text));
+        const score = t => (String(t.name).toLowerCase().match(/[a-z]+/g) || [])
+            .reduce((n, token) => n + (tokens.has(token) ? 3 : 0), 0);
+        return candidates.slice().sort((a, b) => score(b) - score(a))[0]
+            || usableTechniques.find(t => !excluded.includes(t.name)) || null;
+    };
+    const introTechnique = chooseTechnique('intro', title);
+    const pointTechnique = chooseTechnique('point', pointSegment?.text || '', [introTechnique?.name]);
     const beat = (kind, text, kicker, technique) => ({
         kind,
         text,
@@ -138,8 +144,71 @@ export function fallbackShortScenePlan(words, { headline = '', duration = 0, tec
         ...(technique?.motion ? { motion: technique.motion } : {}),
     });
     const beats = [beat('intro', title, null, introTechnique)];
-    if (point && Number(duration) >= 8) beats.push(beat('point', point, '01', pointTechnique));
-    return { tone: 'viral', beats, source: 'local-fallback' };
+    // Only fold a point into the opening sequence if it is spoken near the
+    // opening. Later transcript beats stay at their real timeline position.
+    if (pointSegment && Number(duration) >= 8 && Number(pointSegment.start) <= Math.min(4, Number(duration) * 0.22)) {
+        beats.push(beat('point', pointSegment.text, '01', pointTechnique));
+    }
+
+    // Match the art direction to the speech. This is intentionally a compact,
+    // deterministic read of transcript language rather than another model
+    // request, so creative coverage survives a provider timeout.
+    const transcript = timedWords.map(w => w.word).join(' ').toLowerCase();
+    const tone = /\b(step|steps|lesson|lessons|why|how|explained|tutorial|first|second)\b/.test(transcript)
+        ? 'editorial'
+        : /\b(i|me|my|mine|story|felt|remember|experience)\b/.test(transcript)
+            ? 'warm'
+            : /\b(product|app|software|technology|platform|feature|tool)\b/.test(transcript)
+                ? 'technology' : 'viral';
+
+    // A few timed supporting scenes use the speaker's real words at their
+    // transcript positions. Numbers already have their own StatCallout path;
+    // these scenes focus on contrast, reveal, process, and personal insight.
+    const cues = [
+        { kind: 'quote', pattern: /\b(i|we|they) (learned|realized|remember|found out|used to|had to)\b/ },
+        { kind: 'point', pattern: /\b(but|because|instead|the reason|the truth|the key|the lesson|step|first|finally|changed)\b/ },
+        { kind: 'point', pattern: /\b(works|failed|mistake|difference|result|secret|important)\b/ },
+    ];
+    const timedMoments = [];
+    for (const cue of cues) {
+        const candidate = segments.find(segment => segment.start > 2
+            && segment.start < Number(duration) - 1.5
+            && cue.pattern.test(segment.text.toLowerCase())
+            && !timedMoments.some(moment => Math.abs(moment.start - segment.start) < 2.5)
+            && !segment.text.toLowerCase().includes(title.toLowerCase()));
+        if (!candidate) continue;
+        const technique = chooseTechnique(cue.kind, candidate.text, [introTechnique?.name, pointTechnique?.name]);
+        timedMoments.push({
+            kind: cue.kind,
+            text: candidate.text,
+            start: Math.max(0, Number(candidate.start) || 0),
+            end: Math.min(Number(duration) || Number(candidate.end), Number(candidate.end) || 0),
+            ...(technique?.name ? { technique: technique.name } : {}),
+            ...(technique?.motion ? { motion: technique.motion } : {}),
+        });
+    }
+    if (pointSegment && Number(pointSegment.start) > Math.min(4, Number(duration) * 0.22)
+        && pointSegment.start < Number(duration) - 1.5
+        && !timedMoments.some(moment => Math.abs(moment.start - pointSegment.start) < 2.5)) {
+        timedMoments.push({
+            kind: 'point',
+            text: pointSegment.text,
+            start: Math.max(0, Number(pointSegment.start) || 0),
+            end: Math.min(Number(duration) || Number(pointSegment.end), Number(pointSegment.end) || 0),
+            ...(pointTechnique?.name ? { technique: pointTechnique.name } : {}),
+            ...(pointTechnique?.motion ? { motion: pointTechnique.motion } : {}),
+        });
+    }
+
+    // Only create a closing card when the speaker actually says a CTA.
+    const close = segments.slice().reverse().find(segment =>
+        /\b(follow|subscribe|share|comment|download|sign up|book|buy|try it|learn more)\b/i.test(segment.text)
+    );
+    if (close && Number(duration) >= 8) {
+        const ctaText = close.text.length <= 48 ? close.text : cleanText(close.text.split(/\b(?:and|because|but)\b/i)[0]);
+        beats.push(beat('cta', ctaText, null, chooseTechnique('cta', ctaText, [introTechnique?.name, pointTechnique?.name])));
+    }
+    return { tone, beats, timedMoments, source: 'local-fallback' };
 }
 
 /** Spoken prices, percentages and figures in timeline words: [{t, text}]. */
@@ -342,7 +411,7 @@ export function polishShort(built, profile, opts = {}) {
                 'A punchy short-form hook: open strong and surface the single most important point.',
                 {
                     plan: { beats: introBeats },
-                    tone: 'viral',
+                    tone: scenePlan?.tone || 'viral',
                     duration: hookSpan,
                     aspectRatio: built?.aspectRatio || '9:16',
                     safeZone: profile?.safeZone,
@@ -419,7 +488,7 @@ export function polishShort(built, profile, opts = {}) {
                 'A short, direct call to action to close a short-form video.',
                 {
                     plan: { beats: [ctaBeat] },
-                    tone: 'viral',
+                    tone: opts.scenePlan?.tone || 'viral',
                     duration: ctaDur,
                     aspectRatio: built?.aspectRatio || '9:16',
                     safeZone: profile?.safeZone,
@@ -610,6 +679,50 @@ export function polishShort(built, profile, opts = {}) {
             pushCallout(scene, Math.max(0, t - 0.3));
         });
         if (momentsCount) applied.push(`moment graphics (${momentsCount})`);
+    }
+
+    // The deterministic fallback can also schedule transcript-led scenes
+    // across the body of the short. Keep them tied to their spoken words,
+    // avoid number/reveal callouts already placed above, and use the same
+    // scene director so each beat gets coordinated text, graphic accents,
+    // safe placement, and motion.
+    if (want.title && Array.isArray(opts.scenePlan?.timedMoments)) {
+        let textN = 0, gfxN = 0, count = 0;
+        const timed = opts.scenePlan.timedMoments
+            .filter(m => m && typeof m.text === 'string' && m.text.trim())
+            .filter(m => Number(m.start) >= (want.title ? hookSpan : 0) + 0.4 && Number(m.start) < duration - 1)
+            .filter(m => !spokenNumbers(words).some(n => Math.abs(n.t - Number(m.start)) < 2.2))
+            .filter(m => !moments.some(event => Math.abs(Number(event.timelineTime) - Number(m.start)) < 1.8))
+            .sort((a, b) => Number(a.start) - Number(b.start))
+            .slice(0, 3);
+        for (const moment of timed) {
+            const at = Math.max(0, Math.min(duration - 0.5, Number(moment.start) || 0));
+            const sceneDuration = Math.max(0.8, Math.min(1.8, duration - at));
+            const designed = composeSceneFromBrief('A concise transcript-grounded supporting graphic for a short-form video.', {
+                plan: { beats: [{
+                    kind: moment.kind === 'quote' ? 'quote' : 'point',
+                    text: moment.text,
+                    ...(moment.kicker ? { kicker: moment.kicker } : {}),
+                    ...(moment.motion ? { motion: moment.motion } : {}),
+                }] },
+                tone: opts.scenePlan?.tone || 'viral',
+                duration: sceneDuration,
+                aspectRatio: built?.aspectRatio || '9:16',
+                safeZone: profile?.safeZone,
+                subject: SYNTHETIC_SPEAKER_SUBJECT,
+                palette: { accent: look.accent, text: look.titleColor },
+            });
+            if (!designed?.scene) continue;
+            const { placements } = flattenScene(designed.scene, { startOffset: at });
+            for (const p of placements) {
+                const isText = p.trackType === 'text';
+                const t = trackOf(tracks, isText ? 'text' : 'overlay', isText ? 'track-short-moments' : 'track-short-graphics', isText ? 'Moments' : 'Short graphics');
+                const id = isText ? `short-timed-text-${textN++}` : `short-timed-gfx-${gfxN++}`;
+                t.clips.push({ ...p.clip, id });
+            }
+            if (placements.length) count += 1;
+        }
+        if (count) applied.push(`timed story graphics (${count})`);
     }
 
     // 5. Transitions on real cuts

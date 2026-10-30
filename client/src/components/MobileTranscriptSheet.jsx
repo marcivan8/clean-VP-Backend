@@ -71,6 +71,7 @@ function TranscriptBody({ onClose }) {
     const data = useTimelineStore(useShallow(s => ({
         transcripts: s.transcripts, transcriptVerified: s.transcriptVerified,
         tracks: s.tracks, assets: s.assets, captions: s.captions,
+        setSelectedTimelineRange: s.setSelectedTimelineRange,
     })));
     const words = useMemo(() => getDisplayWords(data), [data]);
     const fillers = useMemo(() => findFillerIndices(words), [words]);
@@ -83,6 +84,18 @@ function TranscriptBody({ onClose }) {
     const sel = rawSel && rawSel.words === words ? rawSel : null;
     const [toast, setToast] = useState(null);   // { text }
     const summary = sel ? selectionSummary(words, sel.anchor, sel.focus) : null;
+
+    useEffect(() => {
+        if (!summary) { data.setSelectedTimelineRange?.(null); return; }
+        const selected = words.slice(summary.first, summary.last + 1);
+        data.setSelectedTimelineRange?.({
+            start: summary.start,
+            end: summary.end,
+            text: selected.map(w => w.word || w.text || '').join(' '),
+            wordCount: selected.length,
+            sourceKeys: selected.map(w => w.sourceKey).filter(Boolean),
+        });
+    }, [summary?.start, summary?.end, summary?.count, words, data.setSelectedTimelineRange]);
 
     // Active word: styled imperatively so playback doesn't re-render every word.
     const boxRef = useRef(null);
@@ -238,6 +251,13 @@ function TranscriptBody({ onClose }) {
                     <span style={{ flex: 1, paddingLeft: 6, fontFamily: 'var(--f-mono)', fontSize: 12 }}>
                         {t('mobileTranscript.selection', { count: summary.count, seconds: summary.seconds.toFixed(1) })}
                     </span>
+                    <button
+                        type="button"
+                        onClick={() => { onClose(); submitRokaPrompt('Add captions to the selected segment', t); }}
+                        style={{ height: 44, padding: '0 12px', borderRadius: 12, border: '1px solid var(--line-strong)', background: 'var(--bg-2)', color: 'var(--fg)', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}
+                    >
+                        {t('mobileCaptions.addCaptions')}
+                    </button>
                     <button
                         type="button"
                         onClick={cutSelection}

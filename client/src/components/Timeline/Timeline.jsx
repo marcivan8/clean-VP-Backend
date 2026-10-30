@@ -23,7 +23,7 @@ const Timeline = () => {
     const { t } = useTranslation('editor');
     const { isMobile } = useDeviceType();
     const labelW = isMobile ? LABEL_W_MOBILE : LABEL_W;
-    const { tracks, duration, zoomLevel, seek, setZoomLevel, undo, redo, past, future, mainTrackMagnet, setMainTrackMagnet } = useTimelineStore(useShallow(state => ({
+    const { tracks, duration, zoomLevel, seek, setZoomLevel, undo, redo, past, future, mainTrackMagnet, setMainTrackMagnet, selectedTimelineRange, targetFindings } = useTimelineStore(useShallow(state => ({
         mainTrackMagnet:    state.mainTrackMagnet,
         setMainTrackMagnet: state.setMainTrackMagnet,
         tracks:      state.tracks,
@@ -35,6 +35,8 @@ const Timeline = () => {
         redo:        state.redo,
         past:        state.past,
         future:      state.future,
+        selectedTimelineRange: state.selectedTimelineRange,
+        targetFindings: state.targetFindings,
     })));
 
     // Hoisted out of the toolbar JSX: that row is not rendered on mobile, and a
@@ -84,7 +86,7 @@ const Timeline = () => {
         if (localX < labelW) return; // in label column
 
         const start = getContentPos(e.clientX, e.clientY);
-        selDragRef.current = { ...start, moved: false };
+        selDragRef.current = { ...start, moved: false, rangeMode: e.shiftKey };
 
         // Track cursor position so the scroll RAF can access it without closure issues
         let cursorX = e.clientX;
@@ -101,9 +103,12 @@ const Timeline = () => {
                 top:    Math.min(selDragRef.current.y, cur.y),
                 width:  Math.abs(dx),
                 height: Math.abs(dy),
+                rangeMode: selDragRef.current.rangeMode,
             });
             const zl = useTimelineStore.getState().zoomLevel;
-            useTimelineStore.getState().seek(Math.max(0, (cur.x - labelW) / zl));
+            if (!selDragRef.current.rangeMode) {
+                useTimelineStore.getState().seek(Math.max(0, (cur.x - labelW) / zl));
+            }
         };
 
         // Edge-scroll loop: runs every animation frame while cursor is in the edge zone
@@ -159,6 +164,16 @@ const Timeline = () => {
                 const zl  = useTimelineStore.getState().zoomLevel;
                 const tStart = Math.max(0, (x1 - labelW) / zl);
                 const tEnd   = (x2 - labelW) / zl;
+
+                if (selDragRef.current.rangeMode) {
+                    if (tEnd - tStart >= 0.1) {
+                        useTimelineStore.getState().setSelectedTimelineRange({ start: tStart, end: tEnd });
+                        useTimelineStore.getState().seek(tStart);
+                    }
+                    selDragRef.current = null;
+                    setSelBox(null);
+                    return;
+                }
 
                 const ids = [];
                 for (const track of useTimelineStore.getState().tracks) {
@@ -652,6 +667,7 @@ const Timeline = () => {
                 style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
                 onMouseDown={handleTracksMouseDown}
                 onScroll={() => setShowScrollHint(false)}
+                title="Shift-drag on an empty track row to select a time range for a localized edit or captions"
             >
                 {/* Scroll hint — fades in briefly when horizontal content overflows */}
                 {showScrollHint && (
@@ -703,6 +719,39 @@ const Timeline = () => {
                 />
 
                 <div className="relative min-w-full" style={{ width: `calc(${labelW}px + ${duration * zoomLevel}px)` }}>
+                    {(targetFindings || []).map((finding, index) => (
+                        <button
+                            key={finding.id || `target-${index}`}
+                            type="button"
+                            className="absolute top-0 bottom-0 z-20 border-x border-amber-300/80 bg-amber-400/10 hover:bg-amber-300/25 cursor-pointer"
+                            style={{
+                                left: `${labelW + finding.timelineStart * zoomLevel}px`,
+                                width: `${Math.max(4, (finding.timelineEnd - finding.timelineStart) * zoomLevel)}px`,
+                            }}
+                            title={`Review ${finding.label || finding.query || 'visual match'} · ${finding.timelineStart.toFixed(2)}–${finding.timelineEnd.toFixed(2)}s · ${Math.round((Number(finding.confidence) || 0) * 100)}% confidence`}
+                            aria-label={`Select visual match ${index + 1}`}
+                            onMouseDown={e => e.stopPropagation()}
+                            onClick={e => {
+                                e.stopPropagation();
+                                useTimelineStore.getState().setSelectedTimelineRange({
+                                    start: finding.timelineStart,
+                                    end: finding.timelineEnd,
+                                    text: finding.evidence || finding.query || '',
+                                });
+                                useTimelineStore.getState().seek(finding.timelineStart);
+                            }}
+                        />
+                    ))}
+                    {selectedTimelineRange?.end > selectedTimelineRange?.start && (
+                        <div
+                            className="absolute top-0 bottom-0 z-30 pointer-events-none border-x border-violet-300/60 bg-violet-400/10"
+                            style={{
+                                left: `${labelW + selectedTimelineRange.start * zoomLevel}px`,
+                                width: `${(selectedTimelineRange.end - selectedTimelineRange.start) * zoomLevel}px`,
+                            }}
+                            title={`Selected edit range: ${selectedTimelineRange.start.toFixed(2)}s–${selectedTimelineRange.end.toFixed(2)}s`}
+                        />
+                    )}
                     {/* Playhead handle (diamond) inside track area */}
                     <div
                         ref={playheadHandleRef}
@@ -724,7 +773,7 @@ const Timeline = () => {
                     {/* Rubber-band selection box */}
                     {selBox && (
                         <div
-                            className="absolute z-40 border border-blue-400/80 bg-blue-400/10 pointer-events-none rounded-sm"
+                            className={`absolute z-40 pointer-events-none rounded-sm ${selBox.rangeMode ? 'border border-violet-300/90 bg-violet-400/15' : 'border border-blue-400/80 bg-blue-400/10'}`}
                             style={{
                                 left: `${selBox.left}px`,
                                 top: `${selBox.top}px`,

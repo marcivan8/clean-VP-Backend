@@ -12,6 +12,7 @@
 
 import { authFetch } from '../utils/authFetch.js';
 import { ContextGenerator } from './ContextGenerator.js';
+import useTimelineStore from '../store/useTimelineStore.js';
 import { zoomStyleFromText } from './EditingStyles.js';
 import { resolveCommand, expandMacro, extractParams, COMMAND_BY_ID } from './CommandRegistry.js';
 import { FallbackParser } from './FallbackParser.js';
@@ -458,6 +459,12 @@ export class IntentParser {
             return this.validateAndNormalize(completeBrief, prompt);
         }
 
+        const applyTargets = this.tryApplyTargetRanges(prompt);
+        if (applyTargets) return this.validateAndNormalize(applyTargets, prompt);
+
+        const visualTargetSearch = this.tryVisualTargetSearch(prompt);
+        if (visualTargetSearch) return this.validateAndNormalize(visualTargetSearch, prompt);
+
         const reg = this.tryRegistry(prompt);
         if (reg) {
             if (reg.needs_clarification) return reg;
@@ -710,10 +717,23 @@ export class IntentParser {
 
         // ── Caption / transcription (highest priority — most misclassified) ──
         if (matches('autoCaptions')) {
+            const timeline = ContextGenerator.getTimelineContext();
+            const selectedRange = timeline.selectedTimelineRange;
+            const wantsFull = /\b(all|entire|whole|full video|whole timeline)\b/.test(lower);
+            const wantsClip = /\b(this|that|selected|current|specific)\s+(?:video\s+)?clip\b/.test(lower);
+            const params = {};
+            if (!wantsFull && selectedRange?.end > selectedRange?.start) {
+                params.scope = 'range';
+                params.range_start = selectedRange.start;
+                params.range_end = selectedRange.end;
+            } else if (!wantsFull && wantsClip && timeline.activeClipId) {
+                params.scope = 'clip';
+                params.clip_id = timeline.activeClipId;
+            }
             return {
                 intent: 'edit',
                 operation: 'auto_captions',
-                parameters: {},
+                constraints: params,
                 confidence: 'HIGH',
                 missingParameters: []
             };
@@ -945,6 +965,50 @@ export class IntentParser {
         }
 
         return null; // let the API handle it
+    }
+
+    static tryApplyTargetRanges(prompt) {
+        const text = String(prompt || '').toLowerCase().trim();
+        const findings = useTimelineStore.getState().targetFindings || [];
+        if (findings.length === 0) return null;
+        const broll = /\b(b-?roll|cutaway|plan de coupe)\b/.test(text) && /\b(add|place|insert|put|apply|ajoute|place|insere)\b/.test(text);
+        const cut = /\b(cut|remove|delete|drop|supprime|retire|coupe)\b/.test(text);
+        const confirmsTargetList = /\b(these|those|them|matches|findings|detected|results|all of them|oui|yes|do it|go ahead)\b/.test(text);
+        if (!confirmsTargetList || (!broll && !cut)) return null;
+        return {
+            intent: 'edit', operation: 'apply_target_ranges',
+            constraints: { operation: broll ? 'broll' : 'cut', confirmed: true },
+            confidence: 'HIGH', missingParameters: [],
+        };
+    }
+
+    static tryVisualTargetSearch(prompt) {
+        const text = String(prompt || '').trim();
+        const lower = text.toLowerCase();
+        const locatorPrefix = /^(?:please\s+)?(?:find|locate|show|identify|detect|search for)\b/i;
+        const whenPattern = /^(?:when|where)\s+(?:does|do|is|are)\s+(.+?)\s+(?:appear|visible|shown|on screen|in frame)\b/i;
+        const actionTargetPattern = /\b(?:part|parts|moment|moments|scene|scenes|time|times)\s+(?:where|when)\s+(.+?)\s+(?:appears?|is visible|shows? up|is on screen)\b/i;
+        const whenMatch = lower.match(whenPattern);
+        const actionMatch = lower.match(actionTargetPattern);
+        if (!locatorPrefix.test(text) && !whenMatch && !actionMatch) return null;
+
+        let query = whenMatch?.[1] || actionMatch?.[1] || text.replace(locatorPrefix, '');
+        query = query
+            .replace(/^(?:all|every|each)\s+(?:(?:time|moment|scene|frame|instance)s?\s+(?:where|when)\s+)?/i, '')
+            .replace(/^(?:the\s+)?(?:moments?|times?|scenes?|frames?|instances?)\s+(?:where|when)\s+/i, '')
+            .replace(/^(?:a|an|the)\s+/i, '')
+            .replace(/\s+(?:in|throughout)\s+(?:the\s+)?(?:video|clip|footage)\s*\??$/i, '')
+            .replace(/\s+(?:appears?|is visible|shows? up|is on screen|in frame)\s*\??$/i, '')
+            .trim();
+        if (!query || query.length < 2) return null;
+
+        const timeline = ContextGenerator.getTimelineContext();
+        const active = timeline.clips.find(c => c.id === timeline.activeClipId);
+        return {
+            intent: 'edit', operation: 'locate_visual_targets',
+            constraints: { query, ...(active?.assetId ? { asset_id: active.assetId } : {}) },
+            confidence: 'HIGH', missingParameters: [],
+        };
     }
 
     static async parseViaAPI(prompt, context, signal) {
@@ -1893,6 +1957,27 @@ export class IntentParser {
     static validateAndNormalize(result, prompt) {
         const operation = result.operation || null;
         const constraints = { ...(result.parameters || {}), ...(result.constraints || {}) };
+        // Caption intents can be recognized by the registry before the
+        // local-first parser gets a chance to attach the user's timeline
+        // selection. Resolve the scope here so every parse path behaves the
+        // same way.
+        if (operation === 'auto_captions' && !constraints.scope) {
+            const text = String(prompt || result.originalPrompt || '').toLowerCase();
+            const asksForWholeEdit = /\b(all|entire|whole|full video|whole timeline)\b/.test(text);
+            const asksForSpecificClip = /\b(this|that|selected|current|specific)\s+(?:video\s+)?clip\b/.test(text);
+            if (!asksForWholeEdit) {
+                const timeline = ContextGenerator.getTimelineContext();
+                const selectedRange = timeline.selectedTimelineRange;
+                if (selectedRange?.end > selectedRange?.start) {
+                    constraints.scope = 'range';
+                    constraints.range_start = selectedRange.start;
+                    constraints.range_end = selectedRange.end;
+                } else if (asksForSpecificClip && timeline.activeClipId) {
+                    constraints.scope = 'clip';
+                    constraints.clip_id = timeline.activeClipId;
+                }
+            }
+        }
 
         // R124: a long_form_edit request can be a single short phrase ("edit
         // this for me") or an entire multi-paragraph creative brief. Neither

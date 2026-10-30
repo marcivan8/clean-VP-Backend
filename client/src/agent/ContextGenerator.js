@@ -1,11 +1,12 @@
 import useTimelineStore from '../store/useTimelineStore.js';
 import { styleContext } from './EditingStyles.js';
 import { applyStyleToAnalysis } from './ContentAnalyzer.js';
+import { buildTimelineSourceMap } from '../timeline/targetRangeResolver.js';
 
 export class ContextGenerator {
     static getTimelineContext() {
         const state = useTimelineStore.getState();
-        const { tracks, duration, currentTime, aspectRatio, beatMarkers, activeClipId } = state;
+        const { tracks, duration, currentTime, aspectRatio, beatMarkers, activeClipId, selectedClipIds, selectedTimelineRange, targetFindings, assetTargetFindings } = state;
 
         // Build clips array for local parsing
         const clips = [];
@@ -13,6 +14,7 @@ export class ContextGenerator {
             track.clips?.forEach(clip => {
                 clips.push({
                     id: clip.id,
+                    assetId: clip.assetId || null,
                     name: clip.name,
                     start: clip.start,
                     duration: clip.duration,
@@ -31,6 +33,24 @@ export class ContextGenerator {
         if (beatMarkers && beatMarkers.length > 0) {
             displayStr += `- Beat Markers Detected: ${beatMarkers.length}\n`;
         }
+        if (selectedTimelineRange?.end > selectedTimelineRange?.start) {
+            displayStr += `- Selected timeline segment: ${selectedTimelineRange.start.toFixed(2)}s–${selectedTimelineRange.end.toFixed(2)}s`;
+            if (selectedTimelineRange.text) displayStr += ` — "${selectedTimelineRange.text.slice(0, 240)}"`;
+            displayStr += '\n  Apply segment edits only inside this range unless the user asks for the whole edit.\n';
+        }
+        if (selectedClipIds?.length) displayStr += `- Selected clip IDs: ${selectedClipIds.join(', ')}\n`;
+        if (targetFindings?.length) {
+            displayStr += `- Visual target candidates awaiting review (${targetFindings.length}):\n`;
+            targetFindings.slice(0, 24).forEach(hit => {
+                displayStr += `  ${hit.id}: ${hit.label || hit.query || 'visual target'} at ${Number(hit.timelineStart).toFixed(2)}–${Number(hit.timelineEnd).toFixed(2)}s, confidence ${Math.round((Number(hit.confidence) || 0) * 100)}%, evidence: ${(hit.evidence || 'frame match').slice(0, 120)}\n`;
+            });
+        }
+        if (assetTargetFindings?.length) {
+            displayStr += `- Visual matches in media-bin assets awaiting review (${assetTargetFindings.length}):\n`;
+            assetTargetFindings.slice(0, 24).forEach(hit => {
+                displayStr += `  ${hit.id}: ${hit.assetName || hit.assetId} at source ${Number(hit.sourceStart).toFixed(2)}–${Number(hit.sourceEnd).toFixed(2)}s, confidence ${Math.round((Number(hit.confidence) || 0) * 100)}%, evidence: ${(hit.evidence || 'frame match').slice(0, 120)}\n`;
+            });
+        }
         displayStr += `\n`;
 
         tracks.forEach(track => {
@@ -43,7 +63,7 @@ export class ContextGenerator {
                 track.clips.sort((a, b) => a.start - b.start).forEach((clip, index) => {
                     const speedInfo = clip.speed !== 1 ? `| Speed: ${clip.speed}x` : '';
                     const colorInfo = clip.filter ? `| Look: ${clip.filter}` : '';
-                    const activeMarker = clip.id === activeClipId ? ' [SELECTED]' : '';
+                    const activeMarker = clip.id === activeClipId || selectedClipIds?.includes(clip.id) ? ' [SELECTED]' : '';
                     displayStr += `  ${index + 1}. Clip: "${clip.name}" [ID: ${clip.id}]${activeMarker}\n`;
                     displayStr += `     Range: ${clip.start.toFixed(2)}s - ${(clip.start + clip.duration).toFixed(2)}s ${speedInfo} ${colorInfo}\n`;
                 });
@@ -59,6 +79,8 @@ export class ContextGenerator {
             currentTime,
             aspectRatio,
             activeClipId,
+            selectedClipIds: Array.isArray(selectedClipIds) ? selectedClipIds : [],
+            selectedTimelineRange: selectedTimelineRange || null,
             display: displayStr
         };
     }
@@ -69,7 +91,7 @@ export class ContextGenerator {
      */
     static getStructuredContext() {
         const state = useTimelineStore.getState();
-        const { tracks, duration, currentTime, aspectRatio, activeClipId, captions, pacingSegments, beatMarkers, assets, transcriptionAttempted, speakerMap } = state;
+        const { tracks, duration, currentTime, aspectRatio, activeClipId, selectedClipIds, selectedTimelineRange, captions, pacingSegments, beatMarkers, assets, transcriptionAttempted, speakerMap } = state;
 
         // --- Collect all clips ---
         const allClips = [];
@@ -86,6 +108,12 @@ export class ContextGenerator {
 
         // --- Editing Mode Detection ---
         const videoClips = allClips.filter(c => c.trackType === 'video');
+        const rangeStart = Number(selectedTimelineRange?.start);
+        const rangeEnd = Number(selectedTimelineRange?.end);
+        const hasSelectedRange = Number.isFinite(rangeStart) && Number.isFinite(rangeEnd) && rangeEnd > rangeStart;
+        const selectedRangeClips = hasSelectedRange ? videoClips.filter(c =>
+            Number(c.start) < rangeEnd && Number(c.start) + Number(c.duration) > rangeStart
+        ) : [];
         let editingMode = 'CREATION';
         if (videoClips.length > 1) {
             editingMode = 'REPURPOSE';
@@ -167,9 +195,23 @@ export class ContextGenerator {
             TimelineState: {
                 totalTimelineDuration: duration,
                 selectedClipDuration,
+                selectedClipIds: Array.isArray(selectedClipIds) ? selectedClipIds : [],
                 totalClips: allClips.length,
                 currentPlayhead: currentTime,
+                ...(hasSelectedRange ? {
+                    selectedSegment: {
+                        start: rangeStart,
+                        end: rangeEnd,
+                        text: String(selectedTimelineRange.text || '').slice(0, 500),
+                        wordCount: Number(selectedTimelineRange.wordCount) || 0,
+                        clipIds: selectedRangeClips.map(c => c.id),
+                        clipRanges: selectedRangeClips.map(c => ({ id: c.id, trackId: c.trackId, start: c.start, end: c.start + c.duration })),
+                    },
+                } : {}),
                 videoClipCount: videoClips.length,
+                // Shared map for resolving transcript, speaker, language,
+                // object, and event findings from asset time to timeline time.
+                sourcePlacements: buildTimelineSourceMap(tracks, assets),
                 dedicatedAudioTrackClipCount: allClips.filter(c => c.trackType === 'audio').length,
                 note: "Video clips usually contain embedded audio. Do not assume a video lacks audio just because dedicatedAudioTrackClipCount is 0."
             },
@@ -182,6 +224,15 @@ export class ContextGenerator {
                 transcriptSummary,
                 energyProfile,
                 hasBeatMarkers: beatMarkers && beatMarkers.length > 0
+            },
+
+            // A single targeting contract for requests about words, languages,
+            // speakers, objects, events, or moments. Modality-specific analysis
+            // supplies findings; every edit uses the same mapped timeline ranges.
+            TargetingInstructions: {
+                supportedEvidence: ['transcript timestamps', 'speaker diarization', 'selected timeline ranges', 'asset visual analysis when available'],
+                sourceToTimelineMap: 'TimelineState.sourcePlacements maps asset source time to each placed clip, including trims and playback speed.',
+                rule: 'Apply edits only to evidence-backed target ranges. Do not invent visual/object/event timestamps when matching analysis is unavailable; ask for analysis or a selected range.',
             },
 
             // Per-clip text breakdown of the edited timeline.

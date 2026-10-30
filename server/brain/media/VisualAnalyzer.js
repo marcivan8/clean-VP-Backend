@@ -14,6 +14,7 @@ const { getAIFor, isAIConfigured, describeAIError } = require('../../../services
 const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const ffmpeg = require('fluent-ffmpeg');
 
 const execFileAsync = promisify(execFile);
@@ -118,6 +119,109 @@ class VisualAnalyzer {
             for (const f of tempFiles) {
                 try { fs.unlinkSync(f); } catch { /* ignore */ }
             }
+        }
+    }
+
+    /**
+     * Search a video for a user-described visual subject/event using timestamped
+     * snapshots. Whole-video upload is avoided; small batches keep vision calls
+     * predictable and make every result traceable to sampled evidence.
+     */
+    async locateTarget(filePath, { query, start = 0, end = null, onProgress = null } = {}) {
+        const target = String(query || '').trim();
+        if (!target) throw new Error('A visual target description is required.');
+        if (!fs.existsSync(filePath)) throw new Error('The video file is unavailable for visual search.');
+        if (!this.openai) throw new Error('Visual target search is not configured.');
+
+        const realDuration = await this.probeDuration(filePath);
+        if (!(realDuration > 0)) throw new Error('Could not read the video duration.');
+        const rangeStart = Math.max(0, Math.min(realDuration, Number(start) || 0));
+        const rangeEnd = Math.max(rangeStart, Math.min(realDuration, Number(end) > rangeStart ? Number(end) : realDuration));
+        if (rangeEnd - rangeStart < 0.25) throw new Error('The requested search range is too short.');
+
+        const maxSamples = 120;
+        const sampleInterval = Math.max(1, Math.ceil((rangeEnd - rangeStart) / maxSamples));
+        const sampleCount = Math.min(maxSamples, Math.ceil((rangeEnd - rangeStart) / sampleInterval));
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibed-target-'));
+        const framePattern = path.join(tempDir, 'frame-%04d.jpg');
+        const { rangesFromFrameMatches } = require('./visualTargetRanges');
+
+        try {
+            await execFileAsync(ffmpegPath, [
+                '-hide_banner', '-loglevel', 'error', '-ss', String(rangeStart), '-i', filePath,
+                '-t', String(rangeEnd - rangeStart), '-vf', `fps=1/${sampleInterval},scale=640:-2`,
+                '-frames:v', String(sampleCount), '-q:v', '7', '-y', framePattern,
+            ], { maxBuffer: MAX_BUFFER, timeout: 120_000 });
+
+            const frameFiles = fs.readdirSync(tempDir)
+                .filter(name => /^frame-\d+\.jpg$/.test(name))
+                .sort((a, b) => Number(a.match(/\d+/)?.[0]) - Number(b.match(/\d+/)?.[0]));
+            if (frameFiles.length === 0) throw new Error('No video snapshots could be extracted.');
+
+            const frameMatches = [];
+            const batchSize = 8;
+            for (let offset = 0; offset < frameFiles.length; offset += batchSize) {
+                const batchFiles = frameFiles.slice(offset, offset + batchSize);
+                const batch = batchFiles.map((name, i) => {
+                    const frameNumber = offset + i;
+                    return {
+                        index: frameNumber,
+                        timestamp: Math.min(rangeEnd, rangeStart + frameNumber * sampleInterval),
+                        base64: fs.readFileSync(path.join(tempDir, name)).toString('base64'),
+                    };
+                });
+                const parts = [{
+                    type: 'text',
+                    text: `Find visual matches for this target: ${JSON.stringify(target)}. These are sampled video frames; each frame label gives its source timestamp. Return JSON only: {"matches":[{"index":<frame index>,"match":true|false,"confidence":0..1,"evidence":"brief visible evidence"}]}. Include one result for each frame. Mark uncertain/ambiguous frames false. Do not infer a match from dialogue or from another frame.`,
+                }];
+                for (const frame of batch) {
+                    parts.push({ type: 'text', text: `Frame index ${frame.index}, source time ${frame.timestamp.toFixed(2)} seconds.` });
+                    parts.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frame.base64}`, detail: 'low' } });
+                }
+                const response = await this.openai.chat.completions.create({
+                    model: this.visionModel,
+                    max_tokens: 900,
+                    temperature: 0,
+                    response_format: { type: 'json_object' },
+                    messages: [{ role: 'user', content: parts }],
+                }, { timeout: 25_000, maxRetries: 0 });
+                const raw = response.choices?.[0]?.message?.content || '{}';
+                let parsed;
+                try { parsed = JSON.parse(raw); } catch { throw new Error('Visual target search returned invalid structured data.'); }
+                for (const hit of Array.isArray(parsed.matches) ? parsed.matches : []) {
+                    const frame = batch.find(f => f.index === Number(hit.index));
+                    if (!frame || hit.match !== true) continue;
+                    frameMatches.push({
+                        timestamp: frame.timestamp,
+                        confidence: Math.max(0, Math.min(1, Number(hit.confidence) || 0)),
+                        evidence: String(hit.evidence || '').slice(0, 240),
+                    });
+                }
+                if (typeof onProgress === 'function') await onProgress(Math.min(95, Math.round(((offset + batch.length) / frameFiles.length) * 95)));
+            }
+
+            const ranges = rangesFromFrameMatches(frameMatches, sampleInterval, rangeEnd, rangeStart)
+                .map((range, index) => ({
+                    id: `visual-target-${index + 1}`,
+                    kind: 'visual',
+                    query: target,
+                    sourceStart: range.start,
+                    sourceEnd: range.end,
+                    confidence: range.confidence,
+                    evidence: range.evidence,
+                    sampleCount: range.sampleCount,
+                    reviewRequired: true,
+                }));
+            return {
+                query: target,
+                assetDuration: realDuration,
+                searchedRange: { start: rangeStart, end: rangeEnd },
+                sampleInterval,
+                ranges,
+                note: ranges.length ? 'Frame-sampled candidates; review each range before editing.' : 'No visual matches were found in the sampled frames.',
+            };
+        } finally {
+            try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* best-effort temp cleanup */ }
         }
     }
 

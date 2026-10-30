@@ -7,6 +7,9 @@ import { autoEmphasizeCaptions, clearAllEmphasis } from '../utils/captionEmphasi
 import { evaluateMotionCompatibility } from './AnimationCompatibilityEvaluator.js';
 import { saveResumableJob, clearResumableJob, getResumableJob, remainingCommandsFrom } from './longFormJobMemory.js';
 import { segmentScript } from './ScriptSegmenter.js';
+import { clampToTimelineRange, wordsInTimelineRange } from '../timeline/targetRangeResolver.js';
+import { mapFindingsToTimeline } from '../timeline/targetRangeResolver.js';
+import { pollJobResult } from '../utils/jobPoller.js';
 
 /**
  * VideoEditorTools
@@ -21,6 +24,31 @@ import { segmentScript } from './ScriptSegmenter.js';
  */
 
 export const TOOL_DEFINITIONS = [
+    {
+        name: 'locate_visual_targets',
+        description: 'Search video assets in the media bin and on the timeline for a visible object, person, action, or event. Returns timestamped candidate ranges, highlights matches already on the timeline, and identifies unplaced rushes by asset name. This tool never edits the video.',
+        parameters: {
+            type: 'object',
+            properties: {
+                query: { type: 'string', description: 'A concrete visible subject or event to find, such as a red car, a person waving, or a product being shown.' },
+                assetId: { type: 'string', description: 'Optional asset ID to search instead of every video asset on the timeline.' },
+            },
+            required: ['query'],
+        },
+    },
+    {
+        name: 'apply_target_ranges',
+        description: 'Apply an edit to reviewed visual target candidate ranges. Only call after the user explicitly confirms. Supports cutting selected matches or adding contextual B-roll inside them.',
+        parameters: {
+            type: 'object',
+            properties: {
+                targetIds: { type: 'array', items: { type: 'string' }, description: 'Candidate IDs from the visual target search. Omit to use all currently reviewed candidates.' },
+                operation: { type: 'string', enum: ['cut', 'broll'], description: 'Cut the matched timeline ranges, or add contextual B-roll inside each one.' },
+                confirmed: { type: 'boolean', description: 'True only when the user has explicitly confirmed applying the reviewed candidate ranges.' },
+            },
+            required: ['operation', 'confirmed'],
+        },
+    },
     // --- Editing Tools ---
     {
         name: "cut_clip",
@@ -954,6 +982,8 @@ export class VideoEditorTools {
         };
 
         switch (action.name) {
+            case 'locate_visual_targets': return await this.locateVisualTargets(action.args, action.signal || null);
+            case 'apply_target_ranges': return await this.applyTargetRanges(action.args);
             // Editing
             case 'cut_clip': return this.cutClip(action.args);
             case 'remove_clip': return this.removeClip(action.args);
@@ -1681,12 +1711,19 @@ export class VideoEditorTools {
     async placeContextualBroll(args = {}, signal = null) {
         try {
             const state = this.store;
-            const words = state.captions;
+            const selectedRange = args.targetRange || state.selectedTimelineRange;
+            const targetStart = Number(selectedRange?.start);
+            const targetEnd = Number(selectedRange?.end);
+            const hasTargetRange = Number.isFinite(targetStart) && Number.isFinite(targetEnd) && targetEnd > targetStart;
+            const allWords = state.captions;
+            const words = wordsInTimelineRange(allWords, hasTargetRange ? { start: targetStart, end: targetEnd } : null);
 
             if (!Array.isArray(words) || words.length === 0) {
                 return {
                     success: false,
-                    message: 'No transcript found — generate captions first, then try matching b-roll again.',
+                    message: hasTargetRange
+                        ? 'No transcript words fall inside the selected range, so I could not match b-roll to that part.'
+                        : 'No transcript found — generate captions first, then try matching b-roll again.',
                     placements: [],
                 };
             }
@@ -1711,7 +1748,9 @@ export class VideoEditorTools {
             // buildBrollCandidates' doc comment. A match can now be an asset
             // the user imported but never dragged onto a track yet.
             const candidates = buildBrollCandidates(profiles, state.assets);
-            const chapterBoundaries = extractChapterBoundaries(state.tracks);
+            const chapterBoundaries = extractChapterBoundaries(state.tracks).filter(t =>
+                !hasTargetRange || (t >= targetStart && t <= targetEnd)
+            );
 
             if (candidates.length === 0) {
                 // ADR-001 follow-up: nothing local to match against. Rather
@@ -1721,11 +1760,11 @@ export class VideoEditorTools {
                 // button runs, but auto-inserted instead of waiting for
                 // manual approval (this tool only runs when the user or an
                 // Auto-mode playbook explicitly asked for b-roll placement).
-                const stock = await this._fetchStockBrollFallback(words, chapterBoundaries, signal);
+                const stock = await this._fetchStockBrollFallback(words, chapterBoundaries, signal, [], hasTargetRange ? { start: targetStart, end: targetEnd } : null);
                 if (stock.inserted > 0) {
                     return {
                         success: true,
-                        message: `No analyzed local b-roll to match, so ${stock.inserted} cutaway(s) were pulled from ${stock.provider || 'stock footage'} instead.`,
+                        message: `No analyzed local b-roll to match, so ${stock.inserted} cutaway(s) were pulled from ${stock.provider || 'stock footage'}${hasTargetRange ? ` for ${targetStart.toFixed(1)}–${targetEnd.toFixed(1)}s` : ''} instead.`,
                         placements: stock.placements,
                         titleCardsCreated: 0,
                         fromStock: stock.inserted,
@@ -1770,7 +1809,14 @@ export class VideoEditorTools {
                 events: Array.isArray(args.events) ? args.events : null,
             });
 
-            for (const match of matches) {
+            // A selected interval is an explicit content target. Keep generated
+            // cutaways inside it even when a matcher proposes a longer hold.
+            const scopedMatches = hasTargetRange ? matches.flatMap(match => {
+                const interval = clampToTimelineRange(match.timelineTime, match.duration, { start: targetStart, end: targetEnd }, 0.5);
+                return interval ? [{ ...match, timelineTime: interval.start, duration: interval.duration }] : [];
+            }) : matches;
+
+            for (const match of scopedMatches) {
                 const asset = (state.assets || []).find(a => a.id === match.assetId);
                 if (!asset) continue;
                 const live = useTimelineStore.getState();
@@ -1832,29 +1878,31 @@ export class VideoEditorTools {
             // this pass ran only when ZERO local matches existed, so one
             // local cutaway suppressed every Vecteezy result for the rest of
             // the edit.
-            const stock = await this._fetchStockBrollFallback(words, chapterBoundaries, signal, matches);
+            const stock = await this._fetchStockBrollFallback(words, chapterBoundaries, signal, scopedMatches, hasTargetRange ? { start: targetStart, end: targetEnd } : null);
             if (stock.inserted > 0) {
                 return {
                     success: true,
-                    message: `Placed ${matches.length} local b-roll cutaway(s) and ${stock.inserted} stock cutaway(s)${stock.provider ? ` from ${stock.provider}` : ''}.`,
-                    placements: [...matches, ...stock.placements],
+                    message: `Placed ${scopedMatches.length} local b-roll cutaway(s) and ${stock.inserted} stock cutaway(s)${hasTargetRange ? ` inside ${targetStart.toFixed(1)}–${targetEnd.toFixed(1)}s` : ''}${stock.provider ? ` from ${stock.provider}` : ''}.`,
+                    placements: [...scopedMatches, ...stock.placements],
                     titleCardsCreated,
                     fromStock: stock.inserted,
                     provider: stock.provider,
                 };
             }
 
-            if (matches.length === 0 && titleCardsCreated === 0) {
+            if (scopedMatches.length === 0 && titleCardsCreated === 0) {
                 return {
                     success: true,
-                    message: `Found analyzed b-roll but none matched a moment in the dialogue closely enough, and ${stock.reason || 'no stock footage could be fetched either'} — nothing placed.`,
+                    message: hasTargetRange
+                        ? `No b-roll matched the selected ${targetStart.toFixed(1)}–${targetEnd.toFixed(1)}s segment closely enough, and ${stock.reason || 'no stock footage could be fetched either'} — nothing placed.`
+                        : `Found analyzed b-roll but none matched a moment in the dialogue closely enough, and ${stock.reason || 'no stock footage could be fetched either'} — nothing placed.`,
                     placements: [],
                     titleCardsCreated: 0,
                 };
             }
 
-            const transitionCount = matches.filter(m => m.isChapterTransition).length;
-            const newlyImportedCount = matches.filter(m => !alreadyOnTimeline.has(m.assetId)).length;
+            const transitionCount = scopedMatches.filter(m => m.isChapterTransition).length;
+            const newlyImportedCount = scopedMatches.filter(m => !alreadyOnTimeline.has(m.assetId)).length;
 
             const notes = [];
             if (transitionCount > 0) notes.push(`${transitionCount} placed as chapter-transition bridges`);
@@ -1864,8 +1912,8 @@ export class VideoEditorTools {
 
             return {
                 success: true,
-                message: `✓ Placed ${matches.length} b-roll cutaway(s) matched to the dialogue${notesText}.`,
-                placements: matches,
+                message: `✓ Placed ${scopedMatches.length} b-roll cutaway(s) matched to the dialogue${hasTargetRange ? ` inside ${targetStart.toFixed(1)}–${targetEnd.toFixed(1)}s` : ''}${notesText}.`,
+                placements: scopedMatches,
                 titleCardsCreated,
             };
         } catch (error) {
@@ -1893,9 +1941,10 @@ export class VideoEditorTools {
      * @param {Array<number>} chapterBoundaries
      * @param {AbortSignal|null} signal
      * @param {Array<Object>} [existingPlacements] local cutaways to avoid overlapping
+     * @param {{start:number,end:number}|null} [targetRange] clamp placements to this timeline segment
      * @returns {Promise<{inserted:number, placements:Array, provider?:string, reason?:string}>}
      */
-    async _fetchStockBrollFallback(words, chapterBoundaries, signal = null, existingPlacements = []) {
+    async _fetchStockBrollFallback(words, chapterBoundaries, signal = null, existingPlacements = [], targetRange = null) {
         try {
             const response = await authFetch('/api/stock/suggest-broll', {
                 method: 'POST',
@@ -1919,8 +1968,11 @@ export class VideoEditorTools {
                 const asset = suggestion.asset;
                 if (!asset) continue;
                 const live = useTimelineStore.getState();
-                const start = Math.max(0, Number(suggestion.timelineTime) || 0);
-                const duration = Number(suggestion.duration) > 0 ? Number(suggestion.duration) : Number(asset.duration) || 3.5;
+                const proposedStart = Math.max(0, Number(suggestion.timelineTime) || 0);
+                const proposedDuration = Number(suggestion.duration) > 0 ? Number(suggestion.duration) : Number(asset.duration) || 3.5;
+                const interval = clampToTimelineRange(proposedStart, proposedDuration, targetRange, 0.5);
+                if (!interval) continue;
+                const { start, duration } = interval;
                 const end = start + duration;
                 const overlaps = (otherStart, otherDuration) => {
                     const otherAt = Number(otherStart) || 0;
@@ -1958,6 +2010,151 @@ export class VideoEditorTools {
             console.error('[VideoEditorTools] stock b-roll fallback error:', error);
             return { inserted: 0, placements: [], reason: `stock footage search failed (${error.message})` };
         }
+    }
+
+    /** Locate visible targets in timestamped frame samples and mark their timeline ranges for review. */
+    async locateVisualTargets({ query, assetId } = {}, signal = null) {
+        const targetQuery = String(query || '').trim();
+        if (!targetQuery) return { success: false, message: 'Describe the visible object, person, or event to find.' };
+        const state = this.store;
+        const binVideoAssets = (state.assets || []).filter(asset =>
+            asset?.id && (!asset.type || asset.type === 'video') && !asset.isProxying && asset.uploadPhase !== 'uploading'
+        );
+        const timelineAssetIds = [...new Set((state.tracks || [])
+            .filter(t => t.type === 'video' || t.type === 'overlay')
+            .flatMap(t => (t.clips || []).map(c => c.assetId).filter(Boolean)))];
+        const assetIds = assetId
+            ? [assetId]
+            : [...new Set([...binVideoAssets.map(asset => asset.id), ...timelineAssetIds])];
+        if (assetIds.length === 0) return { success: false, message: 'Add a video to the media bin before searching its visual content.' };
+
+        const selectedRange = state.selectedTimelineRange;
+        const searchableAssetIds = assetIds.slice(0, 30);
+        const jobs = await Promise.all(searchableAssetIds.map(async id => {
+            const asset = (state.assets || []).find(a => a.id === id);
+            if (asset?.type && asset.type !== 'video') return null;
+            const response = await authFetch('/api/brain/locate-target', {
+                method: 'POST',
+                body: JSON.stringify({ assetId: id, query: targetQuery }),
+                signal,
+            });
+            if (!response.ok) {
+                const details = await response.json().catch(() => ({}));
+                throw new Error(details.error || `Could not start visual search for ${asset?.name || id} (${response.status}).`);
+            }
+            const { jobId } = await response.json();
+            return { asset, jobId };
+        }));
+
+        const results = await Promise.all(jobs.filter(Boolean).map(async ({ asset, jobId }) => {
+            const result = await pollJobResult(jobId, signal, 600_000);
+            return { assetId: asset?.id || null, assetName: asset?.name || null, ...(result || {}) };
+        }));
+        const sourceFindings = results.flatMap(result => (result.ranges || []).map(hit => ({
+            ...hit,
+            assetId: result.assetId,
+            assetName: result.assetName,
+            label: targetQuery,
+        })));
+        const timelineFindings = [];
+        const assetFindings = [];
+        sourceFindings.forEach((finding, index) => {
+            const placements = mapFindingsToTimeline([finding], state.tracks);
+            if (placements.length) {
+                placements.forEach((hit, placementIndex) => timelineFindings.push({
+                    ...hit,
+                    id: `${hit.assetId}-${hit.clipId}-${index}-${placementIndex}`,
+                    query: targetQuery,
+                    reviewRequired: true,
+                }));
+            } else {
+                assetFindings.push({
+                    ...finding,
+                    id: `asset-${finding.assetId}-${index}`,
+                    query: targetQuery,
+                    reviewRequired: true,
+                });
+            }
+        });
+        if (selectedRange?.end > selectedRange?.start) {
+            const scopedTimelineFindings = timelineFindings.filter(hit =>
+                hit.timelineStart < selectedRange.end && hit.timelineEnd > selectedRange.start
+            );
+            useTimelineStore.getState().setTargetFindings(scopedTimelineFindings);
+        } else {
+            useTimelineStore.getState().setTargetFindings(timelineFindings);
+        }
+        useTimelineStore.getState().setAssetTargetFindings(assetFindings);
+
+        const allCandidates = [
+            ...timelineFindings.map(hit => ({
+                id: hit.id, assetId: hit.assetId, assetName: hit.assetName,
+                start: hit.timelineStart, end: hit.timelineEnd, timebase: 'timeline',
+                confidence: hit.confidence, evidence: hit.evidence,
+            })),
+            ...assetFindings.map(hit => ({
+                id: hit.id, assetId: hit.assetId, assetName: hit.assetName,
+                start: hit.sourceStart, end: hit.sourceEnd, timebase: 'source',
+                confidence: hit.confidence, evidence: hit.evidence,
+            })),
+        ];
+        const describeTime = seconds => {
+            const value = Math.max(0, Number(seconds) || 0);
+            const minutes = Math.floor(value / 60);
+            return `${String(minutes).padStart(2, '0')}:${String(Math.floor(value % 60)).padStart(2, '0')}`;
+        };
+        const summary = allCandidates.slice(0, 8).map(hit =>
+            `${hit.assetName || hit.assetId} at ${describeTime(hit.start)}${hit.timebase === 'timeline' ? '' : ' (source)'}`
+        );
+
+        return {
+            success: true,
+            message: allCandidates.length
+                ? `Found ${allCandidates.length} candidate moment(s) for “${targetQuery}”${summary.length ? `: ${summary.join('; ')}` : ''}.${assetFindings.length ? ' Unplaced matches are marked on their media-bin cards.' : ''}${timelineFindings.length ? ' Timeline matches are highlighted for review.' : ''}`
+                : `No confident visual matches for “${targetQuery}” were found in the sampled frames.`,
+            details: {
+                query: targetQuery,
+                scannedAssets: results.map(r => ({ id: r.assetId, name: r.assetName, sampleInterval: r.sampleInterval })),
+                candidates: allCandidates,
+                note: 'Frame-sampled matches are suggestions. Review the highlighted ranges before applying edits.',
+                ...(assetIds.length > searchableAssetIds.length ? { warning: 'Search is limited to the first 30 video assets per request.' } : {}),
+            },
+        };
+    }
+
+    async applyTargetRanges({ targetIds = null, operation, confirmed = false } = {}) {
+        if (confirmed !== true) return { success: false, message: 'Review the highlighted ranges and confirm before I apply this edit.' };
+        const state = useTimelineStore.getState();
+        const wanted = Array.isArray(targetIds) && targetIds.length ? new Set(targetIds) : null;
+        const findings = (state.targetFindings || []).filter(hit => !wanted || wanted.has(hit.id));
+        if (findings.length === 0) return { success: false, message: 'There are no reviewed visual target ranges to apply. Find targets first, then select the candidate ranges.' };
+
+        if (operation === 'cut') {
+            const cutCount = state.cutTimelineRanges(findings.map(hit => [hit.timelineStart, hit.timelineEnd]));
+            if (!cutCount) return { success: false, message: 'The selected target ranges no longer overlap editable video clips.' };
+            const removedIds = new Set(findings.map(hit => hit.id));
+            useTimelineStore.getState().setTargetFindings((state.targetFindings || []).filter(hit => !removedIds.has(hit.id)));
+            return { success: true, message: `Cut ${cutCount} reviewed target range(s) in one undoable edit.`, details: { cutCount } };
+        }
+
+        if (operation === 'broll') {
+            const placements = [];
+            for (const hit of findings) {
+                const result = await this.placeContextualBroll({
+                    targetRange: { start: hit.timelineStart, end: hit.timelineEnd },
+                    wordSync: true,
+                });
+                if (result?.placements?.length) placements.push(...result.placements);
+            }
+            return {
+                success: placements.length > 0,
+                message: placements.length
+                    ? `Added ${placements.length} contextual B-roll cutaway(s) inside the reviewed target ranges.`
+                    : 'No contextual B-roll matched those reviewed ranges closely enough.',
+                details: { placements },
+            };
+        }
+        return { success: false, message: 'Choose a supported target operation: cut or broll.' };
     }
 
     /**
@@ -2002,10 +2199,24 @@ export class VideoEditorTools {
             const exists = (state.assets || []).some(a => a.id === asset.id);
             if (!exists) state.addAssets?.([asset]);
 
+            const selectedRange = state.selectedTimelineRange;
+            const hasTargetRange = Number.isFinite(Number(selectedRange?.start))
+                && Number.isFinite(Number(selectedRange?.end))
+                && Number(selectedRange.end) > Number(selectedRange.start);
+            const interval = clampToTimelineRange(
+                hasTargetRange ? Number(selectedRange.start) : (Number(state.currentTime) || 0),
+                Number(asset.duration) || 4,
+                hasTargetRange ? selectedRange : null,
+                0.5,
+            );
+            if (!interval) {
+                return { success: false, message: 'The selected range is too short for this stock clip.' };
+            }
+
             const trackId = state.addOverlayClip(asset, {
                 scale: 4, x: 50, y: 50,
-                start: typeof state.currentTime === 'number' ? state.currentTime : 0,
-                duration: asset.duration || 4,
+                start: interval.start,
+                duration: interval.duration,
                 kind: 'video',
             });
 
@@ -2015,9 +2226,9 @@ export class VideoEditorTools {
             return {
                 success: !!trackId,
                 message: trackId
-                    ? `✓ Added stock footage for "${q}" (${providerLabel}, credit: ${creditLabel}).`
+                    ? `✓ Added stock footage for "${q}" (${providerLabel}, credit: ${creditLabel})${hasTargetRange ? ` to ${interval.start.toFixed(1)}–${(interval.start + interval.duration).toFixed(1)}s` : ''}.`
                     : `Found stock footage for "${q}" but could not place it on a track.`,
-                details: { query: q, assetId: asset.id, provider: asset.provider || data?.provider || 'vecteezy' },
+                details: { query: q, assetId: asset.id, provider: asset.provider || data?.provider || 'vecteezy', ...(hasTargetRange ? { timelineRange: [interval.start, interval.start + interval.duration] } : {}) },
             };
         } catch (error) {
             console.error('[VideoEditorTools] fetchStockBroll error:', error);

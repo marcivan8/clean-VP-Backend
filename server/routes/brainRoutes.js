@@ -13,6 +13,7 @@
  *   POST   /api/brain/feedback        — Record suggestion chip feedback
  *   POST   /api/brain/observe-command — Learn from an executed command (no GPT)
  *   POST   /api/brain/analyze-asset   — Queue asset analysis (BullMQ job); video via gcsPath, image via imageBase64
+ *   POST   /api/brain/locate-target   — Queue a query-specific visual scan, returns timed review candidates
  *   GET    /api/brain/analysis-status — Read queued visual-analysis status for a project
  *   GET    /api/brain/bin-summary     — Fast media bin summary (no AI)
  *   GET    /api/brain/broll-profiles  — Raw per-asset visual profiles (no AI)
@@ -412,6 +413,41 @@ router.post('/analyze-asset', authenticateUser, async (req, res) => {
 
     } catch (err) {
         console.error('[brainRoutes] /analyze-asset error:', err.message);
+        return res.status(500).json({ error: err.message });
+    }
+});
+
+// ── POST /api/brain/locate-target ───────────────────────────────────────────
+// Query-specific visual search is queued so snapshot sampling and vision calls
+// never block a web request. Results are candidates; callers must review them.
+router.post('/locate-target', authenticateUser, async (req, res) => {
+    try {
+        const assetId = String(req.body?.assetId || '').trim();
+        const query = String(req.body?.query || '').trim().slice(0, 240);
+        const range = req.body?.range || null;
+        if (!assetId || !query) return res.status(400).json({ error: 'assetId and query are required' });
+        if (range && (!Number.isFinite(Number(range.start)) || !Number.isFinite(Number(range.end)) || Number(range.end) <= Number(range.start))) {
+            return res.status(400).json({ error: 'range must contain increasing numeric start and end times' });
+        }
+
+        const { data: asset, error } = await supabaseAdmin
+            .from('media_assets')
+            .select('id, user_id, gcs_path, name')
+            .eq('id', assetId)
+            .eq('user_id', req.user.id)
+            .maybeSingle();
+        if (error) throw error;
+        if (!asset?.gcs_path) return res.status(404).json({ error: 'Video asset was not found or is not ready for analysis.' });
+
+        const jobId = `target-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        const queue = getAssetAnalysisQueue();
+        const job = await queue.add('locate-visual-target', {
+            action: 'locate-visual-target', assetId: asset.id, filePath: asset.gcs_path,
+            userId: req.user.id, name: asset.name || null, query, range,
+        }, { jobId, removeOnComplete: 100, removeOnFail: 200 });
+        return res.json({ jobId: job.id, status: 'queued', assetId: asset.id, query });
+    } catch (err) {
+        console.error('[brainRoutes] /locate-target error:', err.message);
         return res.status(500).json({ error: err.message });
     }
 });
