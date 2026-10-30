@@ -142,6 +142,9 @@ check('proxyUrl is checked before sourceUrl',
         return proxyIdx !== -1 && sourceIdx !== -1 && proxyIdx < sourceIdx;
     })(),
     'sourceUrl (raw) checked first means thumbnail capture picks the URL shape most likely to fail a seek.');
+check('thumbnail capture tries the original source if a processed proxy fails',
+    /function buildVideoUrls\(asset\)[\s\S]*?buildVideoUrl\(\{ \.\.\.asset, proxyUrl: null \}\)/.test(thumbSrc)
+    && /for \(const videoUrl of candidates\.slice\(0, 3\)\)[\s\S]*?blob = await captureFrame\(videoUrl\)[\s\S]*?if \(blob\) break/.test(thumbSrc));
 
 console.log(
     failures === 0

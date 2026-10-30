@@ -1,4 +1,4 @@
-// R124 — a long, multi-section creative brief (the kind of document a user
+// R124 — a detailed creative brief (the kind of document a user
 // pastes wholesale into the AI chat, describing an entire creative edit in
 // 10+ sections) must resolve to ONE long_form_edit (FULL_BUILD) request with
 // its caption-specific instructions preserved — not get hijacked by whichever
@@ -35,7 +35,8 @@ visual storyteller. Your task is to transform my uploaded raw video into a
 polished, modern, dynamic talking-head video inspired by the visual editing
 style of the reference videos provided.
 
-Do not simply add subtitles to the footage. Make the video visually
+Edit this short 45-second talking-head video. Do not simply add subtitles to
+the footage. Make the video visually
 communicate the ideas being spoken.
 Use concise motion graphics and callouts to reinforce important ideas.
 
@@ -65,7 +66,7 @@ console.warn = realWarn; console.info = realInfo;
 const ok = (name) => realLog(`✓ ${name}`);
 
 assert.equal(res.operation, 'long_form_edit', `expected long_form_edit, got ${res.operation}`);
-ok('a full multi-section creative brief resolves to long_form_edit, not a single hijacked command');
+ok('a complete brief for a short talking-head video reaches full edit planning, not a single hijacked command');
 
 assert.equal(res.constraints.editMode, 'FULL_BUILD');
 ok('editMode is FULL_BUILD — a from-scratch creative rebuild, not a narrow clean-up');
@@ -87,6 +88,9 @@ assert.ok(graphicsStep, 'a complete prompt that asks for visual graphics must in
 assert.equal(graphicsStep.args.dryRun, false);
 assert.ok(fullPlan.steps.findIndex(s => s.action === 'storyboard_video') < fullPlan.steps.findIndex(s => s.action === 'animate_automatically'));
 ok('the full creative brief creates graphics across the video, then animates them');
+assert.match(fullPlan.approvalMessage, /Here's what I'm going to do/);
+assert.doesNotMatch(fullPlan.approvalMessage, /Long-Form/);
+ok('the plan label does not imply the source video must be long-form');
 
 // Regression guard: a short, genuinely single-purpose request mentioning
 // "captions" must still resolve to the plain auto_captions command — this

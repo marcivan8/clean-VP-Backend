@@ -241,6 +241,10 @@ async function executeChatCompletionWithFailover({
                             ? Number(process.env.MOTION_AI_MAX_TOKENS)
                             : (/gemini|^o\d|gpt-5/i.test(secondaryModel) ? 2000 : 700),
                     };
+                    // Gemini's reasoning control is provider-specific. If a
+                    // Gemini motion request fails over to another vendor,
+                    // don't send that vendor an unsupported Gemini setting.
+                    if (baseProvider !== 'gemini') delete secondaryParams.reasoning_effort;
                     if (/gemma/i.test(secondaryModel)) {
                         delete secondaryParams.response_format;
                     } else {
@@ -396,6 +400,11 @@ async function generateScenePlan({
                 ? Number(process.env.MOTION_AI_MAX_TOKENS)
                 : (/gemini|^o\d|gpt-5/i.test(model) ? 2000 : 700),
         };
+        // Scene planning is a constrained JSON drafting job, not deep
+        // reasoning. Gemini 3.8 Flash defaults to medium thinking; Google's
+        // OpenAI-compatible API supports reasoning_effort='low', which maps
+        // to its low thinking level and reduces avoidable latency here.
+        if (effectiveProvider === 'gemini') requestParams.reasoning_effort = 'low';
         if (!/gemma/i.test(model)) {
             requestParams.response_format = { type: 'json_object' };
         }

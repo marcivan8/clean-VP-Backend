@@ -449,7 +449,7 @@ router.post('/short-plan', authenticateUser, async (req, res) => {
 
 router.post('/scene-plan', authenticateUser, async (req, res) => {
     // Rate limiter: mounted under aiLimiter in index.js (LLM call).
-    const { brief, transcript, beats, tone, platform } = req.body || {};
+    const { brief, transcript, beats, tone, platform, timeoutMs: requestedTimeoutMs } = req.body || {};
     const cleanBrief = String(brief || '').trim().slice(0, 600);
     if (!cleanBrief) return res.status(400).json({ error: 'brief is required' });
     const cleanTranscript = String(transcript || '').trim().slice(0, 3000);
@@ -457,6 +457,12 @@ router.post('/scene-plan', authenticateUser, async (req, res) => {
 
     const cleanTone = tone ? String(tone).slice(0, 40) : '';
     const cleanPlatform = platform ? String(platform).slice(0, 40) : '';
+    // Pro short finish supplies a shorter budget because it has a local
+    // transcript/technique fallback. Clamp client input so this endpoint can
+    // never extend the server's model request budget.
+    const sceneTimeoutMs = Number(requestedTimeoutMs) > 0
+        ? Math.min(15_000, Math.max(1_000, Number(requestedTimeoutMs)))
+        : undefined;
 
     // R103 — retrieve the knowledge-base shortlist for this brief before the
     // model is asked anything, and hand it to the prompt builder through a
@@ -488,6 +494,16 @@ router.post('/scene-plan', authenticateUser, async (req, res) => {
         techniques = [];
     }
 
+    // The browser uses this compact, validated subset to compose a
+    // transcript-grounded fallback if the model times out. Previously the
+    // route returned only technique names, so the knowledge-base shortlist
+    // could be reported but not executed when there was no AI scene plan.
+    const motionTechniques = techniques.map(({ technique }) => ({
+        name: technique.name,
+        beatKinds: technique.beatKinds,
+        motion: technique.motion,
+    }));
+
     try {
         const result = await generateScenePlan({
             brief: cleanBrief,
@@ -495,6 +511,7 @@ router.post('/scene-plan', authenticateUser, async (req, res) => {
             beats: beatList,
             tone: cleanTone,
             platform: cleanPlatform,
+            timeoutMs: sceneTimeoutMs,
             buildPrompt: (args) => buildScenePlanPrompt({ ...args, techniques, useVibedStandards: true }),
             cleanPlan: cleanScenePlan,
         });
@@ -504,6 +521,7 @@ router.post('/scene-plan', authenticateUser, async (req, res) => {
             // What the KB offered, so the client (and the tests) can see the
             // library was consulted even when the model ignored it.
             techniques: techniques.map(t => t.technique.name),
+            motionTechniques,
             // R104b — WHY there is no plan. The three rules-fallback paths are
             // completely different problems with identical output: the
             // provider is deliberately set to "rules", the provider is set to
@@ -523,6 +541,7 @@ router.post('/scene-plan', authenticateUser, async (req, res) => {
             source: 'rules',
             plan: null,
             techniques: techniques.map(t => t.technique.name),
+            motionTechniques,
             failureCategory: 'route_error',
             provider: null,
         });

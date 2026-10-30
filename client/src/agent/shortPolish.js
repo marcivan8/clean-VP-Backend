@@ -83,6 +83,65 @@ export function headlineFromText(text, { maxWords = 6, upper = true } = {}) {
     return upper ? out.toUpperCase() : out.charAt(0).toUpperCase() + out.slice(1);
 }
 
+/**
+ * Local, transcript-grounded scene plan for Pro Finish when the motion model
+ * is unavailable. The scene model can improve the writing, but a network
+ * timeout must never reduce the finish to a lone title when the transcript
+ * already contains enough words for a second animated beat.
+ */
+export function fallbackShortScenePlan(words, { headline = '', duration = 0, techniques = [] } = {}) {
+    const cleanText = value => String(value || '')
+        .replace(/#[\p{L}\p{N}_]+/gu, '')
+        .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
+        .replace(/[.,;:!?]+/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .split(' ')
+        .filter(Boolean)
+        .slice(0, 7)
+        .join(' ')
+        .slice(0, 70);
+    const timedWords = (Array.isArray(words) ? words : [])
+        .map(w => ({
+            word: wordOf(w),
+            start: Number(w?.start),
+            end: Number(w?.end),
+        }))
+        .filter(w => w.word && Number.isFinite(w.start) && Number.isFinite(w.end));
+    const segments = groupWordsIntoSegments(timedWords, 5, 0.4)
+        .map(s => cleanText(s.text))
+        .filter(s => s.split(/\s+/).filter(Boolean).length >= 2);
+    const title = cleanText(headline)
+        || headlineFromText(timedWords.slice(0, 18).map(w => w.word).join(' '), { maxWords: 6, upper: false });
+    if (!title) return null;
+
+    const wordsOf = value => value.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+    const titleWords = new Set(wordsOf(title));
+    const point = segments.find(segment => {
+        if (segment.toLowerCase() === title.toLowerCase()) return false;
+        const tokens = wordsOf(segment);
+        const overlap = tokens.filter(token => titleWords.has(token)).length;
+        return tokens.length >= 3 && overlap / tokens.length < 0.6;
+    });
+
+    const usableTechniques = Array.isArray(techniques) ? techniques.filter(t => t?.name) : [];
+    const chooseTechnique = (kind, exclude = null) => usableTechniques.find(t =>
+        t.name !== exclude && (!Array.isArray(t.beatKinds) || t.beatKinds.includes(kind))
+    ) || usableTechniques.find(t => t.name !== exclude) || null;
+    const introTechnique = chooseTechnique('intro');
+    const pointTechnique = chooseTechnique('point', introTechnique?.name);
+    const beat = (kind, text, kicker, technique) => ({
+        kind,
+        text,
+        ...(kicker ? { kicker } : {}),
+        ...(technique?.name ? { technique: technique.name } : {}),
+        ...(technique?.motion ? { motion: technique.motion } : {}),
+    });
+    const beats = [beat('intro', title, null, introTechnique)];
+    if (point && Number(duration) >= 8) beats.push(beat('point', point, '01', pointTechnique));
+    return { tone: 'viral', beats, source: 'local-fallback' };
+}
+
 /** Spoken prices, percentages and figures in timeline words: [{t, text}]. */
 export function spokenNumbers(words, { max = 4, gap = 4 } = {}) {
     const out = [];
@@ -214,11 +273,10 @@ export function polishShort(built, profile, opts = {}) {
         // the full SceneDirector's own intro beat (plus its first point/stat
         // beat, if the hook budget has room for a second beat) instead of
         // always a single static title. SceneDirector documents its own
-        // rule -- "never invent claims" -- so this path is only taken when
-        // there is real AI-written text to put on screen; with no plan (no
-        // AI configured, the request failed, the model had nothing to add)
-        // it falls straight through to the original single-title treatment,
-        // unchanged below.
+        // rule -- "never invent claims". Pro Finish callers provide a local
+        // transcript-grounded plan when AI is unavailable, so this same
+        // composition path can still produce measured motion beats without
+        // making up on-screen copy.
         const scenePlan = opts.scenePlan && typeof opts.scenePlan === 'object' ? opts.scenePlan : null;
 
         // R103 -- PASS THE PLAN'S OWN BEATS THROUGH, do not rebuild them.
@@ -298,7 +356,8 @@ export function polishShort(built, profile, opts = {}) {
                     t.clips.push({ ...p.clip, id });
                 }
                 if (placements.length) {
-                    applied.push(`hook sequence (${introBeats.length} beat${introBeats.length > 1 ? 's' : ''}, AI-directed)`);
+                    const direction = scenePlan?.source === 'local-fallback' ? 'transcript fallback' : 'AI-directed';
+                    applied.push(`hook sequence (${introBeats.length} beat${introBeats.length > 1 ? 's' : ''}, ${direction})`);
                     hookApplied = true;
                 }
             }
@@ -593,4 +652,4 @@ export function shiftToShort(list, start, end, key = 'start') {
         }));
 }
 
-export default { POLISH_LOOK, headlineFromText, spokenNumbers, emphasisIndices, phraseFromWords, polishShort, shiftToShort };
+export default { POLISH_LOOK, headlineFromText, fallbackShortScenePlan, spokenNumbers, emphasisIndices, phraseFromWords, polishShort, shiftToShort };

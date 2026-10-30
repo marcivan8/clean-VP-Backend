@@ -190,10 +190,10 @@ export class AgentFeedbackService {
                     // Message came directly from VideoEditorTools.longFormEdit()
                     message = execution.message;
                 } else if (planData) {
-                    message = `✓ Long-form edit applied — ${successCount}/${totalSteps} steps completed.\n\n`;
+                    message = `✓ Complete edit applied — ${successCount}/${totalSteps} steps completed.\n\n`;
                     message += AgentFeedbackService.formatEditPlanResult(planData);
                 } else {
-                    message = '✓ Long-form edit applied.';
+                    message = '✓ Complete edit applied.';
                 }
                 suggestions = ['Review the timeline', 'Undo if anything was cut incorrectly', 'Export when ready'];
                 break;

@@ -67,7 +67,7 @@ const OPERATION_META = {
     export:            { description: 'Render queued. Your video will be ready to download shortly.', suggestion: null },
 
     // Long-form
-    long_form_edit:    { description: 'Long-form edit applied — structured cuts made from content analysis of your full video.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
+    long_form_edit:    { description: 'Complete edit applied — content-aware structure, captions, graphics, and animation for your video.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },
     remove_repetition: { description: 'Repetitive and low-value segments removed — only your best takes remain.', suggestion: 'Make it more dynamic', suggestionPrompt: 'Make it more dynamic' },
 };
 

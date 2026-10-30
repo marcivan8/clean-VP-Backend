@@ -156,6 +156,17 @@ async function main() {
         check('desktop preview accounts for the timeline overlay without adding a layout row',
             /stage\.clientHeight - verticalPadding - timelineOverlayHeight/.test(layoutSrc)
             && !/mode === 'editor' && !isMobile && "pb-72"/.test(layoutSrc));
+        check('desktop preview is centered in the uncovered area above the floating timeline',
+            /transform: mode === 'editor' && !isMobile \? 'translateY\(-9rem\)'/.test(layoutSrc),
+            'the fitted frame is centered in the full stage and its lower portion is covered by the timeline');
+        const stageHeight = 1200, verticalPadding = 64, timelineHeight = 288;
+        const portraitInStage = fitPreviewSize(1400, stageHeight - verticalPadding - timelineHeight, 9 / 16);
+        const portraitTop = verticalPadding / 2
+            + (stageHeight - verticalPadding - portraitInStage.height) / 2
+            - timelineHeight / 2;
+        check('portrait frame bottom stays above the desktop timeline',
+            portraitTop + portraitInStage.height <= stageHeight - timelineHeight - verticalPadding / 2,
+            `frame bottom=${portraitTop + portraitInStage.height}, timeline starts=${stageHeight - timelineHeight - verticalPadding / 2}`);
         check('preview frame uses measured pixel dimensions',
             /width: previewSize\.width[\s\S]*height: previewSize\.height/.test(layoutSrc));
         check('preview dimensions are measured before first paint and include the border box',

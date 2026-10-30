@@ -208,7 +208,7 @@ export const TOOL_DEFINITIONS = [
     },
     {
         name: "long_form_edit",
-        description: "Generates and executes a full long-form edit plan based on prior content analysis. Includes silence removal, hook placement, segment reordering, repetition removal, and transitions. Executes all steps immediately.",
+        description: "Generates and executes a complete edit plan for the current video, regardless of its duration. Uses content analysis to apply requested structure, captions, graphics, and animation. Executes all steps immediately.",
         parameters: {
             type: "object",
             properties: {
@@ -1448,7 +1448,7 @@ export class VideoEditorTools {
         if (!plan || plan.error) {
             return {
                 success: false,
-                message: plan?.error || 'Long-form plan generation failed.',
+                message: plan?.error || 'Complete edit plan generation failed.',
                 editPlan: plan,
             };
         }
@@ -1461,7 +1461,7 @@ export class VideoEditorTools {
             };
         }
 
-        console.log(`[VideoEditorTools] Executing long-form plan: ${plan.step_count} steps`);
+        console.log(`[VideoEditorTools] Executing complete edit plan: ${plan.step_count} steps`);
 
         // Dynamically import to avoid circular dependency issues at module load time
         const { CommandCompiler } = await import('./CommandCompiler.js');
@@ -1472,7 +1472,7 @@ export class VideoEditorTools {
         if (!compileResult.success && compileResult.commands.length === 0) {
             return {
                 success: false,
-                message: compileResult.error || 'Could not compile long-form edit commands.',
+                message: compileResult.error || 'Could not compile complete edit commands.',
                 editPlan: plan,
             };
         }
@@ -1514,8 +1514,8 @@ export class VideoEditorTools {
         return {
             success: executionResult.success,
             message: executionResult.success
-                ? `✓ Long-form edit complete — ${plan.step_count} steps applied.`
-                : `Long-form edit failed: ${executionResult.error} — say "continue" to pick up where it stopped.`,
+                ? `✓ Complete edit applied — ${plan.step_count} steps completed.`
+                : `Complete edit failed: ${executionResult.error} — say "continue" to pick up where it stopped.`,
             editPlan: plan,
             results: executionResult.results,
         };
@@ -1544,7 +1544,7 @@ export class VideoEditorTools {
             if (!record) {
                 return {
                     success: false,
-                    message: 'There is nothing to continue — the last long-form edit either finished successfully or nothing was recorded.',
+                    message: 'There is nothing to continue — the last complete edit either finished successfully or nothing was recorded.',
                 };
             }
 

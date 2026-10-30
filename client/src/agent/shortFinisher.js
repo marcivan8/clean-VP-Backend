@@ -16,7 +16,7 @@
 
 import { authFetch } from '../utils/authFetch.js';
 import { buildShortTimeline } from './shortTimeline.js';
-import { polishShort, shiftToShort } from './shortPolish.js';
+import { fallbackShortScenePlan, polishShort, shiftToShort } from './shortPolish.js';
 import { collectSfxCues, sfxVolume, SFX_QUERIES } from './sfxCues.js';
 import { sfxPlayableUrl } from './animateMoments.js';
 import { PLATFORM_PROFILES } from './PlatformProfiles.js';
@@ -58,6 +58,7 @@ const sfxCache = new Map();
  * is what fires first on a genuine stall, not this one racing ahead of it.
  */
 export const PLAN_TIMEOUT_MS = 35000;
+export const SHORT_SCENE_PLAN_TIMEOUT_MS = 12000;
 
 /** authFetch with a deadline. Aborting reads as a normal failure to the caller. */
 async function fetchWithTimeout(url, options, ms = PLAN_TIMEOUT_MS) {
@@ -206,7 +207,7 @@ const SCENE_PLAN_FAILURES = Object.freeze({
 });
 
 export async function fetchScenePlanResult(text, platform, duration) {
-    const none = (reason, source = 'none', techniques = []) => ({ plan: null, source, techniques, reason });
+    const none = (reason, source = 'none', techniques = [], motionTechniques = []) => ({ plan: null, source, techniques, motionTechniques, reason });
     if (!text) return none('there was no transcript text to plan from');
     const brief = 'A short-form video: open with a strong hook, surface the single most '
         + 'important point or figure, and close with a call to action if the video asks for one.';
@@ -217,7 +218,10 @@ async function runScenePlan(brief, text, platform, duration, none) {
     try {
         const res = await fetchWithTimeout('/api/motion/scene-plan', {
             method: 'POST',
-            body: JSON.stringify({ brief, transcript: text, platform, duration }),
+            // Keep Pro Finish responsive. The server still gets its bounded
+            // fallback window, after which the transcript-driven local scene
+            // plan uses the same technique shortlist without waiting 30s.
+            body: JSON.stringify({ brief, transcript: text, platform, duration, timeoutMs: SHORT_SCENE_PLAN_TIMEOUT_MS }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -225,7 +229,7 @@ async function runScenePlan(brief, text, platform, duration, none) {
             // thrown network error was ever reported, so a 500/502/503 from
             // the motion route made the entire scene plan — and with it every
             // technique in the knowledge base — vanish in complete silence.
-            console.warn(`[shortFinisher] scene plan request failed (${res.status}); the hook falls back to a single title.`);
+            console.warn(`[shortFinisher] scene plan request failed (${res.status}); the transcript-driven motion fallback will be used.`);
             return none(`the motion service answered ${res.status}`, 'error');
         }
         const plan = data.plan || null;
@@ -236,6 +240,7 @@ async function runScenePlan(brief, text, platform, duration, none) {
         // is a motion problem.
         const source = String(data.source || (plan ? 'ai' : 'rules'));
         const techniques = Array.isArray(data.techniques) ? data.techniques : [];
+        const motionTechniques = Array.isArray(data.motionTechniques) ? data.motionTechniques : [];
         if (!plan) {
             const is404 = /404|not found/i.test(data.failureCategory || '');
             const is503 = /503|high demand|overloaded|capacity/i.test(data.failureCategory || '');
@@ -247,20 +252,19 @@ async function runScenePlan(brief, text, platform, duration, none) {
                     || (data.failureCategory ? `the motion model failed (${data.failureCategory})` : null));
             const named = data.provider ? ` [provider: ${data.provider}]` : '';
             console.warn(`[shortFinisher] no AI scene plan (source=${source}, reason=${data.failureCategory || 'unreported'}${named}); `
-                + `${techniques.length} knowledge-base technique(s) were offered and none could be used. `
-                + 'The hook falls back to a single title.');
+                + `${techniques.length} knowledge-base technique(s) were offered; the transcript-driven fallback will apply compatible motions. `);
             return none(why
                 || (source === 'rules'
                     ? 'the motion AI is not answering, so the deterministic rules were used'
-                    : `no plan came back (source: ${source})`), source, techniques);
+                    : `no plan came back (source: ${source})`), source, techniques, motionTechniques);
         }
-        return { plan, source, techniques, reason: null };
+        return { plan, source, techniques, motionTechniques, reason: null };
     } catch (err) {
         if (err.name === 'AbortError') {
-            console.warn(`[shortFinisher] the motion model did not answer within ${PLAN_TIMEOUT_MS / 1000}s; the hook stays a single title.`);
+            console.warn(`[shortFinisher] the scene-plan request did not answer within ${PLAN_TIMEOUT_MS / 1000}s; the transcript-driven motion fallback will be used.`);
             return none(`the motion model did not answer within ${PLAN_TIMEOUT_MS / 1000}s`, 'timeout');
         }
-        console.warn('[shortFinisher] scene plan unavailable, hook stays a single title:', err.message);
+        console.warn('[shortFinisher] scene plan unavailable; the transcript-driven motion fallback will be used:', err.message);
         return none(`the motion service could not be reached (${err.message})`, 'error');
     }
 }
@@ -293,12 +297,19 @@ export async function finishShort(state, short, opts = {}) {
     if (opts.polish === false) return { ...built, applied: [], words };
 
     const text = words.map(w => String(w.word ?? w.text ?? '')).join(' ').slice(0, 2000);
-    const [plan, scenePlan] = await Promise.all([
+    const [plan, sceneResult] = await Promise.all([
         opts.plan !== undefined ? opts.plan
             : (text ? (opts.fetchPlan || fetchShortPlan)(text, profile.id, built.duration) : null),
-        opts.scenePlan !== undefined ? opts.scenePlan
-            : (text ? (opts.fetchScenePlan || fetchScenePlan)(text, profile.id, built.duration) : null),
+        opts.scenePlan !== undefined ? { plan: opts.scenePlan, motionTechniques: opts.motionTechniques || [] }
+            : opts.fetchScenePlan
+                ? Promise.resolve((text ? opts.fetchScenePlan(text, profile.id, built.duration) : null)).then(plan => ({ plan, motionTechniques: [] }))
+                : (text ? fetchScenePlanResult(text, profile.id, built.duration) : { plan: null, motionTechniques: [] }),
     ]);
+    const scenePlan = sceneResult?.plan || fallbackShortScenePlan(words, {
+        headline: plan?.headline,
+        duration: built.duration,
+        techniques: sceneResult?.motionTechniques,
+    });
     const polished = polishShort(built, profile, { words, events, plan, scenePlan, popOut: !!opts.popOut });
     if (opts.sfx !== false) {
         const placed = await addSfxTrack(polished.tracks, collectSfxCues(polished.tracks, { level: profile.sfx }), profile.sfx, opts.fetchAsset);
@@ -308,4 +319,4 @@ export async function finishShort(state, short, opts = {}) {
     return { ...polished, words };
 }
 
-export default { finishShort, fetchShortPlan, fetchScenePlan, fetchSfxAsset, addSfxTrack, clearPlanCache, PLAN_TIMEOUT_MS };
+export default { finishShort, fetchShortPlan, fetchScenePlan, fetchSfxAsset, addSfxTrack, clearPlanCache, PLAN_TIMEOUT_MS, SHORT_SCENE_PLAN_TIMEOUT_MS };

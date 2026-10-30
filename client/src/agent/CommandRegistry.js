@@ -847,7 +847,7 @@ export const COMMANDS = [
         id: 'resume_failed_job',
         category: 'edit',
         label: 'Continue the edit',
-        summary: 'Picks up the last long-form edit from wherever it stopped or failed.',
+        summary: 'Picks up the last complete edit from wherever it stopped or failed.',
         phrases: ['continue the edit', 'continue editing', 'continue where it stopped',
                   'continue where it left off', 'pick up where it left off',
                   'resume the edit', 'resume editing', 'finish the edit',

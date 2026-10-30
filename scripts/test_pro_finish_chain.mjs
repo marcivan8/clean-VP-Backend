@@ -40,7 +40,7 @@ async function check(name, fn) {
 const { createRequire } = await import('module');
 const nodeRequire = createRequire(path.join(ROOT, 'package.json'));
 
-const { finishShort } = await import('../client/src/agent/shortFinisher.js');
+const { finishShort, clearPlanCache, SHORT_SCENE_PLAN_TIMEOUT_MS } = await import('../client/src/agent/shortFinisher.js');
 const { polishShort } = await import('../client/src/agent/shortPolish.js');
 const { PLATFORM_PROFILES } = await import('../client/src/agent/PlatformProfiles.js');
 const SV = await import('../client/src/motion/SceneValidator.js');
@@ -185,18 +185,18 @@ await check('every finish layer is short- prefixed, so a re-run replaces instead
     }
 });
 
-log('\n── 2. No AI configured: the chain degrades to exactly what it was ──');
+log('\n── 2. No AI configured: transcript fallback still builds a directed sequence ──');
 
-await check('with no scene plan the hook is one static title and there is no CTA', async () => {
+await check('with no scene plan the transcript creates an animated multi-beat hook and no invented CTA', async () => {
     finishedNoAi = await finishShort(state(), short, {
         plan: null,
         scenePlan: null,
         sfx: false,
     });
-    assert.ok(finishedNoAi.applied.includes('hook title'), `expected the plain hook: ${JSON.stringify(finishedNoAi.applied)}`);
-    assert.ok(!finishedNoAi.applied.some(a => /AI-directed/.test(a)), 'no plan must mean no directed sequence');
+    assert.ok(finishedNoAi.applied.some(a => /hook sequence/.test(a)), `expected a transcript fallback sequence: ${JSON.stringify(finishedNoAi.applied)}`);
+    assert.ok(!finishedNoAi.applied.some(a => /AI-directed/.test(a)), 'a local fallback must not be reported as AI-directed');
     assert.equal(idsStarting(finishedNoAi.tracks, 'short-cta-').length, 0, 'no CTA text means no CTA layer');
-    assert.equal(idsStarting(finishedNoAi.tracks, 'short-hook-text-').length, 1, 'the fallback is a single headline');
+    assert.ok(idsStarting(finishedNoAi.tracks, 'short-hook-text-').length >= 2, 'the transcript fallback should use more than one beat when the short has room');
 });
 
 await check('the fallback still animates, captions and finds the figure', () => {
@@ -204,6 +204,39 @@ await check('the fallback still animates, captions and finds the figure', () => 
     assert.ok(presetIdsOf(hook).some(p => /^composed:/.test(p)), 'the plain hook should still carry composed motion');
     assert.ok(idsStarting(finishedNoAi.tracks, 'short-caption-').length > 0);
     assert.ok(idsStarting(finishedNoAi.tracks, 'short-moment-').length > 0);
+});
+
+await check('a timed-out scene model uses the offered KB motions in its local fallback', async () => {
+    const savedFetch = globalThis.fetch;
+    clearPlanCache();
+    globalThis.fetch = async (url, options = {}) => {
+        if (String(url).includes('/api/motion/scene-plan')) {
+            const body = JSON.parse(options.body || '{}');
+            assert.equal(body.timeoutMs, SHORT_SCENE_PLAN_TIMEOUT_MS, 'Pro Finish still waits on the full 30s scene budget');
+            return { ok: true, status: 200, json: async () => ({
+                source: 'rules',
+                plan: null,
+                failureCategory: 'timeout',
+                techniques: ['hook-slam-headline', 'point-pop-count'],
+                motionTechniques: [
+                    { name: 'hook-slam-headline', beatKinds: ['intro'], motion: { enter: 'slam-in', emphasis: 'punch', exit: 'whip-out', energy: 0.9 } },
+                    { name: 'point-pop-count', beatKinds: ['point'], motion: { enter: 'pop-in', emphasis: 'punch', exit: 'shrink-out', energy: 0.7 } },
+                ],
+            }) };
+        }
+        return { ok: false, status: 503, json: async () => ({}) };
+    };
+    try {
+        const timeoutFinish = await finishShort(state(), short, { sfx: false });
+        const hook = allClips(timeoutFinish.tracks).filter(c => String(c.id).startsWith('short-hook-'));
+        assert.ok(hook.length > 0, 'the timeout path produced no hook clips');
+        assert.ok(presetIdsOf(hook).includes('composed:slam-in'), `intro KB motion was lost: ${JSON.stringify(presetIdsOf(hook))}`);
+        assert.ok(presetIdsOf(hook).includes('composed:pop-in'), `point KB motion was lost: ${JSON.stringify(presetIdsOf(hook))}`);
+        assert.ok(timeoutFinish.applied.some(a => /transcript fallback/.test(a)), 'fallback source was not identified');
+    } finally {
+        globalThis.fetch = savedFetch;
+        clearPlanCache();
+    }
 });
 
 await check('the injected fetchers are what finishShort actually calls', async () => {

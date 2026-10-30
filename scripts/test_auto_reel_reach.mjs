@@ -59,11 +59,16 @@ log('\n── 1. A missing scene plan is no longer silent ──');
 await check('the rules fallback is reported, with the techniques it could not use', async () => {
     // The exact shape the route returns when the motion model is unconfigured:
     // 200 OK, no plan, and a knowledge-base shortlist that went unused.
-    nextResponse = { ok: true, status: 200, body: { source: 'rules', plan: null, techniques: ['hook-slam-headline', 'stat-count-up'] } };
+    nextResponse = { ok: true, status: 200, body: {
+        source: 'rules', plan: null,
+        techniques: ['hook-slam-headline', 'stat-count-up'],
+        motionTechniques: [{ name: 'hook-slam-headline', beatKinds: ['intro'], motion: { enter: 'slam-in' } }],
+    } };
     const r = await SF.fetchScenePlanResult('some transcript words', 'reels', 20);
     assert.equal(r.plan, null);
     assert.equal(r.source, 'rules', 'the source was dropped — the caller cannot tell why there is no plan');
     assert.deepEqual(r.techniques, ['hook-slam-headline', 'stat-count-up'], 'the shortlist was dropped');
+    assert.deepEqual(r.motionTechniques[0], { name: 'hook-slam-headline', beatKinds: ['intro'], motion: { enter: 'slam-in' } }, 'executable technique data was dropped');
     assert.match(r.reason, /not answering/i, `reason was ${JSON.stringify(r.reason)}`);
 });
 
@@ -137,6 +142,19 @@ await check('the finish message names the techniques, or the reason there are no
     assert.match(block, /Motion techniques: /, 'a successful technique run is still invisible to the user');
     assert.match(block, /The AI scene direction was skipped/, 'a skipped scene plan is still invisible to the user');
     assert.match(block, /sceneSource/, 'the result carries no machine-readable source');
+});
+
+await check('short scene plans expose executable KB motions and use a bounded fast timeout', () => {
+    const route = read('server/routes/motionRoutes.js');
+    assert.match(route, /motionTechniques = techniques\.map\(\(\{ technique \}\) => \(\{/,
+        'the failure response still exposes only technique names, not executable motions');
+    assert.match(route, /Math\.min\(15_000, Math\.max\(1_000, Number\(requestedTimeoutMs\)\)\)/,
+        'scene-plan lets clients extend its model deadline without a cap');
+    assert.match(route, /timeoutMs: sceneTimeoutMs/,
+        'the bounded short timeout is not passed to the motion model');
+    const finisher = read('client/src/agent/shortFinisher.js');
+    assert.match(finisher, /SHORT_SCENE_PLAN_TIMEOUT_MS = 12000/);
+    assert.match(finisher, /timeoutMs: SHORT_SCENE_PLAN_TIMEOUT_MS/);
 });
 
 log('\n── 3. Stock b-roll: the key that was never documented ──');
@@ -263,6 +281,8 @@ await check('a truncated answer is its own reason, not "returned nothing"', () =
     assert.match(motion, /finish_reason === 'length'/, 'truncation is not detected');
     assert.match(motion, /output_truncated/, 'truncation has no category');
     assert.match(motion, /MOTION_AI_MAX_TOKENS/, 'the budget is not overridable');
+    assert.match(motion, /effectiveProvider === 'gemini'\) requestParams\.reasoning_effort = 'low'/,
+        'Gemini motion planning does not request low thinking for this constrained JSON task');
     const sf = read('client/src/agent/shortFinisher.js');
     assert.match(sf, /output_truncated:.*MOTION_AI_MAX_TOKENS/, 'the client cannot explain a truncated answer');
 });

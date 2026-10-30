@@ -452,10 +452,10 @@ export class IntentParser {
         // other instruction in the brief is discarded. A brief this size is
         // never a request to run exactly one atomic command; checked before
         // Registry, same as tryCombinedCleanup above.
-        const longFormBrief = this.tryLongFormCreativeBrief(prompt);
-        if (longFormBrief) {
-            console.log('[IntentParser] Long-form creative brief detected — routing to long_form_edit (FULL_BUILD), bypassing Registry');
-            return this.validateAndNormalize(longFormBrief, prompt);
+        const completeBrief = this.tryCompleteCreativeBrief(prompt);
+        if (completeBrief) {
+            console.log('[IntentParser] Complete creative brief detected — routing to full edit planning, bypassing Registry');
+            return this.validateAndNormalize(completeBrief, prompt);
         }
 
         const reg = this.tryRegistry(prompt);
@@ -639,8 +639,9 @@ export class IntentParser {
     }
 
     /**
-     * R124 — detect a long, multi-section creative brief that should become
-     * ONE long_form_edit (FULL_BUILD) request, never a single narrow
+     * R124 — detect a detailed, multi-section creative brief that should
+     * become ONE complete edit request, regardless of source-video duration,
+     * never a single narrow
      * CommandRegistry match. See the call site in parse() for why this has
      * to run before tryRegistry at all, not just win a tie-break after it.
      *
@@ -657,7 +658,7 @@ export class IntentParser {
      * only has to recognize that the request AS A WHOLE is a full creative
      * build, not extract every individual instruction in it.
      */
-    static tryLongFormCreativeBrief(prompt) {
+    static tryCompleteCreativeBrief(prompt) {
         const text = String(prompt || '');
         if (text.length < 300) return null;
 
@@ -676,7 +677,7 @@ export class IntentParser {
             operation: 'long_form_edit',
             parameters: {
                 editMode: 'FULL_BUILD',
-                reason: 'Long, multi-section creative brief — full ContentAnalyzer-driven rebuild rather than one isolated command',
+                reason: 'Complete creative brief — full ContentAnalyzer-driven edit rather than one isolated command',
             },
             confidence: 'HIGH',
             missingParameters: [],

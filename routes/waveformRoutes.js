@@ -266,32 +266,49 @@ function extractPeaks(inputPath, inputStream) {
             ff.stdin.on('error', () => {}); // suppress EPIPE when stream closes early
         }
 
-        const chunks = [];
-        let pcmBytes = 0;
-        // Raw PCM at 22 050 Hz mono s16le is ~44 KB/s, so 200 MB ≈ 75 min of
-        // audio. Past that we're buffering a pathological input into the same
-        // heap the Express server runs in (R24) — refuse rather than OOM the
-        // process, which is itself a 502 generator.
+        const peaks = [];
+        let sampleCount = 0;
+        let samplesInWindow = 0;
+        let peakInWindow = 0;
+        let pendingLowByte = null;
+        // Keep the 200 MB raw-PCM ceiling (about 75 minutes) as a duration
+        // guard, but process each chunk in-place. Buffering a full interview
+        // as PCM made concurrent waveform requests consume hundreds of MB and
+        // could get ffmpeg SIGKILLed by a memory-limited host.
         const MAX_PCM_BYTES = 200 * 1024 * 1024;
+        const addSample = sample => {
+            sampleCount++;
+            peakInWindow = Math.max(peakInWindow, Math.abs(sample));
+            samplesInWindow++;
+            if (samplesInWindow === SAMPLES_PER_WIN) {
+                peaks.push(peakInWindow / 32767);
+                samplesInWindow = 0;
+                peakInWindow = 0;
+            }
+        };
 
         ff.stdout.on('data', chunk => {
-            pcmBytes += chunk.length;
-            if (pcmBytes > MAX_PCM_BYTES) {
+            if ((sampleCount * 2) + chunk.length > MAX_PCM_BYTES) {
                 try { ff.kill('SIGKILL'); } catch { /* noop */ }
                 finish(new Error('audio stream exceeded the peak-extraction size cap'));
                 return;
             }
-            chunks.push(chunk);
+            let offset = 0;
+            if (pendingLowByte !== null && chunk.length) {
+                addSample((pendingLowByte | (chunk[offset++] << 8)) << 16 >> 16);
+                pendingLowByte = null;
+            }
+            for (; offset + 1 < chunk.length; offset += 2) addSample(chunk.readInt16LE(offset));
+            if (offset < chunk.length) pendingLowByte = chunk[offset];
         });
         ff.stderr.on('data', chunk => { stderrTail = (stderrTail + chunk.toString()).slice(-2000); });
 
         ff.on('error', err => finish(new Error(`ffmpeg spawn failed: ${err.message}`)));
 
-        ff.on('close', code => {
+        ff.on('close', (code, signal) => {
             if (settled) return;
-            const pcm = Buffer.concat(chunks);
 
-            if (code !== 0 && pcm.length === 0) {
+            if (code !== 0 && sampleCount === 0) {
                 const noAudio = /does not contain any stream|matches no streams|no audio stream/i.test(stderrTail);
                 const noAudioExtra = /Stream map.*matches no streams|Output file.*does not contain any stream|Output file #0 does not contain any stream/i.test(stderrTail);
                 if (noAudio || noAudioExtra) {
@@ -303,25 +320,22 @@ function extractPeaks(inputPath, inputStream) {
                     });
                 }
                 const isNotFound = /server returned 404|no such file or directory/i.test(stderrTail);
-                const err = new Error(`ffmpeg exited with code ${code} and no output. stderr: ${stderrTail.slice(-300)}`);
+                const signalDetail = signal ? ` (signal ${signal})` : '';
+                const err = new Error(`ffmpeg exited with code ${code ?? 'null'}${signalDetail} and no output. stderr: ${stderrTail.slice(-300)}`);
                 if (isNotFound) err.statusCode = 404;
                 return finish(err);
             }
 
-            const sampleCount = Math.floor(pcm.length / 2); // s16le = 2 bytes/sample
-            const peakCount   = Math.floor(sampleCount / SAMPLES_PER_WIN);
-            const peaks       = new Array(peakCount);
+            if (samplesInWindow > 0) {
+                peaks.push(peakInWindow / 32767);
+            }
 
-            for (let i = 0; i < peakCount; i++) {
-                let max = 0;
-                const base = i * SAMPLES_PER_WIN * 2;
-                for (let j = 0; j < SAMPLES_PER_WIN; j++) {
-                    const off = base + j * 2;
-                    if (off + 1 >= pcm.length) break;
-                    const v = Math.abs(pcm.readInt16LE(off));
-                    if (v > max) max = v;
-                }
-                peaks[i] = max / 32767;
+            // Never cache a partial waveform if ffmpeg was terminated after
+            // producing some PCM; keep the failure retryable and identify the
+            // signal that stopped the process in the server log.
+            if (code !== 0) {
+                const signalDetail = signal ? ` (signal ${signal})` : '';
+                return finish(new Error(`ffmpeg exited with code ${code ?? 'null'}${signalDetail} after producing partial audio. stderr: ${stderrTail.slice(-300)}`));
             }
 
             // hasAudio distinguishes "this source genuinely carries no audio"
@@ -345,7 +359,7 @@ function extractPeaks(inputPath, inputStream) {
             finish(null, {
                 peaks,
                 duration: sampleCount / SAMPLE_RATE,
-                hasAudio: cleanExit ? (pcm.length > 0 && peaks.length > 0) : null,
+                hasAudio: cleanExit ? (sampleCount > 0 && peaks.length > 0) : null,
                 // null = "we don't know" — extraction did not complete cleanly.
                 extractionFailed: !cleanExit,
             });

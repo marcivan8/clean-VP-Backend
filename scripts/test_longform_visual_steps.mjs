@@ -18,6 +18,8 @@ const realLog = console.log;
 console.log = () => {}; console.warn = () => {}; console.info = () => {};
 
 const { LongFormEditPlanner } = await import('../client/src/agent/LongFormEditPlanner.js');
+const { default: useTimelineStore } = await import('../client/src/store/useTimelineStore.js');
+const { MediaExecutionEngine, ENGINE_TYPES } = await import('../client/src/agent/MediaExecutionEngine.js');
 
 console.log = realLog;
 const ok = (name) => realLog(`✓ ${name}`);
@@ -30,6 +32,33 @@ const baseAnalysis = {
     structure: {},
     contentType: 'rushes',
 };
+
+// `$ALL_CLIPS` is a fan-out marker only for store actions that implement it.
+// A long-form per-clip tool must receive a real clip ID after the source is
+// split into multiple timeline clips.
+{
+    const tm = window.timelineManager;
+    tm.fromLegacyTracks([{ id: 'track-default-video', type: 'video', name: 'Video', clips: [
+        { id: 'v1', type: 'video', start: 0, duration: 5 },
+        { id: 'v2', type: 'video', start: 5, duration: 5 },
+    ] }]);
+    useTimelineStore.setState({ tracks: tm.toLegacyTracks(), activeClipId: null });
+    const engine = new MediaExecutionEngine();
+    const perClip = engine.resolveSymbolicRefs({
+        engine: ENGINE_TYPES.STORE,
+        action: 'reorderSegment',
+        args: { clipId: '$first_clip', trackId: '$track_of($first_clip)' },
+    });
+    assert.equal(perClip.args.clipId, 'v1', 'per-clip operation leaked the bulk marker');
+    assert.equal(perClip.args.trackId, 'track-default-video');
+    const fanOut = engine.resolveSymbolicRefs({
+        engine: ENGINE_TYPES.STORE,
+        action: 'addTransition',
+        args: { clipId: '$first_clip' },
+    });
+    assert.equal(fanOut.args.clipId, '$ALL_CLIPS', 'bulk transition lost its fan-out behavior');
+    ok('per-clip symbolic references resolve to a real clip while bulk actions retain fan-out');
+}
 
 // 1. FULL_BUILD always gets b-roll + motion graphics, AFTER captions.
 {

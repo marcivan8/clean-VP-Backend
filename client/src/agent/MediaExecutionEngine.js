@@ -64,7 +64,7 @@ import { PLATFORM_PROFILES, MAX_SHORT_COUNT, assignPlatforms, platformsFromText 
 // source length, editing style) above a one-minute floor, not from a
 // per-platform constant. See agent/shortLength.js.
 import { planShortLength, fitShortCount, MIN_SHORT_SECONDS } from './shortLength.js';
-import { polishShort } from './shortPolish.js'; // R92 round C
+import { fallbackShortScenePlan, polishShort } from './shortPolish.js'; // R92 round C
 import { packSegments } from './segmentPacking.js';
 
 // See _deriveAudioPeaksForClip below.
@@ -408,18 +408,24 @@ export class MediaExecutionEngine {
             if (val === '$playhead') {
                 args[key] = store.currentTime || 0;
             } else if (val === '$first_clip') {
-                // If a clip is actively selected, target that specific clip.
-                // Otherwise fan out to ALL clips on all video tracks so operations
-                // like volume, mute, color grade apply everywhere — not just clip[0].
-                if (store.activeClipId) {
-                    args[key] = store.activeClipId;
+                // Preserve the bulk marker only for STORE actions that have an
+                // explicit `$ALL_CLIPS` implementation below. Per-clip tools
+                // (notably reorderSegment) resolve the old fallback marker as
+                // a literal clip id and fail with `Clip $ALL_CLIPS not found`
+                // after an edit has split one source into several clips.
+                const allVideoClips = (store.tracks || [])
+                    .filter(t => t.type === 'video')
+                    .flatMap(t => t.clips || []);
+                const activeClip = allVideoClips.find(c => c.id === store.activeClipId);
+                const supportsAllClips = (command.engine || ENGINE_TYPES.STORE) === ENGINE_TYPES.STORE
+                    && ['updateClip', 'addTransition', 'addFilter', 'applyColorGrade'].includes(command.action);
+
+                if (activeClip) {
+                    args[key] = activeClip.id;
+                } else if (allVideoClips.length !== 1 && supportsAllClips) {
+                    args[key] = '$ALL_CLIPS';
                 } else {
-                    const allVideoClips = (store.tracks || [])
-                        .filter(t => t.type === 'video')
-                        .flatMap(t => t.clips || []);
-                    args[key] = allVideoClips.length === 1
-                        ? allVideoClips[0].id   // single clip — keep original behavior
-                        : '$ALL_CLIPS';          // multiple clips — fan out in executeStoreAction
+                    args[key] = allVideoClips[0]?.id || null;
                 }
             } else if (val === '$uploaded_file') {
                 // Prefer the server-side path stored after proxy upload
@@ -1790,7 +1796,16 @@ export class MediaExecutionEngine {
                     ]);
                     plan = p;
                     sceneResult = r;
-                    scenePlan = r.plan;
+                    // The model's plan is optional creative input, never a
+                    // prerequisite for Pro Finish. Build an immediate local
+                    // plan from the actual transcript and the technique
+                    // shortlist when Gemini times out, so useful motion beats
+                    // still reach the timeline instead of one static title.
+                    scenePlan = r.plan || fallbackShortScenePlan(words, {
+                        headline: plan?.headline,
+                        duration: total,
+                        techniques: r.motionTechniques,
+                    });
                 }
                 // Earlier finish replaced, not stacked.
                 const before = JSON.parse(JSON.stringify(st.tracks || []));

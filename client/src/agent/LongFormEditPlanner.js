@@ -439,7 +439,7 @@ export class LongFormEditPlanner {
         const mins = Math.floor(totalSecs / 60);
         const secs = Math.round(totalSecs % 60);
 
-        let msg = `📋 **Long-Form Edit Plan Ready**\n\n`;
+        let msg = `📋 **Complete Edit Plan Ready**\n\n`;
         msg += `**Mode:** ${(editMode || '').replace(/_/g, ' ')}\n`;
         msg += `**Target duration:** ~${mins}m ${secs}s\n\n`;
         msg += `**Planned actions:**\n`;

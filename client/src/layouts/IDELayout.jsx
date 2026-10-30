@@ -2638,6 +2638,14 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     height: previewSize.height || undefined,
                                     maxWidth: '100%',
                                     maxHeight: '100%',
+                                    // The desktop timeline floats over the
+                                    // bottom 18rem of this stage. previewSize
+                                    // already fits the uncovered height, so
+                                    // shift its center up by half that overlay;
+                                    // otherwise the lower part of the correctly
+                                    // sized frame sits behind the timeline and
+                                    // looks cut off.
+                                    transform: mode === 'editor' && !isMobile ? 'translateY(-9rem)' : undefined,
                                     boxSizing: 'border-box',
                                     flex: 'none',
                                 }}

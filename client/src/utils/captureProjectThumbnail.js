@@ -72,6 +72,18 @@ function buildVideoUrl(asset) {
     return null;
 }
 
+function buildVideoUrls(asset) {
+    if (!asset) return [];
+    return [...new Set([
+        buildVideoUrl(asset),
+        // Processed media URLs can expire or be missing while the original
+        // upload is still available. Keep thumbnail capture independent from
+        // an audio-enhancement proxy that failed to load in the browser.
+        buildVideoUrl({ ...asset, proxyUrl: null }),
+        buildVideoUrl({ sourceUrl: asset.sourceUrl }),
+    ].filter(Boolean))];
+}
+
 // ─── Canvas frame capture ─────────────────────────────────────────────────────
 
 /**
@@ -154,20 +166,29 @@ export async function captureProjectThumbnail(projectId, tracks, assets) {
         return null;
     }
 
-    let videoUrl = null;
+    const videoUrls = [];
     for (const clip of videoTrack.clips) {
         const asset = assets.find(a => a.id === clip.assetId);
-        videoUrl = buildVideoUrl(asset);
-        if (videoUrl) break;
+        const assetUrls = buildVideoUrls(asset);
+        if (assetUrls.length) {
+            videoUrls.push(...assetUrls);
+            break;
+        }
     }
 
-    if (!videoUrl) {
+    const candidates = [...new Set(videoUrls)];
+    if (!candidates.length) {
         console.log('[thumbnail] No usable video URL — skipping');
         return null;
     }
 
-    console.log('[thumbnail] Capturing frame from:', videoUrl);
-    const blob = await captureFrame(videoUrl);
+    let blob = null;
+    for (const videoUrl of candidates.slice(0, 3)) {
+        console.log('[thumbnail] Capturing frame from:', videoUrl);
+        // eslint-disable-next-line no-await-in-loop
+        blob = await captureFrame(videoUrl);
+        if (blob) break;
+    }
     if (!blob) return null;
 
     // ── Upload ────────────────────────────────────────────────────────────────

@@ -158,6 +158,15 @@ console.log('\n=== waveformRoutes: failed extraction ≠ silent source ===');
 
     ok('an unknown result is NOT returned as hasAudio:false',
         /peaksData\.hasAudio === null \|\| peaksData\.extractionFailed/.test(src), true);
+
+    ok('PCM is converted to peaks incrementally instead of buffered per whole file',
+        /ff\.stdout\.on\('data',[\s\S]*?addSample\(/.test(src)
+        && !/const chunks = \[\]|Buffer\.concat\(chunks\)/.test(src), true);
+    ok('a partial ffmpeg exit remains an extraction error instead of a cached waveform',
+        /if \(code !== 0\) \{[\s\S]{0,250}after producing partial audio/.test(src), true);
+    ok('ffmpeg signal is included when the process exits without output',
+        /ff\.on\('close', \(code, signal\)/.test(src)
+        && /signal \$\{signal\}/.test(src), true);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

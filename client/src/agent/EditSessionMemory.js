@@ -173,7 +173,7 @@ export class EditSessionMemory {
             split_clip: 'Clip split',
             set_clip_speed: 'Speed change',
             set_aspect_ratio: 'Aspect ratio change',
-            long_form_edit: 'Long-form edit',
+            long_form_edit: 'Complete edit',
             analyze_structure: 'Content analysis',
             find_hook: 'Hook detection',
             remove_repetition: 'Repetition removal',
