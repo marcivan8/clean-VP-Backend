@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { useDraggable } from '@dnd-kit/core';
 import { useTranslation } from 'react-i18next';
 import { Video, Music, Image as ImageIcon, Trash2, Loader2, Plus, Layers } from 'lucide-react';
 import useTimelineStore from '../store/useTimelineStore';
@@ -103,14 +102,6 @@ const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","
     const { t } = useTranslation('editor');
     const { isTouch } = useDeviceType();
     const [addedOverlay, setAddedOverlay] = useState(false);
-    const { attributes, listeners, setNodeRef, transform } = useDraggable({
-        id: `asset-${asset.id}`,
-        data: {
-            type: 'asset',
-            asset: asset // Pass full asset data for the drop handler
-        }
-    });
-
     const removeAsset = useTimelineStore(state => state.removeAsset);
     const assetTargetFindings = useTimelineStore(state => state.assetTargetFindings);
     const targetMatches = (assetTargetFindings || []).filter(hit => hit.assetId === asset.id);
@@ -119,11 +110,12 @@ const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","
         ? `${String(Math.floor(firstMatch.sourceStart / 60)).padStart(2, '0')}:${String(Math.floor(firstMatch.sourceStart % 60)).padStart(2, '0')}`
         : '';
 
-    const style = transform ? {
-        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
-        zIndex: 50,
-        opacity: 0.8
-    } : undefined;
+    const handleNativeDragStart = (event) => {
+        event.dataTransfer.effectAllowed = 'copy';
+        event.dataTransfer.setData('application/x-vibed-asset-id', asset.id);
+        // text/plain keeps the asset id available in browsers that filter custom MIME types.
+        event.dataTransfer.setData('text/plain', asset.id);
+    };
 
     const Icon = asset.type === 'video' ? Video : asset.type === 'audio' ? Music : ImageIcon;
     const dur = asset.sourceDuration || asset.duration || 0;
@@ -133,10 +125,9 @@ const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","
     if (listView) {
         return (
             <div
-                ref={setNodeRef}
-                {...listeners}
-                {...attributes}
-                style={{ ...style, background: isActive ? "color-mix(in oklch, oklch(0.66 0.16 268) 14%, transparent)" : "transparent", cursor: "grab" }}
+                draggable={true}
+                onDragStart={handleNativeDragStart}
+                style={{ background: isActive ? "color-mix(in oklch, oklch(0.66 0.16 268) 14%, transparent)" : "transparent", cursor: "grab" }}
                 className="flex items-center gap-2.5 px-3 py-1.5 mx-1 rounded-md transition-colors hover:bg-[rgba(255,255,255,0.04)] active:cursor-grabbing"
             >
                 <div className="w-[22px] h-[22px] rounded-[4px] shrink-0 overflow-hidden flex items-center justify-center" style={{ background: `linear-gradient(135deg, ${gradientColors[0]}, ${gradientColors[1]})` }}>
@@ -159,10 +150,8 @@ const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","
 
     return (
         <div
-            ref={setNodeRef}
-            {...listeners}
-            {...attributes}
-            style={style}
+            draggable={true}
+            onDragStart={handleNativeDragStart}
             onClick={() => {
                 if (isTouch && !asset.isProxying) {
                     useTimelineStore.getState().addAssetToTimeline(asset);

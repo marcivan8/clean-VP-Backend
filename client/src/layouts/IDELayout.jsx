@@ -14,8 +14,7 @@ import { transcriptionManager } from '../agent/TranscriptionManager';
 import ErrorBoundary from '../components/ErrorBoundary';
 import Timeline from '../components/Timeline/Timeline';
 import ReasoningPanel from '../components/Assistant/ReasoningPanel';
-import { DndContext, DragOverlay, useSensor, useSensors, MouseSensor, TouchSensor } from '@dnd-kit/core';
-import { getAssetDropTime, getDropClientX } from '../timeline/assetDropPosition.js';
+import { DndContext, useSensor, useSensors, MouseSensor, TouchSensor } from '@dnd-kit/core';
 import DraggableAsset from '../components/DraggableAsset';
 import TextPanel from '../components/TextPanel';
 import TranscriptPanel from '../components/TranscriptPanel';
@@ -305,7 +304,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         };
     }, []);
 
-    const { isPlaying, setUploadedFile, updateClip, uploadedFile, aspectRatio, assets, addAssets, addClip, zoomLevel, tracks, activeClipId, setActiveClip, past, future, duration, projectName, projectId, setProjectName } = useTimelineStore(useShallow(state => ({
+    const { isPlaying, setUploadedFile, updateClip, uploadedFile, aspectRatio, assets, addAssets, zoomLevel, tracks, activeClipId, setActiveClip, past, future, duration, projectName, projectId, setProjectName } = useTimelineStore(useShallow(state => ({
     isPlaying: state.isPlaying,
     setUploadedFile: state.setUploadedFile,
     updateClip: state.updateClip,
@@ -313,7 +312,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     aspectRatio: state.aspectRatio,
     assets: state.assets,
     addAssets: state.addAssets,
-    addClip: state.addClip,
     zoomLevel: state.zoomLevel,
     tracks: state.tracks,
     activeClipId: state.activeClipId,
@@ -1907,17 +1905,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         return () => controller.abort();
     }, [isMobile, activeExportKey]); // eslint-disable-line react-hooks/exhaustive-deps -- runs once per project on mobile
 
-    const [activeDragItem, setActiveDragItem] = React.useState(null);
-
-    const handleDragStart = (event) => {
-        const { active } = event;
-        if (active.data.current?.type === 'asset') {
-            setActiveDragItem(active.data.current.asset);
-        }
-    };
-
     const handleDragEnd = (event) => {
-        setActiveDragItem(null);
         const { active, over, delta } = event;
         if (!active || !over) return;
 
@@ -1936,43 +1924,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 return (newStart < cEnd - 0.01 && newEnd > c.start + 0.01);
             });
         };
-
-        // Drop ASSET onto TRACK
-        if (activeData?.type === 'asset' && targetData?.trackId) {
-            const asset = activeData.asset;
-            let trackId = targetData.trackId;
-            const lane = Array.from(document.querySelectorAll('[data-timeline-track]'))
-                .find(node => node.dataset.timelineTrack === String(trackId));
-            const laneLeft = lane?.getBoundingClientRect().left;
-            const pointerX = getDropClientX(event.activatorEvent, delta?.x);
-            const dropTime = getAssetDropTime({
-                clientX: pointerX,
-                laneLeft,
-                zoomLevel: state.zoomLevel,
-                currentTime: state.currentTime,
-            });
-            const duration = asset.type === 'image' ? 5 : (asset.duration || asset.sourceDuration || 10);
-
-            if (checkOverlap(trackId, dropTime, duration)) {
-                trackId = state.addTrack(asset.type === 'audio' ? 'audio' : 'video');
-            }
-
-            addClip(trackId, {
-                id: `clip-${Date.now()}`,
-                assetId: asset.id,
-                start: dropTime,
-                duration: duration,
-                name: asset.name,
-                color: asset.type === 'audio' ? 'bg-orange-500' : 'bg-blue-500',
-                url: asset.url,
-                speed: 1.0,
-                volume: 1.0,
-                metadata: {
-                    fps: asset.fps,
-                    resolution: asset.resolution
-                }
-            });
-        }
 
         // Move existing CLIP
         if (activeData?.clip && targetData?.trackId) {
@@ -2041,7 +1992,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     };
 
     return (
-        <DndContext sensors={sensors} modifiers={[clipSnapModifier]} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <DndContext sensors={sensors} modifiers={[clipSnapModifier]} onDragEnd={handleDragEnd}>
 
             <ExportModal
                 isOpen={showExportModal}
@@ -2805,13 +2756,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 />
             </div>
 
-            <DragOverlay>
-                {activeDragItem ? (
-                    <div className="w-32 h-20 bg-primary/20 backdrop-blur-md border border-primary rounded-lg shadow-2xl flex items-center justify-center pointer-events-none cursor-grabbing z-50 transform rotate-3">
-                        {activeDragItem.thumbnail ? <img src={activeDragItem.thumbnail} className="w-full h-full object-cover opacity-80" /> : <Video className="w-8 h-8 text-primary" />}
-                    </div>
-                ) : null}
-            </DragOverlay>
         </DndContext>
     );
 };

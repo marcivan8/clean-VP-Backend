@@ -7,6 +7,7 @@ import ClipContextMenu from './ClipContextMenu';
 import { Video, Music, Type, Volume2, VolumeX, Headphones, X } from 'lucide-react';
 import classNames from 'classnames';
 import useTimelineStore from '../../store/useTimelineStore';
+import { getAssetDropTime } from '../../timeline/assetDropPosition.js';
 import MobileSheet, { SheetLabel, SheetRow } from '../MobileSheet';
 
 const TrackIcon = ({ type }) => {
@@ -105,6 +106,57 @@ const Track = ({ track, labelWidth = 128, compact = false }) => {
         id: track.id,
         data: { trackId: track.id }
     });
+    const [assetDropX, setAssetDropX] = React.useState(null);
+    const onLaneDragOver = (event) => {
+        const types = Array.from(event.dataTransfer?.types || []);
+        if (!types.includes('application/x-vibed-asset-id') && !types.includes('text/plain')) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        const rect = event.currentTarget.getBoundingClientRect();
+        setAssetDropX(Math.max(0, event.clientX - rect.left));
+    };
+    const onLaneDragLeave = (event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setAssetDropX(null);
+    };
+    const onLaneDrop = (event) => {
+        const assetId = event.dataTransfer?.getData('application/x-vibed-asset-id')
+            || event.dataTransfer?.getData('text/plain');
+        if (!assetId) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setAssetDropX(null);
+
+        const state = useTimelineStore.getState();
+        const asset = state.assets.find(item => item.id === assetId);
+        if (!asset) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        const start = getAssetDropTime({
+            clientX: event.clientX,
+            laneLeft: rect.left,
+            zoomLevel: state.zoomLevel,
+            currentTime: state.currentTime,
+        });
+        const clipDuration = asset.type === 'image' ? 5 : (asset.duration || asset.sourceDuration || 10);
+        const overlaps = (state.tracks.find(item => item.id === track.id)?.clips || []).some(clip =>
+            start < clip.start + clip.duration - 0.01 && start + clipDuration > clip.start + 0.01
+        );
+        const trackId = overlaps
+            ? state.addTrack(asset.type === 'audio' ? 'audio' : 'video')
+            : track.id;
+        state.addClip(trackId, {
+            id: `clip-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            assetId: asset.id,
+            start,
+            duration: clipDuration,
+            name: asset.name,
+            color: asset.type === 'audio' ? 'bg-orange-500' : 'bg-blue-500',
+            url: asset.url,
+            sourceUrl: asset.sourceUrl || asset.url,
+            speed: 1,
+            volume: 1,
+            metadata: { fps: asset.fps, resolution: asset.resolution },
+        });
+    };
 
     // Right-click on empty lane space (desktop): the clip menu for the current
     // selection, plus "Paste here" at the clicked time. Clip.jsx's own
@@ -218,6 +270,9 @@ const Track = ({ track, labelWidth = 128, compact = false }) => {
                 )}
                 style={{ width: `${duration * zoomLevel}px`, minWidth: '100%', height: `${trackHeight}px` }}
                 onContextMenu={handleLaneContextMenu}
+                onDragOver={onLaneDragOver}
+                onDragLeave={onLaneDragLeave}
+                onDrop={onLaneDrop}
             >
                 {/* Grid Lines (Optional) */}
                 <div className="absolute inset-0 pointer-events-none opacity-10 bg-[linear-gradient(90deg,transparent_99%,#fff_100%)] bg-[length:100px_100%]"></div>
@@ -225,6 +280,15 @@ const Track = ({ track, labelWidth = 128, compact = false }) => {
                 {track.clips.map(clip => (
                     <Clip key={clip.id} clip={clip} trackId={track.id} />
                 ))}
+                {assetDropX !== null && (
+                    <div
+                        data-testid="asset-drop-indicator"
+                        className="absolute top-0 bottom-0 z-[60] w-0.5 bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.9)] pointer-events-none"
+                        style={{ left: `${assetDropX}px` }}
+                    >
+                        <span className="absolute -top-1 -left-[3px] h-2 w-2 rounded-full bg-cyan-200 shadow-[0_0_8px_rgba(103,232,249,0.9)]" />
+                    </div>
+                )}
             </div>
             {emptyMenu && (
                 <ClipContextMenu
