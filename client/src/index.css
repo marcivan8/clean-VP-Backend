@@ -785,6 +785,39 @@ section { padding: 96px 0; position: relative; }
   50% { opacity: 1; }
 }
 
+/* Roka's quiet working cue: three softly lit, floating spheres. */
+.roka-working-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--fg-2);
+  font-family: var(--f-sans);
+  font-size: 12px;
+  line-height: 1;
+}
+.roka-working-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  perspective: 40px;
+}
+.roka-working-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 25%, #fff 0%, var(--accent) 38%, color-mix(in oklch, var(--accent) 65%, #171923) 100%);
+  box-shadow: 0 1px 4px color-mix(in oklch, var(--accent) 45%, transparent), inset 0 0.5px 1px rgba(255,255,255,0.7);
+  animation: roka-dot-float 1.15s ease-in-out infinite;
+  transform-style: preserve-3d;
+}
+@keyframes roka-dot-float {
+  0%, 72%, 100% { opacity: 0.52; transform: translateY(1px) scale(0.78) rotateX(0deg); }
+  36% { opacity: 1; transform: translateY(-3px) scale(1) rotateX(28deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .roka-working-dot { animation: none; opacity: 0.8; }
+}
+
 @keyframes drift {
   0%, 100% { transform: translate(0, 0); }
   50% { transform: translate(2%, -2%); }

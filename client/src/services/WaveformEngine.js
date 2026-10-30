@@ -291,7 +291,15 @@ export const WaveformEngine = {
      * proxy job finally completed and the asset now has a real URL.
      */
     reset(assetId) {
-        if (assetId) _attempts.delete(assetId);
+        if (assetId) {
+            _attempts.delete(assetId);
+            // A video source can report no audio before its playable proxy is
+            // ready (or while resolving the raw upload). That result is valid
+            // for that source but must not suppress extraction from a later
+            // proxy URL. Empty results are never persisted, so memory is the
+            // only cache tier to invalidate here.
+            if (_memCache.get(assetId)?.hasAudio === false) _memCache.delete(assetId);
+        }
         else _attempts.clear();
     },
 

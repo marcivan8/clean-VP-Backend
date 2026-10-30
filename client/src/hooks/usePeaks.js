@@ -35,6 +35,13 @@ export function usePeaks(assetId, gcsPath, proxyUrl) {
             return;
         }
 
+        // A proxyUrl arriving (proxy job finished) is new information — clear
+        // any prior "gave up" state for this asset so the engine will try again
+        // rather than staying failed for the rest of the session. Do this
+        // BEFORE the cache check: an earlier raw-file attempt may have cached a
+        // definitive no-audio result, which should not mask the new proxy.
+        if (proxyUrl) WaveformEngine.reset(assetId);
+
         const hit = WaveformEngine.peek(assetId);
         if (hit) {
             setState({ peaks: hit.peaks, duration: hit.duration, loading: false, error: null });
@@ -43,11 +50,6 @@ export function usePeaks(assetId, gcsPath, proxyUrl) {
 
         let cancelled = false;
         const controller = new AbortController();
-
-        // A proxyUrl arriving (proxy job finished) is new information — clear
-        // any prior "gave up" state for this asset so the engine will try again
-        // rather than staying failed for the rest of the session.
-        if (proxyUrl) WaveformEngine.reset(assetId);
 
         setState(s => ({ ...s, loading: true, error: null }));
 

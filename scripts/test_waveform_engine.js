@@ -269,6 +269,31 @@ const run = async () => {
             'The server returns peaks inline rather than leaving the client empty-handed.');
     }
 
+    console.log('\n── 9. A newly-ready proxy invalidates a prior no-audio result ──');
+    {
+        fetchCalls = [];
+        fetchImpl = async (url) => {
+            if (String(url).includes('/extract')) return jsonRes({ peaks: [], duration: 0, hasAudio: false });
+            return jsonRes({ peaks: [0.2, 0.8], duration: 2 });
+        };
+        const first = await WaveformEngine.getPeaks('asset-proxy-ready', {
+            proxyUrl: '/api/proxy/gcs-media/raw/u/original.mp4',
+        });
+        check('no-audio response is cached for the first source', first?.hasAudio === false);
+
+        WaveformEngine.reset('asset-proxy-ready');
+        fetchImpl = async (url) => {
+            if (String(url).includes('/extract')) return jsonRes({ peaksUrl: null, peaks: [0.2, 0.8], duration: 2 });
+            return jsonRes({ peaks: [0.2, 0.8], duration: 2 });
+        };
+        const second = await WaveformEngine.getPeaks('asset-proxy-ready', {
+            proxyUrl: '/api/proxy/gcs-media/proxies/u/ready.mp4',
+        });
+        check('reset clears the cached no-audio result and extracts from the proxy',
+            second?.peaks?.length === 2
+            && fetchCalls.filter(url => String(url).includes('/extract')).length === 2);
+    }
+
     console.log(
         failures === 0
             ? '\nALL WAVEFORM ENGINE TESTS PASSED\n'

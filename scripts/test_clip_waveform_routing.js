@@ -71,9 +71,21 @@ check('the raw clip URL fallback is nulled when unproxied',
     /isUnproxiedVideoAsset\s*\?\s*null\s*:/.test(block),
     'clip.sourceUrl / clip.url must not be used as a stand-in while a video proxy is pending.');
 
-check('asset.gcsPath is ALSO nulled when unproxied (the easy-to-miss half)',
-    /waveformGcsPath\s*=\s*isUnproxiedVideoAsset\s*\?\s*null\s*:\s*\(asset\?\.gcsPath\s*\|\|\s*clip\.gcsPath/.test(block),
-    'gcsPath wins over proxyUrl on the server unconditionally — suppressing proxyUrl alone is a no-op.');
+check('video gcsPath is always suppressed so extraction reads the proxy',
+    /waveformGcsPath\s*=\s*isVideoAsset\s*\?\s*null\s*:\s*\(asset\?\.gcsPath\s*\|\|\s*clip\.gcsPath/.test(block),
+    'gcsPath wins over proxyUrl on the server. Passing the raw gcsPath after proxy completion still makes extraction decode the original upload.');
+check('video waveform extraction receives the server proxy URL',
+    /const wsAudioUrl\s*=\s*serverProxyUrl\s*\|\|\s*rawUrlFallback/.test(block)
+    && /usePeaks\([\s\S]{0,120}waveformGcsPath,\s*wsAudioUrl/.test(block));
+
+const peaksHookSrc = fs.readFileSync(
+    path.resolve(__dirname, '../client/src/hooks/usePeaks.js'), 'utf8');
+const proxyArrivalBlock = peaksHookSrc.slice(
+    peaksHookSrc.indexOf('if (proxyUrl) WaveformEngine.reset(assetId);'),
+    peaksHookSrc.indexOf('let cancelled = false;'));
+check('proxy arrival resets stale cache state before checking cached peaks',
+    !!proxyArrivalBlock
+    && proxyArrivalBlock.indexOf('WaveformEngine.reset(assetId)') < proxyArrivalBlock.indexOf('WaveformEngine.peek(assetId)'));
 
 // The failure mode if someone "simplifies" this back to `asset?.gcsPath` directly.
 check('gcsPath is not passed unconditionally to usePeaks',

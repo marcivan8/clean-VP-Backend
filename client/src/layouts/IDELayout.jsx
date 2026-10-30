@@ -83,6 +83,7 @@ import { loadOnboardingProgress } from '../services/onboardingProgress.js';
 import { EventBus, EVENT_TYPES } from '../agent/EventBus';
 import { useSupabasePersistence } from '../hooks/useSupabasePersistence';
 import { runExportWithAutoRetry } from '../utils/exportAutoRetry.js';
+import { fitPreviewSize } from '../utils/fitPreviewSize.js';
 
 // Screen distance (px) within which a dragged clip clicks onto a neighbour's
 // edge, the playhead or 0. Zoom-independent: converted to seconds per drag.
@@ -179,6 +180,8 @@ const CONTEXTUAL_SUGGESTION = {
 
 const IDELayout = ({ children, mode = 'editor' }) => {
     const { t } = useTranslation('editor');
+    const previewStageRef = useRef(null);
+    const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
 
     // Keeps Supabase in sync with localStorage autosaves (debounced 3 s after each change).
     // Without this call the hook was defined but never mounted — Supabase never updated.
@@ -527,6 +530,34 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const [showAI, setShowAI] = React.useState(false);
     
     const { isMobile } = useDeviceType();
+    useEffect(() => {
+        const stage = previewStageRef.current;
+        if (!stage) return undefined;
+
+        const measure = () => {
+            const style = window.getComputedStyle(stage);
+            const horizontalPadding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+            const verticalPadding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+            const next = fitPreviewSize(
+                stage.clientWidth - horizontalPadding,
+                stage.clientHeight - verticalPadding,
+                (() => {
+                    const [w, h] = aspectRatio.split(':').map(Number);
+                    return w / h;
+                })(),
+            );
+            setPreviewSize(current => (
+                Math.abs(current.width - next.width) < 0.5 && Math.abs(current.height - next.height) < 0.5
+                    ? current
+                    : next
+            ));
+        };
+
+        const observer = new ResizeObserver(measure);
+        observer.observe(stage);
+        measure();
+        return () => observer.disconnect();
+    }, [aspectRatio, isMobile, mode]);
     // Mobile only: Export stays disabled while a video on the timeline is still
     // uploading / preparing (or failed). Selector returns a boolean so upload
     // progress ticks don't re-render this whole layout.
@@ -2568,8 +2599,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     )}
 
                     {/* Center — Viewport & Timeline (always visible on all screen sizes) */}
-                    <main className="flex-1 flex flex-col min-w-0 min-h-0 relative">
+                    <main className={classNames(
+                        "flex-1 flex flex-col min-w-0 min-h-0 relative",
+                        mode === 'editor' && !isMobile && "pb-72",
+                    )}>
                         <div
+                            ref={previewStageRef}
                             className={classNames(
                                 "relative overflow-hidden shrink-0",
                                 isMobile
@@ -2594,30 +2629,16 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             {/* R93: a finished short playing in this player — floating at top of viewport so it's always clearly visible and never clipped */}
                             <ShortPreviewBar />
 
-                            <div className={classNames(
-                                "bg-black rounded-lg shadow-2xl relative border border-white/5 group overflow-hidden transition-all duration-500 ease-in-out",
-                                isMobile
-                                    // Mobile: inner fills the outer's explicit height.
-                                    // 16:9 → w-full h-full (fills entire container, no gaps)
-                                    // 9:16 / 1:1 → height-driven, width from aspect-ratio, centered by flex
-                                    ? (
-                                        aspectRatio === '9:16'
-                                            ? 'h-full w-auto aspect-[9/16]'
-                                            : aspectRatio === '1:1'
-                                                ? 'h-full w-auto aspect-square'
-                                                : 'w-full h-full'
-                                      )
-                                    // Desktop: give the frame a definite height so its aspect ratio derives a matching width.
-                                    // max-height alone does not constrain an auto-width aspect-ratio box, which let portrait previews
-                                    // keep growing from the available width and get clipped by this overflow-hidden viewport.
-                                    : (
-                                        aspectRatio === '9:16'
-                                            ? 'h-full w-auto aspect-[9/16] max-h-full max-w-full'
-                                            : aspectRatio === '1:1'
-                                                ? 'h-full w-auto aspect-square max-h-full max-w-full'
-                                                : 'h-full w-auto aspect-video max-w-full max-h-full'
-                                      )
-                            )}>
+                            <div
+                                className="bg-black rounded-lg shadow-2xl relative border border-white/5 group overflow-hidden"
+                                style={{
+                                    width: previewSize.width || undefined,
+                                    height: previewSize.height || undefined,
+                                    maxWidth: '100%',
+                                    maxHeight: '100%',
+                                    flex: 'none',
+                                }}
+                            >
                                 <ErrorBoundary>
                                     {(() => {
                                         const dims = getPlayerDimensions(aspectRatio);
@@ -2666,12 +2687,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                             {/* Floating Playback Controls (desktop; mobile uses MobileTransportBar) */}
                             {!isMobile && (
-                            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-3 backdrop-blur-xl px-4 py-2 rounded-full shadow-xl z-20 scale-90 md:scale-100 origin-bottom" style={{ background: "rgba(14,15,17,0.85)", border: "0.5px solid var(--line-strong)" }}>
-                                <button className="hover:text-primary transition-colors" onClick={() => useTimelineStore.getState().seek(0)} style={{ color: "var(--fg-3)" }}><SkipBack /></button>
-                                <button className="hover:text-primary transition-colors" onClick={() => useTimelineStore.getState().togglePlay()} style={{ color: "var(--fg)" }}>
+                            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-3 backdrop-blur-xl px-4 py-2 rounded-full shadow-xl z-[60] scale-90 md:scale-100 origin-bottom" style={{ background: "rgba(14,15,17,0.9)", border: "0.5px solid var(--line-strong)" }}>
+                                <button type="button" aria-label="Go to start" className="hover:text-primary transition-colors" onClick={() => useTimelineStore.getState().seek(0)} style={{ color: "var(--fg-3)" }}><SkipBack /></button>
+                                <button type="button" aria-label={isPlaying ? "Pause preview" : "Play preview"} className="hover:text-primary transition-colors" onClick={() => useTimelineStore.getState().togglePlay()} style={{ color: "var(--fg)" }}>
                                     {!isPlaying ? <Play className="fill-current" /> : <Pause className="fill-current" />}
                                 </button>
-                                <button className="hover:text-primary transition-colors" style={{ color: "var(--fg-3)" }}><SkipForward /></button>
+                                <button type="button" aria-label="Skip forward" className="hover:text-primary transition-colors" style={{ color: "var(--fg-3)" }}><SkipForward /></button>
                                 <div className="w-px h-3.5 mx-1" style={{ background: "var(--line-strong)" }} />
                                 <span style={{ fontFamily: "var(--f-mono)", fontSize: 10, color: "var(--fg-3)", letterSpacing: "0.06em" }}>
                                     <VideoTimeDisplay />

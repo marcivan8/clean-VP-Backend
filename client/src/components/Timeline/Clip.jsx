@@ -121,7 +121,13 @@ const Clip = ({ clip, trackId }) => {
     const isUnproxiedVideoAsset = isVideoAsset && !serverProxyUrl;
     const rawUrlFallback = isUnproxiedVideoAsset ? null : (clip.sourceUrl || clip.url || null);
     const wsAudioUrl = serverProxyUrl || rawUrlFallback;
-    const waveformGcsPath = isUnproxiedVideoAsset ? null : (asset?.gcsPath || clip.gcsPath || null);
+    // For video clips, pass the proxy URL only. `asset.gcsPath` points to the
+    // original upload even after the proxy is ready, and the waveform route
+    // prioritizes an explicit gcsPath over proxyUrl. Passing both silently
+    // sends ffmpeg back to the large raw file (often with a late moov atom),
+    // which times out and leaves the video clip flat. The server can resolve
+    // the proxy's storage key from proxyUrl.
+    const waveformGcsPath = isVideoAsset ? null : (asset?.gcsPath || clip.gcsPath || null);
     const { peaks: wsPeaks, duration: wsDuration } = usePeaks(
         isTextClip ? null : clip.assetId,
         waveformGcsPath,

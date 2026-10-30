@@ -39,6 +39,12 @@ const fnSrc = src.slice(
     src.indexOf('const PlaybackState = {')
 ).replace('export function', 'function');
 const computeContainFit = new Function(`${fnSrc}; return computeContainFit;`)();
+const previewSizeSrc = fs.readFileSync(
+    path.resolve(__dirname, '../client/src/utils/fitPreviewSize.js'), 'utf8')
+    .replace('export function', 'function');
+const fitPreviewSize = new Function(`${previewSizeSrc}; return fitPreviewSize;`)();
+const layoutSrc = fs.readFileSync(
+    path.resolve(__dirname, '../client/src/layouts/IDELayout.jsx'), 'utf8');
 
 const P916 = 9 / 16;    // portrait source
 const L169 = 16 / 9;    // landscape source
@@ -138,6 +144,23 @@ async function main() {
         check('no combination scales beyond the frame', violations === 0, `${violations} did`);
     }
 
+    section('7 · Preview frame fits the measured area and desktop timeline');
+    {
+        const portrait = fitPreviewSize(1600, 800, 9 / 16);
+        check('portrait frame fits available height', near(portrait.height, 800));
+        check('portrait width follows the aspect ratio', near(portrait.width, 450));
+        check('frame never exceeds either measured bound', portrait.width <= 1600 && portrait.height <= 800);
+        const landscape = fitPreviewSize(900, 1200, 16 / 9);
+        check('landscape frame fits available width', near(landscape.width, 900));
+        check('landscape frame follows aspect ratio', near(landscape.height, 506.25));
+        check('desktop preview reserves space for the overlaid timeline',
+            /mode === 'editor' && !isMobile && "pb-72"/.test(layoutSrc));
+        check('preview frame uses measured pixel dimensions',
+            /width: previewSize\.width[\s\S]*height: previewSize\.height/.test(layoutSrc));
+        check('desktop play/pause controls render above the timeline layer',
+            /Floating Playback Controls[\s\S]{0,500}z-\[60\]/.test(layoutSrc));
+    }
+
     section('7 · The engine and player are wired to it');
     {
         check('the vertex shader applies the fit',
@@ -170,11 +193,8 @@ async function main() {
         check('changing the ratio re-runs the sizing',
             /resizeHandlerRef\.current\?\.\(\)/.test(player),
             'a ResizeObserver only fires on container changes, not ratio changes');
-        check('desktop portrait preview has a definite height so aspect ratio constrains width',
-            /'h-full w-auto aspect-\[9\/16\] max-h-full max-w-full'/.test(layout));
-        check('desktop square and landscape previews also fit both viewport dimensions',
-            /'h-full w-auto aspect-square max-h-full max-w-full'/.test(layout)
-            && /'h-full w-auto aspect-video max-w-full max-h-full'/.test(layout));
+        check('preview uses measured contain-fit dimensions instead of intrinsic CSS aspect sizing',
+            /fitPreviewSize\(/.test(layout) && /width: previewSize\.width/.test(layout));
     }
 
     console.log(`\n${'─'.repeat(60)}`);

@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 import { enqueueIfVideoNotReady, drainPromptQueue } from '../../agent/rokaPromptQueue.js';
 import ChatComposer from './ChatComposer.jsx';
 import { withAssistantDocuments } from './assistantDocuments.js';
+import RokaWorkingIndicator from './RokaWorkingIndicator.jsx';
 
 
 // --- Sub-components ---
@@ -43,18 +44,6 @@ const UserMessageItem = ({ log }) => {
         </div>
     );
 };
-
-const StepLogItem = ({ log }) => (
-    <div className="flex items-center gap-2 py-1 animate-in fade-in slide-in-from-bottom-1 duration-200">
-        {log.done
-            ? <Check className="w-3 h-3 shrink-0" style={{ color: '#34d399' }} />
-            : <Loader2 className="w-3 h-3 shrink-0 animate-spin" style={{ color: 'var(--accent)' }} />
-        }
-        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: log.done ? 'var(--fg-3)' : 'var(--fg-2)', letterSpacing: '0.02em' }}>
-            {log.message}
-        </span>
-    </div>
-);
 
 const AssistantLogItem = ({ log }) => (
     <div className="rounded-xl mb-2 animate-in fade-in slide-in-from-bottom-2 duration-300"
@@ -194,7 +183,6 @@ const TaskCompletionCard = ({ log }) => {
 
 const LogItem = ({ log }) => {
     const { t } = useTranslation('editor');
-    if (log.type === 'step')            return <StepLogItem log={log} />;
     if (log.type === 'assistant')       return <AssistantLogItem log={log} />;
     if (log.type === 'task_complete')   return <TaskCompletionCard log={log} />;
     if (log.type === 'caption_styles')  return <CaptionStylesCard log={log} />;
@@ -686,6 +674,12 @@ const ReasoningPanel = ({ className }) => {
         ];
         return tagged.sort((a, b) => (a._seq - b._seq));
     }, [logs, suggestions]);
+    // Internal operation-by-operation updates remain in the store for
+    // diagnostics, but don't belong in the user-facing conversation.
+    const visibleFeedItems = useMemo(
+        () => feedItems.filter(item => !(item._kind === 'log' && item.type === 'step')),
+        [feedItems],
+    );
 
     // Auto-scroll to bottom whenever the feed changes (so new cards like
     // caption_styles — and suggestion cards — are always visible)
@@ -693,10 +687,10 @@ const ReasoningPanel = ({ className }) => {
         const el = scrollRef.current;
         if (!el) return;
         el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-    }, [feedItems.length]);
+    }, [visibleFeedItems.length]);
 
     const proxying = assets.filter(a => a.isProxying);
-    const isEmpty = logs.length === 0 && suggestions.length === 0 && !isAnalyzing;
+    const isEmpty = visibleFeedItems.length === 0 && !isAnalyzing;
 
     const handleAccept = async (suggestion, commandText = null) => {
         if (suggestion.type === 'agent_plan') {
@@ -1124,7 +1118,7 @@ const ReasoningPanel = ({ className }) => {
                     generated before three later messages still sat under them.
                     Both collections are stamped with a monotonic `_seq` in
                     useAIStore, so interleaving them restores real chronology. */}
-                {feedItems.map(item => (
+                {visibleFeedItems.map(item => (
                     item._kind === 'log' ? (
                         <LogItem key={item.id} log={item} />
                     ) : item.type === 'brain_advisory' ? (
@@ -1160,27 +1154,17 @@ const ReasoningPanel = ({ className }) => {
                 ))}
 
                 {isAnalyzing && (
-                    <div className="sticky bottom-0 rounded-lg p-3 mt-2 border animate-in fade-in duration-300" style={{ background: 'rgba(0,0,0,0.6)', borderColor: 'var(--line)', backdropFilter: 'blur(12px)' }}>
-                        <div className="flex items-center gap-2 mb-2">
-                            <div className="relative w-4 h-4 shrink-0">
-                                <Loader2 className="w-4 h-4 animate-spin absolute inset-0" style={{ color: 'var(--accent)' }} />
-                            </div>
-                            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-2)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                                {t('assistant.rokaWorkingNoEllipsis')}
-                            </span>
-                            <button
-                                onClick={cancelRun}
-                                className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-colors hover:opacity-80"
-                                style={{ background: 'rgba(255,255,255,0.07)', color: 'var(--fg-3)', fontFamily: 'var(--f-mono)', border: '0.5px solid var(--line)' }}
-                                title={t('assistant.cancelOperation')}
-                            >
-                                <XCircle className="w-3 h-3" />
-                                {t('assistant.cancel')}
-                            </button>
-                        </div>
-                        <p className="text-[10px] leading-relaxed" style={{ color: 'var(--fg-3)', fontFamily: 'var(--f-sans)' }}>
-                            {t('assistant.stepsHint')}
-                        </p>
+                    <div className="sticky bottom-0 flex items-center gap-3 rounded-full px-3 py-2 mt-2 border animate-in fade-in duration-300" style={{ background: 'rgba(14,15,18,0.82)', borderColor: 'color-mix(in oklch, var(--accent) 18%, var(--line))', backdropFilter: 'blur(12px)' }}>
+                        <RokaWorkingIndicator label={t('assistant.rokaWorkingNoEllipsis')} />
+                        <button
+                            onClick={cancelRun}
+                            className="ml-auto flex items-center gap-1 px-2 py-1 rounded-full text-[10px] transition-colors hover:opacity-80"
+                            style={{ background: 'transparent', color: 'var(--fg-3)', fontFamily: 'var(--f-sans)', border: '0.5px solid var(--line)' }}
+                            title={t('assistant.cancelOperation')}
+                        >
+                            <XCircle className="w-3 h-3" />
+                            {t('assistant.cancel')}
+                        </button>
                     </div>
                 )}
 

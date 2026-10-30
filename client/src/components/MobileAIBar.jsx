@@ -11,6 +11,7 @@ import { undoTaskEdits } from '../agent/undoTask.js';
 import { CaptionStyleCallout } from './MobileCaptionSheets';
 import { EventBus, EVENT_TYPES } from '../agent/EventBus.js';
 import { getMainVideoTrackId } from '../timeline/rippleDelete.js';
+import RokaWorkingIndicator from './Assistant/RokaWorkingIndicator.jsx';
 
 function formatLength(secs) {
     const n = Math.max(0, Math.round(Number(secs) || 0));
@@ -77,12 +78,11 @@ const SparklesIcon = ({ style }) => (
 );
 
 // Log types shown in the inline chat log
-const LOG_TYPES = new Set(['assistant', 'success', 'step', 'warning', 'task_complete', 'info', 'caption_styles']);
+const LOG_TYPES = new Set(['assistant', 'success', 'warning', 'task_complete', 'info', 'caption_styles']);
 
 // Color per log type (non-bubble lines)
 const LOG_COLOR = {
     info:    'var(--fg-3)',
-    step:    'var(--fg-3)',
     success: 'var(--mint)',
     warning: 'var(--coral)',
 };
@@ -199,7 +199,7 @@ export default function MobileAIBar({ onExpand, expanded = false, onCollapse }) 
     // Auto-scroll to newest message
     useEffect(() => {
         logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [logs, queuedCount]);
+    }, [visibleLogs.length, queuedCount]);
 
     // Run queued requests once the video is ready and Roka is free.
     useEffect(() => {
@@ -296,10 +296,7 @@ export default function MobileAIBar({ onExpand, expanded = false, onCollapse }) 
                 style={{ borderBottom: '0.5px solid var(--line-soft)', minHeight: 36 }}
             >
                 {isAnalyzing ? (
-                    <Loader2
-                        className="w-3 h-3 shrink-0 animate-spin"
-                        style={{ color: 'var(--accent)' }}
-                    />
+                    <RokaWorkingIndicator />
                 ) : (
                     <span
                         className="w-2 h-2 shrink-0 rounded-full"
@@ -422,13 +419,8 @@ export default function MobileAIBar({ onExpand, expanded = false, onCollapse }) 
                         )}
 
                         {isAnalyzing && (
-                            <div className="flex justify-start mb-2">
-                                <span className="rounded-2xl px-3 py-2 flex items-center gap-2" style={{ background: 'var(--bg-3)' }}>
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: 'var(--accent)' }} />
-                                    <span style={{ fontFamily: 'var(--f-sans)', fontSize: 13, color: 'var(--fg-3)' }}>
-                                        {t('mobileRoka.thinking')}
-                                    </span>
-                                </span>
+                            <div className="flex justify-start mb-2 px-1 py-1">
+                                <RokaWorkingIndicator label={t('assistant.rokaWorkingNoEllipsis')} />
                             </div>
                         )}
                         <div ref={logEndRef} />
