@@ -43,6 +43,7 @@ const {
     generateScenePlan,
     generateMotionScript,
     logMotionTelemetry,
+    executeChatCompletionWithFailover,
 } = motionProvider;
 
 const AIProvider = require('../services/AIProvider.js');
@@ -226,6 +227,39 @@ async function runTests() {
         check('cancellation immediately falls back to rules safely', cancelledResult.source === 'rules');
         check('cancelled result still provides valid layers', cancelledResult.layers && cancelledResult.layers.title);
     });
+
+    {
+        // A Gemini capacity response can start model failover. The whole
+        // chain must share one timeout rather than giving every fallback a
+        // fresh 30 second SDK deadline (which outlives the browser request).
+        let calls = 0;
+        let fallbackAborted = false;
+        const started = Date.now();
+        let timeoutResult = null;
+        try {
+            await executeChatCompletionWithFailover({
+                ai: { chat: { completions: { create: (_params, { signal }) => {
+                    calls += 1;
+                    if (calls === 1) return Promise.reject(Object.assign(new Error('capacity'), { status: 503 }));
+                    return new Promise((resolve, reject) => signal.addEventListener('abort', () => {
+                        fallbackAborted = true;
+                        const error = new Error('aborted');
+                        error.name = 'AbortError';
+                        reject(error);
+                    }, { once: true }));
+                } } } },
+                requestParams: { model: 'gemini-3.8-flash' },
+                provider: 'gemini',
+                model: 'gemini-3.8-flash',
+                timeout: 50,
+            });
+        } catch (error) {
+            timeoutResult = error;
+        }
+        check('Gemini fallback shares the primary request deadline', timeoutResult?.name === 'TimeoutError');
+        check('a hung fallback is aborted before another model is started', calls === 2 && fallbackAborted);
+        check('the whole failover chain returns within its single timeout', Date.now() - started < 500);
+    }
 
     section('5 · End-to-End Generation with Mock Provider');
     await withEnv({ AI_PROVIDER: 'mock', AI_MOTION_PROVIDER: 'mock' }, async () => {

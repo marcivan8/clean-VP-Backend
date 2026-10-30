@@ -163,10 +163,30 @@ async function executeChatCompletionWithFailover({
     let activeProvider = provider;
     let activeModel = model;
 
+    // `timeout` used to apply independently to every Gemini fallback. A
+    // failed primary could therefore cascade through several 30s requests,
+    // even though the browser stops waiting for scene-plan after 35s. Keep a
+    // single deadline across the primary and every fallback so the route can
+    // return its deterministic plan result before the client gives up.
+    const deadlineController = new AbortController();
+    const deadlineTimer = Number(timeout) > 0
+        ? setTimeout(() => deadlineController.abort(), Number(timeout))
+        : null;
+    const abortFromCaller = () => deadlineController.abort(signal?.reason);
+    if (signal?.aborted) abortFromCaller();
+    else signal?.addEventListener('abort', abortFromCaller, { once: true });
+    const requestSignal = deadlineController.signal;
+    const timeoutError = () => {
+        const error = new Error(`Motion model request timed out after ${timeout}ms`);
+        error.name = 'TimeoutError';
+        return error;
+    };
+
     try {
-        completion = await ai.chat.completions.create(requestParams, { signal });
+        completion = await ai.chat.completions.create(requestParams, { signal: requestSignal });
         return { completion, activeProvider, activeModel };
     } catch (err) {
+        if (deadlineController.signal.aborted && !signal?.aborted) throw timeoutError();
         const status = err.status ?? err.statusCode ?? err.response?.status;
         const msg = String(err.message || '');
         const isRetryable = status === 503 || status === 429 || status === 404 ||
@@ -185,18 +205,19 @@ async function executeChatCompletionWithFailover({
 
             const candidateModels = geminiFallbacks.filter(m => m !== model);
             for (const fallbackModel of candidateModels) {
-                if (signal?.aborted) break;
+                if (requestSignal.aborted) break;
                 console.warn(
                     `[motionProvider] Gemini model "${activeModel}" failed (${status || msg}); ` +
                     `retrying with fallback "${fallbackModel}"...`
                 );
                 try {
                     const fallbackParams = { ...requestParams, model: fallbackModel };
-                    completion = await ai.chat.completions.create(fallbackParams, { signal });
+                    completion = await ai.chat.completions.create(fallbackParams, { signal: requestSignal });
                     if (completion?.choices?.[0]?.message?.content) {
                         return { completion, activeProvider: 'gemini', activeModel: fallbackModel };
                     }
                 } catch (fbErr) {
+                    if (deadlineController.signal.aborted && !signal?.aborted) throw timeoutError();
                     console.warn(`[motionProvider] Fallback model "${fallbackModel}" failed: ${describeAIError(fbErr)}`);
                 }
             }
@@ -204,7 +225,7 @@ async function executeChatCompletionWithFailover({
 
         // 2. Try secondary AI provider if configured (e.g. Groq, OpenAI)
         const baseProvider = resolveProvider({ capability: 'chat' });
-        if (baseProvider !== provider && isAIConfigured({ capability: 'chat' })) {
+        if (!requestSignal.aborted && baseProvider !== provider && isAIConfigured({ capability: 'chat' })) {
             console.warn(
                 `[motionProvider] Provider "${provider}" exhausted all models; ` +
                 `failing over to secondary provider "${baseProvider}"...`
@@ -225,17 +246,22 @@ async function executeChatCompletionWithFailover({
                     } else {
                         secondaryParams.response_format = { type: 'json_object' };
                     }
-                    completion = await secondaryAi.chat.completions.create(secondaryParams, { signal });
+                    completion = await secondaryAi.chat.completions.create(secondaryParams, { signal: requestSignal });
                     if (completion?.choices?.[0]?.message?.content) {
                         return { completion, activeProvider: baseProvider, activeModel: secondaryModel };
                     }
                 }
             } catch (secondaryErr) {
+                if (deadlineController.signal.aborted && !signal?.aborted) throw timeoutError();
                 console.warn(`[motionProvider] Secondary provider "${baseProvider}" failed: ${describeAIError(secondaryErr)}`);
             }
         }
 
+        if (deadlineController.signal.aborted && !signal?.aborted) throw timeoutError();
         throw err;
+    } finally {
+        if (deadlineTimer) clearTimeout(deadlineTimer);
+        signal?.removeEventListener('abort', abortFromCaller);
     }
 }
 
