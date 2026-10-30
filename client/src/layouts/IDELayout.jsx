@@ -1,5 +1,5 @@
 import { useShallow } from 'zustand/react/shallow';
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap, Smartphone, Lock } from 'lucide-react';
 import classNames from 'classnames';
@@ -530,7 +530,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const [showAI, setShowAI] = React.useState(false);
     
     const { isMobile } = useDeviceType();
-    useEffect(() => {
+    useLayoutEffect(() => {
         const stage = previewStageRef.current;
         if (!stage) return undefined;
 
@@ -2638,6 +2638,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     height: previewSize.height || undefined,
                                     maxWidth: '100%',
                                     maxHeight: '100%',
+                                    boxSizing: 'border-box',
                                     flex: 'none',
                                 }}
                             >

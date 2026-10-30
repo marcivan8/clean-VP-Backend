@@ -158,6 +158,9 @@ async function main() {
             && !/mode === 'editor' && !isMobile && "pb-72"/.test(layoutSrc));
         check('preview frame uses measured pixel dimensions',
             /width: previewSize\.width[\s\S]*height: previewSize\.height/.test(layoutSrc));
+        check('preview dimensions are measured before first paint and include the border box',
+            /useLayoutEffect\(\(\) => \{\s*const stage = previewStageRef\.current/.test(layoutSrc)
+            && /boxSizing: 'border-box'/.test(layoutSrc));
         check('desktop play/pause controls render above the timeline layer',
             /Floating Playback Controls[\s\S]{0,500}z-\[60\]/.test(layoutSrc)
             && /bottom: mode === 'editor' \? 'calc\(18rem \+ 0\.75rem\)'/.test(layoutSrc));
