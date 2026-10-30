@@ -94,16 +94,24 @@ export default function FirstRunHint({ plan = 'free' }) {
     const [active, setActive] = useState(null);   // { key, anchor, placement, plan }
     const [rect, setRect] = useState(null);
     const queue = useRef([]);
+    const activeRef = useRef(null);
     const shownCount = useRef(0);
     const timer = useRef(null);
+    const queueTimer = useRef(null);
 
     const dismiss = useCallback(() => {
         if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+        // Keep the intake occupied while a queued hint waits to be shown so
+        // another event cannot jump ahead during the cross-fade pause.
+        activeRef.current = queue.current.length > 0 ? { pending: true } : null;
         setActive(null);
         setRect(null);
         // Drain the queue on the next tick so two hints never cross-fade.
-        setTimeout(() => {
+        if (queueTimer.current) clearTimeout(queueTimer.current);
+        queueTimer.current = setTimeout(() => {
+            queueTimer.current = null;
             const next = queue.current.shift();
+            activeRef.current = null;
             if (next) EventBus.emit(HINT_EVENT, { key: next });
         }, 400);
     }, []);
@@ -113,20 +121,27 @@ export default function FirstRunHint({ plan = 'free' }) {
         const onHint = ({ key }) => {
             const spec = HINTS[key];
             if (!spec || hasSeen(key)) return;
-            if (shownCount.current >= MAX_PER_SESSION) return;
             // Busy: hold it rather than replacing what is on screen.
-            if (active) {
+            if (activeRef.current) {
+                if (shownCount.current + queue.current.length >= MAX_PER_SESSION) return;
                 if (!queue.current.includes(key)) queue.current.push(key);
                 return;
             }
+            if (shownCount.current >= MAX_PER_SESSION) return;
             // Spent on show, not on dismiss — see the header.
             markSeen(key);
             shownCount.current += 1;
-            setActive({ key, ...spec });
+            const nextActive = { key, ...spec };
+            activeRef.current = nextActive;
+            setActive(nextActive);
         };
         // EventBus.on returns its own unsubscribe function.
         return EventBus.on(HINT_EVENT, onHint);
-    }, [active]);
+    }, []);
+
+    useEffect(() => () => {
+        if (queueTimer.current) clearTimeout(queueTimer.current);
+    }, []);
 
     // ── Anchoring ───────────────────────────────────────────────────────
     useEffect(() => {

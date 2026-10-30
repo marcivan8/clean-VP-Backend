@@ -66,6 +66,7 @@ import { PLATFORM_PROFILES, MAX_SHORT_COUNT, assignPlatforms, platformsFromText 
 import { planShortLength, fitShortCount, MIN_SHORT_SECONDS } from './shortLength.js';
 import { fallbackShortScenePlan, polishShort } from './shortPolish.js'; // R92 round C
 import { packSegments } from './segmentPacking.js';
+import { splitClipAtSpeakerSegments } from './virtualMulticamTimeline.js';
 
 // See _deriveAudioPeaksForClip below.
 const DERIVED_PEAK_DB_FLOOR = -8;
@@ -1554,7 +1555,7 @@ export class MediaExecutionEngine {
                     }
                     // 5. Automatic placements on the words (A6).
                     const hasWords = Array.isArray(useTimelineStore.getState().captions) && useTimelineStore.getState().captions.length > 0;
-                    if ((recipe.broll || recipe.numberPops) && hasWords) {
+                    if ((recipe.broll || recipe.numberPops || recipe.illustrations) && hasWords) {
                         const events = await this._fetchSemanticEvents();
                         const { VideoEditorTools } = await import('./VideoEditorTools.js');
                         const tools = new VideoEditorTools();
@@ -1567,8 +1568,13 @@ export class MediaExecutionEngine {
                             const pp = tools.placeNumberPops({ events });
                             if (pp.placed > 0) done.push(`${pp.placed} number pop(s)`);
                         }
-                    } else if (recipe.broll || recipe.numberPops) {
-                        skipped.push('b-roll and number pops (need captions)');
+                        if (recipe.illustrations) {
+                            const illustrations = tools.placeContextualIllustrations({ max: recipe.illustrations.max });
+                            if (illustrations.placed > 0) done.push(`${illustrations.placed} contextual vector illustration(s)`);
+                            else skipped.push(`illustrations (${illustrations.message})`);
+                        }
+                    } else if (recipe.broll || recipe.numberPops || recipe.illustrations) {
+                        skipped.push('b-roll, illustrations and number pops (need captions)');
                     }
                     // 6. R92: sound effects on what the recipe placed (whoosh on
                     // transitions, pop on number pops), level from the style.
@@ -3263,13 +3269,10 @@ export class MediaExecutionEngine {
                 //   A whole 5-min clip overlaps with ALL ~200 segments; the one with
                 //   the biggest single duration "wins" → all clips get the same angle.
                 //
-                // Fix: when a clip spans multiple diarization segments, SPLIT it at
-                // segment boundaries and tag each piece individually. This produces
-                // the same 100–200 short tagged clips that we get after silence
-                // removal, but works even when the files haven't been pre-chopped.
-                //
-                // This path also handles the pre-chopped case (1 segment per clip)
-                // transparently — the split branch is never entered.
+                // Fix: split at speaker-turn boundaries in source time, retain
+                // silent gaps as wide shots, and map source seconds back to the
+                // clip's timeline clock (including playback speed). This works
+                // on both one long source clip and pre-chopped timeline clips.
                 const freshStore = useTimelineStore.getState();
                 const tm         = freshStore.manager;
 
@@ -3309,86 +3312,22 @@ export class MediaExecutionEngine {
                             continue;
                         }
 
-                        const srcStart = clip.offset ?? 0;
-                        const srcEnd   = srcStart + (clip.duration ?? 0);
-
-                        // Segments that overlap this clip's source range
-                        const overlapping = clipSegs.filter(s => s.end > srcStart && s.start < srcEnd);
-
-                        if (overlapping.length === 0) {
+                        // Source analysis timestamps must stay aligned to the original
+                        // clip, even when there is only one speaker turn or pauses
+                        // between turns. The splitter preserves gaps and retiming.
+                        const splitPieces = splitClipAtSpeakerSegments(clip, clipSegs);
+                        if (splitPieces.length === 0) {
                             vmNoOverlap++;
                             expandedClips.push(clip);
                             continue;
                         }
-
-                        if (overlapping.length === 1) {
-                            // Single segment — tag in-place, no split needed
-                            const seg = overlapping[0];
-                            countAngle(seg.angle);
-                            expandedClips.push({
-                                ...clip,
-                                virtualCam: {
-                                    angle:   seg.angle,
-                                    scale:   seg.scale  ?? 1,
-                                    x:       seg.x      ?? 0,
-                                    y:       seg.y      ?? 0,
-                                    cropX:   seg.cropX,
-                                    cropY:   seg.cropY,
-                                    cropW:   seg.cropW,
-                                    cropH:   seg.cropH,
-                                    speaker: seg.speaker || null,
-                                },
-                            });
-                            continue;
+                        if (splitPieces.length > 1) {
+                            vmSplitPieces++;
+                            if (clip.keyframes?.scale?.length) droppedZoomKfCount++;
                         }
-
-                        // Multiple segments — split the clip at diarization boundaries.
-                        // Pieces are laid out INSIDE the original clip's timeline span
-                        // (see the `pieceCursor` below): their durations sum to the
-                        // original duration, so the surrounding timeline is untouched.
-                        vmSplitPieces++;
-                        let pieceCursor = clip.start ?? 0;
-                        for (const seg of overlapping) {
-                            const pSrcStart = Math.max(seg.start, srcStart);
-                            const pSrcEnd   = Math.min(seg.end,   srcEnd);
-                            const pDur      = pSrcEnd - pSrcStart;
-                            if (pDur < 0.05) continue; // skip hairline slivers
-
-                            countAngle(seg.angle);
-                            const pieceStart = pieceCursor;
-                            pieceCursor += pDur;
-                            expandedClips.push({
-                                ...clip,
-                                // Millisecond-resolution id: Math.round(x*10) collided
-                                // for segments starting <0.1s apart, and duplicate ids
-                                // overwrite each other when the entity graph is rebuilt.
-                                id:       `${clip.id}_vm${Math.round(pSrcStart * 1000)}`,
-                                offset:   pSrcStart,
-                                duration: pDur,
-                                start:    pieceStart,
-                                end:      pieceStart + pDur,
-                                // Any existing zoom-rhythm keyframes were authored against
-                                // clip's OLD (longer) duration — their timestamps no longer
-                                // correspond to anything meaningful on this new, shorter
-                                // fragment. Drop them rather than silently apply a stale/
-                                // wrong zoom; re-run "make it dynamic" after multicam to
-                                // regenerate a rhythm that matches the new segments.
-                                keyframes: (() => {
-                                    if (clip.keyframes?.scale?.length) droppedZoomKfCount++;
-                                    return clip.keyframes ? { ...clip.keyframes, scale: [] } : clip.keyframes;
-                                })(),
-                                virtualCam: {
-                                    angle:   seg.angle,
-                                    scale:   seg.scale  ?? 1,
-                                    x:       seg.x      ?? 0,
-                                    y:       seg.y      ?? 0,
-                                    cropX:   seg.cropX,
-                                    cropY:   seg.cropY,
-                                    cropW:   seg.cropW,
-                                    cropH:   seg.cropH,
-                                    speaker: seg.speaker || null,
-                                },
-                            });
+                        for (const piece of splitPieces) {
+                            countAngle(piece.clip.virtualCam?.angle);
+                            expandedClips.push(piece.clip);
                         }
                     }
 

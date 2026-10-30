@@ -227,6 +227,9 @@ export function markSeen(key) {
 
 /** Show everything again. For a "replay the walkthrough" control in settings. */
 export async function resetOnboardingProgress() {
+    if (flushTimer) clearTimeout(flushTimer);
+    flushTimer = null;
+    pending = {};
     if (cache) cache.seen = {};
     writeLocal({});
     try { window.localStorage.removeItem('vp_onboarding_tour_seen'); } catch (_) {}

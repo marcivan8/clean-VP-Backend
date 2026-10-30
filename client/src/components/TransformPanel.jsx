@@ -26,7 +26,7 @@
  *    - "Keyframe Curves" (visual timeline for curve & timing editing).
  */
 
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
 import {
@@ -237,6 +237,8 @@ const QUICK_ALIGN_POINTS = [
 
 export default function TransformPanel() {
     const { t } = useTranslation('editor');
+    const [presetSearch, setPresetSearch] = useState('');
+    const presetSearchQuery = presetSearch.trim().toLowerCase();
 
     const {
         tracks,
@@ -685,12 +687,28 @@ export default function TransformPanel() {
                     </span>
                 ) : null}
             >
+                <input
+                    type="search"
+                    value={presetSearch}
+                    onChange={event => setPresetSearch(event.target.value)}
+                    placeholder={t('motionPanel.searchPresets')}
+                    aria-label={t('motionPanel.searchPresets')}
+                    style={{
+                        width: '100%', height: 30, marginBottom: 6, padding: '0 8px',
+                        borderRadius: 'var(--r-xs)', border: '0.5px solid var(--line)',
+                        background: 'var(--glass)', color: 'var(--fg-1)',
+                        fontFamily: 'var(--f-sans)', fontSize: 10.5,
+                    }}
+                />
                 <div
                     role="radiogroup"
                     aria-label={t('transform.motionPresets', 'Motion Presets')}
-                    style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 4 }}
+                    style={{
+                        display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 4,
+                        maxHeight: 216, overflowY: 'auto', paddingRight: 2,
+                    }}
                 >
-                    {availablePresets.slice(0, 9).map(presetId => {
+                    {availablePresets.filter(presetId => !presetSearchQuery || `${MOTION_PRESETS[presetId]?.label || presetId} ${presetId}`.toLowerCase().includes(presetSearchQuery)).map(presetId => {
                         const preset = MOTION_PRESETS[presetId];
                         const isActive = activePresetId === presetId;
                         return (

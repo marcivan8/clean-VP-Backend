@@ -18,6 +18,7 @@ export const STYLE_RECIPES = {
         transitions: { cycle: ['flash', 'whip-left', 'zoom-punch', 'glitch', 'whip-right', 'speed-lines'], jumpCuts: true },
         rhythmZoom: 'dynamic',           // /api/interview/rhythm-zoom styles
         broll: { layout: 'fullscreen' }, // word-synced cutaways (A6)
+        illustrations: { max: 4 },
         numberPops: true,
         phrases: ['punchy', 'punchy creator', 'hormozi', 'high energy', 'dynamique', 'percutant'],
     },
@@ -28,6 +29,7 @@ export const STYLE_RECIPES = {
         transitions: { cycle: ['speed-lines', 'whip-left', 'dip', 'whip-right', 'zoom-punch'], jumpCuts: true },
         rhythmZoom: 'subtle',
         broll: { layout: 'fullscreen' },
+        illustrations: { max: 3 },
         numberPops: true,
         phrases: ['travel', 'travel vlog', 'vlog', 'voyage', 'vlog voyage'],
     },
@@ -38,6 +40,7 @@ export const STYLE_RECIPES = {
         transitions: { cycle: ['dip'], duration: 0.4 },
         rhythmZoom: 'subtle',
         broll: { layout: 'split' },
+        illustrations: { max: 3 },
         numberPops: true,
         phrases: ['explainer', 'tutorial', 'tuto', 'tutoriel', 'educational', 'explication'],
     },
@@ -51,6 +54,7 @@ export const STYLE_RECIPES = {
         // split keeps the speaker present and avoids a flashy full-screen
         // interruption.
         broll: { layout: 'split' },
+        illustrations: { max: 2 },
         numberPops: false,
         phrases: ['podcast', 'podcast clip', 'interview', 'calm', 'calme'],
     },

@@ -39,7 +39,7 @@ const read = (rel) => {
 };
 
 function loadClientModules() {
-    const order = ['Easing', 'MotionSchema', 'MotionResolver', 'MotionPresets', 'CaptionModel', 'ClipAdapter', 'ClipGrouping', 'ComponentLibrary'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'MotionPresets', 'AnimationSynthesizer', 'CaptionModel', 'ClipAdapter', 'ClipGrouping', 'SceneComposer', 'ComponentLibrary'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);

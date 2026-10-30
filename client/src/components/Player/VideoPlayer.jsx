@@ -241,10 +241,11 @@ const VideoPlayer = () => {
         try {
             engineRef.current = new PlaybackEngine(canvasRef.current, {
             onTick: (time) => {
-                // Determine if we should update store
-                // Optimally we don't spam the store with every tick unless UI needs it (scrubber)
-                // For now, let's keep it minimal or use a ref-synced store updater if needed.
-                useTimelineStore.getState().seek(time);
+                // This is the playback clock reporting its current position.
+                // `seek()` would send a requestSeek back to the running player
+                // on every tick, creating a feedback loop that stutters video
+                // and makes the timeline playhead jump.
+                useTimelineStore.getState().setPlaybackTime(time);
             },
             onAudioLevels: (levels) => {
                 useTimelineStore.getState().setAudioLevels(levels);
@@ -797,11 +798,12 @@ const VideoPlayer = () => {
                         filter: baseFilter,
                     }}
                     onTimeUpdate={(e) => {
-                        // Mirrors the primary engine's onTick → seek() wiring.
+                        // Mirror the primary engine's clock update without
+                        // sending another seek back to the playing video.
                         // Only push into the store while actually playing —
                         // while paused, the scrub-sync effect above is the one
                         // driving video.currentTime, not the other way round.
-                        if (isPlaying) useTimelineStore.getState().seek(e.currentTarget.currentTime);
+                        if (isPlaying) useTimelineStore.getState().setPlaybackTime(e.currentTarget.currentTime);
                     }}
                     onLoadedMetadata={(e) => {
                         const { videoWidth, videoHeight } = e.currentTarget;

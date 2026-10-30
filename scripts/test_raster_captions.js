@@ -38,7 +38,7 @@ const read = (rel) => {
 function loadClientModules() {
     // TextCraft before CaptionCompiler: the compiler imports its highlight-ramp
     // rules, and this loader resolves imports by concatenation order.
-    const order = ['Easing', 'MotionSchema', 'MotionResolver', 'MotionPresets', 'TextCraft', 'CaptionModel', 'ClipAdapter', 'Compositor', 'CaptionCompiler'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'MotionPresets', 'TextCraft', 'CaptionModel', 'ClipAdapter', 'Compositor', 'CaptionCompiler'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);

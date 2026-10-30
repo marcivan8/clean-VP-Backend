@@ -58,14 +58,14 @@ const ANIMATION_KNOWLEDGE_GRAPH = {
         event: 'reveal',
         eventType: TimelineEventType.REVEAL,
         animations: {
-            text:    ['scale-reveal', 'blur-reveal'],
-            video:   ['camera-push'],
+            text:    ['scale-reveal', 'blur-reveal', 'txt-rise-soft', 'txt-blur-zoom', 'drop-in', 'txt-spring-up', 'wipe-left', 'blur-pop'],
+            video:   ['camera-push', 'camera-pull', 'cam-push-slow', 'cam-rack-focus', 'camera-orbit', 'cam-pan-left'],
             // 'reveal' is a real IMAGE_PRESETS id (client/src/motion/MotionPresets.js) —
             // an overlay photo appearing/revealing is the closest visual analogue to a
             // REVEAL moment; ken-burns as the fallback if 'reveal' is ever unavailable.
-            image:   ['reveal', 'ken-burns'],
+            image:   ['reveal', 'ken-burns', 'img-parallax-slow', 'img-focus-reveal', 'focus-pull', 'ken-burns-out'],
             // A sticker popping into frame reads as the same "here it is" beat.
-            sticker: ['sticker-pop', 'bounce'],
+            sticker: ['sticker-pop', 'bounce', 'stkr-spin-clockwise', 'stkr-bounce-soft', 'spin-in'],
         },
         sfxIntents: [EditingIntent.REVEAL, EditingIntent.INTRO],
         sfxTerms: ['riser', 'impact', 'reveal'],
@@ -74,12 +74,12 @@ const ANIMATION_KNOWLEDGE_GRAPH = {
         event: 'punchline',
         eventType: TimelineEventType.PUNCHLINE_DETECTED,
         animations: {
-            text:    ['pop'],
+            text:    ['pop', 'kinetic-slam', 'glow-pulse'],
             video:   ['camera-shake'],
             // A sharp punch-in on the overlay photo lands with the joke's beat.
-            image:   ['zoom'],
+            image:   ['zoom', 'slow-rotate', 'drift-diagonal'],
             // Bounce/shake are the comedic-timing presets in STICKER_PRESETS.
-            sticker: ['bounce', 'shake'],
+            sticker: ['bounce', 'shake', 'heartbeat', 'swing'],
         },
         sfxIntents: [EditingIntent.PUNCHLINE, EditingIntent.COMEDY],
         sfxTerms: ['punchline', 'vine boom', 'boing'],
@@ -88,12 +88,12 @@ const ANIMATION_KNOWLEDGE_GRAPH = {
         event: 'emphasis',
         eventType: TimelineEventType.EMPHASIS_MOMENT,
         animations: {
-            text:    ['glow-reveal'],
-            video:   ['camera-zoom'],
+            text:    ['glow-reveal', 'rotate-settle', 'wipe-left'],
+            video:   ['camera-zoom', 'camera-drift-left', 'camera-drift-right'],
             // Deliberately different from punchline's 'zoom' — a standalone emphasis
             // moment (no preceding pause) reads better as a depth shift than a hit.
-            image:   ['parallax', 'pan'],
-            sticker: ['pulse', 'shake'],
+            image:   ['parallax', 'pan', 'pan-up', 'pan-down', 'drift-diagonal'],
+            sticker: ['pulse', 'shake', 'heartbeat', 'sticker-float'],
         },
         sfxIntents: [EditingIntent.IMPACT, EditingIntent.ZOOM_PUNCH],
         sfxTerms: ['impact', 'punch', 'boom'],
@@ -102,14 +102,14 @@ const ANIMATION_KNOWLEDGE_GRAPH = {
         event: 'emotional_beat',
         eventType: TimelineEventType.EMOTIONAL_BEAT,
         animations: {
-            text:    ['fade'],
+            text:    ['fade', 'drift-left', 'blur-pop'],
             // Deliberately empty — an emotional beat ("miss you", "thank you", a real
             // pause) should never get camera-shake/punch-style motion. Same restraint
             // now applies to sticker below: a playful graphic doesn't belong on a beat
             // like this. A meaningful overlay PHOTO is the one exception — it gets the
             // gentlest preset in the whole graph, a slow float, nothing sharper.
             video:   [],
-            image:   ['float'],
+            image:   ['float', 'ken-burns-out', 'focus-pull', 'slow-rotate'],
             sticker: [],
         },
         sfxIntents: [EditingIntent.EMOTIONAL_BEAT, EditingIntent.STORYTELLING],
@@ -132,7 +132,7 @@ const ANIMATION_KNOWLEDGE_GRAPH = {
             // mask-reveal reads as "revealing the next chapter" — a wipe,
             // not a bounce — deliberately distinct from punchline's 'pop'
             // and reveal's 'scale-reveal'/'blur-reveal'.
-            text:    ['mask-reveal', 'slide-up'],
+            text:    ['mask-reveal', 'slide-up', 'wipe-left', 'drop-in'],
             // Rarely the PRIMARY target once a title card exists (see the
             // retargeting above), but kept for parity with the other three
             // entries, as the fallback before any title card has been
@@ -140,11 +140,11 @@ const ANIMATION_KNOWLEDGE_GRAPH = {
             // finds on screen at the same boundary. A slow pull-out reads as
             // "opening up" into a new topic — distinct from reveal's push-in
             // and punchline/emphasis's shake/zoom.
-            video:   ['camera-pull'],
+            video:   ['camera-pull', 'camera-pedestal-up', 'camera-pedestal-down', 'camera-orbit'],
             // A b-roll cutaway R78 places right at this boundary (the
             // chapter-proximity scoring bonus) gets a slow, premium push
             // rather than punchline's sharp zoom or emphasis's parallax/pan.
-            image:   ['ken-burns'],
+            image:   ['ken-burns', 'pan-up', 'pan-down', 'drift-diagonal'],
             // Deliberately empty — same restraint as emotional_beat: a
             // chapter change is not the moment for a playful sticker pop.
             sticker: [],
@@ -340,7 +340,7 @@ function resolveOverlayAnimations(events, tracks, tone = null) {
             // (see audioEngineRoutes.js), so an overlay reacting to the same
             // moment gets a proportionally-matched punch, not a mismatched one.
             const intensity = computeIntensity(event.eventType, event.metadata);
-            const presetId  = pickPresetForIntensity(candidates, intensity);
+            const presetId  = pickPresetForIntensity(candidates, intensity, computeStyleSeed(event, tone));
             if (!presetId) continue;
             const secondaryPresetId = pickSecondaryPreset(presetId, computeStyleSeed(event, tone));
 

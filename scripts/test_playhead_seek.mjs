@@ -1,4 +1,11 @@
 import assert from 'node:assert';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const playerSource = fs.readFileSync(path.join(root, 'client/src/components/Player/VideoPlayer.jsx'), 'utf8');
+const storeSource = fs.readFileSync(path.join(root, 'client/src/store/useTimelineStore.js'), 'utf8');
 
 console.log('--- Testing Playhead Seeking & Frame Accuracy Past 35s ---');
 
@@ -84,4 +91,12 @@ function calcSeekTime(clientX, rectLeft, zoomLevel, timelineDuration, fps = 30) 
     console.log('✓ Test 6 Passed: onTimeUpdate advances playhead normally during playback');
 }
 
+// Playback time is observational. A seek action sends requestSeek() back to
+// the player, so routing each onTick through seek creates a playback feedback
+// loop and makes the playhead/video stutter.
+assert.match(storeSource, /setPlaybackTime:\s*\(time\)\s*=>/);
+assert.match(playerSource, /onTick:\s*\(time\)\s*=>\s*\{[\s\S]*?setPlaybackTime\(time\)/);
+assert.match(playerSource, /if \(isPlaying\) useTimelineStore\.getState\(\)\.setPlaybackTime\(e\.currentTarget\.currentTime\)/);
+assert.doesNotMatch(playerSource, /onTick:\s*\(time\)\s*=>\s*\{[\s\S]*?\.seek\(time\)/);
+console.log('✓ Playback clock updates do not issue recursive seek commands');
 console.log('ALL PLAYHEAD SEEK TESTS PASSED!');

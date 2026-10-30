@@ -5,6 +5,7 @@ import Track from './Track';
 import useTimelineStore from '../../store/useTimelineStore';
 import useDeviceType from '../../hooks/useDeviceType';
 import { addAssetAtTimelinePosition, getAssetDropTime } from '../../timeline/assetDropPosition.js';
+import { triggerHint } from '../FirstRunHint.jsx';
 import { TRANSITION_TYPES, TRANSITION_DEFAULT_DURATION } from '../../motion/TransitionFX.js';
 import { Scissors, ZoomIn, ZoomOut, Copy, Type, Palette, Undo2, Redo2, ChevronsRight, Magnet, ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -117,6 +118,7 @@ const Timeline = () => {
         if (!asset || !position) return;
         const targetTrackId = event.target.closest?.('[data-timeline-track]')?.dataset.timelineTrack || null;
         addAssetAtTimelinePosition(state, asset, targetTrackId, position.time);
+        triggerHint('first_clip');
     };
 
     const handleTracksMouseDown = React.useCallback((e) => {

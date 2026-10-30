@@ -25,7 +25,7 @@ export const EDITING_STYLES = {
         rhythmZoom: 'subtle',
         transition: 'speed-lines',
         targetDuration: null,
-        guidance: 'Vlog: keep the story in chronological order, tighten pauses without removing every breath, cut to b-roll on what is being described, light upbeat energy.',
+        guidance: 'Vlog: keep story order and natural breaths, use relevant b-roll and occasional location/subject vector illustrations, with relaxed motion and light upbeat energy.',
     },
     talking_head: {
         id: 'talking_head',
@@ -35,7 +35,7 @@ export const EDITING_STYLES = {
         rhythmZoom: 'dynamic',
         transition: 'flash',
         targetDuration: null,
-        guidance: 'Talking head: one speaker to camera. Cut silences and filler tightly, keep a fast rhythm with punch-in zooms, bold captions with key words, and use brief relevant b-roll to illustrate important ideas.',
+        guidance: 'Talking head: one speaker to camera. Cut silences and filler tightly; use punch-ins, bold captions, relevant b-roll, restrained animated graphics, and occasional topic-matched vector illustrations.',
     },
     interview: {
         id: 'interview',
@@ -45,7 +45,7 @@ export const EDITING_STYLES = {
         rhythmZoom: 'subtle',
         transition: 'dip',
         targetDuration: null,
-        guidance: 'Interview: two or more speakers. Keep questions and answers intact, never cut a speaker mid-sentence, switch angle on the active speaker, use restrained relevant b-roll to clarify answers, and keep captions clean.',
+        guidance: 'Interview: preserve complete questions and answers, switch to the active speaker, and use clean captions, restrained b-roll, subtle motion, and occasional topic-matched vector illustrations.',
     },
     podcast: {
         id: 'podcast',
@@ -55,7 +55,7 @@ export const EDITING_STYLES = {
         rhythmZoom: 'subtle',
         transition: 'dip',
         targetDuration: null,
-        guidance: 'Podcast: long conversation. Remove dead air and filler but keep the natural flow, clear audio, readable captions, calm gentle zooms, occasional restrained b-roll, and no flashy effects.',
+        guidance: 'Podcast: keep the natural flow and clear audio; use readable captions, gentle motion, restrained b-roll, subtle animated quote/topic graphics, and occasional vector illustrations. Avoid flashy effects.',
     },
     reel: {
         id: 'reel',
@@ -79,7 +79,7 @@ export const EDITING_STYLES = {
         // down to a fixed duration -- see MediaExecutionEngine.js
         // 'extract_short', which checks this cap, not targetDuration.
         maxDuration: 120,
-        guidance: 'Reel: short social cut, often repurposed from a longer video. Strongest moment first (hook in the first 2 seconds), length follows the source (up to 2 minutes), vertical 9:16, very tight cuts, bold captions, and fast relevant b-roll cutaways.',
+        guidance: 'Reel: lead with the strongest moment, use vertical 9:16, tight cuts, bold captions, fast relevant b-roll, kinetic motion, and varied topic-matched vector illustrations.',
     },
 };
 
@@ -170,9 +170,10 @@ export function buildAutopilotSteps(styleId, request, facts = {}) {
     // can fill local-footage gaps from the configured stock provider.
     steps.push({ key: 'captions', prompt: 'Add captions' });
     steps.push({ key: 'recipe', prompt: `Apply the ${style.recipeId} style recipe` });
-    // Motion + sound effects: not for the calm styles. A Reel gets the full
-    // pro short finish (R92 round C: hook title, platform captions, camera
-    // punch-ins, pops, transitions, sounds) instead of the generic animation.
+    // A Reel gets the full pro short finish (hook title, platform captions,
+    // camera punch-ins, pops, transitions, sounds). Every other style runs
+    // the style-aware motion pass: calm styles are reduced to gentle motion
+    // by the animation planner and keep SFX disabled.
     if (style.id === 'reel') {
         // Names the platform explicitly: MediaExecutionEngine's polish_short
         // handler resolves the platform from the prompt text first and only
@@ -182,7 +183,7 @@ export function buildAutopilotSteps(styleId, request, facts = {}) {
         // moment this step executes — the LAST of six Auto steps). Naming it
         // here removes that fragility for the one path that matters most.
         steps.push({ key: 'finish', prompt: 'Pro finish for Instagram Reels' });
-    } else if (style.id === 'vlog' || style.id === 'talking_head') {
+    } else {
         steps.push({ key: 'animate', prompt: 'Animate automatically' });
     }
     return steps;

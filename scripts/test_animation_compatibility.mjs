@@ -28,6 +28,19 @@ await check('evaluator defines all standard editing styles', () => {
     }
 });
 
+await check('vector illustrations are style-adapted on client and server, including interview', () => {
+    for (const evaluator of [ACE_client, ACE_server]) {
+        const reel = evaluator.evaluateMotionCompatibility('reel', 'template', 'icon', { icon: 'rocket' });
+        assert.equal(reel.verdict, 'ideal');
+        assert.equal(reel.adaptedParams.treatment, 'burst');
+        assert.equal(reel.adaptedParams.accent, evaluator.STYLE_MOTION_RULES.reel.palette.accent);
+        const interview = evaluator.evaluateMotionCompatibility('interview', 'template', 'icon', { icon: 'mic' });
+        assert.equal(interview.verdict, 'ideal');
+        assert.equal(interview.adaptedParams.treatment, 'solo');
+        assert.equal(interview.adaptedParams.accent, evaluator.STYLE_MOTION_RULES.podcast.palette.accent);
+    }
+});
+
 await check('talking head style allows lower thirds and clean data charts, rejects noisy glitch', () => {
     const resGood = ACE_client.evaluateMotionCompatibility('talking_head', 'template', 'lower-third-minimal');
     assert.equal(resGood.verdict, 'ideal');

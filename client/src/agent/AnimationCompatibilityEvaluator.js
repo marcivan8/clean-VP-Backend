@@ -244,7 +244,7 @@ export const STYLE_MOTION_RULES = Object.freeze({
  * }}
  */
 export function evaluateMotionCompatibility(styleId, category, itemKey, currentParams = {}) {
-    const normalizedStyle = STYLE_MOTION_RULES[styleId] ? styleId : 'talking_head';
+    const normalizedStyle = STYLE_MOTION_RULES[styleId] ? styleId : styleId === 'interview' ? 'podcast' : 'talking_head';
     const rules = STYLE_MOTION_RULES[normalizedStyle];
 
     let score = 0.75;
@@ -255,7 +255,17 @@ export function evaluateMotionCompatibility(styleId, category, itemKey, currentP
 
     switch (category) {
         case 'template': {
-            if (rules.idealTemplates.includes(itemKey)) {
+            if (['icon', 'icon-label', 'icon-row'].includes(itemKey)) {
+                score = 0.9;
+                verdict = 'ideal';
+                reason = `Vector illustrations work in ${rules.name} when their scale and treatment follow the style.`;
+                if (!adaptedParams.accent) adaptedParams.accent = rules.palette.accent;
+                if (!adaptedParams.treatment) {
+                    adaptedParams.treatment = ['reel'].includes(normalizedStyle) ? 'burst'
+                        : ['vlog', 'repurposing'].includes(normalizedStyle) ? 'badge'
+                            : ['podcast'].includes(normalizedStyle) ? 'solo' : 'frame';
+                }
+            } else if (rules.idealTemplates.includes(itemKey)) {
                 score = 0.95;
                 verdict = 'ideal';
                 reason = `'${itemKey}' perfectly reinforces the ${rules.name} aesthetic.`;
@@ -420,7 +430,7 @@ export function evaluateMotionCompatibility(styleId, category, itemKey, currentP
  * @param {string} styleId
  */
 export function getRecommendedMotionSuite(styleId) {
-    const normalized = STYLE_MOTION_RULES[styleId] ? styleId : 'talking_head';
+    const normalized = STYLE_MOTION_RULES[styleId] ? styleId : styleId === 'interview' ? 'podcast' : 'talking_head';
     const rules = STYLE_MOTION_RULES[normalized];
     return {
         styleId: normalized,
@@ -1261,7 +1271,7 @@ export function queryMotionCatalog({ category, screenZone, styleId, intent, limi
  * @returns {object} Selected variation preset
  */
 export function selectStyleVariation(styleId, { seed, avoidVariationId, themePreference } = {}) {
-    const normalized = STYLE_VARIATION_PRESETS[styleId] ? styleId : 'talking_head';
+    const normalized = STYLE_VARIATION_PRESETS[styleId] ? styleId : styleId === 'interview' ? 'podcast' : 'talking_head';
     const variations = STYLE_VARIATION_PRESETS[normalized];
 
     let candidates = variations;

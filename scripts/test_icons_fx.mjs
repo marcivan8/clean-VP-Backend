@@ -11,6 +11,7 @@ const check = (name, fn) => {
 const read = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 
 const IL = await import('../client/src/motion/IconLibrary.js');
+const VI = await import('../client/src/motion/VectorIllustrationLibrary.js');
 const TG = await import('../client/src/motion/TemplateGraphics.js');
 const FX = await import('../client/src/motion/TransitionFX.js');
 
@@ -32,6 +33,25 @@ function recorder() {
 }
 
 log('\n-- 1. The icon set --');
+
+check('the vector illustration catalog has 100+ unique, usable entries', () => {
+    assert.ok(VI.VECTOR_ILLUSTRATIONS.length >= 100, `only ${VI.VECTOR_ILLUSTRATIONS.length} illustrations`);
+    assert.equal(new Set(VI.VECTOR_ILLUSTRATIONS.map(item => item.id)).size, VI.VECTOR_ILLUSTRATIONS.length);
+    for (const item of VI.VECTOR_ILLUSTRATIONS) {
+        assert.ok(IL.hasIcon(item.icon), `${item.id} references missing icon ${item.icon}`);
+        assert.ok(VI.isValidVectorIllustration(item), `${item.id} is invalid`);
+    }
+});
+
+check('agent template tool exposes the full template catalogue and the illustration picker forwards params', () => {
+    const tools = read('../client/src/agent/VideoEditorTools.js');
+    const panel = read('../client/src/components/TemplatePanel.jsx');
+    assert.match(tools, /kind:\s*\{\s*type:\s*"string",\s*enum:\s*TEMPLATE_KINDS\s*\}/);
+    assert.match(tools, /params\.icon names a vector illustration/);
+    assert.match(panel, /const add = \(kind, params = \{\}\)/);
+    assert.match(panel, /add\('icon', \{ icon: item\.icon, treatment: item\.treatment \}\)/);
+    assert.match(panel, /evaluateMotionCompatibility\(editingStyle, 'template', kind, params\)/);
+});
 
 check('every name in a group is a real icon, and every icon is in a group', () => {
     for (const name of IL.ICON_NAMES) {
@@ -150,6 +170,14 @@ check('the icon templates are registered and draw', () => {
     }
 });
 
+check('each illustration treatment draws through the shared template renderer', () => {
+    for (const treatment of ['solo', 'badge', 'frame', 'burst']) {
+        const { ctx, calls } = recorder();
+        TG.drawTemplate(ctx, 'icon', { icon: 'rocket', treatment, accent: '#ff00aa' }, 1.4, 2.6, {});
+        assert.ok(calls.some(call => call === 'fill()' || call === 'stroke()'), `${treatment} drew nothing`);
+    }
+});
+
 check('an unknown icon name leaves no hole in a label', () => {
     // drawIcon reports whether it drew, so the text shifts left instead of
     // sitting beside an empty gap.
@@ -167,6 +195,9 @@ check('asking for an icon with no usable name returns nothing', () => {
     assert.equal(TG.templateFromText('add an icon'), null);
     assert.equal(TG.templateFromText('add a check icon')?.kind, 'icon');
     assert.equal(TG.templateFromText('add a check icon')?.params.icon, 'check');
+    assert.deepEqual(TG.templateFromText('add a burst illustration of a rocket'), {
+        kind: 'icon', params: { icon: 'rocket', treatment: 'burst' },
+    });
 });
 
 check('the brand reaches an icon', () => {

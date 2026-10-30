@@ -60,16 +60,19 @@ function stripModuleSyntax(src) {
 }
 
 let schemaSrc = read('client/src/motion/MotionSchema.js');
+let expansionSrc = read('client/src/motion/MotionPresetExpansion.js');
 let presetsSrc = read('client/src/motion/MotionPresets.js');
 let synthSrc  = read('client/src/motion/AnimationSynthesizer.js');
 
 schemaSrc = stripModuleSyntax(schemaSrc).replace(/\bclamp\(/g, '__clamp(');
+expansionSrc = stripModuleSyntax(expansionSrc);
 presetsSrc = stripModuleSyntax(presetsSrc);
 synthSrc = stripModuleSyntax(synthSrc);
 
 const motionHarness = `
 const __clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 ${schemaSrc}
+${expansionSrc}
 ${presetsSrc}
 ${synthSrc}
 return { MOTION_PRESETS, buildPreset, createAnimation, createKeyframe, scaleAnimations };

@@ -55,6 +55,10 @@ const vetSrcRaw = read('client/src/agent/VideoEditorTools.js');
 let helpers = null;
 {
     let src = vetSrcRaw
+        // The tool schema now reads the shared template catalogue at module
+        // scope. This harness strips imports because the pure helpers below
+        // do not use the catalogue, so provide the harmless binding first.
+        .replace(/^\s*import\s+\{\s*TEMPLATE_KINDS\s*\}\s+from\s+'\.\.\/motion\/TemplateGraphics\.js';\s*$/m, 'const TEMPLATE_KINDS = [];')
         // Strip every top-level import line — none of these three pure
         // helpers reference them, so nothing needs stubbing.
         .replace(/^\s*import\s+[^;]+;\s*$/gm, '')

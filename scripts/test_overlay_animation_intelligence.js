@@ -153,8 +153,8 @@ section('4 · resolveOverlayAnimations — the core new behaviour, fully execute
             extra.length === 1, `got ${extra.length}`);
         check('plan item targets the overlay clip, not the primary clip',
             extra[0]?.clipId === 'img1');
-        check('plan item uses the IMAGE preset family for punchline (zoom)',
-            extra[0]?.presetId === ANIMATION_KNOWLEDGE_GRAPH.punchline.animations.image[0]);
+        check('plan item chooses a punchline preset from the IMAGE family',
+            ANIMATION_KNOWLEDGE_GRAPH.punchline.animations.image.includes(extra[0]?.presetId));
         check('overlay-derived plan items never carry SFX (only the primary item does)',
             Array.isArray(extra[0]?.sfx) && extra[0].sfx.length === 0);
     }

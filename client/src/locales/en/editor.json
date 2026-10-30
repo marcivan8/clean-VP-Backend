@@ -62,12 +62,15 @@
     "qualityHigh": "High",
     "qualityLow": "Low (faster)",
     "qualityHint": "Lower quality speeds up playback on slower machines",
+    "onboarding": "Getting started",
     "shortcuts": "Keyboard shortcuts",
     "shortcutUndo": "Undo",
     "shortcutRedo": "Redo",
     "shortcutSplit": "Split clip",
     "shortcutDelete": "Delete selection",
     "shortcutPlay": "Play / Pause",
+    "replayWalkthrough": "Replay the walkthrough",
+    "replayWalkthroughHint": "Show the editor walkthrough again",
     "version": "Vibed",
     "appName": "AI Video Editor"
   },
@@ -599,6 +602,7 @@
     "noAnimation": "No animation",
     "customKeyframes": "Custom keyframes",
     "usingPreset": "Preset: {{name}}",
+    "searchPresets": "Search motion presets",
     "startAnimating": "Add a {{param}} keyframe at the playhead",
     "group": {
       "text": "Text",
@@ -642,8 +646,8 @@
       "locked": "Shorts finds the moments that stand on their own and cuts each into its own vertical version, finished for TikTok, Reels or Shorts. Available on Creator."
     },
     "export": {
-      "title": "Export, or take it with you",
-      "body": "Render an MP4, or hand the timeline to Premiere, Final Cut or Resolve with your bins and names intact."
+      "title": "Finish and export your video",
+      "body": "Render an MP4 and download your finished video. Choose the resolution and quality that fit your project."
     },
     "next": "Next",
     "done": "Start editing",

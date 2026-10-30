@@ -391,6 +391,17 @@ const useTimelineStore = create(
                 }
             },
 
+            // Playback clock updates are observations from the running player,
+            // not seek commands. Calling `seek()` here feeds each clock tick
+            // back into requestSeek(), which repeatedly interrupts decoding
+            // and makes the video and playhead stutter against one another.
+            setPlaybackTime: (time) => {
+                const value = Number(time);
+                if (!Number.isFinite(value)) return;
+                const { duration } = get();
+                set({ currentTime: Math.max(0, Math.min(value, Number(duration) || value)) });
+            },
+
             // ==============================================================
             // ZOOM / VIEW
             // ==============================================================

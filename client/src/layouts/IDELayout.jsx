@@ -80,7 +80,7 @@ import OnboardingTour, { shouldShowOnboardingTour } from '../components/Onboardi
 // R105 — first-run teaching: the once-only walkthrough above, plus small
 // contextual hints fired the first time a user reaches a given state.
 import FirstRunHint, { triggerHint } from '../components/FirstRunHint';
-import { loadOnboardingProgress } from '../services/onboardingProgress.js';
+import { loadOnboardingProgress, resetOnboardingProgress } from '../services/onboardingProgress.js';
 import { EventBus, EVENT_TYPES } from '../agent/EventBus';
 import { useSupabasePersistence } from '../hooks/useSupabasePersistence';
 import { runExportWithAutoRetry } from '../utils/exportAutoRetry.js';
@@ -688,6 +688,13 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         try { localStorage.setItem('vp_panel_collapsed', next ? '1' : '0'); }
         catch { /* storage unavailable — the session still honours the choice */ }
     }, []);
+
+    const replayOnboardingWalkthrough = useCallback(async () => {
+        await loadOnboardingProgress();
+        await resetOnboardingProgress();
+        persistCollapsed(false);
+        setShowTour(true);
+    }, [persistCollapsed]);
 
     useEffect(() => {
         if (!progressReady || isMobile || !shouldShowOnboardingTour()) return undefined;
@@ -1456,6 +1463,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
             useAIStore.getState().setOpeningFile(null);
             addAssets(processedAssets);
+            triggerHint('first_upload');
 
             if (processedAssets.length === 1) {
                 // Before auto-placing, evict ghost clips (stale segments from a
@@ -1473,6 +1481,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 // Single file: auto-place immediately. The player resolves proxy URL
                 // from the asset store once processing finishes — no extra work needed.
                 useTimelineStore.getState().addAssetToTimeline(processedAssets[0]);
+                triggerHint('first_clip');
                 // Always start preview from the beginning of the newly placed clip
                 useTimelineStore.getState().seek(0);
             }
@@ -1493,7 +1502,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             // says that the next move is to ASK for something. Point at the
             // chat box once. `triggerHint` is a no-op after the first time, on
             // any device, and while onboarding progress is still loading.
-            triggerHint('first_upload');
             // A long single take is the repurposing case. Say so here, where
             // the user can see how long their clip is, rather than hoping they
             // find a locked tab on their own.
@@ -2168,7 +2176,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         <button onClick={() => { useTimelineStore.getState().exitShortPreview(); const data = useTimelineStore.getState().saveProject(); if (!data) return; const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `project-${Date.now()}.json`; a.click(); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.saveProject')}</button>
                                         <div className="h-px bg-border my-1" />
                                         <button onClick={() => { triggerImport(); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.importMedia')}</button>
-                                        <button onClick={() => { triggerHint('before_export'); setShowExportModal(true); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.exportVideo')}</button>
+                                        <button onMouseEnter={() => triggerHint('before_export')} onFocus={() => triggerHint('before_export')} onClick={() => { setShowExportModal(true); setOpenMenu(null); }} className="px-4 py-2 text-xs text-left hover:bg-secondary transition-colors">{t('ideLayout.menu.exportVideo')}</button>
                                     </div>
                                 </>
                             )}
@@ -2219,6 +2227,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         <button
                             data-tour="export-button"
                             data-hint="export-button"
+                            onMouseEnter={() => triggerHint('before_export')}
+                            onFocus={() => triggerHint('before_export')}
                             onClick={() => {
                                 if (isAnonymous) { showAuthPrompt('export'); }
                                 // Mobile: export sheet (also reopens a running export's progress)
@@ -2553,7 +2563,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 </section>
                             )}
 
-                            {activeTab === 'settings' && <section className="p-4"><SettingsPanel /></section>}
+                            {activeTab === 'settings' && <section className="p-4"><SettingsPanel onReplayWalkthrough={replayOnboardingWalkthrough} showReplayWalkthrough={!isMobile} /></section>}
                         </div>
                     </aside>
 
@@ -2636,7 +2646,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                                     // Only push into store while playing — while paused, user scrub/seek/step
                                                     // drives currentTime so asynchronous/quantized updates do not snap the playhead
                                                     if (useTimelineStore.getState().isPlaying) {
-                                                        useTimelineStore.setState({ currentTime: time });
+                                                        useTimelineStore.getState().setPlaybackTime(time);
                                                     }
                                                 }}
                                                 project={project}

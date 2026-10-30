@@ -27,11 +27,11 @@
  * MOTION_PRESETS keys), chosen deliberately from a channel the primary
  * doesn't already occupy — never two presets that both drive `scale`, for
  * instance, since MotionSchema's 'multiply' composition rule would compound
- * them into a result nobody designed. Only the 21 preset ids
- * AnimationKnowledgeGraph.js's ANIMATION_KNOWLEDGE_GRAPH actually resolves to
- * as a PRIMARY get an entry here — narrower than the full 26-preset library,
- * same scoping choice R81 and R79 both made before it (ship the curated
- * subset that's actually reachable, not a speculative full matrix). A
+ * them into a result nobody designed. Only curated preset ids that
+ * AnimationKnowledgeGraph.js's ANIMATION_KNOWLEDGE_GRAPH can resolve to as a
+ * PRIMARY get an entry here — narrower than the full library, following the
+ * same scoping choice R81 and R79 made before it (ship the curated subset
+ * that's actually reachable, not a speculative full matrix). A
  * secondary VALUE may be a preset that's never itself a primary in the graph
  * (e.g. 'wiggle', 'camera-whip') — that's fine, it's still a real preset.
  *
@@ -77,6 +77,15 @@ const SECONDARY_PRESETS = {
     'kinetic-slam':   ['camera-shake', 'glow-reveal', 'camera-whip'],           // high impact slam + camera shake, glow hit, or whip blur
     'split-reveal':   ['slide-up', 'glow-reveal', 'fade'],                      // split mask wipe + vertical lift, glow accent, or soft fade
     'glitch-stutter': ['glow-reveal', 'pulse', 'pop'],                          // rapid jitter + glow flare or pulsing scale
+    'blur-pop':       ['drop-in', 'glow-pulse', 'rotate-settle'],               // soft focus entrance + lift, glow, or a small tilt
+    'drop-in':        ['glow-pulse', 'blur-reveal', 'pop'],                      // falling title + glow, focus, or scale accent
+    'drift-left':     ['glow-pulse', 'blur-reveal', 'rotate-settle'],           // lateral entrance + glow, focus, or subtle tilt
+    'rotate-settle':  ['glow-pulse', 'blur-reveal', 'drop-in'],                 // tilted entrance + glow, focus, or lift
+    'wipe-left':      ['glow-pulse', 'drop-in', 'blur-reveal'],                 // content wipe + glow, movement, or focus
+    'glow-pulse':     ['drop-in', 'rotate-settle', 'pop'],                      // highlight pulse + motion from another channel
+    'txt-rise-soft':  ['glow-pulse', 'blur-reveal'],
+    'txt-blur-zoom':  ['drop-in', 'glow-pulse'],
+    'txt-spring-up':  ['glow-pulse', 'blur-reveal'],
 
     // ── IMAGE (IMAGE_PRESETS) ──
     'reveal':    ['pan'],       // scale-in + a slow pan
@@ -85,18 +94,42 @@ const SECONDARY_PRESETS = {
     'parallax':  ['zoom'],      // drift + a punch — reciprocal of 'zoom' above
     'pan':       ['reveal'],    // pan + a scale-in pop
     'float':     ['ken-burns'], // gentle drift + a slow push
+    'ken-burns-out': ['float', 'camera-orbit'],
+    'pan-up':       ['zoom', 'slow-rotate'],
+    'pan-down':     ['zoom', 'slow-rotate'],
+    'drift-diagonal': ['zoom', 'slow-rotate'],
+    'focus-pull':   ['parallax', 'zoom'],
+    'slow-rotate':  ['reveal', 'parallax'],
+    'img-parallax-slow': ['zoom', 'img-tilt-left'],
+    'img-focus-reveal': ['parallax', 'zoom'],
 
     // ── STICKER (STICKER_PRESETS) ──
     'sticker-pop': ['wiggle', 'glitch-stutter'], // pop-in + playful wiggle or glitch
     'bounce':      ['pulse', 'elastic-snap'],   // bounce entrance + pulsing scale or elastic snap
     'shake':       ['pulse', 'glow-reveal'],    // comedic shake + pulse or glow accent
     'pulse':       ['wiggle', 'glitch-stutter'], // pulse + wiggle or stutter
+    'spin-in':     ['pulse', 'glow-reveal'],
+    'sticker-float': ['pulse', 'glow-reveal'],
+    'heartbeat':   ['wiggle', 'glitch-stutter'],
+    'swing':       ['sticker-pop', 'glow-reveal'],
+    'sticker-slide-left': ['sticker-pop', 'glow-reveal'],
+    'stkr-spin-clockwise': ['pulse', 'glow-reveal'],
+    'stkr-bounce-soft': ['pulse', 'glow-reveal'],
 
     // ── CAMERA (CAMERA_PRESETS) ──
     'camera-push':  ['camera-whip', 'camera-shake'], // push-in + whip pan or impact shake
     'camera-shake': ['camera-zoom'],                 // shake + a punch zoom — stacked punch, for a hard hit
     'camera-zoom':  ['camera-shake'],                // punch zoom + shake — reciprocal of 'camera-shake' above
     'camera-pull':  ['camera-whip', 'camera-shake'], // pull-out + whip or settling shake
+    'camera-drift-left': ['camera-zoom', 'camera-orbit'],
+    'camera-drift-right': ['camera-zoom', 'camera-orbit'],
+    'camera-pedestal-up': ['camera-zoom', 'camera-orbit'],
+    'camera-pedestal-down': ['camera-zoom', 'camera-orbit'],
+    'camera-orbit': ['camera-zoom', 'camera-whip'],
+    'camera-handheld-soft': ['camera-push', 'camera-orbit'],
+    'cam-push-slow': ['cam-pan-left', 'camera-orbit'],
+    'cam-rack-focus': ['cam-pan-left', 'cam-dolly-in'],
+    'cam-pan-left': ['camera-zoom', 'camera-orbit'],
 };
 
 /** Preferred secondary animations tailored to each editing style */

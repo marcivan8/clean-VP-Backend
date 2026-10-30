@@ -3,7 +3,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
 import useTimelineStore from '../store/useTimelineStore';
 
-const SettingsPanel = () => {
+const SettingsPanel = ({ onReplayWalkthrough, showReplayWalkthrough = true }) => {
     const { t } = useTranslation('editor');
     const { aspectRatio, setAspectRatio, previewQuality, setPreviewQuality } = useTimelineStore(useShallow(state => ({
         aspectRatio:       state.aspectRatio,
@@ -51,6 +51,20 @@ const SettingsPanel = () => {
             </div>
 
             <div className="h-px bg-border my-2" />
+
+            {showReplayWalkthrough && (
+                <div className="space-y-2">
+                    <h3 className="text-sm font-semibold text-foreground">{t('settings.onboarding')}</h3>
+                    <button
+                        type="button"
+                        onClick={onReplayWalkthrough}
+                        title={t('settings.replayWalkthroughHint')}
+                        className="w-full rounded-md border border-border bg-secondary/50 px-3 py-2 text-left text-xs text-foreground hover:bg-secondary transition-colors"
+                    >
+                        {t('settings.replayWalkthrough')}
+                    </button>
+                </div>
+            )}
 
             {/* Keyboard Shortcuts */}
             <div className="space-y-3">

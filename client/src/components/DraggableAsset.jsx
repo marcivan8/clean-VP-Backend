@@ -4,6 +4,7 @@ import { Video, Music, Image as ImageIcon, Trash2, Loader2, Plus, Layers } from 
 import useTimelineStore from '../store/useTimelineStore';
 import useDeviceType from '../hooks/useDeviceType';
 import { computeProxyPollTimeout } from '../services/proxyService';
+import { triggerHint } from './FirstRunHint.jsx';
 
 const PHASES = ['uploading', 'processing', 'ready'];
 
@@ -155,6 +156,7 @@ const DraggableAsset = ({ asset, listView = false, gradientColors = ["#3B5BE4","
             onClick={() => {
                 if (isTouch && !asset.isProxying) {
                     useTimelineStore.getState().addAssetToTimeline(asset);
+                    triggerHint('first_clip');
                     setAddedOverlay(true);
                     setTimeout(() => setAddedOverlay(false), 1000);
                 }

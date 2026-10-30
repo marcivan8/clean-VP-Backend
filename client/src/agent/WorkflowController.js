@@ -222,6 +222,12 @@ const workflowMachine = createMachine({
                                     // from one instruction at a time. Offer it
                                     // once they have seen a single edit work.
                                     if (result.operation !== 'polish_short') triggerHint('auto_available');
+                                    if (/caption|subtitle/i.test(String(result.operation || ''))) {
+                                        const timeline = useTimelineStore.getState();
+                                        const hasCaptions = (timeline.captions || []).length > 0
+                                            || timeline.tracks.some(track => track.type === 'text' && (track.clips || []).length > 0);
+                                        if (hasCaptions) triggerHint('first_captions');
+                                    }
                                 }
 
                                 if (result.operation === 'chat') {

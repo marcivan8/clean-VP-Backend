@@ -33,6 +33,7 @@ const { authenticateUser, optionalAuth } = require('../middleware/auth');
 const { aiGate }     = require('../middleware/usageGate');
 const { audioQueue } = require('../queue/queues');
 const storageConfig  = require('../config/storage');
+const { useWideDuoBoundary, soloAngleForChunk } = require('./virtualMulticamAngles');
 
 let ffmpegPath = null;
 try {
@@ -2161,25 +2162,22 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
                 return res.status(400).json({ error: 'No usable speech segments found in words array.' });
             }
 
-            // Angle cycle: mid → close → mid → wide … — never jumps directly
-            // between wide and close (always bridged by mid), and the video
-            // opens and closes on the wide to establish/settle the scene.
-            const SOLO_CYCLE = ['mid', 'close', 'mid', 'wide'];
+            // Longer edits open and close wide, with mid/close angles in the
+            // body. A two-chunk edit uses wide then close so a short podcast
+            // still gets a real angle change.
             const soloSegments = [];
             let cycleIdx = 0;
 
             for (let i = 0; i < chunks.length; i++) {
-                const isFirst = i === 0;
-                const isLast  = i === chunks.length - 1;
-                let angle;
-                if (isFirst || isLast) {
-                    angle = 'wide';
-                } else {
-                    angle = SOLO_CYCLE[cycleIdx++ % SOLO_CYCLE.length];
+                let angle = soloAngleForChunk(i, chunks.length, cycleIdx);
+                if (i !== 0 && i !== chunks.length - 1) {
+                    cycleIdx++;
                     // The final segment is forced wide — if the cycle put a close
                     // right before it, bridge with a mid to keep the "never jump
                     // wide↔close directly" rule intact.
-                    if (i === chunks.length - 2 && angle === 'close') angle = 'mid';
+                    if (i === chunks.length - 2 && angle === 'close') {
+                        angle = 'mid';
+                    }
                 }
                 const cam     = SOLO_CAMERAS[angle];
                 const crop    = scaleToCrop(cam);
@@ -2272,7 +2270,8 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
         // ── 4. Apply editorial rules to assign camera angles ────────────────
         //
         // Rules (in priority order):
-        //  • First and last segment → wide (establish / close the scene)
+        //  • For 3+ turns, first and last segment → wide (establish / close)
+        //  • A 2-turn interview uses both turns for speaker close-ups
         //  • Duration < 0.6 s → inherit previous angle (avoid micro-cut flicker)
         //  • Duration < MIN_CLOSE_DUR → wide (short segments look nervous as close-ups)
         //  • Otherwise → close-up of the speaking person (speakerA or speakerB)
@@ -2289,12 +2288,9 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
         for (let i = 0; i < rawSegments.length; i++) {
             const seg     = rawSegments[i];
             const dur     = seg.end - seg.start;
-            const isFirst = i === 0;
-            const isLast  = i === rawSegments.length - 1;
-
             let angle;
 
-            if (isFirst || isLast) {
+            if (useWideDuoBoundary(i, rawSegments.length)) {
                 angle = 'wide';
             } else if (dur < 0.6) {
                 angle = prevAngle; // inherit — too short to cut cleanly

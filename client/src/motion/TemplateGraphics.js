@@ -4393,13 +4393,53 @@ function drawIconTemplate(ctx, p, t, duration) {
     const a = Math.min(1, tin * 2) * tout;
     if (a <= 0) return;
     const pop = easeOutBack(clamp(t / 0.34, 0, 1));
-    const size = w * 0.8;
     ctx.save();
     ctx.globalAlpha = a;
     ctx.translate(w / 2, h / 2);
     ctx.scale(pop, pop);
+    const treatment = ['badge', 'frame', 'burst'].includes(p.treatment) ? p.treatment : 'solo';
+    const accent = p.accent || '#00E5FF';
+    const size = w * (treatment === 'solo' ? 0.78 : 0.54);
+    if (treatment === 'badge') {
+        ctx.beginPath();
+        ctx.arc(0, 0, w * 0.43, 0, Math.PI * 2);
+        ctx.fillStyle = accent;
+        ctx.globalAlpha = a * 0.18;
+        ctx.fill();
+        ctx.globalAlpha = a;
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = Math.max(3, w * 0.018);
+        ctx.stroke();
+    } else if (treatment === 'frame') {
+        ctx.fillStyle = accent;
+        ctx.globalAlpha = a * 0.13;
+        roundRect(ctx, -w * 0.44, -w * 0.44, w * 0.88, w * 0.88, w * 0.16);
+        ctx.fill();
+        ctx.globalAlpha = a;
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = Math.max(3, w * 0.018);
+        roundRect(ctx, -w * 0.44, -w * 0.44, w * 0.88, w * 0.88, w * 0.16);
+        ctx.stroke();
+    } else if (treatment === 'burst') {
+        ctx.beginPath();
+        for (let i = 0; i < 24; i++) {
+            const angle = (i / 24) * Math.PI * 2 - Math.PI / 2;
+            const radius = i % 2 === 0 ? w * 0.44 : w * 0.34;
+            const x = Math.cos(angle) * radius;
+            const y = Math.sin(angle) * radius;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = accent;
+        ctx.globalAlpha = a * 0.16;
+        ctx.fill();
+        ctx.globalAlpha = a;
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = Math.max(3, w * 0.018);
+        ctx.stroke();
+    }
     ctx.translate(-size / 2, -size / 2);
-    drawIcon(ctx, p.icon, size, { color: p.accent || '#00E5FF', weight: Math.max(0.5, Number(p.weight) || 2) });
+    drawIcon(ctx, p.icon, size, { color: accent, weight: Math.max(0.5, Number(p.weight) || 2) });
     ctx.restore();
 }
 
@@ -4874,15 +4914,18 @@ function shapeFromText(s, raw, quoted) {
         const names = quoted ? quoted.split(/\s*[,;]\s*/).map(x => iconFromText(x)).filter(Boolean) : [];
         return { kind: 'icon-row', params: names.length ? { icons: names.join(',') } : {} };
     }
-    if (/\bicon\b|\bicone\b|pictogramme/.test(s)) {
-        const named = iconFromText(s.replace(/\bicon\b|\bicone\b|pictogramme/g, ' '));
+    if (/\bicon\b|\bicone\b|pictogramme|\billustration\b|\bvector\b|\bvisuel vectoriel\b/.test(s)) {
+        const named = iconFromText(s.replace(/\bicon\b|\bicone\b|pictogramme|\billustration\b|\bvector\b|\bvisuel vectoriel\b|\bof\b|\bfor\b|\bde\b|\bdu\b|\bune?\b|\ban?\b/g, ' '));
         const withLabel = quoted || /label|with text|avec texte|legende/.test(s);
+        const treatment = /burst|impact|éclat|eclat/.test(s) ? 'burst'
+            : /badge|medallion|médaillon|medaillon/.test(s) ? 'badge'
+                : /frame|framed|encadré|encadre|card/.test(s) ? 'frame' : 'solo';
         if (withLabel) {
             return { kind: 'icon-label', params: { ...(named ? { icon: named } : {}), ...(quoted ? { text: quoted } : {}) } };
         }
         // No usable name means no icon: handing back the default would put
         // some unrelated symbol on screen under the user's own words.
-        return named ? { kind: 'icon', params: { icon: named } } : null;
+        return named ? { kind: 'icon', params: { icon: named, treatment } } : null;
     }
     if (/light sweep|shine across|light pass|balayage|reflet/.test(s)) return { kind: 'light-sweep', params: {} };
     if (/particles?|confetti|floating dots|particules|poussiere/.test(s)) return { kind: 'particles', params: {} };

@@ -215,7 +215,7 @@ router.post('/animate-automatically', authenticateUser, async (req, res) => {
             // just the same fixed preset replayed twice.
             const rawIntensity = computeIntensity(event.eventType, event.metadata);
             const intensity = calm ? Math.round(rawIntensity * 0.5 * 1000) / 1000 : rawIntensity;
-            const presetId  = pickPresetForIntensity(candidates, intensity);
+            const presetId  = pickPresetForIntensity(candidates, intensity, computeStyleSeed(event, projectTone));
             // R82 — layer a complementary secondary preset (a different
             // animation-type channel, e.g. scale+glow) on top of the primary,
             // deterministically chosen from this event's own text/label plus

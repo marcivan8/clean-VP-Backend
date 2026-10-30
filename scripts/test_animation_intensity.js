@@ -137,6 +137,13 @@ section('7 · pickPresetForIntensity — priority-ordered candidate selection');
         pickPresetForIntensity(['strong', 'soft'], NaN) === 'strong');
     check('more than 2 candidates: below-neutral still lands on index 1, not further down',
         pickPresetForIntensity(['a', 'b', 'c'], 0.1) === 'b');
+    const seeded = ['a', 'b', 'c', 'd', 'e'];
+    const highResults = new Set(['clip-1', 'clip-2', 'clip-3', 'clip-4', 'clip-5', 'clip-6']
+        .map(seed => pickPresetForIntensity(seeded, 0.8, seed)));
+    check('a seed chooses repeatably among same-intensity variants while legacy calls stay unchanged',
+        highResults.size > 1 && [...highResults].every(id => ['a', 'c', 'e'].includes(id)) &&
+        pickPresetForIntensity(seeded, 0.8, 'clip-1') === pickPresetForIntensity(seeded, 0.8, 'clip-1') &&
+        pickPresetForIntensity(seeded, 0.8) === 'a');
 }
 
 section('8 · wiring — the route and the knowledge graph both actually use this module');
@@ -146,8 +153,8 @@ section('8 · wiring — the route and the knowledge graph both actually use thi
         /require\(['"]\.\.\/audio-engine\/timeline\/AnimationIntensity\.js['"]\)/.test(routeSrc));
     check('audioEngineRoutes.js computes intensity per event before choosing a preset',
         /computeIntensity\(event\.eventType,\s*event\.metadata\)/.test(routeSrc));
-    check('audioEngineRoutes.js uses pickPresetForIntensity instead of a bare [0] index',
-        /pickPresetForIntensity\(candidates,\s*intensity\)/.test(routeSrc));
+    check('audioEngineRoutes.js chooses a stable preset variant from the event/style seed',
+        /pickPresetForIntensity\(candidates,\s*intensity,\s*computeStyleSeed\(event,\s*projectTone\)\)/.test(routeSrc));
     check('the route\'s plan item includes intensity alongside presetId',
         /presetId,\s*\n\s*secondaryPresetId,\s*\n\s*intensity,\s*\n\s*sfx,/.test(routeSrc));
 
@@ -156,7 +163,7 @@ section('8 · wiring — the route and the knowledge graph both actually use thi
         /require\(['"]\.\/AnimationIntensity\.js['"]\)/.test(graphSrc));
     check('resolveOverlayAnimations also computes and attaches intensity',
         /computeIntensity\(event\.eventType,\s*event\.metadata\)/.test(graphSrc) &&
-        /pickPresetForIntensity\(candidates,\s*intensity\)/.test(graphSrc));
+        /pickPresetForIntensity\(candidates,\s*intensity,\s*computeStyleSeed\(event,\s*tone\)\)/.test(graphSrc));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

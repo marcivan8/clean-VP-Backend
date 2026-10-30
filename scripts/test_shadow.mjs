@@ -166,7 +166,7 @@ log('\n4 \xb7 Export: a shadowed overlay compiles to TWO overlay ops; an unshado
 
 function loadCompositor() {
     const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
-    const order = ['Easing', 'MotionSchema', 'MotionResolver', 'MotionPresets', 'CaptionModel', 'ClipAdapter', 'Compositor'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'MotionPresets', 'CaptionModel', 'ClipAdapter', 'Compositor'];
     let combined = '';
     for (const name of order) {
         let s = read(`client/src/motion/${name}.js`);

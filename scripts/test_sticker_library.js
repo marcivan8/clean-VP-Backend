@@ -165,6 +165,7 @@ function stripModuleSyntax(src) {
 }
 
 let schemaSrc = stripModuleSyntax(read('client/src/motion/MotionSchema.js')).replace(/\bclamp\(/g, '__clamp(');
+let expansionSrc = stripModuleSyntax(read('client/src/motion/MotionPresetExpansion.js'));
 let presetsSrc = stripModuleSyntax(read('client/src/motion/MotionPresets.js'));
 let synthSrc = stripModuleSyntax(read('client/src/motion/AnimationSynthesizer.js'));
 const clipAdapterFullSrc = read('client/src/motion/ClipAdapter.js');
@@ -178,6 +179,7 @@ if (applyMatch) {
     const harness = `
         const __clamp = (v, min, max) => Math.max(min, Math.min(max, v));
         ${schemaSrc}
+        ${expansionSrc}
         ${presetsSrc}
         ${synthSrc}
         ${applyFnSrc}

@@ -104,6 +104,13 @@ await check('the steps are the route to a finished video', () => {
     for (const dead of ["key: 'media'", "key: 'assistant'", "key: 'timeline'"]) {
         assert.ok(!src.includes(dead), `${dead} is still a step`);
     }
+    const en = JSON.parse(read('client/src/locales/en/editor.json'));
+    const fr = JSON.parse(read('client/src/locales/fr/editor.json'));
+    for (const [loc, copy] of [['en', en], ['fr', fr]]) {
+        const exportCopy = copy.onboardingTour.export.body;
+        assert.doesNotMatch(exportCopy, /Premiere|Final Cut|Resolve|timeline to/i, `${loc}: export step promises removed NLE export`);
+        assert.match(exportCopy, /MP4/i, `${loc}: export step doesn't explain the available export`);
+    }
 });
 
 await check('the key is versioned, and v1 completers are left alone', () => {
@@ -197,12 +204,15 @@ await check('a hint is recorded when SHOWN, not when dismissed', () => {
     const src = read('client/src/components/FirstRunHint.jsx');
     const at = src.indexOf('const onHint');
     const block = src.slice(at, at + 900);
-    assert.match(block, /markSeen\(key\);[\s\S]{0,120}setActive/, 'the hint is not spent before it renders');
+    assert.match(block, /markSeen\(key\);[\s\S]{0,220}activeRef\.current = nextActive;[\s\S]{0,80}setActive\(nextActive\)/, 'the hint is not spent before it renders');
 });
 
 await check('two hints never share the screen', () => {
     const src = read('client/src/components/FirstRunHint.jsx');
-    assert.match(src, /if \(active\) \{[\s\S]{0,200}queue\.current\.push\(key\)/, 'a second hint replaces the first instead of queueing');
+    assert.match(src, /const activeRef = useRef\(null\)/, 'the live hint is not tracked synchronously');
+    assert.match(src, /if \(activeRef\.current\) \{[\s\S]{0,260}queue\.current\.push\(key\)/, 'a same-tick hint replaces the first instead of queueing');
+    assert.match(src, /activeRef\.current = nextActive;[\s\S]{0,80}setActive\(nextActive\)/, 'the active ref is not set before React can batch a second event');
+    assert.match(src, /\}, \[\]\);/, 'hint intake is still recreated with a stale active-state closure');
 });
 
 await check('there is a per-session teaching budget', () => {
@@ -256,11 +266,19 @@ await check('triggers sit where the state changes, not in one component', () => 
     const wf = read('client/src/agent/WorkflowController.js');
     assert.match(wf, /triggerHint\('first_ai_edit'\)/, 'a completed AI edit teaches nothing');
     assert.match(wf, /triggerHint\('auto_available'\)/, 'Auto is never offered after a manual edit');
+    assert.match(wf, /triggerHint\('first_captions'\)/, 'the first successful caption operation teaches nothing');
 
     const ide = read('client/src/layouts/IDELayout.jsx');
     assert.match(ide, /triggerHint\('first_upload'\)/, 'the first import teaches nothing');
+    assert.match(ide, /triggerHint\('first_clip'\)/, 'a first imported clip never points out the timeline');
     assert.match(ide, /triggerHint\('shorts_ready'\)/, 'a long take never surfaces repurposing');
-    assert.match(ide, /triggerHint\('before_export'\)/, 'export is never preceded by the Pro Finish nudge');
+    const exportButton = ide.slice(ide.indexOf('data-hint="export-button"'), ide.indexOf('data-hint="export-button"') + 650);
+    assert.match(exportButton, /onMouseEnter=\{\(\) => triggerHint\('before_export'\)\}/, 'the main Export button never surfaces its pre-export hint');
+    assert.match(ide, /resetOnboardingProgress\(\)[\s\S]{0,180}setShowTour\(true\)/, 'settings cannot replay the walkthrough');
+
+    const settings = read('client/src/components/SettingsPanel.jsx');
+    assert.match(settings, /onReplayWalkthrough/, 'the settings panel has no replay action');
+    assert.match(settings, /showReplayWalkthrough/, 'the unsupported mobile spotlight tour is exposed');
 });
 
 await check('triggerHint is cheap and safe to call from a hot path', () => {

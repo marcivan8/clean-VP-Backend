@@ -4,11 +4,10 @@
  * The Motion tab — the UI that makes the motion engine reachable.
  *
  * ─── WHY THIS EXISTS ────────────────────────────────────────────────────────
- * The engine (client/src/motion/) shipped with 26 keyframe-generating presets,
- * 12 easing curves, a resolver driving both preview and export, and — until
- * this panel — five of those presets reachable by a user, via the pre-existing
- * animation dropdown in TextPanel. The other 21, and hand-authored keyframes,
- * had no caller outside the regression suite.
+ * The engine (client/src/motion/) has a growing library of keyframe-generating
+ * presets, easing curves, and a resolver driving both preview and export. This
+ * panel exposes the complete kind-specific preset groups and hand-authored
+ * keyframes to the editor.
  *
  * That is this codebase's signature failure, documented eight times over in
  * CLAUDE.md (R33, R37, /api/brain/organize, R46, R52, R55, R55c, and
@@ -23,7 +22,7 @@
  * and no second keyframe UI competing with it.
  */
 
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
 import { Sparkles } from 'lucide-react';
@@ -46,6 +45,8 @@ import BackgroundPanel from './BackgroundPanel.jsx';
 
 export default function MotionPanel() {
     const { t } = useTranslation('editor');
+    const [presetSearch, setPresetSearch] = useState('');
+    const presetSearchQuery = presetSearch.trim().toLowerCase();
 
     const { tracks, activeClipId, currentTime, updateClip, saveToHistory } = useTimelineStore(
         useShallow(state => ({
@@ -203,6 +204,19 @@ export default function MotionPanel() {
                 announced nothing about which. The status line and Clear moved
                 into the FIRST group's header, where the thing being cleared
                 is in view. */}
+            <input
+                type="search"
+                value={presetSearch}
+                onChange={event => setPresetSearch(event.target.value)}
+                placeholder={t('motionPanel.searchPresets')}
+                aria-label={t('motionPanel.searchPresets')}
+                style={{
+                    width: '100%', height: 32, margin: '8px 0', padding: '0 9px',
+                    borderRadius: 'var(--r-xs)', border: '0.5px solid var(--line)',
+                    background: 'var(--glass)', color: 'var(--fg-1)',
+                    fontFamily: 'var(--f-sans)', fontSize: 11,
+                }}
+            />
             {presetIds.map(({ group, ids }, groupIndex) => (
                 <PanelSection
                     key={group}
@@ -229,7 +243,7 @@ export default function MotionPanel() {
                         aria-label={t(`motionPanel.group.${group}`)}
                         style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}
                     >
-                        {ids.map(id => {
+                        {ids.filter(id => !presetSearchQuery || `${MOTION_PRESETS[id]?.label || id} ${id}`.toLowerCase().includes(presetSearchQuery)).map(id => {
                             const active = activePresetId === id;
                             return (
                                 <button

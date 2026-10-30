@@ -56,6 +56,16 @@ await check('five styles, each pointing at a real recipe, transition and zoom pr
     assert.equal(ES.normalizeEditingMode('auto'), 'auto');
     assert.equal(ES.normalizeEditingMode('x'), 'normal');
 });
+await check('each editing style recipe can place transcript-matched vector illustrations', () => {
+    for (const recipe of Object.values(STYLE_RECIPES)) {
+        assert.ok(recipe.illustrations?.max > 0, `${recipe.id} has no illustration pass`);
+    }
+    const engine = read('../client/src/agent/MediaExecutionEngine.js');
+    const tools = read('../client/src/agent/VideoEditorTools.js');
+    assert.match(engine, /tools\.placeContextualIllustrations\(\{ max: recipe\.illustrations\.max \}\)/);
+    assert.match(tools, /addTemplateClip\('icon'/);
+    assert.match(tools, /applyPresetToClip\(clip, look\.motion/);
+});
 await check('generic requests and questions', () => {
     for (const t of ['edit it', 'Edit the video', 'go', '', 'monte la vidéo', 'vas-y', 'fais le montage']) assert.ok(ES.isGenericEditRequest(t), t);
     for (const t of ['cut the intro', 'edit it but keep the jokes']) assert.ok(!ES.isGenericEditRequest(t), t);
@@ -65,11 +75,12 @@ await check('generic requests and questions', () => {
 await check('playbooks: cuts first, captions after them, levelling after cuts', () => {
     const keys = (id, req = 'edit it', facts = { hasTranscript: true }) => ES.buildAutopilotSteps(id, req, facts).map(s => s.key);
     // R92 round A: full clean up (silences, fillers, repetition, voice) in one step,
-    // animation last for the energetic styles, none for the calm ones.
+    // the style-aware animation pass last for non-Reel styles, including gentle
+    // motion in calm interview/podcast styles.
     assert.deepEqual(keys('talking_head'), ['cleanup', 'captions', 'recipe', 'animate']);
     assert.deepEqual(keys('vlog'), ['silences', 'enhance', 'captions', 'recipe', 'animate']);
-    assert.deepEqual(keys('podcast'), ['cleanup', 'captions', 'recipe']);
-    assert.deepEqual(keys('interview'), ['cleanup', 'captions', 'recipe']);
+    assert.deepEqual(keys('podcast'), ['cleanup', 'captions', 'recipe', 'animate']);
+    assert.deepEqual(keys('interview'), ['cleanup', 'captions', 'recipe', 'animate']);
     // R92 round C: a Reel ends with the pro short finish instead of the generic animation.
     assert.deepEqual(keys('reel'), ['short', 'vertical', 'cleanup', 'captions', 'recipe', 'finish']);
     assert.deepEqual(keys('reel', 'go', {}), ['transcript', 'short', 'vertical', 'cleanup', 'captions', 'recipe', 'finish']);

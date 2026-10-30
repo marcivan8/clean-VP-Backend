@@ -59,8 +59,8 @@ const STEPS = [
  * device. The key is versioned: changing the steps means `tour_v2`, and
  * someone who completed `tour_v1` is NOT shown the new one. Re-teaching an
  * existing user is exactly the interruption this module exists to avoid; a
- * new walkthrough is for new users, and everyone else can replay it from
- * settings if they want it.
+ * new walkthrough is for new users; returning users can replay it from
+ * editor settings.
  */
 export const TOUR_KEY = 'tour_v2';
 

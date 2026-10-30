@@ -119,10 +119,13 @@ await check('"animate" in Auto mode runs only the animation, for every style', (
         assert.deepEqual(ES.buildAutopilotSteps(id, 'animate it', {}).map(s => s.prompt), ['animate it'], id);
     }
 });
-await check('Auto playbooks: animation only for Reel, Vlog and Talking head; calm styles none', () => {
+await check('Auto playbooks: every non-Reel style gets the style-aware animation pass', () => {
     const has = id => ES.buildAutopilotSteps(id, 'edit it', { hasTranscript: true }).some(s => s.key === 'animate' || s.key === 'finish');
-    assert.ok(has('reel') && has('vlog') && has('talking_head'));
-    assert.ok(!has('podcast') && !has('interview'));
+    assert.ok(ES.buildAutopilotSteps('reel', 'edit it', { hasTranscript: true }).some(s => s.key === 'finish'));
+    for (const id of ['vlog', 'talking_head', 'podcast', 'interview']) {
+        assert.ok(ES.buildAutopilotSteps(id, 'edit it', { hasTranscript: true }).some(s => s.key === 'animate'), id);
+    }
+    assert.ok(has('reel') && has('vlog') && has('talking_head') && has('podcast') && has('interview'));
 });
 await check('Auto mode takes the AI retake picks instead of waiting on a dialog', () => {
     assert.match(read('client/src/agent/MediaExecutionEngine.js'), /isAutopilotRunning\(\) \? true : await this\._reviewRetakes/);

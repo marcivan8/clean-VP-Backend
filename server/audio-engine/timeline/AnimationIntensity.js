@@ -140,11 +140,22 @@ function computeIntensity(eventType, metadata) {
  * @param {number} intensity — 0..1, from computeIntensity
  * @returns {string|null}
  */
-function pickPresetForIntensity(candidates, intensity) {
+function pickPresetForIntensity(candidates, intensity, seed = null) {
     if (!Array.isArray(candidates) || candidates.length === 0) return null;
     if (candidates.length === 1) return candidates[0];
     const clamped = typeof intensity === 'number' && Number.isFinite(intensity) ? intensity : NEUTRAL_INTENSITY;
-    return clamped >= NEUTRAL_INTENSITY ? candidates[0] : candidates[1];
+    const preferredParity = clamped >= NEUTRAL_INTENSITY ? 0 : 1;
+    // Preserve the original two-choice policy for legacy callers. The auto
+    // animation route supplies a stable event seed so it can choose among
+    // curated variants at the same intensity without shuffling on reruns.
+    if (seed === null || seed === undefined || candidates.length <= 2) {
+        return clamped >= NEUTRAL_INTENSITY ? candidates[0] : candidates[1];
+    }
+    const preferred = candidates.filter((_, index) => index % 2 === preferredParity);
+    const pool = preferred.length ? preferred : candidates;
+    let hash = 5381;
+    for (const char of String(seed)) hash = ((hash << 5) + hash + char.charCodeAt(0)) | 0;
+    return pool[Math.abs(hash) % pool.length];
 }
 
 module.exports = {

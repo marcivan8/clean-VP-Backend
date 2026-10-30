@@ -286,18 +286,23 @@ section('7 · pure-module sanity — MotionPresets ids referenced by the graph a
     // silently reference a preset id that MotionPresets.js doesn't have.
     let src = read('client/src/motion/MotionPresets.js');
     src = src
-        .replace(/^\s*import\s+[^;]+;\s*$/gm, '// stub\nconst createAnimation = () => ({}); const createKeyframe = (t, p) => ({ t, ...p }); const ANIMATION_TYPES = new Proxy({}, { get: () => "x" }); const LAYER_KINDS = new Proxy({}, { get: () => "x" });')
+        .replace(/^\s*import\s+[^;]+;\s*$/gm, (line) => /MotionSchema/.test(line)
+            ? 'const createAnimation = () => ({}); const createKeyframe = (t, p) => ({ t, ...p }); const ANIMATION_TYPES = new Proxy({}, { get: () => "x" }); const LAYER_KINDS = new Proxy({}, { get: () => "x" });'
+            : 'const TEXT_EXPANSIONS = {}; const IMAGE_EXPANSIONS = {}; const STICKER_EXPANSIONS = {}; const CAMERA_EXPANSIONS = {};')
         .replace(/^\s*export\s+default\s+\{[\s\S]*?\};\s*$/gm, '')
         .replace(/\bexport\s+(const|function)\b/g, '$1');
     src += '\nreturn { MOTION_PRESETS };';
     // eslint-disable-next-line no-new-func
     const { MOTION_PRESETS } = new Function(src)();
+    const expansionSrc = read('client/src/motion/MotionPresetExpansion.js');
+    const expandedPresetIds = [...expansionSrc.matchAll(/^\s*\['([a-z0-9-]+)'\s*,/gm)].map(match => match[1]);
+    const allPresetIds = new Set([...Object.keys(MOTION_PRESETS), ...expandedPresetIds]);
 
     const allGraphPresetIds = Object.values(ANIMATION_KNOWLEDGE_GRAPH)
         .flatMap(e => [...e.animations.text, ...e.animations.video, ...(e.animations.image || []), ...(e.animations.sticker || [])]);
     check('every preset id in the knowledge graph exists in MOTION_PRESETS',
-        allGraphPresetIds.every(id => Object.prototype.hasOwnProperty.call(MOTION_PRESETS, id)),
-        `missing: ${allGraphPresetIds.filter(id => !Object.prototype.hasOwnProperty.call(MOTION_PRESETS, id)).join(', ')}`);
+        allGraphPresetIds.every(id => allPresetIds.has(id)),
+        `missing: ${allGraphPresetIds.filter(id => !allPresetIds.has(id)).join(', ')}`);
 }
 
 console.log(`\n${'─'.repeat(60)}\n${passed} passed, ${failed} failed\n`);

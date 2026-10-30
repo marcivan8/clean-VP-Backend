@@ -55,7 +55,7 @@ const read = (rel) => {
 // hand-rewritten copy would pass while the shipped file was broken.
 function loadModules() {
     const sandbox = { console, Math, Number, Date, Array, Object, JSON, String, Boolean, isNaN, parseInt, parseFloat };
-    const order = ['Easing', 'MotionSchema', 'MotionResolver', 'MotionPresets', 'AnimationSynthesizer', 'CaptionModel', 'ClipAdapter', 'KeyframeBridge'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'MotionPresets', 'AnimationSynthesizer', 'CaptionModel', 'ClipAdapter', 'KeyframeBridge'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);
@@ -376,7 +376,7 @@ section('8 · Nothing that already worked was changed out from under it');
         .replace(/^\s*\/\/.*$/gm, '');
 
     const impure = [];
-    for (const n of ['Easing', 'MotionSchema', 'MotionResolver', 'MotionPresets', 'CaptionModel', 'ClipAdapter']) {
+    for (const n of ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'MotionPresets', 'CaptionModel', 'ClipAdapter']) {
         const code = stripComments(read(`client/src/motion/${n}.js`));
         if (/^\s*import\s[^;]*\bfrom\s*['"]react['"]/m.test(code))      impure.push(`${n}: imports react`);
         if (/^\s*import\s[^;]*useTimelineStore/m.test(code))            impure.push(`${n}: imports the store`);

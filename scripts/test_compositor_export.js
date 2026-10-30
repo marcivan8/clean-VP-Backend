@@ -53,7 +53,7 @@ const {
 // Build plans with the REAL client Compositor, so this exercises the true
 // client→worker path rather than a hand-written plan that could drift from it.
 function loadCompositor() {
-    const order = ['Easing', 'MotionSchema', 'MotionResolver', 'MotionPresets', 'CaptionModel', 'ClipAdapter', 'Compositor'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'MotionPresets', 'CaptionModel', 'ClipAdapter', 'Compositor'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);

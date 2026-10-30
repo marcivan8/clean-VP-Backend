@@ -10,6 +10,9 @@ import { segmentScript } from './ScriptSegmenter.js';
 import { clampToTimelineRange, wordsInTimelineRange } from '../timeline/targetRangeResolver.js';
 import { mapFindingsToTimeline } from '../timeline/targetRangeResolver.js';
 import { pollJobResult } from '../utils/jobPoller.js';
+import { TEMPLATE_KINDS } from '../motion/TemplateGraphics.js';
+import { iconFromText } from '../motion/IconLibrary.js';
+import { applyPresetToClip } from '../motion/ClipAdapter.js';
 
 /**
  * VideoEditorTools
@@ -323,10 +326,10 @@ export const TOOL_DEFINITIONS = [
     },
     {
         name: "add_template",
-        description: "Add an animated template at the playhead: a flip counter (\"DAY 14/30\"), a number or price pop (\"15-20€\"), a logo card, or a code-typing window.",
+        description: "Add an animated graphic, vector icon/illustration, data visualization, social card, or title template at the playhead. Choose a kind from the full template catalogue. For kind 'icon', params.icon names a vector illustration and params.treatment can be solo, badge, frame, or burst.",
         parameters: { type: "object", properties: {
-            kind: { type: "string", enum: ["counter", "price-pop", "logo-card", "code-window"] },
-            params: { type: "object", description: "counter: label, value, total; price-pop: text, sub; logo-card: label, sub; code-window: title, code" }
+            kind: { type: "string", enum: TEMPLATE_KINDS },
+            params: { type: "object", description: "Template-specific fields. For icon use icon (such as rocket, bulb, camera, growth, or heart), treatment (solo, badge, frame, burst), and accent. Examples: counter: label/value/total; price-pop: text/sub; quote-card: quote/attribution; icon-label: icon/text." }
         }, required: ["kind"] }
     },
     {
@@ -2773,6 +2776,75 @@ export class VideoEditorTools {
         } catch (error) {
             console.error('[VideoEditorTools] placeNumberPops error:', error);
             return { success: false, placed: 0, message: `Could not place number pops: ${error.message}` };
+        }
+    }
+
+    /** Add sparse, transcript-matched vector accents using the active style. */
+    placeContextualIllustrations({ max = 3 } = {}) {
+        try {
+            const state = useTimelineStore.getState();
+            const style = state.editingStyle || 'talking_head';
+            const styles = {
+                reel: { treatment: 'burst', accent: '#FFE500', motion: 'stkr-bounce-soft', x: 82, y: 24 },
+                vlog: { treatment: 'badge', accent: '#FF3B5C', motion: 'stkr-float-up', x: 80, y: 22 },
+                talking_head: { treatment: 'frame', accent: '#FFE500', motion: 'stkr-float-up', x: 82, y: 24 },
+                interview: { treatment: 'solo', accent: '#E8C27A', motion: 'stkr-float-up', x: 80, y: 24 },
+                podcast: { treatment: 'solo', accent: '#E8C27A', motion: 'stkr-float-up', x: 80, y: 24 },
+            };
+            const look = styles[style] || { treatment: 'frame', accent: '#00E5FF', motion: 'stkr-float-up', x: 82, y: 24 };
+            const calm = style === 'podcast' || style === 'interview';
+            const cap = Math.max(0, Math.min(calm ? 2 : 5, Math.floor(Number(max) || 0)));
+            if (!cap) return { success: true, placed: 0, message: 'No illustration slots requested.' };
+            const words = (state.captions || []).map(word => ({
+                text: String(word?.word || word?.text || '').trim(),
+                start: Number(word?.start),
+                end: Number(word?.end),
+            })).filter(word => word.text && Number.isFinite(word.start) && Number.isFinite(word.end));
+            if (!words.length) return { success: true, placed: 0, message: 'No transcript is available for contextual illustrations.' };
+
+            const existing = (state.tracks || []).flatMap(track => track.type === 'overlay' ? (track.clips || []) : [])
+                .filter(clip => clip.type === 'template' && clip.template?.kind === 'icon');
+            const selected = [];
+            for (let i = 0; i < words.length && selected.length < cap; i += 2) {
+                const sample = words.slice(i, i + 5);
+                if (!sample.length) continue;
+                const phrase = sample.map(word => word.text).join(' ');
+                const icon = iconFromText(phrase);
+                const start = sample[0].start;
+                if (!icon || start < 0 || selected.some(item => item.icon === icon && Math.abs(item.start - start) < 8)) continue;
+                if (existing.some(clip => clip.template.params?.icon === icon && Math.abs((Number(clip.start) || 0) - start) < 3)) continue;
+                selected.push({ icon, start });
+            }
+
+            let placed = 0;
+            for (const [index, item] of selected.entries()) {
+                const live = useTimelineStore.getState();
+                const duration = Math.min(calm ? 2.2 : 2.6, Math.max(0.6, (Number(live.duration) || item.start + 2.2) - item.start));
+                const r = live.addTemplateClip('icon', {
+                    icon: item.icon,
+                    treatment: look.treatment,
+                    accent: look.accent,
+                }, {
+                    start: item.start,
+                    duration,
+                    x: index % 2 ? 18 : look.x,
+                    y: look.y,
+                    select: false,
+                    skipHistory: true,
+                });
+                if (!r?.success) continue;
+                const current = useTimelineStore.getState();
+                const clip = current.tracks.find(track => track.id === r.trackId)?.clips?.find(itemClip => itemClip.id === r.clipId);
+                if (clip) {
+                    const updates = applyPresetToClip(clip, look.motion, { intensity: calm ? 0.28 : 0.52 });
+                    if (Object.keys(updates).length) current.updateClip(r.trackId, r.clipId, updates, { skipHistory: true });
+                }
+                placed++;
+            }
+            return { success: true, placed, message: placed ? `${placed} contextual vector illustration(s) added.` : 'No transcript phrases matched the illustration library.' };
+        } catch (error) {
+            console.error('[VideoEditorTools] placeContextualIllustrations error:', error);
+            return { success: false, placed: 0, message: `Could not add contextual illustrations: ${error.message}` };
         }
     }
 

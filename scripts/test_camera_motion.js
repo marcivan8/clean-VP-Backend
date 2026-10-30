@@ -45,7 +45,7 @@ const read = (rel) => {
 // strip-to-CJS technique every other regression suite in this repo uses —
 // this exercises the true client-side code, not a re-implementation of it.
 function loadClientModules() {
-    const order = ['Easing', 'MotionSchema', 'MotionResolver', 'MotionPresets', 'CaptionModel', 'ClipAdapter', 'Compositor', 'CameraMotionCompiler'];
+    const order = ['Easing', 'MotionSchema', 'MotionPresetExpansion', 'MotionResolver', 'MotionPresets', 'AnimationSynthesizer', 'CaptionModel', 'ClipAdapter', 'Compositor', 'CameraMotionCompiler'];
     let combined = '';
     for (const name of order) {
         let src = read(`client/src/motion/${name}.js`);

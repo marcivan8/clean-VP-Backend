@@ -62,12 +62,15 @@
     "qualityHigh": "Haute",
     "qualityLow": "Basse (plus rapide)",
     "qualityHint": "Une qualité inférieure accélère la lecture sur les machines lentes",
+    "onboarding": "Prise en main",
     "shortcuts": "Raccourcis clavier",
     "shortcutUndo": "Annuler",
     "shortcutRedo": "Rétablir",
     "shortcutSplit": "Couper le clip",
     "shortcutDelete": "Supprimer la sélection",
     "shortcutPlay": "Lecture / Pause",
+    "replayWalkthrough": "Revoir le guide de démarrage",
+    "replayWalkthroughHint": "Afficher à nouveau le guide de l’éditeur",
     "version": "Vibed",
     "appName": "Éditeur vidéo IA"
   },
@@ -599,6 +602,7 @@
     "noAnimation": "Aucune animation",
     "customKeyframes": "Images clés personnalisées",
     "usingPreset": "Préréglage : {{name}}",
+    "searchPresets": "Rechercher des animations",
     "startAnimating": "Ajouter une image clé {{param}} à la tête de lecture",
     "group": {
       "text": "Texte",
@@ -642,8 +646,8 @@
       "locked": "Shorts repère les moments qui tiennent seuls et en fait des verticales finies pour TikTok, Reels ou Shorts. Disponible avec Creator."
     },
     "export": {
-      "title": "Exportez, ou emportez le montage",
-      "body": "Rendez un MP4, ou passez la timeline à Premiere, Final Cut ou Resolve avec vos chutiers et vos noms."
+      "title": "Finalisez et exportez votre vidéo",
+      "body": "Générez un MP4 et téléchargez votre vidéo terminée. Choisissez la résolution et la qualité adaptées à votre projet."
     },
     "next": "Suivant",
     "done": "Commencer",
