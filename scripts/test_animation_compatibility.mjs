@@ -33,10 +33,12 @@ await check('vector illustrations are style-adapted on client and server, includ
         const reel = evaluator.evaluateMotionCompatibility('reel', 'template', 'icon', { icon: 'rocket' });
         assert.equal(reel.verdict, 'ideal');
         assert.equal(reel.adaptedParams.treatment, 'burst');
+        assert.equal(reel.adaptedParams.background, 'radial-burst');
         assert.equal(reel.adaptedParams.accent, evaluator.STYLE_MOTION_RULES.reel.palette.accent);
         const interview = evaluator.evaluateMotionCompatibility('interview', 'template', 'icon', { icon: 'mic' });
         assert.equal(interview.verdict, 'ideal');
         assert.equal(interview.adaptedParams.treatment, 'solo');
+        assert.equal(interview.adaptedParams.background, 'soft-glow');
         assert.equal(interview.adaptedParams.accent, evaluator.STYLE_MOTION_RULES.podcast.palette.accent);
     }
 });

@@ -105,6 +105,21 @@ check('the scroll is instant, not animated', () => {
     assert.ok(!/behavior:\s*'smooth'/.test(body), 'an animated scroll inside a 60fps loop lags behind itself');
 });
 
+check('a ruler drag cannot also start the tracks-area selection/scrub handler', () => {
+    const i = TIMELINE.indexOf('const handleRulerMouseDown');
+    const body = TIMELINE.slice(i, TIMELINE.indexOf('}, [seekFromRulerX])', i));
+    assert.ok(/e\.stopPropagation\(\)/.test(body), 'ruler mousedown bubbles into the parent tracks-area handler');
+});
+
+check('auto-follow stays out of the way while mouse or touch scrubbing owns the pointer', () => {
+    assert.ok(/const isScrubbingRef = React\.useRef\(false\)/.test(TIMELINE), 'no active scrub state');
+    const i = TIMELINE.indexOf('const updatePlayhead');
+    const body = TIMELINE.slice(i, TIMELINE.indexOf('requestAnimationFrame(updatePlayhead)', i));
+    assert.ok(/!isScrubbingRef\.current/.test(body), 'the playhead can scroll the ruler under the pointer');
+    assert.ok(/onTouchEnd=\{handleRulerTouchEnd\}/.test(TIMELINE), 'touch scrubbing never releases its active state');
+    assert.ok(/onTouchCancel=\{handleRulerTouchEnd\}/.test(TIMELINE), 'cancelled touch scrubbing can leave follow disabled');
+});
+
 console.log('\n── 3. The follow rule itself ──');
 
 check('a playhead already in view does not move the scroll', () => {

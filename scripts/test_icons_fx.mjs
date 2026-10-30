@@ -22,7 +22,10 @@ function recorder() {
             if (prop === 'canvas') return { width: 1080, height: 1920 };
             if (prop === 'measureText') return (s) => ({ width: String(s).length * 11 });
             if (prop === 'createLinearGradient' || prop === 'createRadialGradient') {
-                return () => ({ addColorStop: (o, c) => calls.push(`stop(${o},${c})`) });
+                return (...args) => {
+                    calls.push(`${String(prop)}(${args.join(',')})`);
+                    return { addColorStop: (o, c) => calls.push(`stop(${o},${c})`) };
+                };
             }
             if (typeof prop === 'string' && /^(fillStyle|strokeStyle|lineWidth|font|globalAlpha|textAlign|textBaseline|lineCap|lineJoin|filter|shadowBlur|shadowColor|globalCompositeOperation)$/.test(prop)) return undefined;
             return (...args) => { calls.push(`${String(prop)}(${args.map(a => (typeof a === 'number' ? a.toFixed(4) : String(a))).join(',')})`); };
@@ -40,6 +43,7 @@ check('the vector illustration catalog has 100+ unique, usable entries', () => {
     for (const item of VI.VECTOR_ILLUSTRATIONS) {
         assert.ok(IL.hasIcon(item.icon), `${item.id} references missing icon ${item.icon}`);
         assert.ok(VI.isValidVectorIllustration(item), `${item.id} is invalid`);
+        assert.ok(VI.VECTOR_ILLUSTRATION_BACKGROUNDS.some(({ id }) => id === item.background), `${item.id} has no backdrop`);
     }
 });
 
@@ -49,7 +53,8 @@ check('agent template tool exposes the full template catalogue and the illustrat
     assert.match(tools, /kind:\s*\{\s*type:\s*"string",\s*enum:\s*TEMPLATE_KINDS\s*\}/);
     assert.match(tools, /params\.icon names a vector illustration/);
     assert.match(panel, /const add = \(kind, params = \{\}\)/);
-    assert.match(panel, /add\('icon', \{ icon: item\.icon, treatment: item\.treatment \}\)/);
+    assert.match(panel, /add\('icon', \{ icon: item\.icon, treatment: item\.treatment, background: item\.background \}\)/);
+    assert.match(panel, /VECTOR_ILLUSTRATION_BACKGROUNDS\.map/);
     assert.match(panel, /evaluateMotionCompatibility\(editingStyle, 'template', kind, params\)/);
 });
 
@@ -170,11 +175,17 @@ check('the icon templates are registered and draw', () => {
     }
 });
 
-check('each illustration treatment draws through the shared template renderer', () => {
-    for (const treatment of ['solo', 'badge', 'frame', 'burst']) {
+check('each illustration background draws through the shared template renderer', () => {
+    for (const [treatment, background, gradient] of [
+        ['solo', 'soft-glow', 'createRadialGradient'],
+        ['badge', 'gradient-orb', 'createRadialGradient'],
+        ['frame', 'glass-panel', 'createLinearGradient'],
+        ['burst', 'radial-burst', 'stroke()'],
+    ]) {
         const { ctx, calls } = recorder();
-        TG.drawTemplate(ctx, 'icon', { icon: 'rocket', treatment, accent: '#ff00aa' }, 1.4, 2.6, {});
+        TG.drawTemplate(ctx, 'icon', { icon: 'rocket', treatment, background, accent: '#ff00aa' }, 1.4, 2.6, {});
         assert.ok(calls.some(call => call === 'fill()' || call === 'stroke()'), `${treatment} drew nothing`);
+        assert.ok(calls.some(call => call.startsWith(gradient)), `${background} backdrop was not drawn`);
     }
 });
 

@@ -47,6 +47,11 @@ const Timeline = () => {
     const timeDisplayRef = React.useRef(null);
     const playheadLineRef = React.useRef(null);
     const playheadHandleRef = React.useRef(null);
+    // A seek gesture owns the horizontal coordinate while the pointer is down.
+    // Auto-following during that gesture scrolls the ruler underneath a stationary
+    // pointer, so the next pointer event maps to a different time and the playhead
+    // appears to jump or run away from the cursor.
+    const isScrubbingRef = React.useRef(false);
 
     // Rubber-band multi-select
     const tracksAreaRef = React.useRef(null);
@@ -129,6 +134,7 @@ const Timeline = () => {
         const rect = area.getBoundingClientRect();
         const localX = e.clientX - rect.left + area.scrollLeft;
         if (localX < labelW) return; // in label column
+        isScrubbingRef.current = true;
 
         const start = getContentPos(e.clientX, e.clientY);
         selDragRef.current = { ...start, moved: false, rangeMode: e.shiftKey };
@@ -200,6 +206,7 @@ const Timeline = () => {
         const onUp = (me) => {
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
+            isScrubbingRef.current = false;
             if (scrollRafId !== null) { cancelAnimationFrame(scrollRafId); scrollRafId = null; }
 
             if (selDragRef.current?.moved) {
@@ -380,7 +387,7 @@ const Timeline = () => {
             // playback, and an animated scroll would lag a frame behind itself.
             const area = tracksAreaRef.current;
             const moved = lastDrawnTimeRef.current === null || Math.abs(time - lastDrawnTimeRef.current) > 1e-6;
-            if (area && moved && !isNaN(px)) {
+            if (area && moved && !isScrubbingRef.current && !isNaN(px)) {
                 const contentX = labelWRef.current + px;
                 const view = area.clientWidth;
                 // A margin, so the playhead is never pinned to the very edge
@@ -473,6 +480,11 @@ const Timeline = () => {
 
     const handleRulerMouseDown = React.useCallback((e) => {
         if (e.button !== 0) return;
+        // The ruler is inside the tracks-area mouse handler. Stop bubbling so a
+        // single drag cannot start both ruler scrubbing and track selection,
+        // which used two coordinate systems and issued competing seeks.
+        e.stopPropagation();
+        isScrubbingRef.current = true;
         const rulerEl = e.currentTarget;
         seekFromRulerX(rulerEl, e.clientX);
 
@@ -483,6 +495,7 @@ const Timeline = () => {
         const onMouseUp = () => {
             window.removeEventListener('mousemove', onMouseMove);
             window.removeEventListener('mouseup', onMouseUp);
+            isScrubbingRef.current = false;
         };
 
         window.addEventListener('mousemove', onMouseMove);
@@ -493,6 +506,7 @@ const Timeline = () => {
     const handleRulerTouchStart = React.useCallback((e) => {
         if (e.touches.length !== 1) return;
         e.preventDefault(); // prevent scroll while scrubbing ruler
+        isScrubbingRef.current = true;
         seekFromRulerX(e.currentTarget, e.touches[0].clientX);
     }, [seekFromRulerX]);
 
@@ -501,6 +515,10 @@ const Timeline = () => {
         e.preventDefault();
         seekFromRulerX(e.currentTarget, e.touches[0].clientX);
     }, [seekFromRulerX]);
+
+    const handleRulerTouchEnd = React.useCallback(() => {
+        isScrubbingRef.current = false;
+    }, []);
 
 
     return (
@@ -738,6 +756,8 @@ const Timeline = () => {
                         onMouseDown={handleRulerMouseDown}
                         onTouchStart={handleRulerTouchStart}
                         onTouchMove={handleRulerTouchMove}
+                        onTouchEnd={handleRulerTouchEnd}
+                        onTouchCancel={handleRulerTouchEnd}
                     >
                         {/* Ruler ticks */}
                         {Array.from({ length: Math.ceil(duration / 5) }).map((_, i) => (

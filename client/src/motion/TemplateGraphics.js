@@ -245,7 +245,7 @@ export const TEMPLATE_DEFAULTS = {
     // `icon` names a shape in IconLibrary; an unknown one draws nothing
     // rather than a placeholder, so a typo is visible instead of silently
     // becoming some other symbol.
-    'icon':             { icon: 'sparkle', accent: '#00E5FF', weight: 2, fill: 0 },
+    'icon':             { icon: 'sparkle', accent: '#00E5FF', weight: 2, fill: 0, background: 'soft-glow' },
     'icon-label':       { icon: 'bulb', text: 'Pro tip', accent: '#00E5FF', color: '#FFFFFF' },
     'icon-row':         { icons: 'camera,scissors,send', labels: '', accent: '#00E5FF' },
     // Advanced effects. All four are frame-sized because they act on the
@@ -4400,6 +4400,64 @@ function drawIconTemplate(ctx, p, t, duration) {
     const treatment = ['badge', 'frame', 'burst'].includes(p.treatment) ? p.treatment : 'solo';
     const accent = p.accent || '#00E5FF';
     const size = w * (treatment === 'solo' ? 0.78 : 0.54);
+    const background = ['soft-glow', 'gradient-orb', 'glass-panel', 'radial-burst'].includes(p.background)
+        ? p.background
+        : 'soft-glow';
+    if (background === 'soft-glow') {
+        const glow = ctx.createRadialGradient(0, 0, w * 0.04, 0, 0, w * 0.48);
+        glow.addColorStop(0, accent);
+        glow.addColorStop(0.55, accent);
+        glow.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.globalAlpha = a * 0.22;
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(0, 0, w * 0.48, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = a;
+    } else if (background === 'gradient-orb') {
+        const orb = ctx.createRadialGradient(-w * 0.14, -w * 0.16, w * 0.02, 0, 0, w * 0.46);
+        orb.addColorStop(0, '#FFFFFF');
+        orb.addColorStop(0.24, accent);
+        orb.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.globalAlpha = a * 0.34;
+        ctx.fillStyle = orb;
+        ctx.beginPath();
+        ctx.arc(0, 0, w * 0.46, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = a;
+    } else if (background === 'glass-panel') {
+        const bgGradient = ctx.createLinearGradient(-w * 0.42, -w * 0.42, w * 0.42, w * 0.42);
+        bgGradient.addColorStop(0, accent);
+        bgGradient.addColorStop(1, '#FFFFFF');
+        ctx.globalAlpha = a * 0.12;
+        ctx.fillStyle = bgGradient;
+        roundRect(ctx, -w * 0.45, -w * 0.42, w * 0.9, w * 0.84, w * 0.2);
+        ctx.fill();
+        ctx.globalAlpha = a * 0.55;
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = Math.max(2, w * 0.012);
+        roundRect(ctx, -w * 0.45, -w * 0.42, w * 0.9, w * 0.84, w * 0.2);
+        ctx.stroke();
+        ctx.globalAlpha = a;
+    } else if (background === 'radial-burst') {
+        ctx.save();
+        ctx.globalAlpha = a * 0.2;
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = Math.max(2, w * 0.014);
+        for (let i = 0; i < 16; i++) {
+            const angle = (i / 16) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(angle) * w * 0.3, Math.sin(angle) * w * 0.3);
+            ctx.lineTo(Math.cos(angle) * w * 0.46, Math.sin(angle) * w * 0.46);
+            ctx.stroke();
+        }
+        ctx.beginPath();
+        ctx.arc(0, 0, w * 0.31, 0, Math.PI * 2);
+        ctx.fillStyle = accent;
+        ctx.globalAlpha = a * 0.1;
+        ctx.fill();
+        ctx.restore();
+    }
     if (treatment === 'badge') {
         ctx.beginPath();
         ctx.arc(0, 0, w * 0.43, 0, Math.PI * 2);

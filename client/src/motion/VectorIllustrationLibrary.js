@@ -17,19 +17,20 @@ const SUBJECTS = [
 ];
 
 const TREATMENTS = [
-    ['solo', 'Minimal'],
-    ['badge', 'Badge'],
-    ['frame', 'Framed'],
-    ['burst', 'Burst'],
+    ['solo', 'Minimal', 'soft-glow'],
+    ['badge', 'Badge', 'gradient-orb'],
+    ['frame', 'Framed', 'glass-panel'],
+    ['burst', 'Burst', 'radial-burst'],
 ];
 
 export const VECTOR_ILLUSTRATIONS = Object.freeze(SUBJECTS.flatMap(([icon, subject, category]) =>
-    TREATMENTS.map(([treatment, style]) => Object.freeze({
+    TREATMENTS.map(([treatment, style, background]) => Object.freeze({
         id: `${icon}-${treatment}`,
         name: `${subject} · ${style}`,
         category,
         icon,
         treatment,
+        background,
         accent: '#00E5FF',
     })),
 ));
@@ -39,7 +40,8 @@ export function getVectorIllustration(id) {
 }
 
 export function isValidVectorIllustration(item) {
-    return !!item && hasIcon(item.icon) && TREATMENTS.some(([treatment]) => treatment === item.treatment);
+    return !!item && hasIcon(item.icon) && TREATMENTS.some(([treatment, , background]) => treatment === item.treatment && background === item.background);
 }
 
 export const VECTOR_ILLUSTRATION_TREATMENTS = Object.freeze(TREATMENTS.map(([id, label]) => ({ id, label })));
+export const VECTOR_ILLUSTRATION_BACKGROUNDS = Object.freeze(TREATMENTS.map(([, , id]) => ({ id, label: id.replace('-', ' ') })));

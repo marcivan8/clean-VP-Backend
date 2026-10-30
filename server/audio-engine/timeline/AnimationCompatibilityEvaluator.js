@@ -238,6 +238,11 @@ function evaluateMotionCompatibility(styleId, category, itemKey, currentParams =
                         : ['vlog', 'repurposing'].includes(normalizedStyle) ? 'badge'
                             : normalizedStyle === 'podcast' ? 'solo' : 'frame';
                 }
+                if (!adaptedParams.background) {
+                    adaptedParams.background = normalizedStyle === 'reel' ? 'radial-burst'
+                        : ['vlog', 'repurposing'].includes(normalizedStyle) ? 'gradient-orb'
+                            : ['podcast', 'interview'].includes(normalizedStyle) ? 'soft-glow' : 'glass-panel';
+                }
             } else if (rules.idealTemplates.includes(itemKey)) {
                 score = 0.95;
                 verdict = 'ideal';

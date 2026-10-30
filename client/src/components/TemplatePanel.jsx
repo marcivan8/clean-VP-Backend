@@ -4,7 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 import useTimelineStore from '../store/useTimelineStore';
 import { TEMPLATE_KINDS, drawTemplate, templateParams } from '../motion/TemplateGraphics.js';
 import { ICON_NAMES } from '../motion/IconLibrary.js';
-import { VECTOR_ILLUSTRATIONS } from '../motion/VectorIllustrationLibrary.js';
+import { VECTOR_ILLUSTRATIONS, VECTOR_ILLUSTRATION_BACKGROUNDS } from '../motion/VectorIllustrationLibrary.js';
 import { evaluateMotionCompatibility } from '../agent/AnimationCompatibilityEvaluator.js';
 
 /**
@@ -111,6 +111,12 @@ const TemplateEditor = ({ trackId, clip }) => {
                         {[['solo', 'Minimal'], ['badge', 'Badge'], ['frame', 'Framed'], ['burst', 'Burst']].map(([id, label]) => <option key={id} value={id}>{label}</option>)}
                     </select>
                 </label>
+                <label className="block space-y-1">
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Background</span>
+                    <select className={field} value={draft.background || 'soft-glow'} onChange={e => commit({ background: e.target.value })}>
+                        {VECTOR_ILLUSTRATION_BACKGROUNDS.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+                    </select>
+                </label>
                 {color('accent')}
             </>)}
         </div>
@@ -159,7 +165,7 @@ const TemplatePanel = ({ selectedClip, selectedTrackId }) => {
             />
             <div className="grid grid-cols-2 gap-1.5 max-h-56 overflow-y-auto mb-3 pr-1">
                 {illustrations.map(item => (
-                    <button key={item.id} type="button" title={`${item.category} · ${item.name}`} onClick={() => add('icon', { icon: item.icon, treatment: item.treatment })}
+                    <button key={item.id} type="button" title={`${item.category} · ${item.name}`} onClick={() => add('icon', { icon: item.icon, treatment: item.treatment, background: item.background })}
                         className="px-2 py-1.5 rounded text-[10px] text-left transition-colors border border-border hover:bg-white/5 text-muted-foreground flex items-center gap-1.5">
                         <IllustrationSwatch illustration={item} />
                         <span className="min-w-0"><span className="block text-foreground leading-tight">{item.name}</span>

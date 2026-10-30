@@ -2785,13 +2785,13 @@ export class VideoEditorTools {
             const state = useTimelineStore.getState();
             const style = state.editingStyle || 'talking_head';
             const styles = {
-                reel: { treatment: 'burst', accent: '#FFE500', motion: 'stkr-bounce-soft', x: 82, y: 24 },
-                vlog: { treatment: 'badge', accent: '#FF3B5C', motion: 'stkr-float-up', x: 80, y: 22 },
-                talking_head: { treatment: 'frame', accent: '#FFE500', motion: 'stkr-float-up', x: 82, y: 24 },
-                interview: { treatment: 'solo', accent: '#E8C27A', motion: 'stkr-float-up', x: 80, y: 24 },
-                podcast: { treatment: 'solo', accent: '#E8C27A', motion: 'stkr-float-up', x: 80, y: 24 },
+                reel: { treatment: 'burst', background: 'radial-burst', accent: '#FFE500', motion: 'stkr-bounce-soft', x: 82, y: 24 },
+                vlog: { treatment: 'badge', background: 'gradient-orb', accent: '#FF3B5C', motion: 'stkr-float-up', x: 80, y: 22 },
+                talking_head: { treatment: 'frame', background: 'glass-panel', accent: '#FFE500', motion: 'stkr-float-up', x: 82, y: 24 },
+                interview: { treatment: 'solo', background: 'soft-glow', accent: '#E8C27A', motion: 'stkr-float-up', x: 80, y: 24 },
+                podcast: { treatment: 'solo', background: 'soft-glow', accent: '#E8C27A', motion: 'stkr-float-up', x: 80, y: 24 },
             };
-            const look = styles[style] || { treatment: 'frame', accent: '#00E5FF', motion: 'stkr-float-up', x: 82, y: 24 };
+            const look = styles[style] || { treatment: 'frame', background: 'glass-panel', accent: '#00E5FF', motion: 'stkr-float-up', x: 82, y: 24 };
             const calm = style === 'podcast' || style === 'interview';
             const cap = Math.max(0, Math.min(calm ? 2 : 5, Math.floor(Number(max) || 0)));
             if (!cap) return { success: true, placed: 0, message: 'No illustration slots requested.' };
@@ -2823,6 +2823,7 @@ export class VideoEditorTools {
                 const r = live.addTemplateClip('icon', {
                     icon: item.icon,
                     treatment: look.treatment,
+                    background: look.background,
                     accent: look.accent,
                 }, {
                     start: item.start,
