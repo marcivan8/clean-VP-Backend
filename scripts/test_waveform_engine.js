@@ -226,13 +226,19 @@ const run = async () => {
     console.log('\n── 6. A 4xx is permanent — no pointless retries ──');
     {
         fetchCalls = [];
-        fetchImpl = async () => jsonRes({ error: 'gcsPath required' }, { status: 400 });
+        fetchImpl = async () => jsonRes({ error: 'source path unavailable' }, { status: 400 });
+        const originalWarn = console.warn;
+        let warning = '';
+        console.warn = (...args) => { warning = args.join(' '); };
 
         const r = await WaveformEngine.getPeaks('asset-400', { proxyUrl: '/api/proxy/gcs-media/proxies/u/z/proxy.mp4' });
+        console.warn = originalWarn;
         const extractCalls = fetchCalls.filter(u => String(u).includes('/extract')).length;
         check('400 returned null', r === null);
         check('400 was not retried', extractCalls === 1,
             'Retrying identical input against a 4xx cannot change the outcome.');
+        check('server error detail is preserved in the client diagnostic',
+            warning.includes('source path unavailable'), warning);
     }
 
     console.log('\n── 7. 5xx retries, then gives up (no infinite storm) ──');

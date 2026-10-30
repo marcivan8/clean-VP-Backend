@@ -3,7 +3,8 @@
  *
  *   node scripts/test_clip_waveform_routing.js
  *
- * Pins that Clip.jsx never hands WaveformEngine a raw (unproxied) video file.
+ * Pins that Clip.jsx withholds raw video until its proxy is ready, then gives
+ * the server a raw-source fallback if decoding the proxy fails.
  *
  * WHY THIS EXISTS
  * ---------------
@@ -13,21 +14,17 @@
  * exactly what the waveform route does — often can't produce any output until
  * it has buffered close to the entire file, because the sample table it needs
  * isn't available until the stream ends. A proxy is always faststart, so
- * decoding one is fast and bounded; decoding the raw source is a coin flip that
- * gets worse as the file gets larger.
+ * decoding one is fast and bounded. The raw path remains useful as a fallback
+ * if the proxy itself fails.
  *
  * A 4K interview upload hit exactly this: waveform extraction fired against the
  * raw file before the proxy existed, timed out 3 times, and WaveformEngine gave
  * up — all wasted work, since the proxy (which makes extraction trivial) landed
  * moments later anyway.
  *
- * THE SUBTLE PART THIS TEST GUARDS: `asset.gcsPath` (the raw path) and
- * `asset.proxyUrl` are TWO SEPARATE arguments to usePeaks(), and on the server,
- * utils/waveformPath.js's `deriveGcsPath()` checks the explicit `gcsPath`
- * argument FIRST, unconditionally — `if (rawGcsPath) return rawGcsPath`. So
- * withholding `proxyUrl` alone does nothing; `gcsPath` will still force
- * raw-file resolution regardless. Both must be suppressed together, or this
- * fix silently regresses to a no-op the next time someone touches this block.
+ * THE SUBTLE PART THIS TEST GUARDS: the server resolver prefers proxyUrl, then
+ * retains raw gcsPath as a recovery source. The client must withhold the raw
+ * path only until proxy readiness, and keep it available afterward.
  *
  * Static analysis of the real source — no browser, no network.
  */
@@ -71,12 +68,15 @@ check('the raw clip URL fallback is nulled when unproxied',
     /isUnproxiedVideoAsset\s*\?\s*null\s*:/.test(block),
     'clip.sourceUrl / clip.url must not be used as a stand-in while a video proxy is pending.');
 
-check('video gcsPath is always suppressed so extraction reads the proxy',
-    /waveformGcsPath\s*=\s*isVideoAsset\s*\?\s*null\s*:\s*\(asset\?\.gcsPath\s*\|\|\s*clip\.gcsPath/.test(block),
-    'gcsPath wins over proxyUrl on the server. Passing the raw gcsPath after proxy completion still makes extraction decode the original upload.');
+check('raw gcsPath is withheld until the proxy is ready, then provided as fallback',
+    /waveformGcsPath\s*=\s*isUnproxiedVideoAsset\s*\?\s*null\s*:\s*\(asset\?\.gcsPath\s*\|\|\s*clip\.gcsPath/.test(block));
 check('video waveform extraction receives the server proxy URL',
     /const wsAudioUrl\s*=\s*serverProxyUrl\s*\|\|\s*rawUrlFallback/.test(block)
     && /usePeaks\([\s\S]{0,120}waveformGcsPath,\s*wsAudioUrl/.test(block));
+
+const routeSrc = fs.readFileSync(path.resolve(__dirname, '../routes/waveformRoutes.js'), 'utf8');
+check('server retries a failed proxy extraction from the raw source when available',
+    /if \(useGCS && storagePath && rawGcsPath && rawGcsPath !== storagePath\)[\s\S]{0,220}return await doExtract\(rawGcsPath, null, null\)/.test(routeSrc));
 
 const peaksHookSrc = fs.readFileSync(
     path.resolve(__dirname, '../client/src/hooks/usePeaks.js'), 'utf8');
@@ -109,6 +109,11 @@ check('waveform visibility is gated by extracted peaks, not by a browser playbac
     && !/!isTextClip && wsAudioUrl/.test(src));
 check('trimmed waveform maps across the clip duration at timeline zoom',
     /duration=\{waveformDuration\}[\s\S]{0,120}zoomLevel=\{zoomLevel\}/.test(src));
+
+const projectSrc = fs.readFileSync(path.resolve(__dirname, '../client/src/revideo/project.tsx'), 'utf8');
+check('Revideo waits for video, audio and image nodes before async media access',
+    (projectSrc.match(/layerRefs\[track\.id\]\(\)\.add\(/g) || []).length === 4
+    && (projectSrc.match(/yield mediaRef\(\);/g) || []).length === 3);
 
 // ── The same "raw file has a late moov atom" pattern, second location ────────
 // captureProjectThumbnail.js seeks a <video> element to grab a frame, which

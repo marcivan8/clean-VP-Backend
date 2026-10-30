@@ -107,27 +107,20 @@ const Clip = ({ clip, trackId }) => {
     // wait — no clip is left permanently waveform-less. Non-video assets (plain
     // audio uploads, or a clip with no asset record at all) have no proxy
     // pipeline to wait for, so they keep the original clip-URL fallback.
-    // IMPORTANT: `asset.gcsPath` is ALSO the raw path (set in IDELayout the
-    // moment the raw upload lands on GCS, before any proxy exists), and
-    // usePeaks' `gcsPath` argument takes ABSOLUTE priority over `proxyUrl` on
-    // the server (utils/waveformPath.js's deriveGcsPath: `if (rawGcsPath)
-    // return rawGcsPath` — checked FIRST, unconditionally). Nulling out
-    // wsAudioUrl alone would do nothing: the explicit gcsPath would still force
-    // raw-file resolution regardless of what proxyUrl says. Both arguments have
-    // to be suppressed together or this fix is a no-op.
+    // `asset.gcsPath` is the raw source path. Keep it off the request while the
+    // proxy is still being prepared, but send it once the proxy exists: the
+    // server's deriveGcsPath() prefers the proxy path and uses raw gcsPath as a
+    // fallback if proxy decoding fails. Suppressing it after proxy completion
+    // disabled that recovery path and turned proxy decode failures into 500s.
     const assetType = String(asset?.type || '').toLowerCase();
     const isVideoAsset = assetType === 'video' || assetType.startsWith('video/');
     const serverProxyUrl = asset?.proxyUrl || clip.proxyUrl || null;
     const isUnproxiedVideoAsset = isVideoAsset && !serverProxyUrl;
     const rawUrlFallback = isUnproxiedVideoAsset ? null : (clip.sourceUrl || clip.url || null);
     const wsAudioUrl = serverProxyUrl || rawUrlFallback;
-    // For video clips, pass the proxy URL only. `asset.gcsPath` points to the
-    // original upload even after the proxy is ready, and the waveform route
-    // prioritizes an explicit gcsPath over proxyUrl. Passing both silently
-    // sends ffmpeg back to the large raw file (often with a late moov atom),
-    // which times out and leaves the video clip flat. The server can resolve
-    // the proxy's storage key from proxyUrl.
-    const waveformGcsPath = isVideoAsset ? null : (asset?.gcsPath || clip.gcsPath || null);
+    const waveformGcsPath = isUnproxiedVideoAsset
+        ? null
+        : (asset?.gcsPath || clip.gcsPath || null);
     const { peaks: wsPeaks, duration: wsDuration } = usePeaks(
         isTextClip ? null : clip.assetId,
         waveformGcsPath,

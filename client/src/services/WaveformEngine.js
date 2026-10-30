@@ -133,7 +133,9 @@ async function _fetchPeaks(assetId, gcsPath, proxyUrl, signal, force = false) {
     });
 
     if (!res.ok) {
-        const err = new Error(`Waveform extract failed: ${res.status}`);
+        const responseBody = await res.json().catch(() => null);
+        const detail = typeof responseBody?.error === 'string' ? ` (${responseBody.error})` : '';
+        const err = new Error(`Waveform extract failed: ${res.status}${detail}`);
         err.status = res.status;
         // 503 means the server's own queue is saturated and told us to come
         // back — that's backpressure, not breakage, and must not count against
