@@ -207,6 +207,38 @@ await check('the fallback still animates, captions and finds the figure', () => 
     assert.ok(idsStarting(finishedNoAi.tracks, 'short-moment-').length > 0);
 });
 
+await check('speaker pop-out works independently when the general polish toggle is off', async () => {
+    const input = state();
+    input.tracks[0].clips[0].layerMask = {
+        maskAssetPath: 'masks/speaker.mp4', sourceStart: 0, sourceDuration: 11, fps: 12,
+        bboxTrack: [{ t: 0, cx: 0.5, cy: 0.45, w: 0.3, h: 0.6 }],
+        settings: { mode: 'blur' },
+    };
+    const result = await finishShort(input, short, {
+        polish: false, popOut: true, sfx: false,
+        plan: null, motionTechniques: [], visualContext: [],
+    });
+    const video = result.tracks.find(track => track.type === 'video')?.clips || [];
+    assert.equal(video[0]?.layerTarget, 'background', 'the masked clip did not get the foreground cutout treatment');
+    assert.equal(video[0]?.layerMask?.settings?.mode, 'dim', 'the speaker should remain bright against the dimmed background');
+    assert.ok(result.applied.includes('speaker pop-out'), 'the UI result should report the pop-out layer');
+    assert.equal(allClips(result.tracks).filter(c => String(c.id).startsWith('short-hook-')).length, 0, 'the general polish layers should stay off');
+});
+
+await check('speaker pop-out skips clips where the matte found no person', async () => {
+    const input = state();
+    input.tracks[0].clips[0].layerMask = {
+        maskAssetPath: 'masks/empty.mp4', sourceStart: 0, sourceDuration: 11, fps: 12,
+        bboxTrack: [], settings: { mode: 'blur' },
+    };
+    const result = await finishShort(input, short, {
+        popOut: true, sfx: false, plan: null, motionTechniques: [], visualContext: [],
+    });
+    const video = result.tracks.find(track => track.type === 'video')?.clips || [];
+    assert.equal(video[0]?.layerTarget, undefined, 'empty foreground data should not dim or replace the full frame');
+    assert.ok(!result.applied.includes('speaker pop-out'), 'the planner claimed a pop-out without a detected subject');
+});
+
 await check('the local planner adapts its direction and schedules spoken insights as timed scenes', () => {
     const transcript = ('how to build a better workflow first remove the steps that waste your time '
         + 'but the surprising lesson is that the small change made everything easier '

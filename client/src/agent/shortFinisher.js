@@ -206,18 +206,19 @@ export async function finishShort(state, short, opts = {}) {
     const end = start + built.duration;
     const words = shiftToShort(state.captions || [], start, end, 'start');
     const events = (Array.isArray(short.events) ? short.events : []).map(e => ({ ...e, timelineTime: Number(e.timelineTime) - start }));
-    if (opts.polish === false) return { ...built, applied: [], words };
+    const wantsPolish = opts.polish !== false;
+    if (!wantsPolish && !opts.popOut) return { ...built, applied: [], words };
 
     const text = words.map(w => String(w.word ?? w.text ?? '')).join(' ').slice(0, 2000);
-    const [plan, techniques, visualContext] = await Promise.all([
+    const [plan, techniques, visualContext] = wantsPolish ? await Promise.all([
         opts.plan !== undefined ? opts.plan
             : (text ? (opts.fetchPlan || fetchShortPlan)(text, profile.id, built.duration) : null),
         opts.motionTechniques !== undefined ? opts.motionTechniques
             : (text ? (opts.fetchMotionTechniques || fetchShortMotionTechniques)(text, profile.id, '', opts.signal) : []),
         opts.visualContext !== undefined ? opts.visualContext
             : (state.projectId ? fetchShortVisualContext(state.projectId, opts.signal) : []),
-    ]);
-    const scenePlan = opts.scenePlan || fallbackShortScenePlan(words, {
+    ]) : [null, [], []];
+    const scenePlan = wantsPolish && (opts.scenePlan || fallbackShortScenePlan(words, {
         headline: plan?.headline,
         duration: built.duration,
         techniques,
@@ -225,8 +226,11 @@ export async function finishShort(state, short, opts = {}) {
         events,
         platform: profile.id,
         editingStyle: opts.editingStyle || state.editingStyle,
-    });
-    const polished = polishShort(built, profile, { words, events, plan, scenePlan, popOut: !!opts.popOut });
+    }));
+    const layers = wantsPolish ? undefined : {
+        title: false, captions: false, camera: false, numbers: false, cuts: false,
+    };
+    const polished = polishShort(built, profile, { words, events, plan, scenePlan, popOut: !!opts.popOut, layers });
     if (opts.sfx !== false) {
         const style = opts.editingStyle || state.editingStyle;
         const level = ['interview', 'podcast'].includes(style) ? 'none' : style === 'talking_head' ? 'subtle' : profile.sfx;

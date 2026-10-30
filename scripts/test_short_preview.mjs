@@ -112,6 +112,7 @@ await check('wired: player bar, main Export, prompts and Save leave the preview 
     const panel = read('client/src/components/ShortsPanel.jsx');
     assert.match(panel, /startShortPreview\(short, built/);
     assert.match(panel, /mediaExecutionEngine\._ensureMatte/, 'pop-out bakes through the engine');
+    assert.match(panel, /No person was detected in this short/, 'the panel must explain when the matte found no person');
     assert.doesNotMatch(panel, /bakeClipMatte/);
     for (const lang of ['en', 'fr']) {
         const sp = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).shortsPanel;

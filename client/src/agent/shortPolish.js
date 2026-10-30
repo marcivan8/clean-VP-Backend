@@ -910,6 +910,10 @@ export function polishShort(built, profile, opts = {}) {
             if (t.type !== 'video') continue;
             for (const c of t.clips) {
                 if (!(c.layerMask?.maskAssetPath || c.layerMask?.maskAssetUrl)) continue;
+                // A successful mask file can still contain no detected
+                // person. Do not call that a speaker pop-out or dim the
+                // entire frame in that case.
+                if (Array.isArray(c.layerMask.bboxTrack) && c.layerMask.bboxTrack.length === 0) continue;
                 c.layerTarget = 'background';
                 c.layerMask = { ...c.layerMask, settings: normalizeMatte({ ...(c.layerMask.settings || {}), mode: 'dim', dim: 0.4, blur: 14, feather: 5 }) };
                 popped += 1;
