@@ -84,12 +84,14 @@ export function headlineFromText(text, { maxWords = 6, upper = true } = {}) {
 }
 
 /**
- * Local, transcript-grounded scene plan for Pro Finish when the motion model
- * is unavailable. The scene model can improve the writing, but a network
- * timeout must never reduce the finish to a lone title when the transcript
- * already contains enough words for a second animated beat.
+ * Primary local scene plan for Pro Finish. It grounds structure, timing and
+ * motion in the transcript, semantic events, uploaded-asset visual profiles,
+ * editing style and the executable Motion Knowledge Base.
  */
-export function fallbackShortScenePlan(words, { headline = '', duration = 0, techniques = [], visualContext = [] } = {}) {
+export function fallbackShortScenePlan(words, {
+    headline = '', duration = 0, techniques = [], visualContext = [], events = [],
+    platform = '', editingStyle = '',
+} = {}) {
     const cleanText = value => String(value || '')
         .replace(/#[\p{L}\p{N}_]+/gu, '')
         .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
@@ -119,16 +121,21 @@ export function fallbackShortScenePlan(words, { headline = '', duration = 0, tec
     const visualLanguage = (Array.isArray(visualContext) ? visualContext : [])
         .flatMap(item => [item?.sceneType, item?.locationType, item?.emotionalTone, item?.contentDescription].filter(Boolean))
         .join(' ').toLowerCase();
-    const tone = /\b(step|steps|lesson|lessons|why|how|explained|tutorial|first|second|étape|étapes|leçon|leçons|pourquoi|comment|expliqué|tutoriel|premier|première|deuxième)\b/.test(transcript)
+    const inferredTone = /\b(step|steps|lesson|lessons|why|how|explained|tutorial|first|second|étape|étapes|leçon|leçons|pourquoi|comment|expliqué|tutoriel|premier|première|deuxième)\b/.test(transcript)
         ? 'editorial'
         : /\b(i|me|my|mine|story|felt|remember|experience|je|moi|mon|ma|histoire|ressenti|souviens|expérience)\b/.test(transcript)
             ? 'warm'
             : /\b(product|app|software|technology|platform|feature|tool|produit|application|logiciel|technologie|plateforme|fonctionnalité|outil)\b/.test(`${transcript} ${visualLanguage}`)
                 ? 'technology'
                 : /\b(warm|cozy|intimate|personnel|chaleureux|émotion|emotion|portrait|interview)\b/.test(visualLanguage)
-                    ? 'warm'
-                    : /\b(premium|luxury|studio|cinematic|luxe|studio|cinématique)\b/.test(visualLanguage)
-                        ? 'premium' : 'viral';
+                        ? 'warm'
+                        : /\b(premium|luxury|studio|cinematic|luxe|studio|cinématique)\b/.test(visualLanguage)
+                            ? 'premium' : 'viral';
+    const styleTones = { vlog: 'warm', talking_head: 'editorial', interview: 'warm', podcast: 'warm', reel: 'viral' };
+    const platformTones = { tiktok: 'viral', reels: 'premium', shorts: 'technology' };
+    const tone = styleTones[editingStyle] || (inferredTone === 'viral' ? (platformTones[platform] || inferredTone) : inferredTone);
+    const calmStyle = editingStyle === 'podcast' || editingStyle === 'interview';
+    const restrainedMotion = calmStyle || editingStyle === 'talking_head';
     const wordsOf = value => value.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
     const titleWords = new Set(wordsOf(title));
     const pointSegment = segments.find(segment => {
@@ -147,9 +154,10 @@ export function fallbackShortScenePlan(words, { headline = '', duration = 0, tec
     const visualTokens = new Set(visuals.flatMap(item => tokensOf([
         item.contentDescription, item.suggestedLabel, item.sceneType, item.locationType, item.emotionalTone,
     ].filter(Boolean).join(' '))));
+    const chosenTechniques = new Set();
     const chooseTechnique = (kind, text, excluded = []) => {
         const compatible = usableTechniques.filter(t => !Array.isArray(t.beatKinds) || t.beatKinds.includes(kind));
-        const distinct = compatible.filter(t => !excluded.includes(t.name));
+        const distinct = compatible.filter(t => !excluded.includes(t.name) && !chosenTechniques.has(t.name));
         const candidates = distinct.length ? distinct : compatible;
         if (!candidates.length) return null;
         const speech = new Set(tokensOf(text));
@@ -165,23 +173,44 @@ export function fallbackShortScenePlan(words, { headline = '', duration = 0, tec
             const toneFit = Array.isArray(t.tones) && t.tones.includes(tone) ? 2 : 0;
             return speechFit + visualFit + toneFit;
         };
-        return candidates.slice().sort((a, b) => score(b) - score(a) || String(a.name).localeCompare(String(b.name)))[0];
+        const picked = candidates.slice().sort((a, b) => score(b) - score(a) || String(a.name).localeCompare(String(b.name)))[0];
+        if (picked?.name) chosenTechniques.add(picked.name);
+        return picked;
     };
     const introTechnique = chooseTechnique('intro', title);
     const pointTechnique = chooseTechnique('point', pointSegment?.text || '', [introTechnique?.name]);
-    const fallbackMotion = kind => ({
+    const fallbackMotion = kind => restrainedMotion ? ({
+        intro: { enter: 'rise-in', emphasis: 'nod', exit: 'fade-out', energy: 0.34 },
+        point: { enter: 'fade-in', emphasis: 'nod', exit: 'fade-out', energy: 0.28 },
+        stat: { enter: 'pop-in', emphasis: 'pulse', exit: 'fade-out', energy: 0.4 },
+        quote: { enter: 'fade-in', emphasis: 'nod', exit: 'fade-out', energy: 0.28 },
+        cta: { enter: 'fade-in', emphasis: 'pulse', exit: 'fade-out', energy: 0.32 },
+    }[kind] || { enter: 'fade-in', emphasis: 'nod', exit: 'fade-out', energy: 0.3 }) : ({
         intro: { enter: 'slam-in', emphasis: 'punch', exit: 'whip-out', energy: 0.82, anticipate: true },
         point: { enter: 'rise-in', emphasis: 'pulse', exit: 'fade-out', energy: 0.62 },
         stat: { enter: 'pop-in', emphasis: 'punch', exit: 'shrink-out', energy: 0.78 },
         quote: { enter: 'fade-in', emphasis: 'pulse', exit: 'fade-out', energy: 0.48 },
         cta: { enter: 'slide-in', emphasis: 'pulse', exit: 'fade-out', energy: 0.58 },
     }[kind] || { enter: 'rise-in', emphasis: 'pulse', exit: 'fade-out', energy: 0.55 });
+    const motionFor = (technique, kind) => {
+        const motion = technique?.motion || fallbackMotion(kind);
+        if (!restrainedMotion) return motion;
+        const maxEnergy = calmStyle ? 0.38 : 0.58;
+        return {
+            ...motion,
+            enter: ['fade-in', 'rise-in', 'word-reveal', 'blur-in'].includes(motion.enter) ? motion.enter : 'rise-in',
+            emphasis: ['nod', 'pulse'].includes(motion.emphasis) ? motion.emphasis : 'nod',
+            exit: 'fade-out',
+            energy: Math.min(maxEnergy, Number(motion.energy) || maxEnergy),
+            anticipate: false,
+        };
+    };
     const beat = (kind, text, kicker, technique) => ({
         kind,
         text,
         ...(kicker ? { kicker } : {}),
         ...(technique?.name ? { technique: technique.name } : {}),
-        motion: technique?.motion || fallbackMotion(kind),
+        motion: motionFor(technique, kind),
     });
     const beats = [beat('intro', title, null, introTechnique)];
     // Only fold a point into the opening sequence if it is spoken near the
@@ -199,7 +228,9 @@ export function fallbackShortScenePlan(words, { headline = '', duration = 0, tec
         { kind: 'point', pattern: /\b(works|failed|mistake|difference|result|secret|important|marche|fonctionne|échoué|erreur|différence|résultat|secret|important)\b/ },
     ];
     const timedMoments = [];
+    const maxTimedMoments = Math.max(1, Math.min(5, Math.floor((Number(duration) || 0) / 7)));
     for (const cue of cues) {
+        if (timedMoments.length >= maxTimedMoments) break;
         const candidate = segments.find(segment => segment.start > 2
             && segment.start < Number(duration) - 1.5
             && cue.pattern.test(segment.text.toLowerCase())
@@ -213,11 +244,12 @@ export function fallbackShortScenePlan(words, { headline = '', duration = 0, tec
             start: Math.max(0, Number(candidate.start) || 0),
             end: Math.min(Number(duration) || Number(candidate.end), Number(candidate.end) || 0),
             ...(technique?.name ? { technique: technique.name } : {}),
-            motion: technique?.motion || fallbackMotion(cue.kind),
+            motion: motionFor(technique, cue.kind),
         });
     }
     if (pointSegment && Number(pointSegment.start) > Math.min(4, Number(duration) * 0.22)
         && pointSegment.start < Number(duration) - 1.5
+        && timedMoments.length < maxTimedMoments
         && !timedMoments.some(moment => Math.abs(moment.start - pointSegment.start) < 2.5)) {
         timedMoments.push({
             kind: 'point',
@@ -225,15 +257,53 @@ export function fallbackShortScenePlan(words, { headline = '', duration = 0, tec
             start: Math.max(0, Number(pointSegment.start) || 0),
             end: Math.min(Number(duration) || Number(pointSegment.end), Number(pointSegment.end) || 0),
             ...(pointTechnique?.name ? { technique: pointTechnique.name } : {}),
-            motion: pointTechnique?.motion || fallbackMotion('point'),
+            motion: motionFor(pointTechnique, 'point'),
         });
     }
 
-    // Gemini can select several beats from the whole transcript. Keep the
-    // rules path comparably useful when the transcript has no exact trigger
-    // phrase: choose its strongest, non-overlapping sentences, while keeping
-    // every word tied to its original timing. This is deliberately capped so
-    // a long transcript does not turn into a wall of graphics.
+    // Semantic events add visual evidence from the footage analysis to the
+    // transcript-driven story. Match each event to the nearest spoken phrase
+    // and retain the real event time even when a phrase falls back to words.
+    const eventKinds = { REVEAL: 'point', PUNCHLINE_DETECTED: 'quote', EMPHASIS_MOMENT: 'point' };
+    const semanticEvents = (Array.isArray(events) ? events : [])
+        .filter(event => MOMENT_TYPES.has(event?.eventType))
+        .map(event => {
+            const at = Number(event.timelineTime ?? event.start ?? event.time);
+            if (!Number.isFinite(at) || at < 2 || at >= Number(duration) - 1.5) return null;
+            const nearest = segments
+                .map(segment => ({ segment, distance: Math.abs(Number(segment.start) - at) }))
+                .sort((a, b) => a.distance - b.distance)[0];
+            if (nearest && nearest.distance <= 2.4) return { event, at, text: nearest.segment.text };
+            const phrase = phraseFromWords(timedWords, at, { upper: false, span: 1.2, maxWords: 7 });
+            return phrase ? { event, at, text: cleanText(phrase) } : null;
+        })
+        .filter(Boolean)
+        .sort((a, b) => (Number(b.event.confidence) || 0) - (Number(a.event.confidence) || 0) || a.at - b.at);
+    for (const candidate of semanticEvents) {
+        if (timedMoments.some(moment => Math.abs(moment.start - candidate.at) < 2.5)) continue;
+        if (candidate.text.toLowerCase().includes(title.toLowerCase())) continue;
+        if (timedMoments.length >= maxTimedMoments) {
+            // A high-confidence visual event carries evidence about the
+            // footage. Let it replace a generic transcript pick, while
+            // retaining explicit phrase matches and their real speech times.
+            const replaceIndex = timedMoments.findIndex(moment => !moment.sourceEvent);
+            if (replaceIndex < 0) break;
+            timedMoments.splice(replaceIndex, 1);
+        }
+        const kind = /\d/.test(candidate.text) ? 'stat' : eventKinds[candidate.event.eventType] || 'point';
+        const technique = chooseTechnique(kind, candidate.text, [introTechnique?.name, pointTechnique?.name]);
+        timedMoments.push({
+            kind, text: candidate.text, start: candidate.at,
+            end: Math.min(Number(duration), candidate.at + 1.8),
+            ...(technique?.name ? { technique: technique.name } : {}),
+            motion: motionFor(technique, kind),
+            sourceEvent: candidate.event.eventType,
+        });
+    }
+
+    // Fill remaining scene slots from the strongest transcript segments:
+    // figures, story turns, and phrases that add new meaning beyond the hook.
+    // Timing stays tied to speech and the scene count scales with duration.
     const rankedSegments = segments
         .filter(segment => segment.start > 2 && segment.start < Number(duration) - 1.5)
         .filter(segment => !timedMoments.some(moment => Math.abs(moment.start - segment.start) < 2.5))
@@ -247,7 +317,7 @@ export function fallbackShortScenePlan(words, { headline = '', duration = 0, tec
         })
         .sort((a, b) => b.score - a.score || a.segment.start - b.segment.start);
     for (const candidate of rankedSegments) {
-        if (timedMoments.length >= 3) break;
+        if (timedMoments.length >= maxTimedMoments) break;
         if (candidate.score < 2) continue;
         const segment = candidate.segment;
         const technique = chooseTechnique(candidate.kind, segment.text, [introTechnique?.name, pointTechnique?.name]);
@@ -257,7 +327,7 @@ export function fallbackShortScenePlan(words, { headline = '', duration = 0, tec
             start: Math.max(0, Number(segment.start) || 0),
             end: Math.min(Number(duration) || Number(segment.end), Number(segment.end) || 0),
             ...(technique?.name ? { technique: technique.name } : {}),
-            motion: technique?.motion || fallbackMotion(candidate.kind),
+            motion: motionFor(technique, candidate.kind),
         });
     }
     timedMoments.sort((a, b) => a.start - b.start);
@@ -273,12 +343,13 @@ export function fallbackShortScenePlan(words, { headline = '', duration = 0, tec
     // Keep these cues semantic and sparse. The caller resolves them to actual
     // licensed library sounds and applies the editing style's volume limits.
     const sfxCues = [];
-    if (beats.length && Number(duration) > 1) sfxCues.push({ t: 0.08, kind: (introTechnique?.motion || fallbackMotion('intro')).enter === 'slam-in' ? 'impact' : 'whoosh', sourceId: 'fallback-intro' });
+    if (!calmStyle && beats.length && Number(duration) > 1) sfxCues.push({ t: 0.08, kind: (introTechnique?.motion || fallbackMotion('intro')).enter === 'slam-in' ? 'impact' : 'whoosh', sourceId: 'fallback-intro' });
     for (const moment of timedMoments) {
+        if (calmStyle) break;
         const kind = moment.kind === 'stat' ? 'pop' : moment.kind === 'quote' ? 'whoosh' : 'pop';
         if (!sfxCues.some(cue => Math.abs(cue.t - moment.start) < 0.65)) sfxCues.push({ t: Math.max(0, moment.start - 0.03), kind, sourceId: `fallback-${moment.kind}` });
     }
-    if (close && Number(duration) >= 8 && !sfxCues.some(cue => Math.abs(cue.t - Number(close.start)) < 0.65)) {
+    if (!calmStyle && close && Number(duration) >= 8 && !sfxCues.some(cue => Math.abs(cue.t - Number(close.start)) < 0.65)) {
         sfxCues.push({ t: Math.max(0, Number(duration) - 1.8), kind: 'whoosh', sourceId: 'fallback-cta' });
     }
     const brollMoments = timedMoments
@@ -388,12 +459,8 @@ function trackOf(tracks, type, id, name) {
  * @param {{words?:Array, events?:Array, plan?:{headline?:string, keywords?:string[], titleBrief?:string},
  *          scenePlan?:{title?:string, points?:string[], cta?:string, tone?:string, beats?:Array}|null,
  *          popOut?:boolean, layers?:object}} opts words/events in SHORT time (start at 0).
- *          `scenePlan` is the AI's full SceneDirector plan for this short
- *          (shortFinisher.fetchScenePlan / POST /api/motion/scene-plan),
- *          grounded in the short's own transcript. Optional and additive:
- *          when it is null or empty (no AI configured, request failed, the
- *          model had nothing to say), the hook falls back to exactly the
- *          single static title this function always produced.
+ *          `scenePlan` is the local transcript/visual/Motion-KB result used by
+ *          Pro Finish. It can also accept a caller-supplied directed plan.
  * @returns {{tracks:Array, duration:number, aspectRatio:string, applied:string[]}}
  */
 export function polishShort(built, profile, opts = {}) {
@@ -525,7 +592,7 @@ export function polishShort(built, profile, opts = {}) {
                     t.clips.push({ ...p.clip, id });
                 }
                 if (placements.length) {
-                    const direction = scenePlan?.source === 'local-fallback' ? 'transcript fallback' : 'AI-directed';
+                    const direction = scenePlan?.source === 'local-fallback' ? 'local scene planner' : 'AI-directed';
                     applied.push(`hook sequence (${introBeats.length} beat${introBeats.length > 1 ? 's' : ''}, ${direction})`);
                     hookApplied = true;
                 }
@@ -560,14 +627,13 @@ export function polishShort(built, profile, opts = {}) {
     }
 
     // 1b. CTA outro: a brief, designed call-to-action beat at the very end
-    // of the short, when the AI's scene plan supplied one (from the
-    // transcript or an explicit ask -- never invented). Nothing filled this
+    // of the short, when the local scene plan finds one in the transcript.
+    // Nothing filled this
     // gap before: the hook title and the moment graphics in section 4 never
     // covered the close of a short. Skipped outright when the short is too
     // short to fit both the hook and a CTA without them overlapping.
-    // R103 -- prefer the plan's own closing beat, with whatever motion the
-    // route resolved onto it, over a beat synthesised from `scenePlan.cta`.
-    // Same bug as the hook above: rebuilding the beat threw the technique away.
+    // Prefer the planner's closing beat, with its selected motion technique,
+    // over a beat synthesised from `scenePlan.cta`.
     const planCtaBeat = (Array.isArray(opts.scenePlan?.beats) ? opts.scenePlan.beats : [])
         .find(b => (b?.kind === 'cta' || b?.kind === 'outro') && typeof b.text === 'string' && b.text.trim());
     const ctaBeat = planCtaBeat
@@ -773,20 +839,21 @@ export function polishShort(built, profile, opts = {}) {
         if (momentsCount) applied.push(`moment graphics (${momentsCount})`);
     }
 
-    // The deterministic fallback can also schedule transcript-led scenes
+    // The local planner schedules transcript-led scenes
     // across the body of the short. Keep them tied to their spoken words,
     // avoid number/reveal callouts already placed above, and use the same
     // scene director so each beat gets coordinated text, graphic accents,
     // safe placement, and motion.
     if (want.title && Array.isArray(opts.scenePlan?.timedMoments)) {
         let textN = 0, gfxN = 0, count = 0;
+        const maxTimedScenes = Math.max(1, Math.min(5, Math.floor(duration / 7)));
         const timed = opts.scenePlan.timedMoments
             .filter(m => m && typeof m.text === 'string' && m.text.trim())
             .filter(m => Number(m.start) >= (want.title ? hookSpan : 0) + 0.4 && Number(m.start) < duration - 1)
             .filter(m => !spokenNumbers(words).some(n => Math.abs(n.t - Number(m.start)) < 2.2))
             .filter(m => !moments.some(event => Math.abs(Number(event.timelineTime) - Number(m.start)) < 1.8))
             .sort((a, b) => Number(a.start) - Number(b.start))
-            .slice(0, 3);
+            .slice(0, maxTimedScenes);
         for (const moment of timed) {
             const at = Math.max(0, Math.min(duration - 0.5, Number(moment.start) || 0));
             const sceneDuration = Math.max(0.8, Math.min(1.8, duration - at));

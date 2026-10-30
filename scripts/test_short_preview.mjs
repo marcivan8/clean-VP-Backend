@@ -198,96 +198,64 @@ await check('the thumbnail grab asks for metadata, not the whole file', () => {
     assert.ok(Number(m[1]) <= 5000, `${m[1]}ms per source, per short, in series`);
 });
 
-await check('a planning model that hangs cannot hold the preview open', async () => {
+await check('preview scene planning never waits for a generative scene model', async () => {
     const saved = globalThis.fetch;
-    SF.clearPlanCache();
-    let aborted = false;
-    globalThis.fetch = (url, options) => new Promise((resolve, reject) => {
-        // Never resolves on its own: only the abort can end this.
-        options?.signal?.addEventListener('abort', () => {
-            aborted = true;
-            const err = new Error('aborted');
-            err.name = 'AbortError';
-            reject(err);
+    const requests = [];
+    globalThis.fetch = async (url) => {
+        requests.push(String(url));
+        return { ok: false, status: 503, json: async () => ({}), text: async () => '' };
+    };
+    try {
+        loadMain();
+        const built = await SF.finishShort(S.getState(), SHORT, {
+            plan: null, motionTechniques: [], visualContext: [], sfx: false,
         });
-    });
-    try {
-        const started = Date.now();
-        const result = await Promise.race([
-            SF.fetchScenePlanResult('some transcript words', 'tiktok', 20),
-            new Promise(resolve => setTimeout(() => resolve('NEVER_RETURNED'), SF.PLAN_TIMEOUT_MS + 2000)),
-        ]);
-        assert.notEqual(result, 'NEVER_RETURNED', 'the preview would spin forever');
-        assert.ok(aborted, 'the request was left running');
-        assert.equal(result.plan, null);
-        assert.match(result.reason, /did not answer within/i, `reason was ${JSON.stringify(result.reason)}`);
-        assert.ok(Date.now() - started <= SF.PLAN_TIMEOUT_MS + 1500, 'it waited longer than its own budget');
-    } finally {
-        globalThis.fetch = saved;
-        SF.clearPlanCache();
-    }
+        assert.ok(built.applied.some(item => /hook sequence/.test(item)), 'the local scene plan did not reach the short');
+        assert.ok(requests.every(url => !url.includes('/api/motion/scene-plan')), 'preview requested the AI scene planner');
+    } finally { globalThis.fetch = saved; }
 });
 
-await check('the same short does not re-ask a model that already answered', async () => {
+await check('Motion KB lookup uses a short deadline and keeps executable techniques', async () => {
     const saved = globalThis.fetch;
-    SF.clearPlanCache();
-    let calls = 0;
-    globalThis.fetch = async () => {
-        calls += 1;
-        return { ok: true, status: 200, json: async () => ({ source: 'ai', plan: { title: 'Hook', beats: [] }, techniques: [] }), text: async () => '' };
+    let request;
+    globalThis.fetch = async (url, options = {}) => {
+        request = { url: String(url), options };
+        return { ok: true, status: 200, json: async () => ({ techniques: [{
+            name: 'hook-word-reveal-speech', beatKinds: ['intro'], searchKeywords: ['speech'],
+            bestUseCases: ['a spoken hook'], tones: ['editorial'],
+            motion: { enter: 'word-reveal', exit: 'fade-out', energy: 0.55 },
+        }] }) };
     };
     try {
-        const a = await SF.fetchScenePlanResult('same words every time', 'tiktok', 20);
-        const b = await SF.fetchScenePlanResult('same words every time', 'tiktok', 20);
-        assert.equal(calls, 1, `re-previewing paid for the model ${calls} times`);
-        assert.equal(b.plan.title, a.plan.title);
-        // A different short is a different question.
-        await SF.fetchScenePlanResult('other words entirely', 'tiktok', 20);
-        assert.equal(calls, 2, 'the cache answered a question it was never asked');
-    } finally {
-        globalThis.fetch = saved;
-        SF.clearPlanCache();
-    }
+        const techniques = await SF.fetchShortMotionTechniques('this is spoken', 'reels');
+        assert.equal(techniques[0].motion.enter, 'word-reveal');
+        assert.match(request.url, /\/api\/motion\/techniques$/);
+        assert.equal(JSON.parse(request.options.body).limit, 24);
+        assert.ok(request.options.signal, 'technique lookup has no abort deadline');
+    } finally { globalThis.fetch = saved; }
 });
 
-await check('a failure is never cached, so a retry is a real retry', async () => {
+await check('upload visual profiles are read as local planner context', async () => {
     const saved = globalThis.fetch;
-    SF.clearPlanCache();
-    let calls = 0;
-    globalThis.fetch = async () => {
-        calls += 1;
-        return calls === 1
-            ? { ok: false, status: 503, json: async () => ({}), text: async () => '' }
-            : { ok: true, status: 200, json: async () => ({ source: 'ai', plan: { title: 'Back up', beats: [] }, techniques: [] }), text: async () => '' };
+    let requestedUrl = '';
+    globalThis.fetch = async url => {
+        requestedUrl = String(url);
+        return { ok: true, status: 200, json: async () => ({ profiles: [{ sceneType: 'coffee preparation' }] }) };
     };
     try {
-        const first = await SF.fetchScenePlanResult('retry me', 'tiktok', 20);
-        assert.equal(first.plan, null);
-        const second = await SF.fetchScenePlanResult('retry me', 'tiktok', 20);
-        assert.equal(calls, 2, 'the retry was answered from a cached failure');
-        assert.equal(second.plan.title, 'Back up', 'a model that recovered stayed broken for the session');
-    } finally {
-        globalThis.fetch = saved;
-        SF.clearPlanCache();
-    }
+        const profiles = await SF.fetchShortVisualContext('project-7');
+        assert.match(requestedUrl, /broll-profiles\?projectId=project-7/);
+        assert.equal(profiles[0].sceneType, 'coffee preparation');
+    } finally { globalThis.fetch = saved; }
 });
 
 await check('R120 — the client never gives up on a plan before the server\'s own budget does', () => {
-    // R109 set the client deadline to 12s. motionProvider.js's own
-    // DEFAULT_SCENE_TIMEOUT_MS (what /api/motion/short-plan and
-    // /api/motion/scene-plan give the model before THEY give up) is 30s --
-    // so the client was guaranteed to abort first on any call slower than
-    // 12s but faster than 30s, discarding an answer the server would have
-    // delivered (and, for scene-plan, the whole knowledge-base shortlist
-    // that went with it) and reporting a generic "did not answer within
-    // 12s" instead of the server's own informative failureCategory. Read
-    // the server's real constant rather than hardcoding 30000 here, so this
-    // stays a real cross-file invariant instead of two numbers that happen
-    // to agree today.
+    // The optional headline endpoint has a 35s client cap. Keep it above
+    // the server's model budget; scene structure does not use this request.
     const providerSrc = read('services/motionProvider.js');
     // [\d_]+, not \d+: the source writes this as `30_000` (a numeric
     // separator), which \d+ alone truncates to "30" -- silently turning
-    // this whole check into a no-op (12000 > 30 is also true).
+    // this whole check into a no-op.
     const m = providerSrc.match(/DEFAULT_SCENE_TIMEOUT_MS\s*=\s*([\d_]+)/);
     assert.ok(m, 'DEFAULT_SCENE_TIMEOUT_MS not found in motionProvider.js');
     const serverBudgetMs = Number(m[1].replace(/_/g, ''));

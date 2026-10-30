@@ -6,8 +6,8 @@
 // retrieval and the beat contract, test_scene_editor.mjs proves the director
 // and the validator. Neither proves the thing that actually matters to a user,
 // which is that a transcript goes in one end and ANIMATED CLIPS come out the
-// other — through fetchScenePlan, cleanScenePlan, polishShort,
-// composeSceneFromBrief, composeComponentScene and flattenScene, in that
+// other — through the local scene planner, polishShort, composeSceneFromBrief,
+// composeComponentScene and flattenScene, in that
 // order, with the technique's verbs still present when the clips land.
 //
 // That full path had no test at all, and it is exactly where an integration
@@ -40,7 +40,7 @@ async function check(name, fn) {
 const { createRequire } = await import('module');
 const nodeRequire = createRequire(path.join(ROOT, 'package.json'));
 
-const { finishShort, clearPlanCache, SHORT_SCENE_PLAN_TIMEOUT_MS } = await import('../client/src/agent/shortFinisher.js');
+const { finishShort, clearPlanCache } = await import('../client/src/agent/shortFinisher.js');
 const { polishShort, fallbackShortScenePlan } = await import('../client/src/agent/shortPolish.js');
 const { PLATFORM_PROFILES } = await import('../client/src/agent/PlatformProfiles.js');
 const SV = await import('../client/src/motion/SceneValidator.js');
@@ -250,6 +250,29 @@ await check('the fallback ranks executable KB techniques by their library metada
     assert.ok(local.visualSummary?.includes('coffee preparation'), 'visual profile context should be retained in scene direction');
 });
 
+await check('local planning follows visual events and keeps interview motion restrained', () => {
+    const transcript = ('i remember the first day we started the project and worked through every hard part '
+        + 'then the whole team finally saw the result and celebrated together because the new idea changed everything').split(' ');
+    const words = transcript.map((word, i) => ({ word, start: i * 0.6, end: i * 0.6 + 0.5 }));
+    const eventTime = 16.2;
+    const local = fallbackShortScenePlan(words, {
+        duration: 20,
+        editingStyle: 'interview',
+        platform: 'reels',
+        events: [{ eventType: 'REVEAL', timelineTime: eventTime, confidence: 0.98 }],
+        techniques: [{
+            name: 'high-energy-reveal', beatKinds: ['intro', 'point', 'quote'], tones: ['viral'],
+            motion: { enter: 'slam-in', emphasis: 'punch', exit: 'whip-out', energy: 1 },
+        }],
+    });
+    const reveal = local.timedMoments.find(moment => moment.sourceEvent === 'REVEAL');
+    assert.ok(reveal, 'a visual reveal event should become a timed scene');
+    assert.equal(reveal.start, eventTime, 'the semantic event time should be preserved');
+    assert.equal(local.tone, 'warm', 'interview style should guide the visual tone');
+    assert.deepEqual(local.sfxCues, [], 'interview scenes should not add distracting sound effects');
+    assert.ok([...local.beats, ...local.timedMoments].every(beat => beat.motion.energy <= 0.38), 'interview style should clamp even high-energy KB recipes');
+});
+
 await check('the no-AI finish renders transcript-led graphics at their spoken timestamps', async () => {
     const transcript = ('how to build a better workflow first remove the steps that waste your time '
         + 'but the surprising lesson is that the small change made everything easier '
@@ -276,70 +299,69 @@ await check('the no-AI finish resolves planner sound cues to real SFX clips', as
 
 await check('Pro Finish uses fallback B-roll moments and caps automatic cutaways', () => {
     const engine = nodeRequire('fs').readFileSync(path.join(ROOT, 'client/src/agent/MediaExecutionEngine.js'), 'utf8');
+    const finisher = nodeRequire('fs').readFileSync(path.join(ROOT, 'client/src/agent/shortFinisher.js'), 'utf8');
     const tools = nodeRequire('fs').readFileSync(path.join(ROOT, 'client/src/agent/VideoEditorTools.js'), 'utf8');
     assert.match(engine, /scenePlan\?\.source === 'local-fallback'[\s\S]{0,900}placeContextualBroll/,
         'Pro Finish never sends fallback scenes through contextual B-roll matching');
     assert.match(engine, /maxPlacements: Math\.min\(2, scenePlan\.brollMoments\.length\)/,
         'fallback b-roll has no conservative placement cap');
-    assert.match(engine, /\/api\/brain\/broll-profiles\?projectId=/,
+    assert.match(finisher, /\/api\/brain\/broll-profiles\?projectId=/,
         'the fallback never reads upload-time visual analysis');
-    assert.match(engine, /setTimeout\(\(\) => visualRequest\.abort\(\), 3000\)/,
-        'a slow visual-profile lookup could stall the deterministic fallback');
-    assert.match(engine, /visualContext,\s*\}\);/,
-        'upload-time visual analysis is not passed into the fallback planner');
+    assert.match(finisher, /VISUAL_CONTEXT_TIMEOUT_MS = 3000/,
+        'a slow visual-profile lookup could stall the local planner');
+    assert.match(engine, /visualContext,[\s\S]{0,120}events,/,
+        'upload-time visual analysis and semantic events are not passed into the local planner');
     assert.match(engine, /preferredAssetIds/,
         'asset matches from visual analysis are not used to rank fallback cutaways');
     assert.match(tools, /scopedMatches = scopedMatches\.slice\(0, maxPlacements\)/,
         'contextual B-roll ignores the caller placement cap');
 });
 
-await check('a timed-out scene model uses the offered KB motions in its local fallback', async () => {
+await check('the local scene planner retrieves and executes KB motions with no scene-model request', async () => {
     const savedFetch = globalThis.fetch;
     clearPlanCache();
+    const requests = [];
     globalThis.fetch = async (url, options = {}) => {
-        if (String(url).includes('/api/motion/scene-plan')) {
-            const body = JSON.parse(options.body || '{}');
-            assert.equal(body.timeoutMs, SHORT_SCENE_PLAN_TIMEOUT_MS, 'Pro Finish gives Gemini a bounded 28s scene-plan budget');
-            return { ok: true, status: 200, json: async () => ({
-                source: 'rules',
-                plan: null,
-                failureCategory: 'timeout',
-                techniques: ['hook-slam-headline', 'point-pop-count'],
-                motionTechniques: [
-                    { name: 'hook-slam-headline', beatKinds: ['intro'], motion: { enter: 'slam-in', emphasis: 'punch', exit: 'whip-out', energy: 0.9 } },
-                    { name: 'point-pop-count', beatKinds: ['point'], motion: { enter: 'pop-in', emphasis: 'punch', exit: 'shrink-out', energy: 0.7 } },
-                ],
-            }) };
+        requests.push(String(url));
+        if (String(url).includes('/api/motion/techniques')) {
+            return { ok: true, status: 200, json: async () => ({ techniques: [
+                { name: 'hook-slam-headline', beatKinds: ['intro'], searchKeywords: ['hook', 'headline'], tones: ['viral'], motion: { enter: 'slam-in', emphasis: 'punch', exit: 'whip-out', energy: 0.9 } },
+                { name: 'point-pop-count', beatKinds: ['point'], searchKeywords: ['point', 'lesson', 'result'], tones: ['viral'], motion: { enter: 'pop-in', emphasis: 'punch', exit: 'shrink-out', energy: 0.7 } },
+            ] }) };
         }
         return { ok: false, status: 503, json: async () => ({}) };
     };
     try {
-        const timeoutFinish = await finishShort(state(), short, { sfx: false });
-        const hook = allClips(timeoutFinish.tracks).filter(c => String(c.id).startsWith('short-hook-'));
-        assert.ok(hook.length > 0, 'the timeout path produced no hook clips');
+        const result = await finishShort(state(), short, { sfx: false });
+        const hook = allClips(result.tracks).filter(c => String(c.id).startsWith('short-hook-'));
+        assert.ok(hook.length > 0, 'the local planner produced no hook clips');
         assert.ok(presetIdsOf(hook).includes('composed:slam-in'), `intro KB motion was lost: ${JSON.stringify(presetIdsOf(hook))}`);
         assert.ok(presetIdsOf(hook).includes('composed:pop-in'), `point KB motion was lost: ${JSON.stringify(presetIdsOf(hook))}`);
-        assert.ok(timeoutFinish.applied.some(a => /transcript fallback/.test(a)), 'fallback source was not identified');
+        assert.ok(result.applied.some(a => /local scene planner/.test(a)), 'scene direction source was not identified');
+        assert.ok(requests.some(url => url.includes('/api/motion/techniques')), 'the local KB was not queried');
+        assert.ok(!requests.some(url => url.includes('/api/motion/scene-plan')), 'the generative scene planner was called');
     } finally {
         globalThis.fetch = savedFetch;
         clearPlanCache();
     }
 });
 
-await check('the injected fetchers are what finishShort actually calls', async () => {
-    // Proves the scenePlan fetch is wired into finishShort rather than being a
-    // parameter nothing reads — the failure mode this codebase keeps hitting.
-    let askedForScenePlan = 0;
-    let askedForShortPlan = 0;
-    const M = withRouteStubs(m => m);
+await check('finishShort uses injected headline and Motion KB lookups, then plans scenes locally', async () => {
+    let askedForTechniques = 0;
+    let askedForHeadline = 0;
     const out = await finishShort(state(), short, {
         sfx: false,
-        fetchPlan: async () => { askedForShortPlan += 1; return { headline: 'A REAL HEADLINE' }; },
-        fetchScenePlan: async () => { askedForScenePlan += 1; return planWithTechniques(M); },
+        fetchPlan: async () => { askedForHeadline += 1; return { headline: 'A REAL HEADLINE' }; },
+        fetchMotionTechniques: async () => {
+            askedForTechniques += 1;
+            return [{ name: 'hook-slam-headline', beatKinds: ['intro'], motion: { enter: 'slam-in', emphasis: 'punch', exit: 'whip-out', energy: 0.9 } }];
+        },
+        visualContext: [],
     });
-    assert.equal(askedForShortPlan, 1, 'the short plan was not fetched');
-    assert.equal(askedForScenePlan, 1, 'the scene plan was not fetched — the KB would never be consulted');
-    assert.ok(out.applied.some(a => /AI-directed/.test(a)), 'the fetched scene plan was not used');
+    assert.equal(askedForHeadline, 1, 'the optional headline plan was not fetched');
+    assert.equal(askedForTechniques, 1, 'the non-generative technique lookup was not fetched');
+    assert.ok(out.applied.some(a => /local scene planner/.test(a)), 'local planning was not used');
+    assert.ok(out.applied.some(a => /AI headline/.test(a)), 'the independent headline option stopped working');
 });
 
 log('\n── 3. The directed hook is placed legally in a vertical frame ──');

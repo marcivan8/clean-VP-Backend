@@ -7,10 +7,12 @@
  *      captions in the safe zone;
  *   2. an editorial plan (POST /api/motion/short-plan): AI hook headline and
  *      key words, with a rules fallback;
- *   3. the pro treatment (agent/shortPolish.js): hook title with written
+ *   3. a local, transcript/visual scene plan enriched by the Motion Knowledge
+ *      Base; scene structure and timing do not call a generative model;
+ *   4. the pro treatment (agent/shortPolish.js): hook title with written
  *      motion, platform captions, camera moves, number pops, transitions,
  *      optional speaker pop-out;
- *   4. sound effects on all of it (agent/sfxCues.js + the sound library), on
+ *   5. sound effects on all of it (agent/sfxCues.js + the sound library), on
  *      their own SFX track of the SHORT, never on the main edit.
  */
 
@@ -31,55 +33,35 @@ import { PLATFORM_PROFILES } from './PlatformProfiles.js';
 const sfxCache = new Map();
 
 /**
- * R109 — how long the preview will wait for a planning model.
- *
- * Both plan calls had no timeout at all. A model that hangs (rather than
- * erroring) left the preview spinning with nothing on screen and no way to
- * tell whether it was thinking or dead, for as long as the browser kept the
- * socket. Every caller already degrades to the deterministic rules when a
- * plan does not arrive, so a bounded wait loses the AI headline and keeps the
- * short — the right trade for something a person is watching.
- *
- * R120 — this used to be 12000. Both server routes it bounds
- * (/api/motion/short-plan and /api/motion/scene-plan, see motionRoutes.js)
- * give the model itself up to 30s (DEFAULT_SCENE_TIMEOUT_MS /
- * getAIClient({ timeout: 30_000 })) before THEY give up — and scene-plan can
- * spend part of that budget on Gemini's own reasoning tokens (gemini-3.8-
- * flash reasons by default; see MOTION_AI_MAX_TOKENS in motionProvider.js) or
- * cascade through a couple of fallback models on a 503/429/404 before it
- * answers. A client deadline of 12s was always SHORTER than the server's own
- * budget, so on any request that took longer than 12s but would otherwise
- * have succeeded, THIS timeout fired first — discarding the eventual answer,
- * the whole Motion Design Knowledge Base shortlist that would have gone with
- * it, and reporting it to the user as a generic "did not answer within 12s"
- * instead of whatever the server would have said. Raised to comfortably
- * clear the server's 30s budget (with slack for queueing/network) so the
- * server's own timeout — which DOES return an informative failureCategory —
- * is what fires first on a genuine stall, not this one racing ahead of it.
+ * The optional headline call has a bounded wait. Scene structure and timing
+ * are planned locally; the motion-technique and visual-context lookups are
+ * also bounded and never call a generative model.
  */
 export const PLAN_TIMEOUT_MS = 35000;
-// Keep this below the server route's 30s cap and above the old 12s cutoff,
-// which often expired before Gemini finished drafting the constrained JSON.
-export const SHORT_SCENE_PLAN_TIMEOUT_MS = 28000;
+export const MOTION_TECHNIQUE_TIMEOUT_MS = 3000;
+export const VISUAL_CONTEXT_TIMEOUT_MS = 3000;
 
 /** authFetch with a deadline. Aborting reads as a normal failure to the caller. */
 async function fetchWithTimeout(url, options, ms = PLAN_TIMEOUT_MS) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), ms);
+    const externalSignal = options?.signal;
+    const abortFromExternal = () => controller.abort(externalSignal?.reason);
+    if (externalSignal?.aborted) abortFromExternal();
+    else externalSignal?.addEventListener?.('abort', abortFromExternal, { once: true });
     try {
         return await authFetch(url, { ...options, signal: controller.signal });
     } finally {
         clearTimeout(timer);
+        externalSignal?.removeEventListener?.('abort', abortFromExternal);
     }
 }
 
 /**
- * R109 — the plans for one short, kept for the session.
+ * Optional headline plans for one short, kept for the session.
  *
- * Previewing a short ran both planning calls again every single time, so
- * closing a preview and reopening it paid the full model latency twice for an
- * answer that cannot have changed: both calls are a pure function of the
- * transcript text, the platform and the duration. Keyed on exactly those.
+ * Reopening a preview should not repeat a model call for an unchanged
+ * transcript. The local scene plan and Motion KB lookup do not use this cache.
  */
 const planCache = new Map();
 const planKey = (kind, text, platform, duration) => `${kind}|${platform}|${Math.round(Number(duration) * 100)}|${text}`;
@@ -93,12 +75,12 @@ async function cachedPlan(kind, text, platform, duration, run) {
     planCache.set(key, promise);
     try {
         const result = await promise;
-        // Only a real answer is kept. Caching a failure for the session would
+        // Only a real headline is kept. Caching a failure for the session would
         // mean a model that was briefly down, or one request that timed out,
         // stays "down" for this transcript until the tab is reloaded — and the
         // user's only visible symptom would be a short that never gets its
         // headline, with a retry that cannot possibly help.
-        const useful = kind === 'scene' ? !!result?.plan : !!result;
+        const useful = !!result;
         if (!useful) planCache.delete(key);
         return result;
     } catch (err) {
@@ -138,7 +120,6 @@ export async function addSfxTrack(tracks, cues, level, fetchAsset = fetchSfxAsse
     if (level === 'none' || !cues.length) return 0;
     const clips = [];
     for (const cue of cues) {
-        // eslint-disable-next-line no-await-in-loop
         const asset = await fetchAsset(SFX_QUERIES[cue.kind] || cue.kind);
         const url = sfxPlayableUrl(asset);
         if (!url) continue;
@@ -154,7 +135,7 @@ export async function addSfxTrack(tracks, cues, level, fetchAsset = fetchSfxAsse
     return clips.length;
 }
 
-/** The AI plan for a short, or null (rules then apply). */
+/** Optional AI headline/keyword suggestion, or null (local copy applies). */
 export async function fetchShortPlan(text, platform, duration) {
     return cachedPlan('short', text, platform, duration, async () => {
         try {
@@ -174,118 +155,47 @@ export async function fetchShortPlan(text, platform, duration) {
     });
 }
 
-/**
- * R102 -- the full SceneDirector plan for a short's hook/CTA (POST
- * /api/motion/scene-plan), grounded in the short's own transcript so the
- * beats carry real words instead of SceneDirector's own "YOUR HEADLINE"-
- * style placeholders (it refuses to invent claims -- see SceneDirector.js's
- * own doc comment). The brief here is deliberately generic ("open strong,
- * surface the key point, close with a call to action") because the actual
- * content comes from the transcript; tone is decided client-side (shortPolish
- * always forces 'viral' for this call), not from this brief. Beats are left
- * unspecified so the model decides the full structure itself (R101 PHASE 1)
- * instead of only ever filling words into a fixed shape -- shortPolish then
- * picks just the intro/point/cta beats it has room for.
- */
-/**
- * Why the motion route had no plan, in words an operator can act on.
- *
- * All three of these used to arrive as the same `source: 'rules'`, which is
- * why "the provider is set and it STILL says rules" was impossible to debug
- * from the app: a provider deliberately set to deterministic, a provider set
- * to a real model with no working credentials, and a model that was called
- * and errored are three different jobs for whoever owns the deployment.
- */
-const SCENE_PLAN_FAILURES = Object.freeze({
-    rules_requested: 'the motion provider is set to the deterministic rules (AI_MOTION_PROVIDER=rules), so no model was called',
-    provider_unconfigured: 'the motion provider has no working credentials on the server, so no model was called',
-    client_initialization_failed: 'the motion model could not be initialised on the server',
-    timeout: 'the motion model timed out',
-    cancelled: 'the request was cancelled before the model answered',
-    no_output: 'the motion model returned nothing usable',
-    output_truncated: 'the motion model ran out of output budget mid-answer (raise MOTION_AI_MAX_TOKENS)',
-    api_error: 'the motion model returned an error',
-    route_error: 'the motion route itself failed',
-});
-
-export async function fetchScenePlanResult(text, platform, duration) {
-    const none = (reason, source = 'none', techniques = [], motionTechniques = []) => ({ plan: null, source, techniques, motionTechniques, reason });
-    if (!text) return none('there was no transcript text to plan from');
-    const brief = 'A short-form video: open with a strong hook, surface the single most '
-        + 'important point or figure, and close with a call to action if the video asks for one.';
-    return cachedPlan('scene', text, platform, duration, () => runScenePlan(brief, text, platform, duration, none));
-}
-
-async function runScenePlan(brief, text, platform, duration, none) {
+/** Fast, read-only retrieval over the Motion Knowledge Base; no model generation. */
+export async function fetchShortMotionTechniques(text, platform, tone = '', signal) {
+    if (!String(text || '').trim()) return [];
     try {
-        const res = await fetchWithTimeout('/api/motion/scene-plan', {
+        const res = await fetchWithTimeout('/api/motion/techniques', {
             method: 'POST',
-            // Keep Pro Finish responsive. The server still gets its bounded
-            // fallback window, after which the transcript-driven local scene
-            // plan uses the same technique shortlist without waiting 30s.
-            body: JSON.stringify({ brief, transcript: text, platform, duration, timeoutMs: SHORT_SCENE_PLAN_TIMEOUT_MS }),
-        });
+            body: JSON.stringify({ query: String(text).slice(0, 600), platform, tone, limit: 24 }),
+            ...(signal ? { signal } : {}),
+        }, MOTION_TECHNIQUE_TIMEOUT_MS);
+        if (!res.ok) return [];
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-            // This branch used to `return null` with no log at all. Only a
-            // thrown network error was ever reported, so a 500/502/503 from
-            // the motion route made the entire scene plan — and with it every
-            // technique in the knowledge base — vanish in complete silence.
-            console.warn(`[shortFinisher] scene plan request failed (${res.status}); the transcript-driven motion fallback will be used.`);
-            return none(`the motion service answered ${res.status}`, 'error');
-        }
-        const plan = data.plan || null;
-        // The route answers 200 with `plan: null, source: 'rules'` whenever the
-        // model is unconfigured or the call failed — so "no techniques because
-        // the model chose none" and "no techniques because there was no model"
-        // looked identical to the caller. They are not, and only one of them
-        // is a motion problem.
-        const source = String(data.source || (plan ? 'ai' : 'rules'));
-        const techniques = Array.isArray(data.techniques) ? data.techniques : [];
-        const motionTechniques = Array.isArray(data.motionTechniques) ? data.motionTechniques : [];
-        if (!plan) {
-            const is404 = /404|not found/i.test(data.failureCategory || '');
-            const is503 = /503|high demand|overloaded|capacity/i.test(data.failureCategory || '');
-            const why = is404
-                ? `the motion model was not found on the provider (verify ${data.provider === 'gemini' ? 'GEMINI_MODEL' : 'model configuration'})`
-                : is503
-                ? `the motion model is experiencing a temporary capacity spike on ${data.provider || 'the provider'} (try again in a moment)`
-                : (SCENE_PLAN_FAILURES[data.failureCategory]
-                    || (data.failureCategory ? `the motion model failed (${data.failureCategory})` : null));
-            const named = data.provider ? ` [provider: ${data.provider}]` : '';
-            console.warn(`[shortFinisher] no AI scene plan (source=${source}, reason=${data.failureCategory || 'unreported'}${named}); `
-                + `${techniques.length} knowledge-base technique(s) were offered; the transcript-driven fallback will apply compatible motions. `);
-            return none(why
-                || (source === 'rules'
-                    ? 'the motion AI is not answering, so the deterministic rules were used'
-                    : `no plan came back (source: ${source})`), source, techniques, motionTechniques);
-        }
-        return { plan, source, techniques, motionTechniques, reason: null };
+        return Array.isArray(data?.techniques) ? data.techniques : [];
     } catch (err) {
-        if (err.name === 'AbortError') {
-            console.warn(`[shortFinisher] the scene-plan request did not answer within ${PLAN_TIMEOUT_MS / 1000}s; the transcript-driven motion fallback will be used.`);
-            return none(`the motion model did not answer within ${PLAN_TIMEOUT_MS / 1000}s`, 'timeout');
-        }
-        console.warn('[shortFinisher] scene plan unavailable; the transcript-driven motion fallback will be used:', err.message);
-        return none(`the motion service could not be reached (${err.message})`, 'error');
+        if (signal?.aborted) throw err;
+        console.warn('[shortFinisher] motion technique lookup unavailable; built-in recipes will be used:', err.message);
+        return [];
     }
 }
 
-/**
- * The plan alone. Kept as the original contract for every existing caller and
- * for injected test doubles; `fetchScenePlanResult` is what a caller uses when
- * it needs to tell the user WHY there is no plan.
- */
-export async function fetchScenePlan(text, platform, duration) {
-    const { plan } = await fetchScenePlanResult(text, platform, duration);
-    return plan;
+/** Upload-time visual grounding for local scene and b-roll selection. */
+export async function fetchShortVisualContext(projectId, signal) {
+    if (!projectId) return [];
+    try {
+        const res = await fetchWithTimeout(`/api/brain/broll-profiles?projectId=${encodeURIComponent(projectId)}`, {
+            ...(signal ? { signal } : {}),
+        }, VISUAL_CONTEXT_TIMEOUT_MS);
+        if (!res.ok) return [];
+        const data = await res.json().catch(() => ({}));
+        return Array.isArray(data?.profiles) ? data.profiles : [];
+    } catch (err) {
+        if (signal?.aborted) throw err;
+        console.warn('[shortFinisher] visual context unavailable; scene planning will use the transcript:', err.message);
+        return [];
+    }
 }
 
 /**
  * Build the finished short.
  * @param {object} state useTimelineStore.getState()
  * @param {object} short an entry of state.shorts
- * @param {{polish?:boolean, popOut?:boolean, sfx?:boolean, plan?:object|null, scenePlan?:object|null, fetchPlan?:Function, fetchScenePlan?:Function, fetchAsset?:Function}} opts
+ * @param {{polish?:boolean, popOut?:boolean, sfx?:boolean, plan?:object|null, scenePlan?:object|null, motionTechniques?:Array, visualContext?:Array, events?:Array, editingStyle?:string, fetchPlan?:Function, fetchMotionTechniques?:Function, fetchAsset?:Function}} opts
  * @returns {Promise<{tracks, duration, aspectRatio, applied:string[], words:Array}>}
  */
 export async function finishShort(state, short, opts = {}) {
@@ -299,28 +209,34 @@ export async function finishShort(state, short, opts = {}) {
     if (opts.polish === false) return { ...built, applied: [], words };
 
     const text = words.map(w => String(w.word ?? w.text ?? '')).join(' ').slice(0, 2000);
-    const [plan, sceneResult] = await Promise.all([
+    const [plan, techniques, visualContext] = await Promise.all([
         opts.plan !== undefined ? opts.plan
             : (text ? (opts.fetchPlan || fetchShortPlan)(text, profile.id, built.duration) : null),
-        opts.scenePlan !== undefined ? { plan: opts.scenePlan, motionTechniques: opts.motionTechniques || [] }
-            : opts.fetchScenePlan
-                ? Promise.resolve((text ? opts.fetchScenePlan(text, profile.id, built.duration) : null)).then(plan => ({ plan, motionTechniques: [] }))
-                : (text ? fetchScenePlanResult(text, profile.id, built.duration) : { plan: null, motionTechniques: [] }),
+        opts.motionTechniques !== undefined ? opts.motionTechniques
+            : (text ? (opts.fetchMotionTechniques || fetchShortMotionTechniques)(text, profile.id, '', opts.signal) : []),
+        opts.visualContext !== undefined ? opts.visualContext
+            : (state.projectId ? fetchShortVisualContext(state.projectId, opts.signal) : []),
     ]);
-    const scenePlan = sceneResult?.plan || fallbackShortScenePlan(words, {
+    const scenePlan = opts.scenePlan || fallbackShortScenePlan(words, {
         headline: plan?.headline,
         duration: built.duration,
-        techniques: sceneResult?.motionTechniques,
+        techniques,
+        visualContext,
+        events,
+        platform: profile.id,
+        editingStyle: opts.editingStyle || state.editingStyle,
     });
     const polished = polishShort(built, profile, { words, events, plan, scenePlan, popOut: !!opts.popOut });
     if (opts.sfx !== false) {
-        const cues = mergeSfxCues(collectSfxCues(polished.tracks, { level: profile.sfx }), scenePlan?.sfxCues)
-            .filter(cue => profile.sfx !== 'subtle' || cue.kind !== 'impact');
-        const placed = await addSfxTrack(polished.tracks, cues, profile.sfx, opts.fetchAsset);
+        const style = opts.editingStyle || state.editingStyle;
+        const level = ['interview', 'podcast'].includes(style) ? 'none' : style === 'talking_head' ? 'subtle' : profile.sfx;
+        const cues = mergeSfxCues(collectSfxCues(polished.tracks, { level }), scenePlan?.sfxCues)
+            .filter(cue => level !== 'subtle' || cue.kind !== 'impact');
+        const placed = await addSfxTrack(polished.tracks, cues, level, opts.fetchAsset);
         if (placed) polished.applied.push(`sound effects (${placed})`);
     }
     if (plan?.headline) polished.applied.unshift('AI headline');
     return { ...polished, words };
 }
 
-export default { finishShort, fetchShortPlan, fetchScenePlan, fetchSfxAsset, addSfxTrack, clearPlanCache, PLAN_TIMEOUT_MS, SHORT_SCENE_PLAN_TIMEOUT_MS };
+export default { finishShort, fetchShortPlan, fetchShortMotionTechniques, fetchShortVisualContext, fetchSfxAsset, addSfxTrack, clearPlanCache, PLAN_TIMEOUT_MS };

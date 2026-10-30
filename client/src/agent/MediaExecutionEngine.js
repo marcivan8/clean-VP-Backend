@@ -1802,54 +1802,26 @@ export class MediaExecutionEngine {
                 let plan = null;
                 let scenePlan = null;
                 const text = words.slice(0, 400).map(w => String(w.word ?? w.text ?? '')).join(' ');
-                let sceneResult = null;
                 if (text) {
-                    const { fetchShortPlan, fetchScenePlanResult } = await import('./shortFinisher.js');
-                    // R102 -- the full SceneDirector plan, auto-triggered
-                    // alongside the existing short-plan fetch (same
-                    // transcript, same graceful "null on failure" contract).
-                    //
-                    // R104 -- ...but "graceful" had become "silent". The route
-                    // answers 200 with `plan: null, source: 'rules'` when the
-                    // motion model is unconfigured or fails, and the client
-                    // dropped `source` and `techniques` on the floor. A Pro
-                    // Finish then reported success having used NONE of the
-                    // knowledge base, with nothing anywhere saying why. Take
-                    // the full result so the message below can be honest.
-                    const [p, r] = await Promise.all([
+                    const { fetchShortPlan, fetchShortMotionTechniques, fetchShortVisualContext } = await import('./shortFinisher.js');
+                    // Scene structure is always authored locally from the
+                    // transcript, semantic events and upload-time visual
+                    // analysis. The only remote lookups are the optional
+                    // headline model and the non-generative motion library.
+                    const [p, motionTechniques, visualContext] = await Promise.all([
                         fetchShortPlan(text, platform, total),
-                        fetchScenePlanResult(text, platform, total),
+                        fetchShortMotionTechniques(text, platform, '', job?.signal),
+                        fetchShortVisualContext(st.projectId, job?.signal),
                     ]);
                     plan = p;
-                    sceneResult = r;
-                    let visualContext = [];
-                    if (!r.plan && st.projectId) {
-                        const visualRequest = new AbortController();
-                        const visualTimeout = setTimeout(() => visualRequest.abort(), 3000);
-                        const abortVisualRequest = () => visualRequest.abort(job?.signal?.reason);
-                        if (job?.signal?.aborted) abortVisualRequest();
-                        else job?.signal?.addEventListener?.('abort', abortVisualRequest, { once: true });
-                        try {
-                            const response = await authFetch(`/api/brain/broll-profiles?projectId=${encodeURIComponent(st.projectId)}`, { signal: visualRequest.signal });
-                            if (response.ok) visualContext = (await response.json())?.profiles || [];
-                        } catch (err) {
-                            if (job?.signal?.aborted) throw err;
-                            console.warn('[polish_short] upload-time visual profiles unavailable; using transcript-only planning:', err.message);
-                        } finally {
-                            clearTimeout(visualTimeout);
-                            job?.signal?.removeEventListener?.('abort', abortVisualRequest);
-                        }
-                    }
-                    // The model's plan is optional creative input, never a
-                    // prerequisite for Pro Finish. Build an immediate local
-                    // plan from the actual transcript and the technique
-                    // shortlist when Gemini times out, so useful motion beats
-                    // still reach the timeline instead of one static title.
-                    scenePlan = r.plan || fallbackShortScenePlan(words, {
+                    scenePlan = fallbackShortScenePlan(words, {
                         headline: plan?.headline,
                         duration: total,
-                        techniques: r.motionTechniques,
+                        techniques: motionTechniques,
                         visualContext,
+                        events,
+                        editingStyle: st.editingStyle,
+                        platform,
                     });
                 }
                 // Earlier finish replaced, not stacked.
@@ -1933,16 +1905,13 @@ export class MediaExecutionEngine {
                 let sceneNote = '';
                 if (usedTechniques.length > 0) {
                     sceneNote = ` Motion techniques: ${usedTechniques.slice(0, 4).join(', ')}.`;
-                } else if (sceneResult && !sceneResult.plan) {
-                    sceneNote = ` The AI scene direction was skipped — ${sceneResult.reason}`
-                        + (sceneResult.techniques?.length ? `, so none of the ${sceneResult.techniques.length} matching motion techniques were applied.` : '.');
                 } else if (scenePlan) {
-                    sceneNote = ' The scene was directed without naming a motion technique.';
+                    sceneNote = ' Scene direction used the local transcript and visual planner.';
                 }
                 return {
                     action, success: true,
                     message: `Finished for ${profile.label}: ${by}${polished.applied.join(', ')}${brollNote}${sfxNote}. One undo reverts it.${sceneNote}`,
-                    details: { applied: polished.applied, platform, sceneSource: sceneResult?.source || null, techniques: usedTechniques },
+                    details: { applied: polished.applied, platform, sceneSource: scenePlan?.source || null, techniques: usedTechniques },
                 };
             }
 
