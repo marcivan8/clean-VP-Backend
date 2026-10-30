@@ -395,17 +395,13 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         const nonTextTracks = deferredTracks.filter(t => t.type !== 'text' && t.type !== 'overlay');
         const isAnySolo = deferredTracks.some(tr => tr.solo);
 
-        // Compute duration from non-text (video/audio/image) clips only.
-        // If we used the store's `duration` directly, adding a caption that
-        // extends the timeline would change playerVariables, trigger
-        // playback.reload(), run recalculate(), and hit Revideo's loop-guard
-        // which seeks the playhead back to frame 0 while playing. Deriving
-        // duration from the clips we actually pass to Revideo prevents this.
+        // Compute duration from non-text (video/audio/image) clips and timeline duration.
+        // Ensure Revideo scene duration covers at least the timeline duration so the user can seek
+        // and place the playhead on any frame across the full timeline.
         const playerDuration = (() => {
             const clips = nonTextTracks.flatMap(t => t.clips || []);
-            if (clips.length === 0) return Math.max(duration, 1);
             const maxEnd = clips.reduce((m, c) => Math.max(m, (c.start || 0) + (c.duration || 0)), 0);
-            return Math.max(maxEnd, 1);
+            return Math.max(duration, maxEnd, 1);
         })();
 
         return {
@@ -2641,7 +2637,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                                 controls={false}
                                                 currentTime={useTimelineStore.getState().currentTime}
                                                 onTimeUpdate={(time) => {
-                                                    useTimelineStore.setState({ currentTime: time });
+                                                    // Only push into store while playing — while paused, user scrub/seek/step
+                                                    // drives currentTime so asynchronous/quantized updates do not snap the playhead
+                                                    if (useTimelineStore.getState().isPlaying) {
+                                                        useTimelineStore.setState({ currentTime: time });
+                                                    }
                                                 }}
                                                 project={project}
                                                 variables={playerVariables}

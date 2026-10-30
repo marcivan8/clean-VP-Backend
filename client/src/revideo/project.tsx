@@ -418,12 +418,11 @@ const timelineScene = makeScene2D('timeline', function* (view) {
         });
     });
 
-    // Guard: calling all() with no arguments causes join() to receive undefined as its
-    // first arg, pushing it into tasks, and then Math.max(...[]) = -Infinity which
-    // corrupts playback time. Fall back to waitFor if somehow runningClips is empty.
-    yield* any(
+    // Keep scene active for at least totalDuration (and until any running clips finish).
+    // Using all() ensures the generator does not terminate early when clips finish before totalDuration.
+    yield* all(
         waitFor(totalDuration),
-        runningClips.length > 0 ? all(...runningClips) : waitFor(totalDuration)
+        ...(runningClips.length > 0 ? runningClips : [])
     );
 });
 

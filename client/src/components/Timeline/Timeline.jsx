@@ -387,35 +387,48 @@ const Timeline = () => {
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
 
-    const handleSeekClick = (e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const clickedTime = x / zoomLevel;
-        // Land on an exact frame so clicking and ←/→ frame-stepping agree.
+    // Frame-accurate seek calculation from ruler element and clientX
+    const seekFromRulerX = React.useCallback((rulerEl, clientX) => {
+        if (!rulerEl) return;
+        const rect = rulerEl.getBoundingClientRect();
+        const x = clientX - rect.left;
+        const zl = useTimelineStore.getState().zoomLevel;
+        const dur = useTimelineStore.getState().duration;
         const fps = Number(useTimelineStore.getState().playerRef?.playback?.fps) || 30;
-        seek(Math.round(clickedTime * fps) / fps);
-    };
+        const t = Math.max(0, Math.min(dur, x / zl));
+        seek(Math.round(t * fps) / fps);
+    }, [seek]);
+
+    const handleRulerMouseDown = React.useCallback((e) => {
+        if (e.button !== 0) return;
+        const rulerEl = e.currentTarget;
+        seekFromRulerX(rulerEl, e.clientX);
+
+        const onMouseMove = (me) => {
+            seekFromRulerX(rulerEl, me.clientX);
+        };
+
+        const onMouseUp = () => {
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+        };
+
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+    }, [seekFromRulerX]);
 
     // Touch-seek: tap or drag a single finger on the ruler to scrub
     const handleRulerTouchStart = React.useCallback((e) => {
         if (e.touches.length !== 1) return;
         e.preventDefault(); // prevent scroll while scrubbing ruler
-        const rect = e.currentTarget.getBoundingClientRect();
-        const area = tracksAreaRef.current;
-        const scrollOffset = area ? area.scrollLeft : 0;
-        const x = e.touches[0].clientX - rect.left + scrollOffset;
-        seek(Math.max(0, x / zoomLevel));
-    }, [seek, zoomLevel]);
+        seekFromRulerX(e.currentTarget, e.touches[0].clientX);
+    }, [seekFromRulerX]);
 
     const handleRulerTouchMove = React.useCallback((e) => {
         if (e.touches.length !== 1) return;
         e.preventDefault();
-        const rect = e.currentTarget.getBoundingClientRect();
-        const area = tracksAreaRef.current;
-        const scrollOffset = area ? area.scrollLeft : 0;
-        const x = e.touches[0].clientX - rect.left + scrollOffset;
-        seek(Math.max(0, x / zoomLevel));
-    }, [seek, zoomLevel]);
+        seekFromRulerX(e.currentTarget, e.touches[0].clientX);
+    }, [seekFromRulerX]);
 
 
     return (
@@ -646,13 +659,13 @@ const Timeline = () => {
                     <div
                         className="flex-1 relative cursor-pointer"
                         style={{ width: `${duration * zoomLevel}px`, minWidth: '100%', touchAction: 'none' }}
-                        onClick={handleSeekClick}
+                        onMouseDown={handleRulerMouseDown}
                         onTouchStart={handleRulerTouchStart}
                         onTouchMove={handleRulerTouchMove}
                     >
                         {/* Ruler ticks */}
                         {Array.from({ length: Math.ceil(duration / 5) }).map((_, i) => (
-                            <div key={i} className="absolute top-0 bottom-0 border-l border-white/20 text-[9px] text-muted-foreground pl-1 pt-1" style={{ left: `${i * 5 * zoomLevel}px` }}>
+                            <div key={i} className="absolute top-0 bottom-0 border-l border-white/20 text-[9px] text-muted-foreground pl-1 pt-1 pointer-events-none select-none" style={{ left: `${i * 5 * zoomLevel}px` }}>
                                 {formatTime(i * 5)}
                             </div>
                         ))}
