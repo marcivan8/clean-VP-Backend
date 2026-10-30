@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import Track from './Track';
 import useTimelineStore from '../../store/useTimelineStore';
 import useDeviceType from '../../hooks/useDeviceType';
+import { addAssetAtTimelinePosition, getAssetDropTime } from '../../timeline/assetDropPosition.js';
 import { TRANSITION_TYPES, TRANSITION_DEFAULT_DURATION } from '../../motion/TransitionFX.js';
 import { Scissors, ZoomIn, ZoomOut, Copy, Type, Palette, Undo2, Redo2, ChevronsRight, Magnet, ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -50,6 +51,7 @@ const Timeline = () => {
     const tracksAreaRef = React.useRef(null);
     const selDragRef = React.useRef(null);
     const [selBox, setSelBox] = React.useState(null);
+    const [assetDropPreview, setAssetDropPreview] = React.useState(null);
 
     // Scroll hint: show briefly when horizontal content overflows
     const [showScrollHint, setShowScrollHint] = React.useState(false);
@@ -75,6 +77,47 @@ const Timeline = () => {
             y: clientY - rect.top + area.scrollTop - RULER_H,
         };
     }, []);
+
+    const getAssetDropPreview = (event) => {
+        const area = tracksAreaRef.current;
+        if (!area) return null;
+        const rect = area.getBoundingClientRect();
+        const state = useTimelineStore.getState();
+        return {
+            time: getAssetDropTime({
+                clientX: event.clientX,
+                laneLeft: rect.left + labelW - area.scrollLeft,
+                zoomLevel: state.zoomLevel,
+                currentTime: state.currentTime,
+            }),
+        };
+    };
+
+    const handleAssetDragOver = (event) => {
+        const types = Array.from(event.dataTransfer?.types || []);
+        if (!types.includes('application/x-vibed-asset-id') && !types.includes('text/plain')) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        setAssetDropPreview(getAssetDropPreview(event));
+    };
+
+    const handleAssetDragLeave = (event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setAssetDropPreview(null);
+    };
+
+    const handleAssetDrop = (event) => {
+        const assetId = event.dataTransfer?.getData('application/x-vibed-asset-id')
+            || event.dataTransfer?.getData('text/plain');
+        if (!assetId) return;
+        event.preventDefault();
+        const state = useTimelineStore.getState();
+        const asset = state.assets.find(item => item.id === assetId);
+        const position = getAssetDropPreview(event);
+        setAssetDropPreview(null);
+        if (!asset || !position) return;
+        const targetTrackId = event.target.closest?.('[data-timeline-track]')?.dataset.timelineTrack || null;
+        addAssetAtTimelinePosition(state, asset, targetTrackId, position.time);
+    };
 
     const handleTracksMouseDown = React.useCallback((e) => {
         if (e.button !== 0) return;
@@ -666,6 +709,9 @@ const Timeline = () => {
                 className="flex-1 overflow-auto relative custom-scrollbar flex flex-col"
                 style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
                 onMouseDown={handleTracksMouseDown}
+                onDragOver={handleAssetDragOver}
+                onDragLeave={handleAssetDragLeave}
+                onDrop={handleAssetDrop}
                 onScroll={() => setShowScrollHint(false)}
                 title="Shift-drag on an empty track row to select a time range for a localized edit or captions"
             >
@@ -783,6 +829,22 @@ const Timeline = () => {
                         />
                     )}
                 </div>
+                {tracks.length === 0 && (
+                    <div className="pointer-events-none absolute left-0 right-0 top-12 flex justify-center">
+                        <span className="rounded-full border border-white/10 bg-black/30 px-3 py-1.5 text-xs text-white/45">
+                            Drop media here to create a timeline track
+                        </span>
+                    </div>
+                )}
+                {assetDropPreview !== null && (
+                    <div
+                        data-testid="asset-drop-indicator"
+                        className="pointer-events-none absolute top-6 bottom-0 z-[60] w-0.5 bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.9)]"
+                        style={{ left: `${labelW + assetDropPreview.time * zoomLevel}px` }}
+                    >
+                        <span className="absolute -top-1 -left-[3px] h-2 w-2 rounded-full bg-cyan-200 shadow-[0_0_8px_rgba(103,232,249,0.9)]" />
+                    </div>
+                )}
             </div>
         </div>
     );
