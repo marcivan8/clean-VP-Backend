@@ -89,7 +89,7 @@ export function headlineFromText(text, { maxWords = 6, upper = true } = {}) {
  * timeout must never reduce the finish to a lone title when the transcript
  * already contains enough words for a second animated beat.
  */
-export function fallbackShortScenePlan(words, { headline = '', duration = 0, techniques = [] } = {}) {
+export function fallbackShortScenePlan(words, { headline = '', duration = 0, techniques = [], visualContext = [] } = {}) {
     const cleanText = value => String(value || '')
         .replace(/#[\p{L}\p{N}_]+/gu, '')
         .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
@@ -115,6 +115,20 @@ export function fallbackShortScenePlan(words, { headline = '', duration = 0, tec
         || headlineFromText(timedWords.slice(0, 18).map(w => w.word).join(' '), { maxWords: 6, upper: false });
     if (!title) return null;
 
+    const transcript = timedWords.map(w => w.word).join(' ').toLowerCase();
+    const visualLanguage = (Array.isArray(visualContext) ? visualContext : [])
+        .flatMap(item => [item?.sceneType, item?.locationType, item?.emotionalTone, item?.contentDescription].filter(Boolean))
+        .join(' ').toLowerCase();
+    const tone = /\b(step|steps|lesson|lessons|why|how|explained|tutorial|first|second|étape|étapes|leçon|leçons|pourquoi|comment|expliqué|tutoriel|premier|première|deuxième)\b/.test(transcript)
+        ? 'editorial'
+        : /\b(i|me|my|mine|story|felt|remember|experience|je|moi|mon|ma|histoire|ressenti|souviens|expérience)\b/.test(transcript)
+            ? 'warm'
+            : /\b(product|app|software|technology|platform|feature|tool|produit|application|logiciel|technologie|plateforme|fonctionnalité|outil)\b/.test(`${transcript} ${visualLanguage}`)
+                ? 'technology'
+                : /\b(warm|cozy|intimate|personnel|chaleureux|émotion|emotion|portrait|interview)\b/.test(visualLanguage)
+                    ? 'warm'
+                    : /\b(premium|luxury|studio|cinematic|luxe|studio|cinématique)\b/.test(visualLanguage)
+                        ? 'premium' : 'viral';
     const wordsOf = value => value.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
     const titleWords = new Set(wordsOf(title));
     const pointSegment = segments.find(segment => {
@@ -125,23 +139,49 @@ export function fallbackShortScenePlan(words, { headline = '', duration = 0, tec
     });
 
     const usableTechniques = Array.isArray(techniques) ? techniques.filter(t => t?.name) : [];
+    const visuals = (Array.isArray(visualContext) ? visualContext : [])
+        .filter(item => item && (item.isBroll || item.sceneType || item.contentDescription || item.suggestedLabel))
+        .slice(0, 80);
+    const tokensOf = value => (String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/[\p{L}\p{N}]+/gu) || [])
+        .filter(token => token.length > 3 && !STOP.has(token));
+    const visualTokens = new Set(visuals.flatMap(item => tokensOf([
+        item.contentDescription, item.suggestedLabel, item.sceneType, item.locationType, item.emotionalTone,
+    ].filter(Boolean).join(' '))));
     const chooseTechnique = (kind, text, excluded = []) => {
-        const candidates = usableTechniques.filter(t => !excluded.includes(t.name)
-            && (!Array.isArray(t.beatKinds) || t.beatKinds.includes(kind)));
-        const tokens = new Set(wordsOf(text));
-        const score = t => (String(t.name).toLowerCase().match(/[a-z]+/g) || [])
-            .reduce((n, token) => n + (tokens.has(token) ? 3 : 0), 0);
-        return candidates.slice().sort((a, b) => score(b) - score(a))[0]
-            || usableTechniques.find(t => !excluded.includes(t.name)) || null;
+        const compatible = usableTechniques.filter(t => !Array.isArray(t.beatKinds) || t.beatKinds.includes(kind));
+        const distinct = compatible.filter(t => !excluded.includes(t.name));
+        const candidates = distinct.length ? distinct : compatible;
+        if (!candidates.length) return null;
+        const speech = new Set(tokensOf(text));
+        const score = t => {
+            const terms = tokensOf([
+                t.name, t.displayName, t.description, t.mood, t.category,
+                ...(Array.isArray(t.searchKeywords) ? t.searchKeywords : []),
+                ...(Array.isArray(t.bestUseCases) ? t.bestUseCases : []),
+            ].filter(Boolean).join(' '));
+            const unique = [...new Set(terms)];
+            const speechFit = unique.reduce((n, token) => n + (speech.has(token) ? 4 : 0), 0);
+            const visualFit = unique.reduce((n, token) => n + (visualTokens.has(token) ? 1 : 0), 0);
+            const toneFit = Array.isArray(t.tones) && t.tones.includes(tone) ? 2 : 0;
+            return speechFit + visualFit + toneFit;
+        };
+        return candidates.slice().sort((a, b) => score(b) - score(a) || String(a.name).localeCompare(String(b.name)))[0];
     };
     const introTechnique = chooseTechnique('intro', title);
     const pointTechnique = chooseTechnique('point', pointSegment?.text || '', [introTechnique?.name]);
+    const fallbackMotion = kind => ({
+        intro: { enter: 'slam-in', emphasis: 'punch', exit: 'whip-out', energy: 0.82, anticipate: true },
+        point: { enter: 'rise-in', emphasis: 'pulse', exit: 'fade-out', energy: 0.62 },
+        stat: { enter: 'pop-in', emphasis: 'punch', exit: 'shrink-out', energy: 0.78 },
+        quote: { enter: 'fade-in', emphasis: 'pulse', exit: 'fade-out', energy: 0.48 },
+        cta: { enter: 'slide-in', emphasis: 'pulse', exit: 'fade-out', energy: 0.58 },
+    }[kind] || { enter: 'rise-in', emphasis: 'pulse', exit: 'fade-out', energy: 0.55 });
     const beat = (kind, text, kicker, technique) => ({
         kind,
         text,
         ...(kicker ? { kicker } : {}),
         ...(technique?.name ? { technique: technique.name } : {}),
-        ...(technique?.motion ? { motion: technique.motion } : {}),
+        motion: technique?.motion || fallbackMotion(kind),
     });
     const beats = [beat('intro', title, null, introTechnique)];
     // Only fold a point into the opening sequence if it is spoken near the
@@ -150,24 +190,13 @@ export function fallbackShortScenePlan(words, { headline = '', duration = 0, tec
         beats.push(beat('point', pointSegment.text, '01', pointTechnique));
     }
 
-    // Match the art direction to the speech. This is intentionally a compact,
-    // deterministic read of transcript language rather than another model
-    // request, so creative coverage survives a provider timeout.
-    const transcript = timedWords.map(w => w.word).join(' ').toLowerCase();
-    const tone = /\b(step|steps|lesson|lessons|why|how|explained|tutorial|first|second)\b/.test(transcript)
-        ? 'editorial'
-        : /\b(i|me|my|mine|story|felt|remember|experience)\b/.test(transcript)
-            ? 'warm'
-            : /\b(product|app|software|technology|platform|feature|tool)\b/.test(transcript)
-                ? 'technology' : 'viral';
-
     // A few timed supporting scenes use the speaker's real words at their
     // transcript positions. Numbers already have their own StatCallout path;
     // these scenes focus on contrast, reveal, process, and personal insight.
     const cues = [
-        { kind: 'quote', pattern: /\b(i|we|they) (learned|realized|remember|found out|used to|had to)\b/ },
-        { kind: 'point', pattern: /\b(but|because|instead|the reason|the truth|the key|the lesson|step|first|finally|changed)\b/ },
-        { kind: 'point', pattern: /\b(works|failed|mistake|difference|result|secret|important)\b/ },
+        { kind: 'quote', pattern: /\b(i|we|they|je|nous|on)\s+(learned|realized|remember|found out|used to|had to|compris|découvert|retenu|appris)\b|\bje me suis rendu compte\b/ },
+        { kind: 'point', pattern: /\b(but|because|instead|the reason|the truth|the key|the lesson|step|first|finally|changed|mais|parce que|plutôt|la raison|la vérité|la clé|la leçon|étape|d'abord|enfin|changé)\b/ },
+        { kind: 'point', pattern: /\b(works|failed|mistake|difference|result|secret|important|marche|fonctionne|échoué|erreur|différence|résultat|secret|important)\b/ },
     ];
     const timedMoments = [];
     for (const cue of cues) {
@@ -184,7 +213,7 @@ export function fallbackShortScenePlan(words, { headline = '', duration = 0, tec
             start: Math.max(0, Number(candidate.start) || 0),
             end: Math.min(Number(duration) || Number(candidate.end), Number(candidate.end) || 0),
             ...(technique?.name ? { technique: technique.name } : {}),
-            ...(technique?.motion ? { motion: technique.motion } : {}),
+            motion: technique?.motion || fallbackMotion(cue.kind),
         });
     }
     if (pointSegment && Number(pointSegment.start) > Math.min(4, Number(duration) * 0.22)
@@ -196,19 +225,82 @@ export function fallbackShortScenePlan(words, { headline = '', duration = 0, tec
             start: Math.max(0, Number(pointSegment.start) || 0),
             end: Math.min(Number(duration) || Number(pointSegment.end), Number(pointSegment.end) || 0),
             ...(pointTechnique?.name ? { technique: pointTechnique.name } : {}),
-            ...(pointTechnique?.motion ? { motion: pointTechnique.motion } : {}),
+            motion: pointTechnique?.motion || fallbackMotion('point'),
         });
     }
 
+    // Gemini can select several beats from the whole transcript. Keep the
+    // rules path comparably useful when the transcript has no exact trigger
+    // phrase: choose its strongest, non-overlapping sentences, while keeping
+    // every word tied to its original timing. This is deliberately capped so
+    // a long transcript does not turn into a wall of graphics.
+    const rankedSegments = segments
+        .filter(segment => segment.start > 2 && segment.start < Number(duration) - 1.5)
+        .filter(segment => !timedMoments.some(moment => Math.abs(moment.start - segment.start) < 2.5))
+        .map(segment => {
+            const text = segment.text.toLowerCase();
+            const tokens = wordsOf(text);
+            const hasNumber = /\b\d+(?:[.,]\d+)?\s*(?:%|percent|pour cent|euros?|dollars?|€|\$)?\b/i.test(text);
+            const hasStoryCue = /\b(why|how|because|but|so|then|finally|realized|learned|changed|result|mistake|lesson|pourquoi|comment|parce que|mais|donc|ensuite|enfin|compris|appris|changé|résultat|erreur|leçon)\b/i.test(text);
+            const novelty = tokens.filter(token => !titleWords.has(token) && !STOP.has(token)).length;
+            return { segment, kind: hasNumber ? 'stat' : /\b(i|we|je|nous|on)\b/i.test(text) ? 'quote' : 'point', score: (hasNumber ? 5 : 0) + (hasStoryCue ? 3 : 0) + Math.min(4, novelty) };
+        })
+        .sort((a, b) => b.score - a.score || a.segment.start - b.segment.start);
+    for (const candidate of rankedSegments) {
+        if (timedMoments.length >= 3) break;
+        if (candidate.score < 2) continue;
+        const segment = candidate.segment;
+        const technique = chooseTechnique(candidate.kind, segment.text, [introTechnique?.name, pointTechnique?.name]);
+        timedMoments.push({
+            kind: candidate.kind,
+            text: segment.text,
+            start: Math.max(0, Number(segment.start) || 0),
+            end: Math.min(Number(duration) || Number(segment.end), Number(segment.end) || 0),
+            ...(technique?.name ? { technique: technique.name } : {}),
+            motion: technique?.motion || fallbackMotion(candidate.kind),
+        });
+    }
+    timedMoments.sort((a, b) => a.start - b.start);
+
     // Only create a closing card when the speaker actually says a CTA.
     const close = segments.slice().reverse().find(segment =>
-        /\b(follow|subscribe|share|comment|download|sign up|book|buy|try it|learn more)\b/i.test(segment.text)
+        /\b(follow|subscribe|share|comment|download|sign up|book|buy|try it|learn more|abonnez-vous|abonne-toi|partagez|partage|commentez|commente|téléchargez|télécharge|inscrivez-vous|inscris-toi|achetez|achète|essayez|essaie|découvrez|découvre|lien en bio)\b/i.test(segment.text)
     );
     if (close && Number(duration) >= 8) {
         const ctaText = close.text.length <= 48 ? close.text : cleanText(close.text.split(/\b(?:and|because|but)\b/i)[0]);
         beats.push(beat('cta', ctaText, null, chooseTechnique('cta', ctaText, [introTechnique?.name, pointTechnique?.name])));
     }
-    return { tone, beats, timedMoments, source: 'local-fallback' };
+    // Keep these cues semantic and sparse. The caller resolves them to actual
+    // licensed library sounds and applies the editing style's volume limits.
+    const sfxCues = [];
+    if (beats.length && Number(duration) > 1) sfxCues.push({ t: 0.08, kind: (introTechnique?.motion || fallbackMotion('intro')).enter === 'slam-in' ? 'impact' : 'whoosh', sourceId: 'fallback-intro' });
+    for (const moment of timedMoments) {
+        const kind = moment.kind === 'stat' ? 'pop' : moment.kind === 'quote' ? 'whoosh' : 'pop';
+        if (!sfxCues.some(cue => Math.abs(cue.t - moment.start) < 0.65)) sfxCues.push({ t: Math.max(0, moment.start - 0.03), kind, sourceId: `fallback-${moment.kind}` });
+    }
+    if (close && Number(duration) >= 8 && !sfxCues.some(cue => Math.abs(cue.t - Number(close.start)) < 0.65)) {
+        sfxCues.push({ t: Math.max(0, Number(duration) - 1.8), kind: 'whoosh', sourceId: 'fallback-cta' });
+    }
+    const brollMoments = timedMoments
+        .filter(moment => moment.kind !== 'quote' && wordsOf(moment.text).length >= 3)
+        .slice(0, 2)
+        .map(moment => {
+            const queryTokens = new Set(tokensOf(moment.text));
+            const matches = visuals.filter(item => item.isBroll && !item.hasMainSpeaker).map(item => {
+                const profileTokens = tokensOf([item.contentDescription, item.suggestedLabel, item.sceneType, item.locationType].filter(Boolean).join(' '));
+                const overlap = profileTokens.filter(token => queryTokens.has(token)).length;
+                return { item, overlap };
+            }).filter(match => match.overlap > 0).sort((a, b) => b.overlap - a.overlap);
+            return {
+                start: moment.start,
+                end: moment.end,
+                query: moment.text,
+                kind: moment.kind,
+                ...(matches.length ? { assetIds: matches.slice(0, 3).map(match => match.item.assetId).filter(Boolean) } : {}),
+            };
+        });
+    const visualSummary = [...new Set(visuals.flatMap(item => [item.sceneType, item.locationType, item.emotionalTone].filter(Boolean)))].slice(0, 8);
+    return { tone, beats, timedMoments, sfxCues, brollMoments, ...(visualSummary.length ? { visualSummary } : {}), source: 'local-fallback' };
 }
 
 /** Spoken prices, percentages and figures in timeline words: [{t, text}]. */
@@ -703,6 +795,7 @@ export function polishShort(built, profile, opts = {}) {
                     kind: moment.kind === 'quote' ? 'quote' : 'point',
                     text: moment.text,
                     ...(moment.kicker ? { kicker: moment.kicker } : {}),
+                    ...(moment.technique ? { technique: moment.technique } : {}),
                     ...(moment.motion ? { motion: moment.motion } : {}),
                 }] },
                 tone: opts.scenePlan?.tone || 'viral',

@@ -1747,7 +1747,15 @@ export class VideoEditorTools {
             // Checked against the media BIN, not the timeline — see
             // buildBrollCandidates' doc comment. A match can now be an asset
             // the user imported but never dragged onto a track yet.
-            const candidates = buildBrollCandidates(profiles, state.assets);
+            let candidates = buildBrollCandidates(profiles, state.assets);
+            const preferredAssetIds = new Set((Array.isArray(args.preferredAssetIds) ? args.preferredAssetIds : []).filter(Boolean));
+            if (preferredAssetIds.size > 0) {
+                const preferred = candidates.filter(candidate => preferredAssetIds.has(candidate.assetId));
+                // A visual-profile suggestion is a ranking hint, not a hard
+                // dependency: if an asset was removed after analysis, keep the
+                // normal transcript matcher available for the remaining bin.
+                if (preferred.length > 0) candidates = preferred;
+            }
             const chapterBoundaries = extractChapterBoundaries(state.tracks).filter(t =>
                 !hasTargetRange || (t >= targetStart && t <= targetEnd)
             );
@@ -1760,7 +1768,7 @@ export class VideoEditorTools {
                 // button runs, but auto-inserted instead of waiting for
                 // manual approval (this tool only runs when the user or an
                 // Auto-mode playbook explicitly asked for b-roll placement).
-                const stock = await this._fetchStockBrollFallback(words, chapterBoundaries, signal, [], hasTargetRange ? { start: targetStart, end: targetEnd } : null);
+                const stock = await this._fetchStockBrollFallback(words, chapterBoundaries, signal, [], hasTargetRange ? { start: targetStart, end: targetEnd } : null, args.maxPlacements);
                 if (stock.inserted > 0) {
                     return {
                         success: true,
@@ -1811,10 +1819,13 @@ export class VideoEditorTools {
 
             // A selected interval is an explicit content target. Keep generated
             // cutaways inside it even when a matcher proposes a longer hold.
-            const scopedMatches = hasTargetRange ? matches.flatMap(match => {
+            let scopedMatches = hasTargetRange ? matches.flatMap(match => {
                 const interval = clampToTimelineRange(match.timelineTime, match.duration, { start: targetStart, end: targetEnd }, 0.5);
                 return interval ? [{ ...match, timelineTime: interval.start, duration: interval.duration }] : [];
             }) : matches;
+            const maxPlacements = Number.isFinite(Number(args.maxPlacements)) && Number(args.maxPlacements) > 0
+                ? Math.min(6, Math.floor(Number(args.maxPlacements))) : Infinity;
+            scopedMatches = scopedMatches.slice(0, maxPlacements);
 
             for (const match of scopedMatches) {
                 const asset = (state.assets || []).find(a => a.id === match.assetId);
@@ -1878,7 +1889,7 @@ export class VideoEditorTools {
             // this pass ran only when ZERO local matches existed, so one
             // local cutaway suppressed every Vecteezy result for the rest of
             // the edit.
-            const stock = await this._fetchStockBrollFallback(words, chapterBoundaries, signal, scopedMatches, hasTargetRange ? { start: targetStart, end: targetEnd } : null);
+            const stock = await this._fetchStockBrollFallback(words, chapterBoundaries, signal, scopedMatches, hasTargetRange ? { start: targetStart, end: targetEnd } : null, Number.isFinite(maxPlacements) ? Math.max(0, maxPlacements - scopedMatches.length) : undefined);
             if (stock.inserted > 0) {
                 return {
                     success: true,
@@ -1944,12 +1955,12 @@ export class VideoEditorTools {
      * @param {{start:number,end:number}|null} [targetRange] clamp placements to this timeline segment
      * @returns {Promise<{inserted:number, placements:Array, provider?:string, reason?:string}>}
      */
-    async _fetchStockBrollFallback(words, chapterBoundaries, signal = null, existingPlacements = [], targetRange = null) {
+    async _fetchStockBrollFallback(words, chapterBoundaries, signal = null, existingPlacements = [], targetRange = null, maxSuggestions = 6) {
         try {
             const response = await authFetch('/api/stock/suggest-broll', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ words, chapters: chapterBoundaries, maxSuggestions: 6 }),
+                body: JSON.stringify({ words, chapters: chapterBoundaries, maxSuggestions: Math.max(0, Math.min(6, Number(maxSuggestions) || 0)) }),
                 signal,
             });
             if (!response.ok) {
@@ -1964,7 +1975,7 @@ export class VideoEditorTools {
             }
 
             const placements = [];
-            for (const suggestion of suggestions) {
+            for (const suggestion of suggestions.slice(0, Math.max(0, Number(maxSuggestions) || 0))) {
                 const asset = suggestion.asset;
                 if (!asset) continue;
                 const live = useTimelineStore.getState();

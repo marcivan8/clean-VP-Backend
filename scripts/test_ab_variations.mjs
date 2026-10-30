@@ -47,7 +47,7 @@ async function check(name, fn) {
 }
 
 const useTimelineStore = (await import('../client/src/store/useTimelineStore.js')).default;
-const { IterationEngine } = await import('../client/src/agent/IterationEngine.js');
+const { IterationEngine, getIterationModeForStyle, rankHookCandidates } = await import('../client/src/agent/IterationEngine.js');
 
 const VARIATIONS = [
     { id: 'v1', name: 'Fast cuts', description: 'punchy', engagementScore: 82, snapshot: { tracks: [{ id: 't1', type: 'video', clips: [{ id: 'c1', start: 0, duration: 4 }] }], duration: 4, aspectRatio: '9:16' } },
@@ -163,6 +163,58 @@ await check('the variation list is not part of the undo snapshot', () => {
 });
 
 log('\n── 5. Reachability ──');
+
+await check('editing styles route to hook iterations for long form and video iterations for Reel only', () => {
+    for (const style of ['vlog', 'talking_head', 'interview', 'podcast']) assert.equal(getIterationModeForStyle(style), 'hooks', `${style} should compare hooks`);
+    assert.equal(getIterationModeForStyle('reel'), 'video');
+    assert.equal(getIterationModeForStyle(null), null, 'an unset style should not pick a variation mode implicitly');
+});
+
+await check('the panel label, guidance, transcript gate and action reflect the selected iteration mode', () => {
+    const panel = readCode('client/src/components/ABTestPanel.jsx');
+    assert.match(panel, /Hook variations/);
+    assert.match(panel, /Video variations/);
+    assert.match(panel, /captions\.length === 0/);
+    assert.match(panel, /Generate hooks/);
+    assert.match(panel, /Generate videos/);
+    assert.match(panel, /compare transcript-grounded opening hooks/i);
+    assert.match(panel, /compare full-video pacing and transition treatments/i);
+});
+
+await check('long-form iterations create distinct, animated transcript hook cards without altering the original edit', async () => {
+    const transcript = ('today i learned the hard truth about building a business '
+        + 'why most people fail before they start and the simple change that helped me grow').split(' ');
+    const captions = transcript.map((word, i) => ({ word, start: i * 0.45, end: i * 0.45 + 0.38 }));
+    assert.equal(rankHookCandidates(captions, 'business growth', 3).length, 3, 'hook candidates were not derived from the transcript');
+    const originalTracks = [{ id: 'main-video', type: 'video', name: 'Video', clips: [
+        { id: 'a', type: 'video', start: 0, duration: 20, speed: 1 },
+        { id: 'b', type: 'video', start: 20, duration: 20, speed: 1 },
+    ] }];
+    useTimelineStore.setState({ editingStyle: 'talking_head', tracks: originalTracks, captions, duration: 40, aspectRatio: '16:9' });
+    const hooks = await IterationEngine.generateVariations('business growth', 3);
+    assert.equal(hooks.length, 3);
+    assert.ok(hooks.every(v => v.mode === 'hooks' && v.styleId === 'talking_head'));
+    const titles = hooks.map(v => v.snapshot.tracks.filter(t => t.type === 'text').flatMap(t => t.clips || []).find(c => String(c.id).startsWith('iteration-hook-'))?.content);
+    assert.ok(titles.every(Boolean), `hook title clips missing: ${JSON.stringify(titles)}`);
+    assert.equal(new Set(titles).size, 3, 'each variation should show a different hook');
+    assert.deepEqual(useTimelineStore.getState().tracks, originalTracks, 'generation should leave the original timeline untouched');
+});
+
+await check('Reel iterations make full-video treatments and never add long-form hook cards', async () => {
+    const originalTracks = [{ id: 'main-video', type: 'video', name: 'Video', clips: [
+        { id: 'a', type: 'video', start: 0, duration: 8, speed: 1 },
+        { id: 'b', type: 'video', start: 8, duration: 8, speed: 1 },
+        { id: 'c', type: 'video', start: 16, duration: 8, speed: 1 },
+    ] }];
+    useTimelineStore.setState({ editingStyle: 'reel', tracks: originalTracks, captions: [], duration: 24, aspectRatio: '9:16' });
+    const videos = await IterationEngine.generateVariations('', 3);
+    assert.equal(videos.length, 3);
+    assert.ok(videos.every(v => v.mode === 'video' && v.styleId === 'reel'));
+    const effects = videos.map(v => v.snapshot.tracks.find(t => t.id === 'main-video').clips.map(c => c.transition?.type).filter(Boolean));
+    assert.ok(effects.every(list => list.length > 0), 'full-video variants should carry distinct timeline edits');
+    assert.ok(videos.every(v => !v.snapshot.tracks.some(t => (t.clips || []).some(c => String(c.id).startsWith('iteration-hook-')))));
+    assert.deepEqual(useTimelineStore.getState().tracks, originalTracks, 'video variation generation should preserve the source timeline');
+});
 
 await check('the A/B panel has an entry point in the app', () => {
     // ADR-001 counted eight features that were fully built and never called,

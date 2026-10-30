@@ -167,6 +167,14 @@ console.log('\n=== waveformRoutes: failed extraction ≠ silent source ===');
     ok('ffmpeg signal is included when the process exits without output',
         /ff\.on\('close', \(code, signal\)/.test(src)
         && /signal \$\{signal\}/.test(src), true);
+    ok('waveform decode is restricted to one audio stream and one decoder thread',
+        /'-threads', '1'[\s\S]{0,100}'-i',[\s\S]{0,100}'-map', '0:a:0\?'/.test(src), true);
+    ok('SIGSEGV retries once with the system ffmpeg binary installed in production',
+        /primaryError\.ffmpegSignal !== 'SIGSEGV'/.test(src)
+        && /process\.env\.WAVEFORM_FFMPEG_FALLBACK \|\| '\/usr\/bin\/ffmpeg'/.test(src)
+        && /extractPeaksWithBinary\(inputPath, null, fallbackPath\)/.test(src), true);
+    ok('ffmpeg signal is preserved as structured error metadata for recovery',
+        /err\.ffmpegSignal = signal \|\| null/.test(src), true);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

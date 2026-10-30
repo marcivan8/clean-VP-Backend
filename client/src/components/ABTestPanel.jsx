@@ -7,13 +7,17 @@ import React, { useState, useEffect } from 'react';
 // This panel read from the legacy useTimelineStore, which nothing writes to any
 // more, so it rendered its empty state no matter how many variations existed.
 import useTimelineStore from '../store/useTimelineStore.js';
-import { IterationEngine } from '../agent/IterationEngine.js';
+import { getIterationModeForStyle, IterationEngine } from '../agent/IterationEngine.js';
 
 const VARIATION_COLORS = ['#6366f1', '#a855f7', '#ec4899'];
 
 export function ABTestPanel({ currentPrompt = '' }) {
     const variations = useTimelineStore(s => s.variations) || [];
     const activeVariationId = useTimelineStore(s => s.activeVariationId);
+    const editingStyle = useTimelineStore(s => s.editingStyle);
+    const captions = useTimelineStore(s => s.captions) || [];
+    const mode = getIterationModeForStyle(editingStyle);
+    const visibleVariations = variations.filter(v => !v.mode || v.mode === mode);
     const [isGenerating, setIsGenerating] = useState(false);
     const [prompt, setPrompt] = useState(currentPrompt);
     const [count, setCount] = useState(3);
@@ -21,9 +25,9 @@ export function ABTestPanel({ currentPrompt = '' }) {
     const [compareIds, setCompareIds] = useState([]);
 
     const handleGenerate = async () => {
-        if (!prompt.trim()) return;
+        if (!mode || (mode === 'hooks' && captions.length === 0)) return;
         setIsGenerating(true);
-        try { await IterationEngine.generateVariations(prompt, count); }
+        try { await IterationEngine.generateVariations(prompt.trim(), count); }
         finally { setIsGenerating(false); }
     };
 
@@ -52,8 +56,8 @@ export function ABTestPanel({ currentPrompt = '' }) {
             {/* Header */}
             <div className="px-4 pt-4 pb-3 border-b border-border">
                 <div className="flex items-center justify-between mb-4">
-                    <h3 className="m-0 text-sm font-semibold text-foreground">Iterations</h3>
-                    {variations.length > 0 && (
+                    <h3 className="m-0 text-sm font-semibold text-foreground">{mode === 'hooks' ? 'Hook variations' : mode === 'video' ? 'Video variations' : 'Iterations'}</h3>
+                    {visibleVariations.length > 0 && (
                         <div className="flex gap-2">
                             <button onClick={() => setCompareMode(!compareMode)} className={`px-2 py-1 rounded border text-[10px] font-medium transition-colors ${compareMode ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>Compare</button>
                             <button onClick={handleClear} className="px-2 py-1 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 text-[10px] font-medium transition-colors">Clear</button>
@@ -62,27 +66,34 @@ export function ABTestPanel({ currentPrompt = '' }) {
                 </div>
 
                 {/* Prompt input */}
-                <textarea value={prompt} onChange={e => setPrompt(e.target.value)} placeholder="Describe the edit style to generate variations for…"
-                    className="w-full box-border px-3 py-2 rounded-md border border-border bg-background text-foreground text-xs resize-none h-14 outline-none font-sans focus:border-primary transition-colors" />
+                {mode === 'hooks' && (
+                    <textarea value={prompt} onChange={e => setPrompt(e.target.value)} placeholder="Optional direction for the opening hook…"
+                        className="w-full box-border px-3 py-2 rounded-md border border-border bg-background text-foreground text-xs resize-none h-14 outline-none font-sans focus:border-primary transition-colors" />
+                )}
+                <p className="mt-0 mb-2 text-[11px] text-muted-foreground">
+                    {mode === 'hooks'
+                        ? captions.length ? 'Long-form style: compare transcript-grounded opening hooks. The rest of the edit stays intact.' : 'Add captions first to generate hook variations from your spoken content.'
+                        : mode === 'video' ? 'Reel style: compare full-video pacing and transition treatments.' : 'Choose a long-form style or Reel style to use iterations.'}
+                </p>
                 <div className="flex items-center gap-2 mt-2">
                     <span className="text-xs text-muted-foreground">Count:</span>
                     {[1,2,3].map(n => (
                         <button key={n} onClick={() => setCount(n)}
                             className={`w-6 h-6 rounded border flex items-center justify-center text-xs font-semibold transition-colors ${count === n ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>{n}</button>
                     ))}
-                    <button id="ab-generate-btn" onClick={handleGenerate} disabled={isGenerating||!prompt.trim()}
+                    <button id="ab-generate-btn" onClick={handleGenerate} disabled={isGenerating || !mode || (mode === 'hooks' && captions.length === 0)}
                         className="ml-auto px-3 py-1.5 rounded-md border border-border bg-secondary hover:bg-white/10 text-foreground text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                        {isGenerating ? 'Generating...' : 'Generate'}
+                        {isGenerating ? 'Generating...' : mode === 'hooks' ? 'Generate hooks' : mode === 'video' ? 'Generate videos' : 'Choose a style'}
                     </button>
                 </div>
             </div>
 
             {/* Body */}
             <div style={{ flex:1, overflowY:'auto', padding:16 }}>
-                {variations.length === 0 && !isGenerating && (
+                {visibleVariations.length === 0 && !isGenerating && (
                     <div style={{ textAlign:'center', padding:'40px 20px', color:'rgba(255,255,255,0.25)' }}>
                         <div style={{ fontSize:32, marginBottom:10 }}>🎞️</div>
-                        <p style={{ fontSize:12, margin:0 }}>Generate variations to compare different editing styles.</p>
+                        <p style={{ fontSize:12, margin:0 }}>{mode === 'hooks' ? 'Generate alternative transcript-led openings, then load one to try it.' : mode === 'video' ? 'Generate full-video treatments with different pacing and transitions.' : 'Choose a long-form or Reel editing style to start.'}</p>
                     </div>
                 )}
 
@@ -94,14 +105,14 @@ export function ABTestPanel({ currentPrompt = '' }) {
                 )}
 
                 {/* Original restore button */}
-                {variations.length > 0 && activeVariationId && (
+                {visibleVariations.length > 0 && activeVariationId && (
                     <button onClick={handleRestore} style={{ width:'100%', marginBottom:10, padding:'8px', borderRadius:8, border:'1px solid rgba(255,255,255,0.15)', background:'rgba(255,255,255,0.04)', color:'rgba(255,255,255,0.6)', fontSize:12, cursor:'pointer' }}>
                         ↩ Restore Original
                     </button>
                 )}
 
                 {/* Variation cards */}
-                {variations.map((v, i) => {
+                {visibleVariations.map((v, i) => {
                     const color = VARIATION_COLORS[i % VARIATION_COLORS.length];
                     const isActive = activeVariationId === v.id;
                     const isInCompare = compareIds.includes(v.id);

@@ -457,11 +457,11 @@ router.post('/scene-plan', authenticateUser, async (req, res) => {
 
     const cleanTone = tone ? String(tone).slice(0, 40) : '';
     const cleanPlatform = platform ? String(platform).slice(0, 40) : '';
-    // Pro short finish supplies a shorter budget because it has a local
-    // transcript/technique fallback. Clamp client input so this endpoint can
-    // never extend the server's model request budget.
+    // Pro short finish supplies a bounded budget because it has a local
+    // transcript/technique fallback. Leave enough time for Gemini to finish
+    // its structured response; clamp client input so it cannot extend this.
     const sceneTimeoutMs = Number(requestedTimeoutMs) > 0
-        ? Math.min(15_000, Math.max(1_000, Number(requestedTimeoutMs)))
+        ? Math.min(30_000, Math.max(1_000, Number(requestedTimeoutMs)))
         : undefined;
 
     // R103 — retrieve the knowledge-base shortlist for this brief before the
@@ -500,6 +500,13 @@ router.post('/scene-plan', authenticateUser, async (req, res) => {
     // could be reported but not executed when there was no AI scene plan.
     const motionTechniques = techniques.map(({ technique }) => ({
         name: technique.name,
+        displayName: technique.displayName,
+        description: technique.description,
+        searchKeywords: technique.searchKeywords,
+        bestUseCases: technique.bestUseCases,
+        category: technique.category,
+        mood: technique.mood,
+        tones: technique.tones,
         beatKinds: technique.beatKinds,
         motion: technique.motion,
     }));

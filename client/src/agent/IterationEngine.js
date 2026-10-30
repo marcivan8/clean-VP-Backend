@@ -14,8 +14,18 @@
 import useTimelineStore from '../store/useTimelineStore.js';
 import useAIStore from '../store/useAIStore.js';
 import { EventBus, EVENT_TYPES } from './EventBus.js';
+import { groupWordsIntoSegments } from '../motion/CaptionModel.js';
+import { composeSceneFromBrief } from '../motion/SceneDirector.js';
+import { flattenScene } from '../motion/SceneSchema.js';
 
 const MAX_VARIATIONS = 3;
+
+/** Long-form styles compare opening hooks; Reel compares full edit treatments. */
+export function getIterationModeForStyle(styleId) {
+    if (styleId === 'reel') return 'video';
+    if (['vlog', 'talking_head', 'interview', 'podcast'].includes(styleId)) return 'hooks';
+    return null;
+}
 
 const VARIATION_PRESETS = [
     {
@@ -38,6 +48,39 @@ const VARIATION_PRESETS = [
     }
 ];
 
+const HOOK_PRESETS = [
+    { id: 'hook-1', name: 'Hook 1', description: 'Transcript-led opening with a bold entrance', tone: 'viral', constraints: { pace: 'fast', hookStyle: 'action', cutDensity: 'medium', energy: 'high' }, motion: { enter: 'slam-in', emphasis: 'punch', exit: 'whip-out', energy: 0.84, anticipate: true } },
+    { id: 'hook-2', name: 'Hook 2', description: 'Transcript-led opening with a clean reveal', tone: 'editorial', constraints: { pace: 'medium', hookStyle: 'question', cutDensity: 'medium', energy: 'medium' }, motion: { enter: 'rise-in', emphasis: 'pulse', exit: 'fade-out', energy: 0.58 } },
+    { id: 'hook-3', name: 'Hook 3', description: 'Transcript-led opening with a measured type reveal', tone: 'warm', constraints: { pace: 'slow', hookStyle: 'statement', cutDensity: 'low', energy: 'low' }, motion: { enter: 'word-reveal', emphasis: 'pulse', exit: 'fade-out', energy: 0.48 } },
+];
+
+const HOOK_STOPWORDS = new Set('a an the and or but so to of in on at for with is are was were be this that i you we they my your le la les un une des et ou mais donc de du en au aux pour avec est sont je tu il elle nous vous ils elles mon ton ce cette ces'.split(' '));
+
+/** Select distinct, transcript-grounded opening lines for a long-form hook test. */
+export function rankHookCandidates(captions, prompt = '', limit = MAX_VARIATIONS) {
+    const words = (Array.isArray(captions) ? captions : [])
+        .map(w => ({ ...w, word: String(w?.word ?? w?.text ?? '').trim() }))
+        .filter(w => w.word && Number.isFinite(Number(w.start)));
+    if (!words.length) return [];
+    const promptTokens = new Set(String(prompt || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/[\p{L}\p{N}]+/gu) || []);
+    const segments = groupWordsIntoSegments(words, 9, 0.6);
+    const candidates = segments.map((segment, index) => {
+        const tokens = String(segment.text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/[\p{L}\p{N}]+/gu) || [];
+        const meaningful = tokens.filter(token => token.length > 2 && !HOOK_STOPWORDS.has(token));
+        const promptFit = meaningful.filter(token => promptTokens.has(token)).length;
+        const signal = meaningful.filter(token => /\d/.test(token)).length * 4
+            + tokens.filter(token => /^(why|how|what|never|secret|mistake|truth|because|but|why|comment|pourquoi|comment|jamais|secret|erreur|vérité|parce|mais)$/.test(token)).length * 2;
+        const text = String(segment.text || '').trim().split(/\s+/).slice(0, 8).join(' ').replace(/[.,;:!?]+$/g, '').slice(0, 64).trim();
+        return { text, start: Number(segment.start) || 0, index, score: Math.min(6, meaningful.length) + signal + promptFit * 2 };
+    }).filter(candidate => candidate.text && candidate.text.split(/\s+/).length >= 3);
+    const picked = [];
+    for (const candidate of candidates.slice().sort((a, b) => b.score - a.score || a.start - b.start)) {
+        if (picked.every(item => item.text.toLowerCase() !== candidate.text.toLowerCase())) picked.push(candidate);
+        if (picked.length >= Math.min(MAX_VARIATIONS, Math.max(1, limit))) break;
+    }
+    return picked;
+}
+
 class IterationEngineClass {
     constructor() {
         this.variations = [];
@@ -49,41 +92,52 @@ class IterationEngineClass {
     /**
      * Generate up to 3 A/B variations from a base prompt.
      */
-    async generateVariations(basePrompt, count = MAX_VARIATIONS) {
+    async generateVariations(basePrompt = '', count = MAX_VARIATIONS) {
         if (this.isGenerating) {
             console.warn('[IterationEngine] Already generating variations — ignoring request');
             return this.variations;
         }
 
-        const n = Math.min(count, MAX_VARIATIONS);
+        const currentState = useTimelineStore.getState();
+        const mode = getIterationModeForStyle(currentState.editingStyle);
+        if (!mode) {
+            useAIStore.getState().addLog({ id: `iter-style-${Date.now()}`, type: 'warning', message: 'Choose a long-form or Reel editing style to generate iterations.', timestamp: new Date().toLocaleTimeString() });
+            return [];
+        }
+        const presets = mode === 'hooks' ? HOOK_PRESETS : VARIATION_PRESETS;
+        const requestedCount = Math.min(Math.max(1, Number(count) || MAX_VARIATIONS), MAX_VARIATIONS);
+        const hookCandidates = mode === 'hooks' ? rankHookCandidates(currentState.captions, basePrompt, requestedCount) : [];
+        if (mode === 'hooks' && hookCandidates.length === 0) {
+            useAIStore.getState().addLog({ id: `iter-transcript-${Date.now()}`, type: 'warning', message: 'Generate captions first so I can build transcript-grounded hook variations.', timestamp: new Date().toLocaleTimeString() });
+            return [];
+        }
+        const n = Math.min(requestedCount, presets.length, mode === 'hooks' ? hookCandidates.length : presets.length);
         console.log(`[IterationEngine] Generating ${n} variations for prompt: "${basePrompt}"`);
 
         this.isGenerating = true;
         this.variations = [];
 
-        // FIX: was useEditorStore.getState()
-        const currentState = useTimelineStore.getState();
         this._originalSnapshot = this._snapshotState(currentState);
 
-        EventBus.emit(EVENT_TYPES.ITERATION_STARTED, { count: n, prompt: basePrompt });
+        EventBus.emit(EVENT_TYPES.ITERATION_STARTED, { count: n, prompt: basePrompt, mode, style: currentState.editingStyle });
 
         useAIStore.getState().addLog({
             id: `iter-start-${Date.now()}`,
             type: 'info',
-            message: `🔁 Generating ${n} A/B variations…`,
+            message: mode === 'hooks' ? `🔁 Generating ${n} opening hook variations…` : `🔁 Generating ${n} full-video variations…`,
             timestamp: new Date().toLocaleTimeString()
         });
 
         const results = [];
 
         for (let i = 0; i < n; i++) {
-            const preset = VARIATION_PRESETS[i];
+            const preset = presets[i];
 
             try {
                 useAIStore.getState().addLog({
                     id: `iter-v${i + 1}-${Date.now()}`,
                     type: 'info',
-                    message: `  Creating variation ${i + 1}/${n}: ${preset.name}`,
+                    message: `  Creating ${mode === 'hooks' ? 'hook' : 'video'} ${i + 1}/${n}: ${preset.name}`,
                     timestamp: new Date().toLocaleTimeString()
                 });
 
@@ -94,11 +148,15 @@ class IterationEngineClass {
                     aspectRatio: this._originalSnapshot.aspectRatio
                 });
 
-                const snapshot = await this._applyVariationConstraints(preset, basePrompt);
+                const snapshot = mode === 'hooks'
+                    ? this._applyHookVariation(preset, hookCandidates[i], currentState, currentState.editingStyle)
+                    : await this._applyVariationConstraints(preset, basePrompt);
                 const engagementScore = this._estimateEngagementScore(preset.constraints);
 
                 const variation = {
                     id: preset.id,
+                    mode,
+                    styleId: currentState.editingStyle,
                     name: preset.name,
                     description: preset.description,
                     constraints: preset.constraints,
@@ -151,7 +209,9 @@ class IterationEngineClass {
         useAIStore.getState().addLog({
             id: `iter-done-${Date.now()}`,
             type: 'success',
-            message: `✅ ${results.length} variations ready — check the A/B panel`,
+            message: mode === 'hooks'
+                ? `✅ ${results.length} hook variations ready — check the Iterations panel`
+                : `✅ ${results.length} video variations ready — check the Iterations panel`,
             timestamp: new Date().toLocaleTimeString()
         });
 
@@ -161,7 +221,7 @@ class IterationEngineClass {
     async _applyVariationConstraints(preset, basePrompt) {
         // FIX: was useEditorStore.getState()
         const store = useTimelineStore.getState();
-        const { pace, cutDensity } = preset.constraints;
+        const { pace } = preset.constraints;
 
         const newTracks = JSON.parse(JSON.stringify(store.tracks));
 
@@ -172,13 +232,17 @@ class IterationEngineClass {
                 if (pace === 'fast') clip.speed = Math.min(2.0, (clip.speed || 1.0) * 1.25);
                 else if (pace === 'slow') clip.speed = Math.max(0.5, (clip.speed || 1.0) * 0.8);
 
-                if (preset.constraints.energy === 'high') {
-                    clip.volume = Math.min(1.5, (clip.volume || 1.0) * 1.1);
-                }
+            });
 
-                if (cutDensity === 'high' && clip.duration > 5) {
-                    clip.duration = clip.duration * 0.75;
-                }
+            const sequence = (track.clips || []).slice().sort((a, b) => (Number(a.start) || 0) - (Number(b.start) || 0));
+            sequence.slice(0, -1).forEach((clip, index) => {
+                if (pace === 'fast' && index % 2 !== 0) return;
+                const transition = pace === 'fast'
+                    ? { type: 'whip-left', duration: 0.2 }
+                    : pace === 'slow'
+                        ? { type: 'dip', duration: 0.48 }
+                        : { type: 'zoom-punch', duration: 0.28 };
+                clip.transition = transition;
             });
         });
 
@@ -187,6 +251,41 @@ class IterationEngineClass {
 
         // FIX: was useEditorStore.getState()
         return this._snapshotState(useTimelineStore.getState());
+    }
+
+    _applyHookVariation(preset, candidate, originalState, styleId) {
+        if (!candidate?.text) throw new Error('No transcript hook candidate was available.');
+        const tracks = JSON.parse(JSON.stringify(originalState.tracks || []));
+        const duration = Math.max(2.4, Math.min(4.5, Number(originalState.duration) || 3.5));
+        const restrained = styleId === 'podcast' || styleId === 'interview';
+        const motion = restrained
+            ? { enter: preset.id === 'hook-1' ? 'fade-in' : 'rise-in', emphasis: 'pulse', exit: 'fade-out', energy: preset.id === 'hook-3' ? 0.32 : 0.42 }
+            : preset.motion;
+        const designed = composeSceneFromBrief('A restrained, readable opening hook title for a long-form video. Use only the supplied transcript words.', {
+            plan: { beats: [{ kind: 'intro', text: candidate.text, motion }] },
+            tone: restrained ? 'editorial' : preset.tone,
+            duration,
+            aspectRatio: originalState.aspectRatio || '16:9',
+        });
+        const placements = designed?.scene ? flattenScene(designed.scene).placements : [];
+        if (!placements.length) throw new Error('The hook title could not be composed.');
+        let textIndex = 0;
+        for (const placement of placements) {
+            const type = placement.trackType === 'text' ? 'text' : 'overlay';
+            const name = type === 'text' ? 'Hook Variations' : 'Hook Graphics';
+            let track = tracks.find(item => item.type === type && item.name === name);
+            if (!track) {
+                track = { id: `track-iteration-${type}-${preset.id}`, type, name, clips: [] };
+                tracks.push(track);
+            }
+            track.clips.push({
+                ...placement.clip,
+                id: `iteration-${preset.id}-${type}-${textIndex++}`,
+                name: type === 'text' ? candidate.text : (placement.clip.name || name),
+                iterationKind: 'hook',
+            });
+        }
+        return this._snapshotState({ ...originalState, tracks });
     }
 
     _estimateEngagementScore(constraints) {

@@ -47,6 +47,7 @@ const SV = await import('../client/src/motion/SceneValidator.js');
 const SC = await import('../client/src/motion/SceneComposer.js');
 const SD = await import('../client/src/motion/SceneDirector.js');
 const SS = await import('../client/src/motion/SceneSchema.js');
+const SFX = await import('../client/src/agent/sfxCues.js');
 const IDX = nodeRequire(path.join(ROOT, 'server/audio-engine/library/MotionTechniqueIndex.js'));
 
 // ── A short that looks like something a user actually repurposed ────────────
@@ -217,6 +218,36 @@ await check('the local planner adapts its direction and schedules spoken insight
     assert.ok(local.beats.some(b => b.kind === 'cta'), 'a spoken CTA should become a closing beat');
     assert.ok(local.timedMoments.length > 0, 'transcript reveals should become timed supporting scenes');
     assert.ok(local.timedMoments.every(m => m.start > 2 && m.start < 30), 'supporting scenes must preserve transcript timing');
+    assert.ok(local.sfxCues.length > 0, 'the deterministic scene plan should direct sound effects');
+    assert.ok(local.brollMoments.length > 0, 'the deterministic scene plan should identify contextual b-roll opportunities');
+    assert.ok(local.timedMoments.some(m => m.technique || m.motion), 'timed text beats should carry motion direction');
+});
+
+await check('the deterministic planner handles French transcripts and returns sparse, deduplicated SFX cues', () => {
+    const transcript = ('je me suis rendu compte que cette méthode change tout mais la vérité est simple '
+        + 'la première étape fait gagner 20 euros chaque jour alors suivez pour plus').split(' ');
+    const words = transcript.map((word, i) => ({ word, start: i * 0.55, end: i * 0.55 + 0.45 }));
+    const local = fallbackShortScenePlan(words, { duration: 18 });
+    assert.ok(local.beats.some(b => b.kind === 'intro'), 'French words should still produce a grounded intro title');
+    assert.ok(local.timedMoments.length > 0, 'French insight language should become timed text');
+    assert.ok(local.sfxCues.every(cue => ['whoosh', 'pop', 'impact'].includes(cue.kind)), 'only supported SFX cue kinds should be emitted');
+    assert.deepEqual(SFX.mergeSfxCues([{ t: 1, kind: 'pop' }, { t: 1.1, kind: 'whoosh' }]).map(c => c.kind), ['pop'], 'nearby planner cues should be deduplicated');
+});
+
+await check('the fallback ranks executable KB techniques by their library metadata and visual profiles', () => {
+    const transcript = ('here is the key to a better coffee workflow first grind the beans fresh '
+        + 'because the espresso flavor changes when the water runs through the coffee grounds').split(' ');
+    const words = transcript.map((word, i) => ({ word, start: i * 0.55, end: i * 0.55 + 0.45 }));
+    const techniques = [
+        { name: 'point-workflow-reveal', beatKinds: ['point'], searchKeywords: ['workflow', 'coffee'], bestUseCases: ['reveal a process'], tones: ['editorial'], motion: { enter: 'rise-in', emphasis: 'pulse', exit: 'fade-out', energy: 0.64 } },
+        { name: 'intro-title-slam', beatKinds: ['intro'], searchKeywords: ['hook', 'headline'], tones: ['viral'], motion: { enter: 'slam-in', emphasis: 'punch', exit: 'whip-out', energy: 0.9 } },
+    ];
+    const visualContext = [{ assetId: 'broll-coffee', isBroll: true, hasMainSpeaker: false, sceneType: 'coffee preparation', contentDescription: 'close-up coffee grinder and espresso machine' }];
+    const local = fallbackShortScenePlan(words, { duration: 20, techniques, visualContext });
+    assert.equal(local.beats.find(b => b.kind === 'intro')?.technique, 'intro-title-slam', 'the fallback should execute the matching intro technique');
+    assert.ok(local.timedMoments.some(b => b.technique === 'point-workflow-reveal'), 'the fallback should rank a point technique from its search keywords');
+    assert.ok(local.brollMoments.some(m => m.assetIds?.includes('broll-coffee')), 'upload-time visual analysis should link the spoken coffee beat to the matching bin asset');
+    assert.ok(local.visualSummary?.includes('coffee preparation'), 'visual profile context should be retained in scene direction');
 });
 
 await check('the no-AI finish renders transcript-led graphics at their spoken timestamps', async () => {
@@ -232,13 +263,43 @@ await check('the no-AI finish renders transcript-led graphics at their spoken ti
     assert.ok(timed.applied.some(a => /timed story graphics/.test(a)), 'the applied summary should report the timed scenes');
 });
 
+await check('the no-AI finish resolves planner sound cues to real SFX clips', async () => {
+    const result = await finishShort(state(), short, {
+        plan: null,
+        scenePlan: null,
+        fetchAsset: async query => ({ name: query, url: '/api/test-sfx.mp3', duration: 0.8, recommended_volume: 0.6 }),
+    });
+    const sfx = allClips(result.tracks).filter(c => c.isSFX);
+    assert.ok(sfx.length > 0, 'planner cues were not turned into sound-effect clips');
+    assert.ok(sfx.every(c => ['whoosh', 'pop', 'impact'].includes(c.sfxCue)), 'fallback used an unsupported SFX category');
+});
+
+await check('Pro Finish uses fallback B-roll moments and caps automatic cutaways', () => {
+    const engine = nodeRequire('fs').readFileSync(path.join(ROOT, 'client/src/agent/MediaExecutionEngine.js'), 'utf8');
+    const tools = nodeRequire('fs').readFileSync(path.join(ROOT, 'client/src/agent/VideoEditorTools.js'), 'utf8');
+    assert.match(engine, /scenePlan\?\.source === 'local-fallback'[\s\S]{0,900}placeContextualBroll/,
+        'Pro Finish never sends fallback scenes through contextual B-roll matching');
+    assert.match(engine, /maxPlacements: Math\.min\(2, scenePlan\.brollMoments\.length\)/,
+        'fallback b-roll has no conservative placement cap');
+    assert.match(engine, /\/api\/brain\/broll-profiles\?projectId=/,
+        'the fallback never reads upload-time visual analysis');
+    assert.match(engine, /setTimeout\(\(\) => visualRequest\.abort\(\), 3000\)/,
+        'a slow visual-profile lookup could stall the deterministic fallback');
+    assert.match(engine, /visualContext,\s*\}\);/,
+        'upload-time visual analysis is not passed into the fallback planner');
+    assert.match(engine, /preferredAssetIds/,
+        'asset matches from visual analysis are not used to rank fallback cutaways');
+    assert.match(tools, /scopedMatches = scopedMatches\.slice\(0, maxPlacements\)/,
+        'contextual B-roll ignores the caller placement cap');
+});
+
 await check('a timed-out scene model uses the offered KB motions in its local fallback', async () => {
     const savedFetch = globalThis.fetch;
     clearPlanCache();
     globalThis.fetch = async (url, options = {}) => {
         if (String(url).includes('/api/motion/scene-plan')) {
             const body = JSON.parse(options.body || '{}');
-            assert.equal(body.timeoutMs, SHORT_SCENE_PLAN_TIMEOUT_MS, 'Pro Finish still waits on the full 30s scene budget');
+            assert.equal(body.timeoutMs, SHORT_SCENE_PLAN_TIMEOUT_MS, 'Pro Finish gives Gemini a bounded 28s scene-plan budget');
             return { ok: true, status: 200, json: async () => ({
                 source: 'rules',
                 plan: null,

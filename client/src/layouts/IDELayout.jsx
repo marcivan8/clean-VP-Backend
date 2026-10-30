@@ -14,7 +14,8 @@ import { transcriptionManager } from '../agent/TranscriptionManager';
 import ErrorBoundary from '../components/ErrorBoundary';
 import Timeline from '../components/Timeline/Timeline';
 import ReasoningPanel from '../components/Assistant/ReasoningPanel';
-import { DndContext, DragOverlay, useSensor, useSensors, PointerSensor } from '@dnd-kit/core';
+import { DndContext, DragOverlay, useSensor, useSensors, MouseSensor, TouchSensor } from '@dnd-kit/core';
+import { getAssetDropTime, getDropClientX } from '../timeline/assetDropPosition.js';
 import DraggableAsset from '../components/DraggableAsset';
 import TextPanel from '../components/TextPanel';
 import TranscriptPanel from '../components/TranscriptPanel';
@@ -492,15 +493,13 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         });
     };
 
-    // Mobile: a clip is picked up by pressing and holding (300 ms) so a normal
-    // swipe still scrolls the timeline and a trim drag never turns into a move.
-    // Desktop keeps the 5 px drag threshold. (Same < 768px breakpoint as
-    // useDeviceType; read directly because isMobile is declared further down.)
-    const narrowViewport = typeof window !== 'undefined' && window.innerWidth < 768;
+    // Separate input sensors keep touch scrolling comfortable without making
+    // mouse dragging depend on viewport width or browser zoom.
     const sensors = useSensors(
-        useSensor(PointerSensor, {
-            activationConstraint: narrowViewport ? { delay: 300, tolerance: 8 } : { distance: 5 },
-        })
+        // Mouse dragging should stay immediate even when Windows display zoom
+        // makes the CSS viewport narrow. Touch uses a hold to preserve scrolling.
+        useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+        useSensor(TouchSensor, { activationConstraint: { delay: 300, tolerance: 8 } })
     );
 
     // In-place magnet (CapCut-style): while a timeline clip is dragged, its
@@ -1942,7 +1941,16 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         if (activeData?.type === 'asset' && targetData?.trackId) {
             const asset = activeData.asset;
             let trackId = targetData.trackId;
-            const dropTime = state.currentTime;
+            const lane = Array.from(document.querySelectorAll('[data-timeline-track]'))
+                .find(node => node.dataset.timelineTrack === String(trackId));
+            const laneLeft = lane?.getBoundingClientRect().left;
+            const pointerX = getDropClientX(event.activatorEvent, delta?.x);
+            const dropTime = getAssetDropTime({
+                clientX: pointerX,
+                laneLeft,
+                zoomLevel: state.zoomLevel,
+                currentTime: state.currentTime,
+            });
             const duration = asset.type === 'image' ? 5 : (asset.duration || asset.sourceDuration || 10);
 
             if (checkOverlap(trackId, dropTime, duration)) {

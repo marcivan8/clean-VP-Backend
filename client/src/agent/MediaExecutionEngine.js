@@ -50,7 +50,7 @@ import { applyPresetToClip, AUTO_ANIMATE } from '../motion/ClipAdapter.js';
 // R92 — motion written by the AI (with a rules fallback)
 import { composeMotion, planMotionFromBrief, COMPOSED } from '../motion/MotionComposer.js';
 import { normalizeMatte } from '../motion/MatteSettings.js';
-import { sfxLevel, sfxVolume, collectSfxCues, SFX_QUERIES } from './sfxCues.js'; // R92 round A
+import { sfxLevel, sfxVolume, collectSfxCues, mergeSfxCues, SFX_QUERIES } from './sfxCues.js'; // R92 round A
 import { stickerQueryFromText } from './stickerQuery.js'; // R97
 import { buildStickerPlacement } from '../motion/StickerLibraryAdapter.js'; // R97
 import { pickMotionTargets, layersForPrompt, scriptFor } from './composeMotionTargets.js';
@@ -1822,6 +1822,24 @@ export class MediaExecutionEngine {
                     ]);
                     plan = p;
                     sceneResult = r;
+                    let visualContext = [];
+                    if (!r.plan && st.projectId) {
+                        const visualRequest = new AbortController();
+                        const visualTimeout = setTimeout(() => visualRequest.abort(), 3000);
+                        const abortVisualRequest = () => visualRequest.abort(job?.signal?.reason);
+                        if (job?.signal?.aborted) abortVisualRequest();
+                        else job?.signal?.addEventListener?.('abort', abortVisualRequest, { once: true });
+                        try {
+                            const response = await authFetch(`/api/brain/broll-profiles?projectId=${encodeURIComponent(st.projectId)}`, { signal: visualRequest.signal });
+                            if (response.ok) visualContext = (await response.json())?.profiles || [];
+                        } catch (err) {
+                            if (job?.signal?.aborted) throw err;
+                            console.warn('[polish_short] upload-time visual profiles unavailable; using transcript-only planning:', err.message);
+                        } finally {
+                            clearTimeout(visualTimeout);
+                            job?.signal?.removeEventListener?.('abort', abortVisualRequest);
+                        }
+                    }
                     // The model's plan is optional creative input, never a
                     // prerequisite for Pro Finish. Build an immediate local
                     // plan from the actual transcript and the technique
@@ -1831,6 +1849,7 @@ export class MediaExecutionEngine {
                         headline: plan?.headline,
                         duration: total,
                         techniques: r.motionTechniques,
+                        visualContext,
                     });
                 }
                 // Earlier finish replaced, not stacked.
@@ -1866,10 +1885,40 @@ export class MediaExecutionEngine {
                         if (newTrackIds[t.id]) useTimelineStore.getState().addClip(newTrackIds[t.id], c, { skipHistory: true });
                     }
                 }
+                let brollNote = '';
+                if (scenePlan?.source === 'local-fallback' && scenePlan.brollMoments?.length
+                    && !['interview', 'podcast'].includes(useTimelineStore.getState().editingStyle)) {
+                    const live = useTimelineStore.getState();
+                    live.beginHistoryGroup?.();
+                    try {
+                        const { VideoEditorTools } = await import('./VideoEditorTools.js');
+                        const fallbackEvents = [
+                            ...events,
+                            ...scenePlan.brollMoments.map(moment => ({ eventType: 'REVEAL', timelineTime: moment.start })),
+                        ];
+                        const preferredAssetIds = [...new Set(scenePlan.brollMoments.flatMap(moment => moment.assetIds || []))];
+                        const broll = await new VideoEditorTools().placeContextualBroll({
+                            wordSync: true,
+                            events: fallbackEvents,
+                            autoLayout: true,
+                            ...(preferredAssetIds.length ? { preferredAssetIds } : {}),
+                            maxPlacements: Math.min(2, scenePlan.brollMoments.length),
+                        }, job?.signal ?? null);
+                        const n = Array.isArray(broll?.placements) ? broll.placements.length : 0;
+                        if (n) brollNote = `, ${n} contextual b-roll cutaway(s)`;
+                    } catch (err) {
+                        console.warn('[polish_short] transcript fallback b-roll was unavailable:', err.message);
+                    } finally {
+                        useTimelineStore.getState().endHistoryGroup?.();
+                    }
+                }
                 let sfxNote = '';
                 const lvl = sfxLevel(useTimelineStore.getState().editingStyle) === 'none' ? 'none' : profile.sfx;
                 if (lvl !== 'none') {
-                    const cues = collectSfxCues(useTimelineStore.getState().tracks, { level: lvl });
+                    const cues = mergeSfxCues(
+                        collectSfxCues(useTimelineStore.getState().tracks, { level: lvl }),
+                        scenePlan?.sfxCues,
+                    ).filter(cue => lvl !== 'subtle' || cue.kind !== 'impact');
                     if (cues.length) {
                         const r = await this._placeSfxCues(cues, lvl);
                         if (r.placed) sfxNote = `, ${r.placed} sound effect(s)`;
@@ -1892,7 +1941,7 @@ export class MediaExecutionEngine {
                 }
                 return {
                     action, success: true,
-                    message: `Finished for ${profile.label}: ${by}${polished.applied.join(', ')}${sfxNote}. One undo reverts it.${sceneNote}`,
+                    message: `Finished for ${profile.label}: ${by}${polished.applied.join(', ')}${brollNote}${sfxNote}. One undo reverts it.${sceneNote}`,
                     details: { applied: polished.applied, platform, sceneSource: sceneResult?.source || null, techniques: usedTechniques },
                 };
             }

@@ -17,7 +17,7 @@
 import { authFetch } from '../utils/authFetch.js';
 import { buildShortTimeline } from './shortTimeline.js';
 import { fallbackShortScenePlan, polishShort, shiftToShort } from './shortPolish.js';
-import { collectSfxCues, sfxVolume, SFX_QUERIES } from './sfxCues.js';
+import { collectSfxCues, mergeSfxCues, sfxVolume, SFX_QUERIES } from './sfxCues.js';
 import { sfxPlayableUrl } from './animateMoments.js';
 import { PLATFORM_PROFILES } from './PlatformProfiles.js';
 
@@ -58,7 +58,9 @@ const sfxCache = new Map();
  * is what fires first on a genuine stall, not this one racing ahead of it.
  */
 export const PLAN_TIMEOUT_MS = 35000;
-export const SHORT_SCENE_PLAN_TIMEOUT_MS = 12000;
+// Keep this below the server route's 30s cap and above the old 12s cutoff,
+// which often expired before Gemini finished drafting the constrained JSON.
+export const SHORT_SCENE_PLAN_TIMEOUT_MS = 28000;
 
 /** authFetch with a deadline. Aborting reads as a normal failure to the caller. */
 async function fetchWithTimeout(url, options, ms = PLAN_TIMEOUT_MS) {
@@ -312,7 +314,9 @@ export async function finishShort(state, short, opts = {}) {
     });
     const polished = polishShort(built, profile, { words, events, plan, scenePlan, popOut: !!opts.popOut });
     if (opts.sfx !== false) {
-        const placed = await addSfxTrack(polished.tracks, collectSfxCues(polished.tracks, { level: profile.sfx }), profile.sfx, opts.fetchAsset);
+        const cues = mergeSfxCues(collectSfxCues(polished.tracks, { level: profile.sfx }), scenePlan?.sfxCues)
+            .filter(cue => profile.sfx !== 'subtle' || cue.kind !== 'impact');
+        const placed = await addSfxTrack(polished.tracks, cues, profile.sfx, opts.fetchAsset);
         if (placed) polished.applied.push(`sound effects (${placed})`);
     }
     if (plan?.headline) polished.applied.unshift('AI headline');

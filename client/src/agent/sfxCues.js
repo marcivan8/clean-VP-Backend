@@ -84,6 +84,21 @@ export function collectSfxCues(tracks, { level = 'full', kinds = null } = {}) {
     return out;
 }
 
+/** Merge planner cues with effects inferred from the actual composed clips. */
+export function mergeSfxCues(...cueLists) {
+    const raw = cueLists.flatMap(list => Array.isArray(list) ? list : [])
+        .filter(cue => ['whoosh', 'pop', 'impact'].includes(cue?.kind) && Number.isFinite(Number(cue.t)))
+        .map(cue => ({ ...cue, t: Math.max(0, Math.round(Number(cue.t) * 1000) / 1000) }))
+        .sort((a, b) => a.t - b.t);
+    const out = [];
+    for (const cue of raw) {
+        if (out.some(existing => Math.abs(existing.t - cue.t) < MIN_GAP_S)) continue;
+        out.push(cue);
+        if (out.length >= MAX_CUES) break;
+    }
+    return out;
+}
+
 /**
  * What sound a request names ("add a whoosh", "a pop sound"), or null.
  * Plural / general requests ("add sound effects") return null: they mean
@@ -97,4 +112,4 @@ export function sfxQueryFromText(text) {
     return quoted || null;
 }
 
-export default { SFX_LEVELS, SFX_QUERIES, sfxLevel, sfxVolume, collectSfxCues, sfxQueryFromText };
+export default { SFX_LEVELS, SFX_QUERIES, sfxLevel, sfxVolume, collectSfxCues, mergeSfxCues, sfxQueryFromText };

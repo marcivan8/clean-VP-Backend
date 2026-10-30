@@ -216,10 +216,12 @@ function withWaveformSlot(fn) {
  * http(s) response body).
  * Returns { peaks: number[], duration: number }.
  */
-function extractPeaks(inputPath, inputStream) {
+function extractPeaksWithBinary(inputPath, inputStream, binaryPath) {
     return new Promise((resolve, reject) => {
         const args = [
+            '-threads', '1',                 // avoid decoder-thread crashes on malformed/HEVC camera media
             '-i', inputStream ? 'pipe:0' : inputPath,
+            '-map', '0:a:0?',                // never probe/decode video for an audio waveform
             '-vn',                          // drop video stream
             '-ac', '1',                     // mono
             '-ar', String(SAMPLE_RATE),
@@ -228,14 +230,14 @@ function extractPeaks(inputPath, inputStream) {
             'pipe:1',
         ];
 
-        if (!ffmpegPath) {
-            return reject(new Error('ffmpeg-static binary not resolved — check the Docker image build'));
+        if (!binaryPath) {
+            return reject(new Error('No ffmpeg binary is configured for waveform extraction'));
         }
 
         // stderr was 'ignore' — every failure here came back as a bare message
         // with no way to tell a bad seek from an unreadable source. Capture the
         // tail so the 500 body actually says something useful.
-        const ff = spawn(ffmpegPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+        const ff = spawn(binaryPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
 
         let settled = false;
         let stderrTail = '';
@@ -322,6 +324,7 @@ function extractPeaks(inputPath, inputStream) {
                 const isNotFound = /server returned 404|no such file or directory/i.test(stderrTail);
                 const signalDetail = signal ? ` (signal ${signal})` : '';
                 const err = new Error(`ffmpeg exited with code ${code ?? 'null'}${signalDetail} and no output. stderr: ${stderrTail.slice(-300)}`);
+                err.ffmpegSignal = signal || null;
                 if (isNotFound) err.statusCode = 404;
                 return finish(err);
             }
@@ -335,7 +338,9 @@ function extractPeaks(inputPath, inputStream) {
             // signal that stopped the process in the server log.
             if (code !== 0) {
                 const signalDetail = signal ? ` (signal ${signal})` : '';
-                return finish(new Error(`ffmpeg exited with code ${code ?? 'null'}${signalDetail} after producing partial audio. stderr: ${stderrTail.slice(-300)}`));
+                const err = new Error(`ffmpeg exited with code ${code ?? 'null'}${signalDetail} after producing partial audio. stderr: ${stderrTail.slice(-300)}`);
+                err.ffmpegSignal = signal || null;
+                return finish(err);
             }
 
             // hasAudio distinguishes "this source genuinely carries no audio"
@@ -365,6 +370,30 @@ function extractPeaks(inputPath, inputStream) {
             });
         });
     });
+}
+
+/**
+ * The bundled ffmpeg has crashed with SIGSEGV on some uploaded camera files.
+ * The production image also installs distro ffmpeg; retry that independent
+ * build once, with a single decoder thread, before returning a 500. External
+ * streams cannot be replayed safely, so the fallback is limited to seekable
+ * file/URL inputs.
+ */
+async function extractPeaks(inputPath, inputStream) {
+    try {
+        return await extractPeaksWithBinary(inputPath, inputStream, ffmpegPath);
+    } catch (primaryError) {
+        const fallbackPath = process.env.WAVEFORM_FFMPEG_FALLBACK || '/usr/bin/ffmpeg';
+        if (primaryError.ffmpegSignal !== 'SIGSEGV' || inputStream || !fs.existsSync(fallbackPath) || fallbackPath === ffmpegPath) {
+            throw primaryError;
+        }
+        console.warn(`[waveformRoutes] bundled ffmpeg crashed for waveform extraction (${primaryError.ffmpegSignal}); retrying once with ${fallbackPath}`);
+        try {
+            return await extractPeaksWithBinary(inputPath, null, fallbackPath);
+        } catch (fallbackError) {
+            throw new Error(`${primaryError.message}; system ffmpeg fallback also failed: ${fallbackError.message}`);
+        }
+    }
 }
 
 // ─── Route ────────────────────────────────────────────────────────────────────

@@ -138,7 +138,7 @@ await check('the finish message names the techniques, or the reason there are no
     const src = read('client/src/agent/MediaExecutionEngine.js');
     const at = src.indexOf("case 'polish_short'");
     assert.ok(at > 0, 'the polish_short case is gone');
-    const block = src.slice(at, at + 9000);
+    const block = src.slice(at, at + 18000);
     assert.match(block, /Motion techniques: /, 'a successful technique run is still invisible to the user');
     assert.match(block, /The AI scene direction was skipped/, 'a skipped scene plan is still invisible to the user');
     assert.match(block, /sceneSource/, 'the result carries no machine-readable source');
@@ -148,12 +148,16 @@ await check('short scene plans expose executable KB motions and use a bounded fa
     const route = read('server/routes/motionRoutes.js');
     assert.match(route, /motionTechniques = techniques\.map\(\(\{ technique \}\) => \(\{/,
         'the failure response still exposes only technique names, not executable motions');
-    assert.match(route, /Math\.min\(15_000, Math\.max\(1_000, Number\(requestedTimeoutMs\)\)\)/,
+    assert.match(route, /searchKeywords: technique\.searchKeywords/,
+        'the fallback cannot rank knowledge-base techniques from their search keywords');
+    assert.match(route, /bestUseCases: technique\.bestUseCases/,
+        'the fallback cannot use the knowledge-base technique fit descriptions');
+    assert.match(route, /Math\.min\(30_000, Math\.max\(1_000, Number\(requestedTimeoutMs\)\)\)/,
         'scene-plan lets clients extend its model deadline without a cap');
     assert.match(route, /timeoutMs: sceneTimeoutMs/,
         'the bounded short timeout is not passed to the motion model');
     const finisher = read('client/src/agent/shortFinisher.js');
-    assert.match(finisher, /SHORT_SCENE_PLAN_TIMEOUT_MS = 12000/);
+    assert.match(finisher, /SHORT_SCENE_PLAN_TIMEOUT_MS = 28000/);
     assert.match(finisher, /timeoutMs: SHORT_SCENE_PLAN_TIMEOUT_MS/);
 });
 

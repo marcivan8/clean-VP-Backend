@@ -211,6 +211,7 @@ const Track = ({ track, labelWidth = 128, compact = false }) => {
                 actually makes clips smaller on mobile. */}
             <div
                 ref={setNodeRef}
+                data-timeline-track={track.id}
                 className={classNames(
                     "flex-1 relative border-b border-white/5 transition-colors",
                     isOver ? "bg-white/5" : "bg-black/20 group-hover:bg-black/30"
