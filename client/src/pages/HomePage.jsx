@@ -108,7 +108,6 @@ const Nav = () => {
                 <div style={{ gap: 22, fontSize: 13.5, color: "var(--fg-2)" }} className="nav-only-desktop font-medium">
                     <a href="#product" className="hover:text-foreground transition-colors">{t('nav.product')}</a>
                     <a href="#brain" className="hover:text-foreground transition-colors">{t('nav.brain')}</a>
-                    <a href="#exports" className="hover:text-foreground transition-colors">{t('nav.exports')}</a>
                     <a href="/about" className="hover:text-foreground transition-colors">{t('nav.about')}</a>
                 </div>
 
@@ -121,7 +120,6 @@ const Nav = () => {
                 <div className={`nav-mobile-expand${menuOpen ? ' nav-mobile-expand-open' : ''}`}>
                     <a href="#product" onClick={() => setMenuOpen(false)}>{t('nav.product')}</a>
                     <a href="#brain" onClick={() => setMenuOpen(false)}>{t('nav.brain')}</a>
-                    <a href="#exports" onClick={() => setMenuOpen(false)}>{t('nav.exports')}</a>
                     <a href="/about" onClick={() => setMenuOpen(false)}>{t('nav.about')}</a>
                     {user ? (
                         <span style={{
@@ -542,9 +540,8 @@ const FeatureMoments = () => {
                 <div className="section-head text-center" style={{ marginBottom: 60, alignItems: "center" }}>
                     <span className="eyebrow">{t('workflow.eyebrow')}</span>
                     <h2 className="h-section">
-                        {/* Same bilingual-split pattern as the Exports headline below — the French
-                            translation says "avec", not "with", so both need to be checked or the
-                            italic emphasis silently disappears for French visitors. */}
+                        {/* The French translation says "avec", not "with", so check both forms
+                            to keep the italic emphasis visible in both languages. */}
                         {t('workflow.headline').split('with').map((part, i, arr) => (
                             <React.Fragment key={`en-${i}`}>
                                 {part.split('avec').map((subPart, j, subArr) => (
@@ -808,106 +805,6 @@ const AntiDescript = () => {
         </section>
     );
 };
-
-const ExportIcon = {
-    premiere: () => (
-        <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="6" width="26" height="20" rx="2" />
-            <path d="M3 11h26M3 21h26" />
-            <path d="M7 6v-2M11 6v-2M15 6v-2M19 6v-2M23 6v-2M27 6v-2" />
-            <path d="M7 28v-2M11 28v-2M15 28v-2M19 28v-2M23 28v-2M27 28v-2" />
-            <path d="M13 14l6 2-6 2v-4z" fill="currentColor" stroke="none" />
-        </svg>
-    ),
-    resolve: () => (
-        <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4">
-            <circle cx="16" cy="16" r="10" />
-            <circle cx="16" cy="16" r="3" />
-            <path d="M16 6v4M16 22v4M6 16h4M22 16h4M9 9l2.8 2.8M20.2 20.2L23 23M9 23l2.8-2.8M20.2 11.8L23 9" strokeLinecap="round" />
-        </svg>
-    ),
-    finalcut: () => (
-        <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round">
-            <rect x="4" y="4" width="24" height="24" rx="5" />
-            <path d="M12 11v10l9-5-9-5z" fill="currentColor" stroke="none" />
-        </svg>
-    ),
-    otio: () => (
-        <svg viewBox="0 0 32 32" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4">
-            <circle cx="7" cy="9" r="2.5" />
-            <circle cx="25" cy="9" r="2.5" />
-            <circle cx="16" cy="23" r="2.5" />
-            <path d="M9 10.5l5.5 10M23 10.5l-5.5 10M9.5 9h13" strokeLinecap="round" />
-        </svg>
-    ),
-};
-
-const Exports = () => {
-    const { t } = useTranslation('landing');
-    const translatedTools = t('exports.tools', { returnObjects: true }) || {};
-
-    const tools = [
-        { key: "premiere", name: translatedTools.premiere?.name || "Premiere Pro",    fmt: translatedTools.premiere?.fmt || "XML · MOGRT" },
-        { key: "resolve",  name: translatedTools.resolve?.name  || "DaVinci Resolve", fmt: translatedTools.resolve?.fmt  || "DRP · OFX" },
-        { key: "finalcut", name: translatedTools.finalcut?.name || "Final Cut Pro",   fmt: translatedTools.finalcut?.fmt || "FCPXML · iCloud" },
-        { key: "otio",     name: translatedTools.otio?.name     || "OpenTimelineIO",  fmt: translatedTools.otio?.fmt     || "Open standard" },
-    ];
-    return (
-        <section id="exports" style={{ padding: "100px 0", "--accent": "var(--mint)" }}>
-            <div className="wrap">
-                <div style={{ display: "grid", gap: 80, alignItems: "center" }} className="grid-cols-1 md:grid-cols-2">
-                    <div className="section-head" style={{ marginBottom: 0 }}>
-                        <span className="eyebrow">{t('exports.eyebrow')}</span>
-                        <h2 className="h-section">
-                            {t('exports.headline').split('already').map((part, i, arr) => (
-                                <React.Fragment key={`en-${i}`}>
-                                    {part.split('déjà').map((subPart, j, subArr) => (
-                                        <React.Fragment key={`fr-${j}`}>
-                                            {subPart}
-                                            {j < subArr.length - 1 && <em>déjà</em>}
-                                        </React.Fragment>
-                                    ))}
-                                    {i < arr.length - 1 && <em>already</em>}
-                                </React.Fragment>
-                            ))}
-                        </h2>
-                        <p className="body-lg">{t('exports.body1')}</p>
-                        <p className="body-lg" style={{ marginTop: 16, fontWeight: 500 }}>
-                            {t('exports.body2')}
-                        </p>
-                        <div style={{ display: "flex", gap: 12, marginTop: 24, flexWrap: "wrap" }}>
-                            <span className="tag"><span className="dot" />{t('exports.formatTag')}</span>
-                            <span className="tag">{t('exports.metadataTag')}</span>
-                        </div>
-                    </div>
-
-                    <div className="exports-tool-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
-                        {tools.map((tool) => {
-                            const Icon = ExportIcon[tool.key];
-                            return (
-                                <div key={tool.key} className="card" style={{ padding: 20, display: "flex", alignItems: "center", gap: 14 }}>
-                                    <div style={{
-                                        width: 48, height: 48, borderRadius: 12, background: "var(--bg-3)",
-                                        border: "0.5px solid var(--line)", color: "var(--fg)",
-                                        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                                    }}>
-                                        <Icon />
-                                    </div>
-                                    <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                                        <div style={{ fontSize: 14, fontWeight: 500 }}>{tool.name}</div>
-                                        <div className="mono" style={{ color: "var(--fg-3)", fontSize: 10.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tool.fmt}</div>
-                                    </div>
-                                    <div style={{ marginLeft: "auto", color: "var(--fg-4)" }}><ArrowRight className="w-4 h-4" /></div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-            </div>
-        </section>
-    );
-};
-
 
 const Pricing = () => {
     const { t } = useTranslation('landing');
@@ -1179,7 +1076,6 @@ const HomePage = () => {
                 <FeatureMoments />
                 <BeforeAfterSection />
                 <PersonasSection />
-                <Exports />
                 <AntiDescript />
                 <Pricing />
                 <SocialProof />

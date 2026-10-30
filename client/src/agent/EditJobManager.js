@@ -31,7 +31,6 @@ const logStep = (message) => useAIStore.getState().addLog({
  * Original fixes:
  * 1. ValidationService.validate() is async — always await it
  * 2. CommandCompiler confidence check — force HIGH when plan is valid
- * 3. nle_export routed to NLEExportService before pipeline
  *
  * New:
  * 4. Uses TranscriptionManager cached analysis — skips ContentAnalyzer if ready
@@ -129,12 +128,6 @@ export class EditJobManager {
                 };
             }
 
-            // ── NLE export — bypass normal pipeline ────────────────────────────
-            if (intentResult.operation === 'nle_export') {
-                actor.send({ type: 'INTENT_PARSED', intent: intentResult });
-                actor.send({ type: 'PLAN_GENERATED', plan: { plan_id: jobId, operation: 'nle_export', steps: [] } });
-                return this.runNLEExport(jobId, intentResult, actor);
-            }
 
             // ── organize_clips — bypass EditPlanner ─────────────────────────────
             // EditPlanner sees "0 clips on timeline" and generates a chat step
@@ -485,26 +478,6 @@ export class EditJobManager {
         };
     }
 
-    async runNLEExport(jobId, intentResult, actor) {
-        try {
-            const { NLEExportService } = await import('../services/nleExportService.js');
-            const nleTarget = intentResult.constraints?.nleTarget;
-            const result = await NLEExportService.export(nleTarget, useTimelineStore.getState());
-
-            actor.send({ type: 'EXECUTION_COMPLETE', result });
-            actor.send({ type: 'VALIDATION_COMPLETE', result: { success: true } });
-
-            return {
-                success: true,
-                jobId,
-                message: result.message || `✓ Exported for ${nleTarget}.`,
-                suggestions: ['Open in your NLE', 'Export for another platform'],
-            };
-        } catch (err) {
-            actor.send({ type: 'ERROR', error: err.message });
-            return { success: false, jobId, message: `NLE export failed: ${err.message}` };
-        }
-    }
 
     // R91: callers now `return await this.runPipeline(...)`. Without the
     // await, their finally ran this cleanup as soon as the promise was

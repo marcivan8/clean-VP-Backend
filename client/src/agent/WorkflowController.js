@@ -65,7 +65,6 @@ const OPERATION_META = {
     // Trim / export
     trim:              { description: 'Timeline trimmed to your specified range.', suggestion: 'Export for YouTube', suggestionPrompt: 'Export for YouTube' },
     export:            { description: 'Render queued. Your video will be ready to download shortly.', suggestion: null },
-    nle_export:        { description: 'Project exported for your NLE. Open the file in your editing app to continue.', suggestion: null },
 
     // Long-form
     long_form_edit:    { description: 'Long-form edit applied — structured cuts made from content analysis of your full video.', suggestion: 'Add captions', suggestionPrompt: 'Add captions' },

@@ -7,6 +7,7 @@ globalThis.window = new EventTarget();
 // and without touching the DOM gesture code.
 // node scripts/test_base_clip_resize.mjs
 import assert from 'assert/strict';
+import { readFile } from 'node:fs/promises';
 const log = console.log;
 const ok = (n) => log(`✓ ${n}`);
 
@@ -66,6 +67,9 @@ const { clampScale, startResizeGesture } = await import('../client/src/utils/res
 
 // ── 4 · the resize handle (shared with overlay clips) is correctly reused ─
 {
+    const resizeHandleSource = await readFile(new URL('../client/src/components/Player/ResizeHandle.jsx', import.meta.url), 'utf8');
+    assert.match(resizeHandleSource, /setPointerCapture\(e\.pointerId\)/, 'corner resize must retain pointer capture while the element shrinks under it');
+
     assert.equal(clampScale(10, { min: 0.1, max: 5 }), 5);
     assert.equal(clampScale(0.01, { min: 0.1, max: 5 }), 0.1);
     ok('clampScale enforces the same 0.1x-5x bounds the pinch gesture already uses');

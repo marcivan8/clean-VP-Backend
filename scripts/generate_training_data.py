@@ -14,7 +14,7 @@ INTENTS = {
         "add_transition", "add_filter", "color_grade", "add_text",
         "punch_in", "inject_broll", "adjust_volume"
     ],
-    "EXPORT": ["export_video", "nle_export"]
+    "EXPORT": ["export_video"]
 }
 
 # Template prompts for specific operations
@@ -73,12 +73,6 @@ TEMPLATES = {
         "Format this for {platform}.",
         "Convert to {ratio} aspect ratio for {platform}."
     ],
-    "nle_export": [
-        "Export this to {nle}.",
-        "Send this project to {nle}.",
-        "Export an XML for {nle}.",
-        "Prepare an export for {nle} editing."
-    ]
 }
 
 # Variables to inject into templates
@@ -139,9 +133,6 @@ def generate_json(operation, prompt, kwargs):
         constraints = {"platform": kwargs.get("platform", "tiktok").lower().replace(" ", "_")}
         if "ratio" in kwargs:
             constraints["ratio"] = kwargs["ratio"]
-    elif operation == "nle_export":
-        constraints = {"nleTarget": kwargs.get("nle", "premiere").lower().replace(" ", "_")}
-        
     return {
         "intent": intent_type,
         "operation": operation,

@@ -16,7 +16,6 @@
   },
   "dependencies": {
     "@aws-sdk/client-lambda": "^3.1053.0",
-    "@chatoctopus/timeline": "^0.2.0",
     "@ffprobe-installer/ffprobe": "^2.1.2",
     "@google-cloud/storage": "^7.16.0",
     "@napi-rs/canvas": "^1.0.10",

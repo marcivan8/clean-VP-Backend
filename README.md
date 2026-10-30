@@ -1,13 +1,13 @@
 # Vibed — AI Video Editing Platform
 
-**Vibed** is a full-stack, AI-powered video editing IDE. Stop editing. Start creating. Upload your footage and let the AI agent handle the heavy lifting automatically, the moment you ask. It combines a conversational AI agent with a professional non-linear timeline editor, enabling creators to edit long-form video through natural language commands, then export directly to industry-standard NLE formats.
+**Vibed** is a full-stack, AI-powered video editing IDE. Stop editing. Start creating. Upload your footage and let the AI agent handle the heavy lifting automatically, the moment you ask. It combines a conversational AI agent with a professional non-linear timeline editor, enabling creators to edit long-form video through natural language commands, then export finished videos for sharing.
 
 ---
 
 ## Features
 
 ### 🤖 Conversational AI Agent
-- Natural language editing commands parsed by GPT-4o (e.g. *"remove all filler words"*, *"make it cinematic"*, *"export for Final Cut"*)
+- Natural language editing commands parsed by GPT-4o (e.g. *"remove all filler words"*, *"make it cinematic"*)
 - Acts as a true conversational companion: answers video editing questions, helps ideate hooks, and provides guidance without executing phantom edits
 - Intent parser with spaCy NLP pre-analysis for clarity scoring and duration validation
 - Structured editing plan generation with user approval flow
@@ -18,16 +18,6 @@
 - Frame-accurate clip trimming, splitting, speed ramping, and volume control
 - WebCodecs-based low-latency playback engine
 - Beat detection and silence detection for smart auto-editing
-
-### 📤 NLE Export (Frame-Accurate)
-Powered by `@chatoctopus/timeline` — no floating-point drift, rational time math:
-
-| Target | Format | Notes |
-|---|---|---|
-| Final Cut Pro | FCPXML 1.8 (`.fcpxml`) | File → Import → XML |
-| Adobe Premiere Pro | xmeml v5 (`.xml`) | File → Import |
-| DaVinci Resolve | xmeml v5 (`.xml`) **+** OTIO (`.otio`) | Dual download; OTIO native in Resolve 18+ |
-| Universal | OpenTimelineIO (`.otio`) | Works in Resolve 18, Premiere (beta), Kdenlive 20+ |
 
 ### 🎵 Audio Processing
 - Noise reduction (FFT denoising via FFmpeg)
@@ -64,7 +54,6 @@ Powered by `@chatoctopus/timeline` — no floating-point drift, rational time ma
 | Auth | Supabase (JWT + Row Level Security) |
 | AI | OpenAI GPT-4o, Whisper |
 | Video processing | FFmpeg (via `fluent-ffmpeg` + `ffmpeg-static`) |
-| NLE export | `@chatoctopus/timeline` (OTIO-first) |
 | Rendering | `@revideo/renderer` (headless Chromium) |
 | ML | TensorFlow.js (virality prediction) |
 | Database | Supabase (PostgreSQL) |
@@ -89,7 +78,6 @@ clean-VP-Backend/
 │   ├── audioRoutes.js        # Denoise, normalize, transcribe, beat-detect
 │   ├── exportRoutes.js       # FFmpeg render (timeline → MP4)
 │   ├── revideoRenderRoutes.js# Revideo headless render
-│   ├── nleExport.js          # NLE project export (FCPXML, xmeml, OTIO)
 │   ├── aiRoutes.js           # AI agent: chat, intent parse, plan generate
 │   ├── silenceRoutes.js      # Silence detection
 │   ├── proxyRoutes.js        # Proxy video generation for low-latency editing
@@ -114,7 +102,7 @@ clean-VP-Backend/
     └── src/
         ├── agent/            # AI editing agent (EditJobManager, IntentParser…)
         ├── components/       # UI components (Timeline, ExportModal, MixerPanel…)
-        ├── services/         # Frontend service layer (aiService, nleExportService…)
+        ├── services/         # Frontend service layer (aiService, exportService…)
         └── store/            # Zustand state (timeline, player, effects)
 ```
 
@@ -193,7 +181,6 @@ Authorization: Bearer <supabase-jwt>
 | `POST` | `/api/ai/analyze-content` | Long-form content intelligence |
 | `POST` | `/api/render` | Render timeline → MP4 (FFmpeg) |
 | `POST` | `/api/revideo/render` | Render timeline → MP4 (Revideo) |
-| `POST` | `/api/export/nle` | Export timeline → FCPXML / xmeml / OTIO |
 | `POST` | `/api/audio/denoise` | Apply noise reduction |
 | `POST` | `/api/audio/normalize` | Normalize loudness (EBU R128) |
 | `POST` | `/api/audio/transcribe` | Whisper word-level transcription |
@@ -202,20 +189,6 @@ Authorization: Bearer <supabase-jwt>
 | `POST` | `/api/proxy/upload-url` | Generate a GCS Signed URL for direct upload |
 | `POST` | `/api/proxy/process-direct`| Process the video after direct GCS upload |
 | `GET` | `/api/presets/marketplace` | Get curated preset list |
-
-### NLE Export — `POST /api/export/nle`
-
-```json
-{
-  "target": "fcpx | premiere | resolve | otio",
-  "tracks": [...],
-  "fps": 30,
-  "aspectRatio": "16:9",
-  "projectName": "My Project"
-}
-```
-
-**DaVinci Resolve** returns a JSON envelope with two files (`.xml` + `.otio`). All other targets stream a single file download.
 
 ---
 

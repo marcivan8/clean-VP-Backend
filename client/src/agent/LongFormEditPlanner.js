@@ -226,8 +226,7 @@ export class LongFormEditPlanner {
      * Step 1: silence_removal         — conservative threshold, preserves natural pauses
      * Step 2: remove_repeated_takes   — cuts "let me say that again" moments
      * Step 3: remove_filler_words     — only if filler density > 15%
-     * Step 4: identify_quotable_moments — cuts the best standalone moments out
-     *          onto a separate "Highlights" track for repurposing (main edit untouched)
+     * Step 4: apply_smart_zoom       — add subtle variation without duplicating footage
      * Step 5: normalize_audio
      * Step 6: denoise_audio
      */
@@ -258,14 +257,6 @@ export class LongFormEditPlanner {
             console.log(`[LongFormEditPlanner] Skipping filler removal — density ${Math.round(fillerDensity * 100)}% is below 15% threshold`);
         }
 
-        steps.push(S('identify_quotable_moments', {
-            min_duration: 15,
-            max_duration: 90,
-            min_importance: 0.6,
-            max_results: 5,
-            reason: 'Cut the best standalone moments onto a separate Highlights track for repurposing',
-        }));
-        
         steps.push(S('apply_smart_zoom', {
             reason: 'Automatically apply subtle push-ins to talking heads or punch-ins to dialogue turns',
         }));
@@ -382,14 +373,6 @@ export class LongFormEditPlanner {
             }));
         });
 
-        steps.push(S('identify_quotable_moments', {
-            min_duration: 15,
-            max_duration: 90,
-            min_importance: 0.6,
-            max_results: 5,
-            reason: 'Surface best standalone clips for repurposing',
-        }));
-        
         steps.push(S('apply_smart_zoom', {
             reason: 'Automatically apply Ken Burns and punch-ins based on content context',
         }));
@@ -431,7 +414,7 @@ export class LongFormEditPlanner {
                 structure,
                 editMode,
             });
-        } catch (_) {
+        } catch {
             return this._buildApprovalMessageFallback(editMode, editPlan, segments, structure);
         }
     }

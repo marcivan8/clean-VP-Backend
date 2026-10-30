@@ -355,19 +355,6 @@ const NLP_MAP = {
         'make it engaging', 'hook people', 'attention grabbing',
         'make it shareable', 'boost engagement',
     ],
-    nleExport: [
-        'export for premiere', 'export for premiere pro', 'export to premiere',
-        'premiere pro format', 'premiere export', 'send to premiere',
-        'export for final cut', 'export for fcpx', 'export to final cut',
-        'final cut format', 'fcpx format', 'final cut pro',
-        'export for davinci', 'export for davinci resolve', 'export to davinci',
-        'davinci format', 'davinci resolve format', 'resolve format',
-        'export for resolve', 'export xml', 'export fcpxml',
-        'export project file', 'export to nle', 'nle export',
-        'export otio', 'export as otio', 'export to otio',
-        'opentimelineio', 'open timeline io', 'otio format',
-        'universal export', 'export universal',
-    ],
     ripple: [
         'ripple delete', 'close gap', 'ripple cut', 'delete and close',
         'ripple', 'remove gap', 'collapse', 'shift delete'
@@ -1037,8 +1024,6 @@ export class IntentParser {
         const matches = (category) =>
             NLP_MAP[category]?.some(phrase => lower.includes(phrase)) ?? false;
 
-        if (matches('nleExport')) return this.parseNLEExportIntent(lower);
-
         // ── Caption / transcription — highest priority in localParse too.
         // tryLocalFirst handles the direct case; this covers re-parses that come
         // through resumeJob (where the prompt is a combined string like
@@ -1543,30 +1528,6 @@ export class IntentParser {
         }
 
         return this.needsClarification('How much should I trim? (e.g., "trim 5 seconds from the end")');
-    }
-
-    static parseNLEExportIntent(prompt) {
-        let nleTarget = null;
-
-        if (/premiere/i.test(prompt)) nleTarget = 'premiere';
-        else if (/final.?cut|fcpx/i.test(prompt)) nleTarget = 'fcpx';
-        else if (/davinci|resolve/i.test(prompt)) nleTarget = 'resolve';
-        else if (/otio|opentimelineio|universal/i.test(prompt)) nleTarget = 'otio';
-
-        if (!nleTarget) {
-            return {
-                needs_clarification: true,
-                reason: `Which software should I export for?\n1️⃣ Premiere Pro\n2️⃣ Final Cut Pro\n3️⃣ DaVinci Resolve\n4️⃣ OpenTimelineIO (universal)`,
-                intent: INTENT_TYPES.EXPORT,
-                operation: 'nle_export',
-                targets: [],
-                constraints: {},
-                confidence: 'LOW',
-                missingParameters: ['nleTarget']
-            };
-        }
-
-        return this.createIntent(INTENT_TYPES.EXPORT, 'nle_export', { constraints: { nleTarget } });
     }
 
     static parseSplitIntent(prompt, activeClip, context) {

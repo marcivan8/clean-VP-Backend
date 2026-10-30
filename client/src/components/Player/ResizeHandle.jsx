@@ -45,6 +45,10 @@ const ResizeHandle = ({ getElement, scale, onLive, onCommit, onStart, minScale =
     const handlePointerDown = (e) => {
         e.stopPropagation();
         e.preventDefault();
+        // Keep the resize gesture attached to this corner even as the element
+        // shrinks underneath the pointer. Without capture, the pointer can
+        // start targeting the element's move surface mid-drag.
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* window listeners remain a fallback */ }
         onStart?.();
         startResizeGesture(e, {
             initialScale: scale,

@@ -5,7 +5,8 @@
 // animate_automatically (after captions, so keyword-emphasis detection has
 // text clips to read); color grading only happens when the brief actually
 // used mood/color language; YOUTUBE_OPTIMIZED is opt-in, not unconditional;
-// CLEAN_EDIT is untouched.
+// complete edits do not extract redundant full-frame highlight clips onto
+// another video track.
 import { register } from 'module';
 register('./lib/clientLoaderHooks.mjs', import.meta.url);
 import assert from 'assert/strict';
@@ -75,14 +76,23 @@ const baseAnalysis = {
     ok('YOUTUBE_OPTIMIZED DOES gain them when the brief explicitly asked for b-roll/cutaways');
 }
 
-// 5. CLEAN_EDIT is completely untouched.
+// 5. CLEAN_EDIT does not gain the FULL_BUILD visual extras or duplicate footage.
 {
     const plan = LongFormEditPlanner.generatePlan({ ...baseAnalysis, editMode: 'CLEAN_EDIT' }, {
         visualBrief: { wantsContextualBroll: true, wantsMotionGraphics: true, colorMoodQuery: 'cinematic moody dramatic' },
     });
     const actions = plan.steps.map(s => s.action);
     assert.ok(!actions.includes('place_contextual_broll') && !actions.includes('animate_automatically') && !actions.includes('apply_lut'));
-    ok('CLEAN_EDIT is untouched regardless of what the visual brief says');
+    assert.ok(!actions.includes('identify_quotable_moments'), 'cleanup must not add duplicate footage to a Highlights track');
+    ok('CLEAN_EDIT does not add visual extras or duplicate highlight footage');
+}
+
+// 5b. FULL_BUILD edits the source timeline directly; standalone highlight
+// extraction stays available as an explicitly requested operation.
+{
+    const plan = LongFormEditPlanner.generatePlan(baseAnalysis, {});
+    assert.ok(!plan.steps.some(s => s.action === 'identify_quotable_moments'), 'a full build must not overlay extracted copies of source footage');
+    ok('FULL_BUILD does not add automatic highlight duplicates');
 }
 
 

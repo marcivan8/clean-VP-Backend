@@ -3,7 +3,6 @@
     "header": "Export",
     "headerSub": "Choose your format and platform",
     "tabVideo": "Video",
-    "tabNle": "NLE",
     "tabAudio": "Audio",
     "audioDescription": "Export the project's audio mix as a standalone file.",
     "labelAudioFormat": "Format",
@@ -37,10 +36,6 @@
     "exportAgain": "Export again",
     "renderFailed": "Export failed",
     "tryAgain": "Try again",
-    "nleDescription": "Export a Premiere Pro or DaVinci Resolve XML to continue editing in your NLE.",
-    "nleGenerating": "Generating…",
-    "nleSuccess": "XML ready — click to download",
-    "nleFailed": "XML generation failed",
     "qualityPro": "Pro",
     "qualityMaxBitrate": "Max bitrate",
     "qualitySocial": "Social",
@@ -53,11 +48,7 @@
     "engineCinematic": "Cinematic",
     "engineChromiumRender": "Chromium render",
     "beta": "BETA",
-    "revideoWarning": "Renders through a real browser engine for more accurate fonts/effects. Requires the Lambda render worker to be configured on this deployment — if it isn't, you'll see an error and can fall back to Standard.",
-    "nleHintPremiere": "File → Import → .xml",
-    "nleHintFcpx": "File → Import → XML",
-    "nleHintResolve": ".xml + .otio (Resolve 18+)",
-    "nleHintOtio": "Universal — Resolve, Premiere (beta), Kdenlive 20+"
+    "revideoWarning": "Renders through a real browser engine for more accurate fonts/effects. Requires the Lambda render worker to be configured on this deployment — if it isn't, you'll see an error and can fall back to Standard."
   },
   "settings": {
     "title": "Settings",

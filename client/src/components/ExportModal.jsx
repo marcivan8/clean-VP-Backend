@@ -2,12 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
     X, Film, Download, Tv2, Smartphone, Youtube,
     Clapperboard, CheckCircle2, Loader2, AlertCircle,
-    Scissors, ArrowRight, Music2,
+    ArrowRight, Music2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { exportToNLE } from '../services/nleExportService';
-import { useShallow } from 'zustand/react/shallow';
-import useTimelineStore from '../store/useTimelineStore';
 import { PLATFORMS, RESOLUTIONS, QUALITY_PROFILES } from './exportPresets.js';
 import { useAudioEngine } from '../hooks/useAudioEngine.js';
 
@@ -32,13 +29,6 @@ const AUDIO_FORMATS = [
 ];
 
 const AUDIO_BITRATES = ['128k', '192k', '256k', '320k'];
-
-const NLE_TARGETS = [
-    { id: 'premiere', label: 'Premiere Pro',    sub: 'xmeml v5',          ext: '.xml'         },
-    { id: 'fcpx',     label: 'Final Cut Pro',   sub: 'FCPXML 1.8',        ext: '.fcpxml'      },
-    { id: 'resolve',  label: 'DaVinci Resolve', sub: 'xmeml + OTIO',      ext: '.xml + .otio' },
-    { id: 'otio',     label: 'OpenTimelineIO',  sub: 'Universal format',  ext: '.otio'        },
-];
 
 // ─── Vibed logo mark (waveform bars, cyan→violet) ────────────────────────────
 
@@ -85,9 +75,6 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
     const [settings, setSettings]   = useState({ platform: null, resolution: '1080p', fps: 30, format: 'mp4', quality: 'high', engine: 'ffmpeg' });
     const [step, setStep]           = useState('configure');
     const [progress, setProgress]   = useState(0);
-    const [nleStatus, setNleStatus] = useState(null);
-    const [nleError,  setNleError]  = useState(null);
-    const [nleLoading, setNleLoading] = useState(null);
 
     // Audio export tab state
     const { exportAudio } = useAudioEngine();
@@ -98,8 +85,6 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
     const [audioTrimEnd,   setAudioTrimEnd]   = useState('');
     const [audioStatus,    setAudioStatus]    = useState('idle'); // idle | exporting | done | error
     const [audioError,     setAudioError]     = useState('');
-
-    const { tracks, aspectRatio } = useTimelineStore(useShallow(s => ({ tracks: s.tracks, aspectRatio: s.aspectRatio })));
 
     const handleAudioExport = useCallback(async () => {
         setAudioStatus('exporting');
@@ -138,22 +123,10 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
 
     const handleClose = () => {
         setStep('configure'); setProgress(0);
-        setNleStatus(null); setNleError(null);
         setAudioStatus('idle'); setAudioError('');
         onClose();
     };
 
-    const handleNLEExport = async (id) => {
-        setNleStatus(null); setNleError(null); setNleLoading(id);
-        try {
-            await exportToNLE(id, tracks, { fps: settings.fps || 30, aspectRatio: aspectRatio || '16:9', title: 'Vibed Export' });
-            setNleStatus('success');
-        } catch (err) {
-            setNleStatus('error'); setNleError(err.message);
-        } finally {
-            setNleLoading(null);
-        }
-    };
 
     // ── Shared styles ──────────────────────────────────────────────────────────
 
@@ -242,7 +215,6 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                     {[
                         { id: 'video', icon: Film,    label: t('exportModal.tabVideo') },
                         { id: 'audio', icon: Music2,  label: t('exportModal.tabAudio') },
-                        { id: 'nle',   icon: Scissors, label: t('exportModal.tabNle') },
                     ].map(tab => {
                         const active = activeTab === tab.id;
                         const Icon = tab.icon;
@@ -803,73 +775,7 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                         </div>
                     )}
 
-                    {/* ════ NLE TAB ════ */}
-                    {activeTab === 'nle' && (
-                        <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
-                            <p style={{ margin: 0, fontSize: 12, color: 'var(--fg-4)', lineHeight: 1.6, fontFamily: 'var(--f-mono)' }}>
-                                {t('exportModal.nleDescription')}
-                            </p>
 
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                                {NLE_TARGETS.map(nle => {
-                                    const loading = nleLoading === nle.id;
-                                    return (
-                                        <button
-                                            key={nle.id}
-                                            onClick={() => handleNLEExport(nle.id)}
-                                            disabled={!!nleLoading}
-                                            style={{
-                                                ...selCard(false),
-                                                opacity: nleLoading && !loading ? 0.4 : 1,
-                                                cursor: nleLoading ? 'not-allowed' : 'pointer',
-                                                gap: 8,
-                                            }}
-                                            onMouseEnter={e => { if (!nleLoading) { e.currentTarget.style.background = 'var(--glass-2)'; e.currentTarget.style.borderColor = 'var(--line-strong)'; } }}
-                                            onMouseLeave={e => { e.currentTarget.style.background = 'var(--glass)'; e.currentTarget.style.borderColor = 'var(--line)'; }}
-                                        >
-                                            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg-2)' }}>{nle.label}</span>
-                                            <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)' }}>{nle.sub}</span>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 4, color: 'var(--accent)', fontSize: 11 }}>
-                                                {loading
-                                                    ? <><Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> {t('exportModal.nleGenerating')}</>
-                                                    : <><Download size={11} /> <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10 }}>{nle.ext}</span></>
-                                                }
-                                            </div>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-
-                            {nleStatus === 'success' && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 'var(--r-sm)', background: 'color-mix(in srgb, #00c97a 8%, transparent)', border: '0.5px solid color-mix(in srgb, #00c97a 25%, transparent)' }}>
-                                    <CheckCircle2 size={14} style={{ color: '#00c97a', flexShrink: 0 }} />
-                                    <span style={{ fontSize: 12, color: '#00c97a', fontFamily: 'var(--f-mono)' }}>{t('exportModal.nleSuccess')}</span>
-                                </div>
-                            )}
-                            {nleStatus === 'error' && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 'var(--r-sm)', background: 'color-mix(in srgb, #f04040 8%, transparent)', border: '0.5px solid color-mix(in srgb, #f04040 25%, transparent)' }}>
-                                    <AlertCircle size={14} style={{ color: '#f04040', flexShrink: 0 }} />
-                                    <span style={{ fontSize: 12, color: '#f04040', fontFamily: 'var(--f-mono)' }}>{nleError || t('exportModal.nleFailed')}</span>
-                                </div>
-                            )}
-
-                            <Sep />
-
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                {[
-                                    ['Premiere Pro',    t('exportModal.nleHintPremiere')],
-                                    ['Final Cut Pro',   t('exportModal.nleHintFcpx')],
-                                    ['DaVinci Resolve', t('exportModal.nleHintResolve')],
-                                    ['OpenTimelineIO',  t('exportModal.nleHintOtio')],
-                                ].map(([app, hint]) => (
-                                    <div key={app} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                                        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-3)', minWidth: 110 }}>{app}</span>
-                                        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-4)' }}>{hint}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
 
                 </div>
             </div>

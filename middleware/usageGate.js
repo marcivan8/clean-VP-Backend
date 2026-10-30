@@ -102,28 +102,6 @@ const aiGate = async (req, res, next) => {
     }
 };
 
-// Blocks NLE export for free-tier users.
-const nleGate = async (req, res, next) => {
-    if (!req.user?.id) {
-        return res.status(401).json({ error: 'Authentication required', code: 'AUTH_REQUIRED' });
-    }
-
-    try {
-        const plan = await getUserPlan(req.user.id);
-        if (plan === 'free') {
-            return res.status(402).json({
-                error:           'NLE_EXPORT_PAID',
-                message:         'NLE export is available on the Creator plan and above.',
-                plan,
-                upgradeRequired: 'creator',
-            });
-        }
-        next();
-    } catch (err) {
-        console.error('[usageGate] nleGate error:', err.message);
-        next(); // fail open
-    }
-};
 
 // Blocks stock media searches and B-roll suggestions for free-tier users.
 const stockGate = async (req, res, next) => {
@@ -155,5 +133,5 @@ const stockGate = async (req, res, next) => {
     }
 };
 
-module.exports = { aiGate, nleGate, stockGate, PLAN_LIMITS, getUserPlan };
+module.exports = { aiGate, stockGate, PLAN_LIMITS, getUserPlan };
 

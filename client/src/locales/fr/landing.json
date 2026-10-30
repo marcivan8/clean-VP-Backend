@@ -121,9 +121,8 @@
         "description": "Agences et studios livrant des vidéos corporate, événements et campagnes de marque.",
         "before": "Les monteurs juniors passent 50% de leur temps sur le nettoyage avant qu'un senior voie les rushes",
         "beforeAccent": "50% de leur temps",
-        "after": "Le nettoyage par IA tourne sans surveillance. Le monteur senior reçoit un rough cut pré-nettoyé avec FCPXML prêt pour Final Cut ou DaVinci.",
-        "afterBold": "FCPXML",
-        "afterMint": "Final Cut ou DaVinci."
+        "after": "Le nettoyage par IA tourne sans surveillance. Les monteurs seniors reçoivent une timeline nettoyée, prête pour la vérification finale.",
+        "afterMint": "la vérification finale."
       }
     ]
   },
@@ -132,21 +131,6 @@
     "body": "En économisant 2,5 heures par vidéo et 3 vidéos par semaine, Vibed vous fait gagner 30 heures par mois. Le plan Créateur coûte moins d'une heure de votre temps.",
     "boldPart": "Vibed vous fait gagner 30 heures par mois.",
     "accentPart": "une heure de votre temps."
-  },
-
-  "exports": {
-    "eyebrow": "Prêt pour l'aller-retour",
-    "headline": "Fonctionne avec la suite dans laquelle vous finissez déjà.",
-    "body1": "Vibed n'est pas la dernière application que vous ouvrirez — c'est la première. Transmettez proprement aux outils de montage professionnels dès que vous êtes prêt à peaufiner.",
-    "body2": "Le montage par transcription se fait dans Vibed. La finition se fait là où vous avez toujours fini.",
-    "formatTag": "XML · FCPXML · EDL · OTIO",
-    "metadataTag": "Métadonnées des bacs préservées",
-    "tools": {
-      "premiere": { "name": "Premiere Pro",    "fmt": "XML · MOGRT" },
-      "resolve":  { "name": "DaVinci Resolve", "fmt": "DRP · OFX"  },
-      "finalcut": { "name": "Final Cut Pro",   "fmt": "FCPXML · iCloud" },
-      "otio":     { "name": "OpenTimelineIO",  "fmt": "Standard ouvert" }
-    }
   },
 
   "pricing": {
@@ -165,10 +149,10 @@
           "Suppression des silences & coupe — illimité",
           "Export MP4 — sans filigrane"
         ],
-        "locked": ["Styles de montage et mode Auto", "Panneaux Shorts et Stock", "Export NLE", "Intelligence de transcription"]
+        "locked": ["Styles de montage et mode Auto", "Panneaux Shorts et Stock", "Intelligence de transcription"]
       },
       "creator": {
-        "tagline": "Montez chaque semaine. Exportez vers n'importe quel outil que vous utilisez déjà.",
+        "tagline": "Montez chaque semaine. Exportez des vidéos finalisées quand vous le souhaitez.",
         "cta": "Obtenir Créateur",
         "features": [
           "Projets illimités",
@@ -179,8 +163,7 @@
           "Découpe en Shorts et Médias de stock",
           "Toutes les commandes IA — parasites, sous-titres, meilleurs moments",
           "Transcription complète + intelligence de contenu",
-          "Export MP4",
-          "Export NLE — Premiere, Final Cut, DaVinci, OTIO"
+          "Export MP4"
         ],
         "locked": []
       },

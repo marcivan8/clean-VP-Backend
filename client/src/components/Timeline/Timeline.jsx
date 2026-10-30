@@ -174,6 +174,18 @@ const Timeline = () => {
                     useTimelineStore.getState().clearSelection();
                 }
             } else {
+                // A click on empty track space seeks directly. Keep this in the
+                // same coordinate system as the ruler, including horizontal
+                // scrolling and the track label column.
+                const area = tracksAreaRef.current;
+                if (area) {
+                    const rect = area.getBoundingClientRect();
+                    const x = me.clientX - rect.left + area.scrollLeft - labelW;
+                    const { zoomLevel, duration, playerRef } = useTimelineStore.getState();
+                    const fps = Number(playerRef?.playback?.fps) || 30;
+                    const time = Math.max(0, Math.min(duration, x / (zoomLevel || 1)));
+                    useTimelineStore.getState().seek(Math.round(time * fps) / fps);
+                }
                 useTimelineStore.getState().clearSelection();
             }
 

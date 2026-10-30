@@ -94,7 +94,7 @@ External services:
   middleware/
     auth.js                 authenticateUser: Supabase JWT → req.user (id, email, plan)
     devAuth.js              Dev-only bypass (never production)
-    usageGate.js            aiGate (monthly AI ops), nleGate (paid export only)
+    usageGate.js            aiGate (monthly AI ops)
     usageLimits.js          Rate limiting config
     errorHandling.js        Global Express error handler
   jobs/                     BullMQ worker processors
@@ -244,7 +244,7 @@ client/src/engine/PlaybackEngine.js
 
 ```
 Client: POST /api/export  (routes/exportRoutes.js + services/exportService.js)
-  → Validates auth + nleGate (paid plans only)
+  → Validates auth and queues the video render
   → Pushes job to export-processing BullMQ queue
   → Returns jobId; client polls GET /api/jobs/:id
 
@@ -430,7 +430,7 @@ AI / Agent
   (all handled by aiAgentController.js, model: gpt-4o, response_format: json_object)
 
 Export
-  POST   /api/export                  exportRoutes      optionalAuth + nleGate
+  POST   /api/render                  exportRoutes      render queue
   GET    /api/export/presets          exportRoutes      public
   Platform presets: tiktok / youtube / reels / shorts
 
@@ -465,8 +465,6 @@ Presets
 Interview
   POST   /api/interview               interviewRoutes   authenticateUser
 
-NLE Export
-  POST   /api/nle-export              nleExport.js      authenticateUser + nleGate
 
 Revideo
   POST   /api/revideo/render          revideoRenderRoutes  authenticateUser
@@ -577,7 +575,6 @@ User types command in AssistantPanel
 ### 7C · Export Flow
 ```
 User clicks Export → ExportModal → POST /api/export (with captions, platform preset)
-→ nleGate: block free plan
 → export-processing BullMQ job enqueued (Fly.io worker picks up)
 → exportProcessor.js:
     1. Resolve fonts from FONT_SPECS → /client/public/fonts/ (pre-built by Dockerfile)

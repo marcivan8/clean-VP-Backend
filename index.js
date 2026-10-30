@@ -304,7 +304,6 @@ app.use('/api/effects', require('./routes/effectsRoutes'));
 app.use('/api/proxy', require('./routes/proxyRoutes'));
 // app.use('/api/presets', require('./routes/presetRoutes'));  // OLD — superseded by asset engine
 app.use('/api/presets', require('./server/routes/presetRoutes')); // Asset Engine: presets CRUD + execute
-app.use('/api/export', uploadLimiter, require('./routes/nleExport')); // NLE export (OTIO)
 app.use('/api/jobs', require('./routes/jobRoutes')); // Job Queue SSE monitoring
 app.use('/api/session', require('./routes/sessionRoutes')); // Anonymous sessions
 app.use('/api/captions', require('./routes/captionRoutes')); // Caption generation

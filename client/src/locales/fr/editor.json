@@ -3,7 +3,6 @@
     "header": "Exporter",
     "headerSub": "Choisissez votre format et votre plateforme",
     "tabVideo": "Vidéo",
-    "tabNle": "NLE",
     "tabAudio": "Audio",
     "audioDescription": "Exportez le mixage audio du projet en fichier autonome.",
     "labelAudioFormat": "Format",
@@ -37,10 +36,6 @@
     "exportAgain": "Exporter à nouveau",
     "renderFailed": "Échec de l'export",
     "tryAgain": "Réessayer",
-    "nleDescription": "Exportez un XML Premiere Pro ou DaVinci Resolve pour continuer l'édition dans votre NLE.",
-    "nleGenerating": "Génération…",
-    "nleSuccess": "XML prêt — cliquez pour télécharger",
-    "nleFailed": "Échec de la génération XML",
     "qualityPro": "Pro",
     "qualityMaxBitrate": "Débit maximal",
     "qualitySocial": "Social",
@@ -53,11 +48,7 @@
     "engineCinematic": "Cinématique",
     "engineChromiumRender": "Rendu Chromium",
     "beta": "BÊTA",
-    "revideoWarning": "Effectue le rendu via un vrai moteur de navigateur pour des polices/effets plus fidèles. Nécessite que le worker de rendu Lambda soit configuré sur ce déploiement — sinon, une erreur s'affichera et vous pourrez revenir au mode Standard.",
-    "nleHintPremiere": "Fichier → Importer → .xml",
-    "nleHintFcpx": "Fichier → Importer → XML",
-    "nleHintResolve": ".xml + .otio (Resolve 18+)",
-    "nleHintOtio": "Universel — Resolve, Premiere (bêta), Kdenlive 20+"
+    "revideoWarning": "Effectue le rendu via un vrai moteur de navigateur pour des polices/effets plus fidèles. Nécessite que le worker de rendu Lambda soit configuré sur ce déploiement — sinon, une erreur s'affichera et vous pourrez revenir au mode Standard."
   },
   "settings": {
     "title": "Paramètres",

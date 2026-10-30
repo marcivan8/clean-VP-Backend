@@ -230,26 +230,6 @@ const PATTERNS = [
         })
     },
 
-    // ── NLE EXPORT ─────────────────────────────────────────────────────────
-    {
-        regex: /^export\s+(?:for|to)\s+premiere(?:\s+pro)?$/i,
-        intent: () => ({ type: 'export', action: 'nle_export', constraints: { nleTarget: 'premiere' }, confidence: 'high' })
-    },
-
-    {
-        regex: /^export\s+(?:for|to)\s+(?:final\s+cut(?:\s+pro)?|fcpx)$/i,
-        intent: () => ({ type: 'export', action: 'nle_export', constraints: { nleTarget: 'finalcut' }, confidence: 'high' })
-    },
-
-    {
-        regex: /^export\s+(?:for|to)\s+(?:davinci(?:\s+resolve)?|resolve)$/i,
-        intent: () => ({ type: 'export', action: 'nle_export', constraints: { nleTarget: 'davinci' }, confidence: 'high' })
-    },
-
-    {
-        regex: /^export\s+(?:for|to)\s+capcut$/i,
-        intent: () => ({ type: 'export', action: 'nle_export', constraints: { nleTarget: 'capcut' }, confidence: 'high' })
-    },
 
     // ── UNDO / REDO ────────────────────────────────────────────────────────
     {
@@ -353,10 +333,6 @@ class FallbackParserClass {
             'black and white',
             'blur',
             'export',
-            'export for Premiere',
-            'export for Final Cut',
-            'export for DaVinci',
-            'export for CapCut',
             'undo',
             'redo',
             'normalize audio',
