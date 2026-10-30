@@ -538,9 +538,14 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             const style = window.getComputedStyle(stage);
             const horizontalPadding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
             const verticalPadding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+            // The desktop timeline floats above the workspace (h-72), so use
+            // its uncovered preview area for the frame fit without reserving a
+            // new layout row in the preview column.
+            const rem = parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
+            const timelineOverlayHeight = mode === 'editor' && !isMobile ? 18 * rem : 0;
             const next = fitPreviewSize(
                 stage.clientWidth - horizontalPadding,
-                stage.clientHeight - verticalPadding,
+                stage.clientHeight - verticalPadding - timelineOverlayHeight,
                 (() => {
                     const [w, h] = aspectRatio.split(':').map(Number);
                     return w / h;
@@ -2599,10 +2604,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     )}
 
                     {/* Center — Viewport & Timeline (always visible on all screen sizes) */}
-                    <main className={classNames(
-                        "flex-1 flex flex-col min-w-0 min-h-0 relative",
-                        mode === 'editor' && !isMobile && "pb-72",
-                    )}>
+                    <main className="flex-1 flex flex-col min-w-0 min-h-0 relative">
                         <div
                             ref={previewStageRef}
                             className={classNames(
@@ -2687,7 +2689,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
                             {/* Floating Playback Controls (desktop; mobile uses MobileTransportBar) */}
                             {!isMobile && (
-                            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-3 backdrop-blur-xl px-4 py-2 rounded-full shadow-xl z-[60] scale-90 md:scale-100 origin-bottom" style={{ background: "rgba(14,15,17,0.9)", border: "0.5px solid var(--line-strong)" }}>
+                            <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-3 backdrop-blur-xl px-4 py-2 rounded-full shadow-xl z-[60] scale-90 md:scale-100 origin-bottom" style={{ bottom: mode === 'editor' ? 'calc(18rem + 0.75rem)' : '0.75rem', background: "rgba(14,15,17,0.9)", border: "0.5px solid var(--line-strong)" }}>
                                 <button type="button" aria-label="Go to start" className="hover:text-primary transition-colors" onClick={() => useTimelineStore.getState().seek(0)} style={{ color: "var(--fg-3)" }}><SkipBack /></button>
                                 <button type="button" aria-label={isPlaying ? "Pause preview" : "Play preview"} className="hover:text-primary transition-colors" onClick={() => useTimelineStore.getState().togglePlay()} style={{ color: "var(--fg)" }}>
                                     {!isPlaying ? <Play className="fill-current" /> : <Pause className="fill-current" />}

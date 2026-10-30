@@ -153,12 +153,14 @@ async function main() {
         const landscape = fitPreviewSize(900, 1200, 16 / 9);
         check('landscape frame fits available width', near(landscape.width, 900));
         check('landscape frame follows aspect ratio', near(landscape.height, 506.25));
-        check('desktop preview reserves space for the overlaid timeline',
-            /mode === 'editor' && !isMobile && "pb-72"/.test(layoutSrc));
+        check('desktop preview accounts for the timeline overlay without adding a layout row',
+            /stage\.clientHeight - verticalPadding - timelineOverlayHeight/.test(layoutSrc)
+            && !/mode === 'editor' && !isMobile && "pb-72"/.test(layoutSrc));
         check('preview frame uses measured pixel dimensions',
             /width: previewSize\.width[\s\S]*height: previewSize\.height/.test(layoutSrc));
         check('desktop play/pause controls render above the timeline layer',
-            /Floating Playback Controls[\s\S]{0,500}z-\[60\]/.test(layoutSrc));
+            /Floating Playback Controls[\s\S]{0,500}z-\[60\]/.test(layoutSrc)
+            && /bottom: mode === 'editor' \? 'calc\(18rem \+ 0\.75rem\)'/.test(layoutSrc));
     }
 
     section('7 · The engine and player are wired to it');
