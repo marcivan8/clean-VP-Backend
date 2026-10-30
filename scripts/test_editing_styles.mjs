@@ -76,16 +76,14 @@ await check('generic requests and questions', () => {
 });
 await check('playbooks: cuts first, captions after them, levelling after cuts', () => {
     const keys = (id, req = 'edit it', facts = { hasTranscript: true }) => ES.buildAutopilotSteps(id, req, facts).map(s => s.key);
-    // R92 round A: full clean up (silences, fillers, repetition, voice) in one step,
-    // the style-aware animation pass last for non-Reel styles, including gentle
-    // motion in calm interview/podcast styles.
-    assert.deepEqual(keys('talking_head'), ['cleanup', 'captions', 'recipe', 'animate']);
-    assert.deepEqual(keys('vlog'), ['silences', 'enhance', 'captions', 'recipe', 'animate']);
-    assert.deepEqual(keys('podcast'), ['cleanup', 'captions', 'recipe', 'animate']);
-    assert.deepEqual(keys('interview'), ['cleanup', 'captions', 'recipe', 'animate']);
-    // R92 round C: a Reel ends with the pro short finish instead of the generic animation.
-    assert.deepEqual(keys('reel'), ['short', 'vertical', 'cleanup', 'captions', 'recipe', 'finish']);
-    assert.deepEqual(keys('reel', 'go', {}), ['transcript', 'short', 'vertical', 'cleanup', 'captions', 'recipe', 'finish']);
+    // One creative pass only: style recipes include moment animation and SFX;
+    // Reel Pro Finish includes the same suite plus hook/camera treatment.
+    assert.deepEqual(keys('talking_head'), ['cleanup', 'captions', 'recipe']);
+    assert.deepEqual(keys('vlog'), ['silences', 'enhance', 'captions', 'recipe']);
+    assert.deepEqual(keys('podcast'), ['cleanup', 'captions', 'recipe']);
+    assert.deepEqual(keys('interview'), ['cleanup', 'captions', 'recipe']);
+    assert.deepEqual(keys('reel'), ['short', 'vertical', 'cleanup', 'finish']);
+    assert.deepEqual(keys('reel', 'go', {}), ['transcript', 'short', 'vertical', 'cleanup', 'finish']);
     // A specific request runs ALONE ("animate" used to also run the clean up).
     assert.deepEqual(keys('interview', 'cut the intro'), ['request']);
     assert.deepEqual(keys('talking_head', 'animate it'), ['request']);
@@ -252,15 +250,27 @@ await check('runs the playbook in order as ONE undo step and reports skips', asy
     const r = await runAutopilot('edit it', { run: async (p) => {
         prompts.push(p);
         if (p === 'Clean up the video') { S.getState().cutTimelineRanges([[140, 150]]); return { success: true, jobId: 'j1' }; }
-        if (p === 'Animate automatically') return { success: false, message: 'no moments found' };
         S.getState().addTemplateClip('counter', {}, { start: 2, select: false });
         return { success: true, jobId: 'j2' };
     } });
-    assert.deepEqual(prompts, ['Clean up the video', 'Add captions', 'Apply the punchy style recipe', 'Animate automatically']);
+    assert.deepEqual(prompts, ['Clean up the video', 'Add captions', 'Apply the punchy style recipe']);
     assert.equal(r.success, true); assert.equal(r.operation, 'auto_edit');
-    assert.match(r.message, /Talking head/); assert.match(r.message, /no moments found/);
+    assert.match(r.message, /Talking head/); assert.match(r.message, /style recipe/);
     assert.equal(S.getState().past.length, before + 1);
     assert.equal(S.getState()._historyGroupDepth, 0);
+});
+await check('Reel Auto delegates captions and creative styling to one Pro Finish pass', async () => {
+    setTimeline(40, { captions: words });
+    S.getState().setEditingStyle('reel');
+    const prompts = [];
+    const r = await runAutopilot('edit it', { run: async prompt => { prompts.push(prompt); return { success: true }; } });
+    assert.deepEqual(prompts, [
+        'Extract a short of the strongest moment',
+        'Set the aspect ratio to 9:16',
+        'Clean up the video',
+        'Pro finish for Instagram Reels',
+    ]);
+    assert.equal(r.success, true);
 });
 await check('Auto mode builds from a video in the Media Bin and excludes a brand logo from source footage', async () => {
     S.setState({ tracks: [], assets: [
@@ -285,7 +295,7 @@ await check('no style picked: Talking head, said so; clarifications skipped; a t
         if (p === 'Apply the punchy style recipe') throw new Error('boom');
         return { success: true };
     } });
-    assert.equal(prompts.length, 4);
+    assert.equal(prompts.length, 3);
     assert.match(r.message, /No style picked/);
     assert.match(r.message, /needed a clarification/);
     assert.match(r.message, /boom/);

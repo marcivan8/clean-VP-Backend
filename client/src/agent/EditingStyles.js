@@ -135,7 +135,7 @@ export function isQuestion(text) {
  *    as it is, and a later cut does not move them;
  *  - "Clean up the video" is the full clean up: silences, filler words,
  *    repeated takes, then voice enhancement (after the cuts);
- *  - animation last, so its moments and sound effects land on the final cut;
+ *  - the style recipe is the single final motion pass, after cuts/captions;
  *  - Reel picks its moment from the transcript; with no transcript yet it
  *    transcribes first.
  * @param {string} styleId
@@ -173,26 +173,25 @@ export function buildAutopilotSteps(styleId, request, facts = {}) {
     } else {
         steps.push({ key: 'cleanup', prompt: 'Clean up the video' });
     }
-    // The style recipe owns cutaway placement for every style. It runs after
-    // captions exist, so word timing is settled and the same contextual path
-    // can fill local-footage gaps from the configured stock provider.
-    steps.push({ key: 'captions', prompt: 'Add captions' });
-    steps.push({ key: 'recipe', prompt: `Apply the ${style.recipeId} style recipe` });
-    // A Reel gets the full pro short finish (hook title, platform captions,
-    // camera punch-ins, pops, transitions, sounds). Every other style runs
-    // the style-aware motion pass: calm styles are reduced to gentle motion
-    // by the animation planner and keep SFX disabled.
+    // Captions run after cuts for styles that use a standalone recipe. The
+    // recipe is the one coordinated motion pass for Vlog/Talking Head/
+    // Interview/Podcast; it owns cutaways, illustrations, graphics,
+    // transitions, motion and matching sounds.
+    // Reel Pro Finish owns caption generation/styling and the creative
+    // treatment, so standalone caption and recipe steps would duplicate work
+    // and stack competing designs over the same moments.
     if (style.id === 'reel') {
         // Names the platform explicitly: MediaExecutionEngine's polish_short
         // handler resolves the platform from the prompt text first and only
         // falls back to re-deriving it from the live editingStyle store value
         // when nothing is named (a fallback that silently defaults to
         // 'tiktok' whenever that store value isn't exactly 'reel' at the
-        // moment this step executes — the LAST of six Auto steps). Naming it
+        // moment this step executes — the last Auto step). Naming it
         // here removes that fragility for the one path that matters most.
         steps.push({ key: 'finish', prompt: 'Pro finish for Instagram Reels' });
     } else {
-        steps.push({ key: 'animate', prompt: 'Animate automatically' });
+        steps.push({ key: 'captions', prompt: 'Add captions' });
+        steps.push({ key: 'recipe', prompt: `Apply the ${style.recipeId} style recipe` });
     }
     return steps;
 }
