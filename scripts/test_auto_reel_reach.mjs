@@ -164,23 +164,21 @@ await check('the client turns that 503 into a reason, never into a crash', () =>
     assert.match(block, /not configured/, 'the 503 reason is not phrased for a human');
 });
 
-await check('stock is a FALLBACK, not the Reel default — worth knowing before blaming it', () => {
-    // It only runs when local b-roll matching produced nothing, so a bin with
-    // analysed footage never reaches Pexels at all. That is by design, and it
-    // is the second reason a Reel edit can legitimately show no stock b-roll.
+await check('stock fills dialogue gaps that local b-roll does not cover', () => {
     const tools = read('client/src/agent/VideoEditorTools.js');
     const calls = [...tools.matchAll(/this\._fetchStockBrollFallback\(/g)];
-    assert.ok(calls.length >= 2, `expected the fallback at both no-candidate branches, found ${calls.length}`);
-    for (const m of calls) {
-        const before = tools.slice(Math.max(0, m.index - 800), m.index);
-        assert.match(before, /length === 0/, 'the fallback is no longer gated on having found nothing locally');
-    }
+    assert.ok(calls.length >= 2, `expected no-local-candidate and local-gap stock paths, found ${calls.length}`);
+    const localGapCall = calls.find(m => tools.slice(Math.max(0, m.index - 800), m.index).includes('matches'));
+    assert.ok(localGapCall, 'stock is no longer offered to dialogue moments local matches missed');
+    assert.match(tools.slice(Math.max(0, localGapCall.index - 800), localGapCall.index), /matches/);
 });
 
-await check('the Reel auto playbook really does ask for b-roll', () => {
-    const styles = read('client/src/agent/EditingStyles.js');
-    assert.match(styles, /key: 'broll'/, 'the playbook no longer has a b-roll step');
-    assert.match(styles, /style\.id === 'vlog' \|\| style\.id === 'reel'/, 'reel no longer reaches the b-roll step');
+await check('Auto style recipes route supported styles through contextual b-roll', () => {
+    const engine = read('client/src/agent/MediaExecutionEngine.js');
+    const recipe = engine.slice(engine.indexOf("case 'apply_style_recipe':"), engine.indexOf("case '", engine.indexOf("case 'apply_style_recipe':") + 20));
+    assert.match(recipe, /recipe\.broll/);
+    assert.match(recipe, /tools\.placeContextualBroll/);
+    assert.match(recipe, /layout: recipe\.broll\.layout/);
 });
 
 log('\n── 4. "The provider IS set and it still says rules" ──');

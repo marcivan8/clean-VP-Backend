@@ -249,6 +249,46 @@ function sfxIntentsForEventType(eventType) {
     return entry ? entry.sfxIntents : [];
 }
 
+/** Free-text cues used to rank sounds for the detected event. */
+function sfxTermsForEventType(eventType) {
+    const entry = graphForEventType(eventType);
+    return entry ? entry.sfxTerms : [];
+}
+
+/**
+ * Rank SFX by their fit for one timeline event, keeping popularity as a
+ * tie-breaker. Intent lookup alone is too broad: it can return a popular
+ * impact sound for a reveal or an aggressive sound for a soft talking-head
+ * edit. This helper is pure so the matching policy can be regression-tested.
+ */
+function rankSFXCandidates(eventType, candidates, { soft = false, tone = null } = {}) {
+    const terms = sfxTermsForEventType(eventType).map(term => String(term).toLowerCase());
+    const toneText = String(tone || '').toLowerCase();
+    const hardIntents = new Set(['IMPACT', 'ZOOM_PUNCH', 'COMEDY', 'impact', 'zoom_punch', 'comedy']);
+
+    return (Array.isArray(candidates) ? candidates : [])
+        .map((asset, index) => {
+            const compatible = (asset?.compatible_timeline_events || asset?.compatibleTimelineEvents || []).includes(eventType);
+            const intents = asset?.editing_intents || asset?.editingIntents || [];
+            const energy = Number(asset?.energy_level ?? asset?.energyLevel);
+            const isHard = intents.some(intent => hardIntents.has(intent));
+            const text = [
+                asset?.name, asset?.display_name, asset?.displayName, asset?.category,
+                asset?.description, asset?.search_keywords, asset?.searchKeywords,
+                asset?.best_use_cases, asset?.bestUseCases, asset?.emotion_tags,
+                asset?.emotionTags, asset?.style,
+            ].flat().filter(Boolean).join(' ').toLowerCase();
+            const termScore = terms.reduce((sum, term) => sum + (text.includes(term) ? 1 : 0), 0);
+            const toneScore = toneText && text.includes(toneText) ? 15 : 0;
+            const score = (compatible ? 100 : 0) + termScore * 10 + toneScore
+                - (soft && (isHard || (Number.isFinite(energy) && energy >= 4)) ? 80 : 0);
+            return { asset, index, score, useCount: Number(asset?.use_count ?? asset?.useCount) || 0 };
+        })
+        .filter(item => !(soft && (item.asset?.editing_intents || item.asset?.editingIntents || []).some(intent => hardIntents.has(intent))))
+        .sort((a, b) => b.score - a.score || b.useCount - a.useCount || a.index - b.index)
+        .map(item => item.asset);
+}
+
 /**
  * Given the already-detected semantic events and the full track list, find
  * every OVERLAY clip — a manually-placed image/sticker/shape (`track.type
@@ -325,6 +365,8 @@ module.exports = {
     graphForEventType,
     animationsForEventType,
     sfxIntentsForEventType,
+    sfxTermsForEventType,
+    rankSFXCandidates,
     layerKindForClip,
     resolveOverlayAnimations,
 };

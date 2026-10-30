@@ -1,5 +1,5 @@
-// R91: editing styles under the chat box (Normal / Auto), the Reel short
-// picker, and the undo group that keeps a whole Auto run as one step.
+// R91: editing styles under the chat box (Normal / Auto), contextual cutaway
+// wiring, the Reel short picker, and the Auto undo group.
 // node scripts/test_editing_styles.mjs
 import { register } from 'module';
 register('./lib/clientLoaderHooks.mjs', import.meta.url);
@@ -49,6 +49,8 @@ await check('five styles, each pointing at a real recipe, transition and zoom pr
         assert.ok(TRANSITION_TYPES.includes(s.transition), `${id} transition`);
         assert.ok(['subtle', 'dynamic', 'cinematic'].includes(s.rhythmZoom), `${id} zoom`);
         assert.ok(s.guidance.length > 20 && s.guidance.length <= 300, `${id} guidance length (server caps at 300)`);
+        assert.match(s.guidance, /b-roll/i, `${id} Normal-mode guidance should request style-appropriate cutaways`);
+        assert.ok(STYLE_RECIPES[s.recipeId].broll, `${id} recipe must wire contextual cutaways in Normal and Auto edits`);
     }
     assert.equal(ES.getEditingStyle('nope'), null);
     assert.equal(ES.normalizeEditingMode('auto'), 'auto');
@@ -65,12 +67,12 @@ await check('playbooks: cuts first, captions after them, levelling after cuts', 
     // R92 round A: full clean up (silences, fillers, repetition, voice) in one step,
     // animation last for the energetic styles, none for the calm ones.
     assert.deepEqual(keys('talking_head'), ['cleanup', 'captions', 'recipe', 'animate']);
-    assert.deepEqual(keys('vlog'), ['silences', 'enhance', 'broll', 'captions', 'recipe', 'animate']);
+    assert.deepEqual(keys('vlog'), ['silences', 'enhance', 'captions', 'recipe', 'animate']);
     assert.deepEqual(keys('podcast'), ['cleanup', 'captions', 'recipe']);
     assert.deepEqual(keys('interview'), ['cleanup', 'captions', 'recipe']);
     // R92 round C: a Reel ends with the pro short finish instead of the generic animation.
-    assert.deepEqual(keys('reel'), ['short', 'vertical', 'cleanup', 'broll', 'captions', 'recipe', 'finish']);
-    assert.deepEqual(keys('reel', 'go', {}), ['transcript', 'short', 'vertical', 'cleanup', 'broll', 'captions', 'recipe', 'finish']);
+    assert.deepEqual(keys('reel'), ['short', 'vertical', 'cleanup', 'captions', 'recipe', 'finish']);
+    assert.deepEqual(keys('reel', 'go', {}), ['transcript', 'short', 'vertical', 'cleanup', 'captions', 'recipe', 'finish']);
     // A specific request runs ALONE ("animate" used to also run the clean up).
     assert.deepEqual(keys('interview', 'cut the intro'), ['request']);
     assert.deepEqual(keys('talking_head', 'animate it'), ['request']);

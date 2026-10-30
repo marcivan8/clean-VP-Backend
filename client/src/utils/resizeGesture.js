@@ -21,6 +21,13 @@ export function clampScale(scale, { min = 0.1, max = 5 } = {}) {
     return Math.min(max, Math.max(min, n));
 }
 
+export function scaleFromDistanceRatio(initialScale, startDistance, currentDistance, { min = 0.1, max = 5 } = {}) {
+    if (!(Number(startDistance) > 0) || !Number.isFinite(Number(currentDistance))) {
+        return clampScale(initialScale, { min, max });
+    }
+    return clampScale(Number(initialScale) * (Number(currentDistance) / Number(startDistance)), { min, max });
+}
+
 function distance(ax, ay, bx, by) {
     return Math.hypot(bx - ax, by - ay);
 }
@@ -46,8 +53,7 @@ export function startResizeGesture(e, { getCenter, initialScale = 1, minScale = 
 
     const onMove = (ev) => {
         const liveDist = distance(center.x, center.y, ev.clientX, ev.clientY);
-        const ratio = liveDist / startDist;
-        const next = clampScale(base * ratio, { min: minScale, max: maxScale });
+        const next = scaleFromDistanceRatio(base, startDist, liveDist, { min: minScale, max: maxScale });
         if (next === last) return;
         last = next;
         try { onChange?.(next); } catch (err) { console.error('[resizeGesture] onChange failed:', err); }

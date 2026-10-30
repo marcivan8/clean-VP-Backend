@@ -820,6 +820,29 @@ export const COMMANDS = [
     // alone would be too broad (it could mean a dozen things depending on
     // context), so this only matches when the user is clearly asking to
     // pick a STOPPED EDIT back up, not just "continue" in the abstract.
+    // R132 — "create a video from this script": script-to-video, Slice 1.
+    // No TTS/voice yet (deferred by the user's own choice this round) — this
+    // segments a plain-text script into shots, searches Vecteezy's vector
+    // catalog first for a cartoonish look (falling back to video, then
+    // photo, per shot), places them in sequence, and captions each shot
+    // from the script text itself. See
+    // claude/script-to-video-scoping-R132.md for what this does and
+    // doesn't cover yet.
+    {
+        id: 'create_video_from_script',
+        category: 'edit',
+        label: 'Create a video from a script',
+        summary: 'Builds a cartoonish-style video from a plain-text script — no footage needed — using Vecteezy vector/video/photo stock per shot, captioned from the script itself.',
+        phrases: ['create a video from this script', 'create a video from my script',
+                  'make a video from this script', 'make a video from my script',
+                  'turn this script into a video', 'turn my script into a video',
+                  'generate a video from this script', 'generate a video from my script',
+                  'animate this script', 'make a cartoon video from this script',
+                  'make an animated video from this script', 'build a video from this script'],
+        negative: ['storyboard', 'illustrate', 'b-roll', 'broll', 'footage', 'transcript'],
+        destructive: false,
+    },
+
     {
         id: 'resume_failed_job',
         category: 'edit',

@@ -11,6 +11,7 @@ const check = async (name, fn) => {
 const read = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 
 const T = await import('../client/src/components/Assistant/composerTools.js');
+const D = await import('../client/src/components/Assistant/assistantDocuments.js');
 const { resolveCommand, COMMAND_BY_ID } = await import('../client/src/agent/CommandRegistry.js');
 
 log('\n-- 1. Tools: every menu item is a real command --');
@@ -100,6 +101,7 @@ await check('no element or an empty prompt does nothing', () => {
 log('\n-- 4. Wiring: the old behaviour survived the move --');
 const rp = read('../client/src/components/Assistant/ReasoningPanel.jsx');
 const cc = read('../client/src/components/Assistant/ChatComposer.jsx');
+const css = read('../client/src/index.css');
 await check('ReasoningPanel renders ChatComposer with the same input ref, send and stop', () => {
     assert.ok(/<ChatComposer[\s\S]*inputRef=\{inputRef\}[\s\S]*onSend=\{processCommand\}[\s\S]*onStop=\{cancelRun\}/.test(rp));
     assert.ok(!/<textarea/.test(rp), 'a second textarea would split the input');
@@ -124,6 +126,23 @@ await check('send and stop are labelled', () => {
     for (const s of ['aria-label={t(\'assistant.send\')}', "aria-label={t('assistant.stop')}"]) {
         assert.ok(cc.includes(s), s);
     }
+});
+await check('composer floats over the feed while leaving scroll clearance for the last message', () => {
+    assert.ok(/<aside className=\{classNames\("relative [^"]+"/.test(rp), 'panel must anchor the floating composer');
+    assert.ok(/ref=\{scrollRef\} className="[^"]*overflow-y-auto[^\"]*pb-\[30rem\]/.test(rp), 'scroll feed needs bottom clearance');
+    assert.ok(/<div className="chat-composer-float">[\s\S]*?<ChatComposer/.test(rp), 'composer must live in the floating overlay');
+    assert.ok(/\.chat-composer-float\s*\{[^}]*position:\s*absolute;[^}]*pointer-events:\s*none;/.test(css), 'overlay must float without blocking feed interaction outside controls');
+});
+await check('reference documents are parsed locally and included in edit prompts', async () => {
+    const file = Object.assign(new Blob(['A clear script brief']), { name: 'brief.md', lastModified: 1 });
+    const parsed = await D.readAssistantDocument(file);
+    assert.equal(parsed.name, 'brief.md');
+    assert.equal(parsed.text, 'A clear script brief');
+    assert.match(D.withAssistantDocuments('Add captions', [parsed]), /Add captions[\s\S]*--- brief\.md ---[\s\S]*A clear script brief/);
+    assert.match(D.withAssistantDocuments('', [parsed], 'Use the brief'), /^Use the brief/);
+    await assert.rejects(() => D.readAssistantDocument(Object.assign(new Blob(['%PDF']), { name: 'brief.pdf' })), /documentUnsupported/);
+    assert.ok(/documents=\{referenceDocuments\}[\s\S]*onDocumentsChange=\{setReferenceDocuments\}/.test(rp));
+    assert.ok(/withAssistantDocuments\([\s\S]*referenceDocuments/.test(rp));
 });
 
 log(failures ? `\n${failures} FAILURES` : '\nALL CHAT COMPOSER TESTS PASSED');

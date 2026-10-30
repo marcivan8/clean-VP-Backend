@@ -48,7 +48,7 @@ router.get('/status', (req, res) => {
     res.json({
         provider: service.providerName || 'vecteezy',
         configured: isConfigured,
-        supportedMedia: ['video', 'photo'],
+        supportedMedia: ['video', 'photo', 'vector'],
     });
 });
 
@@ -56,7 +56,7 @@ router.get('/status', (req, res) => {
  * GET /api/stock/search
  * Query params:
  *   - query: string (required)
- *   - type: 'video' (default) | 'photo' | 'all'
+ *   - type: 'video' (default) | 'photo' | 'all' | 'vector' (Vecteezy only)
  *   - page: number (default 1)
  *   - perPage: number (default 15, max 30)
  *   - orientation: 'landscape' | 'portrait' | 'square' (optional)
@@ -84,6 +84,20 @@ router.get('/search', stockLimiter, authMiddleware, stockGate, async (req, res) 
     const providerToUse = service.isConfigured() ? service : pexelsService;
 
     try {
+        // 'vector' is Vecteezy-exclusive (R132: cartoonish-style script-to-video
+        // assembly) — Pexels has no vector/illustration catalog, so there is no
+        // generic provider to fall back to here. An unconfigured Vecteezy
+        // account means this type simply returns no results; callers that want
+        // a fallback (e.g. to 'video'/'photo') do that themselves, the same way
+        // they already handle a zero-result video/photo search.
+        if (type === 'vector') {
+            if (!vecteezyService.isConfigured()) {
+                return res.json({ results: [], totalResults: 0, page, perPage, provider: 'vecteezy' });
+            }
+            const data = await vecteezyService.searchVectors(query, { page, perPage, orientation });
+            return res.json(data);
+        }
+
         if (type === 'photo' || type === 'image') {
             const data = await providerToUse.searchPhotos(query, { page, perPage, orientation });
             return res.json(data);

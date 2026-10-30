@@ -2250,6 +2250,7 @@ export class MediaExecutionEngine {
             case 'layout_fullscreen':
             case 'smart_cleanup':
             case 'resume_failed_job': // R131
+            case 'create_video_from_script': // R132
             case 'longFormEdit': {
                 let VideoEditorTools;
                 try {

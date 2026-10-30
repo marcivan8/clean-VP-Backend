@@ -13,7 +13,7 @@ const ok = (n) => log(`✓ ${n}`);
 
 const { fitContainSize, baseClipScreenBox, screenDeltaToCanvasDelta } =
     await import('../client/src/motion/BaseClipGeometry.js');
-const { clampScale, startResizeGesture } = await import('../client/src/utils/resizeGesture.js');
+const { clampScale, scaleFromDistanceRatio, startResizeGesture } = await import('../client/src/utils/resizeGesture.js');
 
 // ── 1 · fitContainSize mirrors project.tsx's fitSize() exactly ───────────
 {
@@ -73,6 +73,9 @@ const { clampScale, startResizeGesture } = await import('../client/src/utils/res
     assert.equal(clampScale(10, { min: 0.1, max: 5 }), 5);
     assert.equal(clampScale(0.01, { min: 0.1, max: 5 }), 0.1);
     ok('clampScale enforces the same 0.1x-5x bounds the pinch gesture already uses');
+    assert.equal(scaleFromDistanceRatio(1.25, 40, 80), 2.5, 'pinch doubles the current scale at twice the finger distance');
+    assert.equal(scaleFromDistanceRatio(1, 0, 80), 1, 'zero-distance pinch is a safe no-op');
+    ok('touch pinch scales from its starting scale and clamps invalid gesture distances safely');
 
     // Simulate a corner drag: element centred at (100,100), pointer starts at
     // (150,100) -> startDist=50 (the "1x" reference); dragging out to distance

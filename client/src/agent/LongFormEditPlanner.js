@@ -154,9 +154,21 @@ export class LongFormEditPlanner {
             reason: 'Match b-roll/cutaways to what is being said, so the video does not stay a static talking head',
         }));
 
+        // R127 — the visual-brief parser used to detect explicit motion
+        // graphics but that signal only opted into this method; no graphics
+        // were actually created. storyboard_video places contextual graphics
+        // across the transcript. Keep it opt-in so ordinary complete edits
+        // do not gain unsolicited text graphics.
+        if (visualBrief?.wantsMotionGraphics) {
+            steps.push(S('storyboard_video', {
+                args: { dryRun: false },
+                reason: 'Place contextual motion graphics across the spoken ideas',
+            }));
+        }
+
         steps.push(S('animate_automatically', {
             args: {},
-            reason: 'Detect reveal/punchline/emphasis moments and apply motion graphics automatically',
+            reason: 'Detect reveal/punchline/emphasis moments and animate the footage, captions, and graphics',
         }));
 
         // Color mood is the one visual decision this makes NOT by default —

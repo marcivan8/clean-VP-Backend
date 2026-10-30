@@ -6,6 +6,7 @@ import { authFetch } from '../utils/authFetch.js';
 import { autoEmphasizeCaptions, clearAllEmphasis } from '../utils/captionEmphasis.js';
 import { evaluateMotionCompatibility } from './AnimationCompatibilityEvaluator.js';
 import { saveResumableJob, clearResumableJob, getResumableJob, remainingCommandsFrom } from './longFormJobMemory.js';
+import { segmentScript } from './ScriptSegmenter.js';
 
 /**
  * VideoEditorTools
@@ -996,6 +997,7 @@ export class VideoEditorTools {
             case 'cut_segment': return this.cutSegment(action.args);
             case 'identify_quotable_moments': return await this.identifyQuotableMoments(action.args);
             case 'add_transitions_to_sections': return await this.addTransitionsToSections(action.args);
+            case 'create_video_from_script': return await this.createVideoFromScript(action.args, action.signal);
 
             // Asset Engine — Creative Asset Intelligence System
             case 'search_assets':     return await this.searchAssets(action.args);
@@ -1690,16 +1692,20 @@ export class VideoEditorTools {
             }
 
             const projectId = state.projectId || null;
-            if (!projectId) {
-                return { success: false, message: 'No project id available to fetch b-roll profiles.', placements: [] };
+            let profiles = [];
+            // Local asset matching is optional. Unsaved projects have no
+            // profile endpoint to query, and a temporary profile-service
+            // failure must not block independent stock footage placement.
+            if (projectId) {
+                try {
+                    const response = await authFetch(`/api/brain/broll-profiles?projectId=${encodeURIComponent(projectId)}`, { signal });
+                    if (response.ok) profiles = (await response.json())?.profiles || [];
+                    else console.warn(`[VideoEditorTools] b-roll profiles unavailable (${response.status}); trying stock footage`);
+                } catch (profileError) {
+                    if (signal?.aborted) throw profileError;
+                    console.warn('[VideoEditorTools] b-roll profile lookup failed; trying stock footage:', profileError.message);
+                }
             }
-
-            const response = await authFetch(`/api/brain/broll-profiles?projectId=${encodeURIComponent(projectId)}`, { signal });
-            if (!response.ok) {
-                const errText = await response.text().catch(() => '');
-                return { success: false, message: `Could not load b-roll profiles: ${errText || response.status}`, placements: [] };
-            }
-            const { profiles = [] } = await response.json();
 
             // Checked against the media BIN, not the timeline — see
             // buildBrollCandidates' doc comment. A match can now be an asset
@@ -1709,7 +1715,8 @@ export class VideoEditorTools {
 
             if (candidates.length === 0) {
                 // ADR-001 follow-up: nothing local to match against. Rather
-                // than stopping here, fall back to Pexels — the same
+                // than stopping here, fall back to the configured stock
+                // provider — the same
                 // suggest-broll pass the Asset Panel's "Suggest b-roll"
                 // button runs, but auto-inserted instead of waiting for
                 // manual approval (this tool only runs when the user or an
@@ -1718,15 +1725,16 @@ export class VideoEditorTools {
                 if (stock.inserted > 0) {
                     return {
                         success: true,
-                        message: `No analyzed local b-roll to match, so ${stock.inserted} cutaway(s) were pulled from stock footage (Pexels) instead.`,
+                        message: `No analyzed local b-roll to match, so ${stock.inserted} cutaway(s) were pulled from ${stock.provider || 'stock footage'} instead.`,
                         placements: stock.placements,
                         titleCardsCreated: 0,
                         fromStock: stock.inserted,
+                        provider: stock.provider,
                     };
                 }
                 return {
                     success: true,
-                    message: `No analyzed b-roll found in the media bin to match against, and ${stock.reason || 'no stock footage could be fetched either'} — nothing placed. (Clips or images need to finish their content analysis first.)`,
+                    message: `No analyzed b-roll found in the media bin to match against, and ${stock.reason || 'no stock footage could be fetched either'} — nothing placed.`,
                     placements: [],
                     titleCardsCreated: 0,
                 };
@@ -1820,17 +1828,23 @@ export class VideoEditorTools {
                 }
             }
 
-if (matches.length === 0 && titleCardsCreated === 0) {
-                const stock = await this._fetchStockBrollFallback(words, chapterBoundaries, signal);
-                if (stock.inserted > 0) {
-                    return {
-                        success: true,
-                        message: `Local b-roll didn't match any moment closely enough, so ${stock.inserted} cutaway(s) were pulled from stock footage (Pexels) instead.`,
-                        placements: stock.placements,
-                        titleCardsCreated: 0,
-                        fromStock: stock.inserted,
-                    };
-                }
+            // Fill dialogue moments that local footage did not cover. Before
+            // this pass ran only when ZERO local matches existed, so one
+            // local cutaway suppressed every Vecteezy result for the rest of
+            // the edit.
+            const stock = await this._fetchStockBrollFallback(words, chapterBoundaries, signal, matches);
+            if (stock.inserted > 0) {
+                return {
+                    success: true,
+                    message: `Placed ${matches.length} local b-roll cutaway(s) and ${stock.inserted} stock cutaway(s)${stock.provider ? ` from ${stock.provider}` : ''}.`,
+                    placements: [...matches, ...stock.placements],
+                    titleCardsCreated,
+                    fromStock: stock.inserted,
+                    provider: stock.provider,
+                };
+            }
+
+            if (matches.length === 0 && titleCardsCreated === 0) {
                 return {
                     success: true,
                     message: `Found analyzed b-roll but none matched a moment in the dialogue closely enough, and ${stock.reason || 'no stock footage could be fetched either'} — nothing placed.`,
@@ -1861,16 +1875,15 @@ if (matches.length === 0 && titleCardsCreated === 0) {
     }
 
     /**
-     * Stock-footage fallback for placeContextualBroll: when there is no
-     * local, already-analyzed b-roll to match against (or nothing matched
-     * closely enough), pull context-aware suggestions from Pexels — the
+     * Stock-footage fill for placeContextualBroll: pull context-aware
+     * suggestions from the configured provider (Vecteezy or Pexels) — the
      * exact pass services/BrollSuggesterService.js runs for the Asset
      * Panel's "Suggest b-roll" button (POST /api/stock/suggest-broll) — and
      * place them directly, the same way AssetPanel.handleApproveBrollSuggestion
-     * does when a person clicks Approve on a suggestion card. This tool only
-     * runs when b-roll placement was explicitly requested (a command, or an
-     * Auto-mode playbook step), so skipping the manual approval step mirrors
-     * every other Auto-mode action, which already runs hands-free.
+     * does when a person clicks Approve on a suggestion card. It is called by
+     * explicit b-roll actions, style recipes, and complete-build plans; those
+     * edit flows already apply automatically, so these contextual suggestions
+     * are inserted directly instead of waiting for a separate approval click.
      *
      * Never throws: a missing API key, a 503 from the backend, or zero
      * results all just mean "nothing to place from stock either" — the
@@ -1879,9 +1892,10 @@ if (matches.length === 0 && titleCardsCreated === 0) {
      * @param {Array} words transcript words (state.captions)
      * @param {Array<number>} chapterBoundaries
      * @param {AbortSignal|null} signal
-     * @returns {Promise<{inserted:number, placements:Array, reason?:string}>}
+     * @param {Array<Object>} [existingPlacements] local cutaways to avoid overlapping
+     * @returns {Promise<{inserted:number, placements:Array, provider?:string, reason?:string}>}
      */
-    async _fetchStockBrollFallback(words, chapterBoundaries, signal = null) {
+    async _fetchStockBrollFallback(words, chapterBoundaries, signal = null, existingPlacements = []) {
         try {
             const response = await authFetch('/api/stock/suggest-broll', {
                 method: 'POST',
@@ -1895,7 +1909,7 @@ if (matches.length === 0 && titleCardsCreated === 0) {
                 const errText = await response.text().catch(() => '');
                 return { inserted: 0, placements: [], reason: `stock footage search failed (${errText || response.status})` };
             }
-            const { suggestions = [] } = await response.json();
+            const { suggestions = [], provider: responseProvider = null } = await response.json();
             if (suggestions.length === 0) {
                 return { inserted: 0, placements: [], reason: 'no matching stock footage was found' };
             }
@@ -1905,19 +1919,41 @@ if (matches.length === 0 && titleCardsCreated === 0) {
                 const asset = suggestion.asset;
                 if (!asset) continue;
                 const live = useTimelineStore.getState();
+                const start = Math.max(0, Number(suggestion.timelineTime) || 0);
+                const duration = Number(suggestion.duration) > 0 ? Number(suggestion.duration) : Number(asset.duration) || 3.5;
+                const end = start + duration;
+                const overlaps = (otherStart, otherDuration) => {
+                    const otherAt = Number(otherStart) || 0;
+                    const otherEnd = otherAt + (Number(otherDuration) || 0);
+                    return start < otherEnd && end > otherAt;
+                };
+                if ((existingPlacements || []).some(p => overlaps(p.timelineTime, p.duration))) continue;
+                const alreadyPlaced = (live.tracks || []).some(t => t.type === 'overlay' && (t.clips || []).some(c =>
+                    c.type === 'video' && overlaps(c.start, c.duration)));
+                if (alreadyPlaced) continue;
                 const exists = (live.assets || []).some(a => a.id === asset.id);
                 if (!exists) live.addAssets?.([asset]);
                 const trackId = live.addOverlayClip(asset, {
                     scale: 4, x: 50, y: 50,
-                    start: suggestion.timelineTime,
-                    duration: suggestion.duration || asset.duration || 3.5,
+                    start,
+                    duration,
                     kind: 'video',
                     transitions: suggestion.transitions,
                     behindSubject: suggestion.speakerLayout === 'behind_speaker',
                 });
-                if (trackId) placements.push({ assetId: asset.id, timelineTime: suggestion.timelineTime, duration: suggestion.duration, source: 'pexels' });
+                if (trackId) placements.push({
+                    assetId: asset.id,
+                    timelineTime: start,
+                    duration,
+                    source: asset.provider || responseProvider || 'stock',
+                });
             }
-            return { inserted: placements.length, placements };
+            return {
+                inserted: placements.length,
+                placements,
+                provider: placements[0]?.source || responseProvider || null,
+                reason: placements.length ? undefined : 'stock suggestions overlapped with existing cutaways',
+            };
         } catch (error) {
             console.error('[VideoEditorTools] stock b-roll fallback error:', error);
             return { inserted: 0, placements: [], reason: `stock footage search failed (${error.message})` };
@@ -1925,7 +1961,8 @@ if (matches.length === 0 && titleCardsCreated === 0) {
     }
 
     /**
-     * "find stock footage of X" — fetches directly from Pexels (not matched
+     * "find stock footage of X" — fetches directly from the configured stock
+     * provider (Vecteezy when enabled, otherwise Pexels; not matched
      * against existing dialogue/moments; see placeContextualBroll for that)
      * and drops the top result on a B-Roll track at the playhead.
      * @param {{query?: string}} args
@@ -1950,7 +1987,7 @@ if (matches.length === 0 && titleCardsCreated === 0) {
                     return { success: false, message: 'Stock footage is available on Creator and Pro plans. Please upgrade to unlock.' };
                 }
                 if (response.status === 503) {
-                    return { success: false, message: 'Stock footage search is not configured (no Pexels API key set up on the server).' };
+                    return { success: false, message: 'Stock footage search is not configured on the server.' };
                 }
                 const errText = await response.text().catch(() => '');
                 return { success: false, message: `Stock footage search failed: ${errText || response.status}` };
@@ -2659,6 +2696,167 @@ if (matches.length === 0 && titleCardsCreated === 0) {
             console.error('[VideoEditorTools] addTransitionsToSections error:', error);
             return { success: false, message: `Could not add transitions: ${error.message}` };
         }
+    }
+
+    /**
+     * R132, Slice 1 — "create a video from this script": turns a plain-text
+     * narration script into a cartoonish-style video with NO user footage
+     * involved at all, per claude/script-to-video-scoping-R132.md's plan.
+     *
+     * Per the user's explicit choice this round: visuals + captions only —
+     * no TTS/voice generation yet (deferred to a later slice) — and
+     * Vecteezy's vector/illustration catalog is tried first for every shot,
+     * falling back to Vecteezy video, then photo, only when a shot's query
+     * turns up no vector results, so the look stays consistently cartoonish
+     * except where a shot genuinely has nothing vector-style to match.
+     *
+     * Builds on existing, unmodified primitives only: segmentScript (new,
+     * R132) for the shot list, GET /api/stock/search (existing route, now
+     * also serving type=vector per this round's route change) for each
+     * shot's visual, and state.addTrack/addClip (existing store primitives)
+     * to place them — the same primitives placeContextualBroll and
+     * fetchStockBroll already use for their own stock lookups, just applied
+     * sequentially as the BASE content instead of as overlay cutaways,
+     * since there is no existing footage here to lay anything over.
+     */
+    async createVideoFromScript(args = {}, signal = null) {
+        const script = String(args.script || '').trim();
+        if (!script) {
+            return { success: false, message: 'No script text was given to build a video from.' };
+        }
+
+        const shots = segmentScript(script);
+        if (shots.length === 0) {
+            return { success: false, message: 'Could not break that script into any shots — it may be empty or unreadable.' };
+        }
+
+        const searchShot = async (query, type) => {
+            try {
+                const params = new URLSearchParams({ query, type, page: '1', perPage: '5' });
+                const response = await authFetch(`/api/stock/search?${params.toString()}`, { signal });
+                if (!response.ok) return null;
+                const data = await response.json();
+                const results = data?.results || [];
+                return results.length > 0 ? { asset: results[0], provider: data?.provider || results[0]?.provider } : null;
+            } catch (err) {
+                console.warn(`[VideoEditorTools] createVideoFromScript: ${type} search failed for "${query}":`, err.message);
+                return null;
+            }
+        };
+
+        let cursor = 0;
+        let vectorCount = 0;
+        let videoCount = 0;
+        let photoCount = 0;
+        const unmatched = [];
+        const imageClipIds = [];
+
+        useTimelineStore.getState().beginHistoryGroup();
+        let visualTrackId;
+        let textTrackId;
+        try {
+            visualTrackId = useTimelineStore.getState().addTrack('video', { skipHistory: true });
+            textTrackId = useTimelineStore.getState().addTrack('text', { skipHistory: true });
+
+            for (const shot of shots) {
+                const start = cursor;
+                const duration = shot.estimatedDuration;
+
+                // Vecteezy vector-first, per the user's instruction — falls
+                // back to video, then photo, only when a shot's query finds
+                // nothing vector-style. Each fallback is a plain, separate
+                // search, not a provider-level switch, so a shot that fails
+                // all three simply has no visual rather than retrying forever.
+                let found = await searchShot(shot.stockQuery, 'vector');
+                let kind = 'vector';
+                if (!found) { found = await searchShot(shot.stockQuery, 'video'); kind = 'video'; }
+                if (!found) { found = await searchShot(shot.stockQuery, 'photo'); kind = 'photo'; }
+
+                if (!found) {
+                    unmatched.push(shot.stockQuery);
+                    // Still advance the cursor and still caption the line —
+                    // a missing visual shouldn't silently drop the narration
+                    // text too, and shots after it must not overlap.
+                    cursor += duration;
+                } else {
+                    const { asset } = found;
+                    const exists = (useTimelineStore.getState().assets || []).some(a => a.id === asset.id);
+                    if (!exists) useTimelineStore.getState().addAssets([asset]);
+
+                    const clipId = `clip_scriptshot_${Date.now()}_${shot.index}_${Math.random().toString(36).slice(2, 7)}`;
+                    useTimelineStore.getState().addClip(visualTrackId, {
+                        id: clipId,
+                        assetId: asset.id,
+                        type: asset.type === 'image' ? 'image' : 'video',
+                        url: asset.url || asset.sourceUrl,
+                        name: asset.name,
+                        start,
+                        duration,
+                    }, { skipHistory: true });
+
+                    if (asset.type === 'image') imageClipIds.push({ clipId, duration });
+                    if (kind === 'vector') vectorCount++;
+                    else if (kind === 'video') videoCount++;
+                    else photoCount++;
+
+                    cursor += duration;
+                }
+
+                useTimelineStore.getState().addClip(textTrackId, {
+                    id: `clip_scriptcaption_${Date.now()}_${shot.index}_${Math.random().toString(36).slice(2, 7)}`,
+                    type: 'text',
+                    start,
+                    duration,
+                    name: `Script line ${shot.index + 1}`,
+                    content: shot.text,
+                    position: 'bottom',
+                }, { skipHistory: true });
+            }
+
+            // Still vector/photo images are static by default — a Ken Burns
+            // style slow zoom keeps them from reading as a dead slideshow.
+            // applySmartZoom's own ZoomAnalyzer only looks at type:'video'
+            // clips (confirmed in R132's scoping), so a plain, deterministic
+            // zoom is applied here directly via the same addTransformKeyframe
+            // primitive, rather than waiting on that analyzer to be extended.
+            imageClipIds.forEach(({ clipId, duration }) => {
+                useTimelineStore.getState().addTransformKeyframe(clipId, 'scale', 0, 1.0, 'linear');
+                useTimelineStore.getState().addTransformKeyframe(clipId, 'scale', duration, 1.12, 'linear');
+            });
+        } finally {
+            useTimelineStore.getState().endHistoryGroup();
+        }
+
+        const matchedCount = shots.length - unmatched.length;
+        if (matchedCount === 0) {
+            return {
+                success: false,
+                message: `Segmented the script into ${shots.length} shot(s), but no visual (vector, video, or photo) could be found for any of them. Captions were still placed. Try a less abstract script, or check that stock search is configured.`,
+                shotCount: shots.length,
+                matchedCount: 0,
+            };
+        }
+
+        const parts = [];
+        if (vectorCount > 0) parts.push(`${vectorCount} vector`);
+        if (videoCount > 0) parts.push(`${videoCount} video`);
+        if (photoCount > 0) parts.push(`${photoCount} photo`);
+        const breakdown = parts.length > 0 ? ` (${parts.join(', ')})` : '';
+        const unmatchedNote = unmatched.length > 0
+            ? ` ${unmatched.length} shot(s) had no match for any asset type and were left as captions only.`
+            : '';
+
+        return {
+            success: true,
+            message: `✓ Built a ${cursor.toFixed(1)}s video from the script: ${shots.length} shot(s), ${matchedCount} with a visual${breakdown}.${unmatchedNote}`,
+            shotCount: shots.length,
+            matchedCount,
+            vectorCount,
+            videoCount,
+            photoCount,
+            unmatchedQueries: unmatched,
+            totalDuration: cursor,
+        };
     }
 
     clearKeywords() {

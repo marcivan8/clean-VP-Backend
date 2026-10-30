@@ -3476,6 +3476,7 @@ const useTimelineStore = create(
                             activeClipId: st.activeClipId,
                             selectedClipIds: [...(st.selectedClipIds || [])],
                             aspectRatio: st.aspectRatio,
+                            scenes: st.scenes,
                             _extraState: { captions: st.captions, duration: st.duration },
                         },
                         _historyGroupPast: st.past,
@@ -3494,7 +3495,8 @@ const useTimelineStore = create(
                     || timelineManager.getState() !== base._timelineState
                     || st.captions !== base._extraState.captions
                     || st.duration !== base._extraState.duration
-                    || st.aspectRatio !== base.aspectRatio);
+                    || st.aspectRatio !== base.aspectRatio
+                    || st.scenes !== base.scenes);
                 if (base && changed) {
                     set({ _historyGroupDepth: 0, _historyGroupBase: null, _historyGroupPast: null,
                         past: [...(before || []), base].slice(-50), future: [] });

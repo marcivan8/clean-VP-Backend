@@ -204,6 +204,20 @@ console.log('\n── 7. Every caption surface routes through the shared action 
         /captionEditScope/.test(panel) && !/useState\(['"]global['"]\)/.test(panel),
         'Component-local scope is invisible to the canvas — that WAS the bug.');
     check('TextOverlay uses applyCaptionUpdate', /applyCaptionUpdate/.test(overlay));
+    check('mobile text transforms use pinch scaling and one-finger position dragging',
+        /useMobileTextGestures = isMobile && isTouch/.test(overlay)
+            && /pointerCount === 2 && useMobileTextGestures/.test(overlay)
+            && /state\.mode === 'pinch'/.test(overlay)
+            && /state\.mode !== 'drag'/.test(overlay),
+        'Mobile captions need distinct touch gestures because four corner targets overlap at phone preview size.');
+    check('mobile transform gestures stay on the touched caption while desktop follows the scope toggle',
+        /useMobileTextGestures \? \{ scope: 'individual' \} : \{\}/.test(overlay)
+            && /isActive && !useMobileTextGestures/.test(overlay),
+        'The mobile surface has no global/individual control; desktop retains the caption scope behavior.');
+    check('drag starts at the rendered caption center, including animated offsets',
+        /elementRect\.left \+ elementRect\.width \/ 2 - frameRect\.left/.test(overlay)
+            && /elementRect\.top \+ elementRect\.height \/ 2 - frameRect\.top/.test(overlay),
+        'Using stored x/y makes animated captions jump to their base position on the first drag.');
 
     // The model above is only meaningful if the real action still has these branches.
     check('store action exists', /applyCaptionUpdate:\s*\(/.test(store));

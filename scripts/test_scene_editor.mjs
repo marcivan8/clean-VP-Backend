@@ -618,6 +618,31 @@ await check('undo takes the design back too, so the next edit cannot resurrect t
     S.getState().redo();
 });
 
+await check('one grouped undo restores scene data along with all bulk timeline edits', () => {
+    // Grouped undo used a reduced snapshot without `scenes`, so the timeline
+    // reverted but a scene-driven design could keep the bulk edit and restore
+    // it on the next re-flatten.
+    loadProject();
+    const r = S.getState().addMotionComponent('TitleSequence', 'cinematic', { title: 'Bulk original', subtitle: 'Sub' });
+    const original = SS.listNodes(S.getState().getScene(r.sceneId)).find(e => e.node.content === 'Bulk original').node;
+    const trackId = S.getState().tracks.find(t => t.type === 'text').id;
+    const clipBefore = clipsOf(r.sceneId).find(c => c.sceneNodeId === original.id);
+    const pastBefore = S.getState().past.length;
+
+    S.getState().beginHistoryGroup();
+    S.getState().editSceneNode(r.sceneId, original.id, { content: 'Bulk changed' });
+    S.getState().updateClip(trackId, clipBefore.id, { start: clipBefore.start + 1 }, { skipHistory: true });
+    S.getState().endHistoryGroup();
+
+    assert.equal(S.getState().past.length, pastBefore + 1, 'bulk edit is one undo step');
+    S.getState().undo();
+    assert.equal(SS.findNode(S.getState().getScene(r.sceneId), original.id).node.content, 'Bulk original', 'scene data reverted');
+    assert.equal(clipsOf(r.sceneId).find(c => c.sceneNodeId === original.id).start, clipBefore.start, 'timeline edit reverted with it');
+    S.getState().redo();
+    assert.equal(SS.findNode(S.getState().getScene(r.sceneId), original.id).node.content, 'Bulk changed', 'redo restores scene data');
+    assert.equal(clipsOf(r.sceneId).find(c => c.sceneNodeId === original.id).start, clipBefore.start + 1, 'redo restores the timeline edit too');
+});
+
 await check('a loop repeats forwards and snaps back; only a ping-pong turns round', () => {
     // Found in review: skipping the seam keyframe on every cycle made a LOOP
     // play its later cycles backwards, or freeze on a two-keyframe move.

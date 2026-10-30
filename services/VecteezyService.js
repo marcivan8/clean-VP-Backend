@@ -162,6 +162,54 @@ function normalizePhotoAsset(resource) {
     };
 }
 
+
+/**
+ * Normalizes a raw Vecteezy vector/illustration resource into VIBED's asset
+ * schema. Vectors are static (no inherent duration, like a photo), but are
+ * flagged `style: 'vector'` / `isVector: true` so callers building a
+ * cartoonish-style assembly (R132) can tell them apart from photographic
+ * stock without inspecting the file itself.
+ */
+function normalizeVectorAsset(resource) {
+    const resolvedUrl = resource.preview_url
+        || resource.thumbnail_2x_url
+        || resource.thumbnail_url
+        || '';
+    const thumbnail = resource.thumbnail_2x_url
+        || resource.thumbnail_url
+        || resolvedUrl;
+    const dims = resource.dimensions
+        || resource.preview_dimensions
+        || resource.thumbnail_dimensions
+        || null;
+    const resolution = dims?.width && dims?.height
+        ? { w: dims.width, h: dims.height }
+        : null;
+
+    return {
+        id: `vecteezy-vector-${resource.id}`,
+        name: deriveResourceName(resource, 'Vector'),
+        type: 'image',
+        style: 'vector',
+        isVector: true,
+        url: resolvedUrl,
+        sourceUrl: resolvedUrl,
+        proxyUrl: resolvedUrl,
+        thumbnail,
+        duration: 5,
+        sourceDuration: 5,
+        resolution,
+        provider: 'vecteezy',
+        providerId: String(resource.id),
+        attribution: {
+            provider: 'vecteezy',
+            providerUrl: resource.preview_url || 'https://www.vecteezy.com',
+            photographer: 'Vecteezy Contributor',
+            photographerUrl: 'https://www.vecteezy.com',
+        },
+    };
+}
+
 class VecteezyService {
     constructor(apiKey = process.env.VECTEEZY_API_KEY, accountId = process.env.VECTEEZY_ACCOUNT_ID) {
         this.apiKey = apiKey || null;
@@ -337,6 +385,50 @@ class VecteezyService {
         return payload;
     }
 
+    /**
+     * Searches for vector illustrations/graphics on Vecteezy — the asset
+     * type behind a "cartoonish" style assembly (R132): distinct from
+     * searchPhotos, which returns photographic stock.
+     */
+    async searchVectors(query, options = {}) {
+        const cleanQuery = String(query || '').trim();
+        if (!cleanQuery) {
+            return { results: [], totalResults: 0, page: 1, perPage: 15, provider: 'vecteezy' };
+        }
+
+        const page = Math.max(1, parseInt(options.page, 10) || 1);
+        const perPage = Math.min(50, Math.max(1, parseInt(options.perPage, 10) || 15));
+        const orientation = options.orientation ? String(options.orientation).toLowerCase() : undefined;
+
+        const cacheKey = `vecteezy:vectors:${cleanQuery}:${page}:${perPage}:${orientation || 'any'}`;
+        const cached = searchCache.get(cacheKey);
+        if (cached) return cached;
+
+        const accountId = this._getAccountId();
+        const queryParams = {
+            term: cleanQuery,
+            content_type: 'vector',
+            page,
+            per_page: perPage,
+        };
+        if (orientation) queryParams.orientation = orientation;
+
+        const data = await this._request(`/v2/${accountId}/resources`, queryParams);
+        const resources = Array.isArray(data.resources) ? data.resources : [];
+        const results = resources.map(normalizeVectorAsset);
+
+        const payload = {
+            results,
+            totalResults: Number(data.total_resources) || results.length,
+            page,
+            perPage,
+            provider: 'vecteezy',
+        };
+
+        searchCache.set(cacheKey, payload);
+        return payload;
+    }
+
     clearCache() {
         searchCache.clear();
     }
@@ -349,6 +441,7 @@ module.exports = {
     vecteezyService,
     normalizeVideoAsset,
     normalizePhotoAsset,
+    normalizeVectorAsset,
     deriveResourceName,
     MemoryCache,
 };

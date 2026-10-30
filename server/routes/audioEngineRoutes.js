@@ -29,6 +29,7 @@ const {
     SEMANTIC_EVENT_TYPES,
     animationsForEventType,
     sfxIntentsForEventType,
+    rankSFXCandidates,
     layerKindForClip,
     resolveOverlayAnimations,
 }                                 = require('../audio-engine/timeline/AnimationKnowledgeGraph.js');
@@ -225,7 +226,18 @@ router.post('/animate-automatically', authenticateUser, async (req, res) => {
             let sfx = [];
             if (intents.length) {
                 if (!sfxCache.has(event.eventType)) {
-                    sfxCache.set(event.eventType, await taxonomyService.getSFXByIntents(intents, 3));
+                    const [byEvent, byIntent] = await Promise.all([
+                        taxonomyService.getSFXByEvent(event.eventType, 10),
+                        taxonomyService.getSFXByIntents(intents, 10),
+                    ]);
+                    const seen = new Set();
+                    const candidates = [...byEvent, ...byIntent].filter(asset => {
+                        const id = asset?.id || asset?.name;
+                        if (id && seen.has(id)) return false;
+                        if (id) seen.add(id);
+                        return true;
+                    });
+                    sfxCache.set(event.eventType, rankSFXCandidates(event.eventType, candidates, { soft, tone: projectTone }).slice(0, 3));
                 }
                 sfx = sfxCache.get(event.eventType);
             }

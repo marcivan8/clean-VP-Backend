@@ -1229,6 +1229,7 @@ const COMMAND_REGISTRY = new Map([
     ['cut_segment', { compiler: compileCutSegment }],
     ['add_transitions_to_sections', { compiler: compileAddTransitionsToSections }],
     ['resume_failed_job', { compiler: compileAtomicStore('resume_failed_job', 'Continue the last edit from where it stopped') }], // R131
+    ['create_video_from_script', { compiler: compileAtomicStore('create_video_from_script', 'Build a video from the script') }], // R132
 
     // Asset Engine — Creative Asset Intelligence System
     ['search_assets',     { compiler: compileSearchAssets }],

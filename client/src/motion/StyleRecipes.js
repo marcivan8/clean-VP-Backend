@@ -47,7 +47,10 @@ export const STYLE_RECIPES = {
         keywords: false,
         transitions: { cycle: ['dip'], duration: 0.5 },
         rhythmZoom: 'subtle',
-        broll: null,
+        // A calm interview can still use cutaways to clarify a spoken topic;
+        // split keeps the speaker present and avoids a flashy full-screen
+        // interruption.
+        broll: { layout: 'split' },
         numberPops: false,
         phrases: ['podcast', 'podcast clip', 'interview', 'calm', 'calme'],
     },

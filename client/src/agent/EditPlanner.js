@@ -499,6 +499,15 @@ export class EditPlanner {
             case 'detect_scene':    return this.planSingleStep(planId, 'detect_scene', 'Analyse framing and plan camera angles (no timeline changes)');
             case 'apply_angle':     return this.planSingleStep(planId, 'apply_angle', 'Apply the planned camera angles to the clips');
             case 'animate_automatically': return this.planSingleStep(planId, 'animate_automatically', 'Detect and animate the most interesting moments — reveals, punchlines, emphasis, and emotional beats');
+            case 'create_video_from_script': {
+                // The script IS the prompt, same pattern as design_scene's
+                // brief: SceneSegmenter/createVideoFromScript reads the raw
+                // text itself, nothing is decided or stripped here.
+                const script = String(intent.originalPrompt || intent.constraints?.script || '').trim();
+                return this.buildPlan(planId, 'create_video_from_script', [
+                    { step_id: 'step_1', action: 'create_video_from_script', args: { script }, reason: 'Build a cartoonish-style video from this script using stock vectors/video/photo, with no footage needed' },
+                ]);
+            }
             case 'resume_failed_job': return this.planSingleStep(planId, 'resume_failed_job', 'Continue the last edit from where it stopped'); // R131
             case 'reset_crop':  return this.planResetCrop(planId);
             case 'split_speakers': return this.planSplitSpeakers(planId);

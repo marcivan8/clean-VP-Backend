@@ -36,6 +36,8 @@ const {
     graphForEventType,
     animationsForEventType,
     sfxIntentsForEventType,
+    sfxTermsForEventType,
+    rankSFXCandidates,
 } = require(path.join(ROOT, 'server/audio-engine/timeline/AnimationKnowledgeGraph.js'));
 
 section('1 · AnimationKnowledgeGraph — shape matches the feature request');
@@ -80,6 +82,18 @@ section('1 · AnimationKnowledgeGraph — shape matches the feature request');
         animationsForEventType(TimelineEventType.REVEAL, 'text').includes('scale-reveal') &&
         !animationsForEventType(TimelineEventType.REVEAL, 'text').includes('camera-push'));
     check('sfxIntentsForEventType(PUNCHLINE_DETECTED) includes PUNCHLINE', sfxIntentsForEventType(TimelineEventType.PUNCHLINE_DETECTED).includes(EditingIntent.PUNCHLINE));
+    const popularGeneric = { id: 'popular', name: 'generic-pop', use_count: 10000, editing_intents: ['REVEAL'] };
+    const eventFit = { id: 'fit', name: 'chapter-whoosh', use_count: 1, compatible_timeline_events: [TimelineEventType.CHAPTER_START], search_keywords: ['chapter transition whoosh'] };
+    check('event SFX terms and compatibility outrank generic popularity',
+        sfxTermsForEventType(TimelineEventType.CHAPTER_START).includes('whoosh') &&
+        rankSFXCandidates(TimelineEventType.CHAPTER_START, [popularGeneric, eventFit])[0] === eventFit);
+    const neutralTone = { id: 'neutral', name: 'chapter whoosh', compatible_timeline_events: [TimelineEventType.CHAPTER_START], use_count: 100 };
+    const dramaticTone = { id: 'dramatic', name: 'dramatic chapter whoosh', compatible_timeline_events: [TimelineEventType.CHAPTER_START], use_count: 1 };
+    check('cached project tone breaks ties between event-compatible sounds',
+        rankSFXCandidates(TimelineEventType.CHAPTER_START, [neutralTone, dramaticTone], { tone: 'dramatic' })[0] === dramaticTone);
+    const hardPunch = { id: 'hard', name: 'impact-boom', use_count: 100, editing_intents: ['IMPACT'], compatible_timeline_events: [TimelineEventType.PUNCHLINE_DETECTED] };
+    check('soft style ranking excludes impact/comedy intent sounds',
+        !rankSFXCandidates(TimelineEventType.PUNCHLINE_DETECTED, [hardPunch], { soft: true }).length);
 }
 
 section('2 · TimelineEventDetector — PUNCHLINE_DETECTED / EMPHASIS_MOMENT from audio peaks');
@@ -245,7 +259,8 @@ section('5 · backend route wiring (server/routes/audioEngineRoutes.js)');
     check('route requires projectState.tracks', /projectState\.tracks/.test(routes));
     check('route imports timelineEventDetector', /timelineEventDetector/.test(routes));
     check('route imports AnimationKnowledgeGraph helpers', /animationsForEventType/.test(routes) && /sfxIntentsForEventType/.test(routes));
-    check('route calls taxonomyService.getSFXByIntents', /taxonomyService\.getSFXByIntents/.test(routes));
+    check('route fetches event and intent SFX candidates, then ranks by semantic fit',
+        /taxonomyService\.getSFXByEvent/.test(routes) && /taxonomyService\.getSFXByIntents/.test(routes) && /rankSFXCandidates/.test(routes));
     check('route filters to SEMANTIC_EVENT_TYPES only', /SEMANTIC_EVENT_TYPES\.includes/.test(routes));
 
     const indexJs = read('index.js');

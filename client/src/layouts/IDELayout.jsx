@@ -1,7 +1,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap, Smartphone, Film, Lock } from 'lucide-react';
+import { Sparkles, Video, Play, Pause, Layers, Settings, Share, Upload, Palette, Move, X, ChevronLeft, ChevronRight, Zap, Smartphone, Lock } from 'lucide-react';
 import classNames from 'classnames';
 import { Player } from '@revideo/player-react';
 import { Video as RevideoVideo, Audio as RevideoAudio, Media as RevideoMedia } from '@revideo/2d';
@@ -2376,27 +2376,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                     <div className="flex items-center justify-between mb-4">
                                         <div className="studio-mono-label" style={{ color: 'var(--fg-2)' }}>{t('ideLayout.bin', { count: assets.length })}</div>
                                         <div className="flex items-center gap-1.5">
-                                            {/* Stock media button - opens Stock tab in AssetPanel */}
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    if (isFree) {
-                                                        EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
-                                                            reason: 'paid_feature',
-                                                            message: t('assetPanel.stockLockedMessage', 'Stock media is available on Creator and Pro plans.'),
-                                                            upgradeRequired: 'creator',
-                                                        });
-                                                    }
-                                                    setAssetInitialTab('stock');
-                                                    setActiveTab('assets');
-                                                }}
-                                                className="text-[10px] bg-accent/10 hover:bg-accent/20 text-accent px-2 py-1 rounded transition-colors flex items-center gap-1 border border-accent/20"
-                                                style={{ fontFamily: "var(--f-mono)" }}
-                                                title="Pexels Stock Media"
-                                            >
-                                                <Film className="w-3 h-3" /> Stock
-                                                {isFree && <Lock className="w-2.5 h-2.5 ml-0.5" />}
-                                            </button>
                                             {/* Import button — input overlaid directly so Android taps hit the input itself */}
                                             <div className="relative text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-colors flex items-center gap-1" style={{ fontFamily: "var(--f-mono)" }}>
                                                 <Upload className="w-3 h-3" /> {t('ideLayout.import')}

@@ -21,6 +21,8 @@ import { clipsInGroup } from '../../motion/ClipGrouping.js';
 import { getPlayerDimensions } from '../../utils/playerDimensions.js';
 import RotateHandle from './RotateHandle.jsx';
 import ResizeHandle from './ResizeHandle.jsx';
+import useDeviceType from '../../hooks/useDeviceType.js';
+import { scaleFromDistanceRatio } from '../../utils/resizeGesture.js';
 // R92 round C: alignment guides while dragging
 import { computeSnap, startPosition, measureOthers } from '../../motion/SnapGuides.js';
 import { useSnapGuides } from './SnapGuidesLayer.jsx';
@@ -235,6 +237,8 @@ const CaptionWords = ({ content, words, time, reveal, highlight, emphasis, baseC
 const TextOverlay = ({ placementFilter = 'all' }) => {
     const { t } = useTranslation('editor');
     const containerRef = React.useRef(null);
+    const { isMobile, isTouch } = useDeviceType();
+    const useMobileTextGestures = isMobile && isTouch;
 
     // Per-clip gesture state: { pointerId→{clientX,clientY}, initialScale, initialDist }
     const gestureRef = React.useRef({});
@@ -308,17 +312,16 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
     // We use pointer events so the same code handles both mouse and touch.
     // `touch-action: none` on the element prevents the browser from stealing
     // the touch sequence before our handler can call setPointerCapture.
-    // R119: pinch-to-scale was removed — resize is now ONLY the corner
-    // handle, so a second finger landing here is tracked for bookkeeping
-    // but no longer starts a scale gesture. `primaryPointerId` pins the
-    // drag to whichever pointer started it.
+    // Desktop uses the corner resize handles; mobile uses one-finger position
+    // and two-finger scale gestures. `primaryPointerId` pins a position drag
+    // to the pointer that started it.
 
     const handlePointerDown = (e, clip) => {
         e.stopPropagation();
 
         // Capture the pointer so we keep receiving events even if finger
         // leaves the element boundary. Critical on mobile.
-        e.currentTarget.setPointerCapture(e.pointerId);
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* window/container fallback */ }
 
         setActiveClip(clip.id);
 
@@ -336,9 +339,18 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
             state.primaryPointerId = e.pointerId;
             state.dragStartX    = e.clientX;
             state.dragStartY    = e.clientY;
-            // R92: start where the element is DRAWN ('bottom' captions sit at
-            // 85 %), not at 50/50, so the first drag no longer jumps.
-            const startPos      = startPosition(clip);
+            // Start from the element's rendered centre, not its stored base
+            // x/y. Captions with an entrance animation can be visibly offset
+            // from those base coordinates; using the base would make the first
+            // drag snap them backwards on both desktop and mobile.
+            const frameRect = containerRef.current?.getBoundingClientRect();
+            const elementRect = clipElRefs.current[clip.id]?.getBoundingClientRect();
+            const startPos = frameRect?.width > 0 && frameRect?.height > 0 && elementRect
+                ? {
+                    x: ((elementRect.left + elementRect.width / 2 - frameRect.left) / frameRect.width) * 100,
+                    y: ((elementRect.top + elementRect.height / 2 - frameRect.top) / frameRect.height) * 100,
+                }
+                : startPosition(clip);
             state.initialClipX  = startPos.x;
             state.initialClipY  = startPos.y;
             state.mode          = 'drag';
@@ -356,9 +368,8 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
             // R66 — every OTHER member of this clip's group (this clip's own
             // position is already owned by `applyCaptionUpdate` below —
             // unchanged, including its global/individual scope fan-out).
-            // Position only; pinch-to-scale deliberately does NOT fan out to
-            // the group (scaling a bar+text pair together isn't a single
-            // well-defined operation the way "move together" is).
+            // Position only; scaling a bar+text pair together isn't a single
+            // well-defined operation the way "move together" is.
             state.groupMembers = clip.groupId
                 ? clipsInGroup(tracks, clip.groupId)
                     .filter(({ clip: c }) => c.id !== clip.id)
@@ -368,10 +379,18 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
                         initialY: typeof c.y === 'number' ? c.y : 50,
                     }))
                 : null;
+        } else if (pointerCount === 2 && useMobileTextGestures) {
+            // Touch screens use one finger to position and a two-finger pinch
+            // to scale. The desktop corner handles are too small to target
+            // reliably on a phone and overlap short captions at preview size.
+            const [first, second] = Object.values(state.pointers);
+            state.mode = 'pinch';
+            state.primaryPointerId = null;
+            state.pinchStartDistance = Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
+            state.pinchStartScale = Number(clip.scale) || 1;
         }
-        // A second finger landing on the clip is tracked (so pointerUp's
-        // bookkeeping stays correct) but intentionally does nothing else —
-        // resize only happens via the corner handle now (R119).
+        // Desktop ignores extra pointers: resizing is owned by its corner
+        // handles. Mobile switches to pinch scaling on the second pointer.
     };
 
     const handlePointerMove = (e, clip) => {
@@ -383,6 +402,16 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
 
         // Update tracked position for this pointer
         state.pointers[e.pointerId] = { clientX: e.clientX, clientY: e.clientY };
+        if (state.mode === 'pinch') {
+            const points = Object.values(state.pointers);
+            if (points.length < 2) return;
+            const currentDistance = Math.hypot(points[1].clientX - points[0].clientX, points[1].clientY - points[0].clientY);
+            const scale = scaleFromDistanceRatio(state.pinchStartScale, state.pinchStartDistance, currentDistance);
+            state.pendingUpdate = { scale };
+            applyCaptionUpdate({ scale }, { clipId: clip.id, scope: 'individual', skipHistory: true, liveOnly: true });
+            return;
+        }
+        if (state.mode !== 'drag') return;
         // Only the pointer that started the drag drives it — a second
         // finger resting on the clip must not hijack dragStartX/Y.
         if (e.pointerId !== state.primaryPointerId) return;
@@ -416,7 +445,12 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
             const newX = snapped.x;
             const newY = snapped.y;
             state.pendingUpdate = { x: newX, y: newY };
-            applyCaptionUpdate({ x: newX, y: newY }, { clipId: clip.id, skipHistory: true, liveOnly: true });
+            applyCaptionUpdate({ x: newX, y: newY }, {
+                clipId: clip.id,
+                ...(useMobileTextGestures ? { scope: 'individual' } : {}),
+                skipHistory: true,
+                liveOnly: true,
+            });
             // R66 — drag the rest of the group (e.g. a LowerThird's
             // background bar, on a different track) along with the text.
             // Plain updateClip, not applyCaptionUpdate — a bar isn't a
@@ -439,14 +473,22 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
         delete state.pointers[e.pointerId];
 
         const remaining = Object.keys(state.pointers).length;
+        if (remaining === 1 && state.mode === 'pinch') {
+            // Don't jump from a two-finger pinch into a one-finger drag when
+            // the first finger lifts; wait for the remaining finger to lift.
+            state.mode = 'idle';
+            state.primaryPointerId = null;
+        }
         if (remaining === 0) {
-            // Gesture finished — NOW commit at the real scope. In global scope
-            // this is what propagates the final position/scale to every other
-            // caption; mid-gesture only the dragged clip was moving (liveOnly).
-            // Without this commit the canvas would still behave as if the
-            // toggle were always "individual".
+            // Gesture finished — commit the final position/scale once. Desktop
+            // follows the global/individual scope; mobile commits only to the
+            // touched caption because its canvas has no scope toggle.
             if (state.pendingUpdate) {
-                applyCaptionUpdate(state.pendingUpdate, { clipId: clip.id, skipHistory: true });
+                applyCaptionUpdate(state.pendingUpdate, {
+                    clipId: clip.id,
+                    ...(useMobileTextGestures ? { scope: 'individual' } : {}),
+                    skipHistory: true,
+                });
             }
             useSnapGuides.getState().clear();
             // All fingers lifted — clean up
@@ -582,7 +624,7 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
                             />
                         )}
 
-                        {isActive && (
+                        {isActive && !useMobileTextGestures && (
                             <ResizeHandle
                                 getElement={() => clipElRefs.current[clip.id]}
                                 scale={Number(clip.scale) || 1}

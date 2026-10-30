@@ -17,6 +17,7 @@ import BrainPanel from '../BrainPanel.jsx';
 import { useTranslation } from 'react-i18next';
 import { enqueueIfVideoNotReady, drainPromptQueue } from '../../agent/rokaPromptQueue.js';
 import ChatComposer from './ChatComposer.jsx';
+import { withAssistantDocuments } from './assistantDocuments.js';
 
 
 // --- Sub-components ---
@@ -671,6 +672,9 @@ const ReasoningPanel = ({ className }) => {
     const hasCaptionClips = tracks?.some(t => t.clips?.some(c => c.type === 'text' || c.type === 'caption'));
     const { recordDecision } = useUserPreferences();
     const scrollRef = useRef(null);
+    const [referenceDocuments, setReferenceDocuments] = useState([]);
+
+    useEffect(() => setReferenceDocuments([]), [projectId]);
 
     // Single chronological feed: logs and suggestions interleaved by the `_seq`
     // counter stamped in useAIStore when each was created. Rendering them as two
@@ -946,8 +950,13 @@ const ReasoningPanel = ({ className }) => {
     const processCommand = async () => {
         const input = inputRef.current;
         if (!input) return;
-        const command = input.value.trim();
-        if (!command) return;
+        const typedCommand = input.value.trim();
+        if (!typedCommand && referenceDocuments.length === 0) return;
+        const command = withAssistantDocuments(
+            typedCommand,
+            referenceDocuments,
+            t('assistant.documentDefaultPrompt')
+        );
 
         // Dedup guard: ignore if same message submitted < 300 ms ago
         const now = Date.now();
@@ -960,7 +969,7 @@ const ReasoningPanel = ({ className }) => {
             id: 'user-' + now,
             timestamp: new Date().toLocaleTimeString(),
             type: 'info',
-            message: `You: ${command}`
+            message: `You: ${typedCommand || t('assistant.documentDefaultPrompt')}`
         });
 
         // If the agent is waiting for clarification, answer it directly.
@@ -1041,7 +1050,7 @@ const ReasoningPanel = ({ className }) => {
     };
 
     return (
-        <aside className={classNames("w-full h-full border-l border-border bg-card flex flex-col shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.1)]", className)}>
+        <aside className={classNames("relative w-full h-full border-l border-border bg-card flex flex-col shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.1)]", className)}>
             {/* Header */}
             <div className="p-3 border-b flex items-center justify-between" style={{ borderColor: "var(--line-soft)", background: "var(--glass)" }}>
                 <div className="flex items-center gap-2">
@@ -1061,7 +1070,7 @@ const ReasoningPanel = ({ className }) => {
             </div>
 
             {/* Scrollable Content */}
-            <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2 relative scroll-smooth">
+            <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-3 pb-[30rem] space-y-2 relative scroll-smooth">
                 {/* Upload progress cards */}
                 {proxying.map(asset => (
                     <UploadStatusCard key={asset.id} asset={asset} />
@@ -1202,30 +1211,35 @@ const ReasoningPanel = ({ className }) => {
                 />
             </div>
 
-            {/* Persistent Edit Captions chip — visible whenever captions exist */}
-            {hasCaptionClips && (
-                <div className="px-4 pt-2 pb-0 flex" style={{ borderTop: '0.5px solid var(--line-soft)' }}>
-                    <button
-                        onClick={() => setActiveTab('captions')}
-                        className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] transition-colors"
-                        style={{ background: 'color-mix(in oklch, var(--accent) 12%, transparent)', border: '0.5px solid color-mix(in oklch, var(--accent) 35%, transparent)', color: 'var(--accent)', fontFamily: 'var(--f-sans)' }}
-                    >
-                        <Type className="w-2.5 h-2.5" /> {t('assistant.editCaptions')}
-                    </button>
-                </div>
-            )}
+            {/* Floating composer stays above the conversation while the feed scrolls. */}
+            <div className="chat-composer-float">
+                {/* Persistent Edit Captions chip — visible whenever captions exist */}
+                {hasCaptionClips && (
+                    <div className="chat-composer-float__caption pointer-events-auto">
+                        <button
+                            onClick={() => setActiveTab('captions')}
+                            className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] transition-colors"
+                            style={{ background: 'color-mix(in oklch, var(--accent) 12%, transparent)', border: '0.5px solid color-mix(in oklch, var(--accent) 35%, transparent)', color: 'var(--accent)', fontFamily: 'var(--f-sans)' }}
+                        >
+                            <Type className="w-2.5 h-2.5" /> {t('assistant.editCaptions')}
+                        </button>
+                    </div>
+                )}
 
-            {/* Input Area (R110: ChatComposer) */}
-            <div className="p-4 border-t" style={{ borderColor: 'var(--line-soft)', background: 'var(--glass)' }}>
-                <ChatComposer
-                    inputRef={inputRef}
-                    busy={isAnalyzing}
-                    placeholder={isAnalyzing ? t('assistant.rokaWorking') : editingMode === 'auto' ? t('editingStyles.autoPlaceholder') : contextualSuggestion ? t('assistant.tryPlaceholder', { suggestion: contextualSuggestion }) : t('assistant.tellRokaPlaceholder')}
-                    onKeyDown={handleKeyDown}
-                    onSend={processCommand}
-                    onStop={cancelRun}
-                    newlineHint={t('assistant.newlineHint')}
-                />
+                {/* Input Area (R110: ChatComposer) */}
+                <div className="pointer-events-auto">
+                    <ChatComposer
+                        inputRef={inputRef}
+                        busy={isAnalyzing}
+                        placeholder={isAnalyzing ? t('assistant.rokaWorking') : editingMode === 'auto' ? t('editingStyles.autoPlaceholder') : contextualSuggestion ? t('assistant.tryPlaceholder', { suggestion: contextualSuggestion }) : t('assistant.tellRokaPlaceholder')}
+                        onKeyDown={handleKeyDown}
+                        onSend={processCommand}
+                        onStop={cancelRun}
+                        newlineHint={t('assistant.newlineHint')}
+                        documents={referenceDocuments}
+                        onDocumentsChange={setReferenceDocuments}
+                    />
+                </div>
             </div>
 
         </aside>

@@ -35,7 +35,7 @@ export const EDITING_STYLES = {
         rhythmZoom: 'dynamic',
         transition: 'flash',
         targetDuration: null,
-        guidance: 'Talking head: one speaker to camera. Cut silences and filler tightly, keep a fast rhythm with punch-in zooms, bold captions with key words.',
+        guidance: 'Talking head: one speaker to camera. Cut silences and filler tightly, keep a fast rhythm with punch-in zooms, bold captions with key words, and use brief relevant b-roll to illustrate important ideas.',
     },
     interview: {
         id: 'interview',
@@ -45,7 +45,7 @@ export const EDITING_STYLES = {
         rhythmZoom: 'subtle',
         transition: 'dip',
         targetDuration: null,
-        guidance: 'Interview: two or more speakers. Keep questions and answers intact, never cut a speaker mid-sentence, switch angle on the active speaker, clean captions.',
+        guidance: 'Interview: two or more speakers. Keep questions and answers intact, never cut a speaker mid-sentence, switch angle on the active speaker, use restrained relevant b-roll to clarify answers, and keep captions clean.',
     },
     podcast: {
         id: 'podcast',
@@ -55,7 +55,7 @@ export const EDITING_STYLES = {
         rhythmZoom: 'subtle',
         transition: 'dip',
         targetDuration: null,
-        guidance: 'Podcast: long conversation. Remove dead air and filler but keep the natural flow, clear audio, readable captions, calm gentle zooms, no flashy effects.',
+        guidance: 'Podcast: long conversation. Remove dead air and filler but keep the natural flow, clear audio, readable captions, calm gentle zooms, occasional restrained b-roll, and no flashy effects.',
     },
     reel: {
         id: 'reel',
@@ -79,7 +79,7 @@ export const EDITING_STYLES = {
         // down to a fixed duration -- see MediaExecutionEngine.js
         // 'extract_short', which checks this cap, not targetDuration.
         maxDuration: 120,
-        guidance: 'Reel: short social cut, often repurposed from a longer video. Strongest moment first (hook in the first 2 seconds), length follows the source (up to 2 minutes), vertical 9:16, very tight cuts, bold captions.',
+        guidance: 'Reel: short social cut, often repurposed from a longer video. Strongest moment first (hook in the first 2 seconds), length follows the source (up to 2 minutes), vertical 9:16, very tight cuts, bold captions, and fast relevant b-roll cutaways.',
     },
 };
 
@@ -165,16 +165,9 @@ export function buildAutopilotSteps(styleId, request, facts = {}) {
     } else {
         steps.push({ key: 'cleanup', prompt: 'Clean up the video' });
     }
-    // Vlog and Reel guidance both call for illustrative footage over the
-    // dialogue ("cut to b-roll on what is being described" / a Reel's "very
-    // tight cuts" reads flat without any visual variety beyond the talking
-    // head) — match existing footage to the words first, falling back to
-    // stock footage (Pexels) for any moment nothing in the project covers.
-    // See VideoEditorTools.placeContextualBroll's stock fallback. After cuts,
-    // before captions, so cutaway timing is computed on the settled cut.
-    if (style.id === 'vlog' || style.id === 'reel') {
-        steps.push({ key: 'broll', prompt: 'Place b-roll automatically' });
-    }
+    // The style recipe owns cutaway placement for every style. It runs after
+    // captions exist, so word timing is settled and the same contextual path
+    // can fill local-footage gaps from the configured stock provider.
     steps.push({ key: 'captions', prompt: 'Add captions' });
     steps.push({ key: 'recipe', prompt: `Apply the ${style.recipeId} style recipe` });
     // Motion + sound effects: not for the calm styles. A Reel gets the full

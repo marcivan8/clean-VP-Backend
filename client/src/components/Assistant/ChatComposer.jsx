@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
-import { ArrowUp, Square, X, Video, Music, Type } from 'lucide-react';
+import { ArrowUp, Square, X, Video, Music, Type, Plus, FileText } from 'lucide-react';
 import useTimelineStore from '../../store/useTimelineStore';
 import EditingStylePicker from './EditingStylePicker.jsx';
 import { contextChipsFor } from './composerTools.js';
+import { MAX_ASSISTANT_DOCUMENTS, readAssistantDocument } from './assistantDocuments.js';
 
 /**
  * R110 - the assistant's chat box, desktop-first.
@@ -65,8 +66,33 @@ const ContextChips = () => {
     );
 };
 
-const ChatComposer = ({ inputRef, placeholder, busy, onSend, onStop, onKeyDown, newlineHint }) => {
+const ChatComposer = ({ inputRef, placeholder, busy, onSend, onStop, onKeyDown, newlineHint, documents = [], onDocumentsChange }) => {
     const { t } = useTranslation('editor');
+    const fileInputRef = useRef(null);
+    const [readingDocuments, setReadingDocuments] = useState(false);
+    const [documentError, setDocumentError] = useState('');
+
+    const onChooseDocuments = async (event) => {
+        const files = Array.from(event.target.files || []);
+        event.target.value = '';
+        if (!files.length) return;
+        setDocumentError('');
+        const available = MAX_ASSISTANT_DOCUMENTS - documents.length;
+        if (files.length > available) {
+            setDocumentError(t('assistant.documentLimit', { count: MAX_ASSISTANT_DOCUMENTS }));
+            return;
+        }
+        setReadingDocuments(true);
+        try {
+            const parsed = [];
+            for (const file of files) parsed.push(await readAssistantDocument(file));
+            onDocumentsChange([...documents, ...parsed]);
+        } catch (error) {
+            setDocumentError(t(`assistant.${error.code || 'documentReadError'}`));
+        } finally {
+            setReadingDocuments(false);
+        }
+    };
 
     const onInput = (e) => {
         const el = e.target;
@@ -76,6 +102,40 @@ const ChatComposer = ({ inputRef, placeholder, busy, onSend, onStop, onKeyDown, 
 
     return (
         <div className="chat-composer">
+            <div className="chat-composer__attachments">
+                <button
+                    type="button"
+                    className="chat-composer__attach"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={busy || readingDocuments || documents.length >= MAX_ASSISTANT_DOCUMENTS}
+                    aria-label={t('assistant.attachDocument')}
+                    title={t('assistant.attachDocumentHint')}
+                >
+                    {readingDocuments ? <span className="chat-composer__attach-spinner" /> : <Plus className="w-4 h-4" />}
+                </button>
+                <input
+                    ref={fileInputRef}
+                    className="sr-only"
+                    type="file"
+                    accept=".txt,.md,.markdown,.csv,.json,.docx,text/plain,text/markdown,text/csv,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    multiple
+                    onChange={onChooseDocuments}
+                    tabIndex={-1}
+                />
+                {documents.map(document => (
+                    <span key={document.id} className="chat-composer__document" title={document.truncated ? t('assistant.documentTruncated') : document.name}>
+                        <FileText className="w-3 h-3 shrink-0" />
+                        <span className="chat-composer__document-name">{document.name}</span>
+                        <button
+                            type="button"
+                            className="chat-composer__document-remove"
+                            aria-label={t('assistant.removeDocument', { name: document.name })}
+                            onClick={() => onDocumentsChange(documents.filter(item => item.id !== document.id))}
+                        ><X className="w-3 h-3" /></button>
+                    </span>
+                ))}
+            </div>
+            {documentError && <p className="chat-composer__document-error" role="alert">{documentError}</p>}
             <div className="hidden md:block"><ContextChips /></div>
             <textarea
                 ref={inputRef}

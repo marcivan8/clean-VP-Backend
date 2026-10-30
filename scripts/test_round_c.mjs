@@ -121,7 +121,7 @@ await check('text and graphic drags snap, show guides, clear them on release; gu
         assert.match(src, /data-snap-id=\{clip\.id\}/, f);
         assert.match(src, /disabled: e\.altKey/, f);
     }
-    assert.match(read('client/src/components/Player/TextOverlay.jsx'), /const startPos {6}= startPosition\(clip\);/);
+    assert.match(read('client/src/components/Player/TextOverlay.jsx'), /const startPos = frameRect\?\.width > 0[\s\S]*?: startPosition\(clip\);/);
     assert.match(read('client/src/layouts/IDELayout.jsx'), /<SnapGuidesLayer \/>/);
 });
 

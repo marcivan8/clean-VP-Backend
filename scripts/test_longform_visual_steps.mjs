@@ -44,6 +44,22 @@ const baseAnalysis = {
     ok('FULL_BUILD unconditionally gets place_contextual_broll + animate_automatically, after captions');
 }
 
+// A detected motion-graphics request must storyboard graphics across the
+// transcript before automatic animation runs.
+{
+    const plan = LongFormEditPlanner.generatePlan(baseAnalysis, {
+        visualBrief: { wantsContextualBroll: true, wantsMotionGraphics: true },
+    });
+    const actions = plan.steps.map(s => s.action);
+    const graphicsIdx = actions.indexOf('storyboard_video');
+    const animateIdx = actions.indexOf('animate_automatically');
+    const graphics = plan.steps[graphicsIdx];
+    assert.ok(graphicsIdx !== -1, 'explicit motion-graphics brief must create a storyboard step');
+    assert.equal(graphics.args.dryRun, false, 'the storyboard step must place the graphics');
+    assert.ok(graphicsIdx < animateIdx, 'graphics must be placed before automatic animation');
+    ok('explicit motion-graphics requests create a storyboard before automatic animation');
+}
+
 // 2. No color grading without mood language in the brief.
 {
     const plan = LongFormEditPlanner.generatePlan(baseAnalysis, { visualBrief: { wantsContextualBroll: true, wantsMotionGraphics: true, colorMoodQuery: null } });

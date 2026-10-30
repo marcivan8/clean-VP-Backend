@@ -19,6 +19,14 @@ const ok = (name) => log(`✓ ${name}`);
     ok('"visually communicate"/"b-roll"/"cutaway"/"floating card" language is detected');
 }
 
+// Explicit graphics language opts the complete edit into a video-wide storyboard.
+{
+    const brief = 'Add animated callouts for each important idea and use concise labels.';
+    const v = parseVisualBrief(brief);
+    assert.equal(v.wantsMotionGraphics, true);
+    ok('explicit motion-graphics direction is detected for the video storyboard');
+}
+
 // 2. A plain request with none of this language reports nothing.
 {
     const v = parseVisualBrief('remove the silences from my video');

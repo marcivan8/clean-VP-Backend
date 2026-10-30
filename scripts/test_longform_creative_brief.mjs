@@ -20,6 +20,7 @@ const realWarn = console.warn, realInfo = console.info, realLog = console.log;
 console.warn = () => {}; console.info = () => {};
 
 const { IntentParser } = await import('../client/src/agent/IntentParser.js');
+const { LongFormEditPlanner } = await import('../client/src/agent/LongFormEditPlanner.js');
 
 // A condensed excerpt of the real reported brief — same section headers and
 // phrasing as the original multi-section "DYNAMIC CREATOR EDIT" document,
@@ -36,6 +37,7 @@ style of the reference videos provided.
 
 Do not simply add subtitles to the footage. Make the video visually
 communicate the ideas being spoken.
+Use concise motion graphics and callouts to reinforce important ideas.
 
 ## 4. DYNAMIC CAPTIONS
 
@@ -75,6 +77,16 @@ assert.equal(res.constraints.captionBrief.keepClearOfFace, true);
 assert.equal(res.constraints.captionBrief.safeMargins, true);
 assert.equal(res.constraints.captionBrief.stylePresetId, 'clean-modern');
 ok('the caption section\'s detail (emphasis, face-clear, safe margins, style) survives into constraints.captionBrief');
+
+assert.equal(res.constraints.visualBrief.wantsMotionGraphics, true);
+const fullPlan = LongFormEditPlanner.generatePlan({
+    success: true, editMode: 'FULL_BUILD', editPlan: { actions: [] }, segments: [], structure: {}, contentType: 'rushes',
+}, { visualBrief: res.constraints.visualBrief });
+const graphicsStep = fullPlan.steps.find(s => s.action === 'storyboard_video');
+assert.ok(graphicsStep, 'a complete prompt that asks for visual graphics must invoke the video storyboard');
+assert.equal(graphicsStep.args.dryRun, false);
+assert.ok(fullPlan.steps.findIndex(s => s.action === 'storyboard_video') < fullPlan.steps.findIndex(s => s.action === 'animate_automatically'));
+ok('the full creative brief creates graphics across the video, then animates them');
 
 // Regression guard: a short, genuinely single-purpose request mentioning
 // "captions" must still resolve to the plain auto_captions command — this
