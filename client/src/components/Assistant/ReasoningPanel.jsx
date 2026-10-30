@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 import { enqueueIfVideoNotReady, drainPromptQueue } from '../../agent/rokaPromptQueue.js';
 import ChatComposer from './ChatComposer.jsx';
 import { withAssistantDocuments } from './assistantDocuments.js';
+import { withAssistantMedia } from './assistantDocuments.js';
 import RokaWorkingIndicator from './RokaWorkingIndicator.jsx';
 
 
@@ -641,7 +642,7 @@ const CaptionStylesCard = ({ log }) => {
     );
 };
 
-const ReasoningPanel = ({ className }) => {
+const ReasoningPanel = ({ className, onImportMedia }) => {
     const { t } = useTranslation('editor');
     const { logs, suggestions, isAnalyzing, setIsAnalyzing, addLog, addSuggestion, removeSuggestion, contextualSuggestion, quickChips, setActiveTab } = useAIStore();
     // R91: Auto mode changes the input hint (EditingStylePicker below the box);
@@ -658,8 +659,9 @@ const ReasoningPanel = ({ className }) => {
     const { recordDecision } = useUserPreferences();
     const scrollRef = useRef(null);
     const [referenceDocuments, setReferenceDocuments] = useState([]);
+    const [referenceMedia, setReferenceMedia] = useState([]);
 
-    useEffect(() => setReferenceDocuments([]), [projectId]);
+    useEffect(() => { setReferenceDocuments([]); setReferenceMedia([]); }, [projectId]);
 
     // Single chronological feed: logs and suggestions interleaved by the `_seq`
     // counter stamped in useAIStore when each was created. Rendering them as two
@@ -942,12 +944,13 @@ const ReasoningPanel = ({ className }) => {
         const input = inputRef.current;
         if (!input) return;
         const typedCommand = input.value.trim();
-        if (!typedCommand && referenceDocuments.length === 0) return;
-        const command = withAssistantDocuments(
+        if (!typedCommand && referenceDocuments.length === 0 && referenceMedia.length === 0) return;
+        const commandWithDocuments = withAssistantDocuments(
             typedCommand,
             referenceDocuments,
             t('assistant.documentDefaultPrompt')
         );
+        const command = withAssistantMedia(commandWithDocuments, referenceMedia, t('assistant.mediaDefaultPrompt'));
 
         // Dedup guard: ignore if same message submitted < 300 ms ago
         const now = Date.now();
@@ -960,7 +963,7 @@ const ReasoningPanel = ({ className }) => {
             id: 'user-' + now,
             timestamp: new Date().toLocaleTimeString(),
             type: 'info',
-            message: `You: ${typedCommand || t('assistant.documentDefaultPrompt')}`
+            message: `You: ${typedCommand || (referenceDocuments.length ? t('assistant.documentDefaultPrompt') : t('assistant.mediaDefaultPrompt'))}`
         });
 
         // If the agent is waiting for clarification, answer it directly.
@@ -973,10 +976,11 @@ const ReasoningPanel = ({ className }) => {
         }
 
         setIsAnalyzing(true);
-        const { uploadedFile, tracks } = useTimelineStore.getState();
+        const { uploadedFile, tracks, assets: mediaBin } = useTimelineStore.getState();
         const hasClips = tracks?.some(t => t.clips?.length > 0);
+        const hasVisualAssets = (mediaBin || []).some(asset => ['video', 'image'].includes(asset.type) && !asset.assistantReference);
 
-        if (!uploadedFile && !hasClips && !command.toLowerCase().includes('sample')) {
+        if (!uploadedFile && !hasClips && !hasVisualAssets && !command.toLowerCase().includes('sample')) {
             addLog({
                 id: 'agent-err-' + now,
                 timestamp: new Date().toLocaleTimeString(),
@@ -1197,6 +1201,12 @@ const ReasoningPanel = ({ className }) => {
                         newlineHint={t('assistant.newlineHint')}
                         documents={referenceDocuments}
                         onDocumentsChange={setReferenceDocuments}
+                        mediaAttachments={referenceMedia}
+                        onMediaAttachmentsChange={setReferenceMedia}
+                        onImportMedia={async (files) => {
+                            const imported = await onImportMedia?.(files);
+                            return Array.isArray(imported) ? imported : [];
+                        }}
                     />
                 </div>
             </div>

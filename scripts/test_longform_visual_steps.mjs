@@ -1,10 +1,6 @@
-// R125 — FULL_BUILD never placed contextual b-roll or ran automatic motion
-// graphics at all before this, regardless of the brief's explicit "do not
-// simply add subtitles, make the video visually communicate the ideas"
-// instruction. Pins: FULL_BUILD always gets place_contextual_broll +
-// animate_automatically (after captions, so keyword-emphasis detection has
-// text clips to read); color grading only happens when the brief actually
-// used mood/color language; YOUTUBE_OPTIMIZED is opt-in, not unconditional;
+// Pins: FULL_BUILD wires contextual b-roll, illustrations, motion graphics,
+// and automatic animation after captions; color grading only happens when
+// the brief uses mood/color language; YOUTUBE_OPTIMIZED remains opt-in;
 // complete edits do not extract redundant full-frame highlight clips onto
 // another video track.
 import { register } from 'module';
@@ -60,17 +56,20 @@ const baseAnalysis = {
     ok('per-clip symbolic references resolve to a real clip while bulk actions retain fan-out');
 }
 
-// 1. FULL_BUILD always gets b-roll + motion graphics, AFTER captions.
+// 1. FULL_BUILD always gets b-roll, illustrations, graphics and animation, AFTER captions.
 {
     const plan = LongFormEditPlanner.generatePlan(baseAnalysis, {});
     const actions = plan.steps.map(s => s.action);
     const capIdx = actions.indexOf('auto_captions');
     const brollIdx = actions.indexOf('place_contextual_broll');
+    const illustrationsIdx = actions.indexOf('place_contextual_illustrations');
+    const storyboardIdx = actions.indexOf('storyboard_video');
     const animIdx = actions.indexOf('animate_automatically');
-    assert.ok(capIdx !== -1 && brollIdx !== -1 && animIdx !== -1, 'all three steps must be present');
+    assert.ok(capIdx !== -1 && brollIdx !== -1 && illustrationsIdx !== -1 && storyboardIdx !== -1 && animIdx !== -1, 'all creative steps must be present');
     assert.ok(capIdx < brollIdx, 'captions must be generated before b-roll/motion graphics run');
+    assert.ok(brollIdx < illustrationsIdx && illustrationsIdx < storyboardIdx, 'contextual assets should be placed before storyboard motion');
     assert.ok(brollIdx < animIdx, 'b-roll placed before animate_automatically (order in _visualSteps)');
-    ok('FULL_BUILD unconditionally gets place_contextual_broll + animate_automatically, after captions');
+    ok('FULL_BUILD unconditionally gets contextual b-roll, vector illustrations, storyboard graphics and animation after captions');
 }
 
 // A detected motion-graphics request must storyboard graphics across the
@@ -83,7 +82,7 @@ const baseAnalysis = {
     const graphicsIdx = actions.indexOf('storyboard_video');
     const animateIdx = actions.indexOf('animate_automatically');
     const graphics = plan.steps[graphicsIdx];
-    assert.ok(graphicsIdx !== -1, 'explicit motion-graphics brief must create a storyboard step');
+    assert.ok(graphicsIdx !== -1, 'motion graphics must create a storyboard step');
     assert.equal(graphics.args.dryRun, false, 'the storyboard step must place the graphics');
     assert.ok(graphicsIdx < animateIdx, 'graphics must be placed before automatic animation');
     ok('explicit motion-graphics requests create a storyboard before automatic animation');

@@ -25,7 +25,7 @@ import { MAX_ASSISTANT_DOCUMENTS, readAssistantDocument } from './assistantDocum
  * mobile AI bar's expanded view, which has its own strip and no room for them.
  */
 
-const ChatComposer = ({ inputRef, placeholder, busy, onSend, onStop, onKeyDown, newlineHint, documents = [], onDocumentsChange }) => {
+const ChatComposer = ({ inputRef, placeholder, busy, onSend, onStop, onKeyDown, newlineHint, documents = [], onDocumentsChange, mediaAttachments = [], onMediaAttachmentsChange, onImportMedia }) => {
     const { t } = useTranslation('editor');
     const fileInputRef = useRef(null);
     const [readingDocuments, setReadingDocuments] = useState(false);
@@ -36,18 +36,33 @@ const ChatComposer = ({ inputRef, placeholder, busy, onSend, onStop, onKeyDown, 
         event.target.value = '';
         if (!files.length) return;
         setDocumentError('');
+        const docFiles = files.filter(file => /\.(txt|md|markdown|csv|json|docx)$/i.test(file.name));
+        const mediaFiles = files.filter(file => file.type.startsWith('video/') || file.type.startsWith('image/'));
+        const unsupported = files.filter(file => !docFiles.includes(file) && !mediaFiles.includes(file));
+        if (unsupported.length) {
+            setDocumentError(t('assistant.attachmentUnsupported'));
+            return;
+        }
         const available = MAX_ASSISTANT_DOCUMENTS - documents.length;
-        if (files.length > available) {
+        if (docFiles.length > available) {
             setDocumentError(t('assistant.documentLimit', { count: MAX_ASSISTANT_DOCUMENTS }));
             return;
         }
         setReadingDocuments(true);
         try {
             const parsed = [];
-            for (const file of files) parsed.push(await readAssistantDocument(file));
-            onDocumentsChange([...documents, ...parsed]);
+            for (const file of docFiles) parsed.push(await readAssistantDocument(file));
+            if (parsed.length) onDocumentsChange([...documents, ...parsed]);
+            if (mediaFiles.length) {
+                if (!onImportMedia) throw new Error('Media import is unavailable.');
+                const imported = await onImportMedia(mediaFiles);
+                if (imported?.length) {
+                    const additions = imported.map(({ id, name, type }) => ({ id, name, type }));
+                    onMediaAttachmentsChange?.([...mediaAttachments, ...additions.filter(item => !mediaAttachments.some(existing => existing.id === item.id))]);
+                }
+            }
         } catch (error) {
-            setDocumentError(t(`assistant.${error.code || 'documentReadError'}`));
+            setDocumentError(error.code ? t(`assistant.${error.code}`) : (error.message || t('assistant.documentReadError')));
         } finally {
             setReadingDocuments(false);
         }
@@ -66,9 +81,9 @@ const ChatComposer = ({ inputRef, placeholder, busy, onSend, onStop, onKeyDown, 
                     type="button"
                     className="chat-composer__attach"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={busy || readingDocuments || documents.length >= MAX_ASSISTANT_DOCUMENTS}
-                    aria-label={t('assistant.attachDocument')}
-                    title={t('assistant.attachDocumentHint')}
+                    disabled={busy || readingDocuments}
+                    aria-label={t('assistant.attachFiles')}
+                    title={t('assistant.attachFilesHint')}
                 >
                     {readingDocuments ? <span className="chat-composer__attach-spinner" /> : <Plus className="w-4 h-4" />}
                 </button>
@@ -76,7 +91,7 @@ const ChatComposer = ({ inputRef, placeholder, busy, onSend, onStop, onKeyDown, 
                     ref={fileInputRef}
                     className="sr-only"
                     type="file"
-                    accept=".txt,.md,.markdown,.csv,.json,.docx,text/plain,text/markdown,text/csv,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    accept=".txt,.md,.markdown,.csv,.json,.docx,text/plain,text/markdown,text/csv,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document,video/*,image/*"
                     multiple
                     onChange={onChooseDocuments}
                     tabIndex={-1}
@@ -90,6 +105,18 @@ const ChatComposer = ({ inputRef, placeholder, busy, onSend, onStop, onKeyDown, 
                             className="chat-composer__document-remove"
                             aria-label={t('assistant.removeDocument', { name: document.name })}
                             onClick={() => onDocumentsChange(documents.filter(item => item.id !== document.id))}
+                        ><X className="w-3 h-3" /></button>
+                    </span>
+                ))}
+                {mediaAttachments.map(asset => (
+                    <span key={asset.id} className="chat-composer__document" title={asset.name}>
+                        <FileText className="w-3 h-3 shrink-0" />
+                        <span className="chat-composer__document-name">{asset.name}</span>
+                        <button
+                            type="button"
+                            className="chat-composer__document-remove"
+                            aria-label={t('assistant.removeDocument', { name: asset.name })}
+                            onClick={() => onMediaAttachmentsChange?.(mediaAttachments.filter(item => item.id !== asset.id))}
                         ><X className="w-3 h-3" /></button>
                     </span>
                 ))}

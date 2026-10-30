@@ -36,6 +36,24 @@ const PP = await import('../client/src/agent/PlatformProfiles.js');
 const { resolveMotionAt } = await import('../client/src/motion/MotionResolver.js');
 const { clipToMotionLayer } = await import('../client/src/motion/ClipAdapter.js');
 
+await check('segment auto-preview does not leave a delayed timer that can pause later playback', () => {
+    const engine = read('client/src/agent/MediaExecutionEngine.js');
+    const start = engine.indexOf('_applySegmentsToTimeline(');
+    const end = engine.indexOf('async verifyExecution(job)', start);
+    const body = engine.slice(start, end);
+    assert.match(body, /freshStore\.setIsPlaying\(true\)/, 'the updated section should preview after a re-cut');
+    assert.doesNotMatch(body, /setTimeout\([\s\S]{0,180}setIsPlaying\(false\)/, 'a stale four-second timer can pause playback after Auto finishes');
+});
+
+await check('clarification UI closes when an answer starts from the chat command box', () => {
+    const hook = read('client/src/hooks/useClarificationDialog.js');
+    const workflow = read('client/src/agent/WorkflowController.js');
+    assert.match(hook, /on\(EVENT_TYPES\.CLARIFICATION_PROVIDED[\s\S]{0,150}setRequest\(null\)/,
+        'the modal does not listen for answers submitted outside its own controls');
+    assert.match(workflow, /submitClarification\(answers\)[\s\S]{0,350}CLARIFICATION_PROVIDED/,
+        'the workflow does not notify the modal when a clarification answer is submitted');
+});
+
 // ── 1. Caption parity ────────────────────────────────────────────────────────
 log('\n1 · Caption parity');
 const base = { id: 'v', type: 'video', clips: [{ id: 'b', start: 0, duration: 4, offset: 0 }] };

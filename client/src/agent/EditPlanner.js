@@ -501,6 +501,9 @@ export class EditPlanner {
             case 'detect_scene':    return this.planSingleStep(planId, 'detect_scene', 'Analyse framing and plan camera angles (no timeline changes)');
             case 'apply_angle':     return this.planSingleStep(planId, 'apply_angle', 'Apply the planned camera angles to the clips');
             case 'animate_automatically': return this.planSingleStep(planId, 'animate_automatically', 'Detect and animate the most interesting moments — reveals, punchlines, emphasis, and emotional beats');
+            case 'place_contextual_illustrations': return this.buildPlan(planId, 'place_contextual_illustrations', [
+                { step_id: 'step_1', action: 'place_contextual_illustrations', args: { max: 4 }, reason: 'Add animated vector illustrations where the transcript matches a supported subject' },
+            ]);
             case 'create_video_from_script': {
                 // The script IS the prompt, same pattern as design_scene's
                 // brief: SceneSegmenter/createVideoFromScript reads the raw
@@ -508,6 +511,16 @@ export class EditPlanner {
                 const script = String(intent.originalPrompt || intent.constraints?.script || '').trim();
                 return this.buildPlan(planId, 'create_video_from_script', [
                     { step_id: 'step_1', action: 'create_video_from_script', args: { script }, reason: 'Build a cartoonish-style video from this script using stock vectors/video/photo, with no footage needed' },
+                ]);
+            }
+            case 'create_video_from_assets': {
+                const request = String(intent.originalPrompt || '').trim();
+                const asksForImages = /\b(images?|photos?|pictures?|photographs?)\b|\b(images|photos|photographies)\b/i.test(request);
+                const referenceOnly = /\b(?:brand ?kit|logo|reference image|mood ?board|style guide|inspiration image)\b/i.test(request)
+                    && !/\b(?:include|use|build|make|create|turn).{0,24}\b(?:image|photo|logo)\b/i.test(request);
+                const includeImages = !/\bvideo(?:s| clips?)? only\b/i.test(request) && (!referenceOnly || asksForImages);
+                return this.buildPlan(planId, 'create_video_from_assets', [
+                    { step_id: 'step_1', action: 'create_video_from_assets', args: { includeImages }, reason: 'Build a visual montage from the user’s uploaded media assets' },
                 ]);
             }
             case 'resume_failed_job': return this.planSingleStep(planId, 'resume_failed_job', 'Continue the last edit from where it stopped'); // R131

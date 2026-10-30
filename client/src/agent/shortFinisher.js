@@ -231,6 +231,39 @@ export async function finishShort(state, short, opts = {}) {
         title: false, captions: false, camera: false, numbers: false, cuts: false,
     };
     const polished = polishShort(built, profile, { words, events, plan, scenePlan, popOut: !!opts.popOut, layers });
+    // Keep the Shorts panel's generated timeline in parity with the main
+    // Pro Finish path: use upload-time visual matches as small, speaker-safe
+    // cutaway overlays at the local planner's timed beats.
+    const placements = [];
+    const usedAssets = new Set();
+    for (const moment of (scenePlan?.brollMoments || [])) {
+        const at = Number(moment?.start);
+        if (!Number.isFinite(at) || at < 0 || at >= built.duration - 0.4) continue;
+        const asset = (moment.assetIds || []).map(id => (state.assets || []).find(a => a.id === id)).find(Boolean);
+        if (!asset || usedAssets.has(asset.id)) continue;
+        usedAssets.add(asset.id);
+        const rawType = String(asset.type || asset.mediaType || '').toLowerCase();
+        const mediaType = rawType.startsWith('video') ? 'video' : rawType.startsWith('image') ? 'image' : '';
+        if (!mediaType) continue;
+        const url = asset.proxyUrl || asset.url || asset.sourceUrl || asset.src;
+        if (!url) continue;
+        const duration = Math.max(0.5, Math.min(1.8, Number(moment.end) > at ? Number(moment.end) - at : 1.5, built.duration - at));
+        placements.push({
+            id: `short-broll-${placements.length}`, type: mediaType,
+            assetId: asset.id, name: asset.name || 'Contextual b-roll',
+            url, sourceUrl: url, thumbnail: asset.thumbnail,
+            metadata: asset.resolution ? { resolution: asset.resolution } : {},
+            start: at, duration, x: 78, y: 24, scale: 1, rotation: 0, opacity: 1,
+        });
+        if (placements.length >= 2) break;
+    }
+    if (placements.length) {
+        const overlay = polished.tracks.find(track => track.type === 'overlay' && track.id === 'track-short-broll')
+            || { id: 'track-short-broll', type: 'overlay', name: 'B-roll', clips: [] };
+        overlay.clips.push(...placements);
+        if (!polished.tracks.includes(overlay)) polished.tracks.push(overlay);
+        polished.applied.push(`contextual b-roll (${placements.length})`);
+    }
     if (opts.sfx !== false) {
         const style = opts.editingStyle || state.editingStyle;
         const level = ['interview', 'podcast'].includes(style) ? 'none' : style === 'talking_head' ? 'subtle' : profile.sfx;

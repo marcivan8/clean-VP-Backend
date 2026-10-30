@@ -45,6 +45,10 @@ import { flattenScene } from '../motion/SceneSchema.js';
 // instead of only ever reachable through the manual "design_scene" command.
 // See the "1. Hook title" and "1b. CTA outro" sections below.
 import { composeSceneFromBrief } from '../motion/SceneDirector.js';
+import { iconFromText } from '../motion/IconLibrary.js';
+import { VECTOR_ILLUSTRATIONS } from '../motion/VectorIllustrationLibrary.js';
+import { templateSize } from '../motion/TemplateGraphics.js';
+import { applyPresetToClip } from '../motion/ClipAdapter.js';
 
 const STOP = new Set(('a an the and or but so to of in on at for with is are was were be been it this that these those i you we they he she my your our their me us them ' +
     'just really very like um uh then also do does did have has had will would can could should not no yes if about from as by here ' +
@@ -883,6 +887,43 @@ export function polishShort(built, profile, opts = {}) {
             if (placements.length) count += 1;
         }
         if (count) applied.push(`timed story graphics (${count})`);
+    }
+
+    // 4b. Contextual vector illustrations. Only add an icon when the scene
+    // text names a subject supported by the vector library; avoid generic
+    // decorative icons that would add noise without explaining the beat.
+    if (want.title && Array.isArray(opts.scenePlan?.timedMoments)) {
+        const treatment = profile?.id === 'tiktok' ? 'burst' : 'badge';
+        const background = treatment === 'burst' ? 'radial-burst' : 'gradient-orb';
+        const accent = look.accent;
+        const picks = [];
+        for (const moment of opts.scenePlan.timedMoments) {
+            const at = Number(moment?.start);
+            if (!Number.isFinite(at) || at < hookSpan + 0.4 || at >= duration - 0.8) continue;
+            const icon = iconFromText(moment.text);
+            if (!icon || picks.some(item => item.icon === icon || Math.abs(item.start - at) < 5)) continue;
+            if (!VECTOR_ILLUSTRATIONS.some(item => item.icon === icon && item.treatment === treatment)) continue;
+            picks.push({ icon, start: at });
+            if (picks.length >= 3) break;
+        }
+        if (picks.length) {
+            const track = trackOf(tracks, 'overlay', 'track-short-illustrations', 'Illustrations');
+            picks.forEach((item, index) => {
+                const params = { icon: item.icon, treatment, background, accent };
+                const size = templateSize('icon', params);
+                const clip = {
+                    id: `short-illustration-${index}`,
+                    type: 'template', name: `${item.icon} illustration`,
+                    template: { kind: 'icon', params },
+                    metadata: { resolution: { w: size.w, h: size.h } },
+                    start: item.start, duration: Math.min(2.2, duration - item.start),
+                    x: index % 2 ? 18 : 82, y: 24, scale: 1, rotation: 0, opacity: 1,
+                };
+                Object.assign(clip, applyPresetToClip(clip, 'stkr-float-up', { intensity: 0.42 }));
+                track.clips.push(clip);
+            });
+            applied.push(`contextual vector illustrations (${picks.length})`);
+        }
     }
 
     // 5. Transitions on real cuts

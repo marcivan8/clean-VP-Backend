@@ -1023,6 +1023,7 @@ export class VideoEditorTools {
             case 'smart_cleanup': return await this.smartCleanup(action.args, action.signal);
             case 'find_hook': return await this.findHook();
             case 'place_contextual_broll': return await this.placeContextualBroll(action.args, action.signal);
+            case 'place_contextual_illustrations': return this.placeContextualIllustrations(action.args);
             case 'fetch_stock_broll': return await this.fetchStockBroll(action.args, action.signal);
             case 'remove_repetition': return await this.removeRepetition(action.args);
             case 'reorder_clips': return await this.reorderClips(action.args, action.signal);
@@ -1031,6 +1032,7 @@ export class VideoEditorTools {
             case 'identify_quotable_moments': return await this.identifyQuotableMoments(action.args);
             case 'add_transitions_to_sections': return await this.addTransitionsToSections(action.args);
             case 'create_video_from_script': return await this.createVideoFromScript(action.args, action.signal);
+            case 'create_video_from_assets': return this.createVideoFromAssets(action.args);
 
             // Asset Engine — Creative Asset Intelligence System
             case 'search_assets':     return await this.searchAssets(action.args);
@@ -2991,6 +2993,109 @@ export class VideoEditorTools {
             console.error('[VideoEditorTools] addTransitionsToSections error:', error);
             return { success: false, message: `Could not add transitions: ${error.message}` };
         }
+    }
+
+    /** Build a visual montage from uploaded media when no narration is needed. */
+    createVideoFromAssets(args = {}) {
+        const initial = useTimelineStore.getState();
+        const visualTrackClips = (initial.tracks || []).filter(track => track.type === 'video')
+            .flatMap(track => (track.clips || []).map(clip => ({ track, clip })))
+            .filter(({ clip }) => ['video', 'image'].includes(clip.type))
+            .sort((a, b) => (Number(a.clip.start) || 0) - (Number(b.clip.start) || 0));
+        const uploadedVisuals = (initial.assets || []).filter(asset =>
+            ['video', 'image'].includes(asset.type) && !asset.provider && !asset.assistantReference && (asset.userUploaded || asset.file || /^asset-/.test(String(asset.id)))
+        );
+        const videoAssets = uploadedVisuals.filter(asset => asset.type === 'video');
+        const sourceAssets = args.includeImages === false && videoAssets.length
+            ? videoAssets
+            : uploadedVisuals;
+
+        if (!visualTrackClips.length && !sourceAssets.length) {
+            return { success: false, message: 'There are no uploaded images or videos to assemble. Import visual assets into the Media Bin first.' };
+        }
+
+        const style = initial.editingStyle || 'talking_head';
+        const transition = ['podcast', 'interview', 'vlog'].includes(style) ? 'dip' : 'whip-left';
+        let created = 0;
+        let animatedStills = 0;
+        let transitions = 0;
+        initial.beginHistoryGroup();
+        try {
+            let targets = visualTrackClips;
+            if (!targets.length) {
+                let state = useTimelineStore.getState();
+                let track = state.tracks.find(item => item.type === 'video');
+                const trackId = track?.id || state.addTrack('video', { skipHistory: true });
+                let cursor = 0;
+                targets = [];
+                for (const asset of sourceAssets) {
+                    const url = asset.proxyUrl || asset.url || asset.sourceUrl;
+                    if (!url) continue;
+                    const duration = asset.type === 'image'
+                        ? Math.max(2, Math.min(6, Number(args.imageDuration) || 4))
+                        : Math.max(0.5, Number(asset.duration || asset.sourceDuration) || 5);
+                    const clipId = `clip_montage_${Date.now()}_${created}_${Math.random().toString(36).slice(2, 7)}`;
+                    const clip = {
+                        id: clipId,
+                        assetId: asset.id,
+                        type: asset.type,
+                        name: asset.name || `Shot ${created + 1}`,
+                        url,
+                        sourceUrl: asset.sourceUrl || asset.proxyUrl || url,
+                        sourceDuration: Number(asset.duration || asset.sourceDuration) || duration,
+                        start: cursor,
+                        duration,
+                        volume: asset.type === 'video' ? 1 : 0,
+                    };
+                    useTimelineStore.getState().addClip(trackId, clip, { skipHistory: true });
+                    const placedClip = useTimelineStore.getState().tracks
+                        .find(item => item.id === trackId)?.clips
+                        ?.find(item => item.clipId === clipId);
+                    if (!placedClip) continue;
+                    if (asset.type === 'image') {
+                        // The legacy addClip placement defaults `volume: 0` back
+                        // to 1, so explicitly mute stills after placement.
+                        useTimelineStore.getState().updateClip(trackId, placedClip.id, { volume: 0 }, { skipHistory: true });
+                    }
+                    targets.push({ track: { id: trackId }, clip: placedClip });
+                    created++;
+                    cursor += duration;
+                }
+            }
+
+            const liveTargets = targets.map(({ track, clip }) => {
+                const state = useTimelineStore.getState();
+                const owner = state.tracks.find(item => item.id === track.id);
+                return owner?.clips?.find(item => item.id === clip.id)
+                    ? { trackId: owner.id, clip: owner.clips.find(item => item.id === clip.id) }
+                    : { trackId: track.id, clip };
+            });
+            for (let i = 0; i < liveTargets.length; i++) {
+                const { trackId, clip } = liveTargets[i];
+                if (clip.type === 'image' && !(clip.keyframes?.scale?.length)) {
+                    const duration = Math.max(0.5, Number(clip.duration) || 4);
+                    useTimelineStore.getState().addTransformKeyframe(clip.id, 'scale', 0, 1, 'linear');
+                    useTimelineStore.getState().addTransformKeyframe(clip.id, 'scale', duration, 1.1, 'linear');
+                    animatedStills++;
+                }
+                if (i < liveTargets.length - 1 && !clip.transition) {
+                    const duration = Math.min(transition === 'dip' ? 0.5 : 0.36, Math.max(0.15, (Number(clip.duration) || 1) / 3));
+                    useTimelineStore.getState().addTransition(clip.id, transition, duration);
+                    transitions++;
+                }
+            }
+        } finally {
+            useTimelineStore.getState().endHistoryGroup();
+        }
+
+        const count = visualTrackClips.length || created;
+        return {
+            success: count > 0,
+            message: count > 0
+                ? `Assembled ${count} visual shot(s)${animatedStills ? `, added gentle motion to ${animatedStills} still image(s)` : ''}${transitions ? `, and applied ${transitions} transitions` : ''}. One undo reverts the montage.`
+                : 'I could not find any uploaded images or videos with playable media in the Media Bin.',
+            details: { created, usedTimelineClips: visualTrackClips.length, animatedStills, transitions },
+        };
     }
 
     /**

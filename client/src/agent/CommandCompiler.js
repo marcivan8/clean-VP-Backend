@@ -1174,6 +1174,7 @@ const COMMAND_REGISTRY = new Map([
     ['design_scene',              { compiler: compileAtomicStore('design_scene', 'Design a graphics sequence from the brief') }],
     ['set_brand_kit',             { compiler: compileAtomicStore('set_brand_kit', 'Store the brand colours and fonts') }],
     ['storyboard_video',          { compiler: compileAtomicStore('storyboard_video', 'Plan and place graphics across the whole video') }],
+    ['place_contextual_illustrations', { compiler: compileAtomicStore('place_contextual_illustrations', 'Place contextual animated vector illustrations') }],
     ['sync_cutaways',             { compiler: compileAtomicStore('sync_cutaways', 'Place cutaways and number pops on the words') }],
     ['extract_short',             { compiler: compileAtomicStore('extract_short', 'Keep the strongest moment as a short') }],
     ['apply_style_recipe',        { compiler: compileAtomicStore('apply_style_recipe', 'Apply a style recipe') }],
@@ -1255,6 +1256,7 @@ const COMMAND_REGISTRY = new Map([
     ['add_transitions_to_sections', { compiler: compileAddTransitionsToSections }],
     ['resume_failed_job', { compiler: compileAtomicStore('resume_failed_job', 'Continue the last edit from where it stopped') }], // R131
     ['create_video_from_script', { compiler: compileAtomicStore('create_video_from_script', 'Build a video from the script') }], // R132
+    ['create_video_from_assets', { compiler: compileAtomicStore('create_video_from_assets', 'Build a video from uploaded images and footage') }],
 
     // Asset Engine — Creative Asset Intelligence System
     ['search_assets',     { compiler: compileSearchAssets }],

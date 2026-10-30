@@ -312,6 +312,7 @@ app.use('/api/health',  require('./routes/dataHealthRoutes')); // Dependency-tab
 app.use('/api/polar',    require('./routes/polarWebhook'));   // Polar subscription webhooks
 app.use('/api/checkout', require('./routes/polarWebhook'));  // alias: /api/checkout/create
 app.use('/api/projects',   require('./routes/projectRoutes'));   // Project thumbnail upload
+app.use('/api/assets', uploadLimiter, require('./routes/mediaAssetRoutes')); // User image assets for timeline and chat
 app.use('/api/interview', interviewLimiter, require('./routes/interviewRoutes')); // Interview/podcast smart editing
 app.use('/api/vision', interviewLimiter, require('./routes/objectIntelligenceRoutes')); // R67 — Object Intelligence (SAM2 speaker/background separation)
 app.use('/api/waveform',  waveformLimiter,  require('./routes/waveformRoutes'));  // Waveform peak data extraction

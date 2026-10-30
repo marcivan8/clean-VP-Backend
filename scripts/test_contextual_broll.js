@@ -372,8 +372,10 @@ section('10 · R78 — client upload flow queues image analysis (IDELayout.jsx)'
     const ideSrc = read('client/src/layouts/IDELayout.jsx');
     check('an image branch exists alongside the video (isVideo) branch', /\} else if \(file\.type\.startsWith\('image'\)\) \{/.test(ideSrc));
     check('the image branch reads the file as base64 via FileReader', /reader\.readAsDataURL\(file\)/.test(ideSrc));
-    check('the image branch POSTs to the SAME /api/brain/analyze-asset endpoint the video branch uses, with imageBase64 instead of gcsPath',
-        /analyze-asset'[\s\S]{0,400}imageBase64,/.test(ideSrc));
+    check('the image branch stores the image and analyzes it by gcsPath, with inline imageBase64 as a storage-failure fallback',
+        ideSrc.includes("authFetch('/api/assets/image'") && ideSrc.includes('Object.assign(assetEntry, persistedImage)')
+            && ideSrc.includes('analysis.gcsPath = gcsPath') && ideSrc.includes('analysis.imageBase64 = imageBase64')
+            && ideSrc.includes("authFetch('/api/brain/analyze-asset'"));
     check('oversized images are skipped with a warning rather than sent (named byte cap, not silently truncated)',
         /MAX_IMAGE_ANALYSIS_BYTES/.test(ideSrc) && /too large for automatic content analysis/.test(ideSrc));
 }

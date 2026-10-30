@@ -89,6 +89,21 @@ const ok = (name) => realLog(`✓ ${name}`);
 }
 
 {
+    for (const text of [
+        'make a montage from my media',
+        'create a silent video from my media',
+        'create a video from the attached images and video clips',
+        'créer une vidéo à partir des images et des vidéos jointes',
+        'turn these event photos into a video',
+        'assemble my event footage',
+    ]) {
+        const intent = await IntentParser.parse(text);
+        assert.equal(intent.operation, 'create_video_from_assets', `"${text}" resolved to "${intent.operation}"`);
+    }
+    ok('silent visual briefs and event footage route to the uploaded-media montage operation');
+}
+
+{
     // Regression guard: must not hijack storyboard_video's own vocabulary.
     const intent = await IntentParser.parse('storyboard this video');
     assert.notEqual(intent.operation, 'create_video_from_script');
@@ -117,6 +132,39 @@ function mockFetchFor({ vectorHits = true, videoHits = true, photoHits = true } 
         }
         return makeOk([]);
     };
+}
+
+{
+    useTimelineStore.setState({ tracks: [], assets: [
+        { id: 'still-1', type: 'image', userUploaded: true, name: 'arrival.jpg', url: '/media/arrival.jpg' },
+        { id: 'event-1', type: 'video', userUploaded: true, name: 'ceremony.mp4', url: '/media/ceremony.mp4', duration: 8 },
+    ], past: [], future: [] });
+    const tools = new VideoEditorTools();
+    const r = await tools.execute({ name: 'create_video_from_assets', args: { includeImages: true } });
+    assert.equal(r.success, true, r.message);
+
+
+    const clips = useTimelineStore.getState().tracks.find(track => track.type === 'video')?.clips || [];
+    assert.deepEqual(clips.map(clip => clip.assetId), ['still-1', 'event-1']);
+    assert.equal(clips[0].duration, 4);
+    assert.equal(clips[0].volume, 0);
+    assert.equal(clips[1].volume, 1);
+    assert.equal(r.details.animatedStills, 1);
+    assert.equal(r.details.transitions, 1);
+    ok('uploaded stills and silent event footage become a timed montage with gentle motion and a transition');
+}
+
+{
+    useTimelineStore.setState({ tracks: [], assets: [
+        { id: 'reference-video', type: 'video', userUploaded: true, assistantReference: true, name: 'reference.mp4', url: '/media/reference.mp4', duration: 7 },
+        { id: 'source-video', type: 'video', userUploaded: true, name: 'event.mp4', url: '/media/event.mp4', duration: 9 },
+    ], past: [], future: [] });
+    const tools = new VideoEditorTools();
+    const r = await tools.execute({ name: 'create_video_from_assets', args: { includeImages: true } });
+    assert.equal(r.success, true, r.message);
+    const clips = useTimelineStore.getState().tracks.find(track => track.type === 'video')?.clips || [];
+    assert.deepEqual(clips.map(clip => clip.assetId), ['source-video']);
+    ok('chat-attached reference video guides the edit without being inserted into the source footage sequence');
 }
 
 {

@@ -163,3 +163,6 @@ function setupThreeClips(projectId = 'proj-1') {
 }
 
 realLog('\nALL RESUME FAILED JOB TESTS PASSED');
+// The imported timeline/engine modules keep background listeners alive; this
+// standalone regression script should exit once its assertions have finished.
+process.exit(0);

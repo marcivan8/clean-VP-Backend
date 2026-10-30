@@ -15,7 +15,7 @@ import { editJobManager } from './EditJobManager.js';
 import { buildAutopilotSteps, getEditingStyle } from './EditingStyles.js';
 
 const STEP_LABEL = {
-    captions: 'captions', transcript: 'transcript', short: 'best moment kept', vertical: 'vertical 9:16', request: 'your request',
+    captions: 'captions', transcript: 'transcript', short: 'best moment kept', vertical: 'vertical 9:16', request: 'your request', montage: 'visual montage',
     silences: 'silences removed', fillers: 'filler words removed', audio: 'audio levelled', recipe: 'style recipe',
     broll: 'b-roll placed',
 };
@@ -49,7 +49,29 @@ export async function runAutopilot(request, opts = {}) {
     // transcription on upload), not caption clips: it is what Reel needs to
     // pick its moment. Caption clips are always (re)placed after the cuts.
     const hasTranscript = Array.isArray(store.captions) && store.captions.length > 0;
-    const steps = buildAutopilotSteps(styleId, request, { hasTranscript });
+    const visualClips = (store.tracks || []).filter(track => track.type === 'video').flatMap(track => track.clips || [])
+        .filter(clip => ['video', 'image'].includes(clip.type));
+    const visualAssets = (store.assets || []).filter(asset => ['video', 'image'].includes(asset.type) && !asset.provider && !asset.assistantReference);
+    const explicitSilent = /\b(silent|without (?:speech|dialogue|voice)|no (?:speech|dialogue|voice)|without narration|sans (?:parole|voix|dialogue))\b/i.test(request);
+    const imageOnlyProject = [...visualClips.map(clip => clip.type), ...visualAssets.map(asset => asset.type)].length > 0
+        && [...visualClips.map(clip => clip.type), ...visualAssets.map(asset => asset.type)].every(type => type === 'image');
+    const visualOnly = !hasTranscript && (explicitSilent || imageOnlyProject);
+    const hasVideoSource = visualClips.some(clip => clip.type === 'video') || visualAssets.some(asset => asset.type === 'video');
+    const hasBrandReference = /\b(brand|logo|reference|mood ?board|inspiration|style guide)\b/i.test(request)
+        || visualAssets.some(asset => asset.type === 'image' && /\b(brand|logo|kit|reference|mood.?board|inspiration|style.?guide)\b/i.test(asset.name || ''));
+    const videoOnly = /\b(video(?:s| clips?)? only|use only the video)\b/i.test(request)
+        || (hasBrandReference && hasVideoSource);
+    let steps = buildAutopilotSteps(styleId, request, {
+        hasTranscript,
+        visualOnly,
+        videoOnly,
+    });
+    if (!visualClips.length && visualAssets.length && steps.length && steps[0].key !== 'montage') {
+        steps = [{
+            key: 'montage',
+            prompt: videoOnly ? 'Create a video from the uploaded video clips only' : 'Create a video from the uploaded images and event footage',
+        }, ...steps];
+    }
     const intro = getEditingStyle(chosen) ? '' : 'No style picked, so Talking head was used. ';
 
     stopRequested = false;

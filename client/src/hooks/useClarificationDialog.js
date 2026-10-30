@@ -14,7 +14,14 @@ export function useClarificationDialog() {
             console.log('[useClarificationDialog] Received request', payload);
             setRequest(payload);
         });
-        return unsubscribe;
+        const unsubscribeProvided = EventBus.on(EVENT_TYPES.CLARIFICATION_PROVIDED, () => {
+            setRequest(null);
+            setIsProcessing(false);
+        });
+        return () => {
+            unsubscribe();
+            unsubscribeProvided();
+        };
     }, []);
 
     const submit = useCallback((answers) => {

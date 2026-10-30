@@ -11,6 +11,7 @@ globalThis.fetch = async () => ({ ok: false, status: 503, json: async () => ({})
 const log = console.log; console.log = () => {}; console.warn = () => {}; console.info = () => {};
 
 const { default: useTimelineStore } = await import('../client/src/store/useTimelineStore.js');
+const { default: useAIStore } = await import('../client/src/store/useAIStore.js');
 const { IntentParser } = await import('../client/src/agent/IntentParser.js');
 const { EditPlanner, colorLookQuery } = await import('../client/src/agent/EditPlanner.js');
 const { CommandCompiler } = await import('../client/src/agent/CommandCompiler.js');
@@ -75,6 +76,13 @@ for (const [p, q] of [['color grade', 'cinematic'], ['make it cinematic', 'cinem
 }
 assert.equal(colorLookQuery({ style: 'teal orange' }, 'whatever'), 'teal orange');
 log('✓ colour grade → a LUT look (preview + export), default "cinematic"');
+
+useAIStore.getState().clearSession();
+useAIStore.getState().addLog({ id: 'clarification-test', type: 'assistant', message: 'Which style?' });
+useAIStore.getState().addLog({ id: 'chat-test', type: 'info', message: 'Keep this chat message' });
+useAIStore.getState().clearClarificationLogs();
+assert.deepEqual(useAIStore.getState().logs.map(l => l.id), ['chat-test'], 'running the clarified command should remove its clarification card and keep conversation history');
+log('✓ answered clarification cards are dismissed without clearing chat history');
 
 for (const p of ['repetition', 'repetitions', 'remove repetition', 'cut repetition', 'cut repetitions', 'enlever les répétitions', 'supprimer les répétitions']) {
     r = await run(p);

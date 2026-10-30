@@ -68,6 +68,8 @@ await check('each editing style recipe can place transcript-matched vector illus
 });
 await check('generic requests and questions', () => {
     for (const t of ['edit it', 'Edit the video', 'go', '', 'monte la vidéo', 'vas-y', 'fais le montage']) assert.ok(ES.isGenericEditRequest(t), t);
+    assert.ok(ES.isGenericEditRequest('edit it\n\nReference media supplied by the user for guidance only (not source footage):\n- rush.mp4 (video, reference asset id: asset-1)'));
+    assert.ok(ES.isGenericEditRequest('Edit my video.\n\nReference media supplied by the user for guidance only (not source footage):\n- rush.mp4 (video, reference asset id: asset-1)'));
     for (const t of ['cut the intro', 'edit it but keep the jokes']) assert.ok(!ES.isGenericEditRequest(t), t);
     for (const t of ['what is this video about?', 'why did you cut that', 'pourquoi tu as coupé']) assert.ok(ES.isQuestion(t), t);
     assert.ok(!ES.isQuestion('remove silences'));
@@ -89,6 +91,8 @@ await check('playbooks: cuts first, captions after them, levelling after cuts', 
     assert.deepEqual(keys('talking_head', 'animate it'), ['request']);
     assert.deepEqual(keys('podcast', 'remove the repetitions'), ['request']);
     assert.deepEqual(keys('nope'), []);
+    assert.deepEqual(keys('talking_head', 'edit it', { hasTranscript: false, visualOnly: true }), ['montage']);
+    assert.deepEqual(keys('reel', 'edit it', { hasTranscript: false, visualOnly: true }), ['montage', 'vertical']);
 });
 await check('pacing per style', () => {
     assert.ok(ES.stylePacing('podcast').minSilence > ES.stylePacing('talking_head').minSilence);
@@ -257,6 +261,19 @@ await check('runs the playbook in order as ONE undo step and reports skips', asy
     assert.match(r.message, /Talking head/); assert.match(r.message, /no moments found/);
     assert.equal(S.getState().past.length, before + 1);
     assert.equal(S.getState()._historyGroupDepth, 0);
+});
+await check('Auto mode builds from a video in the Media Bin and excludes a brand logo from source footage', async () => {
+    S.setState({ tracks: [], assets: [
+        { id: 'bin-video', type: 'video', name: 'event.mp4', userUploaded: true, url: '/media/event.mp4', duration: 12 },
+        { id: 'bin-logo', type: 'image', name: 'brand-logo.png', userUploaded: true, assistantReference: true, url: '/media/logo.png' },
+    ], captions: [], uploadedFile: null, past: [], future: [] });
+    const prompts = [];
+    const r = await runAutopilot('edit it\n\nReference media supplied by the user for guidance only (not source footage):\n- brand-logo.png (image, reference asset id: bin-logo)', {
+        run: async prompt => { prompts.push(prompt); return { success: true }; },
+    });
+    assert.equal(r.success, true);
+    assert.equal(prompts[0], 'Create a video from the uploaded video clips only');
+    assert.ok(!prompts[0].includes('brand-logo'));
 });
 await check('no style picked: Talking head, said so; clarifications skipped; a throw does not stop the run', async () => {
     setTimeline(150, { captions: [] });

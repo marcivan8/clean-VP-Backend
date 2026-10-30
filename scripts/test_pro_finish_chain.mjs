@@ -318,6 +318,37 @@ await check('the no-AI finish renders transcript-led graphics at their spoken ti
     assert.ok(timed.applied.some(a => /timed story graphics/.test(a)), 'the applied summary should report the timed scenes');
 });
 
+await check('short finish wires contextual vector illustrations as animated template clips', () => {
+    const scenePlan = {
+        tone: 'editorial', beats: [],
+        timedMoments: [{ kind: 'point', text: 'rocket launch', start: 8, end: 10 }],
+        brollMoments: [], sfxCues: [], source: 'local-fallback',
+    };
+    const result = polishShort({ tracks: state().tracks, duration: TOTAL, aspectRatio: '9:16' }, PLATFORM_PROFILES.tiktok,
+        { words: WORDS, events: [], scenePlan });
+    const illustrations = allClips(result.tracks).filter(c => String(c.id).startsWith('short-illustration-'));
+    assert.equal(illustrations.length, 1, 'a recognized vector subject should create one illustration clip');
+    assert.equal(illustrations[0].template?.kind, 'icon');
+    assert.equal(illustrations[0].template?.params?.icon, 'rocket');
+    assert.ok(illustrations[0].animations?.length, 'the vector illustration should be animated');
+    assert.ok(result.applied.some(item => /contextual vector illustrations/.test(item)));
+});
+
+await check('Shorts panel finish places matched bin b-roll into the generated timeline', async () => {
+    const withBroll = state();
+    withBroll.assets.push({ id: 'broll-launch', type: 'video', name: 'Rocket launch', url: '/media/rocket.mp4', duration: 6 });
+    const result = await finishShort(withBroll, { ...short, end: 24 }, {
+        plan: null, motionTechniques: [], visualContext: [], sfx: false,
+        scenePlan: { tone: 'editorial', beats: [], timedMoments: [], sfxCues: [],
+            brollMoments: [{ start: 8, end: 10, query: 'rocket launch', assetIds: ['broll-launch'] }], source: 'local-fallback' },
+    });
+    const clip = allClips(result.tracks).find(c => c.id === 'short-broll-0');
+    assert.ok(clip, 'matched b-roll should appear in the generated Shorts timeline');
+    assert.equal(clip.assetId, 'broll-launch');
+    assert.equal(clip.x, 78, 'b-roll should use the speaker-safe picture-in-picture placement');
+    assert.ok(result.applied.some(item => /contextual b-roll/.test(item)));
+});
+
 await check('the no-AI finish resolves planner sound cues to real SFX clips', async () => {
     const result = await finishShort(state(), short, {
         plan: null,
@@ -347,6 +378,10 @@ await check('Pro Finish uses fallback B-roll moments and caps automatic cutaways
         'asset matches from visual analysis are not used to rank fallback cutaways');
     assert.match(tools, /scopedMatches = scopedMatches\.slice\(0, maxPlacements\)/,
         'contextual B-roll ignores the caller placement cap');
+    assert.match(engine, /automatic moment animations/,
+        'style recipes do not invoke the automatic moment animator');
+    assert.match(finisher, /short-broll-/,
+        'the Shorts panel finish does not copy matched b-roll into the generated timeline');
 });
 
 await check('the local scene planner retrieves and executes KB motions with no scene-model request', async () => {

@@ -54,6 +54,10 @@ const useAIStore = create((set) => ({
         suggestions: state.suggestions.filter(s => s.id !== id)
     })),
 
+    clearClarificationLogs: () => set((state) => ({
+        logs: state.logs.filter(log => !String(log.id || '').startsWith('clarification-')),
+    })),
+
     // Mobile: Roka requests typed while the video is still uploading /
     // preparing wait here and run once it can play (agent/rokaPromptQueue.js).
     queuedPrompts: [],

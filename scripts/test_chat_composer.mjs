@@ -123,6 +123,25 @@ await check('reference documents are parsed locally and included in edit prompts
     assert.ok(/documents=\{referenceDocuments\}[\s\S]*onDocumentsChange=\{setReferenceDocuments\}/.test(rp));
     assert.ok(/withAssistantDocuments\([\s\S]*referenceDocuments/.test(rp));
 });
+await check('chat attachment button imports images and videos into the Media Bin and carries their ids into the prompt', () => {
+    const cc = read('../client/src/components/Assistant/ChatComposer.jsx');
+    const layout = read('../client/src/layouts/IDELayout.jsx');
+    const uploadRoute = read('../routes/mediaAssetRoutes.js');
+    const server = read('../index.js');
+    assert.match(cc, /accept="[^"]*video\/\*,image\/\*"/);
+    assert.match(cc, /file\.type\.startsWith\('video\/'\) \|\| file\.type\.startsWith\('image\/'\)/);
+    assert.match(cc, /await onImportMedia\(mediaFiles\)/);
+    assert.match(rp, /onImportMedia=\{async \(files\) =>/);
+    assert.match(rp, /withAssistantMedia\(commandWithDocuments, referenceMedia/);
+    assert.match(layout, /onImportMedia=\{async \(files\) => handleFileImport\(\{ target: \{ files \}, deferTimelinePlacement: true, referenceMaterial: true \}\)\}/);
+    assert.match(layout, /assistantReference: Boolean\(e\.referenceMaterial\)/);
+    assert.match(uploadRoute, /router\.post\('\/image', authenticateUser, upload\.single\('image'\)/);
+    assert.match(uploadRoute, /fileSize: 20 \* 1024 \* 1024/);
+    assert.match(server, /app\.use\('\/api\/assets', uploadLimiter, require\('\.\/routes\/mediaAssetRoutes'\)\)/);
+    const prompt = D.withAssistantMedia('edit it', [{ id: 'asset-1', name: 'rush.mp4', type: 'video' }]);
+    assert.match(prompt, /edit it[\s\S]*rush\.mp4[\s\S]*asset-1/);
+    assert.match(prompt, /guidance only \(not source footage\)[\s\S]*Do not place reference media on the timeline/);
+});
 
 log(failures ? `\n${failures} FAILURES` : '\nALL CHAT COMPOSER TESTS PASSED');
 process.exit(failures ? 1 : 0);

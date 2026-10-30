@@ -154,12 +154,15 @@ export class LongFormEditPlanner {
             reason: 'Match b-roll/cutaways to what is being said, so the video does not stay a static talking head',
         }));
 
-        // R127 — the visual-brief parser used to detect explicit motion
-        // graphics but that signal only opted into this method; no graphics
-        // were actually created. storyboard_video places contextual graphics
-        // across the transcript. Keep it opt-in so ordinary complete edits
-        // do not gain unsolicited text graphics.
-        if (visualBrief?.wantsMotionGraphics) {
+        steps.push(S('place_contextual_illustrations', {
+            args: { max: 4 },
+            reason: 'Add a few animated vector illustrations when the spoken ideas match the illustration library',
+        }));
+
+        // Full-build edits get transcript-grounded graphics by default. A
+        // caller can explicitly suppress the storyboard for a restrained
+        // visual brief; unsupported beats are skipped by the storyboarder.
+        if (visualBrief?.wantsMotionGraphics !== false) {
             steps.push(S('storyboard_video', {
                 args: { dryRun: false },
                 reason: 'Place contextual motion graphics across the spoken ideas',

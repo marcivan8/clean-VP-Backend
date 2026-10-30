@@ -1012,14 +1012,17 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 const assetEntry = {
                     id: assetId,
                     name: file.name,
+                    userUploaded: true,
+                    source: 'user_upload',
+                    assistantReference: Boolean(e.referenceMaterial),
                     type: isVideo ? 'video' : file.type.startsWith('image') ? 'image' : 'audio',
                     visualAnalysisRequested: isVideo || imageAnalysisAllowed,
                     url: url,
                     file: file,
                     fileSize: file.size,
                     proxyUrl: null,
-                    isProxying: isVideo,
-                    uploadPhase: isVideo ? 'uploading' : 'ready',
+                    isProxying: isVideo || isImage,
+                    uploadPhase: isVideo || isImage ? 'uploading' : 'ready',
                     uploadStartTime: Date.now(),
                     thumbnail: metadata.thumbnail,
                     sourceDuration: metadata.duration,
@@ -1416,48 +1419,73 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             useTimelineStore.getState().updateAsset(assetId, { isProxying: false, uploadPhase: 'ready', uploadError: err?.message || 'upload_failed' });
                         });
                 } else if (file.type.startsWith('image')) {
-                    // Images never went through any content-analysis pipeline
-                    // before this — see MediaIntelligencePipeline.
-                    // analyzeImageAsset()'s doc comment. No GCS upload needed
-                    // here (images aren't proxied/transcribed): read the file
-                    // as base64 and send it inline, fire-and-forget, the same
-                    // non-blocking pattern the video branch above uses for its
-                    // own analyze-asset call. This is what lets a photo be
-                    // matched by place_contextual_broll the same way a b-roll
-                    // video clip already is.
-                    const MAX_IMAGE_ANALYSIS_BYTES = 15 * 1024 * 1024; // ~20MB base64 — matches the server's cap
-                    if (file.size > MAX_IMAGE_ANALYSIS_BYTES) {
-                        setVisualAnalysisRequested(false);
-                        console.warn(`[IDELayout] "${file.name}" is too large for automatic content analysis (${Math.round(file.size / 1024 / 1024)}MB) — it can still be used manually, just without AI-matched placement.`);
-                    } else {
-                        (async () => {
-                            try {
+                    // Persist uploaded images so chat references, saved projects,
+                    // and server-side export all point at a playable URL.
+                    const MAX_IMAGE_ANALYSIS_BYTES = 15 * 1024 * 1024;
+                    await (async () => {
+                        let gcsPath = null;
+                        try {
+                            const { authFetch } = await import('../utils/authFetch.js');
+                            const form = new FormData();
+                            form.append('image', file);
+                            const stored = await authFetch('/api/assets/image', { method: 'POST', body: form });
+                            if (!stored.ok) throw new Error(`Image storage failed (${stored.status})`);
+                            const media = await stored.json();
+                            gcsPath = media.gcsPath || null;
+                            const persistedImage = {
+                                url: media.mediaUrl,
+                                proxyUrl: media.mediaUrl,
+                                sourceUrl: media.sourceUrl || media.gcsPath,
+                                gcsPath,
+                                isProxying: false,
+                                uploadPhase: 'ready',
+                                uploadError: null,
+                            };
+                            // The import batch is inserted into the store after
+                            // every selected file has been prepared. Keep the
+                            // batch record in sync as well as updating an asset
+                            // that may already have been inserted by another flow.
+                            Object.assign(assetEntry, persistedImage);
+                            useTimelineStore.getState().updateAsset(assetId, persistedImage);
+                            const live = useTimelineStore.getState();
+                            live.tracks.forEach(track => (track.clips || []).filter(clip => clip.assetId === assetId).forEach(clip => {
+                                live.updateClip(track.id, clip.id, { url: media.mediaUrl, sourceUrl: media.sourceUrl || media.gcsPath }, { skipHistory: true });
+                            }));
+                        } catch (uploadError) {
+                            const fallbackImage = { isProxying: false, uploadPhase: 'ready', uploadError: 'image_persistence_failed' };
+                            Object.assign(assetEntry, fallbackImage);
+                            useTimelineStore.getState().updateAsset(assetId, fallbackImage);
+                            console.warn(`[IDELayout] image storage failed for "${file.name}":`, uploadError.message);
+                        }
+
+                        if (file.size > MAX_IMAGE_ANALYSIS_BYTES) {
+                            setVisualAnalysisRequested(false);
+                            console.warn(`[IDELayout] "${file.name}" is too large for automatic content analysis (${Math.round(file.size / 1024 / 1024)}MB) — it can still be used manually.`);
+                            return;
+                        }
+                        try {
+                            const analysis = { assetId, name: file.name, projectId: useTimelineStore.getState().projectId || null };
+                            if (gcsPath) analysis.gcsPath = gcsPath;
+                            else {
                                 const imageBase64 = await new Promise((resolve, reject) => {
                                     const reader = new FileReader();
                                     reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
                                     reader.onerror = reject;
                                     reader.readAsDataURL(file);
                                 });
-                                const { authFetch } = await import('../utils/authFetch.js');
-                                const resp = await authFetch('/api/brain/analyze-asset', {
-                                    method: 'POST',
-                                    body: JSON.stringify({
-                                        assetId,
-                                        imageBase64,
-                                        name: file.name,
-                                        projectId: useTimelineStore.getState().projectId || null,
-                                    }),
-                                });
-                                setVisualAnalysisRequested(resp.ok);
-                                console.log(resp.ok
-                                    ? `[IDELayout] 🧠 media intelligence queued for image "${file.name}"`
-                                    : `[IDELayout] image analysis not queued (${resp.status}) — Brain advice stays generic for "${file.name}"`);
-                            } catch (e) {
-                                setVisualAnalysisRequested(false);
-                                console.warn('[IDELayout] image analysis request failed (non-critical):', e.message);
+                                analysis.imageBase64 = imageBase64;
                             }
-                        })();
-                    }
+                            const { authFetch } = await import('../utils/authFetch.js');
+                            const resp = await authFetch('/api/brain/analyze-asset', { method: 'POST', body: JSON.stringify(analysis) });
+                            setVisualAnalysisRequested(resp.ok);
+                            console.log(resp.ok
+                                ? `[IDELayout] 🧠 media intelligence queued for image "${file.name}"`
+                                : `[IDELayout] image analysis not queued (${resp.status}) — Brain advice stays generic for "${file.name}"`);
+                        } catch (analysisError) {
+                            setVisualAnalysisRequested(false);
+                            console.warn('[IDELayout] image analysis request failed (non-critical):', analysisError.message);
+                        }
+                    })();
                 }
             }
 
@@ -1465,7 +1493,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             addAssets(processedAssets);
             triggerHint('first_upload');
 
-            if (processedAssets.length === 1) {
+            if (processedAssets.length === 1 && !e.deferTimelinePlacement) {
                 // Before auto-placing, evict ghost clips (stale segments from a
                 // previous session that have no URL). Without this the new clip
                 // overlaps them visually and `currentEnd` would push it far right
@@ -1507,6 +1535,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             // find a locked tab on their own.
             const longest = processedAssets.reduce((m, a) => Math.max(m, Number(a?.duration) || 0), 0);
             if (longest > 180) triggerHint('shorts_ready');
+            return processedAssets;
         }
     };
 
@@ -2741,7 +2770,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     >
 
                         <div className="flex-1 overflow-hidden flex flex-col">
-                            <ReasoningPanel className="flex-1" />
+                            <ReasoningPanel className="flex-1" onImportMedia={async (files) => handleFileImport({ target: { files }, deferTimelinePlacement: true, referenceMaterial: true })} />
                         </div>
                     </aside>
 

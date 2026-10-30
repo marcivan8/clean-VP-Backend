@@ -506,6 +506,17 @@ export const COMMANDS = [
         destructive: false,
     },
     {
+        id: 'place_contextual_illustrations',
+        category: 'text',
+        label: 'Add contextual vector illustrations',
+        summary: 'Adds a few animated vector illustrations when a spoken phrase matches a supported subject.',
+        phrases: ['add vector illustrations', 'add contextual illustrations', 'illustrate the key ideas',
+                  'add animated icons to the video', 'place vector graphics', 'ajoute des illustrations vectorielles',
+                  'illustre les idees importantes'],
+        negative: ['remove', 'clear', 'undo', 'enleve', 'retire', 'supprime'],
+        destructive: false,
+    },
+    {
         id: 'add_motion_component',
         category: 'text',
         label: 'Add motion title / composition',
@@ -829,6 +840,15 @@ export const COMMANDS = [
     // claude/script-to-video-scoping-R132.md for what this does and
     // doesn't cover yet.
     {
+        id: 'create_video_from_assets',
+        category: 'edit',
+        label: 'Create a video from images and footage',
+        summary: 'Builds a visual montage from uploaded images and event footage, with gentle motion on stills and transitions between shots.',
+        phrases: ['create a video from these images', 'create a video from my images', 'create a video from these photos', 'create a video from my photos', 'make a video from these images', 'make a video from my photos', 'make a montage from my media', 'make a montage from these clips', 'create a silent video from my media', 'create a video from the media bin', 'create a video from the attached images and video clips', 'turn these event photos into a video', 'turn these event videos into a video', 'assemble my event footage', 'compose these images and videos', 'créer une vidéo à partir de ces images', 'créer une vidéo à partir de mes photos', 'créer une vidéo à partir des images et des vidéos jointes', 'faire un montage de mes vidéos'],
+        negative: ['script', 'transcript', 'narration', 'voiceover'],
+        destructive: false,
+    },
+    {
         id: 'create_video_from_script',
         category: 'edit',
         label: 'Create a video from a script',
@@ -928,7 +948,7 @@ export function scoreCommand(cmd, text) {
 
     let best = 0;
     for (const p of cmd.phrases || []) {
-        const pTokens = p.toLowerCase().split(/\s+/).filter(Boolean);
+        const pTokens = p.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/\s+/).filter(Boolean);
         // Ordered subsequence match: every phrase token appears in order,
         // with filler words allowed in between.
         let ti = 0, matched = 0;

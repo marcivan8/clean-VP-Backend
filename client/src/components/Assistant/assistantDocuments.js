@@ -88,3 +88,10 @@ export function withAssistantDocuments(prompt, documents, defaultPrompt = 'Use t
     const references = documents.map(({ name, text }) => `--- ${name} ---\n${text}`).join('\n\n');
     return `${request}\n\nReference documents supplied by the user (use these to guide the edit):\n${references}`;
 }
+
+export function withAssistantMedia(prompt, media, defaultPrompt = 'Use the attached media for this edit.') {
+    if (!media?.length) return prompt;
+    const request = String(prompt || '').trim() || defaultPrompt;
+    const list = media.map(({ id, name, type }) => `- ${name || 'Untitled media'} (${type || 'visual'}, reference asset id: ${id})`).join('\n');
+    return `${request}\n\nReference media supplied by the user for guidance only (not source footage):\n${list}\nUse these references to guide the edit of the user's source video. Do not place reference media on the timeline.`;
+}

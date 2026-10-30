@@ -434,6 +434,8 @@ const workflowMachine = createMachine({
                     target: 'idle',
                     actions: () => {
                         console.log('[Workflow] Clarification cancelled — returning to idle');
+                        useAIStore.getState().clearClarificationLogs();
+                        EventBus.emit(EVENT_TYPES.CLARIFICATION_PROVIDED, { cancelled: true });
                         useAIStore.getState().setIsAnalyzing(false);
                     }
                 }
@@ -619,6 +621,8 @@ export class WorkflowController {
             console.warn('[Workflow] Not in clarifying state, ignoring answers');
             return;
         }
+        useAIStore.getState().clearClarificationLogs();
+        EventBus.emit(EVENT_TYPES.CLARIFICATION_PROVIDED, {});
         this.actor.send({ type: 'RESUME', answers });
     }
 

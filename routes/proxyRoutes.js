@@ -359,6 +359,11 @@ router.get('/gcs-media/*', mediaAccess.requireMediaAccess(req => req.params[0]),
         '.webm': 'video/webm',
         '.mov':  'video/quicktime',
         '.json': 'application/json',
+        '.jpg':  'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png':  'image/png',
+        '.webp': 'image/webp',
+        '.gif':  'image/gif',
     };
     const ext = path.extname(gcsPath).toLowerCase();
     const contentType = CONTENT_TYPES[ext] || 'application/octet-stream';

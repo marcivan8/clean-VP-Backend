@@ -1576,11 +1576,26 @@ export class MediaExecutionEngine {
                     } else if (recipe.broll || recipe.numberPops || recipe.illustrations) {
                         skipped.push('b-roll, illustrations and number pops (need captions)');
                     }
-                    // 6. R92: sound effects on what the recipe placed (whoosh on
+                    // 6. Animate detected emphasis/reveal moments on the
+                    // footage and the graphics this recipe just placed. This
+                    // also adds style-aware library SFX for compatible styles.
+                    try {
+                        const motion = await this.executeStoreAction({ action: 'animate_automatically', args: {} }, job);
+                        if (motion?.success) done.push('automatic moment animations');
+                        else skipped.push('automatic moment animations (no compatible moments found)');
+                    } catch (motionError) {
+                        console.warn('[apply_style_recipe] automatic animation failed:', motionError.message);
+                        skipped.push('automatic moment animations (service unavailable)');
+                    }
+                    // 7. R92: sound effects on what the recipe placed (whoosh on
                     // transitions, pop on number pops), level from the style.
                     const lvl = sfxLevel(useTimelineStore.getState().editingStyle, recipe.id);
                     if (lvl !== 'none') {
-                        const cues = collectSfxCues(useTimelineStore.getState().tracks, { level: lvl });
+                        const afterMotion = useTimelineStore.getState().tracks;
+                        const autoSfxTimes = (afterMotion || []).filter(track => track.type === 'audio')
+                            .flatMap(track => (track.clips || []).filter(clip => clip.autoAnimate).map(clip => Number(clip.start) || 0));
+                        const cues = collectSfxCues(afterMotion, { level: lvl })
+                            .filter(cue => !autoSfxTimes.some(at => Math.abs(at - cue.t) < 0.8));
                         if (cues.length > 0) {
                             const sfx = await this._placeSfxCues(cues, lvl);
                             if (sfx.placed > 0) done.push(`${sfx.placed} sound effect(s)${lvl === 'subtle' ? ' (soft)' : ''}`);
@@ -2304,6 +2319,7 @@ export class MediaExecutionEngine {
             case 'apply_smart_zoom':
             case 'identify_quotable_moments':
             case 'placeContextualBroll':
+            case 'placeContextualIllustrations':
             case 'fetchStockBroll':
             case 'apply_lut':
             case 'clear_lut':
@@ -2316,6 +2332,7 @@ export class MediaExecutionEngine {
             case 'smart_cleanup':
             case 'resume_failed_job': // R131
             case 'create_video_from_script': // R132
+            case 'create_video_from_assets':
             case 'locateVisualTargets':
             case 'applyTargetRanges':
             case 'longFormEdit': {
@@ -5086,13 +5103,12 @@ export class MediaExecutionEngine {
             );
         }
 
-        // Auto-preview: seek to start and briefly play
+        // Auto-preview the edited section. Do not schedule a delayed pause:
+        // multi-step Auto edits can outlive that timer, which then stops the
+        // preview after the edit has completed (or when the user starts it).
         const freshStore = useTimelineStore.getState();
         freshStore.seek(effectiveRangeStart);
         freshStore.setIsPlaying(true);
-        setTimeout(() => {
-            useTimelineStore.getState().setIsPlaying(false);
-        }, 4000);
     }
 
     async verifyExecution(job) {

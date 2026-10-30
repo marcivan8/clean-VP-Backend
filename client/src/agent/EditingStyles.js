@@ -106,10 +106,10 @@ export function normalizeEditingMode(mode) {
 }
 
 // A request that only says "go": the playbook alone is the edit.
-const GENERIC_REQUEST = /^(please\s+)?(edit|edit it|edit this|edit this video|edit this clip|edit the video|edit my video|edit my clip|go|start|do it|run|auto edit|make it|make the edit|fais le montage|monte la vid[eé]o|monte|vas[- ]y|lance|lance le montage|[eé]dite|[eé]dite la vid[eé]o)[\s.!]*$/i;
+const GENERIC_REQUEST = /^(please\s+)?(edit|edit it|edit this|edit this video|edit this clip|edit the video|edit my video|edit my clip|go|start|do it|run|auto edit|make it|make the edit|fais le montage|monte la vid[eé]o|monte|vas[- ]y|lance|lance le montage|[eé]dite|[eé]dite la vid[eé]o|[eé]dite ma vid[eé]o)[\s.!]*$/i;
 
 export function isGenericEditRequest(text) {
-    const s = String(text || '').trim();
+    const s = String(text || '').split(/\n\n(?:Reference documents supplied by the user|Media attached to this request and available in the project Media Bin|Reference media supplied by the user for guidance only \(not source footage\)):/i, 1)[0].trim();
     return s === '' || GENERIC_REQUEST.test(s);
 }
 
@@ -149,6 +149,14 @@ export function buildAutopilotSteps(styleId, request, facts = {}) {
     if (!isGenericEditRequest(request)) {
         const custom = String(request || '').trim();
         return custom ? [{ key: 'request', prompt: custom }] : [];
+    }
+    if (facts.visualOnly) {
+        const sourcePrompt = facts.videoOnly
+            ? 'Create a video from the uploaded video clips only'
+            : 'Create a video from the uploaded images and event footage';
+        const steps = [{ key: 'montage', prompt: sourcePrompt }];
+        if (style.id === 'reel') steps.push({ key: 'vertical', prompt: 'Set the aspect ratio to 9:16' });
+        return steps;
     }
     const steps = [];
     if (style.id === 'reel') {
