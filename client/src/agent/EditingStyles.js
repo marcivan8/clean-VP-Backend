@@ -107,10 +107,15 @@ export function normalizeEditingMode(mode) {
 
 // A request that only says "go": the playbook alone is the edit.
 const GENERIC_REQUEST = /^(please\s+)?(edit|edit it|edit this|edit this video|edit this clip|edit the video|edit my video|edit my clip|go|start|do it|run|auto edit|make it|make the edit|fais le montage|monte la vid[eé]o|monte|vas[- ]y|lance|lance le montage|[eé]dite|[eé]dite la vid[eé]o|[eé]dite ma vid[eé]o)[\s.!]*$/i;
+// A reference-guided edit is still an instruction to run the selected style's
+// Auto playbook. Previously this full sentence fell through as a bespoke
+// command, whose planner asked for clarification instead of editing:
+// "I want to edit my video just like this reference video".
+const REFERENCE_GUIDED_EDIT = /^(?:please\s+)?(?:(?:i|we)\s+(?:want|would like|need)\s+to\s+)?edit\s+(?:my|the|this|a)\s+(?:video|clip)\b.*\b(?:like|match|mimic|in the style of|based on|according to|inspired by)\b.*\b(?:reference|example|attached)\b/i;
 
 export function isGenericEditRequest(text) {
     const s = String(text || '').split(/\n\n(?:Reference documents supplied by the user|Media attached to this request and available in the project Media Bin|Reference media supplied by the user for guidance only \(not source footage\)):/i, 1)[0].trim();
-    return s === '' || GENERIC_REQUEST.test(s);
+    return s === '' || GENERIC_REQUEST.test(s) || REFERENCE_GUIDED_EDIT.test(s);
 }
 
 // Questions stay normal chat even in Auto mode.
@@ -188,10 +193,20 @@ export function buildAutopilotSteps(styleId, request, facts = {}) {
         // 'tiktok' whenever that store value isn't exactly 'reel' at the
         // moment this step executes — the last Auto step). Naming it
         // here removes that fragility for the one path that matters most.
-        steps.push({ key: 'finish', prompt: 'Pro finish for Instagram Reels' });
+        steps.push({
+            key: 'finish',
+            prompt: facts.hasStyleReference
+                ? 'Pro finish for Instagram Reels. Match the attached reference video’s typography, colors, pacing, captions, graphics, motion, and transitions. Choose relevant b-roll, animated vector illustrations, and SFX for the source content. Use only source footage on the timeline; never add the reference video as footage.'
+                : 'Pro finish for Instagram Reels',
+        });
     } else {
         steps.push({ key: 'captions', prompt: 'Add captions' });
-        steps.push({ key: 'recipe', prompt: `Apply the ${style.recipeId} style recipe` });
+        steps.push({
+            key: 'recipe',
+            prompt: facts.hasStyleReference
+                ? `Apply the ${style.recipeId} style recipe. Match the attached reference video’s typography, colors, pacing, captions, graphics, motion, and transitions. Choose relevant b-roll, animated vector illustrations, and SFX for the source content. Use only source footage on the timeline; never add the reference video as footage.`
+                : `Apply the ${style.recipeId} style recipe`,
+        });
     }
     return steps;
 }

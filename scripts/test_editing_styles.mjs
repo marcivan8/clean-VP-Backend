@@ -68,6 +68,8 @@ await check('each editing style recipe can place transcript-matched vector illus
 });
 await check('generic requests and questions', () => {
     for (const t of ['edit it', 'Edit the video', 'go', '', 'monte la vidéo', 'vas-y', 'fais le montage']) assert.ok(ES.isGenericEditRequest(t), t);
+    assert.ok(ES.isGenericEditRequest('I want to edit my video just like this reference video'));
+    assert.ok(ES.isGenericEditRequest('I want to edit my video just like this reference video\n\nReference media supplied by the user for guidance only (not source footage):\n- ref.mp4 (video, reference asset id: ref-1)'));
     assert.ok(ES.isGenericEditRequest('edit it\n\nReference media supplied by the user for guidance only (not source footage):\n- rush.mp4 (video, reference asset id: asset-1)'));
     assert.ok(ES.isGenericEditRequest('Edit my video.\n\nReference media supplied by the user for guidance only (not source footage):\n- rush.mp4 (video, reference asset id: asset-1)'));
     for (const t of ['cut the intro', 'edit it but keep the jokes']) assert.ok(!ES.isGenericEditRequest(t), t);
@@ -84,6 +86,10 @@ await check('playbooks: cuts first, captions after them, levelling after cuts', 
     assert.deepEqual(keys('interview'), ['cleanup', 'captions', 'recipe']);
     assert.deepEqual(keys('reel'), ['short', 'vertical', 'cleanup', 'finish']);
     assert.deepEqual(keys('reel', 'go', {}), ['transcript', 'short', 'vertical', 'cleanup', 'finish']);
+    const referenceSteps = ES.buildAutopilotSteps('reel', 'I want to edit my video just like this reference video', { hasTranscript: true, hasStyleReference: true });
+    assert.equal(referenceSteps[0].key, 'short');
+    assert.ok(referenceSteps.at(-1).prompt.includes('attached reference video'));
+    assert.ok(referenceSteps.at(-1).prompt.includes('never add the reference video as footage'));
     // A specific request runs ALONE ("animate" used to also run the clean up).
     assert.deepEqual(keys('interview', 'cut the intro'), ['request']);
     assert.deepEqual(keys('talking_head', 'animate it'), ['request']);
@@ -110,6 +116,15 @@ for (const [prompt, op] of seen) {
         assert.ok(r.steps.length > 0, 'planned');
     });
 }
+await check('reference-guided finish prompt routes directly to Pro Finish', async () => {
+    const prompt = ES.buildAutopilotSteps('reel', 'I want to edit my video just like this reference video', {
+        hasTranscript: true,
+        hasStyleReference: true,
+    }).at(-1).prompt;
+    const result = await plan(prompt);
+    assert.equal(result.op, 'polish_short');
+    assert.ok(result.steps.length > 0);
+});
 
 log('short picker');
 const W = (list) => list.map(([word, start, end]) => ({ word, start, end: end ?? start + 0.3 }));
@@ -271,6 +286,20 @@ await check('Reel Auto delegates captions and creative styling to one Pro Finish
         'Pro finish for Instagram Reels',
     ]);
     assert.equal(r.success, true);
+});
+await check('reference-guided Reel Auto keeps reference media out of the source timeline', async () => {
+    setTimeline(40, { captions: words, assets: [
+        { id: 'source-video', type: 'video', name: 'source.mp4', userUploaded: true },
+        { id: 'reference-video', type: 'video', name: 'reference.mp4', assistantReference: true, userUploaded: true },
+    ] });
+    S.getState().setEditingStyle('reel');
+    const prompts = [];
+    const r = await runAutopilot('I want to edit my video just like this reference video\n\nReference media supplied by the user for guidance only (not source footage):\n- reference.mp4 (video, reference asset id: reference-video)', {
+        run: async prompt => { prompts.push(prompt); return { success: true }; },
+    });
+    assert.equal(r.success, true);
+    assert.ok(prompts.at(-1).includes('reference video'));
+    assert.ok(!prompts.some(prompt => /Create a video from the uploaded video clips/.test(prompt)));
 });
 await check('Auto mode builds from a video in the Media Bin and excludes a brand logo from source footage', async () => {
     S.setState({ tracks: [], assets: [

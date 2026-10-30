@@ -52,6 +52,9 @@ export async function runAutopilot(request, opts = {}) {
     const visualClips = (store.tracks || []).filter(track => track.type === 'video').flatMap(track => track.clips || [])
         .filter(clip => ['video', 'image'].includes(clip.type));
     const visualAssets = (store.assets || []).filter(asset => ['video', 'image'].includes(asset.type) && !asset.provider && !asset.assistantReference);
+    const hasStyleReference = (store.assets || []).some(asset =>
+        asset.assistantReference && ['video', 'image'].includes(asset.type))
+        || /Reference media supplied by the user for guidance only/i.test(request);
     const explicitSilent = /\b(silent|without (?:speech|dialogue|voice)|no (?:speech|dialogue|voice)|without narration|sans (?:parole|voix|dialogue))\b/i.test(request);
     const imageOnlyProject = [...visualClips.map(clip => clip.type), ...visualAssets.map(asset => asset.type)].length > 0
         && [...visualClips.map(clip => clip.type), ...visualAssets.map(asset => asset.type)].every(type => type === 'image');
@@ -65,6 +68,7 @@ export async function runAutopilot(request, opts = {}) {
         hasTranscript,
         visualOnly,
         videoOnly,
+        hasStyleReference,
     });
     if (!visualClips.length && visualAssets.length && steps.length && steps[0].key !== 'montage') {
         steps = [{

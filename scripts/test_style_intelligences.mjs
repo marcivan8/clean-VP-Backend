@@ -209,7 +209,8 @@ await check('client sends the style to animate (both calls), rhythm zoom, organi
     assert.ok(/style: rzStyle, editingStyle: useTimelineStore\.getState\(\)\.editingStyle \|\| null/.test(e));
     assert.ok(/editingStyle: ocStore\.editingStyle \|\| null/.test(e));
     const rp = read('../client/src/components/Assistant/ReasoningPanel.jsx');
-    assert.ok(/analyzeProject\('edit_applied'\)\)\.catch/.test(rp) && /editingStyle: useTimelineStore\.getState\(\)\.editingStyle \|\| null/.test(rp));
+    assert.ok(/scheduleEditAnalysis\(\);\s*return undefined;\s*\}, \[editingStyle, projectId, scheduleEditAnalysis\]\)/.test(rp)
+        && /editingStyle: useTimelineStore\.getState\(\)\.editingStyle \|\| null/.test(rp));
 });
 
 log(failures ? `\n${failures} FAILURES` : '\nALL STYLE INTELLIGENCE TESTS PASSED');

@@ -345,24 +345,24 @@ section('8 · Static wiring — GET /api/brain/broll-profiles');
 section('9 · R78 — still-image content analysis (VisualAnalyzer + MediaIntelligencePipeline)');
 {
     const vaSrc = read('server/brain/media/VisualAnalyzer.js');
-    check('VisualAnalyzer defines analyzeImageBase64()', /async analyzeImageBase64\(base64\)/.test(vaSrc));
+    check('VisualAnalyzer defines analyzeImageBase64() with optional style-reference mode', /async analyzeImageBase64\(base64,\s*\{\s*styleReference\s*=\s*false\s*\}\s*=\s*\{\}\)/.test(vaSrc));
     check('analyzeImageBase64 reuses analyzeWithVision with a single frame and mediaKind "image" (no new LLM prompt)',
-        /analyzeWithVision\(\[\{\s*timestamp:\s*0,\s*base64\s*\}\],\s*'image'\)/.test(vaSrc));
-    check('analyzeWithVision accepts a mediaKind param and adapts its prompt wording', /analyzeWithVision\(frames,\s*mediaKind = 'video'\)/.test(vaSrc));
+        /analyzeWithVision\(\[\{\s*timestamp:\s*0,\s*base64\s*\}\],\s*'image',\s*\{\s*styleReference\s*\}\)/.test(vaSrc));
+    check('analyzeWithVision accepts a mediaKind and optional reference-style mode', /analyzeWithVision\(frames,\s*mediaKind = 'video',\s*\{\s*styleReference\s*=\s*false\s*\}\s*=\s*\{\}\)/.test(vaSrc));
     check('analyzeImageBase64 still respects the "no OpenAI key configured" guard analyze() uses', /analyzeImageBase64[\s\S]{0,400}if \(!this\.openai\)/.test(vaSrc));
 
     const mipSrc = read('server/brain/media/MediaIntelligencePipeline.js');
-    check('MediaIntelligencePipeline defines analyzeImageAsset()', /async analyzeImageAsset\(assetId, imageBase64, projectId, userId, name = null\)/.test(mipSrc));
+    check('MediaIntelligencePipeline defines analyzeImageAsset() with reference-style mode', /async analyzeImageAsset\(assetId, imageBase64, projectId, userId, name = null, isReference = false\)/.test(mipSrc));
     check('analyzeImageAsset writes the same visual columns analyzeAsset() does', /analyzeImageAsset[\s\S]{0,2200}content_description:\s*visualAnalysis\.contentDescription/.test(mipSrc));
     check('analyzeImageAsset explicitly marks has_audio/has_spoken_word false rather than leaving them unset', /has_audio:\s*false,\s*\n\s*has_spoken_word:\s*false/.test(mipSrc));
-    check('analyzeImageAsset never leaves status stuck at processing on failure', /analyzeImageAsset[\s\S]{0,3000}catch \(err\)[\s\S]{0,200}ASSET_ANALYSIS_FAILED/.test(mipSrc));
+    check('analyzeImageAsset never leaves status stuck at processing on failure', /analyzeImageAsset[\s\S]{0,5000}catch \(err\)[\s\S]{0,250}ASSET_ANALYSIS_FAILED/.test(mipSrc));
 
     const workerSrc = read('worker.js');
-    check('worker.js branches the asset-analysis job on job.data.imageBase64', /const \{(?: action,)? assetId, filePath, projectId, userId, name, imageBase64(?:, query, range)? \} = job\.data;/.test(workerSrc));
+    check('worker.js branches the asset-analysis job on job.data.imageBase64 and preserves isReference', /const \{ action, assetId, filePath, projectId, userId, name, imageBase64, isReference, query, range \} = job\.data;/.test(workerSrc));
     check('worker.js calls analyzeImageAsset for the image branch, analyzeAsset otherwise', /if \(imageBase64\)[\s\S]{0,150}analyzeImageAsset\(assetId, imageBase64/.test(workerSrc) && /\} else \{[\s\S]{0,150}analyzeAsset\(assetId, filePath/.test(workerSrc));
 
     const brSrc2 = read('server/routes/brainRoutes.js');
-    check('POST /analyze-asset accepts imageBase64 as an alternative to gcsPath', /const \{ assetId, gcsPath, projectId, name, imageBase64 \} = req\.body/.test(brSrc2));
+    check('POST /analyze-asset accepts imageBase64 and optional reference marker', /const \{ assetId, gcsPath, projectId, name, imageBase64, isReference = false \} = req\.body/.test(brSrc2));
     check('POST /analyze-asset requires at least one of gcsPath / imageBase64', /gcsPath or imageBase64 is required/.test(brSrc2));
     check('POST /analyze-asset caps imageBase64 payload size', /imageBase64 too large/.test(brSrc2));
 }

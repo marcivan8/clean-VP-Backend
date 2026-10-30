@@ -339,7 +339,7 @@ router.post('/observe-command', authenticateUser, async (req, res) => {
 // Vision analysis can take 10–30s and must not block the HTTP response.
 router.post('/analyze-asset', authenticateUser, async (req, res) => {
     try {
-        const { assetId, gcsPath, projectId, name, imageBase64 } = req.body || {};
+        const { assetId, gcsPath, projectId, name, imageBase64, isReference = false } = req.body || {};
 
         if (!assetId || typeof assetId !== 'string') {
             return res.status(400).json({ error: 'assetId is required' });
@@ -372,6 +372,7 @@ router.post('/analyze-asset', authenticateUser, async (req, res) => {
                     ? name.trim()
                     : (gcsPath ? (gcsPath.split('/').pop() || null) : null),
                 gcs_path: gcsPath || null,
+                is_reference: isReference === true,
                 analysis_status: ASSET_ANALYSIS_PENDING,
             }, { onConflict: 'id', ignoreDuplicates: true });
         if (statusRowError) throw statusRowError;
@@ -400,6 +401,7 @@ router.post('/analyze-asset', authenticateUser, async (req, res) => {
                 name: (typeof name === 'string' && name.trim())
                     ? name.trim()
                     : (gcsPath ? (gcsPath.split('/').pop() || null) : null),
+                isReference: isReference === true,
             });
         } catch (queueError) {
             await supabaseAdmin.from('media_assets')
@@ -414,6 +416,21 @@ router.post('/analyze-asset', authenticateUser, async (req, res) => {
     } catch (err) {
         console.error('[brainRoutes] /analyze-asset error:', err.message);
         return res.status(500).json({ error: err.message });
+    }
+});
+
+// Analyze a previously uploaded video as a style reference. Cached profiles
+// return immediately; older assets are sampled once and the profile is saved.
+router.post('/analyze-style-reference', authenticateUser, async (req, res) => {
+    try {
+        const assetId = String(req.body?.assetId || '').trim();
+        if (!assetId) return res.status(400).json({ error: 'assetId is required' });
+        const profile = await mediaIntel.analyzeStyleReference(assetId, req.user.id);
+        if (!profile) return res.status(422).json({ error: 'No video style profile could be extracted from this reference.' });
+        return res.json({ success: true, assetId, profile });
+    } catch (err) {
+        console.error('[brainRoutes] /analyze-style-reference error:', err.message);
+        return res.status(err.message === 'Reference asset was not found.' ? 404 : 500).json({ error: err.message });
     }
 });
 
@@ -530,8 +547,9 @@ router.get('/broll-profiles', authenticateUser, async (req, res) => {
 
         const { data: assets, error } = await supabaseAdmin
             .from('media_assets')
-            .select('id, name, content_description, suggested_label, scene_type, location_type, is_broll, has_main_speaker, camera_angle, emotional_tone')
+            .select('id, name, content_description, suggested_label, scene_type, location_type, is_broll, has_main_speaker, camera_angle, emotional_tone, lighting_quality, stability, is_reference, visual_style_profile')
             .eq('project_id', projectId)
+            .eq('user_id', req.user.id)
             .eq('analysis_status', ASSET_ANALYSIS_DONE);
 
         if (error) {
@@ -550,6 +568,10 @@ router.get('/broll-profiles', authenticateUser, async (req, res) => {
             hasMainSpeaker: a.has_main_speaker === true,
             cameraAngle:    a.camera_angle || null,
             emotionalTone:  a.emotional_tone || null,
+            lightingQuality: a.lighting_quality || null,
+            stability:      a.stability || null,
+            isReference:    a.is_reference === true,
+            visualStyleProfile: a.visual_style_profile || null,
         }));
 
         return res.json({ success: true, profiles });

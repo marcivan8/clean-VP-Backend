@@ -113,7 +113,7 @@ const assetAnalysisWorker = new Worker('asset-analysis', async (job) => {
     if (!_MediaIntelligencePipeline) {
         throw new Error('MediaIntelligencePipeline not loaded — redeploy with server/brain/ committed');
     }
-    const { action, assetId, filePath, projectId, userId, name, imageBase64, query, range } = job.data;
+    const { action, assetId, filePath, projectId, userId, name, imageBase64, isReference, query, range } = job.data;
     const pipeline = new _MediaIntelligencePipeline();
     if (action === 'locate-visual-target') {
         return await pipeline.locateVisualTarget(assetId, filePath, query, range, job);
@@ -123,9 +123,9 @@ const assetAnalysisWorker = new Worker('asset-analysis', async (job) => {
     // See MediaIntelligencePipeline.analyzeImageAsset()'s doc comment for why
     // images never reached this worker before now.
     if (imageBase64) {
-        await pipeline.analyzeImageAsset(assetId, imageBase64, projectId, userId, name || null);
+        await pipeline.analyzeImageAsset(assetId, imageBase64, projectId, userId, name || null, isReference === true);
     } else {
-        await pipeline.analyzeAsset(assetId, filePath, projectId, userId, name || null);
+        await pipeline.analyzeAsset(assetId, filePath, projectId, userId, name || null, isReference === true);
     }
 }, { connection, concurrency: 1 });
 

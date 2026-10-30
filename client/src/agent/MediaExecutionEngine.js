@@ -65,11 +65,39 @@ import { PLATFORM_PROFILES, MAX_SHORT_COUNT, assignPlatforms, platformsFromText 
 // per-platform constant. See agent/shortLength.js.
 import { planShortLength, fitShortCount, MIN_SHORT_SECONDS } from './shortLength.js';
 import { fallbackShortScenePlan, polishShort } from './shortPolish.js'; // R92 round C
+import { buildStyleReferencePlan } from '../motion/StyleReferenceAdapter.js';
 import { packSegments } from './segmentPacking.js';
 import { splitClipAtSpeakerSegments } from './virtualMulticamTimeline.js';
 
 // See _deriveAudioPeaksForClip below.
 const DERIVED_PEAK_DB_FLOOR = -8;
+
+/** Resolve only explicitly attached reference assets, with a cached profile
+ * preferred and a fail-open one-time analysis for older video references. */
+async function styleReferenceProfileFor(state, visualProfiles = [], signal) {
+    const references = (state?.assets || []).filter(asset => asset?.assistantReference);
+    const ids = new Set(references.map(asset => String(asset.id)));
+    const cached = visualProfiles.find(profile =>
+        profile?.isReference && ids.has(String(profile.assetId)) && profile?.visualStyleProfile
+    )?.visualStyleProfile;
+    if (cached) return cached;
+    const video = references.find(asset => asset?.type === 'video' && asset.id);
+    if (!video) return null;
+    try {
+        const response = await authFetch('/api/brain/analyze-style-reference', {
+            method: 'POST',
+            body: JSON.stringify({ assetId: video.id }),
+            ...(signal ? { signal } : {}),
+        });
+        if (!response.ok) return null;
+        const result = await response.json().catch(() => ({}));
+        return result?.profile || null;
+    } catch (err) {
+        if (signal?.aborted) throw err;
+        console.warn('[reference-style] analysis unavailable; using the selected editing style:', err.message);
+        return null;
+    }
+}
 
 export const EXECUTION_STATES = {
     QUEUED:    'QUEUED',
@@ -1507,8 +1535,38 @@ export class MediaExecutionEngine {
 
             // ── R90 (A7): one-click style recipes ────────────────────────────
             case 'apply_style_recipe': {
-                const recipe = STYLE_RECIPES[args.recipeId];
-                if (!recipe) return { action, success: false, message: `Which style recipe? Choose one: ${Object.keys(STYLE_RECIPES).join(', ')} (for example "apply the punchy recipe").` };
+                const baseRecipe = STYLE_RECIPES[args.recipeId];
+                if (!baseRecipe) return { action, success: false, message: `Which style recipe? Choose one: ${Object.keys(STYLE_RECIPES).join(', ')} (for example "apply the punchy recipe").` };
+                let recipe = baseRecipe;
+                let referenceStyle = null;
+                const recipeState = useTimelineStore.getState();
+                const hasReference = (recipeState.assets || []).some(asset => asset?.assistantReference);
+                if (hasReference) {
+                    let profiles = [];
+                    try {
+                        const { fetchShortVisualContext } = await import('./shortFinisher.js');
+                        profiles = await fetchShortVisualContext(recipeState.projectId, job?.signal);
+                    } catch (err) {
+                        if (job?.signal?.aborted) throw err;
+                    }
+                    const rawStyle = await styleReferenceProfileFor(recipeState, profiles, job?.signal);
+                    referenceStyle = buildStyleReferencePlan(rawStyle);
+                    if (referenceStyle) {
+                        const cycle = referenceStyle.transitionPacing === 'fast'
+                            ? ['flash', 'whip-left', 'zoom-punch', 'whip-right']
+                            : referenceStyle.transitionPacing === 'slow' ? ['dip'] : baseRecipe.transitions?.cycle;
+                        recipe = {
+                            ...baseRecipe,
+                            captionPack: referenceStyle.captionPack || baseRecipe.captionPack,
+                            rhythmZoom: referenceStyle.motionEnergy === 'low' ? 'subtle'
+                                : referenceStyle.motionEnergy === 'high' ? 'dynamic' : baseRecipe.rhythmZoom,
+                            transitions: cycle ? { ...baseRecipe.transitions, cycle } : baseRecipe.transitions,
+                            illustrations: baseRecipe.illustrations
+                                ? { ...baseRecipe.illustrations, max: Math.min(baseRecipe.illustrations.max, referenceStyle.graphicsMax) }
+                                : baseRecipe.illustrations,
+                        };
+                    }
+                }
                 const done = [];
                 const skipped = [];
                 const st0 = useTimelineStore.getState();
@@ -1516,7 +1574,18 @@ export class MediaExecutionEngine {
                 try {
                     // 1. Caption look (global), from the style pack.
                     const textTracks = (useTimelineStore.getState().tracks || []).filter(t => t.type === 'text' && (t.clips || []).length > 0);
-                    const fields = recipe.captionPack ? stylePackToClipFields(recipe.captionPack) : null;
+                    let fields = recipe.captionPack ? stylePackToClipFields(recipe.captionPack) : null;
+                    if (fields && referenceStyle) fields = {
+                        ...fields,
+                        ...(referenceStyle.textColor ? { color: referenceStyle.textColor } : {}),
+                        captionStyle: {
+                            ...(fields.captionStyle || {}),
+                            wordHighlight: {
+                                ...(fields.captionStyle?.wordHighlight || {}),
+                                ...(referenceStyle.accent ? { color: referenceStyle.accent } : {}),
+                            },
+                        },
+                    };
                     if (fields && textTracks.length > 0) {
                         const first = textTracks[0].clips[0];
                         useTimelineStore.getState().applyCaptionUpdate(fields, { clipId: first.id, scope: 'global', skipHistory: true });
@@ -1822,6 +1891,7 @@ export class MediaExecutionEngine {
                 const events = await this._fetchSemanticEvents();
                 let plan = null;
                 let scenePlan = null;
+                let referenceStyleProfile = null;
                 const text = words.slice(0, 400).map(w => String(w.word ?? w.text ?? '')).join(' ');
                 if (text) {
                     const { fetchShortPlan, fetchShortMotionTechniques, fetchShortVisualContext } = await import('./shortFinisher.js');
@@ -1835,11 +1905,16 @@ export class MediaExecutionEngine {
                         fetchShortVisualContext(st.projectId, job?.signal),
                     ]);
                     plan = p;
+                    // Reference assets guide style only. Their cached visual
+                    // grammar is translated through a bounded adapter before
+                    // it can affect the local scene planner or polish choices.
+                    referenceStyleProfile = await styleReferenceProfileFor(st, visualContext, job?.signal);
                     scenePlan = fallbackShortScenePlan(words, {
                         headline: plan?.headline,
                         duration: total,
                         techniques: motionTechniques,
                         visualContext,
+                        referenceStyle: referenceStyleProfile,
                         events,
                         editingStyle: st.editingStyle,
                         platform,
@@ -1848,7 +1923,7 @@ export class MediaExecutionEngine {
                 // Earlier finish replaced, not stacked.
                 const before = JSON.parse(JSON.stringify(st.tracks || []));
                 const polished = polishShort({ tracks: before.map(t => ({ ...t, clips: t.clips.filter(c => !isFinishLayer(c)) })), duration: total, aspectRatio: st.aspectRatio },
-                    profile, { words, events, plan, scenePlan });
+                    profile, { words, events, plan, scenePlan, referenceStyleProfile });
                 st._saveHistory?.();
                 // Remove the previous finish layers, then write the changes clip by clip.
                 for (const t of (useTimelineStore.getState().tracks || [])) {

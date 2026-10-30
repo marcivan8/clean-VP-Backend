@@ -130,6 +130,14 @@ await check('Auto playbooks: every style gets one style-aware creative pass', ()
     // would make the same pass run twice.
     assert.match(engine, /action: 'animate_automatically'/);
 });
+await check('post-edit Brain refreshes coalesce Auto operation bursts', () => {
+    const panel = read('client/src/components/Assistant/ReasoningPanel.jsx');
+    assert.match(panel, /scheduleEditAnalysis\s*=\s*useCallback/);
+    assert.match(panel, /\}, 8000\)/);
+    assert.match(panel, /\[editingStyle, projectId, scheduleEditAnalysis\]/);
+    assert.match(panel, /\[editCount, projectId, assets, scheduleEditAnalysis\]/);
+    assert.match(panel, /analysisDebounceTimerRef\.current\s*=\s*null;\s*\n\s*const out = await analyzeProject\('asset_added'\)/);
+});
 await check('Auto mode takes the AI retake picks instead of waiting on a dialog', () => {
     assert.match(read('client/src/agent/MediaExecutionEngine.js'), /isAutopilotRunning\(\) \? true : await this\._reviewRetakes/);
 });

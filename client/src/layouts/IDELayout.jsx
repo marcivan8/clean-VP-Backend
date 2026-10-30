@@ -1092,6 +1092,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                                 gcsPath,
                                                 name: file.name,
                                                 projectId: useTimelineStore.getState().projectId || null,
+                                                isReference: Boolean(e.referenceMaterial),
                                             }),
                                         });
                                         assetAnalysisQueued = resp.ok;
@@ -1256,6 +1257,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                                 gcsPath:   data.rawGcsPath || rawFilePath,
                                                 name:      file.name,
                                                 projectId: useTimelineStore.getState().projectId || null,
+                                                isReference: Boolean(e.referenceMaterial),
                                             }),
                                         });
                                         if (!resp.ok) {
@@ -1464,7 +1466,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             return;
                         }
                         try {
-                            const analysis = { assetId, name: file.name, projectId: useTimelineStore.getState().projectId || null };
+                            const analysis = {
+                                assetId,
+                                name: file.name,
+                                projectId: useTimelineStore.getState().projectId || null,
+                                isReference: Boolean(e.referenceMaterial),
+                            };
                             if (gcsPath) analysis.gcsPath = gcsPath;
                             else {
                                 const imageBase64 = await new Promise((resolve, reject) => {

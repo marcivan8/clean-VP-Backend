@@ -50,7 +50,7 @@ class MediaIntelligencePipeline {
      * @param {string} projectId
      * @param {string} userId
      */
-    async analyzeAsset(assetId, filePath, projectId, userId, name = null) {
+    async analyzeAsset(assetId, filePath, projectId, userId, name = null, isReference = false) {
         // Create the row FIRST, then mark it processing.
         //
         // Everything in this file writes with `.update()`, which in PostgREST
@@ -58,7 +58,7 @@ class MediaIntelligencePipeline {
         // nothing in the entire codebase ever INSERTed into media_assets — so
         // every analysis wrote into the void, logged "✓ analyzed", and left the
         // table permanently empty (verified: 0 rows in prod). See CLAUDE.md R38.
-        await this._ensureAssetRow(assetId, projectId, userId, name);
+        await this._ensureAssetRow(assetId, projectId, userId, name, isReference);
         await this._updateAssetStatus(assetId, ASSET_ANALYSIS_PROCESSING);
 
         // The analyzers take a LOCAL path (both do fs.existsSync and bail),
@@ -88,7 +88,7 @@ class MediaIntelligencePipeline {
                     console.error(`[MediaPipeline] Audio classify error for ${assetId}:`, err.message);
                     return { audioType: 'unknown', hasAudio: false, hasSpokenWord: false, error: true };
                 }),
-                this.visualAnalyzer.analyze(localPath, null).catch(err => {
+                this.visualAnalyzer.analyze(localPath, null, { styleReference: isReference }).catch(err => {
                     console.error(`[MediaPipeline] Visual analyze error for ${assetId}:`, err.message);
                     return { error: true, sceneType: 'unknown' };
                 }),
@@ -130,6 +130,8 @@ class MediaIntelligencePipeline {
                     emotional_tone:      visualAnalysis.emotionalTone,
                     content_description: visualAnalysis.contentDescription,
                     suggested_label:     visualAnalysis.suggestedLabel,
+                    is_reference:        Boolean(isReference),
+                    visual_style_profile: visualAnalysis.visualStyleProfile || null,
 
                     // Transcript
                     transcript_text:     transcriptText,
@@ -189,8 +191,8 @@ class MediaIntelligencePipeline {
      * @param {string} projectId
      * @param {string} userId
      */
-    async analyzeImageAsset(assetId, imageBase64, projectId, userId, name = null) {
-        await this._ensureAssetRow(assetId, projectId, userId, name);
+    async analyzeImageAsset(assetId, imageBase64, projectId, userId, name = null, isReference = false) {
+        await this._ensureAssetRow(assetId, projectId, userId, name, isReference);
         await this._updateAssetStatus(assetId, ASSET_ANALYSIS_PROCESSING);
 
         try {
@@ -201,7 +203,7 @@ class MediaIntelligencePipeline {
                 return;
             }
 
-            const visualAnalysis = await this.visualAnalyzer.analyzeImageBase64(imageBase64).catch(err => {
+            const visualAnalysis = await this.visualAnalyzer.analyzeImageBase64(imageBase64, { styleReference: isReference }).catch(err => {
                 console.error(`[MediaPipeline] Image visual analyze error for ${assetId}:`, err.message);
                 return { error: true, sceneType: 'unknown' };
             });
@@ -223,6 +225,8 @@ class MediaIntelligencePipeline {
                     emotional_tone:      visualAnalysis.emotionalTone,
                     content_description: visualAnalysis.contentDescription,
                     suggested_label:     visualAnalysis.suggestedLabel,
+                    is_reference:        Boolean(isReference),
+                    visual_style_profile: visualAnalysis.visualStyleProfile || null,
 
                     // Images have no audio/transcript — explicit false/null rather
                     // than leaving the columns at whatever _ensureAssetRow's upsert
@@ -253,6 +257,40 @@ class MediaIntelligencePipeline {
         }
     }
 
+    /** Analyze/cache the visual grammar for an existing video reference. */
+    async analyzeStyleReference(assetId, userId) {
+        const { data: asset, error } = await supabaseAdmin
+            .from('media_assets')
+            .select('id, user_id, gcs_path, name, is_reference, visual_style_profile')
+            .eq('id', assetId)
+            .eq('user_id', userId)
+            .maybeSingle();
+        if (error) throw error;
+        if (!asset) throw new Error('Reference asset was not found.');
+        if (asset.visual_style_profile) return asset.visual_style_profile;
+        if (!asset.gcs_path) return null;
+
+        const { localPath, cleanupPath } = await this._resolveToLocalFile(asset.gcs_path, asset.id);
+        if (!localPath) throw new Error('Reference video is not available for style analysis yet.');
+        try {
+            const profile = await this.visualAnalyzer.analyze(localPath, null, { styleReference: true });
+            const styleProfile = profile?.visualStyleProfile || null;
+            if (styleProfile) {
+                const { error: updateError } = await supabaseAdmin
+                    .from('media_assets')
+                    .update({ is_reference: true, visual_style_profile: styleProfile })
+                    .eq('id', asset.id)
+                    .eq('user_id', userId);
+                if (updateError) throw updateError;
+            }
+            return styleProfile;
+        } finally {
+            if (cleanupPath) {
+                try { fs.unlinkSync(cleanupPath); } catch { /* best-effort cleanup */ }
+            }
+        }
+    }
+
     /**
      * Create the media_assets row if it doesn't exist yet.
      *
@@ -266,7 +304,7 @@ class MediaIntelligencePipeline {
      *
      * @private
      */
-    async _ensureAssetRow(assetId, projectId, userId, name) {
+    async _ensureAssetRow(assetId, projectId, userId, name, isReference = false) {
         try {
             const { error } = await supabaseAdmin
                 .from('media_assets')
@@ -276,6 +314,7 @@ class MediaIntelligencePipeline {
                         user_id:    userId    || null,
                         project_id: projectId || null,
                         name:       name      || null,
+                        is_reference: Boolean(isReference),
                     },
                     { onConflict: 'id', ignoreDuplicates: true }
                 );

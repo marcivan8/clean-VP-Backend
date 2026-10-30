@@ -81,7 +81,7 @@ class VisualAnalyzer {
      * @param {number} duration  - Video duration in seconds
      * @returns {Promise<Object>} Visual analysis result
      */
-    async analyze(filePath, duration) {
+    async analyze(filePath, duration, { styleReference = false } = {}) {
         const tempFiles = [];
 
         try {
@@ -105,10 +105,11 @@ class VisualAnalyzer {
             // default (inside extractFrames) if ffprobe itself fails.
             const realDuration = duration || await this.probeDuration(filePath);
 
-            const frames = await this.extractFrames(filePath, realDuration, tempFiles);
+            const samplePositions = styleReference ? [0.08, 0.28, 0.5, 0.72, 0.92] : undefined;
+            const frames = await this.extractFrames(filePath, realDuration, tempFiles, samplePositions);
             if (!frames.length) return ERROR_RESULT;
 
-            const result = await this.analyzeWithVision(frames);
+            const result = await this.analyzeWithVision(frames, 'video', { styleReference });
             return result;
 
         } catch (err) {
@@ -259,8 +260,10 @@ class VisualAnalyzer {
      * @param {string[]} tempFiles  - Mutated to track files for cleanup
      * @returns {Promise<{ timestamp: number, base64: string }[]>}
      */
-    async extractFrames(filePath, duration, tempFiles) {
-        const positions = [0.1, 0.5, 0.9];
+    async extractFrames(filePath, duration, tempFiles, requestedPositions = null) {
+        const positions = Array.isArray(requestedPositions) && requestedPositions.length
+            ? requestedPositions
+            : [0.1, 0.5, 0.9];
         const frames = [];
         const ts = Date.now();
 
@@ -297,13 +300,13 @@ class VisualAnalyzer {
      * @param {{ timestamp: number, base64: string }[]} frames
      * @returns {Promise<Object>}
      */
-    async analyzeWithVision(frames, mediaKind = 'video') {
+    async analyzeWithVision(frames, mediaKind = 'video', { styleReference = false } = {}) {
         try {
             const imageMessages = frames.map(f => ({
                 type: 'image_url',
                 image_url: {
                     url: `data:image/jpeg;base64,${f.base64}`,
-                    detail: 'low', // cost control
+                    detail: styleReference ? 'high' : 'low', // Read typography and graphic treatment only for explicit references.
                 },
             }));
 
@@ -323,12 +326,24 @@ class VisualAnalyzer {
   "emotionalTone": "energetic|calm|serious|humorous|neutral",
   "contentDescription": "<one sentence describing the video content>",
   "suggestedLabel": "<short label for the media bin, 2-4 words>"
+}${styleReference ? `
+Also return "visualStyleProfile" describing only the visible editing/design grammar (do not infer the story content): {
+  "confidence": <0 to 1; lower if frames do not show enough overlays>,
+  "motionEnergy": "low|medium|high|unknown",
+  "captionTreatment": "none|minimal|clean|bold|word_highlight|boxed|kinetic|unknown",
+  "titleTreatment": "none|minimal|top_card|centered|large_kinetic|lower_third|unknown",
+  "graphicsDensity": "sparse|balanced|dense|unknown",
+  "transitionPacing": "slow|medium|fast|unknown",
+  "visualTone": "cinematic|editorial|warm|viral|technology|unknown",
+  "colorPalette": ["#RRGGBB", "#RRGGBB"],
+  "motifs": ["short visible design motif", "another motif"]
 }
+Use multiple frames to distinguish a persistent style from one moment. Do not claim to see animation direction or sound effects from still frames; use "unknown" when evidence is insufficient.` : ''}
 Return ONLY the JSON object, no explanation.`;
 
             const response = await this.openai.chat.completions.create({
                 model: this.visionModel,
-                max_tokens: 400,
+                max_tokens: styleReference ? 700 : 400,
                 response_format: { type: 'json_object' },
                 messages: [
                     {
@@ -360,6 +375,9 @@ Return ONLY the JSON object, no explanation.`;
                 emotionalTone:      parsed.emotionalTone      || null,
                 contentDescription: parsed.contentDescription || null,
                 suggestedLabel:     parsed.suggestedLabel     || null,
+                ...(styleReference && parsed.visualStyleProfile && typeof parsed.visualStyleProfile === 'object'
+                    ? { visualStyleProfile: parsed.visualStyleProfile }
+                    : {}),
             };
 
         } catch (err) {
@@ -383,7 +401,7 @@ Return ONLY the JSON object, no explanation.`;
      * @param {string} base64  - Raw base64-encoded image bytes (no data: URI prefix)
      * @returns {Promise<Object>} Visual analysis result (same shape as analyze())
      */
-    async analyzeImageBase64(base64) {
+    async analyzeImageBase64(base64, { styleReference = false } = {}) {
         try {
             if (!base64) {
                 console.warn('[VisualAnalyzer] analyzeImageBase64 called with no image data');
@@ -394,7 +412,7 @@ Return ONLY the JSON object, no explanation.`;
                 return { ...ERROR_RESULT, error: false, sceneType: 'unknown' };
             }
 
-            return await this.analyzeWithVision([{ timestamp: 0, base64 }], 'image');
+            return await this.analyzeWithVision([{ timestamp: 0, base64 }], 'image', { styleReference });
         } catch (err) {
             console.error('[VisualAnalyzer] analyzeImageBase64 error:', err.message);
             return ERROR_RESULT;

@@ -49,6 +49,7 @@ import { iconFromText } from '../motion/IconLibrary.js';
 import { VECTOR_ILLUSTRATIONS } from '../motion/VectorIllustrationLibrary.js';
 import { templateSize } from '../motion/TemplateGraphics.js';
 import { applyPresetToClip } from '../motion/ClipAdapter.js';
+import { buildStyleReferencePlan } from '../motion/StyleReferenceAdapter.js';
 
 const STOP = new Set(('a an the and or but so to of in on at for with is are was were be been it this that these those i you we they he she my your our their me us them ' +
     'just really very like um uh then also do does did have has had will would can could should not no yes if about from as by here ' +
@@ -94,7 +95,7 @@ export function headlineFromText(text, { maxWords = 6, upper = true } = {}) {
  */
 export function fallbackShortScenePlan(words, {
     headline = '', duration = 0, techniques = [], visualContext = [], events = [],
-    platform = '', editingStyle = '',
+    platform = '', editingStyle = '', referenceStyle = null,
 } = {}) {
     const cleanText = value => String(value || '')
         .replace(/#[\p{L}\p{N}_]+/gu, '')
@@ -120,9 +121,14 @@ export function fallbackShortScenePlan(words, {
     const title = cleanText(headline)
         || headlineFromText(timedWords.slice(0, 18).map(w => w.word).join(' '), { maxWords: 6, upper: false });
     if (!title) return null;
+    const referencePlan = buildStyleReferencePlan(referenceStyle);
 
     const transcript = timedWords.map(w => w.word).join(' ').toLowerCase();
-    const visualLanguage = (Array.isArray(visualContext) ? visualContext : [])
+    // A reference clip supplies design evidence only; its subject/content must
+    // never be mistaken for source footage or drive content-matched cutaways.
+    const sourceVisualContext = (Array.isArray(visualContext) ? visualContext : [])
+        .filter(item => !item?.isReference);
+    const visualLanguage = sourceVisualContext
         .flatMap(item => [item?.sceneType, item?.locationType, item?.emotionalTone, item?.contentDescription].filter(Boolean))
         .join(' ').toLowerCase();
     const inferredTone = /\b(step|steps|lesson|lessons|why|how|explained|tutorial|first|second|étape|étapes|leçon|leçons|pourquoi|comment|expliqué|tutoriel|premier|première|deuxième)\b/.test(transcript)
@@ -137,9 +143,10 @@ export function fallbackShortScenePlan(words, {
                             ? 'premium' : 'viral';
     const styleTones = { vlog: 'warm', talking_head: 'editorial', interview: 'warm', podcast: 'warm', reel: 'viral' };
     const platformTones = { tiktok: 'viral', reels: 'premium', shorts: 'technology' };
-    const tone = styleTones[editingStyle] || (inferredTone === 'viral' ? (platformTones[platform] || inferredTone) : inferredTone);
+    const tone = referencePlan?.visualTone || styleTones[editingStyle] || (inferredTone === 'viral' ? (platformTones[platform] || inferredTone) : inferredTone);
     const calmStyle = editingStyle === 'podcast' || editingStyle === 'interview';
-    const restrainedMotion = calmStyle || editingStyle === 'talking_head';
+    const restrainedMotion = calmStyle || editingStyle === 'talking_head'
+        || referencePlan?.motionEnergy === 'low' || ['warm', 'editorial', 'cinematic'].includes(referencePlan?.visualTone);
     const wordsOf = value => value.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
     const titleWords = new Set(wordsOf(title));
     const pointSegment = segments.find(segment => {
@@ -150,7 +157,7 @@ export function fallbackShortScenePlan(words, {
     });
 
     const usableTechniques = Array.isArray(techniques) ? techniques.filter(t => t?.name) : [];
-    const visuals = (Array.isArray(visualContext) ? visualContext : [])
+    const visuals = sourceVisualContext
         .filter(item => item && (item.isBroll || item.sceneType || item.contentDescription || item.suggestedLabel))
         .slice(0, 80);
     const tokensOf = value => (String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/[\p{L}\p{N}]+/gu) || [])
@@ -205,7 +212,7 @@ export function fallbackShortScenePlan(words, {
             enter: ['fade-in', 'rise-in', 'word-reveal', 'blur-in'].includes(motion.enter) ? motion.enter : 'rise-in',
             emphasis: ['nod', 'pulse'].includes(motion.emphasis) ? motion.emphasis : 'nod',
             exit: 'fade-out',
-            energy: Math.min(maxEnergy, Number(motion.energy) || maxEnergy),
+            energy: Math.min(maxEnergy, (Number(motion.energy) || maxEnergy) * (Number(referencePlan?.motionScale) || 1)),
             anticipate: false,
         };
     };
@@ -375,7 +382,16 @@ export function fallbackShortScenePlan(words, {
             };
         });
     const visualSummary = [...new Set(visuals.flatMap(item => [item.sceneType, item.locationType, item.emotionalTone].filter(Boolean)))].slice(0, 8);
-    return { tone, beats, timedMoments, sfxCues, brollMoments, ...(visualSummary.length ? { visualSummary } : {}), source: 'local-fallback' };
+    return {
+        tone, beats, timedMoments, sfxCues, brollMoments,
+        ...(referencePlan ? { referenceStyleApplied: {
+            motionEnergy: referencePlan.motionEnergy,
+            visualTone: referencePlan.visualTone,
+            transitionPacing: referencePlan.transitionPacing,
+        } } : {}),
+        ...(visualSummary.length ? { visualSummary } : {}),
+        source: 'local-fallback',
+    };
 }
 
 /** Spoken prices, percentages and figures in timeline words: [{t, text}]. */
@@ -468,7 +484,17 @@ function trackOf(tracks, type, id, name) {
  * @returns {{tracks:Array, duration:number, aspectRatio:string, applied:string[]}}
  */
 export function polishShort(built, profile, opts = {}) {
-    const look = POLISH_LOOK[profile?.id] || POLISH_LOOK.tiktok;
+    const baseLook = POLISH_LOOK[profile?.id] || POLISH_LOOK.tiktok;
+    const referenceStyle = buildStyleReferencePlan(opts.referenceStyleProfile);
+    const look = referenceStyle ? {
+        ...baseLook,
+        ...(referenceStyle.recipe ? { recipe: referenceStyle.recipe } : {}),
+        ...(referenceStyle.titleComponent ? { titleComponent: referenceStyle.titleComponent } : {}),
+        ...(referenceStyle.titlePreset ? { titlePreset: referenceStyle.titlePreset } : {}),
+        ...(referenceStyle.accent ? { accent: referenceStyle.accent } : {}),
+        ...(referenceStyle.textColor ? { titleColor: referenceStyle.textColor } : {}),
+        cameraEnergy: Math.max(0.2, Math.min(0.9, baseLook.cameraEnergy * referenceStyle.motionScale)),
+    } : baseLook;
     const want = { title: true, captions: true, camera: true, numbers: true, cuts: true, popOut: !!opts.popOut, ...(opts.layers || {}) };
     const tracks = (built?.tracks || []).map(t => ({ ...t, clips: (t.clips || []).map(c => ({ ...c })) }));
     const duration = Math.max(0.5, Number(built?.duration) || 0);
@@ -681,8 +707,20 @@ export function polishShort(built, profile, opts = {}) {
     // motion/CaptionModel.js's groupWordsIntoSegments) before styling, so a
     // short always gets captions when a transcript is available, and only
     // stays silent when there is truly no speech to caption.
-    if (want.captions && profile?.captionPack) {
-        const fields = stylePackToClipFields(profile.captionPack) || {};
+    const captionPack = referenceStyle?.captionPack || profile?.captionPack;
+    if (want.captions && captionPack) {
+        const baseFields = stylePackToClipFields(captionPack) || {};
+        const fields = referenceStyle ? {
+            ...baseFields,
+            ...(referenceStyle.textColor ? { color: referenceStyle.textColor } : {}),
+            captionStyle: {
+                ...(baseFields.captionStyle || {}),
+                wordHighlight: {
+                    ...(baseFields.captionStyle?.wordHighlight || {}),
+                    ...(referenceStyle.accent ? { color: referenceStyle.accent } : {}),
+                },
+            },
+        } : baseFields;
         const captionClips = [];
         for (const t of tracks) {
             if (t.type !== 'text' || t.id === 'track-short-title') continue;
@@ -850,7 +888,10 @@ export function polishShort(built, profile, opts = {}) {
     // safe placement, and motion.
     if (want.title && Array.isArray(opts.scenePlan?.timedMoments)) {
         let textN = 0, gfxN = 0, count = 0;
-        const maxTimedScenes = Math.max(1, Math.min(5, Math.floor(duration / 7)));
+        const naturalSceneCap = Math.max(1, Math.min(5, Math.floor(duration / 7)));
+        const maxTimedScenes = referenceStyle
+            ? Math.min(naturalSceneCap, referenceStyle.graphicsMax)
+            : naturalSceneCap;
         const timed = opts.scenePlan.timedMoments
             .filter(m => m && typeof m.text === 'string' && m.text.trim())
             .filter(m => Number(m.start) >= (want.title ? hookSpan : 0) + 0.4 && Number(m.start) < duration - 1)

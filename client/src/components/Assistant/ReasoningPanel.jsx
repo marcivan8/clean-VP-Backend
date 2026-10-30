@@ -752,6 +752,23 @@ const ReasoningPanel = ({ className, onImportMedia }) => {
         lastResponse:   brainLastResponse,
     } = useBrain();
 
+    // An Auto run can record several successful edit operations in quick
+    // succession. Re-analyzing after each one spent the shared AI request
+    // budget on nearly identical project snapshots and could hit the server's
+    // per-IP limiter. Coalesce edit and style changes into one trailing
+    // advisory after the user has had a moment to continue editing.
+    const analysisDebounceTimerRef = useRef(null);
+    const scheduleEditAnalysis = useCallback(() => {
+        if (analysisDebounceTimerRef.current) clearTimeout(analysisDebounceTimerRef.current);
+        analysisDebounceTimerRef.current = setTimeout(() => {
+            analysisDebounceTimerRef.current = null;
+            analyzeProject('edit_applied');
+        }, 8000);
+    }, [analyzeProject]);
+    useEffect(() => () => {
+        if (analysisDebounceTimerRef.current) clearTimeout(analysisDebounceTimerRef.current);
+    }, []);
+
     // Advisory trigger: analyze once per project load ("project_opened").
     //
     // GUARD: if the user's very first action after opening is dropping a
@@ -779,22 +796,14 @@ const ReasoningPanel = ({ className, onImportMedia }) => {
     // the project once the choice settles; the first value (project load) is
     // skipped, the project_opened analysis above already covers it.
     const lastStyleRef = useRef(undefined);
-    const styleTimerRef = useRef(null);
     useEffect(() => {
         if (lastStyleRef.current === undefined) { lastStyleRef.current = editingStyle; return undefined; }
         if (lastStyleRef.current === editingStyle) return undefined;
         lastStyleRef.current = editingStyle;
         if (!projectId || analyzedProjectRef.current !== projectId) return undefined;
-        if (styleTimerRef.current) clearTimeout(styleTimerRef.current);
-        styleTimerRef.current = setTimeout(() => {
-            styleTimerRef.current = null;
-            Promise.resolve(analyzeProject('edit_applied')).catch(err => console.warn('[ReasoningPanel] style re-analysis failed:', err?.message));
-        }, 1500);
-        // No cleanup on purpose: analyzeProject's identity can change while the
-        // timer runs, which must not cancel the pending re-read.
+        scheduleEditAnalysis();
         return undefined;
-    }, [editingStyle, projectId, analyzeProject]);
-    useEffect(() => () => { if (styleTimerRef.current) clearTimeout(styleTimerRef.current); }, []);
+    }, [editingStyle, projectId, scheduleEditAnalysis]);
 
     // Advisory trigger: analyze when a new asset finishes uploading ("asset_added").
     // Tracks the count of non-proxying assets so it only fires once per new asset,
@@ -823,6 +832,11 @@ const ReasoningPanel = ({ className, onImportMedia }) => {
             assetSettleTimerRef.current = null;
             const st = useTimelineStore.getState();
             if (st.assets?.some(a => a.isProxying)) return; // still busy — a later arrival will re-arm
+
+            // The upload analysis includes the latest timeline and style, so
+            // it supersedes any queued post-edit refresh.
+            if (analysisDebounceTimerRef.current) clearTimeout(analysisDebounceTimerRef.current);
+            analysisDebounceTimerRef.current = null;
 
             const out = await analyzeProject('asset_added');
 
@@ -853,13 +867,9 @@ const ReasoningPanel = ({ className, onImportMedia }) => {
         };
     }, [assets, projectId, analyzeProject]);
 
-    // Advisory trigger: re-analyze after every applied edit ("edit_applied").
-    // Previously the Brain only ran on project_opened / asset_added, so its
-    // guidance was generated once at upload and then never changed — it kept
-    // advising "start by removing repetitive content" long after the user had
-    // moved past that. editHistory grows on every successful operation (see
-    // useTimelineStore.recordEdit), which makes it the natural trigger, and the
-    // Brain now receives that same ledger so its answer actually differs.
+    // Advisory trigger: re-analyze after edits settle. Auto runs can record
+    // several successful operations; scheduleEditAnalysis coalesces the burst
+    // into one request using the latest edit ledger and timeline.
     const editCount = useTimelineStore(s => (s.editHistory || []).length);
     const lastAnalyzedEditCountRef = useRef(editCount);
     useEffect(() => {
@@ -876,8 +886,8 @@ const ReasoningPanel = ({ className, onImportMedia }) => {
         // of context" mismatch via a different door. asset_added already
         // fires its own analysis once the upload actually settles, so
         // skipping here (rather than queueing a retry) loses nothing.
-        if (projectId && !assets.some(a => a.isProxying)) analyzeProject('edit_applied');
-    }, [editCount, projectId, assets, analyzeProject]);
+        if (projectId && !assets.some(a => a.isProxying)) scheduleEditAnalysis();
+    }, [editCount, projectId, assets, scheduleEditAnalysis]);
 
     // Run queued requests (above) once the video is ready and Roka is free.
     // Mirrors MobileAIBar's wiring — without this, a prompt queued on desktop
