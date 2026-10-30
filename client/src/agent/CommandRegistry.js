@@ -812,6 +812,26 @@ export const COMMANDS = [
         destructive: false,
     },
 
+    // R131 — "the brain loses the flow after each task done": a long-form
+    // edit that fails or stops partway (a bug, a timeout, a transient error)
+    // left nothing behind for the user to pick back up — see
+    // longFormJobMemory.js. This command reads whatever was saved there.
+    // Phrases are deliberately short and specific: "continue"/"keep going"
+    // alone would be too broad (it could mean a dozen things depending on
+    // context), so this only matches when the user is clearly asking to
+    // pick a STOPPED EDIT back up, not just "continue" in the abstract.
+    {
+        id: 'resume_failed_job',
+        category: 'edit',
+        label: 'Continue the edit',
+        summary: 'Picks up the last long-form edit from wherever it stopped or failed.',
+        phrases: ['continue the edit', 'continue editing', 'continue where it stopped',
+                  'continue where it left off', 'pick up where it left off',
+                  'resume the edit', 'resume editing', 'finish the edit',
+                  'try the edit again', 'try again', 'retry the edit', 'retry the failed step'],
+        destructive: false,
+    },
+
     // ── Macros — sugar only, expand to atomic steps ──────────────────────────
     {
         id: 'macro_multicam',

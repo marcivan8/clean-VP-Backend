@@ -5,6 +5,7 @@ import { LongFormEditPlanner } from './LongFormEditPlanner.js';
 import { authFetch } from '../utils/authFetch.js';
 import { autoEmphasizeCaptions, clearAllEmphasis } from '../utils/captionEmphasis.js';
 import { evaluateMotionCompatibility } from './AnimationCompatibilityEvaluator.js';
+import { saveResumableJob, clearResumableJob, getResumableJob, remainingCommandsFrom } from './longFormJobMemory.js';
 
 /**
  * VideoEditorTools
@@ -984,6 +985,7 @@ export class VideoEditorTools {
             // Long-Form Intelligence Engine
             case 'analyze_structure': return await this.analyzeStructure(action.args, action.signal);
             case 'long_form_edit': return await this.longFormEdit(action.args, action.signal);
+            case 'resume_failed_job': return await this.resumeFailedJob();
             case 'smart_cleanup': return await this.smartCleanup(action.args, action.signal);
             case 'find_hook': return await this.findHook();
             case 'place_contextual_broll': return await this.placeContextualBroll(action.args, action.signal);
@@ -1485,14 +1487,98 @@ export class VideoEditorTools {
         // calls on an already-abandoned job.
         const executionResult = await mediaExecutionEngine.execute(compileResult.commands, null, signal);
 
+        // R131 — "the brain loses the flow after each task done": a failed
+        // long-form edit used to vanish completely — nothing recorded which
+        // steps never applied, so "continue" had nothing to continue. On
+        // success, clear any earlier failure for this project (a user who
+        // redid the whole edit manually shouldn't have a stale "continue"
+        // offer sitting around); on failure, save exactly the commands that
+        // never successfully ran so resumeFailedJob() can hand them straight
+        // back to the execution engine without re-planning from scratch.
+        const state = this.store;
+        if (executionResult.success) {
+            clearResumableJob(state.projectId);
+        } else {
+            const remaining = remainingCommandsFrom(compileResult.commands, executionResult.results);
+            saveResumableJob({
+                projectId: state.projectId,
+                planId: plan.plan_id,
+                remainingCommands: remaining,
+                failedMessage: executionResult.error,
+                totalSteps: plan.step_count,
+            });
+        }
+
         return {
             success: executionResult.success,
             message: executionResult.success
                 ? `✓ Long-form edit complete — ${plan.step_count} steps applied.`
-                : `Long-form edit failed: ${executionResult.error}`,
+                : `Long-form edit failed: ${executionResult.error} — say "continue" to pick up where it stopped.`,
             editPlan: plan,
             results: executionResult.results,
         };
+    }
+
+    /**
+     * R131 — "continue" / "try again" / "resume the edit". Hands the exact
+     * remaining compiled commands from the last failed/incomplete job
+     * straight back to MediaExecutionEngine — no re-analysis, no
+     * re-planning, no re-running of whatever already succeeded. If this
+     * attempt still doesn't fully clear, the newly-remaining subset is
+     * saved again so the user can say "continue" a second time.
+     *
+     * Known limitation (first slice, documented rather than engineered
+     * around): the saved commands reference clip/track ids from the
+     * timeline state at the time of the original failure. If the user
+     * undid or otherwise changed the timeline before asking to continue,
+     * some commands may now target something that moved or no longer
+     * exists — the same risk as manually re-running any edit after
+     * changing your mind about part of it in between.
+     */
+    async resumeFailedJob() {
+        try {
+            const state = this.store;
+            const record = getResumableJob(state.projectId);
+            if (!record) {
+                return {
+                    success: false,
+                    message: 'There is nothing to continue — the last long-form edit either finished successfully or nothing was recorded.',
+                };
+            }
+
+            const { mediaExecutionEngine } = await import('./MediaExecutionEngine.js');
+            const executionResult = await mediaExecutionEngine.execute(record.remainingCommands, null, null);
+
+            if (executionResult.success) {
+                clearResumableJob(state.projectId);
+                return {
+                    success: true,
+                    message: `✓ Continued and finished the edit — ${record.remainingCommands.length} remaining step(s) applied.`,
+                };
+            }
+
+            const stillRemaining = remainingCommandsFrom(record.remainingCommands, executionResult.results);
+            if (stillRemaining.length === 0) {
+                // Everything reported ran, but verifyExecution still failed the
+                // job for some other reason — nothing concrete left to retry.
+                clearResumableJob(state.projectId);
+                return { success: false, message: `Still couldn't finish: ${executionResult.error}` };
+            }
+            saveResumableJob({
+                projectId: state.projectId,
+                planId: record.planId,
+                remainingCommands: stillRemaining,
+                failedMessage: executionResult.error,
+                totalSteps: record.totalSteps,
+            });
+            return {
+                success: false,
+                message: `Still couldn't finish: ${executionResult.error} — ${stillRemaining.length} step(s) remain. Say "continue" again once that's fixed.`,
+            };
+        } catch (error) {
+            console.error('[VideoEditorTools] resumeFailedJob error:', error);
+            return { success: false, message: `Could not continue the edit: ${error.message}` };
+        }
     }
 
     /**

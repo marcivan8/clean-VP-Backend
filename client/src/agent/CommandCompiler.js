@@ -1228,6 +1228,7 @@ const COMMAND_REGISTRY = new Map([
     // Additional long-form steps
     ['cut_segment', { compiler: compileCutSegment }],
     ['add_transitions_to_sections', { compiler: compileAddTransitionsToSections }],
+    ['resume_failed_job', { compiler: compileAtomicStore('resume_failed_job', 'Continue the last edit from where it stopped') }], // R131
 
     // Asset Engine — Creative Asset Intelligence System
     ['search_assets',     { compiler: compileSearchAssets }],
