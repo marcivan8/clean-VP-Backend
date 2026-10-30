@@ -11,7 +11,35 @@ process.env.SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'mock-anon-key'
 
 import assert from 'assert/strict';
 import fs from 'fs';
+import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
+
+// stockGate calls getUserPlan(), which normally reads Supabase. Keep this
+// contract test fully local and deterministic: the project URL above is a
+// placeholder, not a test database, and must never trigger a real request.
+const require = createRequire(import.meta.url);
+const databasePath = require.resolve('../config/database.js');
+const testDatabase = {
+    supabaseAdmin: {
+        from() {
+            return {
+                select() {
+                    return {
+                        eq() {
+                            return { single: async () => ({ data: { plan: 'free' }, error: null }) };
+                        },
+                    };
+                },
+            };
+        },
+    },
+};
+require.cache[databasePath] = {
+    id: databasePath,
+    filename: databasePath,
+    loaded: true,
+    exports: testDatabase,
+};
 
 const read = (rel) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8');
 

@@ -325,7 +325,15 @@ export function polishShort(built, profile, opts = {}) {
         // bounded so the hook can never eat half the short.
         const offered = openingBeats.length > 0 ? openingBeats : flatBeats;
         const roomForTwo = offered.length > 1 && duration >= 8;
-        const introBeats = offered.slice(0, roomForTwo ? 2 : 1);
+        const introBeats = offered.slice(0, roomForTwo ? 2 : 1).map(beat => ({
+            ...beat,
+            // The designed-scene path must keep the same per-platform title
+            // casing as the legacy title component: TikTok/Shorts are set in
+            // uppercase, while Reels keeps sentence case.
+            ...(look.upper && scenePlan?.source === 'local-fallback' && typeof beat.text === 'string'
+                ? { text: beat.text.toUpperCase() }
+                : {}),
+        }));
         if (introBeats.length > 1) hookSpan = Math.min(duration * 0.45, hookDur * 1.8);
 
         let hookApplied = false;
