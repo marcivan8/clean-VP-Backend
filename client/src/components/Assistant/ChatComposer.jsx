@@ -1,22 +1,14 @@
 import React, { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useShallow } from 'zustand/react/shallow';
-import { ArrowUp, Square, X, Video, Music, Type, Plus, FileText } from 'lucide-react';
-import useTimelineStore from '../../store/useTimelineStore';
+import { ArrowUp, Square, X, Plus, FileText } from 'lucide-react';
 import EditingStylePicker from './EditingStylePicker.jsx';
-import { contextChipsFor } from './composerTools.js';
 import { MAX_ASSISTANT_DOCUMENTS, readAssistantDocument } from './assistantDocuments.js';
 
 /**
  * R110 - the assistant's chat box, desktop-first.
  *
- *   [ clip chips ........................................ ]   what the request is about
  *   [ textarea ........................................... ]
  *   [ Vlog v ]  [ Normal | Auto ]                     ( send )
- *
- * Chips are the real selection (`selectedClipIds`), which the agent already
- * honours for clip-level commands, and removing one deselects it - nothing
- * here is decoration.
  *
  * R116 - the left button is the EDITING STYLE (EditingStylePicker.jsx), in
  * the slot R110/R111 gave to Tools. The style is what a person sets before
@@ -32,39 +24,6 @@ import { MAX_ASSISTANT_DOCUMENTS, readAssistantDocument } from './assistantDocum
  * Chips, Tools and the style picker are desktop-only: this panel is also the
  * mobile AI bar's expanded view, which has its own strip and no room for them.
  */
-
-const KIND_ICONS = { video: Video, audio: Music, text: Type };
-
-const ContextChips = () => {
-    const { t } = useTranslation('editor');
-    const { tracks, selectedClipIds, toggleClipSelection } = useTimelineStore(useShallow(s => ({
-        tracks: s.tracks, selectedClipIds: s.selectedClipIds, toggleClipSelection: s.toggleClipSelection,
-    })));
-    const { chips, more } = contextChipsFor(tracks, selectedClipIds);
-    if (chips.length === 0) return null;
-    return (
-        <div className="chat-composer__chips" role="list" aria-label={t('assistant.contextLabel')}>
-            {chips.map(chip => {
-                const Icon = KIND_ICONS[chip.kind] || Video;
-                return (
-                    <span key={chip.id} role="listitem" className="chat-composer__chip" title={t('assistant.contextHint')}>
-                        <Icon className="w-3.5 h-3.5 shrink-0 chat-composer__chip-icon" />
-                        <span className="chat-composer__chip-name">{chip.name}</span>
-                        <button
-                            type="button"
-                            onClick={() => toggleClipSelection(chip.id)}
-                            aria-label={t('assistant.contextRemove', { name: chip.name })}
-                            className="chat-composer__chip-x"
-                        >
-                            <X className="w-3 h-3" />
-                        </button>
-                    </span>
-                );
-            })}
-            {more > 0 && <span className="chat-composer__chip chat-composer__chip--more">+{more}</span>}
-        </div>
-    );
-};
 
 const ChatComposer = ({ inputRef, placeholder, busy, onSend, onStop, onKeyDown, newlineHint, documents = [], onDocumentsChange }) => {
     const { t } = useTranslation('editor');
@@ -136,7 +95,6 @@ const ChatComposer = ({ inputRef, placeholder, busy, onSend, onStop, onKeyDown, 
                 ))}
             </div>
             {documentError && <p className="chat-composer__document-error" role="alert">{documentError}</p>}
-            <div className="hidden md:block"><ContextChips /></div>
             <textarea
                 ref={inputRef}
                 rows={2}

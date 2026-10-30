@@ -59,12 +59,16 @@ export function startResizeGesture(e, { getCenter, initialScale = 1, minScale = 
         try { onChange?.(next); } catch (err) { console.error('[resizeGesture] onChange failed:', err); }
     };
     const onUp = () => {
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-        window.removeEventListener('pointercancel', onUp);
+        window.removeEventListener('pointermove', onMove, true);
+        window.removeEventListener('pointerup', onUp, true);
+        window.removeEventListener('pointercancel', onUp, true);
         try { onCommit?.(last); } catch (err) { console.error('[resizeGesture] onCommit failed:', err); }
     };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    // Capture before React's clip-level onPointerMove/onPointerUp handlers.
+    // Those handlers stop propagation so their drag gesture cannot also move
+    // the clip, but doing that in the bubble phase used to swallow these
+    // window listeners whenever the pointer remained inside the preview.
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', onUp, true);
+    window.addEventListener('pointercancel', onUp, true);
 }

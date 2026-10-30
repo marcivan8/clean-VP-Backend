@@ -68,7 +68,15 @@ const { clampScale, scaleFromDistanceRatio, startResizeGesture } = await import(
 // ── 4 · the resize handle (shared with overlay clips) is correctly reused ─
 {
     const resizeHandleSource = await readFile(new URL('../client/src/components/Player/ResizeHandle.jsx', import.meta.url), 'utf8');
+    const resizeGestureSource = await readFile(new URL('../client/src/utils/resizeGesture.js', import.meta.url), 'utf8');
+    const rotationGestureSource = await readFile(new URL('../client/src/utils/rotationGesture.js', import.meta.url), 'utf8');
     assert.match(resizeHandleSource, /setPointerCapture\(e\.pointerId\)/, 'corner resize must retain pointer capture while the element shrinks under it');
+    for (const [name, source] of [['resize', resizeGestureSource], ['rotation', rotationGestureSource]]) {
+        assert.match(source, /addEventListener\('pointermove', onMove, true\)/, `${name} listens in capture phase so preview handlers cannot swallow movement`);
+        assert.match(source, /addEventListener\('pointerup', onUp, true\)/, `${name} commits in capture phase inside the preview`);
+        assert.match(source, /removeEventListener\('pointermove', onMove, true\)/, `${name} removes capture-phase movement listener`);
+    }
+    ok('scale and rotation gestures receive pointer movement inside the preview despite clip handlers stopping bubbling');
 
     assert.equal(clampScale(10, { min: 0.1, max: 5 }), 5);
     assert.equal(clampScale(0.01, { min: 0.1, max: 5 }), 0.1);

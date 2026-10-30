@@ -90,7 +90,13 @@ check('settings is the only thing below the divider', () => {
 console.log('\n── 2. One switcher at a time, so one anchor at a time ──');
 
 check('the rail is mounted only on desktop', () => {
-    assert.ok(/\{!isMobile && \(\s*<PanelRail/.test(LAYOUT), 'the rail is not gated on !isMobile');
+    assert.ok(/\{!isMobile && \(\s*<div className="hidden md:block shrink-0">\s*<PanelRail/.test(LAYOUT), 'the rail is not gated on desktop');
+});
+
+check('the desktop timeline overlays the left rail and media panel as the top layer', () => {
+    assert.ok(/<main className="flex-1 flex flex-col min-w-0 min-h-0 relative">/.test(LAYOUT), 'the preview column unexpectedly reserves a separate timeline row');
+    assert.ok(/mode === 'editor' && isMobile/.test(LAYOUT), 'mobile timeline is not kept in the center column');
+    assert.ok(/mode === 'editor' && !isMobile && \([\s\S]*?className="absolute bottom-0 left-0 right-80 z-50 hidden md:flex h-72/.test(LAYOUT), 'desktop timeline does not overlay from the workspace left edge to the AI sidebar');
 });
 
 check('the horizontal strip is mounted only on mobile', () => {

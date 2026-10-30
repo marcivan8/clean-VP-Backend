@@ -356,6 +356,11 @@ const BrainPanel = ({ brainOutput, isProcessing, onSendCommand, onSendFeedback }
     // DirectorIntelligence.buildProposals() — see the effect in ReasoningPanel.jsx
     // that attaches this before pushing the advisory card.
     const directorProposals = brainOutput?.directorProposals?.proposals || [];
+    // Show at most one actionable command. Prefer the highest-ranked verified
+    // proposal; use the Brain's first suggestion only when no proposal applies.
+    const primaryProposal = directorProposals.find(proposal => proposal.applicable) || null;
+    const visibleProposals = directorProposals.filter(proposal => !proposal.applicable || proposal === primaryProposal);
+    const primarySuggestion = primaryProposal ? null : suggestions[0] || null;
 
     const hasContent = !!(message || suggestions.length || warnings.length || insight || directorProposals.length);
 
@@ -434,7 +439,7 @@ const BrainPanel = ({ brainOutput, isProcessing, onSendCommand, onSendFeedback }
                     >
                         Editorial findings
                     </div>
-                    {directorProposals.map(p => (
+                    {visibleProposals.map(p => (
                         <ProposalItem
                             key={p.id}
                             proposal={p}
@@ -446,7 +451,7 @@ const BrainPanel = ({ brainOutput, isProcessing, onSendCommand, onSendFeedback }
             )}
 
             {/* Suggestion chips */}
-            {suggestions.length > 0 && (
+            {primarySuggestion && (
                 <div>
                     <div
                         style={{
@@ -460,14 +465,14 @@ const BrainPanel = ({ brainOutput, isProcessing, onSendCommand, onSendFeedback }
                     >
                         Next steps
                     </div>
-                    {suggestions.map((s, i) => (
+                    {primarySuggestion && (
                         <SuggestionChip
-                            key={s?.type || i}
-                            suggestion={s}
+                            key={primarySuggestion?.type || 'brain-suggestion'}
+                            suggestion={primarySuggestion}
                             onAccept={handleAccept}
                             onDismiss={handleDismiss}
                         />
-                    ))}
+                    )}
                 </div>
             )}
 

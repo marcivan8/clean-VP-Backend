@@ -16,9 +16,32 @@
  */
 
 import { ledgerForBrain } from '../agent/EditRecap.js'; // R92 round B
+import {
+    INITIAL_ASSET_ANALYSIS_WAIT_MS,
+    LATE_ASSET_ANALYSIS_WAIT_MS,
+    ASSET_ANALYSIS_POLL_MS,
+    visualAnalysisAssetIds,
+    waitForAssetAnalysisStatus,
+} from '../agent/assetAnalysisWait.js';
 import { useState, useCallback, useRef } from 'react';
 import useTimelineStore from '../store/useTimelineStore';
 import { authFetch } from '../utils/authFetch';
+
+const ASSET_ANALYSIS_STATUS_REQUEST_TIMEOUT_MS = 5_000;
+
+async function fetchAssetAnalysisStatuses(projectId, assetIds) {
+    const params = new URLSearchParams({ projectId, assetIds: assetIds.join(',') });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), ASSET_ANALYSIS_STATUS_REQUEST_TIMEOUT_MS);
+    try {
+        const response = await authFetch(`/api/brain/analysis-status?${params}`, { signal: controller.signal });
+        if (!response.ok) throw new Error(`Asset analysis status failed (${response.status})`);
+        const data = await response.json();
+        return Object.fromEntries((data.statuses || []).map(item => [item.assetId, item.status]));
+    } finally {
+        clearTimeout(timeout);
+    }
+}
 
 /**
  * Build a lightweight project state snapshot from the current timeline store.
@@ -79,6 +102,7 @@ function buildProjectState() {
         duration:         a.duration || a.sourceDuration || 0,
         originalDuration: a.duration || a.sourceDuration || 0,
         analysis_status:  a.analysis_status || null,
+        visualAnalysisRequested: a.visualAnalysisRequested !== false,
     }));
 
     // ── What has actually been done to this project ──────────────────────────
@@ -200,6 +224,8 @@ export function useBrain() {
     // because higher/more variable network latency widens the window for an
     // older request to finish after a newer one.
     const analyzeGenerationRef = useRef(0);
+    const analysisRefreshesRef = useRef(new Set());
+    const analyzeProjectRef = useRef(null);
 
     // ── sendCommand ───────────────────────────────────────────────────────────
     /**
@@ -212,7 +238,6 @@ export function useBrain() {
     const sendCommand = useCallback(async (rawInput, extraState = {}) => {
         if (!rawInput?.trim()) return null;
 
-        setIsProcessing(true);
         setError(null);
 
         try {
@@ -278,10 +303,28 @@ export function useBrain() {
             const projectState = { ...buildProjectState(), ...extraState };
 
             if (!projectState.projectId) {
-                setIsProcessing(false);
                 return null;
             }
 
+            // Let the upload-time vision jobs finish before the first
+            // project_opened/asset_added advisory. Proxy completion and
+            // Gemini completion are independent, so only the persisted
+            // analysis status is authoritative here.
+            let timedOutAssetIds = [];
+            if (trigger === 'project_opened' || trigger === 'asset_added') {
+                const visualIds = visualAnalysisAssetIds(projectState.mediaBin);
+                const waitResult = await waitForAssetAnalysisStatus(
+                    visualIds,
+                    ids => fetchAssetAnalysisStatuses(projectState.projectId, ids),
+                    { timeoutMs: INITIAL_ASSET_ANALYSIS_WAIT_MS, intervalMs: ASSET_ANALYSIS_POLL_MS },
+                );
+                if (!waitResult.checkFailed) timedOutAssetIds = waitResult.pendingAssetIds;
+            }
+
+            // Keep the editor and prompt usable while we're only waiting for
+            // upload-time analysis to settle; show the busy state for the Brain
+            // request itself.
+            setIsProcessing(true);
             const res = await authFetch('/api/brain/analyze', {
                 method: 'POST',
                 body: JSON.stringify({ projectState, trigger }),
@@ -293,6 +336,27 @@ export function useBrain() {
             }
 
             const data = await res.json();
+
+            // If a slow job outlived the initial bounded wait, use the
+            // available context now and refresh exactly once after those jobs
+            // settle. Never hold the editor or repeat on every status poll.
+            if (timedOutAssetIds.length > 0) {
+                const refreshKey = `${projectState.projectId}:${[...timedOutAssetIds].sort().join(',')}`;
+                if (!analysisRefreshesRef.current.has(refreshKey)) {
+                    analysisRefreshesRef.current.add(refreshKey);
+                    void waitForAssetAnalysisStatus(
+                        timedOutAssetIds,
+                        ids => fetchAssetAnalysisStatuses(projectState.projectId, ids),
+                        { timeoutMs: LATE_ASSET_ANALYSIS_WAIT_MS, intervalMs: ASSET_ANALYSIS_POLL_MS, retryOnError: true },
+                    ).then(result => {
+                        if (!result.settled || useTimelineStore.getState().projectId !== projectState.projectId) return;
+                        // The second pass sees the same now-settled rows and
+                        // therefore proceeds immediately without scheduling
+                        // another refresh.
+                        analyzeProjectRef.current?.('asset_analysis_ready');
+                    }).finally(() => analysisRefreshesRef.current.delete(refreshKey));
+                }
+            }
 
             // A NEWER analyzeProject() call started while this one was still
             // in flight — that call's own resolution (whenever it lands)
@@ -340,6 +404,8 @@ export function useBrain() {
             setIsProcessing(false);
         }
     }, []);
+
+    analyzeProjectRef.current = analyzeProject;
 
     // ── sendFeedback ──────────────────────────────────────────────────────────
     /**

@@ -175,7 +175,7 @@ assert.match(assetPanelCode, /stockLockedTitle/, 'AssetPanel renders locked view
 
 const ideLayoutCode = read('../client/src/layouts/IDELayout.jsx');
 assert.match(ideLayoutCode, /tab === 'shorts' && isFree/, 'IDELayout gates shorts tab for free users');
-assert.match(ideLayoutCode, /setAssetInitialTab\('stock'\)/, 'IDELayout routes Stock button to stock tab');
+assert.doesNotMatch(ideLayoutCode, /setAssetInitialTab\('stock'\)/, 'IDELayout no longer exposes the removed Stock shortcut');
 assert.match(ideLayoutCode, /<AssetPanel onClose=.*initialTab=\{assetInitialTab\}/, 'IDELayout forwards initialTab to AssetPanel');
 
 const toolsCode = read('../client/src/agent/VideoEditorTools.js');

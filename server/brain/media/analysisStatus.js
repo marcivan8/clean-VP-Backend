@@ -1,7 +1,7 @@
 /**
  * server/brain/media/analysisStatus.js
  *
- * The three values `media_assets.analysis_status` can hold, in ONE place.
+ * The four values `media_assets.analysis_status` can hold, in ONE place.
  *
  * WHY THIS FILE EXISTS: this string was previously a bare literal duplicated
  * across the writer (MediaIntelligencePipeline) and several readers. Getting it
@@ -29,6 +29,9 @@
 /** Analysis finished successfully and every profile column is populated. */
 const ASSET_ANALYSIS_DONE = 'done';
 
+/** Job accepted and queued, but the worker has not started it yet. */
+const ASSET_ANALYSIS_PENDING = 'pending';
+
 /** Row exists, job is in flight. Carries NO usable signal yet. */
 const ASSET_ANALYSIS_PROCESSING = 'processing';
 
@@ -37,6 +40,7 @@ const ASSET_ANALYSIS_FAILED = 'failed';
 
 module.exports = {
     ASSET_ANALYSIS_DONE,
+    ASSET_ANALYSIS_PENDING,
     ASSET_ANALYSIS_PROCESSING,
     ASSET_ANALYSIS_FAILED,
 };

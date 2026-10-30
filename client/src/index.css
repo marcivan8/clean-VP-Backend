@@ -1151,7 +1151,6 @@ section { padding: 96px 0; position: relative; }
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
-.chat-composer-float__caption { display: flex; padding-left: 4px; }
 .chat-composer {
   display: flex; flex-direction: column; gap: 10px;
   padding: 14px 14px 12px;
@@ -1211,22 +1210,6 @@ section { padding: 96px 0; position: relative; }
 }
 .chat-composer__input:disabled { opacity: 0.5; }
 .chat-composer__bar { display: flex; align-items: center; gap: 8px; }
-.chat-composer__chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chat-composer__chip {
-  display: inline-flex; align-items: center; gap: 7px; max-width: 100%;
-  padding: 5px 6px 5px 11px; border-radius: 12px;
-  border: 1px solid var(--line); background: color-mix(in oklch, var(--fg) 7%, transparent);
-  color: var(--fg); font: 500 12.5px var(--f-sans);
-}
-.chat-composer__chip-icon { color: var(--fg-3); }
-.chat-composer__chip--more { padding: 5px 11px; color: var(--fg-2); }
-.chat-composer__chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
-.chat-composer__chip-x {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 20px; height: 20px; border-radius: 7px; color: var(--fg-3);
-  transition: background 0.12s ease, color 0.12s ease;
-}
-.chat-composer__chip-x:hover { background: color-mix(in oklch, var(--fg) 14%, transparent); color: var(--fg); }
 .chat-composer__pill {
   display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 13px;
   border-radius: 999px; border: 1px solid var(--line);
@@ -1313,6 +1296,6 @@ section { padding: 96px 0; position: relative; }
 .chat-composer__send--stop { background: color-mix(in oklch, var(--fg) 82%, transparent); color: var(--bg, #111); box-shadow: none; }
 @media (prefers-reduced-motion: reduce) {
   .chat-composer, .chat-composer__send, .chat-composer__pill,
-  .chat-composer__menu-item, .chat-composer__chip-x { transition: none; }
+  .chat-composer__menu-item { transition: none; }
   .chat-composer__send:hover { transform: none; }
 }

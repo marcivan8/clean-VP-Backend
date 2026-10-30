@@ -93,7 +93,7 @@ class BrainOrchestrator {
 
         // PHASE 4 — EARLY EXITS (no execution)
         // input.adviceOnly is set by brainRoutes.js's /analyze route (used for
-        // 'project_opened' / 'asset_added' triggers, which must NEVER execute a
+        // 'project_opened' / 'asset_added' / 'asset_analysis_ready' triggers, which must NEVER execute a
         // command — only observe and suggest). We don't trust the model's own
         // intent.type classification for this: GPT-4o can decide something needs
         // fixing and return 'execute' even when asked only to analyze, which would

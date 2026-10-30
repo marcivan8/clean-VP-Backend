@@ -13,6 +13,7 @@
  *   POST   /api/brain/feedback        — Record suggestion chip feedback
  *   POST   /api/brain/observe-command — Learn from an executed command (no GPT)
  *   POST   /api/brain/analyze-asset   — Queue asset analysis (BullMQ job); video via gcsPath, image via imageBase64
+ *   GET    /api/brain/analysis-status — Read queued visual-analysis status for a project
  *   GET    /api/brain/bin-summary     — Fast media bin summary (no AI)
  *   GET    /api/brain/broll-profiles  — Raw per-asset visual profiles (no AI)
  *   POST   /api/brain/organize        — Build a timeline organize plan
@@ -36,7 +37,7 @@ const { ProjectIntelligence }   = require('../brain/ProjectIntelligence');
 const { StoryIntelligence }     = require('../brain/StoryIntelligence');
 const { getOrCreateSession }    = require('../brain/Session');
 const { supabaseAdmin }         = require('../../config/database');
-const { ASSET_ANALYSIS_DONE }   = require('../brain/media/analysisStatus');
+const { ASSET_ANALYSIS_DONE, ASSET_ANALYSIS_PENDING, ASSET_ANALYSIS_FAILED } = require('../brain/media/analysisStatus');
 
 // Singleton instances — shared across requests
 const orchestrator   = new BrainOrchestrator();
@@ -356,6 +357,24 @@ router.post('/analyze-asset', authenticateUser, async (req, res) => {
             return res.status(413).json({ error: 'imageBase64 too large (20MB base64 limit)' });
         }
 
+        // Make queued jobs visible to the Brain's bounded readiness poll
+        // immediately. The worker updates this row to `processing` when it
+        // starts, then to `done` or `failed`; without the placeholder, a job
+        // waiting in BullMQ looked identical to an asset that was never queued.
+        const { error: statusRowError } = await supabaseAdmin
+            .from('media_assets')
+            .upsert({
+                id: assetId,
+                user_id: req.user.id,
+                project_id: projectId || null,
+                name: (typeof name === 'string' && name.trim())
+                    ? name.trim()
+                    : (gcsPath ? (gcsPath.split('/').pop() || null) : null),
+                gcs_path: gcsPath || null,
+                analysis_status: ASSET_ANALYSIS_PENDING,
+            }, { onConflict: 'id', ignoreDuplicates: true });
+        if (statusRowError) throw statusRowError;
+
         // Module-level singleton, NOT a per-request Queue. This used to
         // construct `new Queue('asset-analysis', ...)` inside the handler and
         // never close it, so every upload leaked a BullMQ queue wrapper for the
@@ -365,25 +384,61 @@ router.post('/analyze-asset', authenticateUser, async (req, res) => {
         // broken analyser (see CLAUDE.md R48 and GET /api/health/queues).
         const assetAnalysisQueue = getAssetAnalysisQueue();
 
-        const job = await assetAnalysisQueue.add('analyze', {
-            assetId,
-            filePath: gcsPath || null,
-            imageBase64: imageBase64 || null,
-            projectId: projectId || null,
-            userId: req.user.id,
-            // Stored on the media_assets row so the Brain can refer to footage
-            // BY NAME (R22) rather than as an opaque id. Falls back to the
-            // filename in the GCS key when the client doesn't send one (not
-            // meaningful for the imageBase64 path, which always sends a name).
-            name: (typeof name === 'string' && name.trim())
-                ? name.trim()
-                : (gcsPath ? (gcsPath.split('/').pop() || null) : null),
-        });
+        let job;
+        try {
+            job = await assetAnalysisQueue.add('analyze', {
+                assetId,
+                filePath: gcsPath || null,
+                imageBase64: imageBase64 || null,
+                projectId: projectId || null,
+                userId: req.user.id,
+                // Stored on the media_assets row so the Brain can refer to footage
+                // BY NAME (R22) rather than as an opaque id. Falls back to the
+                // filename in the GCS key when the client doesn't send one (not
+                // meaningful for the imageBase64 path, which always sends a name).
+                name: (typeof name === 'string' && name.trim())
+                    ? name.trim()
+                    : (gcsPath ? (gcsPath.split('/').pop() || null) : null),
+            });
+        } catch (queueError) {
+            await supabaseAdmin.from('media_assets')
+                .update({ analysis_status: ASSET_ANALYSIS_FAILED, updated_at: new Date().toISOString() })
+                .eq('id', assetId)
+                .eq('user_id', req.user.id);
+            throw queueError;
+        }
 
         return res.json({ jobId: job.id, status: 'queued' });
 
     } catch (err) {
         console.error('[brainRoutes] /analyze-asset error:', err.message);
+        return res.status(500).json({ error: err.message });
+    }
+});
+
+// ── GET /api/brain/analysis-status ───────────────────────────────────────────
+// Read only the caller's visual-analysis status for this project. This is a
+// cheap DB poll, not an AI call; it lets the frontend wait briefly before the
+// Brain writes its first project-specific advisory.
+router.get('/analysis-status', authenticateUser, async (req, res) => {
+    try {
+        const { projectId, assetIds: rawAssetIds = '' } = req.query;
+        const assetIds = String(rawAssetIds).split(',').filter(Boolean).slice(0, 200);
+        if (!projectId || assetIds.length === 0) {
+            return res.status(400).json({ error: 'projectId and assetIds query params are required' });
+        }
+
+        const { data, error } = await supabaseAdmin
+            .from('media_assets')
+            .select('id, analysis_status')
+            .eq('project_id', projectId)
+            .eq('user_id', req.user.id)
+            .in('id', assetIds);
+        if (error) throw error;
+
+        return res.json({ statuses: (data || []).map(row => ({ assetId: row.id, status: row.analysis_status })) });
+    } catch (err) {
+        console.error('[brainRoutes] /analysis-status error:', err.message);
         return res.status(500).json({ error: err.message });
     }
 });

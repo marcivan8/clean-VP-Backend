@@ -59,7 +59,7 @@ section('3 · MediaExecutionEngine.js — organize-clips request carries project
 {
     const mee = read('client/src/agent/MediaExecutionEngine.js');
     check('POST body includes projectId alongside clips',
-        /body:\s*JSON\.stringify\(\{\s*clips:\s*clipPayload,\s*projectId:\s*ocStore\.projectId \|\| null\s*\}\)/.test(mee));
+        /body:\s*JSON\.stringify\(\{\s*clips:\s*clipPayload,[\s\S]{0,160}projectId:\s*ocStore\.projectId \|\| null/.test(mee));
 }
 
 section('4 · interviewRoutes.js — organize-clips triggers + waits on real analysis');
@@ -70,7 +70,7 @@ section('4 · interviewRoutes.js — organize-clips triggers + waits on real ana
     check('imports and instantiates the SAME MediaIntelligencePipeline upload uses (module-level singleton, not per-request)',
         /const \{ MediaIntelligencePipeline \} = require\('\.\.\/server\/brain\/media\/MediaIntelligencePipeline'\);\s*\nconst mediaIntel = new MediaIntelligencePipeline\(\);/.test(routes));
     check('destructures projectId from the request body',
-        /const \{ clips = \[\], projectId = null \} = req\.body;/.test(routes));
+        /const \{ clips = \[\], projectId = null,[^}]*\} = req\.body;/.test(routes));
     check('only clips with BOTH assetId and gcsPath qualify for on-demand analysis',
         /if \(!clip\.assetId \|\| !clip\.gcsPath \|\| needsAnalysis\.has\(clip\.assetId\)\) continue;/.test(routes));
     check('checks current analysis_status before triggering — never re-triggers an already-\'processing\' asset',

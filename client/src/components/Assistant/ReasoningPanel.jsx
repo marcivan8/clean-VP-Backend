@@ -397,7 +397,7 @@ const SuggestionCard = ({ suggestion, onAccept, onReject }) => {
 // Each suggestion is a standalone button that submits itself as a command.
 const NextActionsCard = ({ suggestion, onAccept, onReject }) => {
     const { t } = useTranslation('editor');
-    const items = suggestion.data?.suggestions || [];
+    const items = (suggestion.data?.suggestions || []).slice(0, 1);
     if (items.length === 0) return null;
     return (
         <div
@@ -660,16 +660,13 @@ const ReasoningPanel = ({ className }) => {
     // a style change re-reads the project for the Brain (effect below).
     const editingMode = useTimelineStore(s => s.editingMode);
     const editingStyle = useTimelineStore(s => s.editingStyle);
-    const { uploadedFile, performAction, assets, tracks, projectId } = useTimelineStore(useShallow(state => ({
+    const { uploadedFile, performAction, assets, projectId } = useTimelineStore(useShallow(state => ({
         uploadedFile:  state.uploadedFile,
         performAction: state.performAction,
         assets:        state.assets,
-        tracks:        state.tracks,
         projectId:     state.projectId,
     })));
 
-    // Detect if any caption/text clips exist on the timeline
-    const hasCaptionClips = tracks?.some(t => t.clips?.some(c => c.type === 'text' || c.type === 'caption'));
     const { recordDecision } = useUserPreferences();
     const scrollRef = useRef(null);
     const [referenceDocuments, setReferenceDocuments] = useState([]);
@@ -1115,15 +1112,6 @@ const ReasoningPanel = ({ className }) => {
                                         {chip}
                                     </button>
                                 ))}
-                                {hasCaptionClips && (
-                                    <button
-                                        onClick={() => setActiveTab('captions')}
-                                        className="px-2.5 py-1 rounded-full text-[10px] transition-colors flex items-center gap-1"
-                                        style={{ background: 'color-mix(in oklch, var(--accent) 12%, transparent)', border: '0.5px solid color-mix(in oklch, var(--accent) 35%, transparent)', color: 'var(--accent)', fontFamily: 'var(--f-sans)' }}
-                                    >
-                                        <Type className="w-2.5 h-2.5" /> {t('assistant.editCaptions')}
-                                    </button>
-                                )}
                             </div>
                         </div>
                     </div>
@@ -1213,19 +1201,6 @@ const ReasoningPanel = ({ className }) => {
 
             {/* Floating composer stays above the conversation while the feed scrolls. */}
             <div className="chat-composer-float">
-                {/* Persistent Edit Captions chip — visible whenever captions exist */}
-                {hasCaptionClips && (
-                    <div className="chat-composer-float__caption pointer-events-auto">
-                        <button
-                            onClick={() => setActiveTab('captions')}
-                            className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] transition-colors"
-                            style={{ background: 'color-mix(in oklch, var(--accent) 12%, transparent)', border: '0.5px solid color-mix(in oklch, var(--accent) 35%, transparent)', color: 'var(--accent)', fontFamily: 'var(--f-sans)' }}
-                        >
-                            <Type className="w-2.5 h-2.5" /> {t('assistant.editCaptions')}
-                        </button>
-                    </div>
-                )}
-
                 {/* Input Area (R110: ChatComposer) */}
                 <div className="pointer-events-auto">
                     <ChatComposer

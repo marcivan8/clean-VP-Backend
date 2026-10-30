@@ -7,8 +7,7 @@
  * TOOL_GROUPS is NOT MOUNTED anywhere. It is kept, with its test, because the
  * pairing of each sentence to the command it resolves to is expensive to
  * rebuild and the menu may come back somewhere else (a slash menu, the panel
- * rail). `contextChipsFor` below is still live - the composer's context chips
- * use it. `insertPrompt` went unused with the menu and is kept for the same
+ * rail). `insertPrompt` went unused with the menu and is kept for the same
  * reason. Do not read TOOL_GROUPS as shipped UI.
  *
  * Each tool is a real command from agent/CommandRegistry.js, identified by id.
@@ -83,41 +82,6 @@ export const TOOL_GROUPS = Object.freeze([
 /** Every tool, flattened - the order the menu renders them in. */
 export const COMPOSER_TOOLS = Object.freeze(TOOL_GROUPS.flatMap(g => g.tools));
 
-/** How many selected clips get their own chip before the rest fold into "+N". */
-export const MAX_CONTEXT_CHIPS = 3;
-
-/**
- * The chips shown above the input: one per selected clip, in selection order,
- * folded past `max`. Ids that no longer exist on the timeline are skipped (a
- * stale selection after a delete must not render a chip nobody can explain).
- *
- * @param {Array} tracks        store `tracks`
- * @param {string[]} selectedIds store `selectedClipIds`
- * @param {number} [max]
- * @returns {{ chips: Array<{id:string,name:string,kind:string}>, more:number }}
- */
-export function contextChipsFor(tracks, selectedIds, max = MAX_CONTEXT_CHIPS) {
-    const byId = new Map();
-    for (const track of Array.isArray(tracks) ? tracks : []) {
-        for (const clip of Array.isArray(track?.clips) ? track.clips : []) {
-            if (clip?.id != null) byId.set(clip.id, { clip, track });
-        }
-    }
-    const found = [];
-    const seen = new Set();
-    for (const id of Array.isArray(selectedIds) ? selectedIds : []) {
-        if (seen.has(id) || !byId.has(id)) continue;
-        seen.add(id);
-        const { clip, track } = byId.get(id);
-        const kind = clip.type === 'caption' || clip.type === 'text' || track?.type === 'text'
-            ? 'text'
-            : (track?.type === 'audio' || clip.type === 'audio' ? 'audio' : 'video');
-        found.push({ id, name: String(clip.name || clip.content || clip.type || 'clip').slice(0, 40), kind });
-    }
-    const cap = Math.max(1, max | 0);
-    return { chips: found.slice(0, cap), more: Math.max(0, found.length - cap) };
-}
-
 /**
  * Put `text` into an uncontrolled textarea the way a person typing would leave
  * it: value set, caret at the end, grown to fit. Returns false when there is no
@@ -134,4 +98,4 @@ export function insertPrompt(el, text) {
     return true;
 }
 
-export default { TOOL_GROUPS, COMPOSER_TOOLS, MAX_CONTEXT_CHIPS, contextChipsFor, insertPrompt };
+export default { TOOL_GROUPS, COMPOSER_TOOLS, insertPrompt };

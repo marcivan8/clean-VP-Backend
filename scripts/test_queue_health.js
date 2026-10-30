@@ -266,7 +266,11 @@ async function main() {
             .split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
 
         const routeStart = code.indexOf("router.post('/analyze-asset'");
-        const routeBody  = code.slice(routeStart, routeStart + 1200);
+        // Keep the entire handler: setup work added ahead of queue creation
+        // (such as persisting the pending media row) should not make this
+        // source-level assertion miss the shared singleton call.
+        const routeEnd = code.indexOf("\n});", routeStart);
+        const routeBody = code.slice(routeStart, routeEnd < 0 ? undefined : routeEnd);
 
         check('the route uses the shared singleton',
             /getAssetAnalysisQueue\(\)/.test(routeBody));

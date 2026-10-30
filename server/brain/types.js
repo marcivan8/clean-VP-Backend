@@ -12,7 +12,7 @@
  * @typedef {Object} BrainInput
  * @property {string} userId           - Authenticated user ID
  * @property {string} rawInput         - The user's raw text command (may be null for triggers)
- * @property {string} trigger          - What triggered this: 'user_typed'|'user_spoke'|'suggestion_tapped'|'project_opened'|'asset_added'
+ * @property {string} trigger          - What triggered this: 'user_typed'|'user_spoke'|'suggestion_tapped'|'project_opened'|'asset_added'|'asset_analysis_ready'
  * @property {Object} context          - Full project context snapshot
  * @property {Object} context.timeline - Timeline state (tracks, clips, assets)
  * @property {Array}  context.captions - Caption/transcript data

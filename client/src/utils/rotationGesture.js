@@ -59,12 +59,16 @@ export function startRotationGesture(e, { getCenter, initialRotation = 0, onChan
         try { onChange?.(next); } catch (err) { console.error('[rotationGesture] onChange failed:', err); }
     };
     const onUp = () => {
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-        window.removeEventListener('pointercancel', onUp);
+        window.removeEventListener('pointermove', onMove, true);
+        window.removeEventListener('pointerup', onUp, true);
+        window.removeEventListener('pointercancel', onUp, true);
         try { onCommit?.(last); } catch (err) { console.error('[rotationGesture] onCommit failed:', err); }
     };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    // Capture before React's clip-level pointer handlers. They stop bubbling
+    // to keep a resize/rotate gesture from turning into a clip drag; bubble
+    // listeners here were therefore skipped while the pointer stayed inside
+    // the preview frame.
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', onUp, true);
+    window.addEventListener('pointercancel', onUp, true);
 }

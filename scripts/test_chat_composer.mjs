@@ -1,4 +1,4 @@
-// R110: the desktop chat box (ChatComposer) - context chips, Tools menu, send/stop.
+// R110: the desktop chat box (ChatComposer) - Tools menu, send/stop.
 // node scripts/test_chat_composer.mjs
 import assert from 'assert/strict';
 import fs from 'fs';
@@ -46,7 +46,7 @@ await check('tool ids are unique and every one has an icon, in both locales', ()
     assert.equal(new Set(T.COMPOSER_TOOLS.map(t => t.id)).size, T.COMPOSER_TOOLS.length);
     for (const lang of ['en', 'fr']) {
         const a = JSON.parse(read(`../client/src/locales/${lang}/editor.json`)).assistant;
-        for (const k of ['tools', 'send', 'stop', 'contextLabel', 'contextHint', 'contextRemove']) assert.ok(a[k], `${lang}.${k}`);
+        for (const k of ['tools', 'send', 'stop']) assert.ok(a[k], `${lang}.${k}`);
         for (const tool of T.COMPOSER_TOOLS) assert.ok(a.tool?.[tool.id], `${lang} tool.${tool.id}`);
     }
     // The icon map lived in ChatComposer and went with the Tools button in
@@ -55,35 +55,7 @@ await check('tool ids are unique and every one has an icon, in both locales', ()
     for (const tool of T.COMPOSER_TOOLS) assert.ok(tool.icon && typeof tool.icon === 'string', `no icon on ${tool.id}`);
 });
 
-log('\n-- 2. Context chips = the real selection --');
-const tracks = [
-    { id: 'v', type: 'video', clips: [{ id: 'c1', name: 'Interview.mp4', type: 'video' }, { id: 'c2', name: 'B-roll.mp4', type: 'video' }] },
-    { id: 'a', type: 'audio', clips: [{ id: 'c3', name: 'Music.mp3', type: 'audio' }] },
-    { id: 't', type: 'text', clips: [{ id: 'c4', content: 'Hello world', type: 'caption' }, { id: 'c5', name: 'Title', type: 'text' }] },
-];
-await check('one chip per selected clip, in selection order, with a kind', () => {
-    const { chips, more } = T.contextChipsFor(tracks, ['c3', 'c1']);
-    assert.deepEqual(chips.map(c => [c.id, c.name, c.kind]), [['c3', 'Music.mp3', 'audio'], ['c1', 'Interview.mp4', 'video']]);
-    assert.equal(more, 0);
-});
-await check('no selection, bad input, or stale ids give no chips (never a chip nobody can explain)', () => {
-    assert.deepEqual(T.contextChipsFor(tracks, []).chips, []);
-    assert.deepEqual(T.contextChipsFor(null, ['c1']).chips, []);
-    assert.deepEqual(T.contextChipsFor(tracks, ['gone']).chips, []);
-    assert.deepEqual(T.contextChipsFor(tracks, undefined).chips, []);
-});
-await check('duplicates collapse; extras fold into +N past the cap', () => {
-    const r = T.contextChipsFor(tracks, ['c1', 'c1', 'c2', 'c3', 'c4', 'c5']);
-    assert.equal(r.chips.length, T.MAX_CONTEXT_CHIPS);
-    assert.equal(r.more, 5 - T.MAX_CONTEXT_CHIPS);
-});
-await check('captions fall back to their text; names are capped', () => {
-    assert.equal(T.contextChipsFor(tracks, ['c4']).chips[0].name, 'Hello world');
-    const long = [{ id: 'x', clips: [{ id: 'x', name: 'n'.repeat(200) }] }];
-    assert.equal(T.contextChipsFor(long, ['x']).chips[0].name.length, 40);
-});
-
-log('\n-- 3. A tool never overwrites what was typed --');
+log('\n-- 2. A tool never overwrites what was typed --');
 const fakeEl = (value = '') => ({ value, setSelectionRange(a, b) { this.sel = [a, b]; } });
 await check('empty box: the prompt, caret at the end', () => {
     const el = fakeEl(); assert.equal(T.insertPrompt(el, 'add captions'), true);
@@ -98,7 +70,7 @@ await check('no element or an empty prompt does nothing', () => {
     const el = fakeEl('keep'); assert.equal(T.insertPrompt(el, '   '), false); assert.equal(el.value, 'keep');
 });
 
-log('\n-- 4. Wiring: the old behaviour survived the move --');
+log('\n-- 3. Wiring: the old behaviour survived the move --');
 const rp = read('../client/src/components/Assistant/ReasoningPanel.jsx');
 const cc = read('../client/src/components/Assistant/ChatComposer.jsx');
 const css = read('../client/src/index.css');
@@ -114,13 +86,20 @@ await check('the textarea is uncontrolled and keeps the onboarding anchor', () =
     assert.ok(/data-hint="assistant-input"/.test(cc));
     assert.ok(!/<textarea[^>]*\bvalue=/.test(cc), 'controlled textarea breaks suggestions that write .value');
 });
-await check('the style picker and chips are desktop-only; send is not', () => {
-    assert.ok(/hidden md:block">\s*<ContextChips/.test(cc));
+await check('clip selection does not add controls or labels to the chat composer', () => {
+    assert.ok(!/ContextChips|contextChipsFor|toggleClipSelection|selectedClipIds/.test(cc));
+    assert.ok(!/chat-composer__chips|chat-composer__chip/.test(css));
+});
+await check('the Edit Captions shortcut is removed from the chat UI', () => {
+    assert.ok(!/assistant\.editCaptions|hasCaptionClips|Persistent Edit Captions/.test(rp));
+    for (const lang of ['en', 'fr']) {
+        assert.equal(JSON.parse(read(`../client/src/locales/${lang}/editor.json`)).assistant.editCaptions, undefined);
+    }
+    assert.ok(!/chat-composer-float__caption/.test(css));
+});
+await check('the style picker is desktop-only; send is not', () => {
     assert.ok(/hidden md:flex[^"]*">\s*<EditingStylePicker/.test(cc));
     assert.ok(/text-\[16px\] md:text-sm/.test(cc), 'iOS zoom guard lost');
-});
-await check('removing a chip deselects through the store, not a local copy', () => {
-    assert.ok(/toggleClipSelection\(chip\.id\)/.test(cc));
 });
 await check('send and stop are labelled', () => {
     for (const s of ['aria-label={t(\'assistant.send\')}', "aria-label={t('assistant.stop')}"]) {

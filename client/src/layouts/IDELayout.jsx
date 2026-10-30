@@ -920,6 +920,8 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 }
 
                 const isVideo = file.type.startsWith('video');
+                const isImage = file.type.startsWith('image');
+                const imageAnalysisAllowed = isImage && file.size <= 15 * 1024 * 1024;
 
                 // FIX: Set aspect ratio BEFORE building the asset list so that
                 // the Revideo player key (which includes aspectRatio) is correct
@@ -966,6 +968,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     id: assetId,
                     name: file.name,
                     type: isVideo ? 'video' : file.type.startsWith('image') ? 'image' : 'audio',
+                    visualAnalysisRequested: isVideo || imageAnalysisAllowed,
                     url: url,
                     file: file,
                     fileSize: file.size,
@@ -980,6 +983,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     resolution: metadata.width && metadata.height ? { w: metadata.width, h: metadata.height } : null
                 };
                 processedAssets.push(assetEntry);
+                const setVisualAnalysisRequested = (requested) => {
+                    assetEntry.visualAnalysisRequested = requested;
+                    useTimelineStore.getState().updateAsset(assetId, { visualAnalysisRequested: requested });
+                };
 
                 if (isVideo) {
                     // After 5s with no response, assume upload is done and proxy is encoding
@@ -1040,6 +1047,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                             }),
                                         });
                                         assetAnalysisQueued = resp.ok;
+                                        setVisualAnalysisRequested(resp.ok);
                                         console.log(resp.ok
                                             ? `[IDELayout] 🧠 media intelligence queued (parallel with proxy) for "${file.name}"`
                                             : `[IDELayout] asset analysis not queued (${resp.status}) — Brain advice stays generic for "${file.name}"`);
@@ -1203,15 +1211,20 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                             }),
                                         });
                                         if (!resp.ok) {
+                                            setVisualAnalysisRequested(false);
                                             console.warn(`[IDELayout] asset analysis not queued (${resp.status}) — Brain advice will stay generic for "${file.name}"`);
                                         } else {
+                                            setVisualAnalysisRequested(true);
                                             console.log(`[IDELayout] 🧠 media intelligence queued for "${file.name}"`);
                                         }
                                     } catch (e) {
+                                        setVisualAnalysisRequested(false);
                                         console.warn('[IDELayout] asset analysis request failed (non-critical):', e.message);
                                     }
                                 })();
+                                else setVisualAnalysisRequested(true);
                             } else {
+                                setVisualAnalysisRequested(false);
                                 console.warn('[IDELayout] Proxy job result missing proxyPath and originalPath — AI API calls will not work');
                             }
 
@@ -1369,6 +1382,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     // video clip already is.
                     const MAX_IMAGE_ANALYSIS_BYTES = 15 * 1024 * 1024; // ~20MB base64 — matches the server's cap
                     if (file.size > MAX_IMAGE_ANALYSIS_BYTES) {
+                        setVisualAnalysisRequested(false);
                         console.warn(`[IDELayout] "${file.name}" is too large for automatic content analysis (${Math.round(file.size / 1024 / 1024)}MB) — it can still be used manually, just without AI-matched placement.`);
                     } else {
                         (async () => {
@@ -1389,10 +1403,12 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         projectId: useTimelineStore.getState().projectId || null,
                                     }),
                                 });
+                                setVisualAnalysisRequested(resp.ok);
                                 console.log(resp.ok
                                     ? `[IDELayout] 🧠 media intelligence queued for image "${file.name}"`
                                     : `[IDELayout] image analysis not queued (${resp.status}) — Brain advice stays generic for "${file.name}"`);
                             } catch (e) {
+                                setVisualAnalysisRequested(false);
                                 console.warn('[IDELayout] image analysis request failed (non-critical):', e.message);
                             }
                         })();
@@ -2226,13 +2242,15 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         copy of each `data-tour` / `data-hint` anchor is ever in
                         the DOM for the walkthrough to find. */}
                     {!isMobile && (
-                        <PanelRail
-                            activeTab={activeTab}
-                            collapsed={panelCollapsed}
-                            onSelect={handleSelectTab}
-                            isFree={isFree}
-                            t={t}
-                        />
+                        <div className="hidden md:block shrink-0">
+                            <PanelRail
+                                activeTab={activeTab}
+                                collapsed={panelCollapsed}
+                                onSelect={handleSelectTab}
+                                isFree={isFree}
+                                t={t}
+                            />
+                        </div>
                     )}
 
                     {/* Left Sidebar (Media/Effects) — bottom sheet on mobile, static sidebar on desktop */}
@@ -2672,15 +2690,13 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         {/* Mobile playback row: undo/redo, prev/play/next, time, More */}
                         {isMobile && <MobileTransportBar />}
 
-                        {/* Timeline — always visible. Mini (h-36) on mobile, full-height on desktop. */}
-                        {mode === 'editor' && (
+                        {/* Mobile timeline stays in the center column; the
+                            desktop timeline is mounted as a full-width overlay. */}
+                        {mode === 'editor' && isMobile && (
                             <div
                                 data-tour="timeline"
                                 data-hint="timeline-strip"
-                                className={classNames(
-                                    "border-t flex flex-col overflow-hidden shrink-0",
-                                    isMobile ? "h-36" : "h-48 md:h-72"
-                                )}
+                                className="border-t flex flex-col overflow-hidden shrink-0 h-36"
                                 style={{ background: "var(--bg-2)", borderColor: "var(--line-soft)" }}
                             >
                                 <Timeline />
@@ -2719,6 +2735,20 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             <ReasoningPanel className="flex-1" />
                         </div>
                     </aside>
+
+                    {/* Desktop timeline overlays the lower workspace on top
+                        of the panel rail, media sidebar and preview, ending
+                        before the AI sidebar. */}
+                    {mode === 'editor' && !isMobile && (
+                        <div
+                            data-tour="timeline"
+                            data-hint="timeline-strip"
+                            className="absolute bottom-0 left-0 right-80 z-50 hidden md:flex h-72 flex-col overflow-hidden border-t"
+                            style={{ background: "var(--bg-2)", borderColor: "var(--line-soft)" }}
+                        >
+                            <Timeline />
+                        </div>
+                    )}
                 </div>
                 
                 {/* Mobile Bottom Toolbar */}

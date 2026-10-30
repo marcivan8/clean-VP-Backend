@@ -165,7 +165,9 @@ class EditorialBrain {
 
             // Classify intent type for temperature selection
             // We use 0.2 for precise execution tasks, 0.4 for creative/advisory
-            const isAdvise = input?.trigger === 'project_opened' || input?.trigger === 'asset_added';
+            const isAdvise = input?.trigger === 'project_opened'
+                || input?.trigger === 'asset_added'
+                || input?.trigger === 'asset_analysis_ready';
             const temperature = isAdvise ? 0.4 : 0.2;
 
             const userMessage = input?.rawInput

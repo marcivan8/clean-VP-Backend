@@ -40,7 +40,12 @@ const useAIStore = create((set) => ({
     })),
 
     addSuggestion: (suggestion) => set((state) => ({
-        suggestions: [...state.suggestions, { ...suggestion, _seq: suggestion._seq ?? nextSeq(), _at: suggestion._at ?? Date.now() }]
+        // The Brain card is a live recommendation, not a chat turn. Replace
+        // the prior one so repeated project analyses don't stack command cards.
+        suggestions: [
+            ...state.suggestions.filter(existing => suggestion.type !== 'brain_advisory' || existing.type !== 'brain_advisory'),
+            { ...suggestion, _seq: suggestion._seq ?? nextSeq(), _at: suggestion._at ?? Date.now() },
+        ],
     })),
 
     clearSession: () => set({ logs: [], suggestions: [], isAnalyzing: false, contextualSuggestion: null }),
