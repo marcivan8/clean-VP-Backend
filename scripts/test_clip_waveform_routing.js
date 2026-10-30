@@ -52,7 +52,7 @@ const check = (name, cond, detail) => {
 
 // Isolate the usePeaks(...) call and its immediately preceding setup, so the
 // assertions below can't accidentally match unrelated code elsewhere in the file.
-const callStart = src.indexOf('const isUnproxiedVideoAsset');
+const callStart = src.indexOf('const assetType =');
 const callEnd   = src.indexOf(');', src.indexOf('usePeaks(', callStart)) + 2;
 const block = callStart !== -1 && callEnd !== -1 ? src.slice(callStart, callEnd) : '';
 
@@ -61,24 +61,42 @@ console.log('\n── Clip.jsx withholds raw-file URLs from an unproxied video a
 check('an "unproxied video asset" condition exists', !!block,
     'Expected a variable gating raw-file fallback on asset.type === "video" && !asset.proxyUrl.');
 
-check('the condition checks asset.type === \'video\'',
-    /asset\?\.type\s*===\s*'video'/.test(block));
+check('the condition accepts normalized video and video/* MIME asset types',
+    /assetType\s*===\s*'video'\s*\|\|\s*assetType\.startsWith\('video\/'\)/.test(block));
 
 check('the condition checks the PROXY is missing',
-    /!asset\?\.proxyUrl/.test(block));
+    /!serverProxyUrl/.test(block));
 
 check('the raw clip URL fallback is nulled when unproxied',
     /isUnproxiedVideoAsset\s*\?\s*null\s*:/.test(block),
     'clip.sourceUrl / clip.url must not be used as a stand-in while a video proxy is pending.');
 
 check('asset.gcsPath is ALSO nulled when unproxied (the easy-to-miss half)',
-    /isUnproxiedVideoAsset\s*\?\s*null\s*:\s*asset\?\.gcsPath/.test(block),
+    /waveformGcsPath\s*=\s*isUnproxiedVideoAsset\s*\?\s*null\s*:\s*\(asset\?\.gcsPath\s*\|\|\s*clip\.gcsPath/.test(block),
     'gcsPath wins over proxyUrl on the server unconditionally — suppressing proxyUrl alone is a no-op.');
 
 // The failure mode if someone "simplifies" this back to `asset?.gcsPath` directly.
 check('gcsPath is not passed unconditionally to usePeaks',
     !/usePeaks\([^)]*,\s*asset\?\.gcsPath\s*,/.test(block.replace(/isUnproxiedVideoAsset[^,]*,\s*/, '')),
     'A direct, unguarded asset.gcsPath argument reintroduces the raw-file timeout.');
+
+console.log('\n── Timeline clip color and waveform treatment ──');
+check('audio is detected from either clip type or its track type',
+    /clip\.type === 'audio' \|\| trackType === 'audio'/.test(src));
+check('audio clips use an orange body and orange waveform',
+    /isAudioClip\s*\?\s*'rgba\(251,146,60,0\.9\)'/.test(src)
+    && /isAudioClip\s*\?\s*'bg-orange-500'/.test(src));
+check('video waveform remains green', /: 'rgba\(52,211,153,0\.9\)'/.test(src));
+check('waveform sits in the lower band and has enough height to read',
+    /height:\s*'52%'/.test(src) && /height=\{isMobile \? 24 : 40\}/.test(src));
+check('video peaks draw directly to canvas instead of waiting on a WaveSurfer media element',
+    /<Waveform[\s\S]{0,250}peaks=\{clipPeaks\}/.test(src)
+    && !/<ClipWaveform/.test(src));
+check('waveform visibility is gated by extracted peaks, not by a browser playback URL',
+    /!isTextClip && clipPeaks\?\.length > 0 && waveformDuration > 0/.test(src)
+    && !/!isTextClip && wsAudioUrl/.test(src));
+check('trimmed waveform maps across the clip duration at timeline zoom',
+    /duration=\{waveformDuration\}[\s\S]{0,120}zoomLevel=\{zoomLevel\}/.test(src));
 
 // ── The same "raw file has a late moov atom" pattern, second location ────────
 // captureProjectThumbnail.js seeks a <video> element to grab a frame, which

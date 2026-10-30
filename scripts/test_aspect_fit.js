@@ -158,6 +158,8 @@ async function main() {
 
         const player = fs.readFileSync(
             path.resolve(__dirname, '../client/src/components/Player/VideoPlayer.jsx'), 'utf8');
+        const layout = fs.readFileSync(
+            path.resolve(__dirname, '../client/src/layouts/IDELayout.jsx'), 'utf8');
         check('the buffer is derived from the project frame',
             /frameAspectRef\.current/.test(player) && /frameIsLandscape/.test(player));
         check('the buffer is no longer the clip\'s native shape',
@@ -168,6 +170,11 @@ async function main() {
         check('changing the ratio re-runs the sizing',
             /resizeHandlerRef\.current\?\.\(\)/.test(player),
             'a ResizeObserver only fires on container changes, not ratio changes');
+        check('desktop portrait preview has a definite height so aspect ratio constrains width',
+            /'h-full w-auto aspect-\[9\/16\] max-h-full max-w-full'/.test(layout));
+        check('desktop square and landscape previews also fit both viewport dimensions',
+            /'h-full w-auto aspect-square max-h-full max-w-full'/.test(layout)
+            && /'h-full w-auto aspect-video max-w-full max-h-full'/.test(layout));
     }
 
     console.log(`\n${'─'.repeat(60)}`);

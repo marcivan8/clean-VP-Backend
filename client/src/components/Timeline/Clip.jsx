@@ -9,7 +9,6 @@ import useDeviceType from '../../hooks/useDeviceType';
 import classNames from 'classnames';
 import Waveform from './Waveform';
 import ClipContextMenu from './ClipContextMenu';
-import ClipWaveform from '../ClipWaveform';
 import { usePeaks } from '../../hooks/usePeaks';
 import { getAssetUploadStatus, UPLOAD_PHASES, isProblemPhase } from '../../utils/uploadStatus.js';
 import { getMainVideoTrackId } from '../../timeline/rippleDelete.js';
@@ -51,7 +50,7 @@ const fmtLen = (s) => {
 const Clip = ({ clip, trackId }) => {
     const { t } = useTranslation('editor');
     const { isMobile } = useDeviceType();
-    const { zoomLevel, deleteClipWithMagnet, activeClipId, selectedClipIds, setActiveClip, toggleClipSelection, assets } = useTimelineStore(useShallow(state => ({
+    const { zoomLevel, deleteClipWithMagnet, activeClipId, selectedClipIds, setActiveClip, toggleClipSelection, assets, trackType } = useTimelineStore(useShallow(state => ({
         zoomLevel:            state.zoomLevel,
         deleteClipWithMagnet: state.deleteClipWithMagnet,
         activeClipId:         state.activeClipId,
@@ -59,6 +58,7 @@ const Clip = ({ clip, trackId }) => {
         setActiveClip:        state.setActiveClip,
         toggleClipSelection:  state.toggleClipSelection,
         assets:               state.assets,
+        trackType:            state.tracks.find(track => track.id === trackId)?.type,
     })));
     const isActive = activeClipId === clip.id;
     const isSelected = selectedClipIds && selectedClipIds.includes(clip.id);
@@ -68,6 +68,7 @@ const Clip = ({ clip, trackId }) => {
 
     // Text/caption clips never have audio — never render a waveform on them.
     const isTextClip = clip.type === 'text' || clip.type === 'caption';
+    const isAudioClip = !isTextClip && (clip.type === 'audio' || trackType === 'audio');
     const asset = assets?.find(a => a.id === clip.assetId);
     // Mobile only: show this clip's upload / prepare state on the clip itself
     // (see components/MobileUploadStatus.jsx for the preview side).
@@ -114,12 +115,16 @@ const Clip = ({ clip, trackId }) => {
     // wsAudioUrl alone would do nothing: the explicit gcsPath would still force
     // raw-file resolution regardless of what proxyUrl says. Both arguments have
     // to be suppressed together or this fix is a no-op.
-    const isUnproxiedVideoAsset = asset?.type === 'video' && !asset?.proxyUrl;
+    const assetType = String(asset?.type || '').toLowerCase();
+    const isVideoAsset = assetType === 'video' || assetType.startsWith('video/');
+    const serverProxyUrl = asset?.proxyUrl || clip.proxyUrl || null;
+    const isUnproxiedVideoAsset = isVideoAsset && !serverProxyUrl;
     const rawUrlFallback = isUnproxiedVideoAsset ? null : (clip.sourceUrl || clip.url || null);
-    const wsAudioUrl = asset?.proxyUrl || rawUrlFallback;
-    const { peaks: wsPeaks, duration: wsDuration, loading: wsLoading, error: wsError } = usePeaks(
+    const wsAudioUrl = serverProxyUrl || rawUrlFallback;
+    const waveformGcsPath = isUnproxiedVideoAsset ? null : (asset?.gcsPath || clip.gcsPath || null);
+    const { peaks: wsPeaks, duration: wsDuration } = usePeaks(
         isTextClip ? null : clip.assetId,
-        isUnproxiedVideoAsset ? null : asset?.gcsPath,
+        waveformGcsPath,
         wsAudioUrl,
     );
 
@@ -142,9 +147,10 @@ const Clip = ({ clip, trackId }) => {
         const slice = wsPeaks.slice(from, to);
         return slice.length >= 2 ? slice : wsPeaks;
     }, [wsPeaks, wsDuration, clip.offset, clip.duration]);
-    const wsColor = clip.type === 'audio'
-        ? 'rgba(251,146,60,0.6)'
-        : 'rgba(52,211,153,0.6)';
+    const waveformDuration = clip.duration > 0 ? clip.duration : wsDuration;
+    const wsColor = isAudioClip
+        ? 'rgba(251,146,60,0.9)'
+        : 'rgba(52,211,153,0.9)';
 
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: clip.id,
@@ -327,18 +333,20 @@ const Clip = ({ clip, trackId }) => {
             data-clip-id={clip.id}
             style={{
                 ...style,
-                // Two-tone gradient over the Tailwind bg color:
-                // lighter top (label area) → darker bottom (waveform area) for contrast
-                backgroundImage: 'linear-gradient(to bottom, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.04) 55%, rgba(0,0,0,0.28) 100%)',
+                // Separate the clip label from the lower waveform band like a
+                // conventional NLE clip, while retaining the clip's base color.
+                backgroundImage: 'linear-gradient(to bottom, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.06) 34%, rgba(0,0,0,0.18) 34%, rgba(0,0,0,0.34) 100%)',
             }}
             {...listeners}
             {...attributes}
             className={classNames(
-                "absolute top-0 bottom-0 rounded-md border border-white/10 overflow-hidden group flex flex-col select-none",
+                "absolute top-0 bottom-0 rounded-sm border border-white/15 overflow-hidden group flex flex-col select-none",
                 // Text clips use a CSS color (e.g. '#fff') for their content — use
                 // type-based Tailwind class for the timeline bar instead.
                 clip.type === 'text'
                     ? (clip.bgColor || 'bg-green-600/80')
+                    : isAudioClip
+                        ? 'bg-orange-500'
                     : (clip.color || 'bg-blue-500'),
                 (isActive || isSelected) ? "border-white ring-2 ring-primary/50 z-20" : "opacity-90 hover:opacity-100",
                 isDragging && (isMobile
@@ -378,24 +386,21 @@ const Clip = ({ clip, trackId }) => {
                 </button>
             </div>
 
-            {/* Waveform rendered via ClipWaveform (WaveSurfer) below */}
-
-
-
-            {/* ClipWaveform — WaveSurfer overlay, bottom 40%, pointer-events:none */}
-            {!isTextClip && wsAudioUrl && (
+            {/* Draw the server-provided peaks directly. WaveSurfer's media
+                element waits for video metadata (and can fail on proxy/CORS
+                URLs) even though the waveform data is already available. */}
+            {!isTextClip && clipPeaks?.length > 0 && waveformDuration > 0 && (
                 <div style={{
                     position: 'absolute', left: 0, right: 0, bottom: 0,
-                    height: '40%', pointerEvents: 'none', overflow: 'hidden',
+                    height: '52%', pointerEvents: 'none', overflow: 'hidden',
                 }}>
-                    <ClipWaveform
-                        audioUrl={wsAudioUrl}
+                    <Waveform
                         peaks={clipPeaks}
-                        duration={clip.duration ?? wsDuration}
-                        height={isMobile ? 20 : 32}
-                        color={wsColor}
-                        loading={wsLoading}
-                        error={wsError}
+                        duration={waveformDuration}
+                        offset={0}
+                        zoomLevel={zoomLevel}
+                        height={isMobile ? 24 : 40}
+                        waveColor={wsColor}
                     />
                 </div>
             )}

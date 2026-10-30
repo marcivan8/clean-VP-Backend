@@ -2607,13 +2607,15 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                                 ? 'h-full w-auto aspect-square'
                                                 : 'w-full h-full'
                                       )
-                                    // Desktop: cap to max-h-full so the player never overflows the viewport container into the header or timeline
+                                    // Desktop: give the frame a definite height so its aspect ratio derives a matching width.
+                                    // max-height alone does not constrain an auto-width aspect-ratio box, which let portrait previews
+                                    // keep growing from the available width and get clipped by this overflow-hidden viewport.
                                     : (
                                         aspectRatio === '9:16'
-                                            ? 'aspect-[9/16] max-h-full max-w-full md:max-h-[550px] w-auto'
+                                            ? 'h-full w-auto aspect-[9/16] max-h-full max-w-full'
                                             : aspectRatio === '1:1'
-                                                ? 'aspect-square max-h-full max-w-full md:max-h-[450px] w-auto'
-                                                : 'aspect-video max-w-full max-h-full md:max-h-[60vh] w-auto'
+                                                ? 'h-full w-auto aspect-square max-h-full max-w-full'
+                                                : 'h-full w-auto aspect-video max-w-full max-h-full'
                                       )
                             )}>
                                 <ErrorBoundary>
