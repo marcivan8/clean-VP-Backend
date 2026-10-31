@@ -689,7 +689,10 @@ const ReasoningPanel = ({ className, onImportMedia }) => {
         const el = scrollRef.current;
         if (!el) return;
         el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-    }, [visibleFeedItems.length]);
+    // Brain advisories replace the prior live card, so the feed length can stay
+    // constant even though a new item was appended at the end. Scroll on the
+    // memoized feed itself so a fresh analysis is not left below the viewport.
+    }, [visibleFeedItems]);
 
     const proxying = assets.filter(a => a.isProxying);
     const isEmpty = visibleFeedItems.length === 0 && !isAnalyzing;
@@ -929,13 +932,14 @@ const ReasoningPanel = ({ className, onImportMedia }) => {
         );
         if (!hasContent) return;
 
-        // De-dupe: the hook keeps the same object across unrelated re-renders,
-        // and an identical re-analysis shouldn't stack a duplicate card. Proposal
-        // ids are included so a re-analysis that changes only the maps (message
-        // text unchanged) still surfaces as a fresh card.
-        const key = brainLastResponse.sessionId
-            ? `${brainLastResponse.sessionId}:${r.message || ''}:${directorProposals.proposals.map(p => p.id).join(',')}`
-            : `${r.message || ''}|${(r.suggestions || []).map(s => s.type || s.text || s.label).join(',')}|${directorProposals.proposals.map(p => p.id).join(',')}`;
+        // De-dupe unrelated re-renders, not completed analyses. Text and
+        // proposal IDs can be identical across valid re-analyses, so use the
+        // hook's monotonic response identity when available.
+        const key = brainLastResponse.responseRevision != null
+            ? `${projectId || ''}:${brainLastResponse.responseRevision}`
+            : brainLastResponse.sessionId
+                ? `${projectId || ''}:${brainLastResponse.sessionId}:${r.message || ''}:${directorProposals.proposals.map(p => p.id).join(',')}`
+                : `${projectId || ''}:${r.message || ''}|${(r.suggestions || []).map(s => s.type || s.text || s.label).join(',')}|${directorProposals.proposals.map(p => p.id).join(',')}`;
         if (lastBrainKeyRef.current === key) return;
         lastBrainKeyRef.current = key;
 

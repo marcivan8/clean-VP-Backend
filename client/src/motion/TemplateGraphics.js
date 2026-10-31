@@ -46,7 +46,7 @@ export const TEMPLATE_KINDS = ['counter', 'price-pop', 'logo-card', 'code-window
     // structure (steps, a checklist, a question, two sides); the catalogue had
     // the figures and almost none of the rest.
     'step-card', 'checklist', 'question-card', 'split-label',
-    'screenshot-card', 'ui-card', 'profile-portrait', 'stat-grid',
+    'screenshot-card', 'phone-frame', 'scene-background', 'ui-card', 'profile-portrait', 'stat-grid',
     // R113: the reusable building blocks. Labels and markers are the ones a
     // real edit reaches for constantly and the catalogue had none of; the
     // chart family was half-built; diagrams were missing entirely.
@@ -188,10 +188,12 @@ export const TEMPLATE_DEFAULTS = {
     // a card that looks right in the designer's head and renders empty
     // everywhere else. With no url the frame draws its own placeholder rather
     // than a hole: nothing in the pipeline guarantees an asset.
-    'screenshot-card':  { imageUrl: '', title: 'vibedstudio.com', chrome: 'browser', radius: 18, accent: '#00E5FF' },
-    'ui-card':          { title: 'Your edit', rows: 'Captions,Zoom rhythm,Colour grade', cta: 'Export', accent: '#00E5FF' },
-    'profile-portrait': { imageUrl: '', name: 'Marc', handle: '@vibedstudio', accent: '#00E5FF', ring: 1 },
-    'stat-grid':        { values: '40%,3x,12k', labels: 'Revenue,Faster,Views', accent: '#00E5FF', color: '#FFFFFF' },
+    'screenshot-card':  { imageUrl: '', title: 'vibedstudio.com', chrome: 'browser', radius: 18, accent: '#00E5FF', theme: 'dark' },
+    'phone-frame':      { accent: '#FFFFFF', theme: 'dark' },
+    'scene-background': { color: '#F9FAFB' },
+    'ui-card':          { title: 'Your edit', rows: 'Captions,Zoom rhythm,Colour grade', cta: 'Export', accent: '#00E5FF', theme: 'dark' },
+    'profile-portrait': { imageUrl: '', name: 'Marc', handle: '@vibedstudio', accent: '#00E5FF', ring: 1, shape: 'circle', theme: 'dark' },
+    'stat-grid':        { values: '40%,3x,12k', labels: 'Revenue,Faster,Views', accent: '#00E5FF', color: '#FFFFFF', theme: 'dark' },
     // ── R113 ──────────────────────────────────────────────────────────────
     // `tone` picks the colour and the glyph from one table, so "warning" and
     // "success" are the SAME template rather than ten near-identical ones.
@@ -273,7 +275,7 @@ export const TEMPLATE_WIDTH_FRACTION = {
     'panel': 0.8,
     'word-cycle': 0.86,
     'step-card': 0.82, 'checklist': 0.78, 'question-card': 0.84, 'split-label': 0.9,
-    'screenshot-card': 0.78, 'ui-card': 0.74, 'profile-portrait': 0.42, 'stat-grid': 0.9,
+    'screenshot-card': 0.78, 'phone-frame': 0.25, 'scene-background': 0.25, 'ui-card': 0.74, 'profile-portrait': 0.42, 'stat-grid': 0.9,
     'status-label': 0.38, 'numbered-marker': 0.2,
     'spotlight': 1.0, 'magnifier': 1.0, 'crosshair': 1.0,
     'pie-chart': 0.68, 'donut-chart': 0.68, 'area-chart': 0.88, 'h-bar-chart': 0.86,
@@ -351,7 +353,9 @@ export function templateSize(kind, params) {
         }
         case 'question-card': return { w: 900, h: 320 };
         case 'split-label': return p.divider === 'horizontal' ? { w: 1000, h: 620 } : { w: 1000, h: 300 };
-        case 'screenshot-card': return { w: 860, h: 600 };
+        case 'screenshot-card': return p.chrome === 'phone' ? { w: 520, h: 920 } : { w: 860, h: 600 };
+        case 'phone-frame': return { w: 520, h: 920 };
+        case 'scene-background': return { w: 1080, h: 1920 };
         case 'ui-card': {
             const n = Math.max(1, parseList(p.rows, 5).length);
             return { w: 760, h: 150 + n * 86 + (String(p.cta || '').trim() ? 110 : 20) };
@@ -2252,8 +2256,9 @@ function drawScreenshotCard(ctx, p, t, duration, F, images) {
     ctx.scale(pop, pop);
     ctx.translate(-w / 2, -h / 2);
 
-    ctx.fillStyle = 'rgba(10, 13, 20, 0.97)';
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
+    const light = p.theme === 'light';
+    ctx.fillStyle = light ? '#FFFFFF' : 'rgba(10, 13, 20, 0.97)';
+    ctx.strokeStyle = light ? '#1F2937' : 'rgba(255, 255, 255, 0.16)';
     ctx.lineWidth = 2;
     roundRect(ctx, 4, 4, w - 8, h - 8, phone ? 40 : radius + 10);
     ctx.fill();
@@ -2261,7 +2266,7 @@ function drawScreenshotCard(ctx, p, t, duration, F, images) {
 
     // Chrome: three dots and an address pill for a browser, a notch for a phone.
     if (phone) {
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+        ctx.fillStyle = light ? '#111827' : 'rgba(255, 255, 255, 0.16)';
         roundRect(ctx, w / 2 - 70, 20, 140, 16, 8);
         ctx.fill();
     } else {
@@ -2276,7 +2281,7 @@ function drawScreenshotCard(ctx, p, t, duration, F, images) {
         ctx.fill();
         const title = String(p.title || '').slice(0, 42);
         if (title) {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.fillStyle = light ? '#374151' : 'rgba(255, 255, 255, 0.6)';
             ctx.font = `17px "${F.body}"`;
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
@@ -2303,14 +2308,14 @@ function drawScreenshotCard(ctx, p, t, duration, F, images) {
         ctx.drawImage(img, vx + (vw - dw) / 2, vy + (vh - dh) / 2, dw, dh);
     } else {
         // No asset: a plausible interface rather than an empty rectangle.
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+        ctx.fillStyle = light ? '#F3F4F6' : 'rgba(255, 255, 255, 0.05)';
         ctx.fillRect(vx, vy, vw, vh);
         ctx.fillStyle = p.accent || '#00E5FF';
         ctx.globalAlpha = a * 0.5;
         roundRect(ctx, vx + 28, vy + 26, Math.min(220, vw * 0.4), 18, 9);
         ctx.fill();
-        ctx.globalAlpha = a * 0.18;
-        ctx.fillStyle = '#FFFFFF';
+        ctx.globalAlpha = a * (light ? 0.5 : 0.18);
+        ctx.fillStyle = light ? '#D1D5DB' : '#FFFFFF';
         for (let i = 0; i < 5; i++) {
             const rowY = vy + 76 + i * 46;
             if (rowY + 20 > vy + vh) break;
@@ -2319,6 +2324,58 @@ function drawScreenshotCard(ctx, p, t, duration, F, images) {
         }
     }
     ctx.restore();
+    ctx.restore();
+}
+
+/** Transparent device shell. A separately rendered project-video clip sits in its screen opening. */
+function drawPhoneFrame(ctx, p, t, duration) {
+    const { w, h } = templateSize('phone-frame', p);
+    const { tin, tout } = envelope(t, duration, 0.38, 0.24);
+    const alpha = Math.min(1, tin * 2.4) * tout;
+    if (alpha <= 0) return;
+    const shell = p.theme === 'light' ? '#F9FAFB' : '#111318';
+    const edge = p.theme === 'light' ? '#D1D5DB' : '#535861';
+    const sx = w * 0.075, sy = h * 0.055, sw = w * 0.85, sh = h * 0.89;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = 'rgba(0,0,0,0.32)';
+    ctx.shadowBlur = 34;
+    ctx.shadowOffsetY = 18;
+    ctx.fillStyle = shell;
+    roundRect(ctx, 4, 4, w - 8, h - 8, 68);
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'destination-out';
+    roundRect(ctx, sx, sy, sw, sh, 48);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = edge;
+    ctx.lineWidth = 8;
+    roundRect(ctx, 4, 4, w - 8, h - 8, 68);
+    ctx.stroke();
+    // Earpiece and camera sit in the bezel, outside the transparent screen.
+    ctx.fillStyle = shell;
+    roundRect(ctx, w * 0.39, h * 0.022, w * 0.22, 14, 7);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(w * 0.68, h * 0.03, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = p.accent || '#FFFFFF';
+    ctx.globalAlpha = alpha * 0.22;
+    ctx.lineWidth = 2;
+    roundRect(ctx, sx + 3, sy + 3, sw - 6, sh - 6, 45);
+    ctx.stroke();
+    ctx.restore();
+}
+
+function drawSceneBackground(ctx, p) {
+    const { w, h } = templateSize('scene-background', p);
+    ctx.save();
+    ctx.fillStyle = p.color || '#F9FAFB';
+    ctx.fillRect(0, 0, w, h);
     ctx.restore();
 }
 
@@ -2331,14 +2388,16 @@ function drawUiCard(ctx, p, t, duration, F) {
     if (a <= 0) return;
     const accent = p.accent || '#00E5FF';
     const cta = String(p.cta || '').trim();
+    const light = p.theme === 'light';
 
     ctx.save();
     ctx.globalAlpha = a;
-    cardSurface(ctx, w, h, 28, 'rgba(12, 15, 22, 0.96)');
+    cardSurface(ctx, w, h, 28, light ? '#FFFFFF' : 'rgba(12, 15, 22, 0.96)');
+    if (light) { ctx.strokeStyle = '#E5E7EB'; ctx.lineWidth = 3; roundRect(ctx, 2, 2, w - 4, h - 4, 28); ctx.stroke(); }
 
     const title = String(p.title || '').trim();
     if (title) {
-        ctx.fillStyle = '#FFFFFF';
+        ctx.fillStyle = light ? '#111827' : '#FFFFFF';
         ctx.font = `600 36px "${F.body}"`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
@@ -2352,14 +2411,14 @@ function drawUiCard(ctx, p, t, duration, F) {
         ctx.save();
         ctx.globalAlpha = a * e;
         ctx.translate(0, (1 - e) * 14);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+        ctx.fillStyle = light ? '#F3F4F6' : 'rgba(255, 255, 255, 0.06)';
         roundRect(ctx, 32, top, w - 64, 66, 16);
         ctx.fill();
         ctx.fillStyle = accent;
         ctx.beginPath();
         ctx.arc(66, top + 33, 11, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
+        ctx.fillStyle = light ? '#1F2937' : 'rgba(255, 255, 255, 0.88)';
         const { lines, size } = fitLines(ctx, row, F.body, 30, w - 150, 1);
         ctx.font = `500 ${size}px "${F.body}"`;
         ctx.textAlign = 'left';
@@ -2375,7 +2434,7 @@ function drawUiCard(ctx, p, t, duration, F) {
         ctx.fillStyle = accent;
         roundRect(ctx, 32, h - 100, w - 64, 66, 18);
         ctx.fill();
-        ctx.fillStyle = '#0B0E14';
+        ctx.fillStyle = light ? '#FFFFFF' : '#0B0E14';
         ctx.font = `bold 30px "${F.label}"`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -2392,6 +2451,39 @@ function drawProfilePortrait(ctx, p, t, duration, F, images) {
     const a = Math.min(1, tin * 2) * tout;
     if (a <= 0) return;
     const accent = p.accent || '#00E5FF';
+    if (p.shape === 'rounded') {
+        const x = 14, y = 14, cardW = w - 28, cardH = h - 28;
+        const img = (images || {})[p.imageUrl] || null;
+        ctx.save();
+        ctx.globalAlpha = a;
+        ctx.shadowColor = 'rgba(0,0,0,0.18)';
+        ctx.shadowBlur = 24;
+        ctx.shadowOffsetY = 10;
+        ctx.fillStyle = p.theme === 'light' ? '#FFFFFF' : '#111827';
+        roundRect(ctx, x, y, cardW, cardH, 38);
+        ctx.fill();
+        ctx.shadowColor = 'transparent';
+        ctx.save();
+        roundRect(ctx, x + 8, y + 8, cardW - 16, cardH - 16, 32);
+        ctx.clip();
+        if (img) {
+            const iw = img.width || 1, ih = img.height || 1;
+            const boxW = cardW - 16, boxH = cardH - 16;
+            const scale = Math.max(boxW / iw, boxH / ih);
+            const dw = iw * scale, dh = ih * scale;
+            ctx.drawImage(img, x + 8 + (boxW - dw) / 2, y + 8 + (boxH - dh) / 2, dw, dh);
+        } else {
+            ctx.fillStyle = '#E5E7EB';
+            ctx.fillRect(x + 8, y + 8, cardW - 16, cardH - 16);
+        }
+        ctx.restore();
+        ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+        ctx.lineWidth = 8;
+        roundRect(ctx, x + 4, y + 4, cardW - 8, cardH - 8, 36);
+        ctx.stroke();
+        ctx.restore();
+        return;
+    }
     const pop = easeOutBack(clamp(t / 0.4, 0, 1));
     const r = 150;
     const cx = w / 2;
@@ -2472,6 +2564,7 @@ function drawStatGrid(ctx, p, t, duration, F) {
     const a = Math.min(1, tin * 2) * tout;
     if (a <= 0) return;
     const accent = p.accent || '#00E5FF';
+    const light = p.theme === 'light';
     const cellW = 260;
     const gap = 40;
     const totalW = values.length * cellW + (values.length - 1) * gap;
@@ -2487,8 +2580,8 @@ function drawStatGrid(ctx, p, t, duration, F) {
         ctx.globalAlpha = a * e;
         ctx.translate(0, (1 - e) * 26);
 
-        ctx.fillStyle = 'rgba(14, 18, 28, 0.92)';
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.fillStyle = light ? '#FFFFFF' : 'rgba(14, 18, 28, 0.92)';
+        ctx.strokeStyle = light ? '#E5E7EB' : 'rgba(255, 255, 255, 0.12)';
         ctx.lineWidth = 2;
         roundRect(ctx, cx - cellW / 2, 10, cellW, h - 20, 24);
         ctx.fill();
@@ -2503,7 +2596,7 @@ function drawStatGrid(ctx, p, t, duration, F) {
 
         const label = labels[i];
         if (label) {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.fillStyle = light ? '#6B7280' : 'rgba(255, 255, 255, 0.7)';
             const lf = fitLines(ctx, label, F.label, 26, cellW - 36, 1);
             ctx.font = `bold ${lf.size}px "${F.label}"`;
             ctx.fillText((lf.lines[0] || '').toUpperCase(), cx, h / 2 + 62);
@@ -4851,6 +4944,8 @@ export function drawTemplate(ctx, kind, params, t, duration, opts = {}) {
         else if (kind === 'question-card') drawQuestionCard(ctx, p, tt, d, F);
         else if (kind === 'split-label') drawSplitLabel(ctx, p, tt, d, F);
         else if (kind === 'screenshot-card') drawScreenshotCard(ctx, p, tt, d, F, opts.images || {});
+        else if (kind === 'phone-frame') drawPhoneFrame(ctx, p, tt, d);
+        else if (kind === 'scene-background') drawSceneBackground(ctx, p);
         else if (kind === 'ui-card') drawUiCard(ctx, p, tt, d, F);
         else if (kind === 'profile-portrait') drawProfilePortrait(ctx, p, tt, d, F, opts.images || {});
         else if (kind === 'stat-grid') drawStatGrid(ctx, p, tt, d, F);

@@ -17,6 +17,12 @@ const validEnum = (value, allowed) => {
     return allowed.has(normalized) ? normalized : null;
 };
 const hex = value => /^#[\da-f]{6}$/i.test(String(value || '').trim()) ? String(value).trim().toUpperCase() : null;
+const luminance = color => {
+    const channels = String(color || '').slice(1).match(/.{2}/g)?.map(value => parseInt(value, 16) / 255) || [];
+    if (channels.length !== 3) return 0;
+    const linear = channels.map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+};
 
 /** Returns null for weak/invalid evidence so normal style defaults take over. */
 export function buildStyleReferencePlan(raw) {
@@ -55,6 +61,7 @@ export function buildStyleReferencePlan(raw) {
         : transitionPacing === 'slow' || motionEnergy === 'low' ? 'explainer' : 'travel';
     const motionScale = ({ low: 0.65, medium: 0.85, high: 1.05 })[motionEnergy] || 0.85;
     const graphicsMax = ({ sparse: 1, balanced: 2, dense: 4 })[graphicsDensity] || 2;
+    const surface = colors.filter(color => luminance(color) >= 0.82).length >= 1 ? 'light' : 'dark';
 
     return {
         confidence,
@@ -67,6 +74,7 @@ export function buildStyleReferencePlan(raw) {
         titlePreset: title?.preset || null,
         graphicsDensity,
         graphicsMax,
+        surface,
         transitionPacing,
         recipe,
         visualTone,

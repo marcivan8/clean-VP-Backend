@@ -98,13 +98,14 @@ const text = (v) => String(v ?? '').trim();
  * attributes it to a sentence they said, which is worse than a placeholder.
  */
 export function imageFor(beat, assets, { kinds = ['image'] } = {}) {
-    const list = Array.isArray(assets) ? assets : [];
+    const list = (Array.isArray(assets) ? assets : []).filter(asset => asset?.assistantReference !== true);
     if (list.length === 0) return null;
     const words = [text(beat?.evidence), text(beat?.text)].join(' ')
         .toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3);
     if (words.length === 0) return null;
     for (const asset of list) {
-        if (kinds.length && !kinds.includes(asset?.type)) continue;
+        const type = String(asset?.type || asset?.mediaType || asset?.contentType || '').toLowerCase();
+        if (kinds.length && !kinds.some(kind => type === kind || type.startsWith(`${kind}/`))) continue;
         const name = String(asset?.name || '').toLowerCase();
         if (!name) continue;
         if (words.some(w => name.includes(w))) return asset.url || asset.proxyUrl || null;

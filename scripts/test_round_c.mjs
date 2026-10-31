@@ -261,7 +261,7 @@ await check('"pro finish" on the main edit: one undo, a re-run replaces instead 
     const n1 = count();
     assert.ok(n1 >= 2, `title + underline added (${n1})`);
     assert.ok(S.getState().past.length > before);
-    await engine.executeStoreAction({ action: 'polish_short', args: { brief: 'pro finish for tiktok' } }, null);
+    await engine.executeStoreAction({ action: 'polish_short', args: { brief: 'pro finish for instagram reels' } }, null);
     assert.equal(count(), n1, 'replaced, not stacked');
     const vid = S.getState().tracks.find(t => t.type === 'video').clips[0];
     assert.ok(vid.animations.some(a => a.presetId === 'composed:push-in'));

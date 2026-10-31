@@ -311,11 +311,12 @@ await check('the no-AI finish renders transcript-led graphics at their spoken ti
         + 'i realized consistency matters more than speed so follow for more practical ideas').split(' ');
     const words = transcript.map((word, i) => ({ word, start: i * 0.55, end: i * 0.55 + 0.45 }));
     const timed = await finishShort({ ...state(), captions: words }, { ...short, end: 30 }, { plan: null, scenePlan: null, sfx: false });
-    const clips = allClips(timed.tracks).filter(c => String(c.id).startsWith('short-timed-text-'));
-    assert.ok(clips.length > 0, 'no transcript-led timed graphic clips were rendered');
+    const clips = allClips(timed.tracks).filter(c => String(c.id).startsWith('short-storyboard-'));
+    assert.ok(clips.length > 0, 'no transcript-led storyboard template clips were rendered');
     assert.ok(clips.some(c => Number(c.start) > 3), 'supporting graphics should be placed in the body, not all at time zero');
-    assert.ok(clips.some(c => Array.isArray(c.animations) && c.animations.some(a => /^composed:/.test(a.presetId || ''))), 'timed scenes should carry composed animation');
-    assert.ok(timed.applied.some(a => /timed story graphics/.test(a)), 'the applied summary should report the timed scenes');
+    assert.ok(clips.every(c => c.type === 'template' && c.template?.kind), 'storyboard beats should resolve to real renderer-backed graphics');
+    assert.ok(clips.some(c => Array.isArray(c.animations) && c.animations.length > 0), 'storyboard graphics should carry motion');
+    assert.ok(timed.applied.some(a => /storyboard scenes/.test(a)), 'the applied summary should report the storyboard scenes');
 });
 
 await check('short finish wires contextual vector illustrations as animated template clips', () => {

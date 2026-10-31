@@ -195,7 +195,7 @@ export async function fetchShortVisualContext(projectId, signal) {
  * Build the finished short.
  * @param {object} state useTimelineStore.getState()
  * @param {object} short an entry of state.shorts
- * @param {{polish?:boolean, popOut?:boolean, sfx?:boolean, plan?:object|null, scenePlan?:object|null, motionTechniques?:Array, visualContext?:Array, events?:Array, editingStyle?:string, fetchPlan?:Function, fetchMotionTechniques?:Function, fetchAsset?:Function}} opts
+ * @param {{polish?:boolean, popOut?:boolean, sfx?:boolean, plan?:object|null, scenePlan?:object|null, referenceStyleProfile?:object|null, motionTechniques?:Array, visualContext?:Array, events?:Array, editingStyle?:string, fetchPlan?:Function, fetchMotionTechniques?:Function, fetchAsset?:Function}} opts
  * @returns {Promise<{tracks, duration, aspectRatio, applied:string[], words:Array}>}
  */
 export async function finishShort(state, short, opts = {}) {
@@ -230,7 +230,12 @@ export async function finishShort(state, short, opts = {}) {
     const layers = wantsPolish ? undefined : {
         title: false, captions: false, camera: false, numbers: false, cuts: false,
     };
-    const polished = polishShort(built, profile, { words, events, plan, scenePlan, popOut: !!opts.popOut, layers });
+    const polished = polishShort(built, profile, {
+        words, events, plan, scenePlan,
+        referenceStyleProfile: opts.referenceStyleProfile || null,
+        assets: state.assets || [],
+        popOut: !!opts.popOut, layers,
+    });
     // Keep the Shorts panel's generated timeline in parity with the main
     // Pro Finish path: use upload-time visual matches as small, speaker-safe
     // cutaway overlays at the local planner's timed beats.

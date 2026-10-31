@@ -210,6 +210,10 @@ export function useBrain() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [lastResponse, setLastResponse] = useState(null);
     const [error, setError]               = useState(null);
+    // Every completed Brain response gets an identity independent of its text.
+    // Analysis can legitimately return the same advisory twice; consumers still
+    // need to surface the newer result after the old card was dismissed/replaced.
+    const responseRevisionRef = useRef(0);
 
     // Track the last session ID returned by the brain for feedback correlation
     const sessionIdRef = useRef(null);
@@ -273,7 +277,7 @@ export function useBrain() {
             // Persist session ID for subsequent feedback calls
             sessionIdRef.current = brainOutput?.learning?.sessionId || null;
 
-            setLastResponse(brainOutput);
+            setLastResponse({ ...brainOutput, responseRevision: ++responseRevisionRef.current });
             return brainOutput;
 
         } catch (err) {
@@ -376,6 +380,7 @@ export function useBrain() {
             if (myGeneration === analyzeGenerationRef.current) {
                 setLastResponse(prev => ({
                     ...(prev || {}),
+                    responseRevision: ++responseRevisionRef.current,
                     response: {
                         ...(prev?.response || {}),
                         // Previously only `message` and `suggestions` were pulled off

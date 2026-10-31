@@ -25,5 +25,11 @@ assert.doesNotMatch(brainPanel, /suggestions\.map\(/);
 
 const reasoningPanel = read('client/src/components/Assistant/ReasoningPanel.jsx');
 assert.match(reasoningPanel, /suggestion\.data\?\.suggestions \|\| \[\]\)\.slice\(0, 1\)/);
+assert.match(read('client/src/hooks/useBrain.js'), /responseRevision:\s*\+\+responseRevisionRef\.current/,
+    'each completed Brain response gets a fresh identity even when its content repeats');
+assert.match(reasoningPanel, /brainLastResponse\.responseRevision != null[\s\S]{0,140}responseRevision/,
+    'Brain advisory dedupe distinguishes fresh analyses with identical content');
+assert.match(reasoningPanel, /\}, \[visibleFeedItems\]\);/,
+    'feed autoscroll runs when a Brain card is replaced without changing item count');
 
 console.log('Single command suggestion checks passed');

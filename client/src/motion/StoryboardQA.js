@@ -69,6 +69,10 @@ export const MIN_ON_SCREEN_S = 1.2;
  */
 export const SAFE_SPOTS = Object.freeze([
     { x: 50, y: 24 }, { x: 50, y: 20 }, { x: 50, y: 30 }, { x: 50, y: 70 },
+    // Vertical social safe zones are asymmetric (the right-side action rail
+    // is wider than the left margin). Wide cards need the true content center
+    // at about 46%, or every otherwise-valid 78%-wide card is refused.
+    { x: 46, y: 30 }, { x: 46, y: 38 }, { x: 46, y: 70 },
     { x: 50, y: 76 }, { x: 50, y: 64 },
     { x: 26, y: 30 }, { x: 74, y: 30 }, { x: 26, y: 72 }, { x: 74, y: 72 },
     { x: 50, y: 50 },
@@ -86,6 +90,9 @@ const round = (v, p = 3) => Math.round(num(v, 0) * 10 ** p) / 10 ** p;
  * template's own aspect, so a tall card is measured as tall.
  */
 export function boxFor(placement, frame) {
+    if (placement?.bounds && [placement.bounds.x, placement.bounds.y, placement.bounds.w, placement.bounds.h].every(Number.isFinite)) {
+        return { ...placement.bounds };
+    }
     const fw = num(frame?.w, 1080);
     const fh = num(frame?.h, 1920);
     let wFrac = 0.5;
@@ -103,8 +110,9 @@ export function boxFor(placement, frame) {
         wFrac = 0.46;
         aspect = 3;
     }
-    const w = wFrac;
-    const h = (wFrac * fw) / aspect / fh;
+    const scale = Math.max(0.05, num(placement?.scale, 1));
+    const w = wFrac * scale;
+    const h = (wFrac * fw / aspect / fh) * scale;
     const cx = num(placement?.x, 50) / 100;
     const cy = num(placement?.y, 50) / 100;
     return { x: cx - w / 2, y: cy - h / 2, w, h };
@@ -153,6 +161,10 @@ export function inspect(placements, opts = {}) {
     const boxes = list.map(p => ({ p, box: boxFor(p, frame) }));
 
     for (const { p, box } of boxes) {
+        // Layout reservations represent existing title/caption regions. They
+        // participate in collision checks but are not themselves repaired or
+        // checked for safe area, subject coverage, or read duration.
+        if (p.layoutReservation) continue;
         if (box.x < -0.001 || box.y < -0.001 || box.x + box.w > 1.001 || box.y + box.h > 1.001) {
             findings.push(finding(QA_CODES.OFF_FRAME, p, 'part of this graphic is outside the frame', { box }));
         } else if (sz) {
@@ -209,9 +221,10 @@ export function inspect(placements, opts = {}) {
     // duration there is nothing to measure against, and inventing a span is
     // how that bug happened — so the check simply does not run.
     const span = num(opts.duration, 0);
-    if (span > 0 && (list.length / span) * 60 > num(opts.maxPerMinute, 14)) {
+    const visualCount = list.filter(placement => !placement.layoutReservation).length;
+    if (span > 0 && (visualCount / span) * 60 > num(opts.maxPerMinute, 14)) {
         findings.push(finding(QA_CODES.CROWDED, null, 'there are more graphics a minute here than a viewer can follow',
-            { perMinute: round((list.length / span) * 60, 1) }));
+            { perMinute: round((visualCount / span) * 60, 1) }));
     }
 
     return { findings, ok: findings.length === 0 };

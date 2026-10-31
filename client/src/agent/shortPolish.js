@@ -47,9 +47,15 @@ import { flattenScene } from '../motion/SceneSchema.js';
 import { composeSceneFromBrief } from '../motion/SceneDirector.js';
 import { iconFromText } from '../motion/IconLibrary.js';
 import { VECTOR_ILLUSTRATIONS } from '../motion/VectorIllustrationLibrary.js';
-import { templateSize } from '../motion/TemplateGraphics.js';
+import { templateSize, TEMPLATE_WIDTH_FRACTION } from '../motion/TemplateGraphics.js';
 import { applyPresetToClip } from '../motion/ClipAdapter.js';
 import { buildStyleReferencePlan } from '../motion/StyleReferenceAdapter.js';
+import { planStoryboard, KIND_PLAN } from '../motion/Storyboard.js';
+import { findMoments } from '../motion/MomentAnalyzer.js';
+import { placementsFor, paramsFor } from '../motion/StoryboardBridge.js';
+import { inspect as inspectStoryboard, repair as repairStoryboard } from '../motion/StoryboardQA.js';
+import { subjectFromClips } from '../motion/SceneDirector.js';
+import { resolveFrame } from '../motion/SceneLayout.js';
 
 const STOP = new Set(('a an the and or but so to of in on at for with is are was were be been it this that these those i you we they he she my your our their me us them ' +
     'just really very like um uh then also do does did have has had will would can could should not no yes if about from as by here ' +
@@ -472,6 +478,237 @@ function trackOf(tracks, type, id, name) {
     return t;
 }
 
+function styleAwareKindPlan(style) {
+    const plan = Object.fromEntries(Object.entries(KIND_PLAN).map(([kind, item]) => [kind, { ...item, graphics: [...item.graphics], layouts: [...item.layouts] }]));
+    const motifs = (style?.motifs || []).join(' ').toLowerCase();
+    if (/dashboard|subscriber|social (?:feed|list)|interface|app screen/.test(motifs)) {
+        plan.list.graphics = ['ui-card', 'checklist', 'step-card', 'process-flow'];
+        plan.product.graphics = ['ui-card', 'screenshot-card', 'video-thumbnail'];
+    }
+    if (/phone|mobile|instagram|reel interface|social app/.test(motifs)) {
+        plan.list.graphics = ['screenshot-card', 'ui-card', 'step-card'];
+        plan.product.graphics = ['screenshot-card', 'video-player', 'ui-card'];
+        plan.cta.graphics = ['screenshot-card', 'cta-widget', 'social-notification'];
+    }
+    if (/portrait|collage|avatar|multiple people|profile cards/.test(motifs)) {
+        plan.product.graphics = ['profile-portrait', 'screenshot-card', 'ui-card'];
+        plan.quote.graphics = ['profile-portrait', 'quote-card', 'comment-bubble'];
+    }
+    return plan;
+}
+
+function sourceVideoAt(tracks, assets, at) {
+    for (const track of tracks.filter(item => item.type === 'video')) {
+        for (const clip of track.clips || []) {
+            const start = Number(clip.start) || 0;
+            const end = start + (Number(clip.duration) || 0);
+            if (at < start || at >= end || (clip.type && clip.type !== 'video')) continue;
+            const asset = (assets || []).find(item => item.id && item.id === clip.assetId);
+            const url = clip.proxyUrl || clip.url || clip.sourceUrl || clip.src
+                || asset?.proxyUrl || asset?.url || asset?.sourceUrl || asset?.src;
+            if (url || clip.assetId) return { clip, url };
+        }
+    }
+    return null;
+}
+
+function phoneScreenFrame(placement, frame) {
+    const deviceAspect = 520 / 920;
+    const deviceW = TEMPLATE_WIDTH_FRACTION['phone-frame'] * (Number(placement.scale) || 1.48);
+    const deviceH = deviceW * (Number(frame.w) / Number(frame.h)) / deviceAspect;
+    const left = Number(placement.x) / 100 - deviceW / 2;
+    const top = Number(placement.y) / 100 - deviceH / 2;
+    return {
+        x: left + deviceW * 0.075,
+        y: top + deviceH * 0.055,
+        w: deviceW * 0.85,
+        h: deviceH * 0.89,
+        focusX: 0.5,
+        focusY: 0.5,
+        preset: 'cover',
+    };
+}
+
+/**
+ * Turn the transcript's semantic beats into varied, real template graphics.
+ * Keep the whole plan together through QA so captions, the hook, the speaker,
+ * and the new cards share one collision pass instead of being placed as
+ * unrelated overlays.
+ */
+function addAutoStoryboard(tracks, { words, events, duration, aspectRatio, hookSpan, profile, style, assets }) {
+    if (!Array.isArray(words) || words.length < 4 || !(duration > 0)) return 0;
+    const spoken = findMoments(words, { minGap: 2.5 });
+    const eventKinds = { REVEAL: 'claim', PUNCHLINE_DETECTED: 'quote', EMPHASIS_MOMENT: 'emphasis' };
+    const eventBeats = (Array.isArray(events) ? events : []).map(event => {
+        const t = Number(event?.timelineTime ?? event?.start ?? event?.time);
+        if (!Number.isFinite(t) || t < hookSpan + 0.35 || t >= duration - 0.6) return null;
+        const nearby = words.filter(word => Number(word.start) <= t + 1.1 && Number(word.end) >= t - 1.1);
+        const text = nearby.map(wordOf).filter(Boolean).join(' ').trim();
+        return text ? { t, end: Math.min(duration, t + 1.8), kind: eventKinds[event.eventType] || 'claim', text, evidence: null, weight: 5 } : null;
+    }).filter(Boolean);
+    const moments = [...spoken, ...eventBeats]
+        .sort((a, b) => (b.weight || 0) - (a.weight || 0) || a.t - b.t)
+        .filter((moment, index, all) => all.findIndex(other => Math.abs(other.t - moment.t) < 1.4) === index)
+        .sort((a, b) => a.t - b.t);
+    const density = style?.graphicsDensity || 'balanced';
+    const maxPerMinute = ({ sparse: 3, balanced: 5, dense: 8 })[density] || 5;
+    const kindPlan = styleAwareKindPlan(style);
+    const plan = planStoryboard({
+        words, moments, duration,
+        opts: { maxPerMinute, minGap: 2.8, leadIn: Math.max(1.2, hookSpan + 0.25), maxHold: 3.8, minHold: 1.6, kindPlan },
+    });
+    if (!plan.beats.length) return 0;
+
+    const safeAssets = (assets || []).filter(asset => asset?.assistantReference !== true);
+    const bridged = placementsFor(plan.beats, { kindPlan, assets: safeAssets });
+    if (!bridged.placements.length) return 0;
+    const motifs = (style?.motifs || []).join(' ').toLowerCase();
+    let graphicPlacements = [...bridged.placements];
+    const dashboardStyle = /dashboard|subscriber|social (?:feed|list)|interface|app screen/.test(motifs);
+    if (dashboardStyle) {
+        const dashboardPlacement = graphicPlacements.find(placement => placement.graphic === 'ui-card') || graphicPlacements[0];
+        const beat = plan.beats.find(item => item.id === dashboardPlacement?.beatId);
+        if (dashboardPlacement && beat) {
+            const content = paramsFor('ui-card', beat) || {};
+            Object.assign(dashboardPlacement, {
+                id: 'ui-card', graphic: 'ui-card', source: 'template', params: { ...content, theme: style?.surface || 'light' },
+                x: 50, y: 21, scale: 1, dashboardScene: true,
+            });
+        }
+    }
+    if (/phone|mobile|instagram|reel interface|social app/.test(motifs)) {
+        graphicPlacements = graphicPlacements.map(placement => {
+            if (placement.graphic !== 'screenshot-card' || !sourceVideoAt(tracks, assets, placement.start)) return placement;
+            return { ...placement, id: 'phone-frame', graphic: 'phone-mockup', params: { accent: style?.accent || '#FFFFFF', theme: style?.surface || 'dark' }, scale: 1.48, phoneVideo: true };
+        });
+    }
+    // Use only upload-time verified project faces for a portrait-collage look.
+    // Reference media is excluded and no names or claims are invented.
+    if (/portrait|collage|avatar|multiple people|profile cards/.test(motifs)) {
+        const faces = safeAssets.filter(asset => {
+            const type = String(asset?.type || asset?.mediaType || asset?.contentType || '').toLowerCase();
+            const analysis = asset?.visualAnalysis || asset?.analysis || asset;
+            return (type === 'image' || type.startsWith('image/'))
+                && (analysis?.hasFaces === true || analysis?.has_faces === true)
+                && !!(asset.url || asset.proxyUrl || asset.sourceUrl || asset.src);
+        }).slice(0, 4);
+        if (faces.length >= 3) {
+            const beatKinds = new Map(plan.beats.map(beat => [beat.id, beat.kind]));
+            const base = graphicPlacements.find(placement => ['quote', 'product', 'claim'].includes(beatKinds.get(placement.beatId))) || graphicPlacements[0];
+            graphicPlacements = graphicPlacements.filter(placement => placement.beatId !== base?.beatId);
+            const positions = [{ x: 24, y: 28 }, { x: 76, y: 31 }, { x: 22, y: 48 }, { x: 78, y: 50 }];
+            faces.forEach((asset, index) => graphicPlacements.push({
+                source: 'template', id: 'profile-portrait', preset: null,
+                params: { imageUrl: asset.url || asset.proxyUrl || asset.sourceUrl || asset.src, name: '', handle: '', ring: 0, shape: 'rounded', theme: style?.surface || 'dark' },
+                start: base.start, duration: Math.min(base.duration, 2.8),
+                ...positions[index], scale: 0.42, graphic: 'profile-portrait', layout: 'pip', beatId: `${base.beatId}-portrait-${index}`,
+            }));
+        }
+    }
+    const frame = resolveFrame(aspectRatio || '9:16');
+    const subject = subjectFromClips(tracks.filter(track => track.type === 'video').flatMap(track => track.clips || []));
+    const captions = tracks.filter(track => track.type === 'text').flatMap(track => track.clips || [])
+        .filter(clip => String(clip.id || '').startsWith('short-caption-'));
+    const reservations = [
+        ...(hookSpan > 0 ? [{ layoutReservation: true, beatId: 'reserved-hook', start: 0, duration: hookSpan, bounds: { x: 0.08, y: 0.12, w: 0.84, h: 0.30 } }] : []),
+        ...captions.map((clip, index) => {
+            const centerY = Math.max(0.08, Math.min(0.92, (Number(clip.y) || profile?.captionY || 64) / 100));
+            return { layoutReservation: true, beatId: `reserved-caption-${index}`, start: Number(clip.start) || 0,
+                duration: Number(clip.duration) || 0.3, bounds: { x: 0.08, y: centerY - 0.08, w: 0.84, h: 0.16 } };
+        }),
+    ];
+    const qaInput = [...reservations, ...graphicPlacements];
+    let finalPlacements = graphicPlacements;
+    try {
+        const qaOpts = { frame, safeZone: profile?.safeZone, subject, duration, maxPerMinute: maxPerMinute + 1 };
+        if (!inspectStoryboard(qaInput, qaOpts).ok) {
+            const checked = repairStoryboard(qaInput, qaOpts);
+            const refused = new Set((checked.unresolved || []).map(item => item.beatId).filter(Boolean));
+            finalPlacements = checked.placements.filter(placement => !placement.layoutReservation && !refused.has(placement.beatId));
+        }
+    } catch (error) {
+        console.warn('[shortPolish] storyboard quality check failed; keeping the valid original placements:', error.message);
+    }
+
+    const accent = style?.accent || null;
+    const textColor = style?.textColor || null;
+    let placed = 0;
+    const dashboardPlacement = finalPlacements.find(placement => placement.dashboardScene);
+    if (dashboardPlacement) {
+        const source = sourceVideoAt(tracks, assets, dashboardPlacement.start);
+        if (source) {
+            const track = trackOf(tracks, 'overlay', 'track-short-storyboard', 'Story graphics');
+            const bgParams = { color: style?.surface === 'light' ? '#F9FAFB' : '#0B0F15', w: frame.w, h: frame.h };
+            track.clips.push({
+                id: `short-dashboard-bg-${dashboardPlacement.beatId}`, type: 'template', name: 'Dashboard background',
+                template: { kind: 'scene-background', params: bgParams },
+                metadata: { resolution: { w: frame.w, h: frame.h } },
+                start: dashboardPlacement.start, duration: dashboardPlacement.duration,
+                x: 50, y: 50, scale: 4, rotation: 0, opacity: 1,
+            });
+            const sourceStart = Number(source.clip.start) || 0;
+            const speed = Number(source.clip.speed) > 0 ? Number(source.clip.speed) : 1;
+            const sourceAsset = (assets || []).find(item => item.id && item.id === source.clip.assetId);
+            const speakerClip = {
+                ...source.clip,
+                id: `short-dashboard-speaker-${dashboardPlacement.beatId}`,
+                type: 'video', name: 'Speaker footage',
+                start: dashboardPlacement.start,
+                duration: Math.min(dashboardPlacement.duration, sourceStart + (Number(source.clip.duration) || 0) - dashboardPlacement.start),
+                offset: (Number(source.clip.offset) || 0) + Math.max(0, dashboardPlacement.start - sourceStart) * speed,
+                speed, frame: { x: 0, y: 0.43, w: 1, h: 0.57, focusX: 0.5, focusY: 0.5, preset: 'cover' },
+                fit: 'cover', muted: true,
+                ...(source.url ? { url: source.url, sourceUrl: source.url } : {}),
+                ...(sourceAsset?.resolution ? { metadata: { ...(source.clip.metadata || {}), resolution: sourceAsset.resolution } } : {}),
+                animations: [],
+            };
+            if (speakerClip.duration > 0) track.clips.push(speakerClip);
+        }
+    }
+    for (const placement of finalPlacements) {
+        const params = { ...placement.params };
+        if (accent && 'accent' in params) params.accent = accent;
+        if (accent && 'color' in params) params.color = accent;
+        if (textColor && 'textColor' in params) params.textColor = textColor;
+        if (['screenshot-card', 'phone-frame', 'ui-card', 'stat-grid', 'profile-portrait'].includes(placement.id) && style?.surface) params.theme = style.surface;
+        const track = trackOf(tracks, 'overlay', 'track-short-storyboard', 'Story graphics');
+        const size = placement.source === 'template' ? templateSize(placement.id, params) : null;
+        if (placement.phoneVideo) {
+            const source = sourceVideoAt(tracks, assets, placement.start);
+            if (source) {
+                const sourceStart = Number(source.clip.start) || 0;
+                const speed = Number(source.clip.speed) > 0 ? Number(source.clip.speed) : 1;
+                const sourceAsset = (assets || []).find(item => item.id && item.id === source.clip.assetId);
+                const screenClip = {
+                    ...source.clip,
+                    id: `short-phone-screen-${placement.beatId || placed}`,
+                    type: 'video', name: 'Phone screen footage',
+                    start: placement.start,
+                    duration: Math.min(placement.duration, sourceStart + (Number(source.clip.duration) || 0) - placement.start),
+                    offset: (Number(source.clip.offset) || 0) + Math.max(0, placement.start - sourceStart) * speed,
+                    speed, frame: phoneScreenFrame(placement, frame), fit: 'cover', muted: true,
+                    ...(source.url ? { url: source.url, sourceUrl: source.url } : {}),
+                    ...(sourceAsset?.resolution ? { metadata: { ...(source.clip.metadata || {}), resolution: sourceAsset.resolution } } : {}),
+                    animations: [],
+                };
+                if (screenClip.duration > 0) track.clips.push(screenClip);
+            }
+        }
+        const clip = {
+            id: `short-storyboard-${placement.beatId || placed}`,
+            type: 'template', name: placement.graphic,
+            template: { kind: placement.id, params },
+            ...(size ? { metadata: { resolution: { w: size.w, h: size.h } } } : {}),
+            start: placement.start, duration: placement.duration,
+            x: placement.x, y: placement.y, scale: placement.scale || 1, rotation: 0, opacity: 1,
+        };
+        Object.assign(clip, applyPresetToClip(clip, 'stkr-float-up', { intensity: 0.28 }));
+        track.clips.push(clip);
+        placed += 1;
+    }
+    return placed;
+}
+
 /**
  * Apply the treatment.
  * @param {{tracks:Array, duration:number, aspectRatio?:string}} built from buildShortTimeline
@@ -828,6 +1065,15 @@ export function polishShort(built, profile, opts = {}) {
         if (moved) applied.push(`camera moves (${moments.length} punch-in${moments.length === 1 ? '' : 's'})`);
     }
 
+    // Feed a full transcript storyboard through the same composed template
+    // catalog used by the manual storyboard command. It replaces the former
+    // one-off stat/phrase callouts when it has usable beats.
+    const storyboardGraphics = want.title ? addAutoStoryboard(tracks, {
+        words, events: opts.events, duration, aspectRatio: built?.aspectRatio || '9:16', hookSpan, profile, style: referenceStyle,
+        assets: opts.assets,
+    }) : 0;
+    if (storyboardGraphics) applied.push(`storyboard scenes (${storyboardGraphics})`);
+
     // 4. Moment graphics: a spoken number, or another strong beat in the
     // body of the short, gets a designed StatCallout -- the SAME scene
     // engine (R93-95, composeComponentScene + flattenScene) the hook title
@@ -836,7 +1082,7 @@ export function polishShort(built, profile, opts = {}) {
     // hook title was the ONLY place the designed scene engine showed up in a
     // short; Marc asked for the engine to carry the whole short, not just
     // its opening couple of seconds.
-    if (want.numbers) {
+    if (want.numbers && !storyboardGraphics) {
         const hookEnd = want.title ? hookSpan : 0;
         const nums = spokenNumbers(words).filter(n => n.t > 0.3 && n.t < duration - 1);
         let momentTextN = 0, momentGfxN = 0, momentsCount = 0;
@@ -886,7 +1132,7 @@ export function polishShort(built, profile, opts = {}) {
     // avoid number/reveal callouts already placed above, and use the same
     // scene director so each beat gets coordinated text, graphic accents,
     // safe placement, and motion.
-    if (want.title && Array.isArray(opts.scenePlan?.timedMoments)) {
+    if (!storyboardGraphics && want.title && Array.isArray(opts.scenePlan?.timedMoments)) {
         let textN = 0, gfxN = 0, count = 0;
         const naturalSceneCap = Math.max(1, Math.min(5, Math.floor(duration / 7)));
         const maxTimedScenes = referenceStyle
@@ -933,7 +1179,7 @@ export function polishShort(built, profile, opts = {}) {
     // 4b. Contextual vector illustrations. Only add an icon when the scene
     // text names a subject supported by the vector library; avoid generic
     // decorative icons that would add noise without explaining the beat.
-    if (want.title && Array.isArray(opts.scenePlan?.timedMoments)) {
+    if (!storyboardGraphics && want.title && Array.isArray(opts.scenePlan?.timedMoments)) {
         const treatment = profile?.id === 'tiktok' ? 'burst' : 'badge';
         const background = treatment === 'burst' ? 'radial-burst' : 'gradient-orb';
         const accent = look.accent;

@@ -166,8 +166,8 @@ export function holdFor(text, opts = {}) {
  * Returns `{ graphic, layout }`; never null — every kind has a first choice,
  * and falling back to it is better than dropping the beat.
  */
-export function chooseFor(kind, prev = {}) {
-    const plan = KIND_PLAN[kind] || KIND_PLAN.claim;
+export function chooseFor(kind, prev = {}, kindPlan = KIND_PLAN) {
+    const plan = kindPlan?.[kind] || KIND_PLAN[kind] || KIND_PLAN.claim;
     // Only graphics something can draw are offered. A name that stops
     // resolving (a template renamed, a component removed) drops out of the
     // rotation instead of planning a beat nobody can build.
@@ -192,6 +192,7 @@ export function chooseFor(kind, prev = {}) {
 export function planStoryboard({ words, moments, cuts = [], duration, opts = {} } = {}) {
     const total = num(duration, 0);
     const cfg = { ...DEFAULTS, ...(opts || {}) };
+    const kindPlan = cfg.kindPlan || KIND_PLAN;
     const reasoning = [];
     if (!(total > 0)) return { beats: [], reasoning: ['There is no duration to plan over.'], density: 0, skipped: 0 };
 
@@ -239,7 +240,7 @@ export function planStoryboard({ words, moments, cuts = [], duration, opts = {} 
             continue;
         }
 
-        const { graphic, layout } = chooseFor(m.kind, prev);
+        const { graphic, layout } = chooseFor(m.kind, prev, kindPlan);
         const hold = holdFor(m.text, cfg);
         // A beat never runs past the end of the video, and never past the
         // start of the next one: overlapping graphics are the "elements arrive

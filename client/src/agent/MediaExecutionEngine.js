@@ -1922,8 +1922,9 @@ export class MediaExecutionEngine {
                 }
                 // Earlier finish replaced, not stacked.
                 const before = JSON.parse(JSON.stringify(st.tracks || []));
-                const polished = polishShort({ tracks: before.map(t => ({ ...t, clips: t.clips.filter(c => !isFinishLayer(c)) })), duration: total, aspectRatio: st.aspectRatio },
-                    profile, { words, events, plan, scenePlan, referenceStyleProfile });
+                const sourceTracks = before.map(t => ({ ...t, clips: t.clips.filter(c => !isFinishLayer(c)) }));
+                const polished = polishShort({ tracks: sourceTracks, duration: total, aspectRatio: st.aspectRatio },
+                    profile, { words, events, plan, scenePlan, referenceStyleProfile, assets: st.assets || [] });
                 st._saveHistory?.();
                 // Remove the previous finish layers, then write the changes clip by clip.
                 for (const t of (useTimelineStore.getState().tracks || [])) {
@@ -1931,7 +1932,11 @@ export class MediaExecutionEngine {
                         if (isFinishLayer(c)) useTimelineStore.getState().removeClip(t.id, c.id, { skipHistory: true });
                     }
                 }
-                const origById = new Map(before.flatMap(t => t.clips.map(c => [c.id, { trackId: t.id, clip: c }])));
+                // Old finish clips must not be considered source clips here:
+                // generated clips often keep the same deterministic IDs on a
+                // rerun, and matching them against the removed old layer would
+                // make the add loop silently skip their replacements.
+                const origById = new Map(sourceTracks.flatMap(t => t.clips.map(c => [c.id, { trackId: t.id, clip: c }])));
                 const FIELDS = ['animations', 'animation', 'transition', 'emphasis', 'x', 'y', 'fontFamily', 'fontSize', 'fontWeight', 'color', 'stroke', 'textShadow', 'captionStyle', 'textAlign', 'layerTarget', 'layerMask'];
                 const newTrackIds = {};
                 for (const t of polished.tracks) {
