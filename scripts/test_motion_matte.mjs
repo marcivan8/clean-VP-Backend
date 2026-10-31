@@ -403,7 +403,7 @@ await check('engine, compiler, planner, LLM enum and UI are wired', () => {
     for (const c of ['compose_motion', 'remove_background', 'zoom_speaker', 'track_speaker']) assert.ok(comp.includes(`['${c}'`), c);
     const ai = read('controllers/aiAgentController.js');
     assert.match(ai, /"compose_motion", "remove_background"/);
-    assert.match(read('index.js'), /app\.use\('\/api\/motion', aiLimiter, require\('\.\/server\/routes\/motionRoutes'\)\)/);
+    assert.match(read('index.js'), /app\.use\('\/api\/motion', \(req, res, next\) =>[\s\S]*routePath === '\/techniques'[\s\S]*motionLookupLimiter[\s\S]*motionAiLimiter[\s\S]*require\('\.\/server\/routes\/motionRoutes'\)/);
     assert.match(read('client/src/components/MotionPanel.jsx'), /<MotionDirectorPanel/);
     assert.match(read('client/src/components/MotionPanel.jsx'), /<BackgroundPanel/);
 });

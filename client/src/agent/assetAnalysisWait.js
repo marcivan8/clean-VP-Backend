@@ -4,7 +4,10 @@
  * finished summaries are read.
  */
 
-export const ASSET_ANALYSIS_POLL_MS = 1500;
+// Status is a cheap DB read, but several Brain triggers can wait at once.
+// Five seconds still notices uploads promptly without producing a request
+// burst during a slow vision job.
+export const ASSET_ANALYSIS_POLL_MS = 5000;
 export const INITIAL_ASSET_ANALYSIS_WAIT_MS = 30_000;
 export const LATE_ASSET_ANALYSIS_WAIT_MS = 120_000;
 
@@ -41,17 +44,23 @@ export async function waitForAssetAnalysisStatus(
 
     const deadline = now() + Math.max(0, timeoutMs);
     let pendingAssetIds = ids;
+    let nextPollMs = Math.max(250, intervalMs);
 
     while (true) {
         try {
             const statuses = await getStatuses(ids);
+            nextPollMs = Math.max(250, intervalMs);
             pendingAssetIds = ids.filter(id => {
                 const status = statuses instanceof Map ? statuses.get(id) : statuses?.[id];
                 return status === 'pending' || status === 'processing';
             });
-        } catch {
+        } catch (err) {
             if (!retryOnError) return { settled: false, pendingAssetIds, checkFailed: true };
             pendingAssetIds = ids;
+            const retryAfterMs = Number(err?.retryAfterMs);
+            nextPollMs = Number.isFinite(retryAfterMs) && retryAfterMs > 0
+                ? Math.min(30_000, retryAfterMs)
+                : Math.min(30_000, Math.max(intervalMs, nextPollMs * 2));
         }
 
         if (pendingAssetIds.length === 0) {
@@ -62,6 +71,6 @@ export async function waitForAssetAnalysisStatus(
         if (remainingMs <= 0) {
             return { settled: false, pendingAssetIds, checkFailed: false };
         }
-        await sleep(Math.min(intervalMs, remainingMs));
+        await sleep(Math.min(nextPollMs, remainingMs));
     }
 }

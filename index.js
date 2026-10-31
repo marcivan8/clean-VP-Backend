@@ -154,6 +154,24 @@ const aiLimiter = rateLimit({
   message: { error: 'AI rate limit reached. Please wait before sending more requests.' }
 });
 
+// Keep each AI surface in its own budget. These used to share aiLimiter, so
+// background brain polling could consume the same 15 requests as motion plans.
+const brainAiLimiter = rateLimit({
+  windowMs: 60_000, max: 15,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'AI rate limit reached. Please wait before sending more requests.' }
+});
+const motionAiLimiter = rateLimit({
+  windowMs: 60_000, max: 15,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'AI rate limit reached. Please wait before sending more requests.' }
+});
+const motionLookupLimiter = rateLimit({
+  windowMs: 60_000, max: 60,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Motion lookup rate limit reached. Please wait a moment.' }
+});
+
 // Heavy compute: 5 req/min (FFmpeg / headless Chrome)
 const renderLimiter = rateLimit({
   windowMs: 60_000, max: 5,
@@ -292,8 +310,24 @@ app.use('/api/audio', uploadLimiter, audioRoutes);          // audio processing
 app.use('/api/filler', uploadLimiter, audioRoutes);         // alias: /api/filler/detect → /api/audio/filler/detect
 app.use('/api/silence', require('./routes/silenceRoutes'));
 app.use('/api/ai', aiLimiter, require('./routes/aiRoutes')); // GPT-4o — expensive
-app.use('/api/brain', aiLimiter, require('./server/routes/brainRoutes')); // Editorial Brain
-app.use('/api/motion', aiLimiter, require('./server/routes/motionRoutes')); // R92: LLM-written motion (rules fallback)
+const brainRoutes = require('./server/routes/brainRoutes');
+app.use('/api/brain', (req, res, next) => {
+  // Read-only status/profile routes and lightweight feedback never call a
+  // model; they must not spend the budget needed by /analyze and /command.
+  const routePath = req.originalUrl.split('?')[0].replace(/^\/api\/brain(?=\/|$)/, '') || '/';
+  const cheap = req.method === 'GET'
+    || routePath === '/feedback'
+    || routePath === '/observe-command'
+    || (req.method === 'DELETE' && routePath === '/profile/reset');
+  return cheap ? next() : brainAiLimiter(req, res, next);
+}, brainRoutes);
+app.use('/api/motion', (req, res, next) => {
+  // Technique ranking is a bounded local knowledge-base lookup, not a model
+  // call. It has its own generous limit and cannot starve scene planning.
+  const routePath = req.originalUrl.split('?')[0].replace(/^\/api\/motion(?=\/|$)/, '') || '/';
+  if (routePath === '/techniques') return motionLookupLimiter(req, res, next);
+  return motionAiLimiter(req, res, next);
+}, require('./server/routes/motionRoutes')); // R92: LLM-written motion (rules fallback)
 app.use('/api/effects', require('./routes/effectsRoutes'));
 // NOTE: uploadLimiter is NOT applied router-wide here — it would also throttle
 // GET /api/proxy/gcs-media/*, the read-heavy route that streams video/audio/

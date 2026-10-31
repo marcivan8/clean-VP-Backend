@@ -199,6 +199,10 @@ console.log('\n=== proxyRoutes: a range-stream error always ends the response ==
     ok('the old log-and-hang handler is gone',
         !/Range stream error[\s\S]{0,120}if \(!res\.headersSent\) res\.status\(500\)\.end\(\);\s*\}\);/.test(src),
         true);
+    ok('cached waveform JSON buffers and retries transient GCS read failures',
+        /if \(ext === '\.json'\)[\s\S]*?const readJson = \(attempt = 1\)[\s\S]*?if \(attempt < 3\)[\s\S]*?readJson\(attempt \+ 1\)/.test(src), true);
+    ok('failed cached JSON reads return a retryable gateway error',
+        /JSON stream error[\s\S]{0,180}res\.status\(502\)\.end\(\)/.test(src), true);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

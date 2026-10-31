@@ -35,7 +35,12 @@ async function fetchAssetAnalysisStatuses(projectId, assetIds) {
     const timeout = setTimeout(() => controller.abort(), ASSET_ANALYSIS_STATUS_REQUEST_TIMEOUT_MS);
     try {
         const response = await authFetch(`/api/brain/analysis-status?${params}`, { signal: controller.signal });
-        if (!response.ok) throw new Error(`Asset analysis status failed (${response.status})`);
+        if (!response.ok) {
+            const error = new Error(`Asset analysis status failed (${response.status})`);
+            const retryAfterSeconds = Number(response.headers?.get?.('Retry-After'));
+            if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) error.retryAfterMs = retryAfterSeconds * 1000;
+            throw error;
+        }
         const data = await response.json();
         return Object.fromEntries((data.statuses || []).map(item => [item.assetId, item.status]));
     } finally {
@@ -316,9 +321,9 @@ export function useBrain() {
                 const waitResult = await waitForAssetAnalysisStatus(
                     visualIds,
                     ids => fetchAssetAnalysisStatuses(projectState.projectId, ids),
-                    { timeoutMs: INITIAL_ASSET_ANALYSIS_WAIT_MS, intervalMs: ASSET_ANALYSIS_POLL_MS },
+                    { timeoutMs: INITIAL_ASSET_ANALYSIS_WAIT_MS, intervalMs: ASSET_ANALYSIS_POLL_MS, retryOnError: true },
                 );
-                if (!waitResult.checkFailed) timedOutAssetIds = waitResult.pendingAssetIds;
+            timedOutAssetIds = waitResult.pendingAssetIds;
             }
 
             // Keep the editor and prompt usable while we're only waiting for

@@ -500,7 +500,48 @@ router.get('/gcs-media/*', mediaAccess.requireMediaAccess(req => req.params[0]),
             return;
         }
 
-        if (CACHEABLE_EXTS.has(ext)) {
+        if (ext === '.json') {
+            // Waveform peak files are small and already buffered for caching.
+            // A transient GCS read-stream reset used to produce an immediate
+            // 500 even after metadata had succeeded; retry the buffered read
+            // before returning an error so peak URLs survive brief GCS blips.
+            const readJson = (attempt = 1) => new Promise((resolve, reject) => {
+                const chunks = [];
+                const stream = file.createReadStream();
+                let clientClosed = false;
+                const onClose = () => {
+                    clientClosed = true;
+                    stream.destroy();
+                };
+                res.once('close', onClose);
+                stream.on('data', chunk => chunks.push(chunk));
+                stream.on('end', () => {
+                    res.removeListener('close', onClose);
+                    const buf = Buffer.concat(chunks);
+                    _cachePut(gcsPath, buf);
+                    if (!res.destroyed) {
+                        res.setHeader('Content-Length', buf.length);
+                        res.end(buf);
+                    }
+                    resolve();
+                });
+                stream.on('error', err => {
+                    res.removeListener('close', onClose);
+                    if (clientClosed || res.destroyed) return resolve();
+                    if (attempt < 3) {
+                        console.warn(`[proxy/gcs-media] JSON read attempt ${attempt}/3 failed for ${gcsPath}: ${err.message} — retrying in ${250 * attempt}ms`);
+                        return setTimeout(() => readJson(attempt + 1).then(resolve, reject), 250 * attempt);
+                    }
+                    reject(err);
+                });
+            });
+            try {
+                await readJson();
+            } catch (err) {
+                console.error('[proxy/gcs-media] JSON stream error', gcsPath, ':', err.message);
+                if (!res.destroyed && !res.writableEnded) res.status(502).end();
+            }
+        } else if (CACHEABLE_EXTS.has(ext)) {
             // Buffer the whole object so it can be cached for future seeks
             const chunks = [];
             const stream = file.createReadStream();
