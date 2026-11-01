@@ -223,12 +223,18 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     wrapperRef = createRef<Node>();
                     mediaRef = createRef<Video>();
                     const kf = clip.keyframes || {};
-                    // R64: Motion-tab camera presets (push/pull/punch-zoom/
-                    // whip/shake) write clip.animations for ANY clip,
-                    // including a plain base-track video clip. Only build a
-                    // layer when there's actually something to resolve —
-                    // every other clip keeps the exact evaluateKF path below.
-                    const motionLayer = (Array.isArray(clip.animations) && clip.animations.length > 0)
+                    // Motion-tab camera presets write clip.animations for
+                    // base clips. Overlay clips also use the adapter even
+                    // without animations so their percentage-centre geometry
+                    // and quarter-frame base scale match the DOM preview.
+                    const isOverlay = track.type === 'overlay';
+                    // Overlay tracks use the same geometry contract as
+                    // GraphicOverlay/Compositor: x/y are percentage centres
+                    // and scale 1 means 25% of the canvas width. The base
+                    // video path below uses pixel top-left coordinates and a
+                    // full-frame fit, which made overlays jump to full-screen
+                    // as soon as Revideo playback replaced the DOM preview.
+                    const motionLayer = (isOverlay || (Array.isArray(clip.animations) && clip.animations.length > 0))
                         ? clipToMotionLayer(clip, track)
                         : null;
 
@@ -252,14 +258,29 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     const vcCx = hasVc ? ((vc.cropX ?? 0) + vc.cropW / 2) - 0.5 : 0;
                     const vcCy = hasVc ? ((vc.cropY ?? 0) + (vc.cropH ?? 1) / 2) - 0.5 : 0;
 
-                    const totalScaleX = () => videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : null, clip.scaleX ?? clip.scale ?? 1) * vcZoom;
-                    const totalScaleY = () => videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : null, clip.scaleY ?? clip.scale ?? 1) * vcZoom;
+                    const overlayScaleBase = canvasWidth * 0.25 / Math.max(1, fitted.w);
+                    const totalScaleX = () => isOverlay
+                        ? overlayScaleBase * motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale
+                        : videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : null, clip.scaleX ?? clip.scale ?? 1) * vcZoom;
+                    const totalScaleY = () => isOverlay
+                        ? overlayScaleBase * motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale
+                        : videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : null, clip.scaleY ?? clip.scale ?? 1) * vcZoom;
 
                     const posX = () => {
+                        if (isOverlay) {
+                            const motion = motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight);
+                            const centreX = ((Number.isFinite(clip.x) ? clip.x : 50) / 100) * canvasWidth + motion.dx;
+                            return centreX - fitted.w * totalScaleX() / 2;
+                        }
                         const baseX = motionLayer ? (clip.x || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dx : evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0);
                         return baseX - vcCx * fitted.w * totalScaleX();
                     };
                     const posY = () => {
+                        if (isOverlay) {
+                            const motion = motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight);
+                            const centreY = ((Number.isFinite(clip.y) ? clip.y : 50) / 100) * canvasHeight + motion.dy;
+                            return centreY - fitted.h * totalScaleY() / 2;
+                        }
                         const baseY = motionLayer
                             ? (clip.y || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dy
                                 + (0.5 - RHYTHM_ANCHOR_Y) * canvasHeight * (videoCameraScale(kf, clipLocalTime(playback.time, clip.start), motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale, 1) - 1)
@@ -330,7 +351,8 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     mediaRef = createRef<Img>();
                     const kf = clip.keyframes || {};
                     // R64: see the identical comment in the video branch above.
-                    const motionLayer = (Array.isArray(clip.animations) && clip.animations.length > 0)
+                    const isOverlay = track.type === 'overlay';
+                    const motionLayer = (isOverlay || (Array.isArray(clip.animations) && clip.animations.length > 0))
                         ? clipToMotionLayer(clip, track)
                         : null;
 
@@ -338,6 +360,7 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                     const srcW = clip.metadata?.resolution?.w || clip.sourceWidth || canvasWidth;
                     const srcH = clip.metadata?.resolution?.h || clip.sourceHeight || canvasHeight;
                     const fitted = fitSize(srcW, srcH);
+                    const overlayScaleBase = canvasWidth * 0.25 / Math.max(1, fitted.w);
 
                     const g = clip.grading;
 
@@ -348,10 +371,28 @@ const timelineScene = makeScene2D('timeline', function* (view) {
                             src={resolvedUrl}
                             width={fitted.w}
                             height={fitted.h}
-                            x={() => motionLayer ? (clip.x || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dx : evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0)}
-                            y={() => motionLayer ? (clip.y || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dy : evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0)}
-                            scaleX={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
-                            scaleY={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
+                            x={() => {
+                                if (isOverlay) {
+                                    const motion = motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight);
+                                    const centreX = ((Number.isFinite(clip.x) ? clip.x : 50) / 100) * canvasWidth + motion.dx;
+                                    return centreX - fitted.w * overlayScaleBase * motion.scale / 2;
+                                }
+                                return motionLayer ? (clip.x || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dx : evaluateKF(kf.x, clipLocalTime(playback.time, clip.start), clip.x || 0);
+                            }}
+                            y={() => {
+                                if (isOverlay) {
+                                    const motion = motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight);
+                                    const centreY = ((Number.isFinite(clip.y) ? clip.y : 50) / 100) * canvasHeight + motion.dy;
+                                    return centreY - fitted.h * overlayScaleBase * motion.scale / 2;
+                                }
+                                return motionLayer ? (clip.y || 0) + motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).dy : evaluateKF(kf.y, clipLocalTime(playback.time, clip.start), clip.y || 0);
+                            }}
+                            scaleX={() => isOverlay
+                                ? overlayScaleBase * motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale
+                                : motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : evaluateKF(kf.scaleX ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleX ?? clip.scale ?? 1)}
+                            scaleY={() => isOverlay
+                                ? overlayScaleBase * motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale
+                                : motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).scale : evaluateKF(kf.scaleY ?? kf.scale, clipLocalTime(playback.time, clip.start), clip.scaleY ?? clip.scale ?? 1)}
                             rotation={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).rotation : evaluateKF(kf.rotation, clipLocalTime(playback.time, clip.start), clip.rotation || 0)}
                             opacity={() => motionLayer ? motionOffsets(motionLayer, playback.time, canvasWidth, canvasHeight).opacity : evaluateKF(kf.opacity, clipLocalTime(playback.time, clip.start), clip.opacity ?? 1)}
                             filters={g ? [
