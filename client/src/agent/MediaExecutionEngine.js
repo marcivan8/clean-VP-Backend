@@ -805,7 +805,7 @@ export class MediaExecutionEngine {
         // Nth "whoosh" doesn't repeat the (N-1)th whoosh's exact sound.
         const kindOccurrence = {};
         for (const cue of cues) {
-            const candidates = await this._fetchSfxCandidates(SFX_QUERIES[cue.kind] || cue.kind, cache);
+            const candidates = await this._fetchSfxCandidates(cue.query || SFX_QUERIES[cue.kind] || cue.kind, cache);
             const occ = kindOccurrence[cue.kind] || 0;
             kindOccurrence[cue.kind] = occ + 1;
             const asset = candidates.length ? candidates[occ % candidates.length] : null;
@@ -1975,7 +1975,7 @@ export class MediaExecutionEngine {
                             events: fallbackEvents,
                             autoLayout: true,
                             ...(preferredAssetIds.length ? { preferredAssetIds } : {}),
-                            maxPlacements: Math.min(2, scenePlan.brollMoments.length),
+                            maxPlacements: Math.min(4, scenePlan.brollMoments.length),
                         }, job?.signal ?? null);
                         const n = Array.isArray(broll?.placements) ? broll.placements.length : 0;
                         if (n) brollNote = `, ${n} contextual b-roll cutaway(s)`;

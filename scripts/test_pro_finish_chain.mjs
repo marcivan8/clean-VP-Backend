@@ -367,8 +367,8 @@ await check('Pro Finish uses fallback B-roll moments and caps automatic cutaways
     const tools = nodeRequire('fs').readFileSync(path.join(ROOT, 'client/src/agent/VideoEditorTools.js'), 'utf8');
     assert.match(engine, /scenePlan\?\.source === 'local-fallback'[\s\S]{0,900}placeContextualBroll/,
         'Pro Finish never sends fallback scenes through contextual B-roll matching');
-    assert.match(engine, /maxPlacements: Math\.min\(2, scenePlan\.brollMoments\.length\)/,
-        'fallback b-roll has no conservative placement cap');
+    assert.match(engine, /maxPlacements: Math\.min\(4, scenePlan\.brollMoments\.length\)/,
+        'fallback b-roll should use the expanded four-cutaway cap');
     assert.match(finisher, /\/api\/brain\/broll-profiles\?projectId=/,
         'the fallback never reads upload-time visual analysis');
     assert.match(finisher, /VISUAL_CONTEXT_TIMEOUT_MS = 3000/,

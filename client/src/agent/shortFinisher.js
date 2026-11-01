@@ -120,7 +120,7 @@ export async function addSfxTrack(tracks, cues, level, fetchAsset = fetchSfxAsse
     if (level === 'none' || !cues.length) return 0;
     const clips = [];
     for (const cue of cues) {
-        const asset = await fetchAsset(SFX_QUERIES[cue.kind] || cue.kind);
+        const asset = await fetchAsset(cue.query || SFX_QUERIES[cue.kind] || cue.kind);
         const url = sfxPlayableUrl(asset);
         if (!url) continue;
         clips.push({

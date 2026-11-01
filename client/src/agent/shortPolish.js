@@ -137,6 +137,13 @@ export function fallbackShortScenePlan(words, {
     const visualLanguage = sourceVisualContext
         .flatMap(item => [item?.sceneType, item?.locationType, item?.emotionalTone, item?.contentDescription].filter(Boolean))
         .join(' ').toLowerCase();
+    const visualColors = [...new Set(sourceVisualContext.flatMap(item => {
+        const nested = item?.visualStyleProfile || item?.styleProfile || {};
+        const raw = item?.colorPalette || item?.palette || item?.dominantColors || item?.colors
+            || nested.colorPalette || nested.palette || [];
+        return (Array.isArray(raw) ? raw : []).map(value => typeof value === 'string' ? value : value?.hex || value?.color)
+            .filter(value => /^#[\da-f]{6}$/i.test(String(value || '').trim()));
+    }))].slice(0, 3);
     const inferredTone = /\b(step|steps|lesson|lessons|why|how|explained|tutorial|first|second|étape|étapes|leçon|leçons|pourquoi|comment|expliqué|tutoriel|premier|première|deuxième)\b/.test(transcript)
         ? 'editorial'
         : /\b(i|me|my|mine|story|felt|remember|experience|je|moi|mon|ma|histoire|ressenti|souviens|expérience)\b/.test(transcript)
@@ -147,9 +154,19 @@ export function fallbackShortScenePlan(words, {
                         ? 'warm'
                         : /\b(premium|luxury|studio|cinematic|luxe|studio|cinématique)\b/.test(visualLanguage)
                             ? 'premium' : 'viral';
-    const styleTones = { vlog: 'warm', talking_head: 'editorial', interview: 'warm', podcast: 'warm', reel: 'viral' };
+    const styleTones = { vlog: 'warm', talking_head: 'editorial', interview: 'warm', podcast: 'warm' };
     const platformTones = { tiktok: 'viral', reels: 'premium', shorts: 'technology' };
-    const tone = referencePlan?.visualTone || styleTones[editingStyle] || (inferredTone === 'viral' ? (platformTones[platform] || inferredTone) : inferredTone);
+    const tone = referencePlan?.visualTone || styleTones[editingStyle]
+        || (inferredTone === 'viral' ? (platformTones[platform] || inferredTone) : inferredTone);
+    const topicAccent = /\b(food|recipe|cook|cooking|coffee|restaurant|meal|recette|cuisine|cuisiner|restaurant)\b/i.test(transcript) ? '#E27B52'
+        : /\b(fitness|workout|training|exercise|muscle|sport|entraînement|exercice|sportif)\b/i.test(transcript) ? '#5B9B72'
+            : /\b(money|business|revenue|sales|finance|investment|argent|entreprise|revenu|vente|finance)\b/i.test(transcript) ? '#438B70'
+                : /\b(travel|trip|city|country|beach|voyage|ville|pays|plage)\b/i.test(transcript) ? '#5F8FC7'
+                    : /\b(beauty|fashion|style|makeup|skincare|mode|maquillage|beauté)\b/i.test(transcript) ? '#A36F9C'
+                        : tone === 'technology' ? '#4F7FE8'
+                            : tone === 'editorial' ? '#536B8E'
+                                : tone === 'warm' ? '#D88A5B'
+                                    : tone === 'premium' ? '#A9895B' : null;
     const calmStyle = editingStyle === 'podcast' || editingStyle === 'interview';
     const restrainedMotion = calmStyle || editingStyle === 'talking_head'
         || referencePlan?.motionEnergy === 'low' || ['warm', 'editorial', 'cinematic'].includes(referencePlan?.visualTone);
@@ -359,19 +376,40 @@ export function fallbackShortScenePlan(words, {
     }
     // Keep these cues semantic and sparse. The caller resolves them to actual
     // licensed library sounds and applies the editing style's volume limits.
+    const soundForMotion = motion => ({
+        'slam-in': 'cinematic low impact', 'drop-in': 'soft thump', 'whip-in': 'airy whip transition',
+        'blur-in': 'soft airy shimmer', 'rise-in': 'gentle rising sweep', 'pop-in': 'subtle tactile pop',
+        'word-reveal': 'light editorial tick', 'slide-in': 'soft directional swish',
+    }[motion] || 'subtle editorial transition');
     const sfxCues = [];
-    if (!calmStyle && beats.length && Number(duration) > 1) sfxCues.push({ t: 0.08, kind: (introTechnique?.motion || fallbackMotion('intro')).enter === 'slam-in' ? 'impact' : 'whoosh', sourceId: 'fallback-intro' });
+    if (!calmStyle && beats.length && Number(duration) > 1) {
+        const motion = (introTechnique?.motion || fallbackMotion('intro')).enter;
+        sfxCues.push({ t: 0.08, kind: motion === 'slam-in' ? 'impact' : 'whoosh', query: soundForMotion(motion), sourceId: `scene-intro-${introTechnique?.name || 'editorial'}` });
+    }
     for (const moment of timedMoments) {
         if (calmStyle) break;
         const kind = moment.kind === 'stat' ? 'pop' : moment.kind === 'quote' ? 'whoosh' : 'pop';
-        if (!sfxCues.some(cue => Math.abs(cue.t - moment.start) < 0.65)) sfxCues.push({ t: Math.max(0, moment.start - 0.03), kind, sourceId: `fallback-${moment.kind}` });
+        if (!sfxCues.some(cue => Math.abs(cue.t - moment.start) < 0.65)) {
+            const motion = moment.motion?.enter;
+            const toneCue = tone === 'warm' ? 'warm' : tone === 'technology' ? 'digital' : tone === 'premium' ? 'cinematic' : 'clean';
+            const query = moment.kind === 'stat' ? `${toneCue} subtle data reveal accent`
+                : moment.kind === 'quote' ? `${toneCue} soft texture transition`
+                    : `${soundForMotion(motion)} ${toneCue} ${moment.kind === 'point' ? 'editorial emphasis' : 'subtle accent'}`;
+            sfxCues.push({ t: Math.max(0, moment.start - 0.03), kind, query, sourceId: `scene-${moment.kind}-${moment.technique || 'editorial'}` });
+        }
     }
     if (!calmStyle && close && Number(duration) >= 8 && !sfxCues.some(cue => Math.abs(cue.t - Number(close.start)) < 0.65)) {
-        sfxCues.push({ t: Math.max(0, Number(duration) - 1.8), kind: 'whoosh', sourceId: 'fallback-cta' });
+        sfxCues.push({ t: Math.max(0, Number(duration) - 1.8), kind: 'whoosh', query: 'gentle resolve soft transition', sourceId: 'scene-cta' });
     }
-    const brollMoments = timedMoments
+    const storyboardMoments = findMoments(timedWords, { minGap: 3.2, max: 6 })
+        .filter(moment => moment.t > 2 && moment.t < Number(duration) - 1.5)
+        .map(moment => ({ kind: moment.kind, text: cleanText(moment.text), start: moment.t, end: moment.end }));
+    const brollSourceMoments = [...timedMoments, ...storyboardMoments]
+        .sort((a, b) => (b.sourceEvent ? 1 : 0) - (a.sourceEvent ? 1 : 0) || a.start - b.start)
+        .filter((moment, index, all) => all.findIndex(other => Math.abs(other.start - moment.start) < 2.2) === index);
+    const brollMoments = brollSourceMoments
         .filter(moment => moment.kind !== 'quote' && wordsOf(moment.text).length >= 3)
-        .slice(0, 2)
+        .slice(0, 4)
         .map(moment => {
             const queryTokens = new Set(tokensOf(moment.text));
             const matches = visuals.filter(item => item.isBroll && !item.hasMainSpeaker).map(item => {
@@ -396,6 +434,7 @@ export function fallbackShortScenePlan(words, {
             transitionPacing: referencePlan.transitionPacing,
         } } : {}),
         ...(visualSummary.length ? { visualSummary } : {}),
+        ...(visualColors.length ? { palette: visualColors } : topicAccent ? { palette: [topicAccent] } : {}),
         source: 'local-fallback',
     };
 }
@@ -758,15 +797,27 @@ function addAutoStoryboard(tracks, { words, events, duration, aspectRatio, hookS
 export function polishShort(built, profile, opts = {}) {
     const baseLook = POLISH_LOOK[profile?.id] || POLISH_LOOK.tiktok;
     const referenceStyle = buildStyleReferencePlan(opts.referenceStyleProfile);
-    const look = referenceStyle ? {
+    const sourcePalette = Array.isArray(opts.scenePlan?.palette) ? opts.scenePlan.palette : [];
+    const sourceAccent = sourcePalette.find(color => /^#[\da-f]{6}$/i.test(String(color || '')));
+    const look = {
         ...baseLook,
+        ...(opts.scenePlan?.tone === 'editorial' ? { recipe: 'explainer' }
+            : opts.scenePlan?.tone === 'warm' ? { recipe: 'travel' }
+                : opts.scenePlan?.tone === 'technology' ? { recipe: 'punchy' } : {}),
+        ...(sourceAccent ? { accent: sourceAccent } : {}),
+        ...(opts.scenePlan?.tone === 'warm' ? { accent: sourceAccent || '#D88A5B' }
+            : opts.scenePlan?.tone === 'technology' ? { accent: sourceAccent || '#4F7FE8' }
+                : opts.scenePlan?.tone === 'editorial' ? { accent: sourceAccent || '#536B8E' }
+                    : opts.scenePlan?.tone === 'premium' ? { accent: sourceAccent || '#A9895B' } : {}),
+        ...(referenceStyle ? {
         ...(referenceStyle.recipe ? { recipe: referenceStyle.recipe } : {}),
         ...(referenceStyle.titleComponent ? { titleComponent: referenceStyle.titleComponent } : {}),
         ...(referenceStyle.titlePreset ? { titlePreset: referenceStyle.titlePreset } : {}),
         ...(referenceStyle.accent ? { accent: referenceStyle.accent } : {}),
         ...(referenceStyle.textColor ? { titleColor: referenceStyle.textColor } : {}),
         cameraEnergy: Math.max(0.2, Math.min(0.9, baseLook.cameraEnergy * referenceStyle.motionScale)),
-    } : baseLook;
+        } : {}),
+    };
     const want = { title: true, captions: true, camera: true, numbers: true, cuts: true, popOut: !!opts.popOut, ...(opts.layers || {}) };
     const tracks = (built?.tracks || []).map(t => ({ ...t, clips: (t.clips || []).map(c => ({ ...c })) }));
     const duration = Math.max(0.5, Number(built?.duration) || 0);
@@ -993,6 +1044,13 @@ export function polishShort(built, profile, opts = {}) {
                 },
             },
         } : baseFields;
+        const paletteAccent = referenceStyle?.accent || sourceAccent || look.accent;
+        if (paletteAccent && fields.captionStyle?.wordHighlight) {
+            fields.captionStyle = {
+                ...fields.captionStyle,
+                wordHighlight: { ...fields.captionStyle.wordHighlight, color: paletteAccent },
+            };
+        }
         const captionClips = [];
         for (const t of tracks) {
             if (t.type !== 'text' || t.id === 'track-short-title') continue;
@@ -1103,8 +1161,13 @@ export function polishShort(built, profile, opts = {}) {
     // Feed a full transcript storyboard through the same composed template
     // catalog used by the manual storyboard command. It replaces the former
     // one-off stat/phrase callouts when it has usable beats.
+    const storyboardStyle = referenceStyle || {
+        ...(opts.scenePlan?.tone ? { visualTone: opts.scenePlan.tone } : {}),
+        ...(sourceAccent ? { accent: sourceAccent } : {}),
+        graphicsDensity: opts.scenePlan?.tone === 'editorial' || opts.scenePlan?.tone === 'warm' ? 'sparse' : 'balanced',
+    };
     const storyboardGraphics = want.title ? addAutoStoryboard(tracks, {
-        words, events: opts.events, duration, aspectRatio: built?.aspectRatio || '9:16', hookSpan, profile, style: referenceStyle,
+        words, events: opts.events, duration, aspectRatio: built?.aspectRatio || '9:16', hookSpan, profile, style: storyboardStyle,
         assets: opts.assets,
     }) : 0;
     if (storyboardGraphics) applied.push(`storyboard scenes (${storyboardGraphics})`);

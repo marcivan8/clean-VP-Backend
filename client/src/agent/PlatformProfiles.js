@@ -60,7 +60,10 @@ export const PLATFORM_PROFILES = Object.freeze({
         avgShotSeconds: [1.5, 3],
         safeZone: { top: 0.14, bottom: 0.32, left: 0.06, right: 0.14 },
         captionY: 60,
-        captionPack: 'mrbeast',
+        // A clean editorial caption base. MrBeast's yellow word highlight
+        // made every automatically finished Reel look like the same preset,
+        // regardless of the source footage or subject.
+        captionPack: 'apple',
         zoomStyle: 'subtle',
         sfx: 'full',
         pacing: { minSilence: 0.3, padding: 0.08 },
