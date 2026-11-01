@@ -978,6 +978,9 @@ const ReasoningPanel = ({ className, onImportMedia }) => {
             timestamp: new Date().toLocaleTimeString(),
             type: 'info',
             message: `You: ${typedCommand || (referenceDocuments.length ? t('assistant.documentDefaultPrompt') : t('assistant.mediaDefaultPrompt'))}`
+                + ([...referenceDocuments, ...referenceMedia].length
+                    ? `\n${t('assistant.referencesLabel', { defaultValue: 'References' })}: ${[...referenceDocuments, ...referenceMedia].map(item => item.name).join(', ')}`
+                    : '')
         });
 
         // If the agent is waiting for clarification, answer it directly.

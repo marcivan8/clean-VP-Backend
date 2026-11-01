@@ -971,7 +971,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 // FIX: Set aspect ratio BEFORE building the asset list so that
                 // the Revideo player key (which includes aspectRatio) is correct
                 // when the player first mounts for this content.
-                if (isVideo && !ratioSet && metadata.width && metadata.height) {
+                if (isVideo && !e.referenceMaterial && !ratioSet && metadata.width && metadata.height) {
                     const detected = detectAspectRatio(metadata.width, metadata.height);
                     if (detected) {
                         useTimelineStore.getState().setAspectRatio(detected);
@@ -1498,7 +1498,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
 
             useAIStore.getState().setOpeningFile(null);
             addAssets(processedAssets);
-            triggerHint('first_upload');
+            if (!e.referenceMaterial) triggerHint('first_upload');
 
             if (processedAssets.length === 1 && !e.deferTimelinePlacement) {
                 // Before auto-placing, evict ghost clips (stale segments from a
@@ -2439,7 +2439,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             {activeTab === 'media' && (
                                 <section className="p-4 border-b" style={{ borderColor: "var(--line-soft)" }}>
                                     <div className="flex items-center justify-between mb-4">
-                                        <div className="studio-mono-label" style={{ color: 'var(--fg-2)' }}>{t('ideLayout.bin', { count: assets.length })}</div>
+                                        <div className="studio-mono-label" style={{ color: 'var(--fg-2)' }}>{t('ideLayout.bin', { count: assets.filter(asset => !asset.assistantReference).length })}</div>
                                         <div className="flex items-center gap-1.5">
                                             {/* Import button — input overlaid directly so Android taps hit the input itself */}
                                             <div className="relative text-[10px] bg-primary/10 hover:bg-primary/20 text-primary px-2 py-1 rounded transition-colors flex items-center gap-1" style={{ fontFamily: "var(--f-mono)" }}>
@@ -2456,7 +2456,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                         </div>
                                     </div>
                                     <div className="grid grid-cols-2 gap-2">
-                                        {assets.length === 0 && (
+                                        {assets.filter(asset => !asset.assistantReference).length === 0 && (
                                             /* Dropzone — same overlay trick: invisible input fills the entire card */
                                             <div className="relative aspect-video border border-dashed border-border rounded-md flex flex-col items-center justify-center text-muted-foreground hover:bg-secondary/30 transition-colors p-4 text-center col-span-2">
                                                 <Upload className="w-6 h-6 mb-2 opacity-50" />
@@ -2472,7 +2472,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                                 />
                                             </div>
                                         )}
-                                        {assets.map(asset => (
+                                        {assets.filter(asset => !asset.assistantReference).map(asset => (
                                             <DraggableAsset key={asset.id} asset={asset} />
                                         ))}
                                     </div>

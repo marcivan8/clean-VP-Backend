@@ -595,7 +595,9 @@ const useTimelineStore = create(
             // ==============================================================
             addAssets: (newAssets) => set((state) => ({
                 assets: [...state.assets, ...newAssets],
-                uploadedFile: newAssets.find(a => a.type === 'video')?.file || state.uploadedFile
+                // A reference video is never the active source video for the
+                // project. Preserve the real source when a chat reference arrives.
+                uploadedFile: newAssets.find(a => a.type === 'video' && a.assistantReference !== true)?.file || state.uploadedFile
             })),
             // ── FIX: Cascade-remove clips that reference the deleted asset ────────
             // Previously only removed the asset entry; clips remained on the timeline
@@ -630,6 +632,9 @@ const useTimelineStore = create(
             
             // Add asset to timeline (used primarily by mobile tap-to-add interface)
             addAssetToTimeline: (asset) => {
+                // Assistant reference assets are context for the edit only. Keep
+                // them in project state for style analysis, but never create a clip.
+                if (!asset || asset.assistantReference === true) return false;
                 const state = get();
                 const tracks = timelineManager.toLegacyTracks();
                 
@@ -1040,6 +1045,12 @@ const useTimelineStore = create(
             },
 
             addClip: (trackId, clip, options = {}) => {
+                // Central guard covers direct UI actions and AI execution paths.
+                // References may inform an edit, but can never become timeline media.
+                if (clip?.assetId && get().assets.some(asset => asset.id === clip.assetId && asset.assistantReference === true)) {
+                    console.warn('[Timeline] Rejected placement of assistant reference asset:', clip.assetId);
+                    return false;
+                }
                 if (!options.skipHistory) get()._saveHistory();
 
                 const clipId = clip.id || `clip-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;

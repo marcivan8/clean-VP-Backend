@@ -3,10 +3,12 @@
  *
  * Analysis segments are expressed in source-media seconds. Clip start/duration
  * are timeline seconds, while offset and segment ranges are source seconds.
- * Keep those clocks aligned and fill speech gaps with a wide shot so applying
- * multicam never trims or time-compresses the underlying footage.
+ * Keep those clocks aligned, hold the current angle through brief pauses, and
+ * use a wide shot for longer gaps so applying multicam never trims or
+ * time-compresses the underlying footage.
  */
 const EPS = 1e-4;
+const HOLD_ANGLE_GAP = 1.25;
 
 const wideCamera = () => ({
     angle: 'wide', scale: 1, x: 0, y: 0,
@@ -41,11 +43,19 @@ export function splitClipAtSpeakerSegments(clip, segments) {
         const start = Math.max(sourceStart, cursor, Number(segment.start));
         const end = Math.min(sourceEnd, Number(segment.end));
         if (end <= start + EPS) continue;
-        if (start > cursor + EPS) spans.push({ start: cursor, end: start, segment: null });
+        if (start > cursor + EPS) {
+            const previous = spans[spans.length - 1]?.segment;
+            const gapSegment = start - cursor <= HOLD_ANGLE_GAP ? (previous || segment) : null;
+            spans.push({ start: cursor, end: start, segment: gapSegment });
+        }
         spans.push({ start, end, segment });
         cursor = end;
     }
-    if (cursor < sourceEnd - EPS) spans.push({ start: cursor, end: sourceEnd, segment: null });
+    if (cursor < sourceEnd - EPS) {
+        const previous = spans[spans.length - 1]?.segment;
+        const gapSegment = sourceEnd - cursor <= HOLD_ANGLE_GAP ? previous : null;
+        spans.push({ start: cursor, end: sourceEnd, segment: gapSegment });
+    }
     if (!spans.length) return [];
 
     const isWholeClip = spans.length === 1

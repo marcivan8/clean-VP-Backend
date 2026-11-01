@@ -11,6 +11,7 @@ export function getAssetDropTime({ clientX, laneLeft, zoomLevel, currentTime = 0
 
 /** Place an imported asset and create a suitable track if the timeline is empty. */
 export function addAssetAtTimelinePosition(state, asset, requestedTrackId, start) {
+    if (!asset || asset.assistantReference === true) return null;
     const trackType = asset.type === 'audio' ? 'audio' : 'video';
     let track = requestedTrackId
         ? state.tracks.find(item => item.id === requestedTrackId)

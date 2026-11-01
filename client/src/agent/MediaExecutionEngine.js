@@ -3289,7 +3289,9 @@ export class MediaExecutionEngine {
                     // what makes `apply_angle` an instant, re-runnable step instead of
                     // repeating diarization + Vision every time (R23).
                     const cachedScene = vmStore.sceneAnalysisByAsset?.[assetId];
-                    if (cachedScene?.segments?.length && !args.forceReanalyze) {
+                    if (cachedScene?.segments?.length
+                        && cachedScene.plannerVersion >= 2
+                        && !args.forceReanalyze) {
                         vmAnalysisByAsset[assetId] = cachedScene;
                         console.log(`[virtual_multicam] "${assetName}": reusing cached scene analysis (${cachedScene.segments.length} segments)`);
                         continue;
