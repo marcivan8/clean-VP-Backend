@@ -37,6 +37,12 @@ export const TEMPLATE_KINDS = ['counter', 'price-pop', 'logo-card', 'code-window
     'lower-third-minimal', 'location-badge', 'retention-progress-bar', 'quote-card',
     // Expanded Motion Catalog (Editorial, Social Proof, Comparison, KPI)
     'comparison-card', 'social-notification', 'comment-bubble', 'kpi-stat-callout', 'newspaper-headline', 'search-bar',
+    'glass-notification',
+    'framed-headline',
+    'phrase-chips',
+    'editorial-title',
+    'halftone-title',
+    'kinetic-word-cards',
     // R95 PHASE 2: a sized, gradient-filled backdrop for a block of text
     'panel',
     // R107: a slot that cycles through words in a reserved box
@@ -59,7 +65,7 @@ export const TEMPLATE_KINDS = ['counter', 'price-pop', 'logo-card', 'code-window
     'logo-reveal', 'end-card', 'cta-banner', 'episode-badge', 'sponsor-card',
     'comparison-matrix', 'hierarchy', 'cycle-diagram', 'concept-map', 'annotated-shot',
     'reply-thread', 'dm-bubble',
-    'waveform', 'audio-bars',
+    'waveform', 'audio-bars', 'editing-timeline',
     // R115: the icon set reaching the catalogue (9), and the advanced
     // effects worth having (13).
     'icon', 'icon-label', 'icon-row',
@@ -138,7 +144,7 @@ export const TEMPLATE_FONTS = Object.freeze({
 export const TEMPLATE_DEFAULTS = {
     'counter':     { label: 'DAY', value: 14, total: 30, from: null, accent: '#FFE500' },
     'price-pop':   { text: '15-20€', color: '#FFE500', sub: '' },
-    'logo-card':   { label: 'Your brand', sub: '', imageUrl: null, accent: '#00E5FF' },
+    'logo-card':   { label: 'Your brand', sub: '', imageUrl: null, accent: '#00E5FF', style: 'dark' },
     'code-window': { title: 'index.js', code: "const views = await post('reel');\nif (views > 1e6) celebrate();", cps: 28 },
     'highlight-box':  { color: '#FFE500', thickness: 10, fill: false },
     'underline':      { color: '#FFE500', thickness: 18 },
@@ -162,10 +168,16 @@ export const TEMPLATE_DEFAULTS = {
     // Expanded Motion Catalog
     'comparison-card':     { beforeLabel: 'BEFORE', beforeVal: '14 Hours', afterLabel: 'AFTER', afterVal: '35 Mins', color: '#00E5FF', accent: '#10B981' },
     'social-notification': { title: 'NEW SUBSCRIBER', subtitle: '@alex started following you', color: '#FF3B5C', accent: '#FFFFFF' },
+    'glass-notification': { name: 'Creator Studio', message: 'Your next edit is ready', time: 'now', imageUrl: '', accent: '#FFFFFF' },
+    'framed-headline': { headline: 'CREATE|SOMETHING GREAT', highlight: 'GREAT', support: 'Made for the way you create', accent: '#F3B743', color: '#FFFFFF', sparkles: 1 },
+    'phrase-chips': { phrases: 'proof,promise,plan', support: 'The strongest videos bring all three together.', accent: '#E34B40', color: '#111111', cycle: 1 },
+    'editorial-title': { kicker: 'A BETTER WAY TO CREATE', headline: 'Make|something|remarkable.', emphasis: 'remarkable.', support: 'Your idea, shaped into a finished video.', accent: '#3568D4', color: '#111111', mark: 'underline' },
+    'halftone-title': { headline: 'LOUD|IDEAS', color: '#E6322B', patternColor: '#FFF4E7', accent: '#FF3B32', frame: 1 },
+    'kinetic-word-cards': { words: 'THE,RECAP,IS,NOT,OVER', accent: '#94151D', color: '#FFFFFF' },
     'comment-bubble':      { user: '@marcus_dev', text: 'How do you structure this without ads?', color: '#38BDF8' },
     'kpi-stat-callout':     { stat: '+184%', label: 'ORGANIC RETENTION RATE', color: '#10B981', accent: '#38BDF8' },
     'newspaper-headline':  { publication: 'THE TECH DISPATCH', headline: 'AI OVERHAULS CREATOR PRODUCTION', highlight: 'OVERHAULS', date: 'OCTOBER 2026' },
-    'search-bar':          { query: 'how to edit viral videos', placeholder: 'Search Google...', color: '#00E5FF' },
+    'search-bar':          { query: 'how to edit viral videos', placeholder: 'Search Google...', color: '#00E5FF', color2: '#F16CA5', style: 'dark', glow: 0 },
     // R95 PHASE 2 - `panel`: the backdrop a block of text sits on, sized by
     // the layout (`w`/`h` in reference px) rather than guessed. Two colours
     // make a real gradient; `opacity` keeps the footage readable through it.
@@ -173,12 +185,12 @@ export const TEMPLATE_DEFAULTS = {
     // R107 PHASE 2 - `word-cycle`: one line whose middle word changes. The
     // slot is sized from the WIDEST word in `words`, so the prefix and the
     // suffix never move. `dwell` of 0 means "share the duration evenly".
-    'word-cycle': { prefix: 'Made for', words: 'Reels,Shorts,TikTok,Ads', suffix: '', dwell: 0, fontSize: 86, color: '#FFFFFF', accent: '#00E5FF' },
+    'word-cycle': { prefix: 'Made for', words: 'Reels,Shorts,TikTok,Ads', suffix: '', dwell: 0, fontSize: 86, color: '#FFFFFF', accent: '#00E5FF', color2: '#E04BAA', gradient: 0, glow: 0, glowStrength: 22 },
     // ── R112 ──────────────────────────────────────────────────────────────
     // `steps` and `items` are comma lists, like `bar-chart`'s `values`: one
     // field, parsed by parseList, so a caller never has to build an array.
     'step-card':        { steps: 'Record,Upload,Publish', title: '', accent: '#00E5FF', color: '#FFFFFF' },
-    'checklist':        { items: 'No timeline,No keyframes,No plugins', accent: '#10B981', color: '#FFFFFF' },
+    'checklist':        { items: 'No timeline,No keyframes,No plugins', accent: '#10B981', color: '#FFFFFF', style: 'card' },
     'question-card':    { question: 'What would you do?', accent: '#FFE500', color: '#FFFFFF' },
     'split-label':      { left: 'BEFORE', right: 'AFTER', leftColor: '#EF4444', rightColor: '#10B981', divider: 'vertical' },
     // R112 round C: the field is `imageUrl`, NOT a name of its own.
@@ -243,6 +255,9 @@ export const TEMPLATE_DEFAULTS = {
     // invents its own shape is a decoration pretending to be data.
     'waveform':         { samples: '', accent: '#00E5FF', mirror: 1 },
     'audio-bars':       { samples: '', accent: '#00E5FF', bars: 24 },
+    // An editor UI overlay: clip blocks are illustrative, while voiceSamples
+    // are supplied from actual audio analysis (an empty lane stays empty).
+    'editing-timeline': { clipCuts: '0.2,0.24,0.18,0.38', voiceSamples: '', sfxMarks: '', videoLabel: 'VIDEO', voiceLabel: 'VOICE', sfxLabel: 'SFX', accent: '#3478D4', muted: 1 },
     // ── R115 ──────────────────────────────────────────────────────────────
     // `icon` names a shape in IconLibrary; an unknown one draws nothing
     // rather than a placeholder, so a typo is visible instead of silently
@@ -271,6 +286,12 @@ export const TEMPLATE_WIDTH_FRACTION = {
     'film-grain': 1.0, 'vhs-glitch': 1.0, 'light-leak': 1.0,
     'lower-third-minimal': 0.75, 'location-badge': 0.55, 'retention-progress-bar': 0.88, 'quote-card': 0.82,
     'comparison-card': 0.85, 'social-notification': 0.72, 'comment-bubble': 0.82,
+    'glass-notification': 0.84,
+    'framed-headline': 0.94,
+    'phrase-chips': 0.86,
+    'editorial-title': 0.9,
+    'halftone-title': 1.0,
+    'kinetic-word-cards': 0.82,
     'kpi-stat-callout': 0.78, 'newspaper-headline': 0.86, 'search-bar': 0.80,
     'panel': 0.8,
     'word-cycle': 0.86,
@@ -285,7 +306,7 @@ export const TEMPLATE_WIDTH_FRACTION = {
     'comparison-matrix': 0.94, 'hierarchy': 0.9, 'cycle-diagram': 0.72, 'concept-map': 0.86,
     'annotated-shot': 1.0,
     'reply-thread': 0.84, 'dm-bubble': 0.76,
-    'waveform': 0.9, 'audio-bars': 0.8,
+    'waveform': 0.9, 'audio-bars': 0.8, 'editing-timeline': 0.92,
     'icon': 0.22, 'icon-label': 0.5, 'icon-row': 0.76,
     'light-sweep': 1.0, 'particles': 1.0, 'gradient-wash': 1.0, 'chroma-pulse': 1.0,
 };
@@ -337,6 +358,12 @@ export function templateSize(kind, params) {
         case 'quote-card': return { w: 840, h: 300 };
         case 'comparison-card': return { w: 860, h: 220 };
         case 'social-notification': return { w: 680, h: 140 };
+        case 'glass-notification': return { w: 980, h: 250 };
+        case 'framed-headline': return { w: 1040, h: 620 };
+        case 'phrase-chips': return { w: 900, h: 310 };
+        case 'editorial-title': return { w: 980, h: 1040 };
+        case 'halftone-title': return { w: 1080, h: 760 };
+        case 'kinetic-word-cards': return { w: 900, h: 620 };
         case 'comment-bubble': return { w: 800, h: 200 };
         case 'kpi-stat-callout': return { w: 760, h: 210 };
         case 'newspaper-headline': return { w: 880, h: 260 };
@@ -433,6 +460,7 @@ export function templateSize(kind, params) {
         case 'dm-bubble': return { w: 760, h: 200 };
         case 'waveform': return { w: 900, h: 260 };
         case 'audio-bars': return { w: 760, h: 320 };
+        case 'editing-timeline': return { w: 1120, h: 390 };
         // R115
         case 'icon': return { w: 240, h: 240 };
         case 'icon-label': {
@@ -639,9 +667,16 @@ function drawLogoCard(ctx, p, t, duration, F, images) {
     ctx.globalAlpha = Math.min(1, tin * 2) * tout;
     ctx.translate(slide, 0);
 
-    ctx.fillStyle = 'rgba(14,14,18,0.94)';
+    const light = p.style === 'light';
+    ctx.fillStyle = light ? '#FFFFFF' : 'rgba(14,14,18,0.94)';
     roundRect(ctx, 6, 6, w - 12, h - 12, 40);
     ctx.fill();
+    if (light) {
+        ctx.strokeStyle = 'rgba(15,20,30,0.08)';
+        ctx.lineWidth = 2;
+        roundRect(ctx, 7, 7, w - 14, h - 14, 39);
+        ctx.stroke();
+    }
     // Accent bar grows in
     ctx.fillStyle = p.accent || '#00E5FF';
     roundRect(ctx, 6, 6, 14, (h - 12) * easeOutCubic(clamp((t - 0.2) / 0.4, 0, 1)), 7);
@@ -650,7 +685,7 @@ function drawLogoCard(ctx, p, t, duration, F, images) {
     // Logo tile
     const tile = h - 60;
     const tx = 44, ty = 30;
-    ctx.fillStyle = '#FFFFFF';
+    ctx.fillStyle = light ? (p.accent || '#3568D4') : '#FFFFFF';
     roundRect(ctx, tx, ty, tile, tile, 28);
     ctx.fill();
     const img = images && p.imageUrl ? images[p.imageUrl] : null;
@@ -665,7 +700,7 @@ function drawLogoCard(ctx, p, t, duration, F, images) {
         ctx.drawImage(img, tx + (tile - iw) / 2, ty + (tile - ih) / 2, iw, ih);
         ctx.restore();
     } else {
-        ctx.fillStyle = '#0E0E12';
+        ctx.fillStyle = light ? '#FFFFFF' : '#0E0E12';
         ctx.font = `72px "${F.display}"`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -681,11 +716,11 @@ function drawLogoCard(ctx, p, t, duration, F, images) {
     ctx.clip();
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = '#FFFFFF';
+    ctx.fillStyle = light ? '#111318' : '#FFFFFF';
     ctx.font = `62px "${F.label}"`;
     ctx.fillText(String(p.label || '').slice(0, 22), textX, p.sub ? h / 2 + 6 : h / 2 + 22);
     if (p.sub) {
-        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.fillStyle = light ? 'rgba(17,19,24,0.58)' : 'rgba(255,255,255,0.6)';
         ctx.font = `36px "${F.body}"`;
         ctx.fillText(String(p.sub).slice(0, 34), textX, h / 2 + 56);
     }
@@ -1681,6 +1716,525 @@ function drawSocialNotification(ctx, p, t, duration, F) {
     ctx.restore();
 }
 
+/** A restrained, glass-like creator notification over portrait footage. */
+function drawGlassNotification(ctx, p, t, duration, F, images) {
+    const { w, h } = templateSize('glass-notification', p);
+    const { tin, tout } = envelope(t, duration, 0.42, 0.28);
+    const alpha = Math.min(1, tin * 2) * tout;
+    if (alpha <= 0) return;
+    const enter = easeOutBack(clamp(t / 0.42, 0, 1));
+    const x = 20;
+    const y = 18 + (1 - enter) * -42;
+    const bw = w - 40;
+    const bh = h - 36;
+    const radius = 42;
+    const avatar = 116;
+    const ax = x + 24;
+    const ay = y + (bh - avatar) / 2;
+    const textX = ax + avatar + 27;
+    const name = String(p.name || 'Creator').trim();
+    const message = String(p.message || '').trim();
+    const img = (images || {})[p.imageUrl] || null;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(w / 2, h / 2);
+    ctx.scale(0.97 + 0.03 * enter, 0.97 + 0.03 * enter);
+    ctx.translate(-w / 2, -h / 2);
+    ctx.shadowColor = 'rgba(0,0,0,0.25)';
+    ctx.shadowBlur = 26;
+    ctx.shadowOffsetY = 10;
+    const glass = ctx.createLinearGradient(x, y, x + bw, y + bh);
+    glass.addColorStop(0, 'rgba(73,79,75,0.82)');
+    glass.addColorStop(1, 'rgba(39,46,43,0.78)');
+    ctx.fillStyle = glass;
+    roundRect(ctx, x, y, bw, bh, radius);
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+    ctx.lineWidth = 2;
+    roundRect(ctx, x + 1, y + 1, bw - 2, bh - 2, radius - 1);
+    ctx.stroke();
+
+    // A soft top sheen gives the translucent surface depth without implying
+    // that the canvas renderer can blur the footage below it.
+    const sheen = ctx.createLinearGradient(0, y, 0, y + bh * 0.64);
+    sheen.addColorStop(0, 'rgba(255,255,255,0.16)');
+    sheen.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = sheen;
+    roundRect(ctx, x + 2, y + 2, bw - 4, bh - 4, radius - 2);
+    ctx.fill();
+
+    ctx.save();
+    roundRect(ctx, ax, ay, avatar, avatar, 28);
+    ctx.clip();
+    if (img) {
+        const iw = img.width || avatar;
+        const ih = img.height || avatar;
+        const scale = Math.max(avatar / iw, avatar / ih);
+        const dw = iw * scale;
+        const dh = ih * scale;
+        ctx.drawImage(img, ax + (avatar - dw) / 2, ay + (avatar - dh) / 2, dw, dh);
+    } else {
+        const fallback = ctx.createLinearGradient(ax, ay, ax + avatar, ay + avatar);
+        fallback.addColorStop(0, p.accent || '#92A5A0');
+        fallback.addColorStop(1, '#33413E');
+        ctx.fillStyle = fallback;
+        ctx.fillRect(ax, ay, avatar, avatar);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = `700 44px "${F.label}"`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText((name[0] || 'C').toUpperCase(), ax + avatar / 2, ay + avatar / 2 + 2);
+    }
+    ctx.restore();
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `700 34px "${F.label}"`;
+    const nameMax = Math.max(120, x + bw - textX - 112);
+    const nameFit = fitLines(ctx, name, F.label, 34, nameMax, 1);
+    ctx.font = `700 ${nameFit.size}px "${F.label}"`;
+    ctx.fillText(nameFit.lines[0] || '', textX, y + bh * 0.39);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.88)';
+    const msgFit = fitLines(ctx, message, F.body, 29, Math.max(120, x + bw - textX - 28), 1);
+    ctx.font = `400 ${msgFit.size}px "${F.body}"`;
+    ctx.fillText(msgFit.lines[0] || '', textX, y + bh * 0.68);
+
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(255,255,255,0.62)';
+    ctx.font = `500 18px "${F.body}"`;
+    ctx.fillText(String(p.time || 'now').slice(0, 16), x + bw - 26, y + 26);
+    ctx.restore();
+}
+
+/** A framed, multi-line title composition with an animated accent word. */
+function drawFramedHeadline(ctx, p, t, duration, F) {
+    const { w, h } = templateSize('framed-headline', p);
+    const { tin, tout } = envelope(t, duration, 0.46, 0.3);
+    const alpha = Math.min(1, tin * 2) * tout;
+    if (alpha <= 0) return;
+    const accent = p.accent || '#F3B743';
+    const color = p.color || '#FFFFFF';
+    const lines = String(p.headline || '').split(/[|\n]/).map(line => line.trim()).filter(Boolean).slice(0, 3);
+    if (lines.length === 0) return;
+    const highlight = String(p.highlight || '').trim();
+    const frameProgress = easeOutCubic(clamp(t / 0.52, 0, 1));
+    const dashOffset = -t * 22;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // A low opacity plate protects the headline while keeping the speaker and
+    // footage visible through the composition.
+    const panel = ctx.createLinearGradient(70, 76, w - 70, 420);
+    panel.addColorStop(0, 'rgba(40,30,17,0.74)');
+    panel.addColorStop(0.52, 'rgba(89,58,22,0.62)');
+    panel.addColorStop(1, 'rgba(37,28,20,0.74)');
+    ctx.fillStyle = panel;
+    roundRect(ctx, 82, 74, w - 164, 352, 14);
+    ctx.fill();
+
+    // Outer and inset dashed frames draw on with a measured, looping dash
+    // drift. They echo a composition guide without copying a platform UI.
+    ctx.save();
+    ctx.lineWidth = 5;
+    ctx.setLineDash([22, 12]);
+    ctx.lineDashOffset = dashOffset;
+    ctx.strokeStyle = accent;
+    ctx.globalAlpha = alpha * frameProgress;
+    roundRect(ctx, 24, 18, w - 48, h - 36, 3);
+    ctx.stroke();
+    ctx.lineWidth = 3;
+    ctx.setLineDash([14, 10]);
+    ctx.lineDashOffset = -dashOffset * 0.72;
+    ctx.globalAlpha = alpha * 0.92 * frameProgress;
+    roundRect(ctx, 100, 92, w - 200, 316, 2);
+    ctx.stroke();
+    ctx.restore();
+
+    const maxTextWidth = w - 270;
+    const size = Math.min(144, 274 / lines.length);
+    const lineHeight = size * 1.03;
+    const centerY = 250;
+    lines.forEach((line, index) => {
+        const e = easeOutCubic(clamp((t - 0.12 - index * 0.1) / 0.38, 0, 1));
+        if (e <= 0) return;
+        const fitted = fitLines(ctx, line, F.display, size, maxTextWidth, 1);
+        const text = fitted.lines[0] || '';
+        const fontSize = fitted.size;
+        ctx.save();
+        ctx.globalAlpha = alpha * e;
+        ctx.translate(0, (1 - e) * 22);
+        ctx.font = `900 ${fontSize}px "${F.display}"`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        const baseY = centerY + (index - (lines.length - 1) / 2) * lineHeight;
+        const hiAt = highlight ? text.toLowerCase().indexOf(highlight.toLowerCase()) : -1;
+        if (hiAt < 0) {
+            ctx.fillStyle = color;
+            ctx.textAlign = 'center';
+            ctx.fillText(text, w / 2, baseY, maxTextWidth);
+        } else {
+            const before = text.slice(0, hiAt);
+            const matched = text.slice(hiAt, hiAt + highlight.length);
+            const after = text.slice(hiAt + highlight.length);
+            const beforeW = ctx.measureText(before).width;
+            const matchedW = ctx.measureText(matched).width;
+            const afterW = ctx.measureText(after).width;
+            let cursor = w / 2 - (beforeW + matchedW + afterW) / 2;
+            ctx.fillStyle = color;
+            ctx.fillText(before, cursor, baseY);
+            cursor += beforeW;
+            const gold = ctx.createLinearGradient(cursor, baseY - fontSize / 2, cursor + matchedW, baseY + fontSize / 2);
+            gold.addColorStop(0, '#FFF4D5');
+            gold.addColorStop(0.52, accent);
+            gold.addColorStop(1, '#D98B20');
+            ctx.fillStyle = gold;
+            ctx.fillText(matched, cursor, baseY);
+            cursor += matchedW;
+            ctx.fillStyle = color;
+            ctx.fillText(after, cursor, baseY);
+        }
+        ctx.restore();
+    });
+
+    const support = String(p.support || '').trim();
+    if (support) {
+        const e = easeOutCubic(clamp((t - 0.42) / 0.4, 0, 1));
+        ctx.save();
+        ctx.globalAlpha = alpha * e;
+        ctx.fillStyle = 'rgba(255,255,255,0.95)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const fit = fitLines(ctx, support, F.body, 34, w - 250, 1);
+        ctx.font = `500 ${fit.size}px "${F.body}"`;
+        ctx.fillText(fit.lines[0] || '', w / 2, 486 + (1 - e) * 12);
+        ctx.restore();
+    }
+
+    if (Number(p.sparkles) !== 0) {
+        [[130, 438, 26], [w - 136, 438, 30]].forEach(([x, y, radius], i) => {
+            const pulse = 0.72 + 0.28 * Math.sin(t * 3.8 + i * 1.4);
+            ctx.save();
+            ctx.globalAlpha = alpha * frameProgress * pulse;
+            ctx.translate(x, y);
+            ctx.rotate(i ? -0.15 : 0.12);
+            ctx.fillStyle = accent;
+            ctx.beginPath();
+            ctx.moveTo(0, -radius);
+            ctx.quadraticCurveTo(radius * 0.17, -radius * 0.18, radius, 0);
+            ctx.quadraticCurveTo(radius * 0.16, radius * 0.17, 0, radius);
+            ctx.quadraticCurveTo(-radius * 0.16, radius * 0.17, -radius, 0);
+            ctx.quadraticCurveTo(-radius * 0.17, -radius * 0.18, 0, -radius);
+            ctx.fill();
+            ctx.restore();
+        });
+    }
+    ctx.restore();
+}
+
+/** Editorial phrase chips that build a short visual thesis under interview footage. */
+function drawPhraseChips(ctx, p, t, duration, F) {
+    const { w } = templateSize('phrase-chips', p);
+    const { tin, tout } = envelope(t, duration, 0.38, 0.28);
+    const alpha = Math.min(1, tin * 2) * tout;
+    if (alpha <= 0) return;
+    const phrases = parseList(p.phrases, 3).slice(0, 4);
+    if (!phrases.length) return;
+    const accent = p.accent || '#E34B40';
+    const cycle = Number(p.cycle) !== 0;
+    const interval = Math.max(0.75, (duration - 0.4) / Math.max(1, phrases.length));
+    const active = cycle ? Math.min(phrases.length - 1, Math.floor(Math.max(0, t - 0.35) / interval)) : -1;
+    const gap = 16;
+    const fontSize = 29;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = `700 ${fontSize}px "${F.label}"`;
+    const widths = phrases.map(value => Math.max(130, Math.min(260, ctx.measureText(value).width + 48)));
+    const totalW = widths.reduce((sum, value) => sum + value, 0) + gap * (phrases.length - 1);
+    let x = (w - totalW) / 2;
+    phrases.forEach((phrase, index) => {
+        const reveal = easeOutCubic(clamp((t - index * 0.12) / 0.3, 0, 1));
+        if (reveal <= 0) { x += widths[index] + gap; return; }
+        const selected = index === active;
+        const y = 42 + (1 - reveal) * 20;
+        ctx.save();
+        ctx.globalAlpha = alpha * reveal;
+        ctx.fillStyle = selected ? accent : '#111111';
+        roundRect(ctx, x, y, widths[index], 72, 20);
+        ctx.fill();
+        ctx.fillStyle = '#FFFFFF';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(phrase, x + widths[index] / 2, y + 36, widths[index] - 28);
+        ctx.restore();
+        x += widths[index] + gap;
+    });
+
+    const support = String(p.support || '').trim();
+    if (support) {
+        const reveal = easeOutCubic(clamp((t - 0.28) / 0.4, 0, 1));
+        const fit = fitLines(ctx, support, F.body, 42, w - 80, 2);
+        ctx.globalAlpha = alpha * reveal;
+        ctx.font = `600 ${fit.size}px "${F.body}"`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = p.color || '#111111';
+        const lineHeight = fit.size * 1.18;
+        fit.lines.forEach((line, index) => {
+            const lineY = 214 + (index - (fit.lines.length - 1) / 2) * lineHeight + (1 - reveal) * 12;
+            ctx.fillText(line, w / 2, lineY, w - 80);
+        });
+    }
+    ctx.restore();
+}
+
+/** High contrast editorial type with a contrasting serif word and drawn mark. */
+function drawEditorialTitle(ctx, p, t, duration, F) {
+    const { w, h } = templateSize('editorial-title', p);
+    const { tin, tout } = envelope(t, duration, 0.45, 0.3);
+    const alpha = Math.min(1, tin * 2) * tout;
+    if (alpha <= 0) return;
+    const lines = String(p.headline || '').split(/[|\n]/).map(line => line.trim()).filter(Boolean).slice(0, 3);
+    if (!lines.length) return;
+    const accent = p.accent || '#3568D4';
+    const emphasis = String(p.emphasis || '').trim().toLowerCase();
+    const top = lines.length === 1 ? 430 : lines.length === 2 ? 350 : 285;
+    const lineGap = 146;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // A quiet drafting grid lends the clean paper look while remaining subtle
+    // over footage. It is clipped to this template's bounds.
+    ctx.save();
+    ctx.globalAlpha = alpha * 0.055;
+    ctx.strokeStyle = p.color || '#111111';
+    ctx.lineWidth = 1;
+    for (let gx = 0; gx <= w; gx += 72) {
+        ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, h); ctx.stroke();
+    }
+    for (let gy = 0; gy <= h; gy += 72) {
+        ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(w, gy); ctx.stroke();
+    }
+    ctx.restore();
+
+    const kicker = String(p.kicker || '').trim();
+    if (kicker) {
+        const reveal = easeOutCubic(clamp(t / 0.32, 0, 1));
+        ctx.globalAlpha = alpha * reveal * 0.64;
+        ctx.fillStyle = p.color || '#111111';
+        ctx.font = `600 30px "${F.label}"`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(kicker.toUpperCase().slice(0, 48), w / 2, 130 - (1 - reveal) * 10, w - 100);
+    }
+
+    let marked = null;
+    lines.forEach((line, index) => {
+        const reveal = easeOutCubic(clamp((t - 0.14 - index * 0.12) / 0.42, 0, 1));
+        if (reveal <= 0) return;
+        const y = top + index * lineGap;
+        const fitted = fitLines(ctx, line, F.display, 124, w - 90, 1);
+        const value = fitted.lines[0] || '';
+        const hit = emphasis ? value.toLowerCase().indexOf(emphasis) : -1;
+        ctx.save();
+        ctx.globalAlpha = alpha * reveal;
+        ctx.textBaseline = 'middle';
+        if (hit < 0) {
+            ctx.font = `900 ${fitted.size}px "${F.display}"`;
+            ctx.fillStyle = p.color || '#111111';
+            ctx.textAlign = 'center';
+            ctx.fillText(value, w / 2, y, w - 90);
+        } else {
+            const before = value.slice(0, hit);
+            const word = value.slice(hit, hit + emphasis.length);
+            const after = value.slice(hit + emphasis.length);
+            ctx.font = `900 ${fitted.size}px "${F.display}"`;
+            const beforeW = ctx.measureText(before).width;
+            ctx.font = `italic 400 ${Math.min(132, fitted.size * 1.08)}px Georgia, serif`;
+            const wordW = ctx.measureText(word).width;
+            ctx.font = `900 ${fitted.size}px "${F.display}"`;
+            const afterW = ctx.measureText(after).width;
+            let x = (w - beforeW - wordW - afterW) / 2;
+            ctx.textAlign = 'left';
+            ctx.font = `900 ${fitted.size}px "${F.display}"`;
+            ctx.fillStyle = p.color || '#111111';
+            ctx.fillText(before, x, y);
+            x += beforeW;
+            ctx.font = `italic 400 ${Math.min(132, fitted.size * 1.08)}px Georgia, serif`;
+            ctx.fillStyle = accent;
+            ctx.fillText(word, x, y);
+            marked = { x, width: wordW, y, size: fitted.size };
+            x += wordW;
+            ctx.font = `900 ${fitted.size}px "${F.display}"`;
+            ctx.fillStyle = p.color || '#111111';
+            ctx.fillText(after, x, y);
+        }
+        ctx.restore();
+    });
+
+    if (marked && ['underline', 'strike'].includes(p.mark)) {
+        const reveal = easeOutCubic(clamp((t - 0.5) / 0.42, 0, 1));
+        ctx.globalAlpha = alpha * reveal;
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = 5;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        const y = p.mark === 'strike' ? marked.y : marked.y + marked.size * 0.48;
+        ctx.moveTo(marked.x, y);
+        ctx.quadraticCurveTo(marked.x + marked.width * 0.5, y - (p.mark === 'strike' ? 12 : 3), marked.x + marked.width, y + 2);
+        ctx.stroke();
+    }
+
+    const support = String(p.support || '').trim();
+    if (support) {
+        const reveal = easeOutCubic(clamp((t - 0.5) / 0.45, 0, 1));
+        const fit = fitLines(ctx, support, F.body, 38, w - 110, 2);
+        ctx.globalAlpha = alpha * reveal * 0.78;
+        ctx.font = `500 ${fit.size}px "${F.body}"`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = p.color || '#111111';
+        fit.lines.forEach((line, index) => ctx.fillText(line, w / 2, 840 + (index - (fit.lines.length - 1) / 2) * fit.size * 1.2, w - 100));
+    }
+    ctx.restore();
+}
+
+/** Oversized type with a halftone screen, designed to sit behind a cutout. */
+function drawHalftoneTitle(ctx, p, t, duration, F) {
+    const { w, h } = templateSize('halftone-title', p);
+    const { tin, tout } = envelope(t, duration, 0.5, 0.28);
+    const alpha = Math.min(1, tin * 2) * tout;
+    if (alpha <= 0) return;
+    const lines = String(p.headline || '').split(/[|\n]/).map(line => line.trim()).filter(Boolean).slice(0, 2);
+    if (!lines.length) return;
+    const color = p.color || '#E6322B';
+    const dotColor = p.patternColor || '#FFF4E7';
+    const reveal = easeOutCubic(clamp(t / 0.58, 0, 1));
+    const fontSize = Math.min(480, 670 / lines.length);
+    const lineGap = fontSize * 0.88;
+    const firstY = h / 2 - ((lines.length - 1) * lineGap) / 2;
+
+    ctx.save();
+    ctx.globalAlpha = alpha * reveal;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `900 ${fontSize}px "${F.display}"`;
+    lines.forEach((line, index) => {
+        const fitted = fitLines(ctx, line, F.display, fontSize, w - 72, 1);
+        const value = fitted.lines[0] || '';
+        const y = firstY + index * lineGap;
+        const slide = (1 - reveal) * 110;
+        ctx.save();
+        ctx.translate(0, slide);
+        ctx.font = `900 ${fitted.size}px "${F.display}"`;
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = 'rgba(18,10,12,0.72)';
+        ctx.lineWidth = 11;
+        ctx.strokeText(value, w / 2, y, w - 72);
+        ctx.fillStyle = color;
+        ctx.fillText(value, w / 2, y, w - 72);
+
+        // source-atop confines the halftone dots to the glyph pixels, so the
+        // texture stays crisp in both browser Canvas and the export renderer.
+        ctx.globalCompositeOperation = 'source-atop';
+        ctx.fillStyle = dotColor;
+        ctx.globalAlpha = alpha * reveal * 0.58;
+        const spacing = 22;
+        const textWidth = ctx.measureText(value).width;
+        const startX = Math.max(0, w / 2 - textWidth / 2 - spacing);
+        const endX = Math.min(w, w / 2 + textWidth / 2 + spacing);
+        for (let dx = startX; dx < endX; dx += spacing) {
+            for (let dy = Math.max(0, y - fitted.size * 0.62); dy < Math.min(h, y + fitted.size * 0.62); dy += spacing) {
+                const wave = 0.72 + 0.28 * Math.sin(dx * 0.025 + dy * 0.019);
+                ctx.beginPath();
+                ctx.arc(dx, dy, 3.2 * wave, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        ctx.restore();
+    });
+
+    if (Number(p.frame) !== 0) {
+        const drawOn = easeOutCubic(clamp((t - 0.18) / 0.5, 0, 1));
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = alpha * drawOn * 0.8;
+        ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(38, 38, w - 76, h - 76);
+        const hs = 19;
+        ctx.fillStyle = p.accent || '#FF3B32';
+        [[38, 38], [w - 38, 38], [38, h - 38], [w - 38, h - 38]].forEach(([x, y]) => {
+            ctx.fillRect(x - hs / 2, y - hs / 2, hs, hs);
+        });
+    }
+    ctx.restore();
+}
+
+/** Staggered, tilted word cards for punchy interview and recap edits. */
+function drawKineticWordCards(ctx, p, t, duration, F) {
+    const words = parseList(p.words, 5).slice(0, 5);
+    if (!words.length) return;
+    const { tin, tout } = envelope(t, duration, 0.4, 0.28);
+    const alpha = Math.min(1, tin * 2) * tout;
+    if (alpha <= 0) return;
+    const placements = [
+        { x: 82, y: 38, rotation: -0.055, maxW: 580 },
+        { x: 286, y: 152, rotation: 0.035, maxW: 540 },
+        { x: 52, y: 278, rotation: 0.065, maxW: 520 },
+        { x: 390, y: 350, rotation: -0.06, maxW: 450 },
+        { x: 178, y: 472, rotation: 0.045, maxW: 540 },
+    ];
+    const cardH = 112;
+    const gap = Math.max(0.28, (duration - 0.3) / words.length);
+    const red = p.accent || '#94151D';
+    const white = p.color || '#FFFFFF';
+
+    ctx.save();
+    words.forEach((word, index) => {
+        const place = placements[index];
+        const rawStart = 0.08 + index * Math.min(0.22, gap * 0.34);
+        const progress = easeOutBack(clamp((t - rawStart) / 0.42, 0, 1));
+        if (progress <= 0) return;
+        const inverse = index % 2 === 1;
+        ctx.save();
+        ctx.globalAlpha = alpha * Math.min(1, progress * 1.4);
+        ctx.translate(place.x + place.maxW / 2, place.y + cardH / 2 + (1 - progress) * -88);
+        ctx.rotate(place.rotation * progress);
+        ctx.scale(0.72 + 0.28 * progress, 0.72 + 0.28 * progress);
+        ctx.translate(-(place.x + place.maxW / 2), -(place.y + cardH / 2));
+        const textWidth = place.maxW - 44;
+        const fit = fitLines(ctx, word, F.display, 96, textWidth, 1);
+        ctx.font = `900 ${fit.size}px "${F.display}"`;
+        const measured = Math.min(place.maxW, Math.max(170, ctx.measureText(word).width + 54));
+        const cardW = Math.min(place.maxW, measured);
+        const cardX = place.x + (place.maxW - cardW) / 2;
+
+        ctx.shadowColor = 'rgba(20,0,0,0.24)';
+        ctx.shadowBlur = 18;
+        ctx.shadowOffsetY = 8;
+        ctx.fillStyle = inverse ? '#FFFDFB' : red;
+        roundRect(ctx, cardX, place.y, cardW, cardH, 16);
+        ctx.fill();
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.fillStyle = inverse ? red : white;
+        ctx.font = `900 ${fit.size}px "${F.display}"`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(word, cardX + cardW / 2, place.y + cardH / 2 + 2, cardW - 34);
+        ctx.restore();
+    });
+    ctx.restore();
+}
+
 function drawCommentBubble(ctx, p, t, duration, F) {
     const { w, h } = templateSize('comment-bubble', p);
     const { tin, tout } = envelope(t, duration, 0.35, 0.25);
@@ -1895,12 +2449,29 @@ function drawSearchBar(ctx, p, t, duration, F) {
     ctx.scale(pop, pop);
     ctx.translate(-w / 2, -h / 2);
 
-    // Search pill capsule
-    ctx.fillStyle = 'rgba(18, 24, 38, 0.96)';
-    ctx.strokeStyle = 'rgba(0, 229, 255, 0.35)';
+    // Search pill capsule: the light/glow treatment suits clean product edits;
+    // dark remains the default for existing clips.
+    const light = p.style === 'light';
+    const accent = p.color || '#00E5FF';
+    if (Number(p.glow) > 0) {
+        ctx.shadowColor = accent;
+        ctx.shadowBlur = 30;
+        ctx.shadowOffsetY = 8;
+    }
+    ctx.fillStyle = light ? '#FFFFFF' : 'rgba(18, 24, 38, 0.96)';
+    ctx.strokeStyle = light ? accent : 'rgba(0, 229, 255, 0.35)';
     ctx.lineWidth = 2.5;
     roundRect(ctx, 4, 4, w - 8, h - 8, (h - 8) / 2);
     ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    if (light && p.color2) {
+        const outline = ctx.createLinearGradient(4, 0, w - 4, h);
+        outline.addColorStop(0, accent);
+        outline.addColorStop(1, p.color2);
+        ctx.strokeStyle = outline;
+    }
     ctx.stroke();
 
     // Magnifying glass icon on left
@@ -1921,7 +2492,7 @@ function drawSearchBar(ctx, p, t, duration, F) {
     const charCount = Math.floor(typeProg * fullQuery.length);
     const displayedQuery = fullQuery.slice(0, charCount);
 
-    ctx.fillStyle = '#FFFFFF';
+    ctx.fillStyle = light ? '#252833' : '#FFFFFF';
     ctx.font = `600 24px "${F.body}"`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
@@ -2088,10 +2659,12 @@ function drawChecklist(ctx, p, t, duration, F) {
     const a = Math.min(1, tin * 2) * tout;
     if (a <= 0) return;
     const accent = p.accent || '#10B981';
+    const clean = p.style === 'clean';
+    const activeItem = Math.min(items.length - 1, Math.floor(Math.max(0, t) / Math.max(0.5, duration / items.length)));
 
     ctx.save();
     ctx.globalAlpha = a;
-    cardSurface(ctx, w, h);
+    if (!clean) cardSurface(ctx, w, h);
 
     items.forEach((item, i) => {
         const e = easeOutCubic(itemIn(t, i));
@@ -2100,17 +2673,33 @@ function drawChecklist(ctx, p, t, duration, F) {
         ctx.save();
         ctx.globalAlpha = a * e;
 
-        ctx.strokeStyle = accent;
+        if (clean) {
+            roundRect(ctx, 24, cy - 36, w - 48, 72, 36);
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fill();
+            ctx.strokeStyle = i === activeItem ? accent : 'rgba(20,24,31,0.08)';
+            ctx.lineWidth = i === activeItem ? 4 : 2;
+            ctx.stroke();
+        }
+
+        ctx.strokeStyle = clean ? '#FFFFFF' : accent;
         ctx.lineWidth = 3;
-        roundRect(ctx, 40, cy - 26, 52, 52, 14);
-        ctx.stroke();
+        if (clean) {
+            ctx.fillStyle = accent;
+            ctx.beginPath();
+            ctx.arc(66, cy, 25, 0, Math.PI * 2);
+            ctx.fill();
+        } else {
+            roundRect(ctx, 40, cy - 26, 52, 52, 14);
+            ctx.stroke();
+        }
 
         // The tick is DRAWN, not faded: the stroke length follows the same
         // entrance, so it reads as being written rather than appearing.
         const tick = clamp((itemIn(t, i) - 0.35) / 0.5, 0, 1);
         if (tick > 0) {
             ctx.save();
-            ctx.strokeStyle = accent;
+            ctx.strokeStyle = clean ? '#FFFFFF' : accent;
             ctx.lineWidth = 6;
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
@@ -2129,7 +2718,7 @@ function drawChecklist(ctx, p, t, duration, F) {
             ctx.restore();
         }
 
-        ctx.fillStyle = p.color || '#FFFFFF';
+        ctx.fillStyle = clean ? '#111318' : (p.color || '#FFFFFF');
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         const { lines, size } = fitLines(ctx, item, F.body, 38, w - 160, 1);
@@ -4477,6 +5066,187 @@ function drawAudioBars(ctx, p, t, duration, F) {
     ctx.restore();
 }
 
+/**
+ * A compact multitrack editing timeline inspired by the supplied reel refs.
+ * Video clip blocks are illustrative UI; the voice lane only draws a waveform
+ * when the caller provides measured samples, so the graphic never invents audio.
+ */
+function drawEditingTimeline(ctx, p, t, duration, F) {
+    const { w, h } = templateSize('editing-timeline', p);
+    const { tin, tout } = envelope(t, duration, 0.38, 0.28);
+    const entrance = easeOutCubic(tin);
+    const alpha = Math.min(1, tin * 2) * tout;
+    if (alpha <= 0) return;
+
+    const accent = p.accent || '#3478D4';
+    const pad = 24;
+    const labelW = 150;
+    const x0 = pad + labelW;
+    const right = w - pad;
+    const timelineW = right - x0;
+    const rulerY = 94;
+    const videoY = 126;
+    const videoH = 66;
+    const voiceY = 204;
+    const voiceH = 66;
+    const sfxY = 282;
+    const sfxH = 56;
+    const cuts = parseNumbers(p.clipCuts, 8).filter(v => v > 0);
+    const split = cuts.length ? cuts : [1];
+    const total = split.reduce((sum, value) => sum + value, 0);
+    const voice = parseNumbers(p.voiceSamples, 360);
+    const marks = parseNumbers(p.sfxMarks, 24).filter(v => v >= 0 && v <= 1);
+    const slideY = (1 - entrance) * 22;
+
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.translate(0, slideY);
+
+    // Warm matte card and understated header.
+    ctx.fillStyle = '#F4F1EA';
+    roundRect(ctx, 0, 0, w, h, 28);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(25,28,32,0.12)';
+    ctx.lineWidth = 2;
+    roundRect(ctx, 1, 1, w - 2, h - 2, 27);
+    ctx.stroke();
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#626874';
+    ctx.font = `700 24px "${F.label}"`;
+    ctx.fillText('EDIT SESSION', pad, 40);
+
+    const isMuted = Number(p.muted) === 1 || p.muted === true;
+    const db = Number(p.levelDb);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#555B65';
+    ctx.font = `600 23px "${F.body}"`;
+    ctx.fillText(isMuted ? '−∞ dB' : Number.isFinite(db) ? `${db.toFixed(1)} dB` : '— dB', right, 40);
+    ctx.textAlign = 'left';
+
+    // Time ruler.
+    ctx.strokeStyle = 'rgba(43,49,57,0.20)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x0, rulerY);
+    ctx.lineTo(right, rulerY);
+    ctx.stroke();
+    for (let i = 0; i <= 20; i++) {
+        const x = x0 + timelineW * i / 20;
+        const tall = i % 5 === 0 ? 18 : 10;
+        ctx.strokeStyle = i % 5 === 0 ? 'rgba(43,49,57,0.28)' : 'rgba(43,49,57,0.14)';
+        ctx.beginPath();
+        ctx.moveTo(x, rulerY - tall / 2);
+        ctx.lineTo(x, rulerY + tall / 2);
+        ctx.stroke();
+        if (i % 5 === 0 && i < 20) {
+            ctx.fillStyle = '#858A91';
+            ctx.font = `500 14px "${F.mono}"`;
+            ctx.fillText(`${Math.round(duration * i / 20)}s`, x + 4, rulerY - 18);
+        }
+    }
+
+    const label = (text, y) => {
+        ctx.fillStyle = '#616773';
+        ctx.font = `700 20px "${F.label}"`;
+        ctx.fillText(String(text || '').slice(0, 12).toUpperCase(), pad + 2, y + 1);
+    };
+    const lane = (y, height, fill, stroke = 'rgba(35,42,52,0.12)') => {
+        ctx.fillStyle = fill;
+        roundRect(ctx, x0, y, timelineW, height, 13);
+        ctx.fill();
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+    };
+
+    label(p.videoLabel || 'VIDEO', videoY + videoH / 2);
+    label(p.voiceLabel || 'VOICE', voiceY + voiceH / 2);
+    label(p.sfxLabel || 'SFX', sfxY + sfxH / 2);
+
+    // Video lane: segmented thumbnail strips with small frame details.
+    lane(videoY, videoH, '#E8E5DE');
+    let clipX = x0 + 5;
+    const clipGap = 5;
+    split.forEach((part, index) => {
+        const clipW = Math.max(36, (timelineW - 10 - clipGap * (split.length - 1)) * part / total);
+        const innerY = videoY + 5;
+        const innerH = videoH - 10;
+        const shade = index % 2 ? '#697B85' : '#56616B';
+        ctx.save();
+        roundRect(ctx, clipX, innerY, clipW, innerH, 9);
+        ctx.clip();
+        ctx.fillStyle = shade;
+        ctx.fillRect(clipX, innerY, clipW, innerH);
+        const upperH = innerH * 0.56;
+        ctx.fillStyle = index % 2 ? '#28363C' : '#34434A';
+        ctx.fillRect(clipX, innerY, clipW, upperH);
+        // Abstract footage marks read as a filmstrip without pretending to be
+        // thumbnails of the user's own source footage.
+        ctx.fillStyle = 'rgba(234,223,201,0.58)';
+        ctx.beginPath();
+        ctx.arc(clipX + clipW * 0.72, innerY + upperH * 0.48, Math.min(upperH * 0.25, 11), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(17,25,29,0.72)';
+        ctx.fillRect(clipX + clipW * 0.45, innerY + upperH * 0.8, clipW * 0.55, upperH * 0.2);
+        ctx.fillStyle = 'rgba(239,243,244,0.3)';
+        for (let j = 0; j < Math.max(2, Math.floor(clipW / 34)); j++) {
+            ctx.fillRect(clipX + 7 + j * 26, innerY + innerH - 9, 18, 3);
+        }
+        ctx.restore();
+        clipX += clipW + clipGap;
+    });
+
+    // Voice lane. Its shape is strictly derived from real samples.
+    lane(voiceY, voiceH, '#E8F0FB', 'rgba(52,120,212,0.32)');
+    if (voice.length > 1) {
+        const max = Math.max(1e-6, ...voice.map(value => Math.abs(value)));
+        const centerY = voiceY + voiceH / 2;
+        const slot = timelineW / voice.length;
+        const barW = Math.max(2, Math.min(7, slot * 0.64));
+        const revealed = Math.ceil(voice.length * easeOutCubic(clamp(t / 0.65, 0, 1)));
+        ctx.fillStyle = accent;
+        for (let i = 0; i < revealed; i++) {
+            const barH = Math.max(3, Math.abs(voice[i]) / max * (voiceH * 0.72));
+            roundRect(ctx, x0 + i * slot + (slot - barW) / 2, centerY - barH / 2, barW, barH, barW / 2);
+            ctx.fill();
+        }
+    }
+
+    // SFX lane remains an open dashed drop zone until real cue marks are given.
+    ctx.save();
+    ctx.setLineDash([8, 7]);
+    ctx.strokeStyle = '#B9B6AE';
+    ctx.lineWidth = 2;
+    roundRect(ctx, x0, sfxY, timelineW, sfxH, 12);
+    ctx.stroke();
+    ctx.restore();
+    marks.forEach((position, index) => {
+        const x = x0 + timelineW * position;
+        const eventW = Math.max(18, timelineW * 0.035);
+        const pulse = 0.75 + Math.sin(t * 5 + index) * 0.12;
+        ctx.globalAlpha = alpha * pulse;
+        ctx.fillStyle = index % 2 ? '#9A6C4C' : accent;
+        roundRect(ctx, clamp(x - eventW / 2, x0 + 3, right - eventW - 3), sfxY + 11, eventW, sfxH - 22, 7);
+        ctx.fill();
+    });
+    ctx.globalAlpha = alpha;
+
+    // A deterministic playhead crosses all three tracks.
+    const playheadX = x0 + timelineW * clamp(t / Math.max(0.001, duration), 0, 1);
+    ctx.strokeStyle = '#15191F';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(playheadX, rulerY - 7);
+    ctx.lineTo(playheadX, sfxY + sfxH + 13);
+    ctx.stroke();
+    ctx.fillStyle = '#15191F';
+    roundRect(ctx, playheadX - 9, rulerY - 15, 18, 20, 7);
+    ctx.fill();
+    ctx.restore();
+}
+
 // ─── R115: icons in the catalogue, and the advanced effects ──────────────────
 
 /** A single icon, popped in. Unknown name draws nothing — see the defaults. */
@@ -4872,8 +5642,25 @@ function drawWordCycle(ctx, p, t, duration, F) {
     const drawWord = (word, alpha, dy) => {
         if (alpha <= 0.01) return;
         ctx.globalAlpha = base * alpha;
-        ctx.fillStyle = p.accent || '#00E5FF';
+        const accent = p.accent || '#00E5FF';
+        const glowStrength = clamp(Number(p.glowStrength) || 22, 0, 64);
+        if (Number(p.glow) > 0 && glowStrength > 0) {
+            ctx.shadowColor = accent;
+            ctx.shadowBlur = glowStrength * (0.82 + 0.18 * Math.sin(t * 3.2));
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+        }
+        if (Number(p.gradient) > 0) {
+            const gradient = ctx.createLinearGradient(slotX, y + dy - size / 2, slotX + slotW, y + dy + size / 2);
+            gradient.addColorStop(0, accent);
+            gradient.addColorStop(1, p.color2 || '#E04BAA');
+            ctx.fillStyle = gradient;
+        } else {
+            ctx.fillStyle = accent;
+        }
         ctx.fillText(word, slotX, y + dy);
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
     };
     // Outgoing leaves upward, incoming arrives from below: the eye is handed
     // from one word to the next instead of being shown a substitution.
@@ -4933,6 +5720,12 @@ export function drawTemplate(ctx, kind, params, t, duration, opts = {}) {
         else if (kind === 'quote-card') drawQuoteCard(ctx, p, tt, d, F);
         else if (kind === 'comparison-card') drawComparisonCard(ctx, p, tt, d, F);
         else if (kind === 'social-notification') drawSocialNotification(ctx, p, tt, d, F);
+        else if (kind === 'glass-notification') drawGlassNotification(ctx, p, tt, d, F, opts.images || {});
+        else if (kind === 'framed-headline') drawFramedHeadline(ctx, p, tt, d, F);
+        else if (kind === 'phrase-chips') drawPhraseChips(ctx, p, tt, d, F);
+        else if (kind === 'editorial-title') drawEditorialTitle(ctx, p, tt, d, F);
+        else if (kind === 'halftone-title') drawHalftoneTitle(ctx, p, tt, d, F);
+        else if (kind === 'kinetic-word-cards') drawKineticWordCards(ctx, p, tt, d, F);
         else if (kind === 'comment-bubble') drawCommentBubble(ctx, p, tt, d, F);
         else if (kind === 'kpi-stat-callout') drawKpiStatCallout(ctx, p, tt, d, F);
         else if (kind === 'newspaper-headline') drawNewspaperHeadline(ctx, p, tt, d, F);
@@ -4978,6 +5771,7 @@ export function drawTemplate(ctx, kind, params, t, duration, opts = {}) {
         else if (kind === 'dm-bubble') drawDmBubble(ctx, p, tt, d, F);
         else if (kind === 'waveform') drawWaveform(ctx, p, tt, d, F);
         else if (kind === 'audio-bars') drawAudioBars(ctx, p, tt, d, F);
+        else if (kind === 'editing-timeline') drawEditingTimeline(ctx, p, tt, d, F);
         else if (kind === 'icon') drawIconTemplate(ctx, p, tt, d);
         else if (kind === 'icon-label') drawIconLabel(ctx, p, tt, d, F);
         else if (kind === 'icon-row') drawIconRow(ctx, p, tt, d, F);
@@ -5192,6 +5986,9 @@ function shapeFromText(s, raw, quoted) {
             [/timestamp|horodatage/, 'time', ''],
             [/source|citation|credit/, 'source', 'SOURCE'],
         ];
+        if (/topic (?:label|pill|tag|badge)|category pill|sujet (?:etiquette|badge)/.test(s)) {
+            return { kind: 'status-label', params: { tone: 'category', icon: 'none', text: quoted || 'TOPIC', accent: '#D946EF' } };
+        }
         for (const [re, tone, fallback] of tones) {
             if (!re.test(s)) continue;
             if (!/label|badge|tag|chip|pill|indicator|etiquette|badge/.test(s)
@@ -5211,6 +6008,9 @@ function shapeFromText(s, raw, quoted) {
     }
     if (/video player|player mockup|lecteur video|maquette lecteur/.test(s)) {
         return { kind: 'video-player', params: quoted ? { title: quoted } : {} };
+    }
+    if (/edit(?:ing|or)? timeline|montage timeline|video editing tracks|timeline overlay|piste de montage|timeline de montage/.test(s)) {
+        return { kind: 'editing-timeline', params: {} };
     }
     if (/engagement|likes? counter|like count|compteur de likes|mentions j aime/.test(s)) {
         return { kind: 'engagement-counter', params: {} };
@@ -5276,6 +6076,24 @@ function shapeFromText(s, raw, quoted) {
     }
     if (/\b(comparison|before after|avant apres|comparatif|comparaison)\b/.test(s)) {
         return { kind: 'comparison-card', params: quoted ? { beforeVal: quoted } : {} };
+    }
+    if (/glass notification|creator notification|notification banner|push notification|notification flottante/.test(s)) {
+        return { kind: 'glass-notification', params: quoted ? { message: quoted } : {} };
+    }
+    if (/framed headline|headline frame|title in a frame|dashed title frame|encadre(?:r)? un titre|titre encadre/.test(s)) {
+        return { kind: 'framed-headline', params: quoted ? { headline: quoted.replace(/\s*\|\s*/g, '|') } : {} };
+    }
+    if (/phrase chips|key phrase chips|proof promise plan|mots cles en pastilles|pastilles de mots cles/.test(s)) {
+        return { kind: 'phrase-chips', params: quoted ? { phrases: quoted.replace(/\s*\|\s*/g, ',') } : {} };
+    }
+    if (/editorial title|editorial typography|oversized type|kinetic typography|titre editorial|typographie editoriale/.test(s)) {
+        return { kind: 'editorial-title', params: quoted ? { headline: quoted.replace(/\s*\|\s*/g, '|') } : {} };
+    }
+    if (/halftone|dot screen|oversized texture title|titre trame|texte trame/.test(s)) {
+        return { kind: 'halftone-title', params: quoted ? { headline: quoted.replace(/\s*\|\s*/g, '|') } : {} };
+    }
+    if (/kinetic word cards|floating word cards|word tiles|cartes de mots|mots flottants/.test(s)) {
+        return { kind: 'kinetic-word-cards', params: quoted ? { words: quoted.replace(/\s*\|\s*/g, ',') } : {} };
     }
     if (/\b(notification|social notif|notif|subscriber|nouvel abonne)\b/.test(s)) {
         return { kind: 'social-notification', params: quoted ? { subtitle: quoted } : {} };

@@ -2966,7 +2966,7 @@ const useTimelineStore = create(
                 const trackId = track ? track.id : get().addTrack('overlay', opts.skipHistory ? { skipHistory: true } : undefined);
                 const start = Number.isFinite(Number(opts.start)) ? Number(opts.start) : get().currentTime;
                 const duration = Number(opts.duration) > 0 ? Number(opts.duration) : (kind === 'code-window' ? 5 : 3);
-                const defaultY = { 'counter': 20, 'price-pop': 42, 'logo-card': 78, 'code-window': 50 }[kind];
+                const defaultY = { 'counter': 20, 'price-pop': 42, 'logo-card': 78, 'code-window': 50, 'glass-notification': 32, 'framed-headline': 34, 'phrase-chips': 68, 'editorial-title': 32, 'halftone-title': 28, 'kinetic-word-cards': 42 }[kind];
                 const id = `tpl-${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
                 get().addClip(trackId, {
                     id,

@@ -2,7 +2,6 @@
   "nav": {
     "product": "Produit",
     "brain": "Cerveau éditorial",
-    "about": "À propos",
     "logIn": "Connexion",
     "startFree": "Commencer",
     "account": "Tableau de bord",
@@ -34,10 +33,8 @@
   "footer": {
     "tagline": "Le système d'exploitation créatif pour les créateurs, monteurs et studios modernes.",
     "gdpr": "Projets et comptes hébergés en Suisse et dans l'UE",
-    "company": "Entreprise",
     "legal": "Légal",
     "links": {
-      "about": "À propos",
       "privacyPolicy": "Politique de confidentialité",
       "cookiePolicy": "Politique des cookies",
       "yourData": "Vos données",
@@ -68,7 +65,7 @@
   },
   "consent": {
     "title": "Cookies et outils facultatifs",
-    "body": "Nous utilisons uniquement ce qui est nécessaire au fonctionnement de Vibed, ainsi que deux outils facultatifs. Ils restent désactivés tant que vous ne les activez pas.",
+    "body": "Le stockage indispensable au fonctionnement de Vibed reste actif. La relecture des erreurs et les statistiques d'utilisation sont facultatives, réglables séparément et désactivées par défaut. Vous pouvez modifier ou retirer votre choix à tout moment grâce au bouton « Gestion des cookies » du pied de page.",
     "replay": {
       "title": "Relecture d'erreurs",
       "body": "Lorsque l'éditeur rencontre une erreur, une courte relecture de l'écran nous aide à la corriger. Les textes, images et vidéos sont masqués."

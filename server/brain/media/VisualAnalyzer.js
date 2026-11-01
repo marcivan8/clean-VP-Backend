@@ -338,7 +338,7 @@ Also return "visualStyleProfile" describing only the visible editing/design gram
   "colorPalette": ["#RRGGBB", "#RRGGBB"],
   "motifs": ["short visible design motif", "another motif"]
 }
-Use multiple frames to distinguish a persistent style from one moment. Do not claim to see animation direction or sound effects from still frames; use "unknown" when evidence is insufficient.` : ''}
+Motifs may describe visible patterns such as social proof metrics, comment or DM cards, product or document cards, archive-photo layouts, split-screen comparisons, large two-tone headlines, speaker cutouts, or phone frames. Use only motifs actually visible in the sampled frames. Use multiple frames to distinguish a persistent style from one moment. Do not claim to see animation direction or sound effects from still frames; use "unknown" when evidence is insufficient.` : ''}
 Return ONLY the JSON object, no explanation.`;
 
             const response = await this.openai.chat.completions.create({

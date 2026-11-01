@@ -77,7 +77,24 @@ const TemplateEditor = ({ trackId, clip }) => {
             {kind === 'price-pop' && (<>{text('text')}{text('sub')}{color('color')}</>)}
             {kind === 'logo-card' && (<>
                 {text('label')}{text('sub')}{color('accent')}
+                <label className="block space-y-1">
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.fields.style')}</span>
+                    <select className={field} value={draft.style || 'dark'} onChange={e => commit({ style: e.target.value })}>
+                        <option value="dark">{t('templates.styles.darkCapsule')}</option>
+                        <option value="light">{t('templates.styles.lightCapsule')}</option>
+                    </select>
+                </label>
                 <LogoPicker value={draft.imageAssetId} onPick={(asset) => commit({ imageAssetId: asset?.id || null, imageUrl: asset ? (asset.url || asset.proxyUrl || null) : null })} />
+            </>)}
+            {kind === 'checklist' && (<>
+                {text('items', { multiline: true, rows: 4 })}{color('accent')}{color('color')}
+                <label className="block space-y-1">
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.fields.style')}</span>
+                    <select className={field} value={draft.style || 'card'} onChange={e => commit({ style: e.target.value })}>
+                        <option value="card">{t('templates.styles.standardCard')}</option>
+                        <option value="clean">{t('templates.styles.cleanRows')}</option>
+                    </select>
+                </label>
             </>)}
             {kind === 'code-window' && (<>{text('title')}{text('code', { multiline: true, rows: 6 })}{text('cps', { number: true })}</>)}
             {/* R92: vector shapes */}
@@ -98,6 +115,93 @@ const TemplateEditor = ({ trackId, clip }) => {
             </>)}
             {kind === 'progress-bar' && (<>{text('label')}{text('value', { number: true })}{color('color')}</>)}
             {kind === 'bar-chart' && (<>{text('values')}{text('labels')}{color('color')}{color('accent')}</>)}
+            {kind === 'editing-timeline' && (<>
+                {text('clipCuts')}
+                <div className="grid grid-cols-3 gap-2">{text('videoLabel')}{text('voiceLabel')}{text('sfxLabel')}</div>
+                {text('sfxMarks')}
+                {color('accent')}
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input type="checkbox" checked={Number(draft.muted) === 1} onChange={e => commit({ muted: e.target.checked ? 1 : 0 })} />
+                    {t('templates.fields.muted')}
+                </label>
+            </>)}
+            {kind === 'glass-notification' && (<>
+                {text('name')}{text('message')}{text('time')}
+                <LogoPicker labelKey="avatar" value={draft.imageAssetId} onPick={(asset) => commit({ imageAssetId: asset?.id || null, imageUrl: asset ? (asset.url || asset.proxyUrl || null) : null })} />
+                {color('accent')}
+            </>)}
+            {kind === 'framed-headline' && (<>
+                {text('headline', { multiline: true, rows: 3 })}
+                {text('highlight')}{text('support')}
+                <div className="grid grid-cols-2 gap-2">{color('accent')}{color('color')}</div>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input type="checkbox" checked={Number(draft.sparkles) !== 0} onChange={e => commit({ sparkles: e.target.checked ? 1 : 0 })} />
+                    {t('templates.fields.sparkles')}
+                </label>
+            </>)}
+            {kind === 'phrase-chips' && (<>
+                {text('phrases')}{text('phraseSupport')}
+                <div className="grid grid-cols-2 gap-2">{color('accent')}{color('color')}</div>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input type="checkbox" checked={Number(draft.cycle) !== 0} onChange={e => commit({ cycle: e.target.checked ? 1 : 0 })} />
+                    {t('templates.fields.cycleHighlight')}
+                </label>
+            </>)}
+            {kind === 'editorial-title' && (<>
+                {text('kicker')}{text('headline', { multiline: true, rows: 3 })}
+                {text('emphasis')}{text('phraseSupport')}
+                <div className="grid grid-cols-2 gap-2">{color('accent')}{color('color')}</div>
+                <label className="block space-y-1">
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.fields.mark')}</span>
+                    <select className={field} value={draft.mark || 'underline'} onChange={e => commit({ mark: e.target.value })}>
+                        <option value="underline">{t('templates.styles.underline')}</option>
+                        <option value="strike">{t('templates.styles.strike')}</option>
+                        <option value="none">{t('templates.styles.noMark')}</option>
+                    </select>
+                </label>
+            </>)}
+            {kind === 'halftone-title' && (<>
+                {text('headline', { multiline: true, rows: 2 })}
+                <div className="grid grid-cols-2 gap-2">{color('color')}{color('patternColor')}</div>
+                {color('accent')}
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input type="checkbox" checked={Number(draft.frame) !== 0} onChange={e => commit({ frame: e.target.checked ? 1 : 0 })} />
+                    {t('templates.fields.frame')}
+                </label>
+            </>)}
+            {kind === 'kinetic-word-cards' && (<>
+                {text('words', { multiline: true, rows: 3 })}
+                <div className="grid grid-cols-2 gap-2">{color('accent')}{color('color')}</div>
+            </>)}
+            {kind === 'word-cycle' && (<>
+                {text('prefix')}{text('words')}{text('suffix')}
+                {text('fontSize', { number: true })}
+                <div className="grid grid-cols-2 gap-2">{color('accent')}{color('color2')}</div>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input type="checkbox" checked={Number(draft.gradient) !== 0} onChange={e => commit({ gradient: e.target.checked ? 1 : 0 })} />
+                    {t('templates.fields.gradientText')}
+                </label>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input type="checkbox" checked={Number(draft.glow) !== 0} onChange={e => commit({ glow: e.target.checked ? 1 : 0 })} />
+                    {t('templates.fields.glow')}
+                </label>
+                {Number(draft.glow) !== 0 && text('glowStrength', { number: true })}
+            </>)}
+            {kind === 'search-bar' && (<>
+                {text('query')}{text('placeholder')}
+                <div className="grid grid-cols-2 gap-2">{color('color')}{color('color2')}</div>
+                <label className="block space-y-1">
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.fields.style')}</span>
+                    <select className={field} value={draft.style || 'dark'} onChange={e => commit({ style: e.target.value })}>
+                        <option value="dark">{t('templates.styles.darkCapsule')}</option>
+                        <option value="light">{t('templates.styles.lightCapsule')}</option>
+                    </select>
+                </label>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input type="checkbox" checked={Number(draft.glow) !== 0} onChange={e => commit({ glow: e.target.checked ? 1 : 0 })} />
+                    {t('templates.fields.glow')}
+                </label>
+            </>)}
             {kind === 'icon' && (<>
                 <label className="block space-y-1">
                     <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Illustration</span>
@@ -123,12 +227,12 @@ const TemplateEditor = ({ trackId, clip }) => {
     );
 };
 
-const LogoPicker = ({ value, onPick }) => {
+const LogoPicker = ({ value, onPick, labelKey = 'logo' }) => {
     const { t } = useTranslation('editor');
     const images = useTimelineStore(useShallow(s => (s.assets || []).filter(a => a.type === 'image')));
     return (
         <label className="block space-y-1">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('templates.fields.logo')}</span>
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t(`templates.fields.${labelKey}`)}</span>
             <select className={field} value={value || ''} onChange={e => onPick(images.find(a => a.id === e.target.value) || null)}>
                 <option value="">{t('templates.noLogo')}</option>
                 {images.map(a => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}

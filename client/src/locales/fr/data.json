@@ -75,7 +75,7 @@
         {
           "list": [
             "**Un projet :** supprimez-le depuis votre tableau de bord. Ses fichiers sources, aperçus et exports sont supprimés avec lui, sauf si un autre de vos projets utilise le même fichier.",
-            "**Votre compte :** supprimez-le depuis la [page compte](/auth). Tous les fichiers et enregistrements qui y sont liés sont effacés, de manière définitive.",
+            "**Votre compte :** supprimez-le depuis la [page compte](/account). Tous les fichiers et enregistrements qui y sont liés sont effacés, de manière définitive.",
             "**Votre profil de style :** consultez-le, téléchargez-le ou réinitialisez-le sur [Votre style](/style).",
             "**Une copie de toutes vos données :** écrivez à [{{email}}](mailto:{{email}}), nous vous l'enverrons sous un mois."
           ]

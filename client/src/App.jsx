@@ -8,7 +8,6 @@ import DataPage from './pages/DataPage';
 import GdprPage from './pages/GdprPage';
 import AuthPage from './pages/AuthPage';
 import PrivacyPage from './pages/PrivacyPage';
-import AboutPage from './pages/AboutPage';
 import SuccessPage from './pages/SuccessPage';
 import CookiePolicyPage from './pages/CookiePolicyPage';
 import UserStylePage from './pages/UserStylePage';
@@ -62,7 +61,6 @@ function App() {
                 <Route path="/data"     element={<DataPage />} />
                 <Route path="/gdpr"     element={<GdprPage />} />
                 <Route path="/privacy"  element={<PrivacyPage />} />
-                <Route path="/about"    element={<AboutPage />} />
                 <Route path="/success"       element={<SuccessPage />} />
                 <Route path="/cookie-policy" element={<CookiePolicyPage />} />
                 <Route path="/terms"         element={<TermsPage />} />

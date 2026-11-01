@@ -302,7 +302,7 @@
             "give instructions on what should happen to your data after your death."
           ]
         },
-        "Several of these are available directly in the app: delete a project from the dashboard, delete your account from the [account page](/auth), manage your style profile on [Your style](/style), unsubscribe from the link in any product email, and change your cookie choice from the footer. For anything else, write to [{{email}}](mailto:{{email}}). We reply within one month. We may ask you to confirm your identity if we have a reasonable doubt about it.",
+        "Several of these are available directly in the app: delete a project from the dashboard, delete your account from the [account page](/account), manage your style profile on [Your style](/style), unsubscribe from the link in any product email, and change your cookie choice from Cookie settings in the footer. For anything else, write to [{{email}}](mailto:{{email}}). We reply within one month. We may ask you to confirm your identity if we have a reasonable doubt about it.",
         "If you think we have not handled your data properly, you can lodge a complaint with the CNIL, the French data protection authority: [www.cnil.fr](https://www.cnil.fr), 3 place de Fontenoy, TSA 80715, 75334 Paris Cedex 07. We would appreciate the chance to sort it out with you first."
       ]
     },

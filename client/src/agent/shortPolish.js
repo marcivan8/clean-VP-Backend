@@ -485,6 +485,28 @@ function styleAwareKindPlan(style) {
         plan.list.graphics = ['ui-card', 'checklist', 'step-card', 'process-flow'];
         plan.product.graphics = ['ui-card', 'screenshot-card', 'video-thumbnail'];
     }
+    if (/social proof|analytics|creator metrics|engagement|kpi|scorecard/.test(motifs)) {
+        // stat-grid is a multi-column card whose large default footprint can
+        // collide with captions in a vertical edit. Prefer the compact KPI
+        // callout for a single spoken number; it remains readable in a safe
+        // zone and gives the planner room to add richer multi-stat grids only
+        // when the transcript actually supplies several values.
+        plan.stat.graphics = ['kpi-stat-callout', 'data-counter', 'stat-grid', 'donut-chart'];
+        plan.quote.graphics = ['comment-bubble', 'quote-card', 'reply-thread'];
+        plan.cta.graphics = ['social-notification', 'engagement-counter', 'cta-banner'];
+    }
+    if (/comment|direct message|dm interface|chat|inbox|notification/.test(motifs)) {
+        plan.quote.graphics = ['comment-bubble', 'dm-bubble', 'reply-thread', 'quote-card'];
+        plan.cta.graphics = ['social-notification', 'dm-bubble', 'cta-banner'];
+    }
+    if (/evidence board|archive|polaroid|document|resource|product page|screenshot/.test(motifs)) {
+        plan.product.graphics = ['screenshot-card', 'video-thumbnail', 'ui-card', 'profile-portrait'];
+        plan.list.graphics = ['step-card', 'checklist', 'ui-card'];
+    }
+    if (/split screen|debate|two speakers|versus|comparison/.test(motifs)) {
+        plan.contrast.graphics = ['split-label', 'comparison-card', 'h-bar-chart'];
+        plan.contrast.layouts = ['split', 'card'];
+    }
     if (/phone|mobile|instagram|reel interface|social app/.test(motifs)) {
         plan.list.graphics = ['screenshot-card', 'ui-card', 'step-card'];
         plan.product.graphics = ['screenshot-card', 'video-player', 'ui-card'];
@@ -525,7 +547,11 @@ function phoneScreenFrame(placement, frame) {
         h: deviceH * 0.89,
         focusX: 0.5,
         focusY: 0.5,
-        preset: 'cover',
+        // The compositor recognizes these layout presets when deciding
+        // whether to crop media into an explicit frame. `cover` describes
+        // the fit mode, not a frame preset, so use the supported PiP frame
+        // marker and let the compositor carry cover through `fit`.
+        preset: 'pip',
     };
 }
 
@@ -601,7 +627,7 @@ function addAutoStoryboard(tracks, { words, events, duration, aspectRatio, hookS
                 source: 'template', id: 'profile-portrait', preset: null,
                 params: { imageUrl: asset.url || asset.proxyUrl || asset.sourceUrl || asset.src, name: '', handle: '', ring: 0, shape: 'rounded', theme: style?.surface || 'dark' },
                 start: base.start, duration: Math.min(base.duration, 2.8),
-                ...positions[index], scale: 0.42, graphic: 'profile-portrait', layout: 'pip', beatId: `${base.beatId}-portrait-${index}`,
+                    ...positions[index], scale: 0.42, graphic: 'profile-portrait', layout: 'pip', beatId: `${base.beatId}-portrait-${index}`,
             }));
         }
     }
@@ -700,7 +726,16 @@ function addAutoStoryboard(tracks, { words, events, duration, aspectRatio, hookS
             template: { kind: placement.id, params },
             ...(size ? { metadata: { resolution: { w: size.w, h: size.h } } } : {}),
             start: placement.start, duration: placement.duration,
-            x: placement.x, y: placement.y, scale: placement.scale || 1, rotation: 0, opacity: 1,
+            x: placement.x, y: placement.y,
+            // Keep Auto storyboard sizing identical to addTemplateClip():
+            // QA measures the intended width as TEMPLATE_WIDTH_FRACTION ×
+            // placement.scale. The compositor's base is 25% of the frame, so
+            // translate that intended width into its scale convention here.
+            // Without this conversion, scene templates silently render at
+            // 25% regardless of their designed width.
+            scale: (TEMPLATE_WIDTH_FRACTION[placement.id] || 0.5)
+                * (Number(placement.scale) > 0 ? placement.scale : 1) / 0.25,
+            rotation: 0, opacity: 1,
         };
         Object.assign(clip, applyPresetToClip(clip, 'stkr-float-up', { intensity: 0.28 }));
         track.clips.push(clip);

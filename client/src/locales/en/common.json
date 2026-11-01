@@ -2,7 +2,6 @@
   "nav": {
     "product": "Product",
     "brain": "Editorial Brain",
-    "about": "About",
     "logIn": "Log in",
     "startFree": "Start free",
     "account": "Dashboard",
@@ -34,10 +33,8 @@
   "footer": {
     "tagline": "The creative operating system for modern storytellers, editors and studios.",
     "gdpr": "Projects and accounts stored in Switzerland and the EU",
-    "company": "Company",
     "legal": "Legal",
     "links": {
-      "about": "About",
       "privacyPolicy": "Privacy Policy",
       "cookiePolicy": "Cookie Policy",
       "yourData": "Your data",
@@ -68,7 +65,7 @@
   },
   "consent": {
     "title": "Cookies and optional tools",
-    "body": "We only use what is needed to run Vibed, plus two optional tools. Both are off until you turn them on.",
+    "body": "Essential storage keeps Vibed working. Error replay and usage analytics are optional, separately controlled, and off until you choose them. You can change or withdraw your choice at any time in Cookie settings.",
     "replay": {
       "title": "Error replay",
       "body": "When the editor hits an error, a short replay of the screen helps us fix it. Text, images and video are hidden."

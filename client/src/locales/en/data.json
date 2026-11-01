@@ -75,7 +75,7 @@
         {
           "list": [
             "**A project:** delete it from your dashboard. Its source files, previews and exports are removed with it, unless another of your projects uses the same file.",
-            "**Your account:** delete it from the [account page](/auth). Every file and record linked to it is removed, and the action cannot be undone.",
+            "**Your account:** delete it from the [account page](/account). Every file and record linked to it is removed, and the action cannot be undone.",
             "**Your style profile:** view, download or reset it on [Your style](/style).",
             "**A copy of everything we hold:** write to [{{email}}](mailto:{{email}}) and we will send it within one month."
           ]
