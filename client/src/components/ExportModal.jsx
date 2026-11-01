@@ -131,9 +131,14 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
     // ── Shared styles ──────────────────────────────────────────────────────────
 
     const overlay = {
-        position: 'fixed', inset: 0, zIndex: 50,
+        // Keep the export flow above the editor chrome. The player controls
+        // and timeline playhead use z-index 60, which otherwise painted over
+        // this dialog and obscured its resolution and export controls.
+        position: 'fixed', inset: 0, zIndex: 2000,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'rgba(0,0,0,0.72)',
+        // The export flow should feel separate from the editor. An opaque
+        // scrim keeps the timeline and player out of view while exporting.
+        background: 'rgba(7,8,10,0.98)',
         backdropFilter: 'blur(12px)',
         WebkitBackdropFilter: 'blur(12px)',
     };
