@@ -52,9 +52,11 @@ export function splitClipAtSpeakerSegments(clip, segments) {
         cursor = end;
     }
     if (cursor < sourceEnd - EPS) {
-        const previous = spans[spans.length - 1]?.segment;
-        const gapSegment = sourceEnd - cursor <= HOLD_ANGLE_GAP ? previous : null;
-        spans.push({ start: cursor, end: sourceEnd, segment: gapSegment });
+        // Return to the wide composition at the clip tail. The short-gap hold
+        // applies between detected turns, where it avoids a flash to wide;
+        // extending a close-up through the trailing silence changes the
+        // established timeline contract and can leave the final frame cropped.
+        spans.push({ start: cursor, end: sourceEnd, segment: null });
     }
     if (!spans.length) return [];
 
