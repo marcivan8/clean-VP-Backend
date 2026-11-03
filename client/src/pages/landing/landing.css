@@ -78,6 +78,15 @@
   max-width: 1320px;
   margin: 0 auto;
 }
+.vibed-landing .vl-mid-cta { padding: 0 80px; }
+.vibed-landing .vl-mid-cta-card { padding: 64px 56px; }
+.vibed-landing .vl-final-cta { padding: 120px 80px 128px; }
+.vibed-landing .vl-craft-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.vibed-landing .vl-preview-wrap { box-sizing: border-box; width: 100%; }
 .vibed-landing .landing-footer-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -226,6 +235,20 @@
 @media (max-width: 860px) {
   .vibed-landing .landing-footer-grid { gap: 32px; }
   .vibed-landing .landing-footer-legal-links { column-gap: 24px; }
+  .vibed-landing .vl-mid-cta { padding: 0 20px !important; }
+  .vibed-landing .vl-mid-cta-card { padding: 38px 20px !important; border-radius: 22px !important; }
+  .vibed-landing .vl-trust-bar { padding: 32px 20px !important; }
+  .vibed-landing .vl-trust-bar .vl-wrap { gap: 18px 24px !important; justify-content: flex-start !important; }
+  .vibed-landing .vl-final-cta { padding: 80px 20px !important; }
+  .vibed-landing .vl-final-cta .vl-h1 { max-width: 100% !important; font-size: clamp(32px, 8vw, 38px); }
+  .vibed-landing .vl-mid-cta .vl-h2 { font-size: clamp(26px, 7vw, 34px); }
+  .vibed-landing .vl-craft-grid { grid-template-columns: 1fr; }
+  .vibed-landing .vl-hero-layout { width: 100%; gap: 32px !important; }
+  .vibed-landing .vl-hero-copy { flex-basis: 100% !important; }
+  .vibed-landing .vl-preview-wrap { flex: 1 1 100% !important; padding: 36px 0 10px !important; }
+  .vibed-landing .vl-btn { max-width: 100%; white-space: normal; }
+  .vibed-landing .vl-mid-cta .vl-canvas-host,
+  .vibed-landing .vl-final-cta .vl-canvas-host { display: none; }
   .vibed-landing .vl-sec {
     padding: 68px 22px;
   }
@@ -267,7 +290,7 @@
 @media (max-width: 860px) {
     .vibed-landing .landing-footer-grid { grid-template-columns: 1fr; }
     .vibed-landing .landing-footer-legal-links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .vibed-landing .vl-craft-grid { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+    .vibed-landing .vl-craft-grid { grid-template-columns: 1fr; }
     .vibed-landing .vl-sec { padding: 72px 20px; }
     .vibed-landing .vl-h1 { font-size: 38px; }
     .vibed-landing .vl-h2 { font-size: 28px; }

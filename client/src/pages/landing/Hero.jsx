@@ -21,7 +21,7 @@ const PreviewCard = () => {
     const { t } = useTranslation('landing');
 
     return (
-        <div style={{ flex: '1 1 440px', minWidth: 0, position: 'relative', padding: '40px 10px 10px 40px', zIndex: 2 }}>
+        <div className="vl-preview-wrap" style={{ flex: '1 1 440px', minWidth: 0, position: 'relative', padding: '40px 10px 10px 40px', zIndex: 2 }}>
             <div
                 className="vl-tilt"
                 style={{
@@ -177,11 +177,11 @@ const Hero = () => {
                 }}
             />
 
-            <div className="vl-wrap" style={{
+            <div className="vl-wrap vl-hero-layout" style={{
                 display: 'flex', gap: 64, flexWrap: 'wrap', alignItems: 'center',
                 position: 'relative', zIndex: 1,
             }}>
-                <div style={{ flex: '1 1 520px', minWidth: 0 }}>
+                <div className="vl-hero-copy" style={{ flex: '1 1 520px', minWidth: 0 }}>
                     <h1 className="vl-h1">
                         {t('v2.hero.headline').split('\n').map((line, i, arr) => (
                             <React.Fragment key={line}>

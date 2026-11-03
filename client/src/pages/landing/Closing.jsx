@@ -10,11 +10,11 @@ export const MidCta = () => {
     const { t } = useTranslation('landing');
 
     return (
-        <section style={{ background: 'var(--vl-bg)', padding: '0 80px' }}>
+        <section className="vl-mid-cta" style={{ background: 'var(--vl-bg)' }}>
             <div className="vl-wrap" style={{ padding: 0 }}>
-                <div style={{
+                <div className="vl-mid-cta-card" style={{
                     position: 'relative', overflow: 'hidden', borderRadius: 28,
-                    padding: '64px 56px', textAlign: 'center',
+                    textAlign: 'center',
                     background: 'linear-gradient(135deg, rgba(0,229,255,0.07), rgba(138,43,226,0.07))',
                     border: '1px solid rgba(255,255,255,0.12)',
                 }}>
@@ -62,9 +62,7 @@ export const CraftGrid = () => {
                 <h2 className="vl-h2" style={{ maxWidth: 700 }}>{t('v2.craft.title')}</h2>
                 <p className="vl-lead" style={{ maxWidth: 600, marginBottom: 56 }}>{t('v2.craft.lead')}</p>
 
-                <div className="vl-craft-grid" style={{
-                    display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 20,
-                }}>
+                <div className="vl-craft-grid">
                     {CRAFT.map((c) => (
                         <div key={c.key} className="vl-card vl-card-hover" style={{ padding: 30, borderRadius: 18 }}>
                             <span style={{
@@ -102,7 +100,7 @@ export const TrustBar = () => {
     const { t } = useTranslation('landing');
 
     return (
-        <section style={{
+        <section className="vl-trust-bar" style={{
             background: 'var(--vl-bg)', padding: '42px 80px',
             borderTop: '1px solid rgba(255,255,255,0.07)',
             borderBottom: '1px solid rgba(255,255,255,0.07)',
@@ -302,9 +300,9 @@ export const FinalCtaV2 = () => {
     const { t } = useTranslation('landing');
 
     return (
-        <section style={{
+        <section className="vl-final-cta" style={{
             position: 'relative', overflow: 'hidden',
-            background: 'var(--vl-bg-2)', padding: '120px 80px 128px', textAlign: 'center',
+            background: 'var(--vl-bg-2)', textAlign: 'center',
         }}>
             <CtaObject className="vl-canvas-host vl-drift" style={{
                 position: 'absolute', bottom: 40, right: '7%',
