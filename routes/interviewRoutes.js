@@ -2175,9 +2175,8 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
                 return res.status(400).json({ error: 'No usable speech segments found in words array.' });
             }
 
-            // Longer edits open and close wide, with mid/close angles in the
-            // body. A two-chunk edit uses wide then close so a short podcast
-            // still gets a real angle change.
+            // Spoken chunks use mid/close framing when a face anchor exists;
+            // the timeline splitter supplies wide shots for longer pauses.
             const soloSegments = [];
             let cycleIdx = 0;
 
@@ -2187,11 +2186,6 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
                     : 'wide';
                 if (i !== 0 && i !== chunks.length - 1) {
                     cycleIdx++;
-                    // Keep the penultimate chunk at mid when the final chunk is
-                    // also mid, avoiding a close-to-mid snap at the tail.
-                    if (i === chunks.length - 2 && angle === 'close') {
-                        angle = 'mid';
-                    }
                 }
                 const cam     = SOLO_CAMERAS[angle];
                 const crop    = scaleToCrop(cam);

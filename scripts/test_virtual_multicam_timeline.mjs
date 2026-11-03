@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { splitClipAtSpeakerSegments } from '../client/src/agent/virtualMulticamTimeline.js';
 const require = createRequire(import.meta.url);
-const { useWideDuoBoundary, soloAngleForChunk } = require('../routes/virtualMulticamAngles.js');
+const { soloAngleForChunk } = require('../routes/virtualMulticamAngles.js');
 
 const camera = (angle, start, end) => ({
     angle, start, end, speaker: `SPEAKER_${angle}`,
@@ -51,13 +51,16 @@ assert.deepEqual(splitClipAtSpeakerSegments(
 const engine = readFileSync(new URL('../client/src/agent/MediaExecutionEngine.js', import.meta.url), 'utf8');
 assert.match(engine, /splitClipAtSpeakerSegments\(clip, clipSegs\)/, 'virtual_multicam must use the tested source-to-timeline splitter');
 const route = readFileSync(new URL('../routes/interviewRoutes.js', import.meta.url), 'utf8');
-assert.match(route, /useWideDuoBoundary\(i, rawSegments\.length\)/, 'duo angle planning must keep short dialogue edits from forcing every turn wide');
+assert.match(route, /if \(dur < MIN_CLOSE_DUR\)/, 'only very brief duo interjections should remain wide');
+assert.match(route, /angle = hasReliableDuoSides \? \(speakerCam\[seg\.speaker\] \|\| 'wide'\) : 'wide'/, 'spoken turns should use their speaker crop when positions are known and stay safe-wide otherwise');
+assert.match(route, /fallbackDuoCamera = \{ scale: 1\.00, x: 0, y: 0 \}/, 'unknown duo positions must not use a guessed center punch-in');
+assert.match(route, /angle = soloAnchor[\s\S]*?soloAngleForChunk\(i, chunks\.length, cycleIdx\)/, 'solo speech should use face-anchored mid/close angles');
 assert.match(route, /soloAngleForChunk\(i, chunks\.length, cycleIdx\)/, 'solo angle planning must use the tested turn-count policy');
-assert.equal(useWideDuoBoundary(0, 2), false, 'two speaker turns must be eligible for close-up crops');
-assert.equal(useWideDuoBoundary(1, 2), false);
-assert.equal(useWideDuoBoundary(0, 3), true, 'longer interviews keep their establishing wide shot');
-assert.equal(useWideDuoBoundary(2, 3), true, 'longer interviews keep their closing wide shot');
-assert.equal(soloAngleForChunk(0, 2), 'wide');
+assert.doesNotMatch(route, /useWideDuoBoundary/, 'spoken duo bookends must not be forced wide');
+assert.equal(soloAngleForChunk(0, 1), 'mid', 'a continuous solo speaker turn should receive a speaker crop');
+assert.equal(soloAngleForChunk(0, 2), 'mid');
 assert.equal(soloAngleForChunk(1, 2), 'close', 'a two-chunk single-person podcast must create an actual close-up');
+assert.equal(soloAngleForChunk(0, 3), 'mid');
 assert.equal(soloAngleForChunk(1, 3), 'close');
+assert.equal(soloAngleForChunk(2, 3), 'mid');
 console.log('ALL VIRTUAL MULTICAM TIMELINE TESTS PASSED');
