@@ -82,10 +82,65 @@ export const CAPTION_STYLES = [
         style: 'italic',    color: '#F5E6D3', stroke: null,
         textShadow: '0 2px 16px rgba(0,0,0,0.85)', transform: 'none', sample: 'grace',
     },
+    {
+        id: 'creator-pop', name: 'Creator Pop', font: 'Boogaloo', weight: 700,
+        fontLabel: 'Boogaloo Bold', tag: 'Social / Playful',
+        color: '#FFFFFF', stroke: { width: 1.5, color: '#141414' },
+        textShadow: '0 2px 8px rgba(0,0,0,0.65)', transform: 'none', sample: 'Hey!',
+    },
+    {
+        id: 'social-clean', name: 'Social Clean', font: 'Roboto', weight: 700,
+        fontLabel: 'Roboto Bold', tag: 'Reels / Universal',
+        color: '#FFFFFF', stroke: null, textShadow: '0 2px 8px rgba(0,0,0,0.7)',
+        transform: 'none', sample: 'Make it simple',
+    },
+    {
+        id: 'punchy-condensed', name: 'Punchy Condensed', font: 'Teko', weight: 700,
+        fontLabel: 'Teko Bold', tag: 'Hooks / Sports',
+        color: '#FFFFFF', stroke: { width: 1.5, color: '#111111' },
+        textShadow: '0 2px 8px rgba(0,0,0,0.7)', transform: 'uppercase', sample: 'NO EXCUSES',
+    },
+    {
+        id: 'storyteller', name: 'Storyteller', font: 'Kalam', weight: 700,
+        fontLabel: 'Kalam Bold', tag: 'Personal / Warm',
+        color: '#FFF8E8', stroke: null, textShadow: '0 2px 8px rgba(0,0,0,0.7)',
+        transform: 'none', sample: 'A little story',
+    },
+    {
+        id: 'creator-minimal', name: 'Creator Minimal', font: 'DM Sans', weight: 700,
+        fontLabel: 'DM Sans Bold', tag: 'Clean / Modern',
+        color: '#FFFFFF', stroke: null, textShadow: '0 2px 8px rgba(0,0,0,0.72)',
+        transform: 'none', sample: 'Here is why',
+    },
+    {
+        id: 'friendly-round', name: 'Friendly Round', font: 'Quicksand', weight: 700,
+        fontLabel: 'Quicksand Bold', tag: 'Lifestyle / Beauty',
+        color: '#FFFFFF', stroke: null, textShadow: '0 2px 8px rgba(0,0,0,0.7)',
+        transform: 'none', sample: 'You got this',
+    },
+    {
+        id: 'brand-block', name: 'Brand Block', font: 'Black Han Sans', weight: 700,
+        fontLabel: 'Black Han Sans', tag: 'Big / Bold',
+        color: '#FFFFFF', stroke: { width: 2, color: '#101014' },
+        textShadow: '0 3px 10px rgba(0,0,0,0.7)', transform: 'uppercase', sample: 'GO BIG',
+    },
+    {
+        id: 'mono-tech-caption', name: 'Mono Tech', font: 'JetBrains Mono', weight: 700,
+        fontLabel: 'JetBrains Mono Bold', tag: 'Tech / Tutorial',
+        color: '#B9F7D4', stroke: null, textShadow: '0 0 10px rgba(16,185,129,0.5)',
+        transform: 'none', sample: 'step_01',
+    },
+    {
+        id: 'bootzy-caption', name: 'Bootzy Impact', font: 'Bootzy TM', weight: 400,
+        fontLabel: 'Bootzy TM', tag: 'Social / Bold',
+        color: '#FFFFFF', stroke: { width: 1.5, color: '#111111' },
+        textShadow: '0 2px 8px rgba(0,0,0,0.7)', transform: 'none', sample: 'MAKE IT COUNT',
+    },
 ];
 
 export const FONT_STACK = (font) =>
     font === 'Caveat' ? `"${font}", cursive`
+    : font === 'JetBrains Mono' ? `"${font}", monospace`
     : (font === 'Playfair Display' || font === 'Cormorant Garamond') ? `"${font}", serif`
     : `"${font}", sans-serif`;
 

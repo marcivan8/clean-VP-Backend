@@ -323,6 +323,11 @@ function drawState(Canvas, entry, state, opts) {
         : parseAllTextShadows(raster.textShadow).reverse();
 
     const placedWords = [];
+    const captionBackground = entry.style.backgroundColor
+        ? cssColor(entry.style.backgroundColor, null)
+        : null;
+    const backgroundPadX = Math.max(0, Number(entry.style.backgroundPadding) || 0) * fontPx;
+    const backgroundPadY = Math.max(0.04, (Number(entry.style.backgroundPadding) || 0) * 0.55) * fontPx;
     lines.forEach((line, li) => {
         let lineX;
         if (align === 'left') lineX = pad;
@@ -330,6 +335,21 @@ function drawState(Canvas, entry, state, opts) {
         else lineX = pad + (maxWidth - line.width) / 2;
         const top = pad + li * lh;
         const baseline = top + halfLeading + ascentPx;
+        if (captionBackground && line.width > 0) {
+            const bx = lineX - backgroundPadX;
+            const by = top + halfLeading - backgroundPadY;
+            const bw = line.width + backgroundPadX * 2;
+            const bh = contentPx + backgroundPadY * 2;
+            const radius = Math.min(fontPx * 0.06, bh / 2, bw / 2);
+            ctx.fillStyle = captionBackground;
+            if (typeof ctx.roundRect === 'function') {
+                ctx.beginPath();
+                ctx.roundRect(bx, by, bw, bh, radius);
+                ctx.fill();
+            } else {
+                ctx.fillRect(bx, by, bw, bh);
+            }
+        }
         for (const it of line.items) {
             placedWords.push({
                 ...it,

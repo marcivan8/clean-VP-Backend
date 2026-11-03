@@ -681,12 +681,13 @@ const FONT_SPECS = {
     'DM Sans':            { file: 'DMSans-Regular.ttf',            slug: 'dm-sans',            weight: 400, subset: 'latin' },
     'Unbounded':          { file: 'Unbounded-Regular.ttf',         slug: 'unbounded',          weight: 400, subset: 'latin' },
     'JetBrains Mono':     { file: 'JetBrainsMono-Regular.ttf',     slug: 'jetbrains-mono',     weight: 400, subset: 'latin' },
+    'Bootzy TM':          { file: 'BootzyTM.ttf',                  slug: 'bootzy-tm',          weight: 400, subset: 'latin' },
 };
 
 /**
  * Download a font TTF to `destPath` if not already present.
  *
- * All 36 fonts in FONT_SPECS are now committed as real .ttf files directly in
+ * All fonts in FONT_SPECS are committed as real .ttf files directly in
  * client/public/fonts/ (see CLAUDE.md EXT2 + the Dockerfile's font-presence
  * check), so in practice this function's existsSync guard below returns
  * immediately and nothing past it ever runs. It only matters as a defensive
@@ -810,6 +811,52 @@ function getResolutionDimensions(aspectRatio, tier) {
     // FFmpeg's yuv420p output requires even width/height.
     const roundEven = (n) => Math.round(n * scale / 2) * 2;
     return { width: roundEven(ref.width), height: roundEven(ref.height) };
+}
+
+/** FFmpeg equivalents for the CSS effects used by the editor's timeline shelf. */
+function compileTimelineVisualEffects(effects = []) {
+    const filters = [];
+    for (const effect of Array.isArray(effects) ? effects : []) {
+        if (!effect || effect.enabled === false) continue;
+        switch (effect.id) {
+            case 'warm-film': filters.push('colorbalance=rs=.04:gs=.015:bs=-.035', 'eq=saturation=1.18:contrast=1.06'); break;
+            case 'vivid': filters.push('eq=saturation=1.45:contrast=1.08'); break;
+            case 'noir': filters.push('hue=s=0', 'eq=contrast=1.22'); break;
+            case 'dreamy': filters.push('eq=brightness=0.08:saturation=0.88', 'boxblur=0.3:1'); break;
+            case 'soft-contrast': filters.push('eq=brightness=-0.03:contrast=1.06'); break;
+            case 'cool-tone': filters.push('hue=h=12:s=0.92', 'eq=contrast=1.04'); break;
+            case 'soft-focus': filters.push('boxblur=0.5:1', 'eq=saturation=0.92'); break;
+            case 'bright-pop': filters.push('eq=brightness=0.12:saturation=1.24'); break;
+            case 'golden-hour': filters.push('colorbalance=rs=.04:gs=.02:bs=-.04', 'eq=brightness=0.04:saturation=1.3'); break;
+            case 'cinematic': filters.push('eq=contrast=1.16:saturation=0.86:brightness=-0.02'); break;
+            case 'matte': filters.push('eq=contrast=0.88:brightness=0.05:saturation=0.9'); break;
+            case 'high-contrast': filters.push('eq=contrast=1.34:saturation=1.08'); break;
+            case 'sepia': filters.push('colorchannelmixer=rr=.393:rg=.769:rb=.189:gr=.349:gg=.686:gb=.168:br=.272:bg=.534:bb=.131', 'eq=saturation=0.9'); break;
+            case 'mono': filters.push('hue=s=0'); break;
+            case 'blue-mono': filters.push('hue=s=0', 'colorbalance=bs=.12:rs=-.04'); break;
+            case 'teal-shift': filters.push('hue=h=155:s=0.78'); break;
+            case 'rose-toned': filters.push('colorbalance=rs=.06:gs=-.025:bs=.02', 'eq=saturation=1.18'); break;
+            case 'sunset': filters.push('colorbalance=rs=.08:gs=.015:bs=-.06', 'eq=saturation=1.42'); break;
+            case 'faded-film': filters.push('eq=contrast=0.82:saturation=0.78:brightness=0.05'); break;
+            case 'crisp': filters.push('eq=contrast=1.18:saturation=1.08'); break;
+            case 'moody': filters.push('eq=brightness=-0.08:contrast=1.18:saturation=0.82'); break;
+            case 'shadow-lift': filters.push('eq=brightness=0.08:contrast=0.9'); break;
+            case 'bright-airy': filters.push('eq=brightness=0.12:contrast=0.92:saturation=0.9'); break;
+            case 'cool-night': filters.push('hue=h=18:s=0.82', 'eq=brightness=-0.1'); break;
+            case 'warm-shadow': filters.push('colorbalance=rs=.04:gs=.015:bs=-.025', 'eq=brightness=-0.04:contrast=1.08'); break;
+            case 'soft-warm': filters.push('colorbalance=rs=.035:gs=.012:bs=-.025', 'eq=brightness=0.03:saturation=0.92'); break;
+            case 'vintage': filters.push('colorchannelmixer=rr=.393:rg=.769:rb=.189:gr=.349:gg=.686:gb=.168:br=.272:bg=.534:bb=.131', 'eq=contrast=0.92:saturation=0.78'); break;
+            case 'washed': filters.push('eq=brightness=0.06:contrast=0.78:saturation=0.78'); break;
+            case 'punchy': filters.push('eq=contrast=1.24:saturation=1.34'); break;
+            case 'pastel': filters.push('eq=saturation=0.72:brightness=0.06:contrast=0.88'); break;
+            case 'amber': filters.push('colorbalance=rs=.05:gs=.02:bs=-.04', 'eq=saturation=1.22'); break;
+            case 'aqua': filters.push('hue=h=155:s=1.18', 'eq=brightness=0.02'); break;
+            case 'lavender': filters.push('hue=h=265:s=0.78', 'eq=brightness=0.03'); break;
+            case 'sports': filters.push('eq=contrast=1.22:saturation=1.3:brightness=0.02'); break;
+            default: break;
+        }
+    }
+    return filters;
 }
 
 // ─── Main job handler ─────────────────────────────────────────────────────────
@@ -1421,6 +1468,10 @@ module.exports = async function processExportJob(job) {
                     console.log(`  [camera] clip "${clip.name}": animated zoom/pan (${scaleKfs?.length || 0} scale, ${(panX?.length || 0) + (panY?.length || 0)} pan keyframes)`);
                 }
             }
+
+            // Timeline effect cards are stored on clips and mirror the live CSS
+            // preview with supported FFmpeg filter approximations.
+            vFilters.push(...compileTimelineVisualEffects(clip.effects));
 
             // Colour grade LAST, so it grades the final composed frame rather
             // than an intermediate one — after rotation correction, crop,

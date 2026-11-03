@@ -29,7 +29,20 @@ export function getClipDropStart({
 export function createClipCollisionDetection({ pointerWithin, rectIntersection }) {
     return (args) => {
         const active = args?.active;
-        if (!active?.data?.current?.clip) return rectIntersection(args);
+        const activeData = active?.data?.current;
+        if (!activeData?.clip) {
+            const pointerHits = pointerWithin(args);
+            if (!pointerHits.length) return rectIntersection(args);
+            if (activeData?.type === 'timeline-transition') {
+                const cut = pointerHits.find(hit => hit.data?.droppableContainer?.data?.current?.type === 'transition-cut');
+                if (cut) return [cut];
+            }
+            if (activeData?.type === 'timeline-effect') {
+                const clip = pointerHits.find(hit => String(hit.id).startsWith('drop-clip-'));
+                if (clip) return [clip];
+            }
+            return pointerHits;
+        }
 
         const containers = args.droppableContainers.filter((container) => {
             if (container.id === `drop-clip-${active.id}`) return false;

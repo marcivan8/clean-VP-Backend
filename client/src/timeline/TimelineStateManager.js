@@ -945,6 +945,7 @@ export class TimelineStateManager {
                         grading: clip.grading,
                         filter: clip.filter,
                         filterIntensity: clip.filterIntensity,
+                        effects: Array.isArray(clip.effects) ? clip.effects : [],
                         transition: clip.transition,
                         keyframes: clip.keyframes,
                         // Text / overlay properties
@@ -1142,6 +1143,7 @@ export class TimelineStateManager {
                                 grading: legacyClip.grading,
                                 filter: legacyClip.filter,
                                 filterIntensity: legacyClip.filterIntensity,
+                                effects: Array.isArray(legacyClip.effects) ? legacyClip.effects : [],
                                 transition: legacyClip.transition,
                                 // Virtual multicam crop metadata
                                 virtualCam: legacyClip.virtualCam,

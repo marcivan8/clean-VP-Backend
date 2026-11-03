@@ -56,6 +56,7 @@ import { placementsFor, paramsFor } from '../motion/StoryboardBridge.js';
 import { inspect as inspectStoryboard, repair as repairStoryboard } from '../motion/StoryboardQA.js';
 import { subjectFromClips } from '../motion/SceneDirector.js';
 import { resolveFrame } from '../motion/SceneLayout.js';
+import { fitTextToBox } from '../motion/TextMeasurement.js';
 
 const STOP = new Set(('a an the and or but so to of in on at for with is are was were be been it this that these those i you we they he she my your our their me us them ' +
     'just really very like um uh then also do does did have has had will would can could should not no yes if about from as by here ' +
@@ -367,8 +368,11 @@ export function fallbackShortScenePlan(words, {
     timedMoments.sort((a, b) => a.start - b.start);
 
     // Only create a closing card when the speaker actually says a CTA.
+    // A CTA needs an actual invitation. Matching isolated words such as
+    // "comment" or "follow" promoted ordinary transcript phrases (for
+    // example "comment et pourquoi") into a fake end card.
     const close = segments.slice().reverse().find(segment =>
-        /\b(follow|subscribe|share|comment|download|sign up|book|buy|try it|learn more|abonnez-vous|abonne-toi|partagez|partage|commentez|commente|téléchargez|télécharge|inscrivez-vous|inscris-toi|achetez|achète|essayez|essaie|découvrez|découvre|lien en bio)\b/i.test(segment.text)
+        /\b(follow me|follow for more|subscribe(?: now)?|like and subscribe|share this|comment below|leave a comment|drop a comment|download now|sign up|book a call|buy now|try it now|learn more|abonnez-vous|abonne-toi|partagez(?: cette vid[eé]o)?|partage cette vid[eé]o|laissez un commentaire|commentez ci-dessous|commente ci-dessous|t[eé]l[eé]chargez maintenant|inscrivez-vous|inscris-toi|achetez maintenant|ach[eè]te maintenant|essayez maintenant|essaie maintenant|d[eé]couvrez maintenant|d[eé]couvre maintenant|lien en bio)\b/i.test(segment.text)
     );
     if (close && Number(duration) >= 8) {
         const ctaText = close.text.length <= 48 ? close.text : cleanText(close.text.split(/\b(?:and|because|but)\b/i)[0]);
@@ -821,9 +825,32 @@ export function polishShort(built, profile, opts = {}) {
     const want = { title: true, captions: true, camera: true, numbers: true, cuts: true, popOut: !!opts.popOut, ...(opts.layers || {}) };
     const tracks = (built?.tracks || []).map(t => ({ ...t, clips: (t.clips || []).map(c => ({ ...c })) }));
     const duration = Math.max(0.5, Number(built?.duration) || 0);
+    const frame = resolveFrame(built?.aspectRatio || '9:16');
     const words = Array.isArray(opts.words) ? opts.words : [];
-    const moments = (opts.events || []).filter(e => MOMENT_TYPES.has(e?.eventType) && Number(e.timelineTime) >= 0 && Number(e.timelineTime) < duration);
+    const plannedEvents = (Array.isArray(opts.scenePlan?.moments) ? opts.scenePlan.moments : [])
+        .map(moment => ({
+            eventType: moment.kind === 'quote' ? 'PUNCHLINE_DETECTED' : moment.kind === 'stat' ? 'EMPHASIS_MOMENT' : 'REVEAL',
+            timelineTime: Number(moment.start),
+            confidence: 0.65,
+            text: moment.text,
+            source: 'transcript-scene-plan',
+        }));
+    // The local planner already selects transcript-grounded moments, but the
+    // old camera path only read semantic events from the backend. When those
+    // were unavailable it produced zero punch-ins despite having a beat plan.
+    // Merge both evidence sources and deduplicate close beats for restrained,
+    // purposeful framing variation across the whole Reel.
+    const momentCandidates = [...(opts.events || []), ...plannedEvents]
+        .filter(e => MOMENT_TYPES.has(e?.eventType) && Number(e.timelineTime) >= 0 && Number(e.timelineTime) < duration)
+        .sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0) || Number(a.timelineTime) - Number(b.timelineTime));
+    const moments = [];
+    for (const candidate of momentCandidates) {
+        if (moments.some(event => Math.abs(Number(event.timelineTime) - Number(candidate.timelineTime)) < 1.8)) continue;
+        moments.push(candidate);
+    }
+    moments.sort((a, b) => Number(a.timelineTime) - Number(b.timelineTime));
     const applied = [];
+    const captionQa = { checked: false, transcriptWords: 0, captionWords: 0, coverage: 0, issues: [] };
 
     // 1. Hook title: a designed graphic (kicker/headline + a measured
     // accent), composed for the real frame and safe zone rather than a flat
@@ -929,6 +956,8 @@ export function polishShort(built, profile, opts = {}) {
                     safeZone: profile?.safeZone,
                     subject: SYNTHETIC_SPEAKER_SUBJECT,
                     palette: { accent: look.accent, text: look.titleColor },
+                    titleComponent: referenceStyle?.titleComponent,
+                    titlePreset: referenceStyle?.titlePreset,
                 },
             );
             if (designed?.scene) {
@@ -1035,7 +1064,8 @@ export function polishShort(built, profile, opts = {}) {
         const baseFields = stylePackToClipFields(captionPack) || {};
         const fields = referenceStyle ? {
             ...baseFields,
-            ...(referenceStyle.textColor ? { color: referenceStyle.textColor } : {}),
+            ...((referenceStyle.captionTextColor || referenceStyle.textColor)
+                ? { color: referenceStyle.captionTextColor || referenceStyle.textColor } : {}),
             captionStyle: {
                 ...(baseFields.captionStyle || {}),
                 wordHighlight: {
@@ -1062,7 +1092,9 @@ export function polishShort(built, profile, opts = {}) {
 
         let generated = 0;
         if (captionClips.length === 0 && words.length > 0) {
-            const segments = groupWordsIntoSegments(words, 6, 0.4).filter(seg => (seg.start || 0) < duration);
+            // Keep short-form captions scannable: a short spoken phrase is
+            // grouped by both word count and rendered character length.
+            const segments = groupWordsIntoSegments(words, 4, 0.4, { maxChars: 32 }).filter(seg => (seg.start || 0) < duration);
             if (segments.length) {
                 // `short-` prefixed, like the hook title, so a re-run of
                 // polish_short on the main edit replaces this batch instead
@@ -1123,10 +1155,37 @@ export function polishShort(built, profile, opts = {}) {
             if (wordCount > 4 && Number.isFinite(Number(fields.fontSize))) {
                 c.fontSize = Math.round(Number(fields.fontSize) * (wordCount > 7 ? 0.72 : 0.85));
             }
+            const captionText = String(c.content || '').trim();
+            const baseCaptionSize = Number(c.fontSize) || Number(fields.fontSize) || 40;
+            const captionFit = fitTextToBox(captionText, { maxWidth: frame.w * 0.76, maxHeight: frame.h * 0.12 }, {
+                initialFontSize: baseCaptionSize,
+                minFontSize: Math.min(28, baseCaptionSize),
+                fontFamily: c.fontFamily || fields.fontFamily || 'Inter',
+                fontWeight: c.fontWeight || fields.fontWeight || 'normal',
+                lineHeight: 1.12,
+                allowWrap: true,
+            });
+            if (captionFit.width > frame.w * 0.76 + 1 || captionFit.height > frame.h * 0.12 + 1) {
+                captionQa.issues.push({ clipId: c.id, code: 'caption-overflow' });
+            } else {
+                c.fontSize = Math.min(baseCaptionSize, captionFit.fontSize);
+                if (!Array.isArray(c.words) || c.words.length === 0) c.content = captionFit.lines.join('\n');
+            }
+            const wordCountForCoverage = Array.isArray(c.words) && c.words.length
+                ? c.words.length : captionText.split(/\s+/).filter(Boolean).length;
+            captionQa.captionWords += wordCountForCoverage;
+            if (Number(c.y) > 100 - (Number(profile?.safeZone?.bottom) || 0.08) * 100) {
+                captionQa.issues.push({ clipId: c.id, code: 'caption-safe-zone' });
+            }
             const idx = emphasisIndices(c.content, opts.plan?.keywords);
             if (idx.length) c.emphasis = { indices: idx, source: 'auto' };
             styled += 1;
         }
+        captionQa.checked = true;
+        captionQa.transcriptWords = words.filter(w => Number(w.start) < duration).length;
+        captionQa.coverage = captionQa.transcriptWords > 0
+            ? Math.min(1, captionQa.captionWords / captionQa.transcriptWords) : 0;
+        if (captionQa.transcriptWords > 0 && captionClips.length === 0) captionQa.issues.push({ code: 'captions-missing' });
         if (styled) applied.push(generated ? `captions (${styled}, generated from the transcript)` : `captions (${styled})`);
     }
 
@@ -1348,7 +1407,85 @@ export function polishShort(built, profile, opts = {}) {
         if (popped) applied.push('speaker pop-out');
     }
 
-    return { tracks, duration, aspectRatio: built?.aspectRatio || '9:16', applied };
+    const finishQa = repairGeneratedTitleLayout(tracks, built?.aspectRatio || '9:16', profile?.safeZone);
+    if (finishQa.repairs.length) applied.push(`title layout repaired (${finishQa.repairs.length})`);
+
+    return {
+        tracks,
+        duration,
+        aspectRatio: built?.aspectRatio || '9:16',
+        applied,
+        quality: { checked: true, repairs: finishQa.repairs, issues: finishQa.issues, captions: captionQa },
+    };
+}
+
+/**
+ * Render-time preparation for generated title cards. Composed scene clips are
+ * already safe-zone placed, but the final text string can still exceed the
+ * available width once it is flattened into an ordinary timeline clip. Fit
+ * the actual flattened copy here so preview and export receive the same
+ * corrected text, font size, and line breaks.
+ */
+export function repairGeneratedTitleLayout(tracks, aspectRatio = '9:16', safeZone = null) {
+    const frame = resolveFrame(aspectRatio);
+    const maxWidth = frame.w * 0.82;
+    const maxHeight = frame.h * 0.2;
+    const repairs = [];
+    const issues = [];
+
+    for (const track of tracks || []) {
+        if (track?.type !== 'text') continue;
+        const isGeneratedTitleTrack = /^(hook|cta)$/i.test(String(track.name || ''))
+            || String(track.id || '').includes('short-title')
+            || String(track.id || '').includes('short-cta');
+        if (!isGeneratedTitleTrack) continue;
+
+        for (const clip of track.clips || []) {
+            const raw = String(clip?.content || '').trim();
+            if (!raw || !(Number(clip.fontSize) > 0)) continue;
+            const initialSize = Number(clip.fontSize);
+            const fit = fitTextToBox(raw, { maxWidth, maxHeight }, {
+                initialFontSize: initialSize,
+                minFontSize: Math.min(40, initialSize),
+                fontFamily: clip.fontFamily || 'Inter',
+                fontWeight: clip.fontWeight || 'normal',
+                lineHeight: 1.08,
+                allowWrap: true,
+            });
+
+            if (fit.width > maxWidth + 1 || fit.height > maxHeight + 1) {
+                issues.push({ clipId: clip.id, code: 'title-overflow', text: raw });
+                continue;
+            }
+
+            const fittedContent = fit.lines.join('\n');
+            const titleHeightPct = fit.height / frame.h * 100;
+            const minY = (Number(safeZone?.top) || 0) * 100 + 3;
+            // `y` is the top edge of the overlay box. Reserve the measured
+            // title height as well as the platform bottom margin or a tall,
+            // wrapped headline can still extend into the UI safe zone.
+            const maxY = Math.max(minY, 100 - (Number(safeZone?.bottom) || 0) * 100 - titleHeightPct - 3);
+            const oldY = Number(clip.y);
+            const fittedY = Number.isFinite(oldY) ? Math.max(minY, Math.min(maxY, oldY)) : oldY;
+            const changed = Math.abs(fit.fontSize - initialSize) >= 1
+                || fittedContent !== raw
+                || (Number.isFinite(oldY) && Math.abs(fittedY - oldY) >= 0.01);
+            if (!changed) continue;
+
+            clip.content = fittedContent;
+            clip.fontSize = fit.fontSize;
+            if (Number.isFinite(fittedY)) clip.y = fittedY;
+            repairs.push({
+                clipId: clip.id,
+                fromFontSize: initialSize,
+                toFontSize: fit.fontSize,
+                ...(Number.isFinite(oldY) && Number.isFinite(fittedY) && Math.abs(fittedY - oldY) >= 0.01 ? { fromY: oldY, toY: fittedY } : {}),
+                lines: fit.lines.length,
+            });
+        }
+    }
+
+    return { repairs, issues };
 }
 
 /** Words and moment events moved into short time (0 = the short's start). */
@@ -1363,4 +1500,4 @@ export function shiftToShort(list, start, end, key = 'start') {
         }));
 }
 
-export default { POLISH_LOOK, headlineFromText, fallbackShortScenePlan, spokenNumbers, emphasisIndices, phraseFromWords, polishShort, shiftToShort };
+export default { POLISH_LOOK, headlineFromText, fallbackShortScenePlan, spokenNumbers, emphasisIndices, phraseFromWords, repairGeneratedTitleLayout, polishShort, shiftToShort };

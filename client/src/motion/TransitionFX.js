@@ -38,7 +38,7 @@ export const TRANSITION_TYPES = ['flash', 'dip', 'whip-left', 'whip-right', 'zoo
     // It works inside this pack's one-stream model because the shape hides
     // the cut rather than needing both clips on screen, which is what a true
     // dissolve or push would need (see the note at the top of this file).
-    'circle-wipe', 'bar-wipe', 'blinds', 'diagonal-wipe'];
+    'circle-wipe', 'bar-wipe', 'blinds', 'diagonal-wipe', 'soft-blur', 'push-left', 'push-right', 'color-flash'];
 
 export const TRANSITION_DEFAULT_DURATION = {
     'flash': 0.3,
@@ -52,6 +52,10 @@ export const TRANSITION_DEFAULT_DURATION = {
     'bar-wipe': 0.44,
     'blinds': 0.5,
     'diagonal-wipe': 0.46,
+    'soft-blur': 0.5,
+    'push-left': 0.44,
+    'push-right': 0.44,
+    'color-flash': 0.3,
 };
 
 /** Values written by the old timeline menu, never rendered until R89. */
@@ -82,6 +86,10 @@ export function transitionFromText(text) {
         [/blinds?|stores?|persiennes?/, 'blinds'],
         [/bar[\s-]?wipe|volet|barres?/, 'bar-wipe'],
         [/speed[\s-]?lines?|lignes? de vitesse/, 'speed-lines'],
+        [/soft[\s-]?blur|blur transition|flou doux/, 'soft-blur'],
+        [/push[\s-]?left|pousser a gauche/, 'push-left'],
+        [/push[\s-]?right|pousser a droite/, 'push-right'],
+        [/color[\s-]?flash|colour[\s-]?flash|flash couleur/, 'color-flash'],
         [/whip[\s-]?right|file droite|filé droite/, 'whip-right'],
         [/whip[\s-]?left|file gauche/, 'whip-left'],
         [/\bwhip\b|whip[\s-]?pan|\bfile\b|\bswish\b/, 'whip-left'],
@@ -125,6 +133,26 @@ export function fxAt(type, u) {
     const out = { ...NEUTRAL_FX };
 
     switch (t) {
+        case 'color-flash': {
+            out.flash = Math.pow(peak, 1.25);
+            out.chroma = 0.004 * (u < 0 ? -1 : 1) * peak;
+            break;
+        }
+        case 'soft-blur': {
+            out.blurX = 0.028 * Math.pow(peak, 1.2);
+            out.blurY = 0.018 * Math.pow(peak, 1.2);
+            out.dip = 0.12 * peak;
+            break;
+        }
+        case 'push-left':
+        case 'push-right': {
+            const dir = t === 'push-left' ? -1 : 1;
+            const travel = u < 0 ? easeIn(u + 1) : -(1 - easeOut(u));
+            out.tx = dir * 0.17 * travel;
+            out.scale = 1 + Math.abs(out.tx) * 0.85 + 0.015 * peak;
+            out.blurX = 0.012 * peak;
+            break;
+        }
         case 'flash': {
             out.flash = Math.pow(peak, 1.6);
             out.scale = 1 + 0.04 * smooth(peak);

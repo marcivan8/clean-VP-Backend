@@ -279,6 +279,15 @@ const useTimelineStore = create(
             // reload never resumes in Auto by surprise.
             editingStyle: _preRestoredProject?.editingStyle || null,
             editingMode: 'normal',
+            // Keep a short, project-scoped record of completed Auto runs so
+            // users can inspect how an edit was built after closing/reopening
+            // the project. The actual editable result remains in `tracks`.
+            autoEditReports: Array.isArray(_preRestoredProject?.autoEditReports)
+                ? _preRestoredProject.autoEditReports.slice(-10) : [],
+            setAutoEditReports: (reports) => {
+                set({ autoEditReports: Array.isArray(reports) ? reports.slice(-10) : [] });
+                try { get().saveProject(); } catch (err) { console.error('[setAutoEditReports] save failed:', err); }
+            },
             // R92 round B: shorts found in this project (repurposing). Each is a
             // window of the main edit tuned for one platform; the main edit is
             // never changed by them. Saved with the project.
@@ -1126,6 +1135,7 @@ const useTimelineStore = create(
                 if (updates.grading !== undefined) clipUpdates.grading = updates.grading;
                 if (updates.filter !== undefined) clipUpdates.filter = updates.filter;
                 if (updates.filterIntensity !== undefined) clipUpdates.filterIntensity = updates.filterIntensity;
+                if (updates.effects !== undefined) clipUpdates.effects = Array.isArray(updates.effects) ? updates.effects : [];
                 if (updates.transition !== undefined) clipUpdates.transition = updates.transition;
                 // Text / visual properties
                 if (updates.content !== undefined) clipUpdates.content = updates.content;
@@ -3821,6 +3831,7 @@ const useTimelineStore = create(
                     transcriptVerified:   state.transcriptVerified || {},
                     contentAnalysis:      state.contentAnalysis || null,
                     editingStyle:         state.editingStyle || null,
+                    autoEditReports:      Array.isArray(state.autoEditReports) ? state.autoEditReports.slice(-10) : [],
                     // R114: the brand kit belongs in the save for exactly the
                     // reason the note above gives. Omitted, it would reset on
                     // every refresh and read as "it forgot my colours" — one
@@ -3916,6 +3927,7 @@ const useTimelineStore = create(
                     // Per project: a project saved without one opens with none.
                     editingStyle:         projectData.editingStyle || null,
                     editingMode:          'normal',
+                    autoEditReports:      Array.isArray(projectData.autoEditReports) ? projectData.autoEditReports.slice(-10) : [],
                     shorts:               Array.isArray(projectData.shorts) ? projectData.shorts : [],
                     // R94: the design scenes behind this project's graphics.
                     scenes:               projectData.scenes && typeof projectData.scenes === 'object' ? projectData.scenes : {},

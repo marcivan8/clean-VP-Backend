@@ -180,6 +180,11 @@ const Clip = ({ clip, trackId }) => {
             trackId
         }
     });
+    const { setNodeRef: setTransitionDropRef, isOver: isTransitionDropOver } = useDroppable({
+        id: `transition-cut-${clip.id}`,
+        data: { type: 'transition-cut', outgoingClipId: clip.id, trackId },
+        disabled: clip.type !== 'video',
+    });
 
     const style = {
         left: `${clip.start * zoomLevel}px`,
@@ -353,7 +358,7 @@ const Clip = ({ clip, trackId }) => {
                     ? "z-30 ring-2 ring-primary shadow-2xl"
                     : "opacity-50 z-30 ring-2 ring-primary")
             )}
-            title={`${clip.name} (${clip.duration.toFixed(2)}s)`}
+            title={`${clip.name} (${clip.duration.toFixed(2)}s)${clip.effects?.length ? ` · ${clip.effects.map(effect => effect.name).join(', ')}` : ''}`}
             onClick={(e) => {
                 e.stopPropagation();
                 if (e.metaKey || e.ctrlKey) {
@@ -429,6 +434,15 @@ const Clip = ({ clip, trackId }) => {
             )}
 
             {/* Transition Handle / Visualizer */}
+            {clip.type === 'video' && (
+                <div ref={setTransitionDropRef} title="Drop a transition on this cut" aria-label="Transition drop zone"
+                    className="absolute right-0 top-0 bottom-0 z-40 flex items-center justify-center"
+                    style={{ width: 10, background: isTransitionDropOver ? 'rgba(0,229,255,.85)' : 'rgba(0,229,255,.18)',
+                        borderLeft: '1px solid rgba(0,229,255,.8)', opacity: isTransitionDropOver ? 1 : 0.45,
+                        pointerEvents: 'auto' }}>
+                    <span style={{ width: 2, height: 14, background: '#fff', borderRadius: 2, opacity: 0.9 }} />
+                </div>
+            )}
             {clip.transition && (
                 <div 
                     className="absolute top-0 bottom-0 right-0 border-l border-primary/80 z-10 pointer-events-none"

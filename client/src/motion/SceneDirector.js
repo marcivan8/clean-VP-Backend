@@ -82,7 +82,7 @@ export const TONES = {
     editorial: {
         label: 'editorial',
         match: /explain|editorial|documentar|investigat|essay|analysis|report|teach|tutorial/,
-        presets: { intro: 'minimal', point: 'creator', stat: 'growth', quote: 'minimal', cta: 'creator', outro: 'minimal' },
+        presets: { intro: 'editorial-serif', point: 'refined', stat: 'growth', quote: 'editorial-serif', cta: 'refined', outro: 'editorial-serif' },
         palette: { text: '#ffffff', sub: '#A0AEC0', accent: '#38BDF8' },
         pacing: 'deliberate',
     },
@@ -321,6 +321,7 @@ function placeholderFor(beat, index) {
  * @param {string} brief
  * @param {{aspectRatio?:string, frame?:object, safeZone?:object, duration?:number,
  *          plan?:object, title?:string, items?:string[], tone?:string,
+ *          titleComponent?:string, titlePreset?:string,
  *          subject?:object, clips?:Array, palette?:object, start?:number}} [opts]
  * @returns {{scene:object, plan:object, placement:object, placeholders:string[]}|null}
  */
@@ -366,8 +367,12 @@ export function composeSceneFromBrief(brief, opts = {}) {
     plan.beats.forEach((beat, i) => {
         const share = (weights[i] / totalWeight) * total;
         const duration = round(asked > 0 ? share : Math.min(maxBeat * 1.6, Math.max(minBeat * 0.8, share)));
-        const spec = BEAT_COMPONENT[beat.kind] || BEAT_COMPONENT.point;
-        const presetSpec = plan.tone.presets[beat.kind];
+        const defaultSpec = BEAT_COMPONENT[beat.kind] || BEAT_COMPONENT.point;
+        const referenceTitle = beat.kind === 'intro'
+            && opts.titleComponent && opts.titlePreset
+            && LOOKS[opts.titleComponent]?.[opts.titlePreset];
+        const spec = referenceTitle ? { ...defaultSpec, component: opts.titleComponent } : defaultSpec;
+        const presetSpec = referenceTitle ? opts.titlePreset : plan.tone.presets[beat.kind];
         const occurrence = kindOccurrence[beat.kind] || 0;
         kindOccurrence[beat.kind] = occurrence + 1;
         const preset = Array.isArray(presetSpec) && presetSpec.length

@@ -372,6 +372,8 @@ export function buildCaptionProgram(tracks, baseClips) {
                     color: clip.color || '#ffffff',
                     stroke: clip.stroke || null,
                     shadow: parseTextShadow(clip.textShadow),
+                    backgroundColor: clip.backgroundColor || null,
+                    backgroundPadding: Number(clip.backgroundPadding) || 0,
                 },
                 geometry,       // [{t, x, y, scale, opacity, glow, rotation}] in OUTPUT time
                 revealSteps,    // [{prefixCount, fromOutput, toOutput}] | null — null means render `text` whole

@@ -12,6 +12,7 @@ import ObjectLayerOverlay from './ObjectLayerOverlay'; // R67 — Object Intelli
 import TransitionLayer from './TransitionLayer.jsx';
 import { transitionTransform, transitionFilter } from './transitionStyle.js';
 import { transitionWindows, fxAtTime } from '../../motion/TransitionFX.js';
+import { combinePreviewFilters, resolveTimelineEffectFilter } from '../../motion/TimelineVisualEffects.js';
 
 /**
  * Interpolates a keyframe track at `localTime` (clip-local seconds).
@@ -726,7 +727,8 @@ const VideoPlayer = () => {
     const transitionWins = React.useMemo(() => transitionWindows(baseTransitionClips), [baseTransitionClips]);
     const tfx = transitionWins.length > 0 ? fxAtTime(transitionWins, currentTime) : null;
     const baseTransform = transitionTransform(tfx, transformStyle, transformOrigin);
-    const baseFilter = transitionFilter(tfx, projectLUTFilter);
+    const effectFilter = resolveTimelineEffectFilter(activeClip?.effects);
+    const baseFilter = combinePreviewFilters(transitionFilter(tfx, projectLUTFilter), effectFilter);
     const frameWidthPx = containerRef.current?.clientWidth || 0;
 
     // Show overlay when user presses play but no proxy exists yet.

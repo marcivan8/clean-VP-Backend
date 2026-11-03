@@ -38,8 +38,9 @@
  * @param {number} [pauseThreshold=0.4] seconds of silence that forces a break
  * @returns {Array<{text:string,start:number,end:number,words:Array}>}
  */
-export function groupWordsIntoSegments(words, maxWords = 6, pauseThreshold = 0.4) {
+export function groupWordsIntoSegments(words, maxWords = 6, pauseThreshold = 0.4, options = {}) {
     if (!Array.isArray(words) || words.length === 0) return [];
+    const maxChars = Number(options?.maxChars) > 0 ? Number(options.maxChars) : Infinity;
 
     const segments = [];
     let group = [];
@@ -67,7 +68,8 @@ export function groupWordsIntoSegments(words, maxWords = 6, pauseThreshold = 0.4
         const w = words[i];
         if (!w || typeof w.word !== 'string') continue;
         const gap = i > 0 ? (w.start || 0) - (words[i - 1].end || 0) : 0;
-        if (group.length >= maxWords || (group.length > 0 && gap >= pauseThreshold)) flush();
+        const candidateText = [...group, w].map(item => item.word).join(' ');
+        if (group.length > 0 && (group.length >= maxWords || gap >= pauseThreshold || candidateText.length > maxChars)) flush();
         group.push(w);
     }
     flush();
@@ -169,6 +171,17 @@ export const CAPTION_STYLE_PACKS = {
         uppercase: false,
         animationPreset: 'fade',
         wordHighlight: { mode: 'opacity', scale: 1.0 },
+    },
+    'editorial-boxed': {
+        id: 'editorial-boxed', name: 'Editorial Box',
+        fontFamily: 'Montserrat', fontWeight: 800, fontSize: 44,
+        color: '#171923',
+        stroke: { width: 0, color: '#000000' },
+        textShadow: 'none',
+        backgroundColor: '#F7F5F0', backgroundPadding: 0.16,
+        uppercase: true,
+        animationPreset: 'fade',
+        wordHighlight: { mode: 'none', scale: 1.0 },
     },
     'documentary': {
         id: 'documentary', name: 'Documentary',
@@ -289,6 +302,15 @@ export const LEGACY_PACK_MOTION = {
     'extended-bold': { uppercase: true,  animationPreset: 'scale-reveal', wordHighlight: { mode: 'box', color: '#0A0A0E', background: '#FFFFFF', scale: 1.04 } },
     'platform-sans': { uppercase: false, animationPreset: 'slide-up',    wordHighlight: { mode: 'opacity', scale: 1 } },
     'editorial':     { uppercase: true,  animationPreset: 'fade',        wordHighlight: { mode: 'none',  scale: 1 } },
+    'creator-pop':   { uppercase: false, animationPreset: 'pop',         wordHighlight: { mode: 'color', color: '#FFE500', scale: 1.08 } },
+    'social-clean':  { uppercase: false, animationPreset: 'slide-up',    wordHighlight: { mode: 'color', color: '#4ADE80', scale: 1.04 } },
+    'punchy-condensed': { uppercase: true, animationPreset: 'pop',        wordHighlight: { mode: 'box', color: '#111111', background: '#FFE500', scale: 1.08 } },
+    'storyteller':   { uppercase: false, animationPreset: 'fade',        wordHighlight: { mode: 'color', color: '#FDE68A', scale: 1.04 } },
+    'creator-minimal': { uppercase: false, animationPreset: 'slide-up',  wordHighlight: { mode: 'color', color: '#00E5FF', scale: 1.04 } },
+    'friendly-round': { uppercase: false, animationPreset: 'pop',        wordHighlight: { mode: 'color', color: '#F9A8D4', scale: 1.04 } },
+    'brand-block':   { uppercase: true,  animationPreset: 'scale-reveal', wordHighlight: { mode: 'box', color: '#111111', background: '#FFFFFF', scale: 1.06 } },
+    'mono-tech-caption': { uppercase: false, animationPreset: 'blur-reveal', wordHighlight: { mode: 'color', color: '#34D399', scale: 1.02 } },
+    'bootzy-caption': { uppercase: false, animationPreset: 'pop', wordHighlight: { mode: 'box', color: '#111111', background: '#FFE500', scale: 1.08 } },
 };
 
 /**
@@ -331,6 +353,8 @@ export function stylePackToClipFields(packId) {
         color:      pack.color,
         stroke:     pack.stroke,
         textShadow: pack.textShadow,
+        ...(pack.backgroundColor ? { backgroundColor: pack.backgroundColor } : {}),
+        ...(Number.isFinite(Number(pack.backgroundPadding)) ? { backgroundPadding: Number(pack.backgroundPadding) } : {}),
         // Nested under `captionStyle` so the pack's motion-specific bits travel
         // with the clip without colliding with any existing flat field.
         captionStyle: {

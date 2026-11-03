@@ -72,6 +72,10 @@ const FONT_MAP = {
     'Righteous':          '"Righteous", cursive',
     'Press Start 2P':     '"Press Start 2P", monospace',
     'Audiowide':          '"Audiowide", sans-serif',
+    'DM Sans':            '"DM Sans", sans-serif',
+    'Unbounded':          '"Unbounded", sans-serif',
+    'JetBrains Mono':     '"JetBrains Mono", monospace',
+    'Bootzy TM':          '"Bootzy TM", sans-serif',
     // Legacy
     'Roboto':             '"Roboto", sans-serif',
     'Lato':               '"Lato", sans-serif',
@@ -601,6 +605,15 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
                             cursor: 'move',
                             userSelect: 'none',
                             WebkitUserSelect: 'none',
+                            ...(clip.backgroundColor ? {
+                                width: 'fit-content',
+                                maxWidth: '80%',
+                                backgroundColor: clip.backgroundColor,
+                                padding: `0.08em ${Math.max(0.06, Number(clip.backgroundPadding) || 0.16)}em`,
+                                borderRadius: '0.04em',
+                                boxDecorationBreak: 'clone',
+                                WebkitBoxDecorationBreak: 'clone',
+                            } : {}),
                         }}
                     >
                         {needsWordRender

@@ -7,6 +7,7 @@ import useDeviceType from '../../hooks/useDeviceType';
 import { addAssetAtTimelinePosition, getAssetDropTime } from '../../timeline/assetDropPosition.js';
 import { triggerHint } from '../FirstRunHint.jsx';
 import { TRANSITION_TYPES, TRANSITION_DEFAULT_DURATION } from '../../motion/TransitionFX.js';
+import TimelineVisualShelf from './TimelineVisualShelf.jsx';
 import { Scissors, ZoomIn, ZoomOut, Copy, Type, Palette, Undo2, Redo2, ChevronsRight, Magnet, ChevronLeft, ChevronRight } from 'lucide-react';
 
 const RULER_H    = 24;   // h-6 = 24px (ruler height)
@@ -722,6 +723,8 @@ const Timeline = () => {
             </div>
 
             )}
+
+            <TimelineVisualShelf />
 
             {/* Tracks Area */}
             <div

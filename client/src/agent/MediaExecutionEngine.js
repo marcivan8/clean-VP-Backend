@@ -1577,7 +1577,8 @@ export class MediaExecutionEngine {
                     let fields = recipe.captionPack ? stylePackToClipFields(recipe.captionPack) : null;
                     if (fields && referenceStyle) fields = {
                         ...fields,
-                        ...(referenceStyle.textColor ? { color: referenceStyle.textColor } : {}),
+                        ...((referenceStyle.captionTextColor || referenceStyle.textColor)
+                            ? { color: referenceStyle.captionTextColor || referenceStyle.textColor } : {}),
                         captionStyle: {
                             ...(fields.captionStyle || {}),
                             wordHighlight: {
@@ -1937,7 +1938,7 @@ export class MediaExecutionEngine {
                 // rerun, and matching them against the removed old layer would
                 // make the add loop silently skip their replacements.
                 const origById = new Map(sourceTracks.flatMap(t => t.clips.map(c => [c.id, { trackId: t.id, clip: c }])));
-                const FIELDS = ['animations', 'animation', 'transition', 'emphasis', 'x', 'y', 'fontFamily', 'fontSize', 'fontWeight', 'color', 'stroke', 'textShadow', 'captionStyle', 'textAlign', 'layerTarget', 'layerMask'];
+                const FIELDS = ['animations', 'animation', 'transition', 'emphasis', 'x', 'y', 'fontFamily', 'fontSize', 'fontWeight', 'color', 'stroke', 'textShadow', 'backgroundColor', 'backgroundPadding', 'captionStyle', 'textAlign', 'layerTarget', 'layerMask'];
                 const newTrackIds = {};
                 for (const t of polished.tracks) {
                     for (const c of t.clips) {
@@ -1959,6 +1960,9 @@ export class MediaExecutionEngine {
                     }
                 }
                 let brollNote = '';
+                let brollPlaced = 0;
+                let brollFailure = null;
+                const brollRequested = scenePlan?.source === 'local-fallback' ? (scenePlan.brollMoments?.length || 0) : 0;
                 if (scenePlan?.source === 'local-fallback' && scenePlan.brollMoments?.length
                     && !['interview', 'podcast'].includes(useTimelineStore.getState().editingStyle)) {
                     const live = useTimelineStore.getState();
@@ -1978,14 +1982,20 @@ export class MediaExecutionEngine {
                             maxPlacements: Math.min(4, scenePlan.brollMoments.length),
                         }, job?.signal ?? null);
                         const n = Array.isArray(broll?.placements) ? broll.placements.length : 0;
+                        brollPlaced = n;
+                        if (!n) brollFailure = broll?.message || 'No suitable cutaway was available.';
                         if (n) brollNote = `, ${n} contextual b-roll cutaway(s)`;
                     } catch (err) {
+                        brollFailure = err.message || 'The b-roll service was unavailable.';
                         console.warn('[polish_short] transcript fallback b-roll was unavailable:', err.message);
                     } finally {
                         useTimelineStore.getState().endHistoryGroup?.();
                     }
                 }
                 let sfxNote = '';
+                let sfxRequested = 0;
+                let sfxPlaced = 0;
+                let sfxMissing = [];
                 const lvl = sfxLevel(useTimelineStore.getState().editingStyle) === 'none' ? 'none' : profile.sfx;
                 if (lvl !== 'none') {
                     const cues = mergeSfxCues(
@@ -1993,7 +2003,10 @@ export class MediaExecutionEngine {
                         scenePlan?.sfxCues,
                     ).filter(cue => lvl !== 'subtle' || cue.kind !== 'impact');
                     if (cues.length) {
+                        sfxRequested = cues.length;
                         const r = await this._placeSfxCues(cues, lvl);
+                        sfxPlaced = r.placed || 0;
+                        sfxMissing = r.missing || [];
                         if (r.placed) sfxNote = `, ${r.placed} sound effect(s)`;
                     }
                 }
@@ -2009,10 +2022,34 @@ export class MediaExecutionEngine {
                 } else if (scenePlan) {
                     sceneNote = ' Scene direction used the local transcript and visual planner.';
                 }
+                const reportStyle = referenceStyleProfile ? buildStyleReferencePlan(referenceStyleProfile) : null;
                 return {
                     action, success: true,
                     message: `Finished for ${profile.label}: ${by}${polished.applied.join(', ')}${brollNote}${sfxNote}. One undo reverts it.${sceneNote}`,
-                    details: { applied: polished.applied, platform, sceneSource: scenePlan?.source || null, techniques: usedTechniques },
+                    details: {
+                        applied: polished.applied,
+                        platform,
+                        duration: total,
+                        sceneSource: scenePlan?.source || null,
+                        techniques: usedTechniques,
+                        quality: polished.quality || { checked: false, repairs: [], issues: [] },
+                        capabilities: {
+                            broll: { requested: brollRequested, placed: brollPlaced, status: brollPlaced ? 'used' : brollRequested ? 'unavailable' : 'not-needed', ...(brollFailure ? { reason: String(brollFailure).slice(0, 180) } : {}) },
+                            soundEffects: { requested: sfxRequested, placed: sfxPlaced, missing: sfxMissing.slice(0, 6), status: sfxPlaced ? (sfxMissing.length ? 'partial' : 'used') : sfxRequested ? 'unavailable' : 'not-needed' },
+                        },
+                        style: reportStyle ? {
+                            captionTreatment: reportStyle.captionTreatment || null,
+                            captionPack: reportStyle.captionPack || null,
+                            titleTreatment: reportStyle.titleTreatment || null,
+                            titleComponent: reportStyle.titleComponent || null,
+                            titlePreset: reportStyle.titlePreset || null,
+                            visualTone: reportStyle.visualTone || null,
+                            transitionPacing: reportStyle.transitionPacing || null,
+                            accent: reportStyle.accent || null,
+                            captionTextColor: reportStyle.captionTextColor || null,
+                            motifs: Array.isArray(reportStyle.motifs) ? reportStyle.motifs.slice(0, 4) : [],
+                        } : null,
+                    },
                 };
             }
 

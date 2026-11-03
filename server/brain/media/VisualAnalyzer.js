@@ -331,13 +331,14 @@ Also return "visualStyleProfile" describing only the visible editing/design gram
   "confidence": <0 to 1; lower if frames do not show enough overlays>,
   "motionEnergy": "low|medium|high|unknown",
   "captionTreatment": "none|minimal|clean|bold|word_highlight|boxed|kinetic|unknown",
-  "titleTreatment": "none|minimal|top_card|centered|large_kinetic|lower_third|unknown",
+  "titleTreatment": "none|minimal|top_card|centered|large_kinetic|lower_third|editorial_serif|unknown",
   "graphicsDensity": "sparse|balanced|dense|unknown",
   "transitionPacing": "slow|medium|fast|unknown",
   "visualTone": "cinematic|editorial|warm|viral|technology|unknown",
   "colorPalette": ["#RRGGBB", "#RRGGBB"],
   "motifs": ["short visible design motif", "another motif"]
 }
+For captionTreatment, use these visual definitions: "boxed" means caption words sit on a visible solid or translucent filled panel; "clean" means plain text without a panel; "word_highlight" means one spoken word is singled out with a distinct color or shape; "bold" means consistently heavy caption text without a panel; "kinetic" means the words visibly change position or scale. Choose the treatment repeated most consistently across the sampled frames. A one-off title card is not the caption treatment. If the frames do not show enough captions, use "unknown". For titleTreatment, use "editorial_serif" when the reference repeatedly uses a high-contrast serif display face for its main titles, even if captions use sans-serif; reserve "minimal" for restrained sans-serif titles.
 Motifs may describe visible patterns such as social proof metrics, comment or DM cards, product or document cards, archive-photo layouts, split-screen comparisons, large two-tone headlines, speaker cutouts, or phone frames. Use only motifs actually visible in the sampled frames. Use multiple frames to distinguish a persistent style from one moment. Do not claim to see animation direction or sound effects from still frames; use "unknown" when evidence is insufficient.` : ''}
 Return ONLY the JSON object, no explanation.`;
 

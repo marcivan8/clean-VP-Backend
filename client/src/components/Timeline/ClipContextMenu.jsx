@@ -335,6 +335,17 @@ const ClipContextMenu = ({ clip, trackId, position, onClose, spot = null }) => {
                 disabled={noClip}
                 onClick={() => run(() => store().addFilter(clip.id, 'cinematic', 0.8))}
             />
+            {(clip.effects || []).map(effect => (
+                <Item
+                    key={effect.id}
+                    icon={Sparkles}
+                    label={`Remove ${effect.name || 'effect'}`}
+                    danger
+                    onClick={() => run(() => store().updateClip(trackId, clip.id, {
+                        effects: (clip.effects || []).filter(item => item.id !== effect.id),
+                    }))}
+                />
+            ))}
         </div>
     );
 

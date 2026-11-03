@@ -23,6 +23,7 @@ import GraphicOverlay from '../components/Player/GraphicOverlay'; // R62 — sti
 import BlurZoneOverlay from '../components/Player/BlurZoneOverlay'; // R99 — freeform zone blur
 import BaseClipOverlay from '../components/Player/BaseClipOverlay'; // R100 — move/resize handles for base video/image clips
 import { getPlayerDimensions } from '../utils/playerDimensions';
+import { TRANSITION_DEFAULT_DURATION } from '../motion/TransitionFX.js';
 import MobileToolbar from '../components/MobileToolbar';
 import MobileAIBar from '../components/MobileAIBar';
 import useDeviceType from '../hooks/useDeviceType';
@@ -85,6 +86,7 @@ import { EventBus, EVENT_TYPES } from '../agent/EventBus';
 import { useSupabasePersistence } from '../hooks/useSupabasePersistence';
 import { runExportWithAutoRetry } from '../utils/exportAutoRetry.js';
 import { fitPreviewSize } from '../utils/fitPreviewSize.js';
+import { prepareAutoExport, verifyAutoExportCompilation } from '../agent/AutoExportQuality.js';
 
 // Screen distance (px) within which a dragged clip clicks onto a neighbour's
 // edge, the playhead or 0. Zoom-independent: converted to seconds per drag.
@@ -911,10 +913,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         return closest;
     };
 
-    // Shape of an imported video from its proxy, for when the in-browser probe
-    // of the original file gave up. Prefers the size the proxy job measured
-    // (server ffprobe, upright); falls back to reading the proxy here.
-    const applyProxyDimensions = async (assetId, data, ratioBefore) => {
+    // Resolve the display orientation from the generated proxy. FFmpeg
+    // autorotates that proxy, so its aspect is authoritative when the source
+    // file stores portrait footage as landscape dimensions plus a rotate tag.
+    const applyProxyDimensions = async (assetId, data, ratioBefore, shouldAffectTimeline = true) => {
         try {
             let dims = Number(data?.width) > 0 && Number(data?.height) > 0
                 ? { width: Number(data.width), height: Number(data.height) } : null;
@@ -924,13 +926,51 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             if (!dims) return;
             const st = useTimelineStore.getState();
             const asset = (st.assets || []).find(a => a.id === assetId);
-            if (asset && !(asset.resolution?.w && asset.resolution?.h)) {
-                st.updateAsset(assetId, { resolution: { w: dims.width, h: dims.height } });
+            const current = asset?.resolution;
+            const proxyAspect = dims.width / dims.height;
+            let resolution = current?.w > 0 && current?.h > 0
+                ? { w: Number(current.w), h: Number(current.h) }
+                : { w: dims.width, h: dims.height };
+            let orientationStatus = 'verified-upright';
+            let resolutionChanged = !(current?.w > 0 && current?.h > 0);
+            if (current?.w > 0 && current?.h > 0) {
+                const directAspect = Number(current.w) / Number(current.h);
+                const swappedAspect = Number(current.h) / Number(current.w);
+                const directError = Math.abs(Math.log(directAspect / proxyAspect));
+                const swappedError = Math.abs(Math.log(swappedAspect / proxyAspect));
+                if (swappedError + 0.025 < directError) {
+                    resolution = { w: Number(current.h), h: Number(current.w) };
+                    orientationStatus = 'corrected-rotation';
+                    resolutionChanged = true;
+                } else if (directError > 0.025) {
+                    // Preserve native resolution when only orientation was
+                    // swapped; otherwise fall back to the upright proxy shape.
+                    resolution = { w: dims.width, h: dims.height };
+                    orientationStatus = 'proxy-shape-used';
+                    resolutionChanged = true;
+                }
+            }
+            if (asset) {
+                st.updateAsset(assetId, {
+                    ...(resolutionChanged ? { resolution } : {}),
+                    orientation: {
+                        status: orientationStatus,
+                        displayWidth: dims.width,
+                        displayHeight: dims.height,
+                        displayAspect: proxyAspect,
+                    },
+                });
             }
             const detected = detectAspectRatio(dims.width, dims.height);
-            if (detected && st.aspectRatio === ratioBefore && detected !== st.aspectRatio) {
+            let reframedByAspectChange = false;
+            if (shouldAffectTimeline && detected && ratioBefore && st.aspectRatio === ratioBefore && detected !== st.aspectRatio) {
                 st.setAspectRatio(detected);
-                console.log(`[IDELayout] Aspect ratio from the proxy (the file probe gave up): ${detected}`);
+                reframedByAspectChange = true;
+                console.log(`[IDELayout] Aspect ratio from upright proxy: ${detected}`);
+            }
+            if (shouldAffectTimeline && resolutionChanged && !reframedByAspectChange) {
+                const result = useTimelineStore.getState().reframeToFrame?.();
+                if (result?.reframed) console.log(`[IDELayout] Reframed ${result.reframed} clip(s) after resolving source orientation.`);
             }
         } catch (err) {
             console.warn('[IDELayout] could not read the proxy size:', err.message);
@@ -979,11 +1019,9 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                         console.log(`[IDELayout] Auto-detected aspect ratio: ${detected}`);
                     }
                 }
-                // The probe gave up (iPhone Safari can time out on a large clip,
-                // and some codecs -- HEVC in a non-Safari browser -- never decode
-                // enough to read dimensions at all): read the shape from the proxy
-                // once it exists instead of leaving this asset with no resolution
-                // forever.
+                // Reconcile dimensions against the proxy once it exists. This
+                // backfills failed probes and corrects containers whose encoded
+                // dimensions disagree with their upright display orientation.
                 //
                 // This USED to be gated on `!ratioSet`, a flag that only tracks
                 // whether an EARLIER file in this same multi-file upload already
@@ -1004,8 +1042,11 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 // the one thing that DOES need `ratioSet`-like protection -- not
                 // clobbering an aspect ratio someone else set in the meantime --
                 // internally, via its own `st.aspectRatio === ratioBefore` check.
-                const needsResolutionFromProxy = isVideo && !(metadata.width && metadata.height);
-                const ratioBeforeProxy = needsResolutionFromProxy ? useTimelineStore.getState().aspectRatio : null;
+                // Always reconcile video dimensions against the autorotated
+                // proxy, even when the browser probe succeeded: some containers
+                // report encoded dimensions while the video itself displays
+                // upright.
+                const ratioBeforeProxy = isVideo && !e.referenceMaterial ? useTimelineStore.getState().aspectRatio : null;
 
                 const assetId = `asset-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -1148,7 +1189,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                                 isProxying: false,
                                 uploadPhase: 'ready'
                             });
-                            if (needsResolutionFromProxy) applyProxyDimensions(assetId, data, ratioBeforeProxy);
+                            if (isVideo) applyProxyDimensions(assetId, data, ratioBeforeProxy, !e.referenceMaterial);
 
                             // Backfill sourceUrl on any clips already placed on the
                             // timeline that belong to this asset — they were added
@@ -1645,8 +1686,21 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         // R93: the main Export always renders the main edit, never a short being previewed.
         if (!override) useTimelineStore.getState().exitShortPreview();
         const live = useTimelineStore.getState();
-        const { tracks, duration, assets, projectLUTId, aspectRatio: projectAspectRatio } = override ? { ...live, ...override } : live;
+        const exportState = override ? { ...live, ...override } : live;
+        let { tracks, duration, assets, projectLUTId, aspectRatio: projectAspectRatio } = exportState;
         const planAspectRatio = override?.aspectRatio || live.aspectRatio || aspectRatio;
+        let autoQaReport = null;
+        if (!override) {
+            const prepared = prepareAutoExport({
+                tracks,
+                assets: assets || [],
+                captions: live.captions || [],
+                aspectRatio: planAspectRatio,
+                autoEditReports: live.autoEditReports,
+            });
+            tracks = prepared.tracks;
+            autoQaReport = prepared.report;
+        }
         const { authFetch }     = await import('../utils/authFetch.js');
         const { pollJobResult } = await import('../utils/jobPoller.js');
 
@@ -1732,6 +1786,10 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             tracksForExport = tracks;
         }
 
+        // This verification is against the exact composition/caption programs
+        // sent to the worker, after any safe reference-style repairs above.
+        autoQaReport = verifyAutoExportCompilation(autoQaReport, { compositionPlan, captionProgram, tracks });
+
         // Enqueue the export job — returns { jobId } immediately
         const response = await authFetch('/api/render', {
             method: 'POST',
@@ -1807,6 +1865,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             captionProgramWarning: result.captionProgramWarning,
             revideoWarning: result.revideoWarning,
             clipWarning: result.clipWarning,
+            autoQaReport,
         };
     };
     // route responds 500 "Render proxy not configured" and we surface a clear,
@@ -1877,8 +1936,19 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 captionProgramWarning: result.captionProgramWarning,
                 revideoWarning: result.revideoWarning,
                 clipWarning: result.clipWarning,
+                autoQaReport: result.autoQaReport || null,
             });
             setExportUrl(result.url);
+
+            if (result.autoQaReport?.source === 'auto') {
+                const state = useTimelineStore.getState();
+                const reports = [...(state.autoEditReports || [])];
+                const last = reports.length - 1;
+                if (last >= 0) {
+                    reports[last] = { ...reports[last], exportQa: result.autoQaReport };
+                    state.setAutoEditReports?.(reports);
+                }
+            }
 
             finishExportMetric('success');
             captureEvent('editor_export_completed', {
@@ -1913,6 +1983,21 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         }
     };
 
+    const handleSaveEditingHabits = async () => {
+        const editHistory = useTimelineStore.getState().editHistory || [];
+        const commands = editHistory.map(edit => edit.op).filter(Boolean);
+        if (!commands.length) return;
+        const { authFetch } = await import('../utils/authFetch.js');
+        const response = await authFetch('/api/brain/observe-export', {
+            method: 'POST',
+            body: JSON.stringify({
+                projectId: useTimelineStore.getState().projectId || null,
+                commands,
+            }),
+        });
+        if (!response.ok) throw new Error(`Habit save failed (${response.status})`);
+    };
+
     // Mobile: an export that was still rendering when the page closed is picked
     // up again here (job id saved by handleFfmpegExport). Only resumes a job
     // younger than 2 h that the server still knows about.
@@ -1939,7 +2024,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 setShowMobileExport(true);
                 const result = await pollJobResult(saved.jobId, controller.signal, 3600 * 1000, setExportProgress);
                 if (!result?.url) throw new Error('Export completed but no URL returned');
-                setExportResult({ success: true, url: result.url, filename: result.filename, metadata: result.metadata });
+                setExportResult({ success: true, url: result.url, filename: result.filename, metadata: result.metadata, autoQaReport: result.autoQaReport || null });
                 setExportUrl(result.url);
                 clearActiveExport();
             } catch (err) {
@@ -2033,11 +2118,52 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             });
         }
 
-        // Drop EFFECT onto CLIP
+        const applyEffect = (trackId, clipId, effect) => {
+            const track = state.tracks.find(item => item.id === trackId);
+            const clip = track?.clips.find(item => item.id === clipId);
+            if (!clip || track?.type !== 'video') return;
+            const effects = (clip.effects || []).filter(item => item.id !== effect.id);
+            state.updateClip(trackId, clipId, { effects: [...effects, { ...effect, enabled: true }] });
+        };
+
+        // Drop a transition directly on a cut marker, or on a clip to attach
+        // the transition to its outgoing edge.
+        if (activeData?.type === 'timeline-transition') {
+            const clipId = targetData?.type === 'transition-cut' ? targetData.outgoingClipId : targetData?.clipId;
+            const trackId = targetData?.trackId;
+            const track = state.tracks.find(item => item.id === trackId);
+            const clip = track?.clips.find(item => item.id === clipId);
+            if (clip && track?.type === 'video') {
+                state.addTransition(clip.id, activeData.transitionType,
+                    TRANSITION_DEFAULT_DURATION[activeData.transitionType] || 0.4);
+            }
+        }
+
+        // Drop effects on an individual clip or a whole video lane. The
+        // Timeline shelf also provides an explicit all-video timeline action.
+        if (activeData?.type === 'timeline-effect') {
+            if (targetData?.type === 'clip' && targetData.trackId) {
+                applyEffect(targetData.trackId, targetData.clipId, activeData.effect);
+            } else if (targetData?.trackId) {
+                const track = state.tracks.find(item => item.id === targetData.trackId);
+                if (track?.type === 'video') {
+                    state.beginEditGesture?.();
+                    for (const clip of track.clips || []) {
+                        const effects = (clip.effects || []).filter(item => item.id !== activeData.effect.id);
+                        state.updateClip(track.id, clip.id, { effects: [...effects, { ...activeData.effect, enabled: true }] }, { skipHistory: true });
+                    }
+                    state.endEditGesture?.(true);
+                }
+            }
+        }
+
+        // Legacy effect tiles now create preview-visible clip effects too.
         if (activeData?.type === 'effect' && targetData?.type === 'clip') {
-            const clipId = targetData.clipId;
-            const trackId = targetData.trackId;
-            useTimelineStore.getState().updateClip(trackId, clipId, { filter: activeData.filter });
+            applyEffect(targetData.trackId, targetData.clipId, {
+                id: activeData.id || active.id,
+                name: activeData.name || 'Effect',
+                filter: activeData.filter,
+            });
         }
     };
 
@@ -2051,6 +2177,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                 isExporting={isExporting}
                 exportResult={exportResult}
                 exportError={exportError}
+                onSaveEditingHabits={handleSaveEditingHabits}
             />
             <ClarificationDialog />
             <ApprovalDialog />

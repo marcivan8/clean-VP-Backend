@@ -69,12 +69,13 @@ const Sep = () => (
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exportError }) => {
+const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exportError, onSaveEditingHabits }) => {
     const { t } = useTranslation('editor');
     const [activeTab, setActiveTab] = useState('video');
     const [settings, setSettings]   = useState({ platform: null, resolution: '1080p', fps: 30, format: 'mp4', quality: 'high', engine: 'ffmpeg' });
     const [step, setStep]           = useState('configure');
     const [progress, setProgress]   = useState(0);
+    const [habitSaveState, setHabitSaveState] = useState('idle'); // idle | saving | saved | error
 
     // Audio export tab state
     const { exportAudio } = useAudioEngine();
@@ -114,7 +115,13 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
         }
     }, [isExporting]);
 
-    useEffect(() => { if (exportResult) { setStep('done'); setProgress(100); } }, [exportResult]);
+    useEffect(() => {
+        if (exportResult) {
+            setStep('done');
+            setProgress(100);
+            setHabitSaveState('idle');
+        }
+    }, [exportResult]);
     useEffect(() => { if (exportError)  { setStep('error'); } }, [exportError]);
 
     if (!isOpen) return null;
@@ -523,6 +530,37 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                     ))}
                                 </div>
 
+                                <label style={{
+                                    width: '100%', display: 'flex', alignItems: 'center', gap: 9,
+                                    padding: '10px 12px', borderRadius: 'var(--r-md)',
+                                    border: '0.5px solid var(--line)', background: 'var(--glass)',
+                                    color: 'var(--fg-2)', fontSize: 12, cursor: habitSaveState === 'saving' || habitSaveState === 'saved' ? 'default' : 'pointer',
+                                }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={habitSaveState === 'saving' || habitSaveState === 'saved'}
+                                        disabled={habitSaveState === 'saving' || habitSaveState === 'saved'}
+                                        onChange={async (event) => {
+                                            if (!event.target.checked || !onSaveEditingHabits) return;
+                                            setHabitSaveState('saving');
+                                            try {
+                                                await onSaveEditingHabits();
+                                                setHabitSaveState('saved');
+                                            } catch (err) {
+                                                console.warn('[ExportModal] habit save failed:', err.message);
+                                                setHabitSaveState('error');
+                                            }
+                                        }}
+                                        style={{ accentColor: 'var(--accent)', width: 14, height: 14, margin: 0 }}
+                                    />
+                                    <span style={{ flex: 1 }}>
+                                        {habitSaveState === 'saved' ? t('exportModal.habitsSaved')
+                                            : habitSaveState === 'saving' ? t('exportModal.savingHabits')
+                                                : habitSaveState === 'error' ? t('exportModal.habitSaveError')
+                                                    : t('exportModal.saveEditingHabits')}
+                                    </span>
+                                </label>
+
                                 {/* FIX: exportResult.{captionWarning,compositorWarning,
                                     captionProgramWarning,revideoWarning} were already
                                     computed server-side (jobs/exportProcessor.js) but
@@ -560,6 +598,33 @@ const ExportModal = ({ isOpen, onClose, onExport, isExporting, exportResult, exp
                                                         : w.text}
                                                 </p>
                                             </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {exportResult.autoQaReport && (
+                                    <div style={{
+                                        width: '100%',
+                                        background: exportResult.autoQaReport.status === 'passed'
+                                            ? 'color-mix(in srgb, #34d399 8%, transparent)'
+                                            : 'color-mix(in srgb, #f5a623 9%, transparent)',
+                                        border: `0.5px solid color-mix(in srgb, ${exportResult.autoQaReport.status === 'passed' ? '#34d399' : '#f5a623'} 28%, transparent)`,
+                                        borderRadius: 'var(--r-md)',
+                                        padding: '12px 14px',
+                                        display: 'flex', flexDirection: 'column', gap: 6,
+                                    }}>
+                                        <p style={{ margin: 0, fontFamily: 'var(--f-mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: exportResult.autoQaReport.status === 'passed' ? '#34d399' : '#f5a623' }}>
+                                            {exportResult.autoQaReport.source === 'auto' ? 'Auto export check' : 'Export quality check'} · {exportResult.autoQaReport.status === 'passed' ? 'passed' : 'review'}
+                                        </p>
+                                        <p style={{ margin: 0, fontSize: 11, lineHeight: 1.45, color: 'var(--fg-2)' }}>
+                                            Orientation {exportResult.autoQaReport.orientation?.resolved || 0}/{exportResult.autoQaReport.orientation?.videoCount || 0} · titles {exportResult.autoQaReport.titles?.repaired || 0} repaired · captions {exportResult.autoQaReport.captions?.clips || 0} checked
+                                            {exportResult.autoQaReport.reference?.expectedCaptionPack ? ` · ${exportResult.autoQaReport.reference.expectedCaptionPack} style ${exportResult.autoQaReport.reference.boxedCaptionInRenderPlan || exportResult.autoQaReport.reference.matchedAfterRepair ? 'verified' : 'not verified'}` : ''}
+                                        </p>
+                                        {(exportResult.autoQaReport.warnings || []).map((warning, index) => (
+                                            <p key={index} style={{ margin: 0, display: 'flex', gap: 6, fontSize: 11, lineHeight: 1.4, color: 'var(--fg-3)' }}>
+                                                <AlertCircle size={12} style={{ color: '#f5a623', flexShrink: 0, marginTop: 1 }} />
+                                                <span>{warning.message}</span>
+                                            </p>
                                         ))}
                                     </div>
                                 )}

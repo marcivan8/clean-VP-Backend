@@ -126,6 +126,40 @@ const TaskCompletionCard = ({ log }) => {
                 )}
 
                 {/* Details list (compound ops etc) */}
+                {log.data?.details?.report?.steps?.some(step => step.details?.quality?.checked) && (() => {
+                    const qualitySteps = log.data.details.report.steps
+                        .map(step => step.details?.quality)
+                        .filter(item => item?.checked);
+                    const quality = qualitySteps[qualitySteps.length - 1];
+                    if (!quality) return null;
+                    const repairs = quality.repairs?.length || 0;
+                    const issues = quality.issues?.length || 0;
+                    const captions = quality.captions;
+                    const finish = log.data.details.report.steps.find(step => step.key === 'finish')?.details;
+                    const capabilities = finish?.capabilities;
+                    const unavailable = [capabilities?.broll, capabilities?.soundEffects]
+                        .filter(item => item?.status === 'unavailable').length;
+                    return (
+                        <div className="mb-3 rounded-md px-2.5 py-2"
+                             style={{ background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.08)' }}>
+                            <div style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--fg-2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                                Auto edit check
+                            </div>
+                            <div className="mt-1" style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: issues ? '#fbbf24' : 'var(--fg-2)' }}>
+                                {issues ? `${issues} title layout issue${issues === 1 ? '' : 's'} need review` : 'Title layout checked'}
+                                {repairs > 0 ? ` · ${repairs} title${repairs === 1 ? '' : 's'} adjusted to fit` : ''}
+                                {captions?.checked ? ` · captions ${Math.round((Number(captions.coverage) || 0) * 100)}% covered` : ''}
+                                {finish?.sceneSource === 'local-fallback' ? ' · local scene fallback' : ''}
+                                {unavailable ? ` · ${unavailable} media service${unavailable === 1 ? '' : 's'} unavailable` : ''}
+                            </div>
+                            {capabilities && (
+                                <div className="mt-1" style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--fg-3)' }}>
+                                    B-roll {capabilities.broll?.placed || 0}/{capabilities.broll?.requested || 0} · SFX {capabilities.soundEffects?.placed || 0}/{capabilities.soundEffects?.requested || 0}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })()}
                 {log.data?.details && log.data.details.length > 0 && (
                     <ul className="mb-3 space-y-1">
                         {log.data.details.map((step, i) => (
@@ -649,6 +683,8 @@ const ReasoningPanel = ({ className, onImportMedia }) => {
     // a style change re-reads the project for the Brain (effect below).
     const editingMode = useTimelineStore(s => s.editingMode);
     const editingStyle = useTimelineStore(s => s.editingStyle);
+    const autoEditReports = useTimelineStore(s => s.autoEditReports);
+    const lastAutoEdit = Array.isArray(autoEditReports) ? autoEditReports[autoEditReports.length - 1] : null;
     const { uploadedFile, performAction, assets, projectId } = useTimelineStore(useShallow(state => ({
         uploadedFile:  state.uploadedFile,
         performAction: state.performAction,
@@ -1091,6 +1127,31 @@ const ReasoningPanel = ({ className, onImportMedia }) => {
                 {/* Empty state with contextual suggestion + quick chips */}
                 {isEmpty && proxying.length === 0 && (
                     <div className="flex flex-col gap-4 pt-4 pb-2">
+                        {lastAutoEdit && (
+                            <div className="rounded-xl p-3" style={{ background: 'color-mix(in oklch, var(--accent) 7%, rgba(255,255,255,0.03))', border: '0.5px solid color-mix(in oklch, var(--accent) 22%, transparent)' }}>
+                                <div className="flex items-center gap-1.5 mb-2">
+                                    <Sparkles className="w-3 h-3" style={{ color: 'var(--accent)' }} />
+                                    <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Last Auto edit</span>
+                                </div>
+                                <div className="flex items-center justify-between gap-3">
+                                    <span style={{ fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg-2)' }}>
+                                        {String(lastAutoEdit.styleId || 'Auto').replace(/[_-]+/g, ' ')} style · {lastAutoEdit.steps?.filter(step => step.status === 'complete').length || 0} steps completed
+                                    </span>
+                                    <button
+                                        onClick={() => {
+                                            const state = useTimelineStore.getState();
+                                            state.setEditingStyle?.(lastAutoEdit.styleId || null);
+                                            state.setEditingMode?.('auto');
+                                            if (inputRef.current) { inputRef.current.value = 'Edit it'; inputRef.current.focus(); }
+                                        }}
+                                        className="shrink-0 px-2.5 py-1 rounded-md text-[10px] transition-opacity hover:opacity-80"
+                                        style={{ background: 'color-mix(in oklch, var(--accent) 16%, transparent)', border: '0.5px solid color-mix(in oklch, var(--accent) 30%, transparent)', color: 'var(--accent)', fontFamily: 'var(--f-mono)' }}
+                                    >
+                                        Reuse setup
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                         {contextualSuggestion ? (
                             <div className="rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.1)' }}>
                                 <div className="flex items-center gap-1.5 mb-2">

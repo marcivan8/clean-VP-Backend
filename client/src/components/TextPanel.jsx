@@ -19,6 +19,7 @@ const FONT_GROUPS = [
     { group: 'Motivational',       groupKey: 'textPanel.fontGroupMotivational',   fonts: ['Oswald', 'Teko', 'Black Han Sans', 'Saira Condensed', 'Cabin'] },
     { group: 'Handwritten',        groupKey: 'textPanel.fontGroupHandwritten',    fonts: ['Caveat', 'Pacifico', 'Kalam', 'Satisfy', 'Dancing Script'] },
     { group: 'Neon / Glow',        groupKey: 'textPanel.fontGroupNeonGlow',       fonts: ['Boogaloo', 'Righteous', 'Press Start 2P', 'Audiowide'] },
+    { group: 'Social / Creator',   groupKey: 'textPanel.fontGroupSocialCreator',  fonts: ['Bootzy TM', 'Roboto', 'DM Sans', 'Unbounded', 'JetBrains Mono'] },
 ];
 
 const ANIMATION_PRESETS = [

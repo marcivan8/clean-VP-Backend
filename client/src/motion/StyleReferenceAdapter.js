@@ -6,7 +6,7 @@
 const ENUMS = {
     motionEnergy: new Set(['low', 'medium', 'high']),
     captionTreatment: new Set(['none', 'minimal', 'clean', 'bold', 'word_highlight', 'boxed', 'kinetic']),
-    titleTreatment: new Set(['none', 'minimal', 'top_card', 'centered', 'large_kinetic', 'lower_third']),
+    titleTreatment: new Set(['none', 'minimal', 'top_card', 'centered', 'large_kinetic', 'lower_third', 'editorial_serif']),
     graphicsDensity: new Set(['sparse', 'balanced', 'dense']),
     transitionPacing: new Set(['slow', 'medium', 'fast']),
     visualTone: new Set(['cinematic', 'editorial', 'warm', 'viral', 'technology']),
@@ -44,7 +44,7 @@ export function buildStyleReferencePlan(raw) {
     const captionPack = ({
         bold: 'hormozi',
         word_highlight: 'mrbeast',
-        boxed: 'hormozi-bounce',
+        boxed: 'editorial-boxed',
         kinetic: 'gaming',
         clean: 'ali-abdaal',
         minimal: 'apple',
@@ -55,13 +55,24 @@ export function buildStyleReferencePlan(raw) {
         top_card: { component: 'TitleSequence', preset: 'minimal' },
         lower_third: { component: 'TitleSequence', preset: 'minimal' },
         minimal: { component: 'TitleSequence', preset: 'minimal' },
+        editorial_serif: { component: 'TitleSequence', preset: 'editorial-serif' },
     })[titleTreatment] || null;
     const recipe = transitionPacing === 'fast' || motionEnergy === 'high'
         ? 'punchy'
         : transitionPacing === 'slow' || motionEnergy === 'low' ? 'explainer' : 'travel';
     const motionScale = ({ low: 0.65, medium: 0.85, high: 1.05 })[motionEnergy] || 0.85;
     const graphicsMax = ({ sparse: 1, balanced: 2, dense: 4 })[graphicsDensity] || 2;
-    const surface = colors.filter(color => luminance(color) >= 0.82).length >= 1 ? 'light' : 'dark';
+    // The first swatch is the reference's dominant surface. Treating any
+    // white text swatch as a light background made mixed dark palettes pick a
+    // mid-tone accent as the caption color, which could disappear in export.
+    const dominantLuminance = colors.length ? luminance(colors[0]) : 0;
+    const surface = dominantLuminance >= 0.5 ? 'light' : 'dark';
+    const textColor = colors.length
+        ? (surface === 'light'
+            ? colors.slice().sort((a, b) => luminance(a) - luminance(b))[0]
+            : colors.slice().sort((a, b) => luminance(b) - luminance(a))[0])
+        : null;
+    const captionTextColor = captionTreatment === 'boxed' ? '#171923' : textColor;
 
     return {
         confidence,
@@ -79,7 +90,8 @@ export function buildStyleReferencePlan(raw) {
         recipe,
         visualTone,
         accent: colors[0] || null,
-        textColor: colors.find(color => color !== colors[0]) || null,
+        textColor,
+        captionTextColor,
         motifs,
     };
 }

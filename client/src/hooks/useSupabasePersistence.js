@@ -124,12 +124,12 @@ export function useSupabasePersistence() {
         // syncs even when the timeline itself did not change.
         const unsub = useTimelineStore.subscribe(
             // R92: the shorts list is saved with the project too.
-            (state) => [state.tracks, state.editingStyle, state.shorts],
+            (state) => [state.tracks, state.editingStyle, state.shorts, state.autoEditReports],
             () => {
                 clearTimeout(timerRef.current);
                 timerRef.current = setTimeout(executeSave, DEBOUNCE_MS);
             },
-            { equalityFn: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2] }
+            { equalityFn: (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3] }
         );
 
         return () => {
