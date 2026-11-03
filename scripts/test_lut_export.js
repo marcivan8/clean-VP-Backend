@@ -92,9 +92,12 @@ section('2 · It fails OPEN — an export must never die over a colour grade');
 section('3 · The client actually sends the selection');
 {
     check('projectLUTId is read from the store',
-        // R92: read from the store; a short export overrides only tracks/duration/aspect.
-        (/const \{ tracks, duration, assets, projectLUTId.*\} = useTimelineStore\.getState\(\)/.test(ideSrc)
-            || (/const live = useTimelineStore\.getState\(\);/.test(ideSrc) && /const \{ tracks, duration, assets, projectLUTId.*\} = override \? \{ \.\.\.live, \.\.\.override \} : live;/.test(ideSrc))));
+        // R92: capture live store state, merge any short-export override, then
+        // read projectLUTId from that effective export state.
+        (/const \{[^}]*projectLUTId[^}]*\} = useTimelineStore\.getState\(\)/.test(ideSrc)
+            || (/const live = useTimelineStore\.getState\(\);/.test(ideSrc)
+                && /const exportState = override \? \{ \.\.\.live, \.\.\.override \} : live;/.test(ideSrc)
+                && /(?:const|let) \{[^}]*projectLUTId[^}]*\} = exportState;/.test(ideSrc))));
     check('it is included in the export settings',
         /projectLUTId: projectLUTId \|\| null/.test(ideSrc),
         'without this the worker never learns a LUT was chosen');
@@ -169,13 +172,15 @@ section('6 · The PREVIEW is graded too, not just the export');
     check('the player subscribes to it',
         /useTimelineStore\(state => state\.projectLUTFilter\)/.test(player),
         'getState() would not re-render on apply — the immediacy is the point');
-    // R89: the canvas filter is now the LUT composed with the transition
-    // filter (TransitionLayer.transitionFilter), which returns the LUT alone
-    // outside transitions and 'none' when there is neither.
+    // The selected project id gates the subscribed CSS preview filter; the
+    // canvas receives that LUT composed with transitions and clip effects.
     const tlayer = read('client/src/components/Player/transitionStyle.js');
     check('the canvas actually applies it',
-        (/filter: projectLUTFilter \|\| 'none'/.test(player))
-            || (/const baseFilter = transitionFilter\(tfx, projectLUTFilter\)/.test(player) && /filter: baseFilter/.test(player)),
+        (/const projectLUTId = useTimelineStore\(state => state\.projectLUTId\)/.test(player)
+            && /const storedProjectLUTFilter = useTimelineStore\(state => state\.projectLUTFilter\)/.test(player)
+            && /const projectLUTFilter = projectLUTId \? storedProjectLUTFilter : 'none';/.test(player)
+            && /const baseFilter = combinePreviewFilters\(transitionFilter\(tfx, projectLUTFilter\), effectFilter\)/.test(player)
+            && /filter: baseFilter/.test(player)),
         'the filter was stored and never used — clicking a LUT changed nothing visible');
     check('the ungraded path stays neutral',
         /\|\| 'none'/.test(player) || /parts\.length \? parts\.join\(' '\) : 'none'/.test(tlayer),
