@@ -1,0 +1,274 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   Landing page (v2) — scoped design system.
+
+   Everything here lives under `.vibed-landing` on purpose. The marketing page
+   runs a cooler, higher-contrast palette than the warm-graphite theme the app
+   itself uses, and scoping keeps the two from fighting: nothing in this file
+   can reach the editor, auth or legal pages.
+   ────────────────────────────────────────────────────────────────────────── */
+
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/plus-jakarta-sans-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/plus-jakarta-sans-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/plus-jakarta-sans-800.woff2') format('woff2');
+}
+
+.vibed-landing {
+  /* The landing palette now lives in the global design system (src/index.css).
+     These aliases keep the vl- names the sections use pointing at one source. */
+
+  /* surfaces */
+  --vl-bg: var(--bg);
+  --vl-bg-2: var(--bg-2);
+  --vl-surface: rgba(255, 255, 255, 0.035);
+  --vl-surface-2: rgba(255, 255, 255, 0.065);
+  --vl-line: var(--line);
+  --vl-line-strong: var(--line-strong);
+
+  /* ink */
+  --vl-ink: var(--fg);
+  --vl-ink-2: #C7D0DA;
+  --vl-ink-3: #A9B4C0;
+  --vl-ink-4: #8B96A5;
+
+  /* accent */
+  --vl-cyan: var(--cyan);
+  --vl-cyan-soft: var(--cyan-soft);
+  --vl-violet: var(--violet);
+  --vl-violet-soft: var(--violet-soft);
+
+  /* type */
+  --vl-display: var(--f-display);
+  --vl-sans: var(--f-sans);
+  --vl-mono: var(--f-mono);
+
+  background: var(--vl-bg);
+  color: var(--vl-ink);
+  font-family: var(--vl-sans);
+}
+
+
+.vibed-landing ::selection {
+  background: var(--vl-cyan);
+  color: var(--vl-bg);
+}
+
+/* ── layout ─────────────────────────────────────────────────────────────── */
+.vibed-landing .vl-sec {
+  padding: 104px 80px;
+  position: relative;
+}
+.vibed-landing .vl-wrap {
+  max-width: 1320px;
+  margin: 0 auto;
+}
+.vibed-landing .landing-footer-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 56px;
+}
+.vibed-landing .landing-footer-legal {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: 16px;
+}
+.vibed-landing .landing-footer-legal-links {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, max-content));
+  align-items: start;
+  column-gap: 40px;
+  row-gap: 16px;
+}
+
+/* ── type ───────────────────────────────────────────────────────────────── */
+.vibed-landing .vl-h1 {
+  font-family: var(--vl-display);
+  font-weight: 800;
+  font-size: 56px;
+  line-height: 1.06;
+  letter-spacing: -0.025em;
+  margin: 0 0 22px;
+  color: var(--vl-ink);
+}
+.vibed-landing .vl-h2 {
+  font-family: var(--vl-display);
+  font-weight: 800;
+  font-size: 38px;
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  margin: 0 0 14px;
+  color: var(--vl-ink);
+}
+.vibed-landing .vl-lead {
+  font-size: 16.5px;
+  line-height: 1.6;
+  color: var(--vl-ink-3);
+  margin: 0;
+}
+.vibed-landing .vl-mono {
+  font-family: var(--vl-mono);
+}
+
+/* ── buttons ────────────────────────────────────────────────────────────── */
+.vibed-landing .vl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 0 28px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  border: 0;
+  cursor: pointer;
+  font-family: var(--vl-sans);
+  transition: transform 0.18s cubic-bezier(0.2, 0.7, 0.3, 1),
+              box-shadow 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+.vibed-landing .vl-btn-primary {
+  background: #F7F9FC;
+  color: #05070B;
+  box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+.vibed-landing .vl-btn-primary:hover {
+  background: #fff;
+  color: #05070B;
+  transform: translateY(-2px);
+  box-shadow: 0 20px 42px -14px rgba(0, 0, 0, 0.95), inset 0 1px 0 #fff;
+}
+.vibed-landing .vl-btn-primary:active { transform: translateY(0); }
+.vibed-landing .vl-btn-ghost {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  color: var(--vl-ink);
+  font-weight: 600;
+}
+
+.vibed-landing .vl-price-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+}
+.vibed-landing .vl-price-card {
+  height: 100%;
+  padding: 30px;
+  border-radius: 20px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.vibed-landing .vl-price-card > p { min-height: 66px; }
+.vibed-landing .vl-price-card > .vl-btn { flex: none; }
+.vibed-landing .vl-btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.13);
+  border-color: rgba(255, 255, 255, 0.24);
+  transform: translateY(-2px);
+}
+
+/* ── cards ──────────────────────────────────────────────────────────────── */
+.vibed-landing .vl-card {
+  background: var(--vl-surface);
+  border: 1px solid var(--vl-line);
+  border-radius: 18px;
+  box-sizing: border-box;
+  transition: transform 0.2s cubic-bezier(0.2, 0.7, 0.3, 1),
+              border-color 0.2s ease, background 0.2s ease;
+}
+.vibed-landing .vl-card-hover:hover {
+  transform: translateY(-3px);
+  border-color: rgba(0, 229, 255, 0.3);
+  background: var(--vl-surface-2);
+}
+
+/* ── focus ──────────────────────────────────────────────────────────────── */
+.vibed-landing a:focus-visible,
+.vibed-landing button:focus-visible {
+  outline: 2px solid var(--vl-cyan);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* ── decorative 3D hosts ────────────────────────────────────────────────── */
+.vibed-landing .vl-canvas-host { pointer-events: none; }
+
+@keyframes vlDrift {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-20px); }
+}
+.vibed-landing .vl-drift { animation: vlDrift 13s ease-in-out infinite; }
+
+/* ── responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .vibed-landing .vl-sec { padding-left: 40px; padding-right: 40px; }
+}
+@media (max-width: 860px) {
+  .vibed-landing .landing-footer-grid { gap: 32px; }
+  .vibed-landing .landing-footer-legal-links { column-gap: 24px; }
+  .vibed-landing .vl-sec {
+    padding: 68px 22px;
+  }
+  .vibed-landing .vl-h1 { font-size: 36px; line-height: 1.1; }
+  .vibed-landing .vl-h2 { font-size: 27px; }
+  .vibed-landing .vl-tilt { transform: none !important; }
+  .vibed-landing .vl-hero-3d {
+    width: 300px !important;
+    height: 330px !important;
+    top: -60px !important;
+    right: -110px !important;
+    opacity: 0.4 !important;
+  }
+  .vibed-landing .vl-triad { padding: 22px 0 !important; border-left: 0 !important; }
+  .vibed-landing .vl-triad + .vl-triad { border-top: 1px solid var(--vl-line) !important; }
+  .vibed-landing .vl-panel-row { flex-direction: column !important; }
+  .vibed-landing .vl-panel-thumb {
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    aspect-ratio: 16 / 9 !important;
+  }
+}
+
+/* ── reduced motion ─────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .vibed-landing *,
+  .vibed-landing *::before,
+  .vibed-landing *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ── New section grids ─────────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+    .vibed-landing .vl-price-grid { grid-template-columns: 1fr; }
+    .vibed-landing .vl-price-card > p { min-height: 0; }
+}
+@media (max-width: 860px) {
+    .vibed-landing .landing-footer-grid { grid-template-columns: 1fr; }
+    .vibed-landing .landing-footer-legal-links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .vibed-landing .vl-craft-grid { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+    .vibed-landing .vl-sec { padding: 72px 20px; }
+    .vibed-landing .vl-h1 { font-size: 38px; }
+    .vibed-landing .vl-h2 { font-size: 28px; }
+}
