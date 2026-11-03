@@ -149,7 +149,10 @@ export function fxAt(type, u) {
             const dir = t === 'push-left' ? -1 : 1;
             const travel = u < 0 ? easeIn(u + 1) : -(1 - easeOut(u));
             out.tx = dir * 0.17 * travel;
-            out.scale = 1 + Math.abs(out.tx) * 0.85 + 0.015 * peak;
+            // Translation exposes the opposite frame edge by the same amount.
+            // Keep enough overscan at every point in the move, matching the
+            // whip transition's no-edge invariant.
+            out.scale = 1 + 2 * Math.abs(out.tx) + 0.015 * peak;
             out.blurX = 0.012 * peak;
             break;
         }

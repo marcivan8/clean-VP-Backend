@@ -385,6 +385,7 @@ export const EMPHASIS_BY_PACK = {
     'hormozi':       { mode: 'color', color: '#FFE500', scale: 1.08 },
     'ali-abdaal':    { mode: 'color', color: '#4ADE80', scale: 1.06 },
     'apple':         { mode: 'scale', scale: 1.12 },
+    'editorial-boxed': { mode: 'color', color: '#8A5A00', scale: 1.0 },
     'documentary':   { mode: 'color', color: '#E8C27A', scale: 1.0 },
     'podcast':       { mode: 'color', color: '#00E5FF', scale: 1.06 },
     'luxury':        { mode: 'color', color: '#D4AF6A', scale: 1.0 },
@@ -404,6 +405,15 @@ export const EMPHASIS_BY_PACK = {
     'extended-bold': { mode: 'box',   color: '#0A0A0E', background: '#FFFFFF', scale: 1.04 },
     'platform-sans': { mode: 'scale', scale: 1.1 },
     'editorial':     { mode: 'color', color: '#E8C27A', scale: 1.0 },
+    'creator-pop':   { mode: 'color', color: '#FFE500', scale: 1.08 },
+    'social-clean':  { mode: 'color', color: '#4ADE80', scale: 1.04 },
+    'punchy-condensed': { mode: 'box', color: '#111111', background: '#FFE500', scale: 1.08 },
+    'storyteller':   { mode: 'color', color: '#FDE68A', scale: 1.04 },
+    'creator-minimal': { mode: 'color', color: '#00E5FF', scale: 1.04 },
+    'friendly-round': { mode: 'color', color: '#F9A8D4', scale: 1.04 },
+    'brand-block':   { mode: 'box', color: '#111111', background: '#FFFFFF', scale: 1.06 },
+    'mono-tech-caption': { mode: 'color', color: '#34D399', scale: 1.02 },
+    'bootzy-caption': { mode: 'box', color: '#111111', background: '#FFE500', scale: 1.08 },
 };
 
 const DEFAULT_EMPHASIS = { mode: 'color', color: '#FACC15', scale: 1.12 };

@@ -72,19 +72,17 @@ section('2b · speed audio and the proxy size');
     check('the proxy job reports the upright proxy size (for the iPhone shape fallback)',
         /const dims = await probeDimensions\(mp4Path\)/.test(vp) && /width:\s+dims\?\.width/.test(vp));
     const ide = fs.readFileSync(path.join(ROOT, 'client/src/layouts/IDELayout.jsx'), 'utf8');
-    check('the editor sets the shape from the proxy when the file probe gave up',
-        /if \(needsResolutionFromProxy\) applyProxyDimensions\(assetId, data, ratioBeforeProxy\)/.test(ide)
+    check('the editor reconciles each video shape from its upright proxy',
+        /if \(isVideo\) applyProxyDimensions\(assetId, data, ratioBeforeProxy, !e\.referenceMaterial\)/.test(ide)
+        && /data\?\.width[\s\S]*data\?\.proxyUrl/.test(ide)
         && /st\.aspectRatio === ratioBefore/.test(ide));
-    // R95: this backfill must run per-FILE, not gated on the batch-wide
-    // "has some earlier file in this upload already set the project ratio"
-    // flag -- or the 2nd+ video in a multi-file upload whose own in-browser
-    // probe fails never gets its resolution backfilled at all, and every
-    // short made from it is pillarboxed forever (agent/shortTimeline.js's
-    // aspectOf() can never determine its shape). See IDELayout.jsx's comment
-    // on `needsResolutionFromProxy` for the full chain.
-    check('the proxy-shape backfill does not depend on ratioSet (that would make it batch-wide, not per-file)',
-        !/const needsResolutionFromProxy = isVideo && !ratioSet/.test(ide)
-        && /const needsResolutionFromProxy = isVideo && !\(metadata\.width && metadata\.height\)/.test(ide));
+    // R95: proxy dimensions must be reconciled per file, independent of the
+    // batch-wide ratioSet flag. The helper itself protects the project ratio
+    // from overwriting a change made while the proxy was being generated.
+    check('proxy-shape reconciliation is per-file and protects later ratio changes',
+        !/if \(isVideo && !ratioSet\) applyProxyDimensions/.test(ide)
+        && /if \(isVideo\) applyProxyDimensions\(assetId, data, ratioBeforeProxy, !e\.referenceMaterial\)/.test(ide)
+        && /st\.aspectRatio === ratioBefore/.test(ide));
 }
 
 function bin(name) {

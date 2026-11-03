@@ -491,7 +491,7 @@ await check('two offered beats produce a two-beat hook ON TIKTOK', () => {
         const hookText = allClips(polished.tracks).filter(c => String(c.id).startsWith('short-hook-text-'));
         assert.ok(hookText.length >= 2, `expected two beats' worth of text clips, got ${hookText.length}`);
         const words = hookText.map(c => String(c.content || c.name || '')).join(' ');
-        assert.match(words, /Zero To Forty Thousand/);
+        assert.match(words, /Zero To Forty\s+Thousand/);
         assert.match(words, /Six weeks/);
     });
 });

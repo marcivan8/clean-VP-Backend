@@ -484,7 +484,7 @@ await check('picker is in the desktop chat box, style syncs to the cloud', () =>
     const cc = read('../client/src/components/Assistant/ChatComposer.jsx');
     assert.ok(/<ChatComposer/.test(rp) && /hidden md:flex[^"]*">[\s\S]*?<EditingStylePicker/.test(cc));
     // R92 round B: the shorts list syncs in the same selector.
-    assert.ok(/\[state\.tracks, state\.editingStyle(?:, state\.shorts)?\]/.test(read('../client/src/hooks/useSupabasePersistence.js')));
+    assert.ok(/\(state\) => \[state\.tracks, state\.editingStyle(?:, state\.\w+)*\]/.test(read('../client/src/hooks/useSupabasePersistence.js')));
     for (const lang of ['en', 'fr']) {
         const j = JSON.parse(read(`../client/src/locales/${lang}/editor.json`)).editingStyles;
         for (const id of ES.EDITING_STYLE_IDS) assert.ok(j.names[id] && j.hints[id], `${lang} ${id}`);

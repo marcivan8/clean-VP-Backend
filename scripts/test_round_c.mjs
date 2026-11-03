@@ -164,9 +164,9 @@ await check('every layer is added, tuned per platform, and the input is not chan
     const before = JSON.stringify(SHORT);
     const r = SPo.polishShort(SHORT, PP.PLATFORM_PROFILES.tiktok, { words: WORDS, events: [{ eventType: 'REVEAL', timelineTime: 5 }], popOut: true });
     assert.equal(JSON.stringify(SHORT), before, 'input untouched');
-    assert.deepEqual(r.applied.map(a => a.split(' (')[0]), ['hook title', 'captions', 'camera moves', 'moment graphics', 'transitions', 'speaker pop-out']);
+    assert.deepEqual(r.applied.map(a => a.split(' (')[0]), ['hook title', 'captions', 'camera moves', 'moment graphics', 'transitions', 'speaker pop-out', 'title layout repaired']);
     const title = r.tracks.find(t => t.id === 'track-short-title').clips[0];
-    assert.equal(title.content, 'HOW WE GREW REVENUE BY 300');
+    assert.equal(title.content.replace(/\s+/g, ' '), 'HOW WE GREW REVENUE BY 300', 'layout QA may wrap the title to keep it inside the frame');
     assert.ok(title.animations.some(a => a.presetId === 'composed:slam-in') && title.animations.some(a => a.anchor === 'out'));
     assert.ok(title.y > PP.PLATFORM_PROFILES.tiktok.safeZone.top * 100, 'title below the top UI');
     const gfx = r.tracks.find(t => t.id === 'track-short-graphics').clips;
@@ -194,7 +194,7 @@ await check('every layer is added, tuned per platform, and the input is not chan
 await check('the look differs per platform; an AI headline and keywords win', () => {
     const reels = SPo.polishShort(SHORT, PP.PLATFORM_PROFILES.reels, { words: WORDS, plan: { headline: 'The one change that tripled us', keywords: ['year'] } });
     const title = reels.tracks.find(t => t.id === 'track-short-title').clips[0];
-    assert.equal(title.content, 'The one change that tripled us', 'Reels keeps sentence case');
+    assert.equal(title.content.replace(/\s+/g, ' '), 'The one change that tripled us', 'Reels keeps sentence case while allowing safe line breaks');
     assert.equal(title.fontFamily, 'Montserrat', 'brand font survives the designed-title wiring');
     // R95 wiring: reels' hook title is now TitleSequence's "minimal" preset
     // (closest calm entrance to the old hand-rolled blur-in).
@@ -235,7 +235,7 @@ await check('the finisher: own 9:16 timeline, AI plan, polish and sounds on the 
     assert.equal(JSON.stringify(S.getState().tracks), before, 'main edit untouched');
     assert.equal(r.aspectRatio, '9:16');
     assert.ok(r.applied[0] === 'AI headline' && r.applied.some(a => a.startsWith('sound effects')));
-    assert.equal(r.tracks.find(t => t.id === 'track-short-title').clips[0].content, 'HOW WE TRIPLED REVENUE');
+    assert.equal(r.tracks.find(t => t.id === 'track-short-title').clips[0].content.replace(/\s+/g, ' '), 'HOW WE TRIPLED REVENUE');
     const v = r.tracks.find(t => t.id === 'track-default-video').clips[0];
     assert.ok(v.virtualCam?.reframe === '9:16', '9:16 speaker crop');
     assert.ok(v.animations.some(a => a.presetId === 'composed:punch'), 'punch on the reveal (moved into short time)');

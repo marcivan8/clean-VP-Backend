@@ -191,9 +191,10 @@ check('both cases run inside a history group and close it in finally', () => {
     for (const c of ['sync_cutaways', 'apply_style_recipe']) {
         const i = eng.indexOf(`case '${c}'`);
         assert.ok(i > 0, c);
-        // Style recipes now also place contextual vector illustrations, so the
-        // implementation body is longer; inspect through its finally block.
-        const body = eng.slice(i, i + 10000);
+        // Inspect the complete switch case. Style recipes now place several
+        // kinds of visuals, so a fixed-size slice can end before `finally`.
+        const nextCase = eng.indexOf('\n            case ', i + 1);
+        const body = eng.slice(i, nextCase > 0 ? nextCase : undefined);
         assert.ok(/beginHistoryGroup\(\)/.test(body), `${c} begin`);
         assert.ok(/finally\s*\{[^}]*endHistoryGroup\(\)/.test(body), `${c} finally end`);
     }

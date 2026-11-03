@@ -62,13 +62,22 @@ export function buildStyleReferencePlan(raw) {
         : transitionPacing === 'slow' || motionEnergy === 'low' ? 'explainer' : 'travel';
     const motionScale = ({ low: 0.65, medium: 0.85, high: 1.05 })[motionEnergy] || 0.85;
     const graphicsMax = ({ sparse: 1, balanced: 2, dense: 4 })[graphicsDensity] || 2;
-    // The first swatch is the reference's dominant surface. Treating any
-    // white text swatch as a light background made mixed dark palettes pick a
-    // mid-tone accent as the caption color, which could disappear in export.
+    // The first swatch is the reference's lead color and sets caption contrast.
+    // UI-card surfaces use the palette's median luminance instead: a light
+    // secondary surface should be able to make device/UI graphics light even
+    // when the lead brand color is dark, while one white text swatch should
+    // not flip an otherwise dark palette.
     const dominantLuminance = colors.length ? luminance(colors[0]) : 0;
-    const surface = dominantLuminance >= 0.5 ? 'light' : 'dark';
+    const paletteLuminances = colors.map(luminance).sort((a, b) => a - b);
+    const middle = Math.floor(paletteLuminances.length / 2);
+    const paletteMedian = paletteLuminances.length === 0 ? 0
+        : paletteLuminances.length % 2 === 0
+            ? (paletteLuminances[middle - 1] + paletteLuminances[middle]) / 2
+            : paletteLuminances[middle];
+    const surface = paletteMedian >= 0.4 ? 'light' : 'dark';
+    const captionSurface = dominantLuminance >= 0.5 ? 'light' : 'dark';
     const textColor = colors.length
-        ? (surface === 'light'
+        ? (captionSurface === 'light'
             ? colors.slice().sort((a, b) => luminance(a) - luminance(b))[0]
             : colors.slice().sort((a, b) => luminance(b) - luminance(a))[0])
         : null;

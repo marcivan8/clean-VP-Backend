@@ -506,6 +506,7 @@ const TRANSITION_PACK_DURATIONS = {
     'flash': 0.3, 'dip': 0.6, 'whip-left': 0.36, 'whip-right': 0.36,
     'zoom-punch': 0.4, 'glitch': 0.32, 'speed-lines': 0.5,
     'circle-wipe': 0.52, 'bar-wipe': 0.44, 'blinds': 0.5, 'diagonal-wipe': 0.46,
+    'soft-blur': 0.5, 'push-left': 0.44, 'push-right': 0.44, 'color-flash': 0.3,
 };
 const TRANSITION_LEGACY = { fade: 'dip', crossfade: 'dip', dissolve: 'dip', slide: 'whip-left', wipe: 'whip-left', zoom: 'zoom-punch' };
 
