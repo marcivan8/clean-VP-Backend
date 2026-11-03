@@ -1,27 +1,27 @@
 {
   "hero": {
-    "headline": "Créez à la\nvitesse de la pensée.",
-    "body": "Vibed est le système d'exploitation créatif pour les créateurs et monteurs. Montez, organisez et affinez vos prises en conversation avec un assistant qui respecte votre goût. Chaque modification est nommée et réversible.",
-    "cta": "Voir les offres",
-    "caption": "Sans carte bancaire. Importez vos propres clips."
+    "headline": "Un premier montage.\nÀ votre image.",
+    "body": "Vibed transforme vos rushes en premier montage. Décrivez vos envies simplement, puis ajustez chaque changement sur la timeline.",
+    "cta": "Essayer gratuitement",
+    "secondaryCta": "Voir comment ça marche",
+    "caption": "Aucune expérience du montage requise. Commencez avec un clip."
   },
-
   "problem": {
     "eyebrow": "La réalité",
-    "headline": "Vous ne devriez pas passer votre week-end à monter.",
+    "headline": "Vous ne devriez pas passer votre week end à monter.",
     "pains": [
       {
         "num": "01",
         "headline": "Chaque minute de silence vous en coûte deux.",
-        "body": "Une vidéo de 10 minutes contient 3 à 4 minutes de silence, d'hésitations et de mots parasites — tous coupés manuellement, un par un.",
+        "body": "Une vidéo de 10 minutes contient 3 à 4 minutes de silence, d'hésitations et de mots parasites, tous coupés manuellement, un par un.",
         "bodyAccent": "3 à 4 minutes",
         "bodyBold": "manuellement, un par un."
       },
       {
         "num": "02",
         "headline": "Une vidéo. Quatre exports. Des heures sans fin.",
-        "body": "La même vidéo doit être reformatée, réencodée et sous-titrée pour chaque plateforme — un processus qui peut prendre autant de temps que le montage original.",
-        "bodyAccent": "reformatée, réencodée et sous-titrée",
+        "body": "La même vidéo doit être reformatée, réencodée et sous titrée pour chaque plateforme, un processus qui peut prendre autant de temps que le montage original.",
+        "bodyAccent": "reformatée, réencodée et sous titrée",
         "bodyBold": "autant de temps que le montage original."
       },
       {
@@ -32,12 +32,11 @@
         "bodyBold": "en plus d'un travail plus large."
       }
     ],
-    "kicker": "Le résultat : vous publiez un contenu qui n'est pas aussi bon qu'il pourrait l'être, ou vous passez votre week-end à monter.",
+    "kicker": "Le résultat : vous publiez un contenu qui n'est pas aussi bon qu'il pourrait l'être, ou vous passez votre week end à monter.",
     "kickerBoldFg": "n'est pas aussi bon qu'il pourrait l'être",
-    "kickerAccent": "week-end",
+    "kickerAccent": "week end",
     "kickerBoldFg2": "à monter."
   },
-
   "workflow": {
     "eyebrow": "Le workflow",
     "headline": "Une IA qui travaille avec votre créativité.",
@@ -52,29 +51,45 @@
       },
       {
         "title": "Tapez ce que vous voulez couper",
-        "copy": "Tapez 'couper de donc voilà à passons à la suite' → la coupe apparaît."
+        "copy": "Tapez 'couper de donc voilà à passons à la suite' and the cut appears. la coupe apparaît."
       },
       {
         "title": "Analyse et suggestions de montage",
-        "copy": "ROKA observe où en est votre projet et propose la prochaine étape — un angle multicam, un rythme de zoom, une coupe plus serrée — pour que vous acceptiez, ajustiez ou refusiez au lieu de partir d'une timeline vide."
+        "copy": "ROKA observe où en est votre projet et propose la prochaine étape, un angle multicam, un rythme de zoom, une coupe plus serrée, pour que vous acceptiez, ajustiez ou refusiez au lieu de partir d'une timeline vide."
       }
     ]
   },
-
   "brain": {
     "eyebrow": "Le cerveau éditorial",
-    "headline": "Il sait ce que vous créez —\npas seulement ce que vous avez cliqué.",
-    "body": "Vibed lit vos rushes comme le ferait un assistant monteur. Dites-lui ce que vous construisez, ou laissez-le reconnaître le format, et ses suggestions changent en conséquence — un podcast reçoit un traitement différent d'une démo produit.",
+    "headline": "Il sait ce que vous créez, \npas seulement ce que vous avez cliqué.",
+    "body": "Vibed lit vos rushes comme le ferait un assistant monteur. Dites lui ce que vous construisez, ou laissez le reconnaître le format, et ses suggestions changent en conséquence, un podcast reçoit un traitement différent d'une démo produit.",
     "scenarios": [
-      { "title": "Podcasts & interviews", "body": "Transcription colorée par intervenant, nettoyage des interruptions, et suggestions de chapitres pour les conversations à plusieurs invités." },
-      { "title": "Vlogs & face caméra", "body": "Coupes sensibles au rythme et sélection des meilleurs moments, adaptées aux formats portés par une personnalité, en plan unique." },
-      { "title": "Tutoriels & formation", "body": "Conserve la structure étape par étape tout en supprimant les temps morts entre les démonstrations." },
-      { "title": "Publicités & démos produit", "body": "Repère votre accroche la plus forte et propose des trois premières secondes plus percutantes." },
-      { "title": "Présentations", "body": "Reconnaît le rythme porté par les diapositives et garde la voix off alignée avec ce qui est à l'écran." },
-      { "title": "Récit & montage", "body": "Regroupe les prises et B-roll apparentés, pour assembler une séquence à partir d'une sélection, pas d'un bac entier." }
+      {
+        "title": "Podcasts & interviews",
+        "body": "Transcription colorée par intervenant, nettoyage des interruptions, et suggestions de chapitres pour les conversations à plusieurs invités."
+      },
+      {
+        "title": "Vlogs & face caméra",
+        "body": "Coupes sensibles au rythme et sélection des meilleurs moments, adaptées aux formats portés par une personnalité, en plan unique."
+      },
+      {
+        "title": "Tutoriels & formation",
+        "body": "Conserve la structure étape par étape tout en supprimant les temps morts entre les démonstrations."
+      },
+      {
+        "title": "Publicités & démos produit",
+        "body": "Repère votre accroche la plus forte et propose des trois premières secondes plus percutantes."
+      },
+      {
+        "title": "Présentations",
+        "body": "Reconnaît le rythme porté par les diapositives et garde la voix off alignée avec ce qui est à l'écran."
+      },
+      {
+        "title": "Récit & montage",
+        "body": "Regroupe les prises et B roll apparentés, pour assembler une séquence à partir d'une sélection, pas d'un bac entier."
+      }
     ]
   },
-
   "beforeAfter": {
     "eyebrow": "La différence",
     "headline": "Votre montage de 3h.\nTerminé en 20 minutes.",
@@ -82,17 +97,41 @@
     "withoutHeader": "SANS VIBED",
     "withHeader": "AVEC VIBED",
     "rows": [
-      { "without": "Parcourir l'enregistrement pour les silences", "withoutTime": "45 min",  "with": "Détection des silences par IA & coupe auto",        "withTime": "2 min"  },
-      { "without": "Couper les mots parasites un par un",          "withoutTime": "30 min",  "with": "Suppression des mots parasites par IA",             "withTime": "1 min"  },
-      { "without": "Normalisation audio manuelle",                 "withoutTime": "15 min",  "with": "Normalisation en un clic",                          "withTime": "30 s"   },
-      { "without": "Saisir et synchroniser les sous-titres manuellement", "withoutTime": "60 min", "with": "Sous-titres auto avec horodatage par mot",     "withTime": "2 min"  },
-      { "without": "Réexporter pour chaque plateforme séparément", "withoutTime": "30 min",  "with": "Exports parallèles multi-plateformes",              "withTime": "3 min"  }
+      {
+        "without": "Parcourir l'enregistrement pour les silences",
+        "withoutTime": "45 min",
+        "with": "Détection des silences par IA & coupe auto",
+        "withTime": "2 min"
+      },
+      {
+        "without": "Couper les mots parasites un par un",
+        "withoutTime": "30 min",
+        "with": "Suppression des mots parasites par IA",
+        "withTime": "1 min"
+      },
+      {
+        "without": "Normalisation audio manuelle",
+        "withoutTime": "15 min",
+        "with": "Normalisation en un clic",
+        "withTime": "30 s"
+      },
+      {
+        "without": "Saisir et synchroniser les sous titres manuellement",
+        "withoutTime": "60 min",
+        "with": "Sous titres auto avec horodatage par mot",
+        "withTime": "2 min"
+      },
+      {
+        "without": "Réexporter pour chaque plateforme séparément",
+        "withoutTime": "30 min",
+        "with": "Exports parallèles multi plateformes",
+        "withTime": "3 min"
+      }
     ],
     "totalLabel": "Total par vidéo",
     "totalWithout": "~3 heures",
     "totalWith": "~25 min"
   },
-
   "personas": {
     "eyebrow": "Pour qui",
     "headline": "Conçu pour tous ceux\nqui créent avec la vidéo.",
@@ -103,7 +142,7 @@
         "description": "Enregistre et monte tout seul. Publie 2 à 5 vidéos par semaine.",
         "before": "3 à 5 heures de montage par vidéo",
         "beforeAccent": "3 à 5 heures",
-        "after": "20 à 40 minutes. L'IA gère le nettoyage ; vous vous concentrez sur les décisions créatives.",
+        "after": "20 à 40 minutes. L'IA gère le nettoyage; vous vous concentrez sur les décisions créatives.",
         "afterMint": "20 à 40 minutes.",
         "afterBold": "décisions créatives."
       },
@@ -112,7 +151,7 @@
         "description": "Interviews longues, plusieurs invités, épisodes de 30 à 90 minutes.",
         "before": "Défilement manuel, transcription séparée, sélection des extraits à l'oreille",
         "beforeAccent": "sélection des extraits à l'oreille",
-        "after": "Mots parasites et silences nettoyés en minutes. La transcription colorée par intervenant rend le montage multi-invités aussi simple qu'un traitement de texte.",
+        "after": "Mots parasites et silences nettoyés en minutes. La transcription colorée par intervenant rend le montage multi invités aussi simple qu'un traitement de texte.",
         "afterMint": "minutes.",
         "afterBold": "aussi simple qu'un traitement de texte."
       },
@@ -126,13 +165,11 @@
       }
     ]
   },
-
   "roi": {
-    "body": "En économisant 2,5 heures par vidéo et 3 vidéos par semaine, Vibed vous fait gagner 30 heures par mois. Le plan Créateur coûte moins d'une heure de votre temps.",
+    "body": "En économisant 2, 5 heures par vidéo et 3 vidéos par semaine, Vibed vous fait gagner 30 heures par mois. Le plan Créateur coûte moins d'une heure de votre temps.",
     "boldPart": "Vibed vous fait gagner 30 heures par mois.",
     "accentPart": "une heure de votre temps."
   },
-
   "pricing": {
     "eyebrow": "Tarifs simples",
     "headline": "Un outil. Trois vitesses.",
@@ -146,10 +183,14 @@
           "Vidéos jusqu'à 20 minutes",
           "Stockage 7 jours",
           "3 opérations IA / mois",
-          "Suppression des silences & coupe — illimité",
-          "Export MP4 — sans filigrane"
+          "Suppression des silences & coupe, illimité",
+          "Export MP4, sans filigrane"
         ],
-        "locked": ["Styles de montage et mode Auto", "Panneaux Shorts et Stock", "Intelligence de transcription"]
+        "locked": [
+          "Styles de montage et mode Auto",
+          "Panneaux Shorts et Stock",
+          "Intelligence de transcription"
+        ]
       },
       "creator": {
         "tagline": "Montez chaque semaine. Exportez des vidéos finalisées quand vous le souhaitez.",
@@ -161,7 +202,7 @@
           "100 opérations IA / mois",
           "Tous les styles de montage et mode Auto",
           "Découpe en Shorts et Médias de stock",
-          "Toutes les commandes IA — parasites, sous-titres, meilleurs moments",
+          "Toutes les commandes IA, parasites, sous titres, meilleurs moments",
           "Transcription complète + intelligence de contenu",
           "Export MP4"
         ],
@@ -184,7 +225,6 @@
       }
     }
   },
-
   "socialProof": {
     "quotes": [
       {
@@ -199,10 +239,244 @@
       }
     ]
   },
-
   "finalCta": {
     "headline": "L'avenir du montage\nest collaboratif.",
     "cta": "Voir les offres",
     "caption": "Commencez gratuitement. Sans carte bancaire. Importez vos clips."
+  },
+  "showcase": {
+    "headline": "Du rush brut à un montage qui vous ressemble.",
+    "body": "Laissez le mode Auto préparer une première version. Ajustez ensuite le rythme, le style et le message pour créer une vidéo à votre image.",
+    "cta": "Essayer Auto avec votre clip",
+    "before": "PRISE BRUTE",
+    "after": "MONTAGE AVEC VIBED",
+    "demoAlt": "Une personne avant et après un montage avec Vibed",
+    "personAlt": "Illustration d’une personne face caméra",
+    "demoCaption": "Auto prépare une première version. Vous choisissez la suite.",
+    "caption": "À votre image.",
+    "points": {
+      "auto": {
+        "title": "Un premier montage plus rapide",
+        "body": "Auto prépare une première version. Relisez la, puis ajustez le rythme et les détails."
+      },
+      "access": {
+        "title": "Aucune expérience requise",
+        "body": "Décrivez le changement avec vos mots. Vibed l’applique à votre timeline."
+      },
+      "creative": {
+        "title": "Votre style, jusqu’au bout",
+        "body": "Travaillez les sous titres, les couleurs et le mouvement, puis affinez chaque choix."
+      }
+    },
+    "windowTitle": "VIBED STUDIO"
+  },
+  "v2": {
+    "hero": {
+      "headline": "Importez vos rushes.\nRécupérez un montage fini\nen quelques minutes.",
+      "body": "Pas de timeline. Aucune compétence en montage. Rien à installer. Choisissez un style, appuyez sur entrée, et VIBED coupe, sous-titre et ajoute la musique.",
+      "proofLead": "Déjà utilisé par",
+      "proofHighlight": "100+ créateurs",
+      "proofTail": "."
+    },
+    "cta": {
+      "primary": "Commencer gratuitement",
+      "microcopy": "Gratuit pour commencer · Sans carte bancaire"
+    },
+    "card": {
+      "autoMode": "MODE AUTO",
+      "prompt": "Transforme ça en Reel percutant",
+      "status": "Rendu en 11 s",
+      "caption": "ça change tout",
+      "r1": "2:41 de silences supprimés",
+      "r2": "118 mots de remplissage coupés",
+      "r3": "Sous-titres calés au mot près",
+      "r4": "Recadré en 9:16 pour les Reels",
+      "output": "reel_01.mp4 · 1:05 · prêt à publier"
+    },
+    "triad": {
+      "a": {
+        "title": "Accessible à tous",
+        "body": "Si vous savez importer un fichier et choisir dans une liste, vous savez monter ici. Aucune formation, aucune timeline, rien à installer."
+      },
+      "b": {
+        "title": "Une étape, pas quarante",
+        "body": "Choisissez un style et appuyez sur entrée. Un seul passage gère les coupes, les sous-titres, les transitions et le son. Un clic annule tout."
+      },
+      "c": {
+        "title": "Des minutes, pas des soirées",
+        "body": "Une vidéo de 14 minutes revient en un montage fini de 8 minutes, prêt à publier."
+      }
+    },
+    "how": {
+      "title": "Trois étapes. C'est tout le produit.",
+      "lead": "Aucune timeline à apprendre, aucun panneau à ranger. Déposez un fichier, dites le rendu que vous voulez, et lancez la passe.",
+      "s1": {
+        "title": "Déposez vos rushes",
+        "body": "Fichiers caméra, capture d'écran, piste de podcast. Jusqu'à quatre heures en Pro.",
+        "dropzone": "Glissez un fichier ici"
+      },
+      "s2": {
+        "title": "Choisissez un style",
+        "body": "Vlog, face caméra, interview, podcast, reel. Chacun porte son propre rythme et ses règles de coupe."
+      },
+      "s3": {
+        "title": "Appuyez sur entrée",
+        "body": "VIBED lit les rushes, coupe les temps morts, construit la séquence et vous rend un montage prêt à lire.",
+        "status": "Montage prêt"
+      }
+    },
+    "styles": {
+      "vlog": "Vlog",
+      "talkingHead": "Face caméra",
+      "interview": "Interview",
+      "podcast": "Podcast",
+      "reel": "Reel"
+    },
+    "speed": {
+      "title": "Une soirée de montage, faite pendant que vous préparez le café.",
+      "lead": "La première passe est ce qui vous prend la soirée. VIBED la fait en quelques secondes et vous laisse les choix artistiques.",
+      "rawLabel": "RUSH BRUT",
+      "editLabel": "MONTAGE AUTO",
+      "cut": "5:21 coupées",
+      "c1": "Silences supprimés",
+      "c2": "Mots parasites retirés",
+      "c3": "Meilleurs moments gardés",
+      "c4": "Sous-titres incrustés",
+      "c5": "Séquence construite",
+      "passTitle": "CE QUE LA PASSE A FAIT",
+      "p1": "Repéré les temps morts et coupé, sur chaque prise",
+      "p2": "Retiré les mots parasites de la transcription",
+      "p3": "Classé les moments à garder",
+      "p4": "Posé la séquence dans l'ordre, prête à lire",
+      "stat": {
+        "a": {
+          "value": "5-15 s",
+          "label": "Temps habituel de la passe sur un montage court."
+        },
+        "b": {
+          "value": "0",
+          "label": "Timeline à apprendre avant votre premier export."
+        },
+        "c": {
+          "value": "1",
+          "label": "Seul endroit où vit tout le montage, du rush à l'export."
+        }
+      }
+    },
+    "repurpose": {
+      "title": "Arrêtez de remonter trois fois la même vidéo.",
+      "lead": "Un long enregistrement devient des formats verticaux pour chaque plateforme, chacun avec ses sous-titres et son cadrage.",
+      "tiktok": {
+        "label": "TIKTOK",
+        "caption": "Voilà ce que personne ne vous dit"
+      },
+      "reels": {
+        "label": "IG REELS",
+        "caption": "Trois minutes, une prise honnête"
+      },
+      "shorts": {
+        "label": "YT SHORTS",
+        "caption": "Le réglage qui a enfin marché"
+      },
+      "card": {
+        "a": {
+          "title": "Cadré pour le vertical",
+          "body": "Les visages restent centrés quand le cadre passe du large au 9:16."
+        },
+        "b": {
+          "title": "Des sous-titres lisibles",
+          "body": "Incrustés, calés sur les mots, à une taille qui se lit sur un téléphone."
+        },
+        "c": {
+          "title": "Choisi, pas tronçonné",
+          "body": "Les coupes viennent des moments qui portent le propos, pas d'une horloge fixe."
+        }
+      }
+    },
+    "script": {
+      "title": "Montrez-lui une vidéo que vous aimez. Il monte la vôtre pareil.",
+      "lead": "Des références, un brief court, un script. Un seul suffit pour dire à VIBED le rendu que vous attendez.",
+      "step1": "1 RÉFÉRENCES",
+      "step2": "2 BRIEF",
+      "step3": "3 SCRIPT",
+      "output": "MONTÉ COMME ÇA",
+      "brief": "Rythme sec et rapide. Coupes franches, pas de nappe musicale, sous-titres sur chaque ligne.",
+      "scriptLines": "Ouvrir sur le problème\nMontrer que ça marche\nFinir sur ce que ça coûte",
+      "note1": "Déposez les clips dont vous voulez le rythme.",
+      "note2": "Deux lignes sur le ton suffisent.",
+      "note3": "Collez le script, il se cale sur vos rushes.",
+      "note4": "Le même rythme, vos rushes et votre voix.",
+      "o1": "Ouvrir sur le problème",
+      "o2": "Montrer la solution",
+      "o3": "Ce que ça coûte",
+      "o4": "Finir sur le propos",
+      "shipping": "Références, brief et script alimentent la même passe."
+    },
+    "midCta": {
+      "title": "Votre prochain montage pourrait déjà être fait.",
+      "body": "Commencez sur le plan gratuit. Trois passes IA par mois, sans carte, sans filigrane sur vos exports."
+    },
+    "craft": {
+      "title": "Les parties qui prennent le plus de temps.",
+      "lead": "Chacune travaille sur la transcription, donc elle sait ce qui a été dit et quand.",
+      "a": {
+        "title": "Silences et mots parasites",
+        "body": "Les temps morts et les euh partent en une passe, sur chaque prise, sans que vous les cherchiez."
+      },
+      "b": {
+        "title": "Sous-titres sur chaque ligne",
+        "body": "Calés sur la transcription, incrustés à une taille qui se lit sur un téléphone."
+      },
+      "c": {
+        "title": "Recadrage vertical",
+        "body": "Les rushes larges passent en 9:16 avec le sujet toujours dans le cadre."
+      },
+      "d": {
+        "title": "Meilleurs moments, classés",
+        "body": "La passe marque les passages qui portent le propos, à garder ou retirer en un clic."
+      }
+    },
+    "trust": {
+      "a": "100+ créateurs montent sur VIBED",
+      "b": "Rushes et transcriptions hébergés dans l'UE",
+      "c": "Plan gratuit, sans carte",
+      "d": "Export MP4 sans filigrane"
+    },
+    "pricing": {
+      "popular": "LE PLUS CHOISI",
+      "redirecting": "Redirection",
+      "footnote": "Annulable à tout moment. Un plan change ce que vous pouvez lancer ensuite, jamais ce que vous avez déjà exporté."
+    },
+    "faq": {
+      "title": "Les questions qui méritent une réponse.",
+      "q1": {
+        "q": "Faut-il savoir monter ?",
+        "a": "Non. La première passe tourne seule et vous rend quelque chose de lisible. Ensuite, si vous voulez changer une coupe, vous le demandez avec des mots."
+      },
+      "q2": {
+        "q": "Combien de temps prend une passe ?",
+        "a": "Les montages courts reviennent en général en cinq à quinze secondes. Les enregistrements longs prennent proportionnellement plus, et vous pouvez continuer à travailler pendant."
+      },
+      "q3": {
+        "q": "Que puis-je importer ?",
+        "a": "Fichiers caméra, captures d'écran et audio. Le plan gratuit accepte les vidéos jusqu'à vingt minutes, Creator jusqu'à quatre-vingt-dix, Pro jusqu'à quatre heures."
+      },
+      "q4": {
+        "q": "Puis-je encore intervenir à la main ?",
+        "a": "Oui. Chaque coupe de la passe est une coupe normale que vous pouvez déplacer, rogner ou retirer, et vous pouvez aussi demander les changements en langage courant."
+      },
+      "q5": {
+        "q": "Où sont stockés mes rushes ?",
+        "a": "Sur une infrastructure européenne. Le stockage dure sept jours sur le plan gratuit, trente sur Creator, et tant que vous êtes abonné sur Pro."
+      },
+      "q6": {
+        "q": "Que se passe-t-il quand les passes gratuites sont épuisées ?",
+        "a": "Le montage manuel continue de fonctionner, suppression des silences et coupe comprises. Les passes IA reviennent le mois suivant, ou tout de suite si vous passez à un plan payant."
+      }
+    },
+    "finalCta": {
+      "title": "Vos rushes sont déjà bons.\nLe montage ne devrait pas être le plus dur.",
+      "body": "Commencez gratuitement, lancez votre première passe et voyez ce qui revient."
+    }
   }
 }

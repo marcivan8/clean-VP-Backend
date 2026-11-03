@@ -6,7 +6,12 @@
     "startFree": "Start free",
     "account": "Dashboard",
     "backToVibed": "Back to Vibed",
-    "back": "Back"
+    "back": "Back",
+    "how": "How it works",
+    "features": "Features",
+    "pricing": "Pricing",
+    "openMenu": "Open menu",
+    "closeMenu": "Close menu"
   },
   "actions": {
     "export": "Export",
@@ -32,7 +37,6 @@
   },
   "footer": {
     "tagline": "The creative operating system for modern storytellers, editors and studios.",
-    "gdpr": "Projects and accounts stored in Switzerland and the EU",
     "legal": "Legal",
     "links": {
       "privacyPolicy": "Privacy Policy",

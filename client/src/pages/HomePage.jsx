@@ -1,55 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, ArrowRight, Play, CheckCircle2, MousePointerClick, Layers, LayoutGrid, Link as LinkIcon, MessageSquare, Mic, Scissors, UserCheck, Zap, Video, BookOpen, Megaphone, Presentation, Film, Menu, X } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import Logo from '../components/Logo';
 import { openConsentSettings } from '../lib/consent';
-import { captureEvent } from '../lib/posthog';
+import './landing/landing.css';
+import LandingHero from './landing/Hero';
+import { HowItWorks, SpeedProof, Repurpose, ScriptFlow } from './landing/Sections';
+import { MidCta, CraftGrid, TrustBar, PricingV2, Faq, FinalCtaV2 } from './landing/Closing';
 
-const renderHighlightedText = (text, accent, bold, mint, boldFg) => {
-    if (!text) return null;
-    let parts = [text];
-    if (accent) parts = parts.flatMap((p, idx) => typeof p === 'string' ? p.split(accent).reduce((acc, val, i, arr) => i < arr.length - 1 ? acc.concat(val, <A key={`a-${idx}-${i}`}>{accent}</A>) : acc.concat(val), []) : [p]);
-    if (bold) parts = parts.flatMap((p, idx) => typeof p === 'string' ? p.split(bold).reduce((acc, val, i, arr) => i < arr.length - 1 ? acc.concat(val, <W key={`w-${idx}-${i}`}>{bold}</W>) : acc.concat(val), []) : [p]);
-    if (mint) parts = parts.flatMap((p, idx) => typeof p === 'string' ? p.split(mint).reduce((acc, val, i, arr) => i < arr.length - 1 ? acc.concat(val, <G key={`g-${idx}-${i}`}>{mint}</G>) : acc.concat(val), []) : [p]);
-    if (boldFg) parts = parts.flatMap((p, idx) => typeof p === 'string' ? p.split(boldFg).reduce((acc, val, i, arr) => i < arr.length - 1 ? acc.concat(val, <span key={`bf-${idx}-${i}`} style={{ color: "var(--fg)", fontWeight: 600 }}>{boldFg}</span>) : acc.concat(val), []) : [p]);
-    return parts;
-};
-
-async function createCheckout(plan) {
-    captureEvent('checkout_started', { plan: plan || 'unknown' });
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) { window.location.href = '/auth?next=/'; return; }
-    const res = await fetch('/api/checkout/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ plan }),
-    });
-    if (!res.ok) { console.error('[checkout] failed', await res.text()); return; }
-    const { url } = await res.json();
-    window.location.href = url;
-}
-
-// ── Scroll-triggered reveal hook ──────────────────────────────────────────────
-const useReveal = (threshold = 0.15) => {
-    const ref = useRef(null);
-    const [visible, setVisible] = useState(false);
-    useEffect(() => {
-        const el = ref.current;
-        if (!el) return;
-        const obs = new IntersectionObserver(
-            ([entry]) => { if (entry.isIntersecting) { setVisible(true); obs.disconnect(); } },
-            { threshold }
-        );
-        obs.observe(el);
-        return () => obs.disconnect();
-    }, [threshold]);
-    return [ref, visible];
-};
-
-
+// ── Navigation ────────────────────────────────────────────────────────────────
 const Nav = () => {
     const [scrolled, setScrolled] = useState(false);
     const [user, setUser] = useState(null);
@@ -106,9 +68,9 @@ const Nav = () => {
                     the Vite build, so those utility classes compile to
                     nothing and were silently no-ops. */}
                 <div style={{ gap: 22, fontSize: 13.5, color: "var(--fg-2)" }} className="nav-only-desktop font-medium">
-                    <a href="#product" className="hover:text-foreground transition-colors">{t('nav.product')}</a>
-                    <a href="#brain" className="hover:text-foreground transition-colors">{t('nav.brain')}</a>
-                    <a href="/about" className="hover:text-foreground transition-colors">{t('nav.about')}</a>
+                    <a href="#how" className="hover:text-foreground transition-colors">{t('nav.how')}</a>
+                    <a href="#features" className="hover:text-foreground transition-colors">{t('nav.features')}</a>
+                    <a href="#pricing" className="hover:text-foreground transition-colors">{t('nav.pricing')}</a>
                 </div>
 
                 {/* Mobile-only expandable row: nav links and (when logged out)
@@ -118,15 +80,14 @@ const Nav = () => {
                     below expands the pill horizontally to reveal this as a
                     scrollable row. */}
                 <div className={`nav-mobile-expand${menuOpen ? ' nav-mobile-expand-open' : ''}`}>
-                    <a href="#product" onClick={() => setMenuOpen(false)}>{t('nav.product')}</a>
-                    <a href="#brain" onClick={() => setMenuOpen(false)}>{t('nav.brain')}</a>
-                    <a href="/about" onClick={() => setMenuOpen(false)}>{t('nav.about')}</a>
+                    <a href="#how" onClick={() => setMenuOpen(false)}>{t('nav.how')}</a>
+                    <a href="#features" onClick={() => setMenuOpen(false)}>{t('nav.features')}</a>
+                    <a href="#pricing" onClick={() => setMenuOpen(false)}>{t('nav.pricing')}</a>
                     {user ? (
                         <span style={{
                             fontSize: 12.5, color: "var(--fg-3)", padding: "0 4px",
-                            display: "flex", alignItems: "center", gap: 6, flexShrink: 0,
+                            display: "flex", alignItems: "center", flexShrink: 0,
                         }}>
-                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--mint)", flexShrink: 0, display: "inline-block" }} />
                             <span style={{ whiteSpace: "nowrap" }}>{user.email}</span>
                         </span>
                     ) : (
@@ -149,10 +110,9 @@ const Nav = () => {
                         {user ? (
                             <span style={{
                                 fontSize: 12.5, color: "var(--fg-3)", padding: "0 12px",
-                                display: "flex", alignItems: "center", gap: 6,
+                                display: "flex", alignItems: "center",
                                 maxWidth: "clamp(80px, 20vw, 200px)", overflow: "hidden",
                             }}>
-                                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--mint)", flexShrink: 0, display: "inline-block" }} />
                                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
                                     {user.email}
                                 </span>
@@ -188,829 +148,11 @@ const Nav = () => {
     );
 };
 
-// Static hero visual — the real editor: AI subtitle styling + ROKA's proactive
-// edit suggestions. Shown as-is in both locales (no more rotating screenshot
-// carousel).
-const HeroFrame = () => (
-    <div style={{
-        position: "relative",
-        borderRadius: 28,
-        overflow: "hidden",
-        border: "0.5px solid var(--glass-stroke)",
-        boxShadow: "var(--shadow-card)",
-        aspectRatio: "16/9",
-        background: "var(--bg-2)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center"
-    }}>
-        <img
-            src="/Sous-titres et suggestions IA.png"
-            alt="Vibed editor — AI subtitle styling and ROKA's proactive edit suggestions"
-            loading="eager"
-            width={1536}
-            height={1024}
-            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-        />
-    </div>
-);
-
-const Hero = () => {
-    const { t } = useTranslation('landing');
-    return (
-        <section style={{ paddingTop: 140, paddingBottom: 40, position: "relative", overflow: "hidden" }}>
-            <div className="aurora" />
-            <div className="wrap" style={{ position: "relative", zIndex: 2 }}>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 28 }}>
-                    <h1 className="display fade-up fade-up-d1" style={{ whiteSpace: "pre-line" }}>
-                        {t('hero.headline').split('\n').map((line, i, arr) => (
-                            <React.Fragment key={i}>
-                                {i === arr.length - 1 ? <em>{line}</em> : line}
-                                {i < arr.length - 1 && <br />}
-                            </React.Fragment>
-                        ))}
-                    </h1>
-                    <p className="body-lg fade-up fade-up-d2" style={{ maxWidth: 620, margin: 0, fontSize: 19 }}>
-                        {t('hero.body')}
-                    </p>
-                    <div className="fade-up fade-up-d3" style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", marginTop: 12 }}>
-                        <button onClick={() => window.location.href='#pricing'} className="btn btn-primary">{t('hero.cta')} <ArrowRight className="w-4 h-4 ml-1" /></button>
-                    </div>
-                    <div className="fade-up fade-up-d4 caption" style={{ marginTop: 8 }}>
-                        {t('hero.caption')}
-                    </div>
-                </div>
-                <div className="fade-up fade-up-d4" style={{ marginTop: 72 }}>
-                    <HeroFrame />
-                </div>
-            </div>
-        </section>
-    );
-};
-
-// ── Inline emphasis helpers (module-level to avoid "component created during render") ──
-const A = ({ children }) => <span style={{ color: "var(--accent)", fontWeight: 600 }}>{children}</span>;
-const G = ({ children }) => <span style={{ color: "var(--mint)", fontWeight: 600 }}>{children}</span>;
-const W = ({ children }) => <span style={{ color: "var(--fg)", fontWeight: 600 }}>{children}</span>;
-
-// ── Animated logo mark — the real Vibed waveform, breathing like a live level meter.
-// Bars/gradient match components/Logo.jsx exactly; .wave-bar keyframes live in index.css
-// and are disabled under prefers-reduced-motion alongside the site's other animations.
-const LOGO_BARS = [
-    { x: 2.5,  y: 15,   h: 70, delay: '-0.9s', color: '#00E5FF' },
-    { x: 13.5, y: 25,   h: 50, delay: '-0.7s', color: '#17CDFB' },
-    { x: 24.5, y: 33,   h: 34, delay: '-1.3s', color: '#2EB5F7' },
-    { x: 35.5, y: 39.5, h: 21, delay: '-0.4s', color: '#459DF3' },
-    { x: 46.5, y: 43,   h: 14, delay: '-1.1s', color: '#5B85EF' },
-    { x: 57.5, y: 39.5, h: 21, delay: '-0.2s', color: '#726DEB' },
-    { x: 68.5, y: 33,   h: 34, delay: '-1.5s', color: '#8855E7' },
-    { x: 79.5, y: 25,   h: 50, delay: '-0.6s', color: '#9F3DE3' },
-    { x: 90.5, y: 15,   h: 70, delay: '-1s',   color: '#8A2BE2' },
-];
-const AnimatedLogo = ({ size = 48, glow = true }) => (
-    <svg width={size} height={size} viewBox="0 0 100 100" fill="none" aria-hidden="true"
-        style={glow ? { filter: "drop-shadow(0 0 14px rgba(114,109,235,.45))" } : undefined}>
-        {LOGO_BARS.map((bar, i) => (
-            <rect key={i} className="wave-bar" x={bar.x} y={bar.y} width="7" height={bar.h} rx="3.5"
-                fill={bar.color} style={{ animationDelay: bar.delay }} />
-        ))}
-    </svg>
-);
-
-// ── Problem Section ───────────────────────────────────────────────────────────
-const ProblemSection = () => {
-    const { t } = useTranslation('landing');
-    const [ref, visible] = useReveal();
-
-    const _rawPains = t('problem.pains', { returnObjects: true });
-    const pains = Array.isArray(_rawPains) ? _rawPains : [];
-
-    return (
-        <section style={{
-            padding: "100px 0",
-            background: "var(--bg-2)",
-            borderTop: "0.5px solid var(--line)",
-            borderBottom: "0.5px solid var(--line)",
-            "--accent": "var(--coral)",
-        }}>
-            <div className="wrap">
-                <div style={{ textAlign: "center", marginBottom: 72 }}>
-                    <span className="eyebrow">{t('problem.eyebrow')}</span>
-                    <h2 className="h-section" style={{ marginTop: 16, maxWidth: 600, marginInline: "auto" }}>
-                        {t('problem.headline')}
-                    </h2>
-                </div>
-
-                <div ref={ref} style={{ display: "flex", flexDirection: "column" }}>
-                    {pains.map((p, i) => (
-                        <div key={i} style={{
-                            display: "grid",
-                            gridTemplateColumns: "72px 1fr",
-                            gap: 36,
-                            padding: "40px 0",
-                            borderTop: "0.5px solid var(--line)",
-                            opacity: visible ? 1 : 0,
-                            transform: visible ? "translateY(0)" : "translateY(20px)",
-                            transition: `opacity 0.65s ease ${i * 0.13}s, transform 0.65s ease ${i * 0.13}s`,
-                        }}>
-                            <div className="mono" style={{
-                                fontSize: 12, fontWeight: 600, letterSpacing: "0.12em",
-                                color: "var(--fg-4)", paddingTop: 5,
-                            }}>
-                                {p.num}
-                            </div>
-                            <div>
-                                <h3 style={{
-                                    fontSize: "clamp(19px, 2vw, 22px)", fontWeight: 600,
-                                    letterSpacing: "-0.01em", marginBottom: 10, lineHeight: 1.3,
-                                }}>
-                                    {p.headline}
-                                </h3>
-                                <p style={{
-                                    fontSize: 15.5, color: "var(--fg-2)", lineHeight: 1.7,
-                                    margin: 0, maxWidth: 680,
-                                }}>
-                                    {renderHighlightedText(p.body, p.bodyAccent, p.bodyBold)}
-                                </p>
-                            </div>
-                        </div>
-                    ))}
-
-                    {/* Kicker */}
-                    <div style={{
-                        borderTop: "0.5px solid var(--line)",
-                        paddingTop: 52,
-                        textAlign: "center",
-                        opacity: visible ? 1 : 0,
-                        transform: visible ? "translateY(0)" : "translateY(16px)",
-                        transition: "opacity 0.65s ease 0.42s, transform 0.65s ease 0.42s",
-                    }}>
-                        <p style={{
-                            fontSize: "clamp(18px, 2.2vw, 25px)",
-                            fontWeight: 500,
-                            fontStyle: "italic",
-                            color: "var(--fg-2)",
-                            maxWidth: 700,
-                            margin: "0 auto",
-                            lineHeight: 1.55,
-                            letterSpacing: "-0.01em",
-                        }}>
-                            {renderHighlightedText(t('problem.kicker'), t('problem.kickerAccent'), t('problem.kickerBoldFg2'), null, t('problem.kickerBoldFg'))}
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </section>
-    );
-};
-
-// ── Editorial Brain — scenario-aware suggestions ────────────────────────────────
-const BRAIN_SCENARIO_ICONS = [Mic, Video, BookOpen, Megaphone, Presentation, Film];
-// Rotate through the design system's full accent family so the scenario grid feels
-// varied rather than monochrome — matches the approved preview.
-const BRAIN_SCENARIO_COLORS = ["var(--mint)", "var(--coral)", "var(--violet)", "var(--indigo)", "var(--mint)", "var(--coral)"];
-
-const EditorialBrain = () => {
-    const { t } = useTranslation('landing');
-    const [ref, visible] = useReveal(0.1);
-
-    const _rawScenarios = t('brain.scenarios', { returnObjects: true });
-    const scenarios = Array.isArray(_rawScenarios) ? _rawScenarios : [];
-
-    return (
-        <section id="brain" style={{ padding: "80px 0", position: "relative", overflow: "hidden", "--accent": "var(--violet)" }}>
-            <div className="aurora" style={{ opacity: 0.5 }} />
-            <div className="wrap" style={{ position: "relative", zIndex: 2 }}>
-                <div className="section-head text-center" style={{ marginBottom: 56, alignItems: "center", marginInline: "auto" }}>
-                    <span className="eyebrow">{t('brain.eyebrow')}</span>
-                    <h2 className="h-section">
-                        {t('brain.headline').split('\n').map((line, i, arr) => (
-                            <React.Fragment key={i}>
-                                {i === arr.length - 1 ? <em>{line}</em> : line}
-                                {i < arr.length - 1 && <br />}
-                            </React.Fragment>
-                        ))}
-                    </h2>
-                    <p className="body-lg" style={{ maxWidth: 620, marginInline: "auto" }}>{t('brain.body')}</p>
-                </div>
-
-                <div
-                    className="grid-cols-1 md:grid-cols-[220px_1fr]"
-                    style={{ display: "grid", gap: 40, alignItems: "center" }}
-                >
-                    <div style={{ display: "flex", justifyContent: "center" }}>
-                        <div style={{ position: "relative" }}>
-                            <div style={{
-                                position: "absolute", inset: -32, borderRadius: "50%",
-                                background: "radial-gradient(circle, color-mix(in oklch, var(--violet) 28%, transparent), transparent 70%)",
-                                filter: "blur(4px)", pointerEvents: "none",
-                            }} />
-                            <AnimatedLogo size={104} />
-                        </div>
-                    </div>
-
-                    <div
-                        ref={ref}
-                        className="grid-cols-1 md:grid-cols-3"
-                        style={{ display: "grid", gap: 16 }}
-                    >
-                        {scenarios.map((s, i) => {
-                            const Icon = BRAIN_SCENARIO_ICONS[i % BRAIN_SCENARIO_ICONS.length];
-                            return (
-                                <div key={i} className="card" style={{
-                                    padding: "24px 22px", display: "flex", flexDirection: "column", gap: 14,
-                                    opacity: visible ? 1 : 0,
-                                    transform: visible ? "translateY(0)" : "translateY(18px)",
-                                    transition: `opacity 0.55s ease ${i * 0.08}s, transform 0.55s ease ${i * 0.08}s`,
-                                }}>
-                                    <div style={{
-                                        width: 44, height: 44, borderRadius: 12, background: "var(--bg-3)", border: "0.5px solid var(--line)",
-                                        display: "flex", alignItems: "center", justifyContent: "center",
-                                        color: BRAIN_SCENARIO_COLORS[i % BRAIN_SCENARIO_COLORS.length],
-                                    }}>
-                                        <Icon size={19} strokeWidth={1.7} />
-                                    </div>
-                                    <h3 style={{ fontSize: 16.5, fontWeight: 600, margin: 0 }}>{s.title}</h3>
-                                    <p style={{ fontSize: 13.5, color: "var(--fg-3)", lineHeight: 1.6, margin: 0 }}>{s.body}</p>
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-            </div>
-        </section>
-    );
-};
-
-// ── Feature Moments ───────────────────────────────────────────────────────────
-// Rotate through the design system's accent family per row instead of one flat color.
-const MOMENT_COLORS = ["var(--indigo)", "var(--mint)", "var(--coral)", "var(--violet)"];
-
-// Illustrated mockups (from the approved preview) instead of static screenshots —
-// each takes the row's rotating accent color so it stays in sync visually.
-const MomentIllustration = ({ index, color }) => {
-    if (index === 0) {
-        // Conversational editing: a command + the AI's reply
-        return (
-            <div style={{ width: "80%", display: "flex", flexDirection: "column", gap: 10 }}>
-                <div style={{ alignSelf: "flex-end", background: color, color: "#fff", padding: "9px 14px", borderRadius: "14px 14px 4px 14px", fontSize: 13, maxWidth: "80%" }}>
-                    Cut the dead air after the intro and tighten pacing
-                </div>
-                <div style={{ alignSelf: "flex-start", background: "var(--bg-3)", border: "0.5px solid var(--line)", padding: "9px 14px", borderRadius: "14px 14px 14px 4px", fontSize: 13, maxWidth: "80%" }}>
-                    Removed 6 silences · trimmed 3 stumbles · timeline updated
-                </div>
-            </div>
-        );
-    }
-    if (index === 1) {
-        // Transcript-as-timeline: a highlighted line of dialogue
-        return (
-            <div style={{ width: "82%", fontSize: 13.5, lineHeight: 2, color: "var(--fg-3)" }}>
-                So the thing I wanted to{" "}
-                <span style={{ background: `color-mix(in oklch, ${color} 28%, transparent)`, color: "var(--fg)", borderRadius: 3, padding: "1px 4px" }}>
-                    show you today
-                </span>{" "}
-                is the new dashboard.<br />
-                <span style={{ textDecoration: "line-through", opacity: 0.3 }}>Um, let me just—</span> Okay so if you look at the top left—
-            </div>
-        );
-    }
-    if (index === 2) {
-        // Type-to-cut: a timeline bar with a dashed removed segment
-        return (
-            <svg width="82%" viewBox="0 0 300 90">
-                <rect x="0" y="35" width="300" height="20" rx="4" fill="var(--bg-3)" />
-                <rect x="0" y="35" width="90" height="20" rx="4" fill={color} opacity="0.5" />
-                <rect x="90" y="35" width="60" height="20" rx="4" fill="var(--bg-3)" stroke="#EF4444" strokeDasharray="3 2" opacity="0.7" />
-                <rect x="150" y="35" width="150" height="20" rx="4" fill={color} opacity="0.5" />
-            </svg>
-        );
-    }
-    // index 3 — Analysis and edit suggestions: ROKA's "next steps" suggestion card
-    return (
-        <div style={{ width: "100%", padding: 20, display: "flex", flexDirection: "column", gap: 10 }}>
-            <div className="mono" style={{ fontSize: 9.5, letterSpacing: "0.06em", color: "var(--fg-4)" }}>NEXT STEPS</div>
-            <div style={{ background: "var(--bg-3)", border: `0.5px solid ${color}`, borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0 }} />
-                    <span style={{ fontSize: 12, fontWeight: 600, color: "var(--fg)" }}>Create virtual multicam angles</span>
-                </div>
-                <p style={{ fontSize: 11, color: "var(--fg-3)", margin: 0, lineHeight: 1.5 }}>
-                    Simulates multiple camera angles to add visual variety and keep the audience engaged.
-                </p>
-            </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 11, padding: "6px 12px", borderRadius: 999, background: color, color: "#fff", fontWeight: 600 }}>Add dynamic zoom rhythm</span>
-                <span style={{ fontSize: 11, padding: "6px 12px", borderRadius: 999, background: "transparent", border: "0.5px solid var(--line-strong)", color: "var(--fg-3)" }}>Dismiss</span>
-            </div>
-        </div>
-    );
-};
-
-const FeatureMoments = () => {
-    const { t } = useTranslation('landing');
-    const translatedMoments = t('workflow.moments', { returnObjects: true });
-
-    const moments = [
-        {
-            title: translatedMoments[0]?.title || "Conversational Editing",
-            copy: translatedMoments[0]?.copy || "Tell the AI what to do, and watch the timeline update.",
-            icon: MessageSquare
-        },
-        {
-            title: translatedMoments[1]?.title || "Your transcript is your timeline",
-            copy: translatedMoments[1]?.copy || "Click a sentence, the playhead is already there.",
-            icon: Layers
-        },
-        {
-            title: translatedMoments[2]?.title || "Type what you want to cut",
-            copy: translatedMoments[2]?.copy || "Type 'cut from so anyway to let's move on' → the cut appears.",
-            icon: Scissors
-        },
-        {
-            title: translatedMoments[3]?.title || "Analysis and edit suggestions",
-            copy: translatedMoments[3]?.copy || "ROKA watches where your project stands and proposes the next move — you accept, tweak, or dismiss.",
-            icon: Sparkles
-        }
-    ];
-
-    return (
-        <section id="product" style={{ paddingTop: 80, paddingBottom: 80 }}>
-            <div className="wrap">
-                <div className="section-head text-center" style={{ marginBottom: 60, alignItems: "center" }}>
-                    <span className="eyebrow">{t('workflow.eyebrow')}</span>
-                    <h2 className="h-section">
-                        {/* The French translation says "avec", not "with", so check both forms
-                            to keep the italic emphasis visible in both languages. */}
-                        {t('workflow.headline').split('with').map((part, i, arr) => (
-                            <React.Fragment key={`en-${i}`}>
-                                {part.split('avec').map((subPart, j, subArr) => (
-                                    <React.Fragment key={`fr-${j}`}>
-                                        {subPart}
-                                        {j < subArr.length - 1 && <em>avec</em>}
-                                    </React.Fragment>
-                                ))}
-                                {i < arr.length - 1 && <em>with</em>}
-                            </React.Fragment>
-                        ))}
-                    </h2>
-                </div>
-
-                <div style={{ display: "flex", flexDirection: "column", gap: 64 }}>
-                    {moments.map((m, i) => (
-                        <div key={i} style={{
-                            display: "grid",
-                            gridTemplateColumns: i % 2 === 0 ? "1fr 1.2fr" : "1.2fr 1fr",
-                            gap: 48,
-                            alignItems: "center"
-                        }} className="md:grid-cols-[1fr_1fr] grid-cols-1 feature-moment-grid">
-                            <div style={{ order: i % 2 === 0 ? 1 : 2 }} className="md:order-none order-2">
-                                <div style={{
-                                    width: 48, height: 48, borderRadius: 12, background: "var(--bg-2)", border: "0.5px solid var(--line)",
-                                    display: "flex", alignItems: "center", justifyContent: "center",
-                                    color: MOMENT_COLORS[i % MOMENT_COLORS.length],
-                                    marginBottom: 20
-                                }}>
-                                    <m.icon className="w-6 h-6" />
-                                </div>
-                                <h3 className="h-section" style={{ fontSize: 32, marginBottom: 12 }}>{m.title}</h3>
-                                <p className="body-lg" style={{ color: "var(--fg-2)" }}>{m.copy}</p>
-                            </div>
-                            <div style={{ order: i % 2 === 0 ? 2 : 1 }} className="md:order-none order-1">
-                                <div style={{
-                                    borderRadius: 16, border: "0.5px solid var(--line)", background: "var(--bg-2)",
-                                    aspectRatio: "16/9", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center",
-                                    boxShadow: "var(--shadow-card)"
-                                }}>
-                                    <MomentIllustration index={i} color={MOMENT_COLORS[i % MOMENT_COLORS.length]} />
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </section>
-    );
-};
-
-// ── Before / After Section ────────────────────────────────────────────────────
-const BeforeAfterSection = () => {
-    const { t } = useTranslation('landing');
-    const [ref, visible] = useReveal(0.1);
-
-    const rows = t('beforeAfter.rows', { returnObjects: true }) || [];
-
-    return (
-        <section style={{ padding: "100px 0" }}>
-            <div className="wrap">
-                <div style={{ textAlign: "center", marginBottom: 64 }}>
-                    <span className="eyebrow">{t('beforeAfter.eyebrow')}</span>
-                    <h2 className="h-section" style={{ marginTop: 16 }}>
-                        {t('beforeAfter.headline').split('\n').map((line, i, arr) => (
-                            <React.Fragment key={i}>
-                                {i === arr.length - 1 ? <em>{line}</em> : line}
-                                {i < arr.length - 1 && <br />}
-                            </React.Fragment>
-                        ))}
-                    </h2>
-                    <p className="body-lg" style={{ color: "var(--fg-2)", maxWidth: 480, margin: "20px auto 0" }}>
-                        {t('beforeAfter.subtitle')}
-                    </p>
-                </div>
-
-                <div ref={ref} style={{ borderRadius: 16, overflow: "hidden", border: "0.5px solid var(--line)" }}>
-                    {/* Header row */}
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", background: "var(--bg-2)" }}>
-                        <div style={{ padding: "18px 28px", borderRight: "0.5px solid var(--line)", display: "flex", alignItems: "center", gap: 10 }}>
-                            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#EF4444", flexShrink: 0 }} />
-                            <span className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", color: "var(--fg-3)" }}>{t('beforeAfter.withoutHeader')}</span>
-                        </div>
-                        <div style={{ padding: "18px 28px", display: "flex", alignItems: "center", gap: 10 }}>
-                            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--mint)", flexShrink: 0 }} />
-                            <span className="mono" style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", color: "var(--accent)" }}>{t('beforeAfter.withHeader')}</span>
-                        </div>
-                    </div>
-
-                    {/* Data rows */}
-                    {rows.map((row, i) => (
-                        <div key={i} style={{
-                            display: "grid",
-                            gridTemplateColumns: "1fr 1fr",
-                            borderTop: "0.5px solid var(--line)",
-                            opacity: visible ? 1 : 0,
-                            transform: visible ? "translateX(0)" : "translateX(-12px)",
-                            transition: `opacity 0.55s ease ${i * 0.07}s, transform 0.55s ease ${i * 0.07}s`,
-                        }}>
-                            <div className="before-after-cell" style={{
-                                padding: "20px 28px", borderRight: "0.5px solid var(--line)",
-                                display: "flex", justifyContent: "space-between", alignItems: "center",
-                                background: "rgba(239, 68, 68, 0.025)",
-                            }}>
-                                <span style={{ fontSize: 14, color: "var(--fg-2)", lineHeight: 1.4 }}>{row.without}</span>
-                                <span style={{ fontSize: 14, fontWeight: 700, color: "#EF4444", flexShrink: 0, marginLeft: 20 }}>{row.withoutTime}</span>
-                            </div>
-                            <div className="before-after-cell" style={{
-                                padding: "20px 28px",
-                                display: "flex", justifyContent: "space-between", alignItems: "center",
-                                background: "rgba(16, 185, 129, 0.025)",
-                            }}>
-                                <span style={{ fontSize: 14, color: "var(--fg-2)", lineHeight: 1.4 }}>{row.with}</span>
-                                <span style={{ fontSize: 14, fontWeight: 700, color: "var(--mint)", flexShrink: 0, marginLeft: 20 }}>{row.withTime}</span>
-                            </div>
-                        </div>
-                    ))}
-
-                    {/* Total row */}
-                    <div style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr 1fr",
-                        borderTop: "0.5px solid var(--line)",
-                        background: "var(--bg-2)",
-                    }}>
-                        <div style={{
-                            padding: "28px 28px", borderRight: "0.5px solid var(--line)",
-                            display: "flex", justifyContent: "space-between", alignItems: "center",
-                        }}>
-                            <span style={{ fontSize: 15, fontWeight: 600, color: "var(--fg)" }}>{t('beforeAfter.totalLabel')}</span>
-                            <span style={{ fontSize: 22, fontWeight: 700, color: "#EF4444", letterSpacing: "-0.02em" }}>{t('beforeAfter.totalWithout')}</span>
-                        </div>
-                        <div style={{
-                            padding: "28px 28px",
-                            display: "flex", justifyContent: "space-between", alignItems: "center",
-                        }}>
-                            <span style={{ fontSize: 15, fontWeight: 600, color: "var(--fg)" }}>{t('beforeAfter.totalLabel')}</span>
-                            <span style={{ fontSize: 22, fontWeight: 700, color: "var(--mint)", letterSpacing: "-0.02em" }}>{t('beforeAfter.totalWith')}</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-    );
-};
-
-// ── Who It's For ──────────────────────────────────────────────────────────────
-const PersonasSection = () => {
-    const { t } = useTranslation('landing');
-    const [ref, visible] = useReveal(0.1);
-
-    const translatedPersonas = t('personas.list', { returnObjects: true }) || [];
-
-    const personas = [
-        { Icon: Mic, color: "var(--indigo)", ...translatedPersonas[0] },
-        { Icon: Layers, color: "var(--violet)", ...translatedPersonas[1] },
-        { Icon: UserCheck, color: "var(--coral)", ...translatedPersonas[2] },
-    ];
-
-    return (
-        <section style={{
-            padding: "100px 0",
-            background: "var(--bg-2)",
-            borderTop: "0.5px solid var(--line)",
-            borderBottom: "0.5px solid var(--line)",
-        }}>
-            <div className="wrap">
-                <div style={{ textAlign: "center", marginBottom: 64 }}>
-                    <span className="eyebrow">{t('personas.eyebrow')}</span>
-                    <h2 className="h-section" style={{ marginTop: 16, maxWidth: 560, marginInline: "auto" }}>
-                        {t('personas.headline').split('\n').map((line, i, arr) => (
-                            <React.Fragment key={i}>
-                                {line}
-                                {i < arr.length - 1 && <br />}
-                            </React.Fragment>
-                        ))}
-                    </h2>
-                </div>
-
-                <div ref={ref} style={{ display: "grid", gap: 20 }} className="grid-cols-1 md:grid-cols-3">
-                    {personas.map((p, i) => (
-                        <div key={i} className="card" style={{
-                            padding: "32px 28px",
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 24,
-                            opacity: visible ? 1 : 0,
-                            transform: visible ? "translateY(0)" : "translateY(28px)",
-                            transition: `opacity 0.65s ease ${i * 0.14}s, transform 0.65s ease ${i * 0.14}s`,
-                            "--accent": p.color,
-                        }}>
-                            <div style={{
-                                width: 48, height: 48, borderRadius: 12,
-                                background: "var(--bg-3)", border: "0.5px solid var(--line)",
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                                color: "var(--accent)",
-                            }}>
-                                {p.Icon && <p.Icon size={20} strokeWidth={1.6} />}
-                            </div>
-
-                            <div>
-                                <div className="mono" style={{ fontSize: 10.5, letterSpacing: "0.1em", color: "var(--fg-4)", marginBottom: 8 }}>
-                                    {t('personas.personaLabel')}
-                                </div>
-                                <h3 style={{ fontSize: 19, fontWeight: 600, letterSpacing: "-0.01em", marginBottom: 8, lineHeight: 1.3 }}>
-                                    {p.role}
-                                </h3>
-                                <p style={{ fontSize: 13.5, color: "var(--fg-3)", lineHeight: 1.6, margin: 0 }}>
-                                    {p.description}
-                                </p>
-                            </div>
-
-                            <div style={{ borderTop: "0.5px solid var(--line)", paddingTop: 20, display: "flex", flexDirection: "column", gap: 14 }}>
-                                <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                                    <div style={{
-                                        width: 20, height: 20, borderRadius: "50%", flexShrink: 0, marginTop: 1,
-                                        background: "rgba(239,68,68,0.1)", border: "0.5px solid rgba(239,68,68,0.25)",
-                                        display: "flex", alignItems: "center", justifyContent: "center",
-                                    }}>
-                                        <div style={{ width: 7, height: 1.5, background: "#EF4444", borderRadius: 1 }} />
-                                    </div>
-                                    <p style={{ fontSize: 13.5, color: "var(--fg-3)", lineHeight: 1.55, margin: 0 }}>
-                                        {renderHighlightedText(p.before, p.beforeAccent)}
-                                    </p>
-                                </div>
-                                <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                                    <div style={{
-                                        width: 20, height: 20, borderRadius: "50%", flexShrink: 0, marginTop: 1,
-                                        background: "rgba(16,185,129,0.1)", border: "0.5px solid rgba(16,185,129,0.25)",
-                                        display: "flex", alignItems: "center", justifyContent: "center",
-                                    }}>
-                                        <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
-                                            <path d="M1 3.5l2.3 2.3 4.4-4.6" stroke="#10B981" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                                        </svg>
-                                    </div>
-                                    <p style={{ fontSize: 13.5, color: "var(--fg)", lineHeight: 1.55, margin: 0 }}>
-                                        {renderHighlightedText(p.after, null, p.afterBold, p.afterMint)}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </section>
-    );
-};
-
-// ── ROI Statement ─────────────────────────────────────────────────────────────
-const AntiDescript = () => {
-    const { t } = useTranslation('landing');
-    return (
-        <section style={{ padding: "80px 0", background: "var(--bg-2)", borderTop: "0.5px solid var(--line)", borderBottom: "0.5px solid var(--line)" }}>
-            <div className="wrap">
-                <div style={{ maxWidth: 800, margin: "0 auto", textAlign: "center" }}>
-                    <p style={{ fontSize: "clamp(24px, 3vw, 32px)", lineHeight: 1.4, fontWeight: 500, margin: 0, letterSpacing: "-0.01em" }}>
-                        {renderHighlightedText(t('roi.body'), t('roi.accentPart'), null, null, t('roi.boldPart'))}
-                    </p>
-                </div>
-            </div>
-        </section>
-    );
-};
-
-const Pricing = () => {
-    const { t } = useTranslation('landing');
-    const navigate = useNavigate();
-    const [loading, setLoading] = useState(null);
-
-    const translatedPlans = t('pricing.plans', { returnObjects: true }) || {};
-
-    const PLANS = [
-        {
-            key:     'free',
-            name:    'Free',
-            price:   '€0',
-            period:  '',
-            tagline: translatedPlans.free?.tagline,
-            cta:     translatedPlans.free?.cta,
-            ctaStyle: 'btn-ghost',
-            features: translatedPlans.free?.features || [],
-            locked: translatedPlans.free?.locked || [],
-        },
-        {
-            key:     'creator',
-            name:    'Creator',
-            price:   '€15',
-            period:  '/ month',
-            tagline: translatedPlans.creator?.tagline,
-            cta:     translatedPlans.creator?.cta,
-            ctaStyle: 'btn-primary',
-            highlight: true,
-            features: translatedPlans.creator?.features || [],
-            locked: translatedPlans.creator?.locked || [],
-        },
-        {
-            key:     'pro',
-            name:    'Pro',
-            price:   '€35',
-            period:  '/ month',
-            tagline: translatedPlans.pro?.tagline,
-            cta:     translatedPlans.pro?.cta,
-            ctaStyle: 'btn-ghost',
-            features: translatedPlans.pro?.features || [],
-            locked: translatedPlans.pro?.locked || [],
-        },
-    ];
-
-    const handleUpgrade = async (plan) => {
-        if (plan === 'free') { navigate('/dashboard'); return; }
-        setLoading(plan);
-        await createCheckout(plan);
-        setLoading(null);
-    };
-
-    return (
-        <section id="pricing" style={{ padding: '120px 0 80px', background: 'var(--bg)', '--accent': 'var(--violet)' }}>
-            <div className="wrap">
-                <div style={{ textAlign: 'center', marginBottom: 64 }}>
-                    <div className="tag" style={{ display: 'inline-flex', marginBottom: 20 }}>
-                        <Zap className="w-3 h-3" style={{ color: 'var(--accent)' }} />
-                        <span>{t('pricing.eyebrow')}</span>
-                    </div>
-                    <h2 className="display" style={{ fontSize: 'clamp(36px, 5vw, 64px)', margin: '0 0 16px' }}>
-                        {t('pricing.headline')}
-                    </h2>
-                    <p className="body-lg" style={{ margin: 0, color: 'var(--fg-2)', maxWidth: 520, marginInline: 'auto' }}>
-                        {t('pricing.subtitle')}
-                    </p>
-                </div>
-
-                <div style={{ display: 'grid', gap: 20 }} className="grid-cols-1 md:grid-cols-3">
-                    {PLANS.map(plan => (
-                        <div key={plan.key} style={{
-                            padding: 32,
-                            borderRadius: 16,
-                            border: plan.highlight
-                                ? '1px solid var(--accent)'
-                                : '0.5px solid var(--line)',
-                            background: plan.highlight ? 'var(--bg-2)' : 'var(--bg)',
-                            display: 'flex', flexDirection: 'column', gap: 24,
-                            position: 'relative',
-                        }}>
-                            {plan.highlight && (
-                                <div style={{
-                                    position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)',
-                                    background: 'var(--accent)', color: '#fff',
-                                    fontSize: 11, fontWeight: 600, letterSpacing: '0.08em',
-                                    padding: '3px 14px', borderRadius: 999, whiteSpace: 'nowrap',
-                                }}>
-                                    MOST POPULAR
-                                </div>
-                            )}
-
-                            <div>
-                                <div className="mono" style={{ color: 'var(--fg-4)', fontSize: 11, letterSpacing: '0.1em', marginBottom: 8 }}>
-                                    {plan.name.toUpperCase()}
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-                                    <span style={{ fontSize: 40, fontWeight: 700, letterSpacing: '-0.02em' }}>{plan.price}</span>
-                                    {plan.period && <span style={{ color: 'var(--fg-3)', fontSize: 14 }}>{plan.period}</span>}
-                                </div>
-                                <p style={{ margin: '10px 0 0', fontSize: 13.5, color: 'var(--fg-2)', lineHeight: 1.5 }}>
-                                    {plan.tagline}
-                                </p>
-                            </div>
-
-                            <button
-                                className={`btn ${plan.ctaStyle}`}
-                                style={{ width: '100%', height: 44, fontSize: 14 }}
-                                onClick={() => handleUpgrade(plan.key)}
-                                disabled={loading === plan.key}
-                            >
-                                {loading === plan.key ? 'Redirecting…' : plan.cta}
-                            </button>
-
-                            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                {plan.features.map(f => (
-                                    <li key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13.5 }}>
-                                        <CheckCircle2 size={15} strokeWidth={2} style={{ color: 'var(--mint)', flexShrink: 0, marginTop: 2 }} />
-                                        <span>{f}</span>
-                                    </li>
-                                ))}
-                                {plan.locked.map(f => (
-                                    <li key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13.5, opacity: 0.35 }}>
-                                        <CheckCircle2 size={15} strokeWidth={2} style={{ flexShrink: 0, marginTop: 2 }} />
-                                        <span>{f}</span>
-                                    </li>
-                                ))}
-                            </ul>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </section>
-    );
-};
-
-const SocialProof = () => {
-    const { t } = useTranslation('landing');
-    const _rawQuotes = t('socialProof.quotes', { returnObjects: true });
-    const quotes = Array.isArray(_rawQuotes) ? _rawQuotes : [];
-
-    return (
-        <section style={{ padding: "80px 0", background: "var(--bg-2)" }}>
-            <div className="wrap">
-                <div style={{ display: "grid", gap: 32 }} className="grid-cols-1 md:grid-cols-2">
-                    {quotes.map((q, i) => (
-                        <div key={i} className="card" style={{ padding: 40, border: "0.5px solid var(--line)" }}>
-                            <div style={{ color: "var(--accent)", marginBottom: 20 }}>
-                                <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
-                                    <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/>
-                                </svg>
-                            </div>
-                            <p style={{ fontSize: 20, fontStyle: "italic", lineHeight: 1.5, marginBottom: 24 }}>
-                                "{q.text}"
-                            </p>
-                            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                                <div style={{ width: 40, height: 40, borderRadius: "50%", background: "var(--line)", flexShrink: 0 }} />
-                                <div>
-                                    <div style={{ fontWeight: 600, fontSize: 15 }}>{q.author}</div>
-                                    <div style={{ color: "var(--fg-3)", fontSize: 14 }}>{q.role}</div>
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </section>
-    );
-};
-
-const FinalCTA = () => {
-    const { t } = useTranslation('landing');
-    return (
-        <section style={{ position: "relative", overflow: "hidden", paddingTop: 140, paddingBottom: 140, "--accent": "var(--coral)" }}>
-            <div className="aurora" />
-            <div className="wrap" style={{ position: "relative", zIndex: 2, textAlign: "center", display: "flex", flexDirection: "column", gap: 28, alignItems: "center" }}>
-                <AnimatedLogo size={44} />
-                <h2 className="display" style={{ fontSize: "clamp(48px, 6.4vw, 96px)" }}>
-                    {t('finalCta.headline').split('\n').map((line, i, arr) => (
-                        <React.Fragment key={i}>
-                            {i === arr.length - 1 ? <em>{line}</em> : line}
-                            {i < arr.length - 1 && <br />}
-                        </React.Fragment>
-                    ))}
-                </h2>
-                <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap", justifyContent: "center" }}>
-                    <button onClick={() => window.location.href='#pricing'} className="btn btn-primary" style={{ padding: "0 32px", height: 48, fontSize: 16 }}>
-                        {t('finalCta.cta')} <ArrowRight className="w-5 h-5 ml-1" />
-                    </button>
-                </div>
-                <div className="caption" style={{ marginTop: 8 }}>
-                    {t('finalCta.caption')}
-                </div>
-            </div>
-        </section>
-    );
-};
-
+// ── Footer ────────────────────────────────────────────────────────────────────
 const Footer = () => {
     const { t } = useTranslation('common');
 
     const cols = [
-        {
-            key: 'company',
-            label: t('footer.company'),
-            items: [{ label: t('footer.links.about'), href: '/about' }],
-        },
         {
             key: 'legal',
             label: t('footer.legal'),
@@ -1028,30 +170,25 @@ const Footer = () => {
 
     return (
         <footer style={{ borderTop: "0.5px solid var(--line)", padding: "64px 0 32px", background: "var(--bg)" }}>
-            <div className="wrap grid-cols-2 md:grid-cols-[1.4fr_1fr_1fr_1fr]" style={{ display: "grid", gap: 56 }}>
+            <div className="wrap landing-footer-grid">
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                     <Logo size={32} />
                     <p className="body" style={{ fontSize: 13.5, margin: 0, maxWidth: 280 }}>
                         {t('footer.tagline')}
                     </p>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
-                        <div style={{ display: "flex" }}>
-                            <a href="/gdpr" style={{ textDecoration: 'none' }}>
-                                <span className="tag" style={{ border: "0.5px solid var(--line-strong)", background: "var(--bg-2)", cursor: "pointer" }}>{t('footer.gdpr')}</span>
-                            </a>
-                        </div>
-                    </div>
                 </div>
                 {cols.map(col => (
-                    <div key={col.key} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div key={col.key} className="landing-footer-legal">
                         <div className="mono" style={{ color: "var(--fg-4)" }}>{col.label.toUpperCase()}</div>
-                        {col.items.map(item => (
-                            item.onClick ? (
-                                <button key={item.href} type="button" onClick={item.onClick} style={{ font: "inherit", fontSize: 13.5, color: "var(--fg-2)", background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer" }} className="hover:text-foreground transition-colors">{item.label}</button>
-                            ) : (
-                                <a key={item.href} href={item.href} style={{ fontSize: 13.5, color: "var(--fg-2)" }} className="hover:text-foreground transition-colors">{item.label}</a>
-                            )
-                        ))}
+                        <div className="landing-footer-legal-links">
+                            {col.items.map(item => (
+                                item.onClick ? (
+                                    <button key={item.href} type="button" onClick={item.onClick} style={{ font: "inherit", fontSize: 13.5, color: "var(--fg-2)", background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer" }} className="hover:text-foreground transition-colors">{item.label}</button>
+                                ) : (
+                                    <a key={item.href} href={item.href} style={{ fontSize: 13.5, color: "var(--fg-2)" }} className="hover:text-foreground transition-colors">{item.label}</a>
+                                )
+                            ))}
+                        </div>
                     </div>
                 ))}
             </div>
@@ -1065,21 +202,25 @@ const Footer = () => {
 };
 
 // ── Page composition ──────────────────────────────────────────────────────────
+// Section order mirrors the landing design: the promise, how it works, the time
+// it saves, what it does with one recording, how it reads a reference, a CTA at
+// the midpoint, the craft details, trust, pricing, objections, and a final CTA.
 const HomePage = () => {
     return (
-        <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)] font-sans selection:bg-accent selection:text-white">
+        <div className="vibed-landing min-h-screen">
             <Nav />
             <main>
-                <Hero />
-                <ProblemSection />
-                <EditorialBrain />
-                <FeatureMoments />
-                <BeforeAfterSection />
-                <PersonasSection />
-                <AntiDescript />
-                <Pricing />
-                <SocialProof />
-                <FinalCTA />
+                <LandingHero />
+                <HowItWorks />
+                <SpeedProof />
+                <Repurpose />
+                <ScriptFlow />
+                <MidCta />
+                <CraftGrid />
+                <TrustBar />
+                <PricingV2 />
+                <Faq />
+                <FinalCtaV2 />
             </main>
             <Footer />
         </div>

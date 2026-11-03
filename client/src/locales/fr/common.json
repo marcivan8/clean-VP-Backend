@@ -6,7 +6,12 @@
     "startFree": "Commencer",
     "account": "Tableau de bord",
     "backToVibed": "Retour à Vibed",
-    "back": "Retour"
+    "back": "Retour",
+    "how": "Comment ça marche",
+    "features": "Fonctionnalités",
+    "pricing": "Tarifs",
+    "openMenu": "Ouvrir le menu",
+    "closeMenu": "Fermer le menu"
   },
   "actions": {
     "export": "Exporter",
@@ -32,7 +37,6 @@
   },
   "footer": {
     "tagline": "Le système d'exploitation créatif pour les créateurs, monteurs et studios modernes.",
-    "gdpr": "Projets et comptes hébergés en Suisse et dans l'UE",
     "legal": "Légal",
     "links": {
       "privacyPolicy": "Politique de confidentialité",
