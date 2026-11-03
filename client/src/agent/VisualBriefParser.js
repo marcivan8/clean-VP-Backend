@@ -22,6 +22,17 @@ const BROLL_SIGNALS = [
     'b-roll', 'b roll', 'broll', 'cutaway', 'supporting imagery', 'supporting visual',
     'floating card', 'contextual motion graphic', 'contextual graphic',
     'visually communicate', 'bring it to life', 'bring this to life', 'make it come alive',
+    // Explicit multi-rush requests. These are deliberately prompt gated: a
+    // normal full build should not pull unrelated files from the media bin.
+    'use my other footage', 'use the other footage', 'use my other videos',
+    'use the other videos', 'use my other rushes', 'use the other rushes',
+    'use my uploaded footage', 'use uploaded footage', 'illustrate what i say',
+    'illustrate what i am saying', 'illustrate my speech', 'illustrate the narration',
+    'put the other footage over', 'place the other footage over',
+    'use the rest as overlays', 'use the rest as overlay', 'overlay the event footage',
+    'use event footage to illustrate', 'use the event footage as cutaways',
+    'use the speaking video as the main', 'use me talking as the main',
+    'talking head as the main', 'talking-head as the main',
 ];
 
 const MOTION_GRAPHICS_SIGNALS = [

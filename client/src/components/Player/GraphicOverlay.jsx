@@ -31,9 +31,8 @@ import { useSnapGuides } from './SnapGuidesLayer.jsx';
  * Kept in step with the playhead: seeks when paused, plays along when the
  * editor plays and re-syncs if it drifts.
  */
-const OverlayVideo = ({ clip, currentTime, isPlaying, style }) => {
+const OverlayVideo = ({ clip, src, currentTime, isPlaying, style }) => {
     const ref = React.useRef(null);
-    const src = clip.proxyUrl || clip.url || clip.sourceUrl;
     const speed = Number(clip.speed) > 0 ? Number(clip.speed) : 1;
     const target = (Number(clip.offset) || 0) + Math.max(0, currentTime - (Number(clip.start) || 0)) * speed;
 
@@ -99,6 +98,24 @@ function overlayFilterCss(motionBlur, clipShadow) {
 // preview/export divergence this whole engine exists to prevent.
 const DEFAULT_WIDTH_FRACTION = 25; // as a CSS percent
 
+// Overlay clips can be created from an asset that only has a proxy URL (for
+// example while the original upload is still processing). Resolve that URL
+// the same way IDELayout does for Revideo's main video tracks; otherwise the
+// video renderer may receive an unserved storage path or be skipped entirely.
+function resolveOverlayMediaUrl(clip, asset) {
+    const rawUrl = clip?.proxyUrl || asset?.proxyUrl || clip?.url || clip?.sourceUrl
+        || asset?.url || asset?.sourceUrl || asset?.fileUrl || asset?.downloadUrl;
+    if (!rawUrl) return null;
+    if (rawUrl.startsWith('https://storage.googleapis.com/')) {
+        const objectPath = rawUrl.slice('https://storage.googleapis.com/'.length).split('/').slice(1).join('/');
+        return `/api/proxy/gcs-media/${objectPath}`;
+    }
+    if (rawUrl.startsWith('proxies/') || rawUrl.startsWith('raw/')) {
+        return `/api/proxy/gcs-media/${rawUrl}`;
+    }
+    return rawUrl;
+}
+
 // Preview<->export shadow parity. CompositorCompiler.js's compileShadowSource
 // scales clip.shadow.{dx,dy,blur} by frame.width / REFERENCE_WIDTH (a FLAT,
 // aspect-ratio-INDEPENDENT reference, per Compositor.js's normalizeShadow doc
@@ -126,10 +143,11 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
     const gestureRef = React.useRef({});
     const clipElRefs = React.useRef({});
 
-    const { currentTime, tracks, activeClipId, updateClip, setActiveClip, saveToHistory, isPlaying, aspectRatio } = useTimelineStore(useShallow(state => ({
+    const { currentTime, tracks, assets, activeClipId, updateClip, setActiveClip, saveToHistory, isPlaying, aspectRatio } = useTimelineStore(useShallow(state => ({
         currentTime:   state.currentTime,
         isPlaying:     state.isPlaying,
         tracks:        state.tracks,
+        assets:        state.assets,
         activeClipId:  state.activeClipId,
         updateClip:    state.updateClip,
         setActiveClip: state.setActiveClip,
@@ -315,6 +333,7 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
         <div ref={containerRef} className={`absolute inset-0 pointer-events-none overflow-hidden ${placementFilter === 'behind_subject' ? 'z-[2]' : 'z-10'}`}>
             {activeClips.map(({ clip, trackId }) => {
                 const isActive = clip.id === activeClipId;
+                const asset = clip.assetId ? assets.find(item => item.id === clip.assetId) : null;
 
                 const layer = clipToMotionLayer(clip, { id: trackId, type: 'overlay' });
                 const motion = layer
@@ -322,7 +341,7 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
                     : { x: clip.x ?? 78, y: clip.y ?? 18, scale: clip.scale || 1, rotation: 0, opacity: clip.opacity ?? 1, blur: 0 };
 
                 const isTemplate = (clip.type === 'template' && !!clip.template) || (clip.type === 'vector' && !!clip.vector);
-                const src = clip.url || clip.sourceUrl;
+                const src = resolveOverlayMediaUrl(clip, asset);
                 if (!src && !isTemplate) return null;
 
                 const transform = [
@@ -361,7 +380,7 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
                             style={{ ...css.box, pointerEvents: 'auto', touchAction: 'none', cursor: isActive ? 'grab' : 'pointer' }}
                         >
                             {isVideo
-                                ? <OverlayVideo clip={clip} currentTime={currentTime} isPlaying={isPlaying} style={mediaStyle} />
+                                ? <OverlayVideo clip={clip} src={src} currentTime={currentTime} isPlaying={isPlaying} style={mediaStyle} />
                                 : <img src={src} alt={clip.name || 'overlay'} draggable={false} style={mediaStyle} />}
                         </div>
                     );
@@ -399,7 +418,7 @@ const GraphicOverlay = ({ placementFilter = 'all' }) => {
                         {isTemplate
                             ? <TemplateCanvas clip={clip} currentTime={currentTime} style={{ opacity: motion.opacity, pointerEvents: 'none', ...(overlayFilter ? { filter: overlayFilter } : {}) }} />
                             : isVideo
-                                ? <OverlayVideo clip={clip} currentTime={currentTime} isPlaying={isPlaying} style={mediaStyle} />
+                                ? <OverlayVideo clip={clip} src={src} currentTime={currentTime} isPlaying={isPlaying} style={mediaStyle} />
                                 : <img src={src} alt={clip.name || 'overlay'} draggable={false} style={mediaStyle} />}
                         {isActive && (
                             <RotateHandle

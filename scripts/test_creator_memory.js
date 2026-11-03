@@ -93,31 +93,20 @@ check('it never returns a hard error to a fire-and-forget caller',
     /catch\s*\(\s*err\s*\)[\s\S]*return res\.json\(\{ ok: true \}\)/.test(observeBody),
     'The caller ignores the response by design; a rejected promise would surface as noise.');
 
-// ── 2. The client actually calls it, on the real success path ────────────────
-const workflow = read('client/src/agent/WorkflowController.js');
+// ── 2. A successful export commits the project's edit ledger ────────────────
+const layoutSrc = read('client/src/layouts/IDELayout.jsx');
 
-console.log('\n── WorkflowController reports executed commands to the server ──');
-
-check('WorkflowController calls /api/brain/observe-command',
-    /observe-command/.test(workflow),
-    'recordEdit() alone only writes the CLIENT-side ledger — the server profile stays frozen.');
-
-// The call must sit next to recordEdit, i.e. on the success branch — not, say,
-// in an error handler or a place that runs for advisory triggers too.
-const recordEditIdx = workflow.indexOf('recordEdit?.(');
-const observeIdx    = workflow.indexOf('observe-command');
-check('the call sits on the same success path as recordEdit',
-    recordEditIdx !== -1 && observeIdx !== -1 && observeIdx > recordEditIdx
-        && (observeIdx - recordEditIdx) < 2500,
-    'Learning must fire exactly where an edit is known to have succeeded.');
-
-check('it sends the resolved operation, not raw user text',
-    /command:\s*result\.operation/.test(workflow),
-    'Sending raw text would require the server to re-interpret it — the exact thing this design avoids.');
-
-check('the call is wrapped so it cannot break the edit',
-    /profile learning skipped/.test(workflow),
-    'Telemetry for a preference model must never surface into the edit path.');
+console.log('\n── the user can opt in to saving habits after a successful export ──');
+check('the authenticated observe-export route exists',
+    /router\.post\(\s*'\/observe-export',\s*authenticateUser/.test(brainRoutes));
+check('the save callback submits resolved edit operations only on demand',
+    /handleSaveEditingHabits[\s\S]*?observe-export/.test(layoutSrc)
+    && /editHistory\.map\(edit => edit\.op\)/.test(layoutSrc));
+check('automatic export completion does not submit habit data',
+    !/setExportUrl\(result\.url\)[\s\S]{0,900}observe-export/.test(layoutSrc));
+const exportModalSrc = read('client/src/components/ExportModal.jsx');
+check('the completed export card has an opt-in checkbox',
+    /type="checkbox"[\s\S]{0,700}onSaveEditingHabits/.test(exportModalSrc));
 
 // ── 3. Skill inference is wired AND speaks the pipeline's vocabulary ─────────
 const profileEngineSrc = read('server/brain/UserProfileEngine.js');

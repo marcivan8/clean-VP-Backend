@@ -12,6 +12,7 @@
  *   POST   /api/brain/analyze         — Analyze project state (advise only)
  *   POST   /api/brain/feedback        — Record suggestion chip feedback
  *   POST   /api/brain/observe-command — Learn from an executed command (no GPT)
+ *   POST   /api/brain/observe-export  — Save edits from a successfully rendered export
  *   POST   /api/brain/analyze-asset   — Queue asset analysis (BullMQ job); video via gcsPath, image via imageBase64
  *   POST   /api/brain/locate-target   — Queue a query-specific visual scan, returns timed review candidates
  *   GET    /api/brain/analysis-status — Read queued visual-analysis status for a project
@@ -330,6 +331,47 @@ router.post('/observe-command', authenticateUser, async (req, res) => {
         console.error('[brainRoutes] /observe-command error:', err.message);
         // Never surface a hard failure to a fire-and-forget caller.
         return res.json({ ok: true });
+    }
+});
+
+// Learn only from the edit ledger attached to a video that rendered
+// successfully. This is the durable boundary for session habits: an abandoned
+// edit session or failed render must not teach the user's profile.
+router.post('/observe-export', authenticateUser, async (req, res) => {
+    try {
+        const { projectId = null, commands = [] } = req.body || {};
+        if (!Array.isArray(commands)) {
+            return res.status(400).json({ error: 'commands must be an array' });
+        }
+
+        const normalized = commands
+            .map(item => typeof item === 'string' ? item : item?.op)
+            .filter(command => typeof command === 'string' && command.trim())
+            .map(command => command.trim())
+            .slice(-60);
+
+        for (const command of normalized) {
+            await profileEngine.updateFromCommand(req.user.id, command, true);
+        }
+
+        try {
+            await supabaseAdmin.from('editing_sessions').insert({
+                user_id: req.user.id,
+                project_id: projectId || null,
+                session_id: `export:${projectId || 'project'}:${Date.now()}`,
+                trigger: 'export_completed',
+                raw_input: `Saved ${normalized.length} edit(s) after successful export`,
+                executed: true,
+            });
+        } catch (logErr) {
+            console.error('[brainRoutes] /observe-export session log failed:', logErr.message);
+        }
+
+        return res.json({ ok: true, saved: normalized.length });
+    } catch (err) {
+        console.error('[brainRoutes] /observe-export error:', err.message);
+        // Preference learning must never turn a successful render into a failure.
+        return res.json({ ok: true, saved: 0 });
     }
 });
 

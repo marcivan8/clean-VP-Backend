@@ -94,7 +94,12 @@ export class LongFormEditPlanner {
             case EDIT_MODES.FULL_BUILD:
                 steps.push(...this._fullBuildSteps(editPlan, segments || [], structure, state, S));
                 steps.push(...this._captionSteps(captionBrief, S));
-                steps.push(...this._visualSteps(visualBrief, S));
+                // Visual additions are prompt-driven. In particular, only an
+                // explicit request for b-roll/cutaways may pull assets from
+                // the media bin and place them on the timeline.
+                if (visualBrief?.wantsContextualBroll || visualBrief?.wantsMotionGraphics) {
+                    steps.push(...this._visualSteps(visualBrief, S));
+                }
                 break;
             default:
                 steps.push(...this._cleanEditSteps(editPlan, state, segments || [], S));
@@ -138,7 +143,7 @@ export class LongFormEditPlanner {
             }));
         }
 
-        steps.push(S('place_contextual_broll', {
+        if (visualBrief?.wantsContextualBroll) steps.push(S('place_contextual_broll', {
             // R126 — automatic layout variety (brief section 6): without this,
             // every placed cutaway implicitly covers the whole frame (the
             // engine's default when a clip has no `.frame`), so a long
@@ -154,7 +159,7 @@ export class LongFormEditPlanner {
             reason: 'Match b-roll/cutaways to what is being said, so the video does not stay a static talking head',
         }));
 
-        steps.push(S('place_contextual_illustrations', {
+        if (visualBrief?.wantsMotionGraphics) steps.push(S('place_contextual_illustrations', {
             args: { max: 4 },
             reason: 'Add a few animated vector illustrations when the spoken ideas match the illustration library',
         }));
