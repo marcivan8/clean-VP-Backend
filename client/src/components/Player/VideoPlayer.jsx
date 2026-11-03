@@ -639,10 +639,14 @@ const VideoPlayer = () => {
 
     // Pull global project aspect ratio so the container matches the layout perfectly
     const aspectRatio = useTimelineStore(state => state.aspectRatio);
-    // Project colour grade as a CSS filter, written by useAudioEngine.applyLUT.
-    // Subscribed (not read via getState) so applying a LUT re-renders the canvas
-    // immediately — that immediacy is the whole point of the CSS-filter path.
-    const projectLUTFilter = useTimelineStore(state => state.projectLUTFilter);
+    // The selected LUT id is the source of truth for whether a project LUT is
+    // active; the matching CSS preview filter is the value applied to the
+    // rendered canvas below. Subscribe to both so selecting or clearing a LUT
+    // immediately repaints the preview, and an old filter cannot linger after
+    // the id has been cleared.
+    const projectLUTId = useTimelineStore(state => state.projectLUTId);
+    const storedProjectLUTFilter = useTimelineStore(state => state.projectLUTFilter);
+    const projectLUTFilter = projectLUTId ? storedProjectLUTFilter : 'none';
     
     const getPlayerRatioString = (ratio) => {
         switch (ratio) {
@@ -756,19 +760,17 @@ const VideoPlayer = () => {
             <canvas
                 ref={canvasRef}
                 className="transition-transform duration-75"
+                data-project-lut-id={projectLUTId || undefined}
                 style={{
                     width: '100%',
                     height: '100%',
                     objectFit: 'contain',
                     transform: baseTransform,
                     transformOrigin,
-                    // Project colour grade. `applyLUT` has always stored a CSS
-                    // filter alongside the LUT id — its own comment says "CSS
-                    // filter is used in the editor (immediate); FFmpeg lut3d
-                    // used at export" — but nothing ever applied it, so clicking
-                    // a LUT changed the store and nothing else. See R55.
-                    // 'none' (the cleared state) is a valid CSS filter value and
-                    // costs nothing, so the ungraded path is unchanged.
+                    // Apply the selected project's LUT preview directly to the
+                    // canvas pixels. The id gates the stored filter, and the
+                    // filter is combined with clip effects and transition FX
+                    // above. 'none' is the unchanged, ungraded path.
                     filter: baseFilter,
                     display: useFallbackPlayer ? 'none' : 'block',
                 }}
