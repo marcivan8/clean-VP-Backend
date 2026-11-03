@@ -3326,12 +3326,25 @@ export class MediaExecutionEngine {
                     // what makes `apply_angle` an instant, re-runnable step instead of
                     // repeating diarization + Vision every time (R23).
                     const cachedScene = vmStore.sceneAnalysisByAsset?.[assetId];
+                    // A fallback plan is still useful as an edit, but it is not
+                    // speaker-aware. Do not let a transient vision/path failure
+                    // become permanent: retry face-position analysis next time.
+                    const cachedAnchors = (cachedScene?.layout?.anchors || [])
+                        .map(frame => frame?.anchor)
+                        .filter(anchor => Number.isFinite(anchor?.cx) && Number.isFinite(anchor?.cy));
+                    const cachedHasVisualAnchor = cachedScene?.mode === 'solo'
+                        ? cachedAnchors.length > 0
+                        : cachedAnchors.length >= 2 && Math.abs(cachedAnchors[0].cx - cachedAnchors[1].cx) > 0.08;
                     if (cachedScene?.segments?.length
                         && cachedScene.plannerVersion >= 2
+                        && cachedHasVisualAnchor
                         && !args.forceReanalyze) {
                         vmAnalysisByAsset[assetId] = cachedScene;
                         console.log(`[virtual_multicam] "${assetName}": reusing cached scene analysis (${cachedScene.segments.length} segments)`);
                         continue;
+                    }
+                    if (cachedScene?.segments?.length && !cachedHasVisualAnchor) {
+                        console.log(`[virtual_multicam] "${assetName}": cached plan has no face positions — retrying visual analysis`);
                     }
 
                     let diar = null;
@@ -3559,6 +3572,19 @@ export class MediaExecutionEngine {
                     : `${wideN} wide  ·  ${closeN} close-ups  ·  ${rxTotal} reaction shots\n\n` +
                       `Host (${host}) detected on the ${hostSide}. `;
 
+                const usesFaceAnchors = (data) => {
+                    const anchors = (data.layout?.anchors || [])
+                        .map(frame => frame?.anchor)
+                        .filter(anchor => Number.isFinite(anchor?.cx) && Number.isFinite(anchor?.cy));
+                    if (data.mode === 'solo') return anchors.length > 0;
+                    return anchors.length >= 2 && Math.abs(anchors[0].cx - anchors[1].cx) > 0.08;
+                };
+                const anchoredAssetCount = Object.values(vmAnalysisByAsset).filter(usesFaceAnchors).length;
+                const analysedAssetCount = Object.keys(vmAnalysisByAsset).length;
+                const visualPositionNote = anchoredAssetCount === analysedAssetCount
+                    ? `Visual analysis located speaker positions in all ${anchoredAssetCount} analysed video(s).`
+                    : `Precise face positions were available for ${anchoredAssetCount} of ${analysedAssetCount} analysed video(s). Other footage used safe fallback framing to avoid cropping out an off-center speaker; check backend video access and vision configuration.`;
+
                 const droppedZoomNote = droppedZoomKfCount > 0
                     ? `\n\nNote: ${droppedZoomKfCount} clip(s) had an existing zoom rhythm that no longer matched the new camera cuts, so it was cleared — run "make it more dynamic" again to re-add it on top of these angles.`
                     : '';
@@ -3579,6 +3605,7 @@ export class MediaExecutionEngine {
                     message:
                         `Virtual multicam applied — ${totalTagged} angle-tagged segments.\n\n` +
                         vmSummary +
+                        visualPositionNote + `\n\n` +
                         `Jumped to the first close-up — scrub the timeline to review all angle cuts.` +
                         multiAssetNote + droppedZoomNote + otherAssetNote,
                 };

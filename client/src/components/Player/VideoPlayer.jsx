@@ -731,6 +731,26 @@ const VideoPlayer = () => {
     const transitionWins = React.useMemo(() => transitionWindows(baseTransitionClips), [baseTransitionClips]);
     const tfx = transitionWins.length > 0 ? fxAtTime(transitionWins, currentTime) : null;
     const baseTransform = transitionTransform(tfx, transformStyle, transformOrigin);
+    // The normal WebGL path applies virtualCam as a UV crop. When WebCodecs or
+    // WebGL fails, reproduce that crop with CSS so multicam does not look wide
+    // just because playback switched to the native-video fallback.
+    const fallbackTransform = (() => {
+        const vc = activeClip?.virtualCam;
+        if (!useFallbackPlayer || !vc) return baseTransform;
+
+        const cropW = Math.max(0.05, Math.min(1, Number(vc.cropW) || 1));
+        const cropH = Math.max(0.05, Math.min(1, Number(vc.cropH) || cropW));
+        if (cropW >= 0.999 && cropH >= 0.999) return baseTransform;
+
+        const scaleX = 1 / cropW;
+        const scaleY = 1 / cropH;
+        const centerX = (Number(vc.cropX) || 0) + cropW / 2;
+        const centerY = (Number(vc.cropY) || 0) + cropH / 2;
+        const translateX = (0.5 - centerX) * scaleX * 100;
+        const translateY = (0.5 - centerY) * scaleY * 100;
+        const cropTransform = `translate(${translateX}%, ${translateY}%) scale(${scaleX}, ${scaleY})`;
+        return [baseTransform, cropTransform].filter(Boolean).join(' ');
+    })();
     const effectFilter = resolveTimelineEffectFilter(activeClip?.effects);
     const baseFilter = combinePreviewFilters(transitionFilter(tfx, projectLUTFilter), effectFilter);
     const frameWidthPx = containerRef.current?.clientWidth || 0;
@@ -776,16 +796,9 @@ const VideoPlayer = () => {
                 }}
             />
 
-            {/* Fallback native <video> — see the useFallbackPlayer state block
-                above for exactly when/why this engages. Only mounted once the
-                primary pipeline has actually failed, so it costs nothing in
-                the normal (working) case. Not muted: the primary engine is
-                paused (and therefore silent) whenever this is active, so this
-                is the sole audio source for the clip — see the play/pause
-                effect's useFallbackPlayer branch for why that's safe. Loses
-                virtual-multicam crop (WebGL-only) but keeps the CSS transform
-                (position/scale/rotation) and colour-grade filter, which apply
-                the same way to any element. */}
+            {/* Native-video fallback: the primary engine is paused while this
+                is active, making this the sole audio source. CSS mirrors the
+                virtualCam crop for preview parity with the WebGL path. */}
             {useFallbackPlayer && mediaUrl && (
                 <video
                     ref={fallbackVideoRef}
@@ -797,8 +810,8 @@ const VideoPlayer = () => {
                         width: '100%',
                         height: '100%',
                         objectFit: 'contain',
-                        transform: baseTransform,
-                        transformOrigin,
+                        transform: fallbackTransform,
+                        transformOrigin: '50% 50%',
                         filter: baseFilter,
                     }}
                     onTimeUpdate={(e) => {

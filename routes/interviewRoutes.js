@@ -33,7 +33,7 @@ const { authenticateUser, optionalAuth } = require('../middleware/auth');
 const { aiGate }     = require('../middleware/usageGate');
 const { audioQueue } = require('../queue/queues');
 const storageConfig  = require('../config/storage');
-const { useWideDuoBoundary, soloAngleForChunk } = require('./virtualMulticamAngles');
+const { soloAngleForChunk } = require('./virtualMulticamAngles');
 
 let ffmpegPath = null;
 try {
@@ -2073,7 +2073,9 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
         }
 
         const hasReliableDuoSides = !!forcedHostSide || faceDetected || !!(duoLeftAnchor && duoRightAnchor);
-        const fallbackDuoCamera = { scale: 1.42, x: 0, y: -0.04 };
+        // No reliable position means a safe two-shot. A guessed center punch-in
+        // can cut the active speaker out when both people sit off-axis.
+        const fallbackDuoCamera = { scale: 1.00, x: 0, y: 0 };
         const VIRTUAL_CAMERAS = {
             wide: { scale: 1.00, x: 0.00, y: 0.00 },
             // Only make a side-specific crop when visual analysis established
@@ -2135,8 +2137,11 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
 
             const SOLO_CAMERAS = {
                 wide:  { scale: 1.00, x: 0, y: 0.00 },
-                mid:   anchorCam(1.18, soloAnchor) || { scale: 1.18, x: 0, y: -0.04 },
-                close: anchorCam(1.48, soloAnchor) || { scale: 1.48, x: 0, y: -0.07 },
+                // Without a detected face position, keep the full frame rather
+                // than guessing at center and potentially cropping the speaker
+                // out. With an anchor, both shots frame that same person.
+                mid:   anchorCam(1.18, soloAnchor) || { scale: 1, x: 0, y: 0 },
+                close: anchorCam(1.48, soloAnchor) || { scale: 1, x: 0, y: 0 },
             };
             if (soloAnchor) {
                 console.log(
@@ -2177,12 +2182,13 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
             let cycleIdx = 0;
 
             for (let i = 0; i < chunks.length; i++) {
-                let angle = soloAngleForChunk(i, chunks.length, cycleIdx);
+                let angle = soloAnchor
+                    ? soloAngleForChunk(i, chunks.length, cycleIdx)
+                    : 'wide';
                 if (i !== 0 && i !== chunks.length - 1) {
                     cycleIdx++;
-                    // The final segment is forced wide — if the cycle put a close
-                    // right before it, bridge with a mid to keep the "never jump
-                    // wide↔close directly" rule intact.
+                    // Keep the penultimate chunk at mid when the final chunk is
+                    // also mid, avoiding a close-to-mid snap at the tail.
                     if (i === chunks.length - 2 && angle === 'close') {
                         angle = 'mid';
                     }
@@ -2282,22 +2288,19 @@ router.post('/virtual-multicam', ...authAndGate, async (req, res) => {
         //  • Reactions are not assigned while someone else is speaking.
 
         const segments = [];
-        const MIN_CLOSE_DUR = 2.8; // seconds; brief turns stay wide rather than flicking crops
+        const MIN_CLOSE_DUR = 1.8; // Keep only very brief interjections wide.
 
         for (let i = 0; i < rawSegments.length; i++) {
             const seg     = rawSegments[i];
             const dur     = seg.end - seg.start;
             let angle;
 
-            if (useWideDuoBoundary(i, rawSegments.length) && dur >= 4.0) {
-                // Keep genuinely long establishing/bookend shots wide, without
-                // forcing a short first or last phrase into its own abrupt cut.
-                angle = 'wide';
-            } else if (dur < MIN_CLOSE_DUR) {
+            if (dur < MIN_CLOSE_DUR) {
                 angle = 'wide';
             } else {
-                // Every crop follows the person whose turn this segment is.
-                angle = speakerCam[seg.speaker] || 'wide';
+                // Active turns get their speaker's crop, including first and
+                // last turns. Wide bookends during speech left speakers small.
+                angle = hasReliableDuoSides ? (speakerCam[seg.speaker] || 'wide') : 'wide';
             }
 
             const cam  = VIRTUAL_CAMERAS[angle] || VIRTUAL_CAMERAS.wide;
