@@ -22,3 +22,7 @@ silent_video.mp4
 output.mp4
 tests/
 
+# Generated edit previews and test renders are not needed in the deploy image.
+artifacts/
+client/dist/
+

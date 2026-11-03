@@ -28,3 +28,6 @@ Social SFX Pack - Collection 1/
 # Diagnostic SVG preview output
 render-previews/
 
+# Generated edit previews and test renders (keep out of Railway source uploads).
+artifacts/
+
