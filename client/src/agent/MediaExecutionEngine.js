@@ -1668,13 +1668,13 @@ export class MediaExecutionEngine {
                         console.warn('[apply_style_recipe] automatic animation failed:', motionError.message);
                         skipped.push('automatic moment animations (service unavailable)');
                     }
+                    const afterMotion = useTimelineStore.getState().tracks;
+                    const autoSfxTimes = (afterMotion || []).filter(track => track.type === 'audio')
+                        .flatMap(track => (track.clips || []).filter(clip => clip.autoAnimate).map(clip => Number(clip.start) || 0));
                     // 7. R92: sound effects on what the recipe placed (whoosh on
                     // transitions, pop on number pops), level from the style.
                     const lvl = sfxLevel(useTimelineStore.getState().editingStyle, recipe.id);
                     if (lvl !== 'none') {
-                        const afterMotion = useTimelineStore.getState().tracks;
-                        const autoSfxTimes = (afterMotion || []).filter(track => track.type === 'audio')
-                            .flatMap(track => (track.clips || []).filter(clip => clip.autoAnimate).map(clip => Number(clip.start) || 0));
                         const cues = collectSfxCues(afterMotion, { level: lvl })
                             .filter(cue => !autoSfxTimes.some(at => Math.abs(at - cue.t) < 0.8));
                         if (cues.length > 0) {
