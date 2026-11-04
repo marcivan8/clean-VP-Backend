@@ -1347,10 +1347,13 @@ export class EditPlanner {
     }
 
     static findFirstClip(state) {
+        const referenceAssetIds = new Set((state?.assets || [])
+            .filter(asset => asset?.assistantReference === true)
+            .map(asset => asset.id));
         for (const track of state.tracks || []) {
-            if (track.clips && track.clips.length > 0) {
-                return { ...track.clips[0], trackId: track.id };
-            }
+            const clip = (track.clips || []).find(candidate => candidate?.assistantReference !== true
+                && !referenceAssetIds.has(candidate?.assetId));
+            if (clip) return { ...clip, trackId: track.id };
         }
         return null;
     }

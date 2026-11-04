@@ -118,6 +118,11 @@ export function isGenericEditRequest(text) {
     return s === '' || GENERIC_REQUEST.test(s) || REFERENCE_GUIDED_EDIT.test(s);
 }
 
+export function isReferenceGuidedEditRequest(text) {
+    const s = String(text || '').split(/\n\n(?:Reference documents supplied by the user|Media attached to this request and available in the project Media Bin|Reference media supplied by the user for guidance only \(not source footage\)):/i, 1)[0].trim();
+    return REFERENCE_GUIDED_EDIT.test(s);
+}
+
 // Questions stay normal chat even in Auto mode.
 export function isQuestion(text) {
     const s = String(text || '').trim().toLowerCase();
@@ -218,4 +223,4 @@ export function styleContext(styleId, mode) {
     return { id: style.id, mode: normalizeEditingMode(mode), guidance: style.guidance, recipe: style.recipeId, targetDurationSec: style.targetDuration, maxDurationSec: style.maxDuration };
 }
 
-export default { EDITING_STYLES, EDITING_STYLE_IDS, EDITING_MODES, getEditingStyle, stylePacing, zoomStyleFromText, normalizeEditingMode, isGenericEditRequest, isQuestion, buildAutopilotSteps, styleContext };
+export default { EDITING_STYLES, EDITING_STYLE_IDS, EDITING_MODES, getEditingStyle, stylePacing, zoomStyleFromText, normalizeEditingMode, isGenericEditRequest, isReferenceGuidedEditRequest, isQuestion, buildAutopilotSteps, styleContext };

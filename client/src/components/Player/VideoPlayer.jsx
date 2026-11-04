@@ -156,9 +156,16 @@ const VideoPlayer = () => {
     // Search ALL video tracks — after split-speakers there are 2 (one per speaker).
     const videoTracks = avTracks.filter(t => t.type === 'video');
     const videoTrack = videoTracks[0]; // legacy compat for single-track code paths
+    const referenceAssetIds = React.useMemo(
+        () => new Set(assets.filter(asset => asset?.assistantReference === true).map(asset => asset.id)),
+        [assets]
+    );
     const activeClip = videoTracks
         .flatMap(t => t.clips)
-        .find(clip => currentTime >= clip.start - 0.001 && currentTime < clip.start + clip.duration + 0.001);
+        .find(clip => clip?.assistantReference !== true
+            && !referenceAssetIds.has(clip?.assetId)
+            && currentTime >= clip.start - 0.001
+            && currentTime < clip.start + clip.duration + 0.001);
 
     // activeClipForEngine: stable reference that only changes when properties the
     // engine actually cares about change. x / y / scale / rotation are pure CSS

@@ -787,6 +787,21 @@ function addAutoStoryboard(tracks, { words, events, duration, aspectRatio, hookS
     return placed;
 }
 
+function applyReferenceTextStyle(placements, directive, fallbackAnimation) {
+    if (!directive || !Array.isArray(placements)) return;
+    for (const placement of placements) {
+        if (placement.trackType !== 'text' || !placement.clip) continue;
+        const clip = placement.clip;
+        if (directive.fontFamily) clip.fontFamily = directive.fontFamily;
+        if (directive.fontWeight) clip.fontWeight = directive.fontWeight;
+        if (directive.color) clip.color = directive.color;
+        if (directive.x !== undefined) clip.x = directive.x;
+        if (directive.y !== undefined) clip.y = directive.y;
+        const motion = directive.animationIn || fallbackAnimation;
+        if (motion) Object.assign(clip, applyPresetToClip(clip, motion, { intensity: 0.72 }));
+    }
+}
+
 /**
  * Apply the treatment.
  * @param {{tracks:Array, duration:number, aspectRatio?:string}} built from buildShortTimeline
@@ -819,6 +834,8 @@ export function polishShort(built, profile, opts = {}) {
         ...(referenceStyle.titlePreset ? { titlePreset: referenceStyle.titlePreset } : {}),
         ...(referenceStyle.accent ? { accent: referenceStyle.accent } : {}),
         ...(referenceStyle.textColor ? { titleColor: referenceStyle.textColor } : {}),
+        ...(referenceStyle.titleStyle?.fontFamily ? { titleFont: referenceStyle.titleStyle.fontFamily } : {}),
+        ...(referenceStyle.titleStyle?.color ? { titleColor: referenceStyle.titleStyle.color } : {}),
         cameraEnergy: Math.max(0.2, Math.min(0.9, baseLook.cameraEnergy * referenceStyle.motionScale)),
         } : {}),
     };
@@ -956,12 +973,15 @@ export function polishShort(built, profile, opts = {}) {
                     safeZone: profile?.safeZone,
                     subject: SYNTHETIC_SPEAKER_SUBJECT,
                     palette: { accent: look.accent, text: look.titleColor },
+                    fontFamily: referenceStyle?.titleStyle?.fontFamily,
                     titleComponent: referenceStyle?.titleComponent,
                     titlePreset: referenceStyle?.titlePreset,
                 },
             );
             if (designed?.scene) {
                 const { placements } = flattenScene(designed.scene);
+                applyReferenceTextStyle(placements,
+                    referenceStyle?.sceneDirections?.find(item => item.role === 'hook' || item.role === 'title') || referenceStyle?.titleStyle);
                 // `short-` prefixed ids (as the old hand-rolled clips always
                 // had) are how `polish_short` finds and replaces this layer
                 // on a re-run instead of stacking a second one - see
@@ -995,6 +1015,7 @@ export function polishShort(built, profile, opts = {}) {
                 }, { aspectRatio: built?.aspectRatio || '9:16', safeZone: profile?.safeZone });
                 if (scene) {
                     const { placements } = flattenScene(scene);
+                    applyReferenceTextStyle(placements, referenceStyle?.titleStyle);
                     let textN = 0, gfxN = 0;
                     for (const p of placements) {
                         const isText = p.trackType === 'text';
@@ -1064,10 +1085,13 @@ export function polishShort(built, profile, opts = {}) {
         const baseFields = stylePackToClipFields(captionPack) || {};
         const fields = referenceStyle ? {
             ...baseFields,
-            ...((referenceStyle.captionTextColor || referenceStyle.textColor)
-                ? { color: referenceStyle.captionTextColor || referenceStyle.textColor } : {}),
+            ...(referenceStyle.captionStyle?.fontFamily ? { fontFamily: referenceStyle.captionStyle.fontFamily } : {}),
+            ...(referenceStyle.captionStyle?.fontWeight ? { fontWeight: referenceStyle.captionStyle.fontWeight } : {}),
+            ...((referenceStyle.captionStyle?.color || referenceStyle.captionTextColor || referenceStyle.textColor)
+                ? { color: referenceStyle.captionStyle?.color || referenceStyle.captionTextColor || referenceStyle.textColor } : {}),
             captionStyle: {
                 ...(baseFields.captionStyle || {}),
+                ...(referenceStyle.captionStyle?.animationIn ? { animationPreset: referenceStyle.captionStyle.animationIn } : {}),
                 wordHighlight: {
                     ...(baseFields.captionStyle?.wordHighlight || {}),
                     ...(referenceStyle.accent ? { color: referenceStyle.accent } : {}),
@@ -1146,7 +1170,16 @@ export function polishShort(built, profile, opts = {}) {
         let styled = 0;
         for (const c of captionClips) {
             const overlapsHook = hookDurForCaptions > 0 && (Number(c.start) || 0) < hookDurForCaptions;
-            Object.assign(c, fields, { x: 50, y: overlapsHook ? belowHookY : profile.captionY });
+            const refX = referenceStyle?.captionStyle?.x;
+            const refY = referenceStyle?.captionStyle?.y;
+            Object.assign(c, fields, {
+                x: Number.isFinite(refX) ? refX : 50,
+                y: overlapsHook ? Math.max(belowHookY, Number.isFinite(refY) ? refY : belowHookY)
+                    : Number.isFinite(refY) ? refY : profile.captionY,
+            });
+            if (referenceStyle?.captionStyle?.animationIn) {
+                Object.assign(c, applyPresetToClip(c, referenceStyle.captionStyle.animationIn, { intensity: 0.72 }));
+            }
             // A caption running long (more than ~4 words) renders as 2+ lines
             // at the pack's base size and can grow tall enough to reach back
             // up into the hook's space even after the Y offset above -- scale
@@ -1305,6 +1338,7 @@ export function polishShort(built, profile, opts = {}) {
         for (const moment of timed) {
             const at = Math.max(0, Math.min(duration - 0.5, Number(moment.start) || 0));
             const sceneDuration = Math.max(0.8, Math.min(1.8, duration - at));
+            const sceneDirection = referenceStyle?.sceneDirections?.filter(item => item.role === 'graphic' || item.role === 'title')?.[count + 1];
             const designed = composeSceneFromBrief('A concise transcript-grounded supporting graphic for a short-form video.', {
                 plan: { beats: [{
                     kind: moment.kind === 'quote' ? 'quote' : 'point',
@@ -1319,9 +1353,11 @@ export function polishShort(built, profile, opts = {}) {
                 safeZone: profile?.safeZone,
                 subject: SYNTHETIC_SPEAKER_SUBJECT,
                 palette: { accent: look.accent, text: look.titleColor },
+                fontFamily: sceneDirection?.fontFamily || referenceStyle?.titleStyle?.fontFamily,
             });
             if (!designed?.scene) continue;
             const { placements } = flattenScene(designed.scene, { startOffset: at });
+            applyReferenceTextStyle(placements, sceneDirection || referenceStyle?.titleStyle);
             for (const p of placements) {
                 const isText = p.trackType === 'text';
                 const t = trackOf(tracks, isText ? 'text' : 'overlay', isText ? 'track-short-moments' : 'track-short-graphics', isText ? 'Moments' : 'Short graphics');
@@ -1382,6 +1418,8 @@ export function polishShort(built, profile, opts = {}) {
                 const clip = base.clips.find(c => c.id === clipId);
                 if (!clip || clip === last) return;
                 const tr = recipeTransitionForCut(recipe, i);
+                const referenceTransition = referenceStyle?.transitionTypes?.[i % Math.max(1, referenceStyle.transitionTypes.length)];
+                if (tr && referenceTransition) tr.type = referenceTransition;
                 if (tr) { clip.transition = { type: tr.type, duration: tr.duration || TRANSITION_DEFAULT_DURATION[tr.type] }; n += 1; }
             });
             if (n) applied.push(`transitions (${n})`);

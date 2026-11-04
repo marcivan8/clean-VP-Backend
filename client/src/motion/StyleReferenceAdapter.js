@@ -11,12 +11,32 @@ const ENUMS = {
     transitionPacing: new Set(['slow', 'medium', 'fast']),
     visualTone: new Set(['cinematic', 'editorial', 'warm', 'viral', 'technology']),
 };
+const FONTS = new Set(['Inter', 'Anton', 'Montserrat', 'Poppins', 'DM Sans', 'Playfair Display', 'Cormorant Garamond', 'Rajdhani', 'JetBrains Mono', 'Oswald', 'Bebas Neue']);
+const ANIMATIONS = new Set(['fade', 'slide-up', 'slide-down', 'pop', 'scale-reveal', 'blur-reveal', 'glow-reveal', 'typewriter']);
+const TRANSITIONS = new Set(['flash', 'dip', 'whip-left', 'whip-right', 'zoom-punch', 'glitch', 'speed-lines', 'circle-wipe', 'bar-wipe', 'blinds', 'diagonal-wipe', 'soft-blur', 'push-left', 'push-right', 'color-flash']);
 
 const validEnum = (value, allowed) => {
     const normalized = String(value || '').toLowerCase().replace(/[ -]+/g, '_');
     return allowed.has(normalized) ? normalized : null;
 };
+const validIdentifier = (value, allowed) => {
+    const normalized = String(value || '').trim().toLowerCase().replace(/[ _]+/g, '-');
+    return allowed.has(normalized) ? normalized : null;
+};
 const hex = value => /^#[\da-f]{6}$/i.test(String(value || '').trim()) ? String(value).trim().toUpperCase() : null;
+const bounded = (value, min, max) => Number.isFinite(Number(value)) && Number(value) >= min && Number(value) <= max ? Number(value) : null;
+const textStyle = raw => {
+    if (!raw || typeof raw !== 'object') return null;
+    const fontFamily = FONTS.has(raw.fontFamily) ? raw.fontFamily : null;
+    const fontWeight = [400, 500, 600, 700, 800, 900].includes(Number(raw.fontWeight)) ? Number(raw.fontWeight) : null;
+    const color = hex(raw.color || raw.textColor);
+    const accentColor = hex(raw.accentColor);
+    const x = bounded(raw.x, 8, 92);
+    const y = bounded(raw.y, 8, 92);
+    const animationIn = validIdentifier(raw.animationIn, ANIMATIONS);
+    if (![fontFamily, fontWeight, color, accentColor, x, y, animationIn].some(Boolean)) return null;
+    return { ...(fontFamily ? { fontFamily } : {}), ...(fontWeight ? { fontWeight } : {}), ...(color ? { color } : {}), ...(accentColor ? { accentColor } : {}), ...(x !== null ? { x } : {}), ...(y !== null ? { y } : {}), ...(animationIn ? { animationIn } : {}) };
+};
 const luminance = color => {
     const channels = String(color || '').slice(1).match(/.{2}/g)?.map(value => parseInt(value, 16) / 255) || [];
     if (channels.length !== 3) return 0;
@@ -37,8 +57,23 @@ export function buildStyleReferencePlan(raw) {
     const visualTone = validEnum(raw.visualTone, ENUMS.visualTone);
     const colors = [...new Set((Array.isArray(raw.colorPalette) ? raw.colorPalette : []).map(hex).filter(Boolean))].slice(0, 3);
     const motifs = (Array.isArray(raw.motifs) ? raw.motifs : []).map(x => String(x || '').trim()).filter(Boolean).slice(0, 4);
+    const titleStyle = textStyle(raw.titleStyle);
+    const captionStyle = textStyle(raw.captionStyle);
+    const transitionTypes = [...new Set((Array.isArray(raw.transitionTypes) ? raw.transitionTypes : [])
+        .map(value => validIdentifier(value, TRANSITIONS)).filter(Boolean))].slice(0, 4);
+    const sceneDirections = (Array.isArray(raw.sceneDirections) ? raw.sceneDirections : []).slice(0, 9).map(item => {
+        if (!item || typeof item !== 'object') return null;
+        const directionStyle = textStyle({ ...item, color: item.textColor });
+        const role = validEnum(item.role, new Set(['hook', 'title', 'caption', 'graphic', 'transition', 'unknown']));
+        const transitionAfter = validIdentifier(item.transitionAfter, TRANSITIONS);
+        const time = bounded(item.time, 0, 24 * 60 * 60);
+        const confidence = bounded(item.confidence, 0, 1);
+        return { ...(time !== null ? { time } : {}), ...(role ? { role } : {}), ...(directionStyle || {}), ...(transitionAfter ? { transitionAfter } : {}), ...(confidence !== null ? { confidence } : {}) };
+    }).filter(item => item && (item.confidence === undefined || item.confidence >= 0.45));
     const evidenceCount = [motionEnergy, captionTreatment, titleTreatment, graphicsDensity, transitionPacing, visualTone]
-        .filter(Boolean).length + (colors.length ? 1 : 0) + (motifs.length ? 1 : 0);
+        .filter(Boolean).length + (colors.length ? 1 : 0) + (motifs.length ? 1 : 0)
+        + (titleStyle ? 1 : 0) + (captionStyle ? 1 : 0) + (transitionTypes.length ? 1 : 0)
+        + (sceneDirections.length ? 1 : 0);
     if (evidenceCount < 2) return null;
 
     const captionPack = ({
@@ -102,6 +137,10 @@ export function buildStyleReferencePlan(raw) {
         textColor,
         captionTextColor,
         motifs,
+        titleStyle,
+        captionStyle,
+        transitionTypes,
+        sceneDirections,
     };
 }
 

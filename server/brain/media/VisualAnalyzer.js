@@ -105,7 +105,12 @@ class VisualAnalyzer {
             // default (inside extractFrames) if ffprobe itself fails.
             const realDuration = duration || await this.probeDuration(filePath);
 
-            const samplePositions = styleReference ? [0.08, 0.28, 0.5, 0.72, 0.92] : undefined;
+            // A style reference needs enough temporal coverage to distinguish
+            // persistent typography from one-off cards and to compare motion
+            // across adjacent moments. Keep the ordinary asset pass cheap.
+            const samplePositions = styleReference
+                ? [0.04, 0.15, 0.26, 0.37, 0.48, 0.59, 0.70, 0.81, 0.92]
+                : undefined;
             const frames = await this.extractFrames(filePath, realDuration, tempFiles, samplePositions);
             if (!frames.length) return ERROR_RESULT;
 
@@ -336,23 +341,58 @@ Also return "visualStyleProfile" describing only the visible editing/design gram
   "transitionPacing": "slow|medium|fast|unknown",
   "visualTone": "cinematic|editorial|warm|viral|technology|unknown",
   "colorPalette": ["#RRGGBB", "#RRGGBB"],
-  "motifs": ["short visible design motif", "another motif"]
+  "motifs": ["short visible design motif", "another motif"],
+  "titleStyle": {
+    "fontFamily": "closest supported font name or unknown",
+    "fontWeight": 400|500|600|700|800|900|null,
+    "color": "#RRGGBB or null",
+    "accentColor": "#RRGGBB or null",
+    "x": 0-100|null,
+    "y": 0-100|null,
+    "animationIn": "fade|slide-up|slide-down|pop|scale-reveal|blur-reveal|glow-reveal|typewriter|unknown"
+  },
+  "captionStyle": {
+    "fontFamily": "closest supported font name or unknown",
+    "fontWeight": 400|500|600|700|800|900|null,
+    "color": "#RRGGBB or null",
+    "accentColor": "#RRGGBB or null",
+    "x": 0-100|null,
+    "y": 0-100|null,
+    "animationIn": "fade|slide-up|slide-down|pop|scale-reveal|blur-reveal|glow-reveal|typewriter|unknown"
+  },
+  "transitionTypes": ["flash|dip|whip-left|whip-right|zoom-punch|glitch|speed-lines|circle-wipe|bar-wipe|blinds|diagonal-wipe|soft-blur|push-left|push-right|color-flash"],
+  "sceneDirections": [{
+    "time": <source timestamp in seconds from the label>,
+    "role": "hook|title|caption|graphic|transition|unknown",
+    "x": 0-100|null, "y": 0-100|null,
+    "fontFamily": "closest supported font name or unknown",
+    "fontWeight": 400|500|600|700|800|900|null,
+    "textColor": "#RRGGBB or null", "accentColor": "#RRGGBB or null",
+    "animationIn": "supported animation id or unknown",
+    "transitionAfter": "supported transition id or unknown",
+    "confidence": 0-1
+  }]
 }
 For captionTreatment, use these visual definitions: "boxed" means caption words sit on a visible solid or translucent filled panel; "clean" means plain text without a panel; "word_highlight" means one spoken word is singled out with a distinct color or shape; "bold" means consistently heavy caption text without a panel; "kinetic" means the words visibly change position or scale. Choose the treatment repeated most consistently across the sampled frames. A one-off title card is not the caption treatment. If the frames do not show enough captions, use "unknown". For titleTreatment, use "editorial_serif" when the reference repeatedly uses a high-contrast serif display face for its main titles, even if captions use sans-serif; reserve "minimal" for restrained sans-serif titles.
-Motifs may describe visible patterns such as social proof metrics, comment or DM cards, product or document cards, archive-photo layouts, split-screen comparisons, large two-tone headlines, speaker cutouts, or phone frames. Use only motifs actually visible in the sampled frames. Use multiple frames to distinguish a persistent style from one moment. Do not claim to see animation direction or sound effects from still frames; use "unknown" when evidence is insufficient.` : ''}
+For fontFamily choose only from: Inter, Anton, Montserrat, Poppins, DM Sans, Playfair Display, Cormorant Garamond, Rajdhani, JetBrains Mono, Oswald, Bebas Neue. Describe the closest visual match, not a claimed exact font identification. Measure x/y as the text block's center in frame percentages (origin top-left); use null when it is not visible. Color values must be sampled visually and may be null. sceneDirections must correspond to the timestamped sampled frames, be chronological, and contain at most 9 entries. transitionAfter may only name a transition when adjacent samples show evidence; otherwise use unknown. Still frames cannot prove the exact animation or transition, so leave unknown when the evidence is weak. Do not infer story content or transcribe text. Motifs may describe visible patterns such as social proof metrics, comment or DM cards, product or document cards, archive-photo layouts, split-screen comparisons, large two-tone headlines, speaker cutouts, or phone frames. Do not claim to see sound effects from still frames.` : ''}
 Return ONLY the JSON object, no explanation.`;
 
             const response = await this.openai.chat.completions.create({
                 model: this.visionModel,
-                max_tokens: styleReference ? 700 : 400,
+                max_tokens: styleReference ? 1800 : 400,
                 response_format: { type: 'json_object' },
                 messages: [
                     {
                         role: 'user',
-                        content: [
-                            { type: 'text', text: prompt },
-                            ...imageMessages,
-                        ],
+                        content: styleReference
+                            ? [
+                                { type: 'text', text: prompt },
+                                ...frames.flatMap((frame, index) => [
+                                    { type: 'text', text: `Sample ${index + 1}, source timestamp ${Number(frame.timestamp).toFixed(2)} seconds:` },
+                                    imageMessages[index],
+                                ]),
+                            ]
+                            : [{ type: 'text', text: prompt }, ...imageMessages],
                     },
                 ],
             });
@@ -377,7 +417,7 @@ Return ONLY the JSON object, no explanation.`;
                 contentDescription: parsed.contentDescription || null,
                 suggestedLabel:     parsed.suggestedLabel     || null,
                 ...(styleReference && parsed.visualStyleProfile && typeof parsed.visualStyleProfile === 'object'
-                    ? { visualStyleProfile: parsed.visualStyleProfile }
+                    ? { visualStyleProfile: { ...parsed.visualStyleProfile, profileVersion: 2 } }
                     : {}),
             };
 

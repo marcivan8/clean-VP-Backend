@@ -12,7 +12,7 @@ import { triggerHint } from '../components/FirstRunHint.jsx';
 import { countMetric, distributionMetric, nowMs } from '../utils/metrics.js';
 import { getNextAction, getQuickChips } from './SuggestionEngine.js';
 import { runAutopilot, stopAutopilot, isAutopilotRunning } from './StyleAutopilot.js';
-import { isQuestion } from './EditingStyles.js';
+import { isQuestion, isReferenceGuidedEditRequest } from './EditingStyles.js';
 import { timelineFacts } from './EditRecap.js'; // R92 round B: measured impact per edit
 
 // Per-operation editorial descriptions and next-step suggestions.
@@ -155,7 +155,12 @@ const workflowMachine = createMachine({
                     // R91: Auto mode runs the editing style's whole playbook
                     // (StyleAutopilot). Questions stay normal chat.
                     const { editingMode } = useTimelineStore.getState();
-                    const auto = editingMode === 'auto' && !isQuestion(userPrompt);
+                    // A reference-guided edit is a complete creative brief,
+                    // even when the editor's general mode is Normal. Route it
+                    // through the selected style playbook so reference analysis
+                    // and the coordinated Pro Finish stage actually run.
+                    const auto = !isQuestion(userPrompt)
+                        && (editingMode === 'auto' || isReferenceGuidedEditRequest(userPrompt));
                     // Use the new pipeline
                     const result = await measureAICommand(auto ? 'auto' : 'prompt',
                         () => (auto ? runAutopilot(userPrompt) : editJobManager.processEditRequest(userPrompt)));

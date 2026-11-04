@@ -79,6 +79,7 @@ async function styleReferenceProfileFor(state, visualProfiles = [], signal) {
     const ids = new Set(references.map(asset => String(asset.id)));
     const cached = visualProfiles.find(profile =>
         profile?.isReference && ids.has(String(profile.assetId)) && profile?.visualStyleProfile
+        && Number(profile.visualStyleProfile.profileVersion) >= 2
     )?.visualStyleProfile;
     if (cached) return cached;
     const video = references.find(asset => asset?.type === 'video' && asset.id);
@@ -89,8 +90,11 @@ async function styleReferenceProfileFor(state, visualProfiles = [], signal) {
             body: JSON.stringify({ assetId: video.id }),
             ...(signal ? { signal } : {}),
         });
-        if (!response.ok) return null;
         const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            console.warn(`[reference-style] analysis failed (${response.status}): ${result?.error || response.statusText || 'unknown server error'}`);
+            return null;
+        }
         return result?.profile || null;
     } catch (err) {
         if (signal?.aborted) throw err;
@@ -1552,9 +1556,11 @@ export class MediaExecutionEngine {
                     const rawStyle = await styleReferenceProfileFor(recipeState, profiles, job?.signal);
                     referenceStyle = buildStyleReferencePlan(rawStyle);
                     if (referenceStyle) {
-                        const cycle = referenceStyle.transitionPacing === 'fast'
-                            ? ['flash', 'whip-left', 'zoom-punch', 'whip-right']
-                            : referenceStyle.transitionPacing === 'slow' ? ['dip'] : baseRecipe.transitions?.cycle;
+                        const cycle = referenceStyle.transitionTypes.length
+                            ? referenceStyle.transitionTypes
+                            : referenceStyle.transitionPacing === 'fast'
+                                ? ['flash', 'whip-left', 'zoom-punch', 'whip-right']
+                                : referenceStyle.transitionPacing === 'slow' ? ['dip'] : baseRecipe.transitions?.cycle;
                         recipe = {
                             ...baseRecipe,
                             captionPack: referenceStyle.captionPack || baseRecipe.captionPack,
@@ -1577,10 +1583,15 @@ export class MediaExecutionEngine {
                     let fields = recipe.captionPack ? stylePackToClipFields(recipe.captionPack) : null;
                     if (fields && referenceStyle) fields = {
                         ...fields,
-                        ...((referenceStyle.captionTextColor || referenceStyle.textColor)
-                            ? { color: referenceStyle.captionTextColor || referenceStyle.textColor } : {}),
+                        ...(referenceStyle.captionStyle?.fontFamily ? { fontFamily: referenceStyle.captionStyle.fontFamily } : {}),
+                        ...(referenceStyle.captionStyle?.fontWeight ? { fontWeight: referenceStyle.captionStyle.fontWeight } : {}),
+                        ...((referenceStyle.captionStyle?.color || referenceStyle.captionTextColor || referenceStyle.textColor)
+                            ? { color: referenceStyle.captionStyle?.color || referenceStyle.captionTextColor || referenceStyle.textColor } : {}),
+                        ...(Number.isFinite(referenceStyle.captionStyle?.x) ? { x: referenceStyle.captionStyle.x } : {}),
+                        ...(Number.isFinite(referenceStyle.captionStyle?.y) ? { y: referenceStyle.captionStyle.y } : {}),
                         captionStyle: {
                             ...(fields.captionStyle || {}),
+                            ...(referenceStyle.captionStyle?.animationIn ? { animationPreset: referenceStyle.captionStyle.animationIn } : {}),
                             wordHighlight: {
                                 ...(fields.captionStyle?.wordHighlight || {}),
                                 ...(referenceStyle.accent ? { color: referenceStyle.accent } : {}),
