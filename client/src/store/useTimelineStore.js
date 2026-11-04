@@ -25,14 +25,15 @@ import { clipsInGroup, computeGroupMoveUpdates, computeGroupDuplicateSpecs } fro
 // R94 — PHASE 1 + 6: a designed graphic is a scene, checked before it lands.
 import { sceneFromPlacements, flattenScene, normalizeScene } from '../motion/SceneSchema.js';
 import { autoFixScene, safeZoneForAspect } from '../motion/SceneValidator.js';
-import { composeSceneFromBrief } from '../motion/SceneDirector.js';
+import { composeSceneFromBrief, subjectFromClips } from '../motion/SceneDirector.js';
+import { resolveCaptionArtDirection } from '../motion/CaptionArtDirector.js';
 import { planStoryboard, KIND_PLAN } from '../motion/Storyboard.js';
 import { placementsFor } from '../motion/StoryboardBridge.js';
 import { framingPlan } from '../motion/StoryboardFraming.js';
 import { inspect as inspectStoryboard, repair as repairStoryboard, describe as describeQa } from '../motion/StoryboardQA.js';
 import { findNode, updateNode, removeNode as removeSceneNodeFrom, listNodes } from '../motion/SceneSchema.js';
 import { deriveSpeakerCrop, deriveTrackingSegments } from '../motion/ObjectLayers.js';
-import { frameForPreset, splitSpeakerCrop, fillFrameCrop, computeReframePlan, LAYOUT_PRESETS } from '../motion/LayoutPresets.js';
+import { frameForPreset, splitSpeakerCrop, computeReframePlan, LAYOUT_PRESETS } from '../motion/LayoutPresets.js';
 import { TEMPLATE_KINDS, TEMPLATE_WIDTH_FRACTION, TEMPLATE_DEFAULTS, templateParams, templateSize } from '../motion/TemplateGraphics.js';
 import { applyBrand, normalizeBrand, brandFromProject } from '../motion/BrandKit.js';
 import { normalizeMatte } from '../motion/MatteSettings.js'; // R92
@@ -106,7 +107,22 @@ try {
             localStorage.removeItem('vp_project_name');
         }
     }
-} catch (_) { /* corrupted autosave — ignore */ }
+} catch { /* corrupted autosave: start clean rather than fail to load */ }
+
+function isAssistantReferencePath(value, assets = []) {
+    if (typeof value !== 'string' || !value) return false;
+    return value.startsWith('references/') || (assets || []).some(asset => asset?.assistantReference === true
+        && [asset.gcsPath, asset.sourceUrl, asset.proxyUrl, asset.name, asset.file?.name]
+            .filter(Boolean).some(ref => ref === value || ref.endsWith(`/${value}`) || value.endsWith(`/${ref}`)));
+}
+
+function editableUploadPath(value, assets = []) {
+    if (!isAssistantReferencePath(value, assets)) return value || null;
+    const source = (assets || []).find(asset => asset?.type === 'video' && asset.assistantReference !== true);
+    return source?.gcsPath || source?.sourcePath || null;
+}
+
+const _preRestoredUploadPath = editableUploadPath(_preRestoredProject?.uploadedFilePath, _preRestoredProject?.assets || []);
 
 /**
  * R94: the scenes still referenced by a clip. A graphic that was undone or
@@ -232,16 +248,17 @@ const useTimelineStore = create(
             // Cloud project identity (set by EditorPage on load, or by autosave hook on first save)
             projectId:   localStorage.getItem('vp_project_id') || null,
             projectName: localStorage.getItem('vp_project_name') || 'Untitled Project',
-            setProjectId:   (id)   => { set({ projectId: id });     try { localStorage.setItem('vp_project_id', id); }   catch (_) {} },
-            setProjectName: (name) => { set({ projectName: name }); try { localStorage.setItem('vp_project_name', name); } catch (_) {} },
+            setProjectId:   (id)   => { set({ projectId: id });     try { localStorage.setItem('vp_project_id', id); }   catch { /* private mode: keep the id in memory only */ } },
+            setProjectName: (name) => { set({ projectName: name }); try { localStorage.setItem('vp_project_name', name); } catch { /* private mode: keep the name in memory only */ } },
 
             // Main-track magnet (CapCut-style): deleting a clip on the main video
             // track closes the gap. Always on for mobile; desktop can toggle it
             // from the timeline toolbar. Default ON, persisted per browser.
-            mainTrackMagnet: (() => { try { return localStorage.getItem('vp_main_track_magnet') !== '0'; } catch (_) { return true; } })(),
-            setMainTrackMagnet: (on) => { set({ mainTrackMagnet: !!on }); try { localStorage.setItem('vp_main_track_magnet', on ? '1' : '0'); } catch (_) {} },
+            mainTrackMagnet: (() => { try { return localStorage.getItem('vp_main_track_magnet') !== '0'; } catch { return true; } })(),
+            setMainTrackMagnet: (on) => { set({ mainTrackMagnet: !!on }); try { localStorage.setItem('vp_main_track_magnet', on ? '1' : '0'); } catch { /* private mode: the setting lasts the session */ } },
 
-            // History
+            // History. Exposed on the store so the UI can derive the
+            // undo/redo disabled state without reaching into the manager.
             past: [],
             future: [],
 
@@ -255,8 +272,8 @@ const useTimelineStore = create(
             // Null until the user sets one; every graphic falls back to the
             // catalogue's own defaults, exactly as before.
             brandKit: _preRestoredProject?.brandKit || null,
-            uploadedFile: _preRestoredProject?.uploadedFilePath ? { name: _preRestoredProject.uploadedFilePath } : null,
-            uploadedFilePath: _preRestoredProject?.uploadedFilePath || null,
+            uploadedFile: _preRestoredUploadPath ? { name: _preRestoredUploadPath } : null,
+            uploadedFilePath: _preRestoredUploadPath,
             pacingSegments: _preRestoredProject?.pacingSegments || [],
             beatMarkers: _preRestoredProject?.beatMarkers || [],
             captions: _preRestoredProject?.captions || [],
@@ -334,10 +351,6 @@ const useTimelineStore = create(
             // re-deriving it per track. Persisted (R29) so a reload is a cache
             // hit instead of an ffmpeg round-trip.
             waveformsByAsset: _preRestoredProject?.waveformsByAsset || {},
-
-            // History (expose for UI disabled-state)
-            past: [],
-            future: [],
 
             // Manager access
             manager: timelineManager,
@@ -636,15 +649,23 @@ const useTimelineStore = create(
             updateAsset: (assetId, updates) => set((state) => ({
                 assets: state.assets.map(a => a.id === assetId ? { ...a, ...updates } : a)
             })),
-            setUploadedFile: (file) => set({ uploadedFile: file }),
-            setUploadedFilePath: (path) => set({ uploadedFilePath: path }),
+            setUploadedFile: (file) => {
+                if (isAssistantReferencePath(file?.name, get().assets)) return;
+                set({ uploadedFile: file });
+            },
+            setUploadedFilePath: (path) => {
+                if (isAssistantReferencePath(path, get().assets)) {
+                    console.warn('[Timeline] Ignored attempt to set an assistant reference as the editable source.');
+                    return;
+                }
+                set({ uploadedFilePath: path || null });
+            },
             
             // Add asset to timeline (used primarily by mobile tap-to-add interface)
             addAssetToTimeline: (asset) => {
                 // Assistant reference assets are context for the edit only. Keep
                 // them in project state for style analysis, but never create a clip.
                 if (!asset || asset.assistantReference === true) return false;
-                const state = get();
                 const tracks = timelineManager.toLegacyTracks();
                 
                 // Find target track (first video track for video/image, first audio for audio)
@@ -1037,16 +1058,6 @@ const useTimelineStore = create(
             // ==============================================================
             // CLIP MANAGEMENT (legacy-compatible API)
             // ==============================================================
-
-            toggleTrackMute: (trackId) => {
-                timelineManager.dispatch({ type: ACTION_TYPES.LAYER_MUTE, payload: { layerId: trackId } });
-                set({ tracks: timelineManager.toLegacyTracks() });
-            },
-
-            toggleTrackSolo: (trackId) => {
-                timelineManager.dispatch({ type: ACTION_TYPES.LAYER_SOLO, payload: { layerId: trackId } });
-                set({ tracks: timelineManager.toLegacyTracks() });
-            },
 
             setTrackVolume: (trackId, volume) => {
                 timelineManager.dispatch({ type: ACTION_TYPES.LAYER_UPDATE, payload: { layerId: trackId, updates: { volume } } });
@@ -2003,6 +2014,9 @@ const useTimelineStore = create(
                         activeClipId: newPlacementId
                     });
                 } catch (err) {
+                    // The rollback is the recovery, but swallowing the reason
+                    // left a duplicate that silently did nothing.
+                    console.error('[useTimelineStore] Duplicate Clip failed, rolled back:', err?.message || err);
                     timelineManager.rollbackTransaction();
                 }
             },
@@ -3491,6 +3505,30 @@ const useTimelineStore = create(
                             ? Math.min(cap.end || 0, nextStart)
                             : (cap.end || 0);
                         const duration = Math.max(0.3, clampedEnd - (cap.start || 0));
+                        const currentStyle = existingTextClip || {};
+                        const isAutoDirected = Boolean(currentStyle.captionStyle?.contextFamily);
+                        const hasCustomStyle = Boolean(currentStyle.captionStyle?.packId)
+                            || (!isAutoDirected && Boolean(currentStyle.fontFamily && currentStyle.fontFamily !== 'Anton'))
+                            || (!isAutoDirected && Boolean(currentStyle.color && currentStyle.color !== '#FACC15'))
+                            || (!isAutoDirected && Number(currentStyle.fontSize) > 0 && Number(currentStyle.fontSize) !== 48)
+                            || (!isAutoDirected && Number(currentStyle.fontWeight) > 0 && Number(currentStyle.fontWeight) !== 900)
+                            || (!isAutoDirected && (Number.isFinite(Number(currentStyle.x)) || Number.isFinite(Number(currentStyle.y))));
+                        const shotClips = (get().tracks || []).filter(t => t.type === 'video').flatMap(t => t.clips || [])
+                            .filter(c => Number(cap.start) >= (Number(c.start) || 0)
+                                && Number(cap.start) < (Number(c.start) || 0) + (Number(c.duration) || 0));
+                        const projectAssets = get().assets || [];
+                        const visualTone = shotClips.map(c => projectAssets.find(a => a.id === c.assetId))
+                            .map(a => a?.emotionalTone || a?.emotional_tone || a?.analysis?.emotionalTone)
+                            .find(Boolean) || null;
+                        const art = hasCustomStyle ? null : resolveCaptionArtDirection(cap, {
+                            editingStyle: get().editingStyle,
+                            aspectRatio: get().aspectRatio,
+                            index: i,
+                            seed: get().projectId,
+                            subject: subjectFromClips(shotClips),
+                            visualTone,
+                            duration,
+                        });
 
                         // Add the clip entity (metadata / visual properties)
                         // Preserve any existing global style from the text track (so style
@@ -3500,21 +3538,23 @@ const useTimelineStore = create(
                             name: cap.text,
                             content: cap.text,
                             type: 'text',
-                            position: 'bottom',
+                            position: art?.position || existingTextClip?.position || 'bottom',
+                            ...((art || (hasCustomStyle && Number.isFinite(Number(existingTextClip?.x)))) ? { x: art?.x ?? existingTextClip.x } : {}),
+                            ...((art || (hasCustomStyle && Number.isFinite(Number(existingTextClip?.y)))) ? { y: art?.y ?? existingTextClip.y } : {}),
                             style: 'subtitle',
                             // Vibed caption defaults — inherit existing style if already set
-                            fontFamily:    existingTextClip?.fontFamily  || 'Anton',
-                            fontWeight:    existingTextClip?.fontWeight  || 900,
-                            fontSize:      existingTextClip?.fontSize    || 48,
+                            fontFamily:    art?.fontFamily || existingTextClip?.fontFamily  || 'Anton',
+                            fontWeight:    art?.fontWeight || existingTextClip?.fontWeight  || 900,
+                            fontSize:      art?.fontSize || existingTextClip?.fontSize    || 48,
                             fontStyle:     existingTextClip?.fontStyle   || 'normal',
-                            color:         existingTextClip?.color       || '#FACC15',
-                            textShadow:    existingTextClip?.textShadow  !== undefined
+                            color:         art?.color || existingTextClip?.color       || '#FACC15',
+                            textShadow:    art?.textShadow || (existingTextClip?.textShadow  !== undefined
                                                ? existingTextClip.textShadow
-                                               : '2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 3px 6px rgba(0,0,0,0.6)',
-                            stroke:        existingTextClip?.stroke      !== undefined
+                                               : '2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 3px 6px rgba(0,0,0,0.6)'),
+                            stroke:        art?.stroke || (existingTextClip?.stroke      !== undefined
                                                ? existingTextClip.stroke
-                                               : { width: 2, color: '#000000' },
-                            textAlign:     existingTextClip?.textAlign   || 'center',
+                                               : { width: 2, color: '#000000' }),
+                            textAlign:     art?.textAlign || existingTextClip?.textAlign   || 'center',
                             animation:     existingTextClip?.animation   || 'none',
                             // Motion Graphics engine (R58). `cap.words` now arrives
                             // populated from groupWordsIntoCaptions → the caption
@@ -3526,15 +3566,20 @@ const useTimelineStore = create(
                             // under size pressure — see DROP_ORDER).
                             // Times are ABSOLUTE, same clock as start/duration.
                             words:         Array.isArray(cap.words) ? cap.words : undefined,
-                            captionStyle:  existingTextClip?.captionStyle,
+                            captionStyle:  art?.captionStyle || existingTextClip?.captionStyle,
+                            ...(art?.emphasis ? { emphasis: art.emphasis } : {}),
                             // Style inheritance only: never copy the "animate"
                             // command's per-moment animations onto every caption.
-                            animations:    Array.isArray(existingTextClip?.animations)
-                                ? existingTextClip.animations.filter(a => a?.source !== 'auto-animate')
+                            animations:    art?.animations?.length
+                                ? [...(Array.isArray(existingTextClip?.animations)
+                                    ? existingTextClip.animations.filter(a => !['auto-animate', 'caption-intelligence'].includes(a?.source))
+                                    : []), ...art.animations]
+                                : Array.isArray(existingTextClip?.animations)
+                                ? existingTextClip.animations.filter(a => !['auto-animate', 'caption-intelligence'].includes(a?.source))
                                 : existingTextClip?.animations,
                             sourceUrl: null,
                             sourceDuration: duration,
-                            metadata: {},
+                            metadata: existingTextClip?.metadata || {},
                         }));
 
                         // Add the placement (when/where on the timeline)
@@ -3963,8 +4008,9 @@ const useTimelineStore = create(
                 // empty, exactly like tracks/duration/captions above.
                 updates.assets = projectData.assets || [];
                 if (projectData.uploadedFilePath) {
-                    updates.uploadedFilePath = projectData.uploadedFilePath;
-                    updates.uploadedFile = { name: projectData.uploadedFilePath };
+                    const sourcePath = editableUploadPath(projectData.uploadedFilePath, updates.assets);
+                    updates.uploadedFilePath = sourcePath;
+                    updates.uploadedFile = sourcePath ? { name: sourcePath } : null;
                 }
                 set(updates);
                 console.log('📂 Project Loaded');

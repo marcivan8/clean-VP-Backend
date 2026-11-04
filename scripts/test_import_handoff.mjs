@@ -47,7 +47,12 @@ console.log('✓ unreadable video still rejects (handleFileImport falls back to 
 
 // ── Handoff gate ───────────────────────────────────────────────────────────
 const ide = readFileSync(new URL('../client/src/layouts/IDELayout.jsx', import.meta.url), 'utf8');
-const effect = ide.slice(ide.indexOf('takePendingNewVideo(projectId)') - 400, ide.indexOf('takePendingNewVideo(projectId)'));
+// R145 renamed this to takePendingNewVideoFiles (the handoff carries a list
+// now). The gate it protects is unchanged, so the anchor follows the rename
+// rather than the assertions being relaxed.
+const anchor = ide.indexOf('takePendingNewVideoFiles(projectId)');
+assert.ok(anchor > 0, 'the new-video handoff must still read its files from pendingNewVideo');
+const effect = ide.slice(anchor - 400, anchor);
 assert.match(effect, /if \(!projectId \|\| !sessionChecked\) return;/, 'waits for the session check, not sessionId');
 assert.doesNotMatch(effect, /!sessionId\)/, 'signed-in users have no sessionId: must not gate on it');
 const session = readFileSync(new URL('../client/src/store/useSessionStore.js', import.meta.url), 'utf8');

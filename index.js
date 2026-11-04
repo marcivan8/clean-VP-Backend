@@ -128,7 +128,12 @@ const corsOptions = {
     : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  // X-Session-Id carries the anonymous session (client/src/utils/authFetch.js)
+  // and X-Vibed-Run-Id groups one Auto run's requests into a single billable
+  // AI operation (middleware/usageGate.js, R148). Both must be listed: a JSON
+  // POST already triggers a preflight, and a custom header missing from this
+  // list makes the browser block the whole request, not just drop the header.
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'X-Session-Id', 'X-Vibed-Run-Id'],
   exposedHeaders: ['Content-Length', 'Content-Type', 'X-Export-Filename', 'X-Export-Target'],
   maxAge: 86400,
 };
@@ -302,6 +307,11 @@ app.get('/api/analyze/test', (req, res) => {
 // Mount API routes — rate limiters applied to expensive endpoints
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/email', authLimiter, require('./routes/emailRoutes')); // Unsubscribe links
+// Publishing destinations. authLimiter counts only FAILED requests, which is
+// the right shape here: the thing worth throttling is someone brute forcing an
+// OAuth state signature against the callback, and normal connecting never
+// trips it. R149.
+app.use('/api/social', authLimiter, require('./routes/socialRoutes'));
 app.use('/api/analyze', uploadLimiter, analyzeRoutes);
 app.use('/api/v2/analyze', uploadLimiter, analyzeRoutes);
 app.use('/analyze', uploadLimiter, analyzeRoutes);          // legacy/proxy

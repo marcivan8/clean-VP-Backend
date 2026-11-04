@@ -53,6 +53,8 @@
   "planSheet": {
     "aiOpsTitle": "Vous avez utilisé toutes vos opérations IA",
     "aiOpsBody": "Roka ne peut pas lancer de nouvelles modifications avant le {{date}}. Vos projets, le montage manuel et l'export continuent de fonctionner.",
+    "autoTrialTitle": "Vous avez utilisé vos montages Auto gratuits",
+    "autoTrialBody": "Vos {{total}} montages Auto gratuits sont utilisés. Vos projets, le montage manuel, la suppression des silences et l'export continuent de fonctionner.",
     "projectsTitle": "Vous avez atteint votre limite de projets",
     "projectsBody_one": "Le plan {{plan}} inclut {{count}} projet actif. Supprimez-en un, ou passez à un plan supérieur pour des projets illimités.",
     "projectsBody_other": "Le plan {{plan}} inclut {{count}} projets actifs. Supprimez-en un, ou passez à un plan supérieur pour des projets illimités.",

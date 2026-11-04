@@ -26,7 +26,7 @@ const COOKIE_TTL_S = 12 * 60 * 60; // 12 h; the client refreshes it well before
 /** Prefixes whose 2nd segment is the owner's user id. */
 const USER_PREFIXES = new Set([
     'raw', 'proxies', 'exports', 'thumbnails', 'processed', 'waveforms',
-    'luts', 'analysis-only', 'ai-training', 'masks', 'segments',
+    'luts', 'analysis-only', 'ai-training', 'masks', 'segments', 'references',
 ]);
 /** Shared, non-personal assets. */
 const PUBLIC_PREFIXES = new Set(['sticker-library', 'motion-assets', 'sfx-library', 'library']);

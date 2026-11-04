@@ -210,13 +210,13 @@ async function runRetention({ db, bucket, sendEmail, getUserEmail }, { now = Dat
 
 /**
  * Files older than their owner's retention period that no project uses:
- * raw/<uid>/<file>, proxies/<uid>/<name>/..., and exports/<uid>/<file>
+ * raw/<uid>/<file>, references/<uid>/..., proxies/<uid>/<name>/..., and exports/<uid>/<file>
  * (exports from before the per-project folder). Owners on active Pro keep
  * everything. Files of deleted accounts count as Free.
  */
 async function findStrayFiles({ db, bucket, now, profilesCache = new Map() }) {
     const byUser = new Map();
-    for (const prefix of ['raw/', 'proxies/', 'exports/']) {
+    for (const prefix of ['raw/', 'references/', 'proxies/', 'exports/']) {
         const [files] = await bucket.getFiles({ prefix });
         for (const f of files) {
             const parts = f.name.split('/');

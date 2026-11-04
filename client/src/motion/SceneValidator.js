@@ -22,7 +22,7 @@
  */
 
 import { measureTextBounds, fitTextToBox, reserveSlotWidth } from './TextMeasurement.js';
-import { parseColor, contrastRatio, luminance } from './ColorTheory.js';
+import { contrastRatio, luminance } from './ColorTheory.js';
 import { TEMPLATE_KINDS, SHAPE_KINDS } from './TemplateGraphics.js';
 import { auditScene as auditTextCraft, ruleById as craftRuleById } from './TextCraft.js';
 import {
@@ -306,6 +306,7 @@ function checkText(scene, entry, issues, opts) {
 
 function checkPlacement(scene, entry, issues, opts) {
     const { node, box } = entry;
+    if (node.meta?.animatedBackground) return;
     if (!(box.w > 0) || !(box.h > 0)) return;
     const { w: fw, h: fh } = scene.frame;
     const outside = box.x < -EDGE_TOLERANCE_PX || box.y < -EDGE_TOLERANCE_PX
@@ -374,6 +375,7 @@ function checkEffects(entry, issues) {
  * things, and two of those over each other is a real defect.
  */
 function hidesWhatIsBehind(node) {
+    if (node.meta?.animatedBackground) return false;
     if (node.type === NODE_TYPES.TEXT || node.type === NODE_TYPES.CAPTION) return true;
     if (node.type === NODE_TYPES.IMAGE || node.type === NODE_TYPES.STICKER) return true;
     if (node.type !== NODE_TYPES.SHAPE) return false;

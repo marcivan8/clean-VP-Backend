@@ -95,6 +95,8 @@ function makeBucket(names, createdAt) {
     check('tampered token is rejected', ma.verifyToken(tok.slice(0, -2) + 'xx') === null);
     check('expired token is rejected', ma.verifyToken(ma.issueToken('u1', 1, Date.now() - 10_000)) === null);
     check('owner can read raw file', ma.canReadObject('raw/u1/a.mov', 'u1').allowed);
+    check('owner can read private chat reference media', ma.canReadObject('references/u1/a/ref.mp4', 'u1').allowed);
+    check('another user cannot read chat reference media', !ma.canReadObject('references/u1/a/ref.mp4', 'u2').allowed);
     check('other user cannot', !ma.canReadObject('raw/u1/a.mov', 'u2').allowed);
     check('anonymous cannot', ma.canReadObject('exports/u1/p/x.mp4', null).reason === 'no_identity');
     check('path traversal refused', ma.canReadObject('raw/u1/../u2/a.mov', 'u1').reason === 'bad_path');
@@ -121,20 +123,23 @@ function makeBucket(names, createdAt) {
         timeline_state: { assets: [
             { id: 'a1', gcsPath: 'raw/u1/shared.mov', proxyUrl: '/api/proxy/gcs-media/proxies/u1/shared/proxy.mp4' },
             { id: 'a2', sourceUrl: 'https://storage.googleapis.com/bkt/raw/u1/onlyA.mov' },
+            { id: 'a3', assistantReference: true, gcsPath: 'references/u1/a3/ref.mp4' },
             { id: 'evil', gcsPath: 'raw/u2/notmine.mov' },
         ] },
     };
     const pB = { id: 'pB', user_id: 'u1', timeline_state: { assets: [{ id: 'b1', gcsPath: 'raw/u1/shared.mov' }] } };
     const f = pf.filesForProject(pA, 'u1');
     check('finds raw uploads by path and URL', f.exact.has('raw/u1/shared.mov') && f.exact.has('raw/u1/onlyA.mov'));
+    check('tracks isolated reference media for project cleanup', f.exact.has('references/u1/a3/ref.mp4'));
     check('never lists another user file', !f.exact.has('raw/u2/notmine.mov'));
     check('includes proxy folder and exports folder', f.prefixes.has('proxies/u1/shared/') && f.prefixes.has('exports/u1/pA/'));
     const bucket = makeBucket([
         'raw/u1/shared.mov', 'raw/u1/onlyA.mov', 'raw/u2/notmine.mov',
+        'references/u1/a3/ref.mp4',
         'proxies/u1/shared/proxy.mp4', 'exports/u1/pA/final.mp4', 'thumbnails/u1/pA.jpg', 'waveforms/u1/a2.json',
     ], new Date().toISOString());
     const rep = await pf.deleteProjectFiles(bucket, pA, [pB], { userId: 'u1' });
-    check('deletes files only project A uses', !bucket.files.has('raw/u1/onlyA.mov') && !bucket.files.has('exports/u1/pA/final.mp4') && !bucket.files.has('thumbnails/u1/pA.jpg'));
+    check('deletes files only project A uses', !bucket.files.has('raw/u1/onlyA.mov') && !bucket.files.has('references/u1/a3/ref.mp4') && !bucket.files.has('exports/u1/pA/final.mp4') && !bucket.files.has('thumbnails/u1/pA.jpg'));
     check('keeps the upload project B still uses', bucket.files.has('raw/u1/shared.mov') && rep.kept.includes('raw/u1/shared.mov'));
     check("never touches another user's file", bucket.files.has('raw/u2/notmine.mov'));
 

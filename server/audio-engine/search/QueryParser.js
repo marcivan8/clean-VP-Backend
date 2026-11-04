@@ -32,6 +32,8 @@ const ASSET_TYPE_TRIGGERS = {
     [AssetType.SOUND_EFFECT]: [
         'sound effect', 'sfx', 'sound', 'audio effect', 'whoosh', 'boom',
         'boing', 'hit sound', 'transition sound', 'audio cue',
+        'riser', 'suspense', 'shutter', 'camera', 'flash', 'digital',
+        'electronic', 'glitch', 'reveal', 'comic', 'comedy', 'cartoon', 'pop',
     ],
     [AssetType.LUT]: [
         'lut', 'color grade', 'colour grade', 'color look', 'colour look',

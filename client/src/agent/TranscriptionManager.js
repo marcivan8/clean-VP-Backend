@@ -14,6 +14,7 @@ import { pollJobResult } from '../utils/jobPoller.js';
 import { EventBus, EVENT_TYPES } from './EventBus.js';
 import { ContentAnalyzer } from './ContentAnalyzer.js';
 import useTimelineStore from '../store/useTimelineStore.js';
+import { quotaReason } from '../lib/quotaReason.js';
 
 export const TRANSCRIPTION_STATUS = {
     IDLE: 'idle',
@@ -186,7 +187,7 @@ class TranscriptionManagerClass {
                     // visible upgrade prompt. QUOTA_EXCEEDED is the shared channel
                     // IDELayout listens on to show a real upgrade modal.
                     EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
-                        reason: 'ai_ops',
+                        reason: quotaReason(errorData),
                         message: errorData?.message || "You've used all your AI operations this month.",
                         upgradeRequired: errorData?.upgradeRequired || 'creator',
                     });

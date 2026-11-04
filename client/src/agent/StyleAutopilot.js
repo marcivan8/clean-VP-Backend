@@ -13,6 +13,7 @@ import useTimelineStore from '../store/useTimelineStore.js';
 import useAIStore from '../store/useAIStore.js';
 import { editJobManager } from './EditJobManager.js';
 import { buildAutopilotSteps, getEditingStyle } from './EditingStyles.js';
+import { beginAutoRun, endAutoRun } from './autoRunContext.js';
 
 const STEP_LABEL = {
     captions: 'captions', transcript: 'transcript', short: 'best moment kept', vertical: 'vertical 9:16', request: 'your request', montage: 'visual montage',
@@ -69,6 +70,9 @@ export async function runAutopilot(request, opts = {}) {
         visualOnly,
         videoOnly,
         hasStyleReference,
+        // Set by the mobile flow from the outcome the user picked; desktop
+        // Auto leaves it undefined and keeps its existing playbooks.
+        shortTargetSeconds: opts.shortTargetSeconds,
     });
     if (!visualClips.length && visualAssets.length && steps.length && steps[0].key !== 'montage') {
         steps = [{
@@ -80,6 +84,9 @@ export async function runAutopilot(request, opts = {}) {
 
     stopRequested = false;
     running = true;
+    // Tags every gated request this run makes with one id, so the server bills
+    // the run as a single AI operation instead of once per step. R148.
+    beginAutoRun();
     const done = [];
     const skipped = [];
     const stepReports = [];
@@ -151,6 +158,7 @@ export async function runAutopilot(request, opts = {}) {
     } finally {
         useTimelineStore.getState().endHistoryGroup();
         running = false;
+        endAutoRun();
     }
 
     const name = STYLE_NAME[styleId];

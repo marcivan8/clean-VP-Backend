@@ -36,7 +36,6 @@ const useEditorStore = create((set, get) => ({
     activeClipId: null, // Primary active clip (for inspector)
     selectedClipIds: [], // Multi-selection array
     clipboard: null, // Clip ID or data to copy
-    clipboard: null, // Clip ID or data to copy
     uploadedFile: null, // The real file object for backend analysis
     pacingSegments: [], // Array of fast/slow segments for HUD
     beatMarkers: [], // Array of timestamps for music beats
@@ -75,7 +74,7 @@ const useEditorStore = create((set, get) => ({
     addAssets: (newAssets) => set((state) => ({
         assets: [...state.assets, ...newAssets],
         // Default uploadedFile to the last added video if none selected (for AI compatibility)
-        uploadedFile: newAssets.find(a => a.type === 'video')?.file || state.uploadedFile
+        uploadedFile: newAssets.find(a => a.type === 'video' && a.assistantReference !== true)?.file || state.uploadedFile
     })),
     removeAsset: (assetId) => set((state) => ({
         assets: state.assets.filter(a => a.id !== assetId)
@@ -222,9 +221,6 @@ const useEditorStore = create((set, get) => ({
             pacingSegments: state.pacingSegments,
             beatMarkers: state.beatMarkers,
             captions: state.captions,
-            pacingSegments: state.pacingSegments,
-            beatMarkers: state.beatMarkers,
-            captions: state.captions,
             activeClipId: state.activeClipId,
             selectedClipIds: state.selectedClipIds
         };
@@ -246,8 +242,6 @@ const useEditorStore = create((set, get) => ({
             aspectRatio: state.aspectRatio,
             zoomLevel: state.zoomLevel,
             pacingSegments: state.pacingSegments,
-            beatMarkers: state.beatMarkers,
-            captions: state.captions,
             beatMarkers: state.beatMarkers,
             captions: state.captions,
             activeClipId: state.activeClipId,
@@ -274,8 +268,6 @@ const useEditorStore = create((set, get) => ({
             aspectRatio: state.aspectRatio,
             zoomLevel: state.zoomLevel,
             pacingSegments: state.pacingSegments,
-            beatMarkers: state.beatMarkers,
-            captions: state.captions,
             beatMarkers: state.beatMarkers,
             captions: state.captions,
             activeClipId: state.activeClipId,
@@ -363,7 +355,7 @@ const useEditorStore = create((set, get) => ({
     // AI Actions
     performAction: (action) => {
         get().saveToHistory();
-        const { tracks, updateClip } = get();
+        const { tracks } = get();
         console.log("⚡ Executing Action:", action);
         // ... (rest of logic same, but we need to ensure internal calls don't double save?)
         // updateClip calls saveToHistory. So performAction calling it is redundant IF it only calls updateClip.
@@ -571,21 +563,6 @@ const useEditorStore = create((set, get) => ({
         });
     },
 
-    rippleDelete: (atTime) => {
-        get().saveToHistory();
-        set((state) => {
-            // Very basic ripple delete: find gap at time and close it
-            // For now, let's just shift everything after `atTime` left?
-            // Need to know how much to shift.
-            // Simplified: Just remove active clip and shift?
-            // The compiler sends `atTime`. 
-            // Let's assume we want to close gaps. 
-            // Real ripple delete usually deletes A CLIP and shifts.
-            // If passed a time, maybe it means "close gap at this time".
-            return state; // Placeholder until we have gap detection logic
-        });
-    },
-
     addTransition: (clipId, type, duration) => {
         get().saveToHistory();
         set((state) => {
@@ -712,7 +689,6 @@ const useEditorStore = create((set, get) => ({
             const videoTrack = tracks.find(t => t.type === 'video');
             if (!videoTrack) return state;
 
-            let newClips = [];
             // ... (sync logic same as before, essentially)
             // Re-using logic:
 

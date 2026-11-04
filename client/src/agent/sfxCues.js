@@ -25,7 +25,15 @@ export const SFX_QUERIES = Object.freeze({
     whoosh: 'whoosh transition swoosh',
     pop: 'pop bubble click',
     impact: 'impact hit boom',
+    riser: 'suspense cinematic riser buildup',
+    flash: 'flash transition camera flash',
+    shutter: 'camera shutter click photography',
+    digital_riser: 'digital electronic riser glitch buildup',
+    digital_reveal: 'digital reveal electronic glitch',
+    digital: 'digital electronic glitch technology sound',
+    comic: 'comic cartoon comedy sound effect',
 });
+const CUE_KINDS = new Set(Object.keys(SFX_QUERIES));
 
 /** Seconds a cue starts before its visual event (a whoosh leads the cut). */
 const LEAD = { whoosh: 0.18, pop: 0.02, impact: 0.04 };
@@ -61,8 +69,10 @@ export function collectSfxCues(tracks, { level = 'full', kinds = null } = {}) {
         for (const c of track.clips || []) {
             const start = Number(c.start) || 0;
             const end = start + (Number(c.duration) || 0);
-            if (track.type === 'video' && c.transition?.type && want('whoosh')) {
-                raw.push({ t: end - LEAD.whoosh, kind: 'whoosh', sourceId: c.id });
+            if (track.type === 'video' && c.transition?.type) {
+                const transition = String(c.transition.type).toLowerCase();
+                const kind = transition.includes('flash') ? 'flash' : transition.includes('glitch') ? 'digital' : 'whoosh';
+                if (want(kind)) raw.push({ t: end - LEAD.whoosh, kind, sourceId: c.id });
             }
             if (track.type === 'overlay' && (c.type === 'template' || c.type === 'sticker') && want('pop')) {
                 raw.push({ t: start + LEAD.pop, kind: 'pop', sourceId: c.id });
@@ -70,6 +80,13 @@ export function collectSfxCues(tracks, { level = 'full', kinds = null } = {}) {
             if ((track.type === 'text' || track.type === 'overlay') && Array.isArray(c.animations) && want('impact')) {
                 const slam = c.animations.find(a => a?.presetId === 'composed:slam-in');
                 if (slam) raw.push({ t: start + (Number(slam.startTime) || 0) + (Number(slam.duration) || 0) * 0.5 - LEAD.impact, kind: 'impact', sourceId: c.id });
+            }
+            if ((track.type === 'text' || track.type === 'overlay') && Array.isArray(c.animations)) {
+                const reveal = c.animations.find(a => /reveal|glitch/i.test(`${a?.presetId || ''} ${a?.type || ''}`));
+                if (reveal) {
+                    const kind = /glitch|digital/i.test(`${reveal.presetId || ''} ${reveal.type || ''}`) ? 'digital_reveal' : 'riser';
+                    if (want(kind)) raw.push({ t: start + (Number(reveal.startTime) || 0), kind, sourceId: c.id });
+                }
             }
         }
     }
@@ -87,7 +104,7 @@ export function collectSfxCues(tracks, { level = 'full', kinds = null } = {}) {
 /** Merge planner cues with effects inferred from the actual composed clips. */
 export function mergeSfxCues(...cueLists) {
     const raw = cueLists.flatMap(list => Array.isArray(list) ? list : [])
-        .filter(cue => ['whoosh', 'pop', 'impact'].includes(cue?.kind) && Number.isFinite(Number(cue.t)))
+        .filter(cue => CUE_KINDS.has(cue?.kind) && Number.isFinite(Number(cue.t)))
         .map(cue => ({ ...cue, t: Math.max(0, Math.round(Number(cue.t) * 1000) / 1000) }))
         .sort((a, b) => a.t - b.t);
     const out = [];
@@ -106,7 +123,10 @@ export function mergeSfxCues(...cueLists) {
  */
 export function sfxQueryFromText(text) {
     const s = String(text || '').toLowerCase();
-    const named = s.match(/\b(whoosh|swoosh|woosh|riser|impact|boom|hit|pop|ding|click|swish|whip|bell|cash register|applause|laugh(?:ter)?|record scratch|camera shutter|notification|typing|glitch)\b/);
+    const phrases = ['digital riser', 'digital reveal', 'camera shutter', 'camera flash', 'comic sound', 'digital sound', 'suspense riser'];
+    const phrase = phrases.find(value => s.includes(value));
+    if (phrase) return phrase;
+    const named = s.match(/\b(whoosh|swoosh|woosh|riser|suspense|flash|shutter|digital|electronic|comic|comedy|cartoon|impact|boom|hit|pop|ding|click|swish|whip|bell|cash register|applause|laugh(?:ter)?|record scratch|notification|typing|glitch)\b/);
     if (named) return named[1];
     const quoted = (String(text || '').match(/["“«]\s*([^"”»]{2,40}?)\s*["”»]/) || [])[1];
     return quoted || null;

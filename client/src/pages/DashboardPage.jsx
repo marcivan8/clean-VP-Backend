@@ -553,7 +553,7 @@ function DeleteConfirm({ projectId, projectName, onClose, onConfirm, modalWidth 
 
 // ── plan limit modal ──────────────────────────────────────────────────────────
 
-function PlanLimitModal({ plan, limit, onClose, onUpgrade, modalWidth }) {
+function PlanLimitModal({ plan, onClose, onUpgrade, modalWidth }) {
     const { t } = useTranslation('dashboard');
     const nextPlan = plan === 'free' ? 'Creator' : 'Pro';
     return (
@@ -722,6 +722,11 @@ export default function DashboardPage() {
             autoPromptShownRef.current = true;
             requestNewProject();
         }
+        // requestNewProject is a plain declaration, so it is a new function on
+        // every render and listing it would re-run this effect constantly. The
+        // ref above already makes it fire exactly once, so there is nothing a
+        // fresh reference would change.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [loading, projects.length, user]);
 
     // ── actions ───────────────────────────────────────────────────────────────
@@ -742,7 +747,11 @@ export default function DashboardPage() {
      * Mobile "New video": create a project named after the picked file, open
      * the editor, and let it start the normal upload (pendingNewVideo).
      */
-    async function handlePickVideo(file) {
+    async function handlePickVideo(picked) {
+        // R145: the picker is multi-select now. The project is named after the
+        // first file; the rest ride along and land on the same timeline.
+        const files = Array.isArray(picked) ? picked.filter(Boolean) : (picked ? [picked] : []);
+        const file = files[0];
         if (!file || creatingVideo) return;
         if (atLimit(plan, projects.length)) {
             setNewVideoOpen(false);
@@ -760,7 +769,7 @@ export default function DashboardPage() {
             setProjectId(id);
             setProjectName(name);
             try { localStorage.setItem('vp_autosave', JSON.stringify(skeleton)); } catch { /* storage full */ }
-            setPendingNewVideo(id, file);
+            setPendingNewVideo(id, files);
             setNewVideoOpen(false);
             navigate(`/editor/${id}`);
         } catch (err) {
@@ -771,7 +780,7 @@ export default function DashboardPage() {
         }
     }
 
-    async function handleCreate(name, aspectRatio) {
+    async function handleCreate(name) {
         // Double-check limit (guards against race where projects loaded after click)
         if (atLimit(plan, projects.length)) {
             setShowNew(false);
@@ -789,7 +798,7 @@ export default function DashboardPage() {
         loadProject(skeleton);
         setProjectId(id);
         setProjectName(name);
-        try { localStorage.setItem('vp_autosave', JSON.stringify(skeleton)); } catch (_) {}
+        try { localStorage.setItem('vp_autosave', JSON.stringify(skeleton)); } catch { /* private mode or quota: the project still opens, just without the autosave hint */ }
 
         setShowNew(false);
         navigate(`/editor/${id}`);
@@ -863,7 +872,6 @@ export default function DashboardPage() {
             {showLimitModal && !isPhone && (
                 <PlanLimitModal
                     plan={plan}
-                    limit={getProjectLimit(plan)}
                     onClose={() => setShowLimitModal(false)}
                     onUpgrade={() => {
                         // FIX: this used to `navigate('/success')` directly —

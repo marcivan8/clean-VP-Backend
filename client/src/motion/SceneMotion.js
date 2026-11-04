@@ -368,6 +368,24 @@ export function resolveNodeAnimations(child, ctx = {}) {
     return clean;
 }
 
+/**
+ * Resolve motion owned by a scene group. Group paths and repeats must be
+ * compiled before their motion is inherited by children; otherwise the group
+ * appears to support object movement in the schema but silently flattens to
+ * static placements.
+ */
+export function resolveGroupAnimations(group, frame) {
+    const duration = Math.max(0.01, num(group?.duration, 0));
+    const own = (Array.isArray(group?.animations) ? group.animations : [])
+        .map(animation => expandRepeat(animation, { duration }));
+    const path = group?.path ? compilePath(group.path, { duration }) : null;
+    return sanitizeAnimations([...own, ...(path ? [path] : [])].slice(0, LIMITS.maxAnimations), {
+        duration,
+        kind: 'video',
+        frame,
+    });
+}
+
 export default {
     STAGGER_ORDERS,
     REPEAT_MODES,
@@ -378,4 +396,5 @@ export default {
     expandRepeat,
     inheritAnimation,
     resolveNodeAnimations,
+    resolveGroupAnimations,
 };

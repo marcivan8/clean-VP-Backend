@@ -432,14 +432,23 @@ You MUST respond by calling the execute_video_edit function — never as plain t
             ? `${md.transcriptSummary.slice(0, MAX_TRANSCRIPT_SUMMARY_CHARS)}…`
             : md.transcriptSummary;
 
+        // R148: the published free plan locks Auto mode and editing styles, and
+        // it still does once the trial is spent. But a brand new free account
+        // gets its first few Auto runs with both unlocked, and aiGate has
+        // already decided that (req.autoTrialActive) and refused the request
+        // outright if the trial was over. So a trial run is treated exactly
+        // like a paid one here; re-stripping it would silently hand back a
+        // different edit than the one the gate just allowed.
+        const styleAndAutoAllowed = req.userPlan !== 'free' || req.autoTrialActive === true;
+
         const enrichedContext = {
             ProjectContext: {
-                editingMode: req.userPlan === 'free' ? 'normal' : proj.editingMode,
+                editingMode: styleAndAutoAllowed ? proj.editingMode : 'normal',
                 // R91: editing style picked under the chat box. Id from a fixed
                 // list, guidance capped: it is the user's own setting, but it
                 // must not become a channel for arbitrary prompt text.
-                // Accessible only in paid subscriptions (Creator and Pro).
-                ...(req.userPlan !== 'free' && proj.editingStyle && EDITING_STYLE_IDS.includes(proj.editingStyle.id) ? {
+                // Paid subscriptions, plus a new account's trial Auto runs.
+                ...(styleAndAutoAllowed && proj.editingStyle && EDITING_STYLE_IDS.includes(proj.editingStyle.id) ? {
                     editingStyle: {
                         id: proj.editingStyle.id,
                         guidance: String(proj.editingStyle.guidance || '').slice(0, 300),

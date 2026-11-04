@@ -25,6 +25,13 @@ const SFX_INTENT_MAP = {
     'hard cut':       [EditingIntent.HARD_CUT, EditingIntent.TRANSITION],
     'cut transition': [EditingIntent.HARD_CUT, EditingIntent.TRANSITION],
     'whoosh':         [EditingIntent.HARD_CUT, EditingIntent.TRANSITION, EditingIntent.ZOOM_OUT],
+    'flash':          [EditingIntent.TRANSITION, EditingIntent.EMPHASIS, EditingIntent.TECHNOLOGY],
+    'camera shutter': [EditingIntent.FASHION, EditingIntent.FOLEY, EditingIntent.TRANSITION],
+    'digital riser':  [EditingIntent.BUILDUP, EditingIntent.CINEMATIC, EditingIntent.TECHNOLOGY],
+    'digital reveal': [EditingIntent.REVEAL, EditingIntent.TECHNOLOGY, EditingIntent.TECH],
+    'digital':        [EditingIntent.TECHNOLOGY, EditingIntent.TECH, EditingIntent.REVEAL],
+    'electronic':     [EditingIntent.TECHNOLOGY, EditingIntent.TECH],
+    'glitch':         [EditingIntent.TECHNOLOGY, EditingIntent.TECH, EditingIntent.TRANSITION],
     'swipe':          [EditingIntent.HARD_CUT, EditingIntent.TRANSITION],
     // Zoom
     'zoom punch':     [EditingIntent.ZOOM_PUNCH, EditingIntent.ZOOM_IN],
@@ -37,6 +44,8 @@ const SFX_INTENT_MAP = {
     'hit':            [EditingIntent.IMPACT, EditingIntent.GAMING_EVENT],
     // Comedy
     'comedy':         [EditingIntent.COMEDY, EditingIntent.COMEDY_MEME],
+    'comic':          [EditingIntent.COMEDY, EditingIntent.COMEDY_MEME, EditingIntent.PUNCHLINE],
+    'cartoon':        [EditingIntent.COMEDY, EditingIntent.COMEDY_MEME],
     'funny':          [EditingIntent.COMEDY, EditingIntent.COMEDY_MEME],
     'meme':           [EditingIntent.COMEDY_MEME, EditingIntent.COMEDY],
     'punchline':      [EditingIntent.PUNCHLINE, EditingIntent.COMEDY],

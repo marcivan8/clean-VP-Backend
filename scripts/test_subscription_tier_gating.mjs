@@ -58,6 +58,8 @@ assert.match(planLimitsCode, /creator:\s*100\b/, 'planLimits AI_OPS_LIMITS.creat
 
 const { AI_OPS_LIMITS, getAiOpsLimit, aiOpsMeter } = await import('../client/src/lib/planLimits.js');
 assert.equal(AI_OPS_LIMITS.free, 3);
+const { FREE_TRIAL_AUTO_RUNS } = require('../middleware/usageGate.js');
+const CLIENT_FREE_TRIAL_AUTO_RUNS = /export const FREE_TRIAL_AUTO_RUNS = (\d+)/.exec(planLimitsCode)?.[1] * 1;
 assert.equal(getAiOpsLimit('free'), 3);
 assert.equal(getAiOpsLimit('unknown'), 3);
 
@@ -74,21 +76,34 @@ assert.equal(meter3.ratio, 1);
 
 console.log('  ok  Free tier quota is strictly 3 AI operations');
 
-console.log('── 2. Backend gate sanitization for free tier ──');
-// aiGate strips editingStyle and forces normal mode on free tier
+console.log('── 2. Backend gate: free tier capability ──');
+// R148 changed this deliberately. The gate used to rewrite editingMode 'auto'
+// to 'normal' and blank editingStyle for every free user, so the request
+// succeeded while quietly becoming a different edit than the one asked for.
+// It now refuses instead, and a brand new account gets FREE_TRIAL_AUTO_RUNS
+// Auto runs with the capability intact. The published free plan is unchanged:
+// once the trial is spent, styles and Auto are still not available.
+// Behaviour is covered by scripts/test_usage_runs.mjs; these pin the contract.
 assert.match(gateCode, /req\.userPlan\s*=\s*plan/, 'aiGate sets req.userPlan');
-assert.match(gateCode, /plan === 'free' && req\.body/, 'aiGate checks for free plan on request body');
-assert.match(gateCode, /req\.body\.editingStyle\s*=\s*null/, 'aiGate blanks editingStyle for free tier');
-assert.match(gateCode, /req\.body\.editingMode\s*=\s*'normal'/, 'aiGate forces editingMode to normal for free tier');
+const gateNoComments = gateCode.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+assert.ok(!/req\.body\.editingStyle\s*=\s*null/.test(gateNoComments), 'aiGate must NOT blank editingStyle any more: it refuses instead');
+assert.ok(!/req\.body\.editingMode\s*=\s*'normal'/.test(gateNoComments), 'aiGate must NOT force normal mode any more: it refuses instead');
+assert.match(gateCode, /AUTO_TRIAL_SPENT/, 'aiGate refuses a spent trial explicitly');
+assert.match(gateCode, /FREE_TRIAL_AUTO_RUNS/, 'aiGate grants a trial');
+assert.equal(FREE_TRIAL_AUTO_RUNS, 3, 'the trial is 3 Auto runs');
+assert.equal(CLIENT_FREE_TRIAL_AUTO_RUNS, FREE_TRIAL_AUTO_RUNS, 'the client copy constant must match the server');
 
-console.log('  ok  aiGate sanitizes editingStyle to null and mode to normal for free users');
+console.log('  ok  aiGate refuses a spent trial rather than silently downgrading the edit');
 
 console.log('── 3. AI Agent controller enforcement ──');
 const aiCtrl = read('../controllers/aiAgentController.js');
-assert.match(aiCtrl, /editingMode:\s*req\.userPlan === 'free' \? 'normal' : proj\.editingMode/, 'aiAgentController forces normal mode when user is free');
-assert.match(aiCtrl, /req\.userPlan !== 'free'\s*&&\s*proj\.editingStyle\s*&&\s*EDITING_STYLE_IDS\.includes\(proj\.editingStyle\.id\)/, 'aiAgentController omits editingStyle for free tier');
+// The controller strips independently of the gate, so a trial run has to reach
+// it as well or the capability would be taken back after the gate allowed it.
+assert.match(aiCtrl, /const styleAndAutoAllowed = req\.userPlan !== 'free' \|\| req\.autoTrialActive === true/, 'aiAgentController honours the trial flag');
+assert.match(aiCtrl, /editingMode: styleAndAutoAllowed \? proj\.editingMode : 'normal'/, 'aiAgentController still forces normal mode outside the trial');
+assert.match(aiCtrl, /\.\.\.\(styleAndAutoAllowed && proj\.editingStyle && EDITING_STYLE_IDS\.includes\(proj\.editingStyle\.id\)/, 'aiAgentController still omits editingStyle outside the trial');
 
-console.log('  ok  aiAgentController strips style and auto mode for free users');
+console.log('  ok  aiAgentController allows a trial run and still strips outside it');
 
 console.log('── 4. EditingStylePicker UI gating & defaults ──');
 const picker = read('../client/src/components/Assistant/EditingStylePicker.jsx');

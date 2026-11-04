@@ -10,6 +10,7 @@
  */
 
 import { supabase } from '../lib/supabaseClient.js';
+import { currentAutoRunId } from '../agent/autoRunContext.js';
 
 // Singleton refresh promise — prevents concurrent 401s from each spawning
 // their own supabase.auth.refreshSession() call, which interfere and all fail.
@@ -29,11 +30,15 @@ async function buildHeaders(token, options) {
     const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
     const needsContentType = ['POST', 'PUT', 'PATCH'].includes(method) && options.body && !isFormData;
     const anonSessionId = !token ? (localStorage.getItem('vp_session') ?? null) : null;
+    // Present only while an Auto run is in flight. usageGate groups a run's
+    // requests under it and bills them as one AI operation. R148.
+    const autoRunId = currentAutoRunId();
 
     const headers = {
         ...(needsContentType ? { 'Content-Type': 'application/json' } : {}),
         ...(token           ? { Authorization:  `Bearer ${token}` }   : {}),
         ...(anonSessionId   ? { 'X-Session-Id': anonSessionId }       : {}),
+        ...(autoRunId       ? { 'X-Vibed-Run-Id': autoRunId }         : {}),
         ...(options.headers || {}),
     };
 

@@ -53,6 +53,9 @@ assert.equal(s.blocking, false);
 // empty main track + pending upload → card (nothing to play anyway)
 s = summarizeUploads([v({ uploadPhase: 'uploading', isProxying: true })], T([]));
 assert.equal(s.blocking, true);
+s = summarizeUploads([v({ id: 'ref', assistantReference: true, uploadPhase: 'uploading', isProxying: true })], T([]));
+assert.equal(s.items.length, 0); assert.equal(s.blocking, false);
+console.log('✓ reference uploads never become the editor preview or block playback');
 assert.equal(toMB(430 * 1024 * 1024), 430); assert.equal(toMB(0), null);
 console.log('✓ failure, all-ready, legacy clips, empty timeline');
 console.log('\nALL UPLOAD-STATUS CHECKS PASSED');

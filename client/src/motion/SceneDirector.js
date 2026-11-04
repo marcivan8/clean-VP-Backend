@@ -33,10 +33,40 @@ import { composeComponentScene, LOOKS } from './SceneComposer.js';
 // straight through meant the shot decided legibility by luck.
 import { harmonisePalette } from './ColorTheory.js';
 import { contentRectFor, resolveFrame } from './SceneLayout.js';
-import { createScene, createGroup, normalizeScene, sceneContentDuration } from './SceneSchema.js';
+import { createScene, createGroup, createNode, normalizeScene, sceneContentDuration, NODE_TYPES } from './SceneSchema.js';
 
 /** The kinds of beat a graphic sequence is built from. */
 export const BEAT_KINDS = ['intro', 'point', 'stat', 'quote', 'cta', 'outro'];
+export const BACKGROUND_MOTIONS = ['gradient-wash', 'particles', 'light-sweep'];
+
+function cleanBackground(raw, palette) {
+    if (!raw || typeof raw !== 'object' || !BACKGROUND_MOTIONS.includes(raw.kind)) return null;
+    const color = value => /^#[\da-f]{6}$/i.test(String(value || '')) ? String(value) : null;
+    const params = {
+        w: 1080,
+        h: 1920,
+        color: color(raw.color) || palette.accent,
+        color2: color(raw.color2) || palette.sub,
+    };
+    if (raw.kind === 'gradient-wash') params.opacity = Math.max(0.08, Math.min(0.28, num(raw.opacity, 0.18)));
+    if (raw.kind === 'particles') {
+        params.accent = params.color;
+        params.count = Math.max(6, Math.min(24, Math.round(num(raw.count, 14))));
+        params.size = Math.max(2, Math.min(6, num(raw.size, 3)));
+    }
+    if (raw.kind === 'light-sweep') params.color = color(raw.color) || palette.accent;
+    return { kind: raw.kind, params };
+}
+
+function backgroundRequestFromBrief(brief) {
+    const text = String(brief || '').toLowerCase();
+    if (/particles?|floating dots|confetti/.test(text)) return { kind: 'particles' };
+    if (/light sweep|sweep of light/.test(text)) return { kind: 'light-sweep' };
+    if (/animated background|moving background|background motion|gradient wash|animated gradient|colour wash|color wash/.test(text)) {
+        return { kind: 'gradient-wash' };
+    }
+    return null;
+}
 
 /** Which composed component plays each beat, and in which look. */
 const BEAT_COMPONENT = {
@@ -262,6 +292,7 @@ export function planFromBrief(brief, opts = {}) {
         tone,
         pacing: tone.pacing,
         beats,
+        background: cleanBackground(plan?.background || opts.background || backgroundRequestFromBrief(text), tone.palette),
         placeholders: beats.filter(b => !b.text && b.kind !== 'stat').length,
         rationale,
         ...(askedDuration > 0 ? { askedDuration } : {}),
@@ -451,16 +482,27 @@ export function composeSceneFromBrief(brief, opts = {}) {
     });
 
     if (groups.length === 0) return null;
+    const background = plan.background ? createNode(NODE_TYPES.SHAPE, {
+        name: 'Animated background',
+        start: 0,
+        duration: cursor,
+        transform: { x: 50, y: 50, scale: 4 },
+        size: { w: frame.w, h: frame.h },
+        template: { kind: plan.background.kind, params: { ...plan.background.params, w: frame.w, h: frame.h } },
+        meta: { isBackdrop: true, animatedBackground: true },
+        origin: { role: 'background', componentId: 'scene-background-motion' },
+    }) : null;
     const scene = normalizeScene(createScene({
         name: `Sequence (${plan.tone.label})`,
         frame,
         duration: sceneContentDuration(groups),
-        nodes: groups,
+        nodes: [...(background ? [background] : []), ...groups],
         meta: {
             director: true,
             brief: String(brief || '').slice(0, 300),
             tone: plan.tone.label,
             pacing: plan.pacing,
+            ...(background ? { backgroundMotion: background.template.kind } : {}),
             beats: plan.beats.map(b => b.kind),
             rationale: [...plan.rationale, placement.reason, ...(palette.notes || [])],
             visualDirections: plan.beats.map((beat, index) => ({
@@ -477,6 +519,7 @@ export function composeSceneFromBrief(brief, opts = {}) {
 
 export default {
     BEAT_KINDS,
+    BACKGROUND_MOTIONS,
     TONES,
     toneFromBrief,
     planFromBrief,

@@ -53,6 +53,8 @@
   "planSheet": {
     "aiOpsTitle": "You've used all your AI operations",
     "aiOpsBody": "Roka can't start new edits until {{date}}. Your projects, manual editing and export keep working.",
+    "autoTrialTitle": "You've used your free Auto edits",
+    "autoTrialBody": "All {{total}} free Auto edits are used. Your projects, manual editing, silence removal and export keep working.",
     "projectsTitle": "You've reached your project limit",
     "projectsBody_one": "The {{plan}} plan includes {{count}} active project. Delete one, or upgrade for unlimited projects.",
     "projectsBody_other": "The {{plan}} plan includes {{count}} active projects. Delete one, or upgrade for unlimited projects.",

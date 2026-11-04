@@ -67,11 +67,9 @@ function inferKind(clip, trackType) {
  */
 function resolveAnimations(clip) {
     const own = Array.isArray(clip?.animations) ? clip.animations : [];
-    // Animations the user picked override the clip's legacy/pack animation,
-    // as before. Animations the "animate" command added (source AUTO_ANIMATE)
-    // only ADD to it: a caption keeps its style pack's word animation and
-    // gets the punch on top, instead of losing it.
-    if (own.some(a => a && a.source !== AUTO_ANIMATE)) return own;
+    // User authored animations still override the pack. Automatic moment and
+    // caption-intelligence moves are additive so the style's entrance remains.
+    if (own.some(a => a && a.source !== AUTO_ANIMATE && a.source !== CAPTION_INTELLIGENCE)) return own;
     const base = baseAnimations(clip);
     return own.length ? [...base, ...own] : base;
 }
@@ -94,6 +92,7 @@ function baseAnimations(clip) {
 
 /** Tag on animations added by the "animate" command (MediaExecutionEngine animate_automatically). */
 export const AUTO_ANIMATE = 'auto-animate';
+export const CAPTION_INTELLIGENCE = 'caption-intelligence';
 
 const RELEASE_NEUTRAL = { scale: 1, x: 0, y: 0, rotation: 0 };
 const RELEASE_HOLD_S = 1.2;

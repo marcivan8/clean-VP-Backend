@@ -51,7 +51,7 @@
 
 import { clamp } from './Easing.js';
 import { ANIMATABLE_PROPS } from './MotionSchema.js';
-import { applyStagger, resolveNodeAnimations } from './SceneMotion.js';
+import { applyStagger, resolveNodeAnimations, resolveGroupAnimations } from './SceneMotion.js';
 
 /** Bumped whenever a stored scene needs `migrateScene` to touch it. */
 export const SCENE_SCHEMA_VERSION = 1;
@@ -581,7 +581,7 @@ export function flattenScene(scene, opts = {}) {
             if (node.type === NODE_TYPES.GROUP) {
                 // Its own animations pass down to its children (parenting),
                 // along with anything it inherited itself.
-                const inherited = [...(parentAnimations || []), ...(Array.isArray(node.animations) ? node.animations : [])];
+                const inherited = [...(parentAnimations || []), ...resolveGroupAnimations(node, scene.frame)];
                 visit(applyStagger(node.children, node.motion || {}), abs, start, groupId || node.id, inherited);
                 continue;
             }

@@ -23,7 +23,10 @@ export default defineConfig([
       },
     },
     rules: {
-      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      // An argument named with a leading underscore is deliberately unused:
+      // it keeps a method's signature readable where a sibling method needs
+      // the same parameter (executeMediaBunnyCommand(command, _job)).
+      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]', argsIgnorePattern: '^_' }],
     },
   },
   {

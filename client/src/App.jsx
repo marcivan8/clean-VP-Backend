@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { bindEditSteps } from './store/useEditStepsStore';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import HomePage from './pages/HomePage';
 import EditorPage from './pages/EditorPage';
@@ -21,6 +22,10 @@ import useSessionStore from './store/useSessionStore';
 
 function App() {
     const { migrateSession } = useSessionStore();
+
+    // One app-wide subscription that turns the engine's per-command events into
+    // the step list the mobile progress screen reads.
+    useEffect(() => bindEditSteps(), []);
 
     useEffect(() => {
         // When Supabase completes a sign-in (magic link, OAuth, email+password),

@@ -42,10 +42,11 @@ function FilePickRow({ icon, label, sub, accept, capture, onFile, disabled }) {
                 capture={capture}
                 aria-label={label}
                 disabled={disabled}
+                multiple={!capture}
                 onChange={(e) => {
-                    const file = e.target.files?.[0];
+                    const files = Array.from(e.target.files || []);
                     e.target.value = '';
-                    if (file) onFile(file);
+                    if (files.length) onFile(files);
                 }}
                 style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', fontSize: 0 }}
             />
@@ -204,7 +205,7 @@ export default function MobileHome({
             {/* ── New video ── */}
             <MobileSheet open={newVideoOpen} title={t('mobileHome.pickTitle')} onClose={() => { if (!creating) onNewVideoOpenChange(false); }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <FilePickRow icon={<ImageIcon size={22} />} label={t('mobileHome.pickVideo')} sub={t('mobileHome.pickVideoSub')} accept="video/*" onFile={onPickVideo} disabled={creating} />
+                    <FilePickRow icon={<ImageIcon size={22} />} label={t('mobileHome.pickVideo')} sub={t('mobileHome.pickVideoSub')} accept="video/*,image/*" onFile={onPickVideo} disabled={creating} />
                     <FilePickRow icon={<Camera size={22} />} label={t('mobileHome.record')} sub={t('mobileHome.recordSub')} accept="video/*" capture="environment" onFile={onPickVideo} disabled={creating} />
                 </div>
                 {creating && (

@@ -169,9 +169,15 @@ const sfxTracks = [
     ] },
     { id: 't', type: 'text', clips: [{ id: 'title', start: 1, duration: 3, animations: [{ presetId: 'composed:slam-in', startTime: 0, duration: 0.5 }] }] },
 ];
-await check('cues: whoosh before each transition, pop on templates, impact on a slam; spaced', () => {
+// The cue for a transition follows the TRANSITION's own character: a whip gets
+// a whoosh, but a flash gets a camera flash and a glitch gets a digital hit
+// (sfxCues.js SFX_QUERIES). This expectation used to be a whoosh for both
+// transitions in the fixture, which stopped being true once those kinds were
+// added and was left pinning the old behaviour. The fixture's third clip is a
+// 'flash', so 'flash' is the right answer.
+await check('cues: a sound matched to each transition, pop on templates, impact on a slam; spaced', () => {
     const cues = X.collectSfxCues(sfxTracks, { level: 'full' });
-    assert.deepEqual(cues.map(c => c.kind), ['impact', 'whoosh', 'pop', 'whoosh']);
+    assert.deepEqual(cues.map(c => c.kind), ['impact', 'whoosh', 'pop', 'flash']);
     assert.ok(Math.abs(cues[1].t - (4 - 0.18)) < 1e-6, 'whoosh leads the cut');
     const soft = X.collectSfxCues(sfxTracks, { level: 'subtle' });
     assert.ok(!soft.some(c => c.kind === 'impact'), 'no impacts when soft');

@@ -42,7 +42,7 @@ async function buildHeaders(extra = {}) {
     try {
         const { data: { session } } = await supabase.auth.getSession();
         token = session?.access_token ?? null;
-    } catch (_) {}
+    } catch { /* no session: the request goes out unauthenticated */ }
 
     const headers = { ...extra };
     if (token) {
@@ -55,6 +55,52 @@ async function buildHeaders(extra = {}) {
  * Service to handle proxy generation requests.
  */
 class ProxyService {
+    /** Store assistant guidance media without queuing an editable-media job. */
+    static async uploadReference(file, assetId, projectId, onProgress) {
+        const extension = file.name.split('.').pop()?.toLowerCase();
+        const contentType = file.type || ({
+            jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
+            mp4: 'video/mp4', mov: 'video/quicktime', m4v: 'video/x-m4v', webm: 'video/webm',
+            mkv: 'video/x-matroska', avi: 'video/x-msvideo',
+        }[extension] || 'application/octet-stream');
+        const headers = await buildHeaders({ 'Content-Type': 'application/json' });
+        const initResponse = await fetch(`${API_URL}/api/assets/reference-upload-url`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ filename: file.name, contentType, assetId }),
+        });
+        if (!initResponse.ok) {
+            const err = await initResponse.json().catch(() => ({}));
+            throw new Error(err.error || `Reference upload could not start (${initResponse.status})`);
+        }
+        const { sessionUrl, destPath } = await initResponse.json();
+        await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('PUT', sessionUrl, true);
+            xhr.setRequestHeader('Content-Type', contentType);
+            xhr.upload.onprogress = event => {
+                if (event.lengthComputable && onProgress) onProgress(Math.round(event.loaded / event.total * 100));
+            };
+            xhr.onload = () => xhr.status >= 200 && xhr.status < 300
+                ? resolve()
+                : reject(new Error(`Reference upload failed: ${xhr.status} ${xhr.responseText}`));
+            xhr.onerror = () => reject(new Error('Reference upload network error'));
+            xhr.send(file);
+        });
+
+        const completeHeaders = await buildHeaders({ 'Content-Type': 'application/json' });
+        const completeResponse = await fetch(`${API_URL}/api/assets/complete-reference-upload`, {
+            method: 'POST',
+            headers: completeHeaders,
+            body: JSON.stringify({ assetId, gcsPath: destPath, name: file.name, projectId }),
+        });
+        if (!completeResponse.ok) {
+            const err = await completeResponse.json().catch(() => ({}));
+            throw new Error(err.error || `Reference upload could not be finalized (${completeResponse.status})`);
+        }
+        return completeResponse.json();
+    }
+
     /**
      * Request proxy generation for an already-uploaded video.
      * @param {string} videoPath - Relative path of the video (relative to /uploads).
@@ -133,7 +179,7 @@ class ProxyService {
 
         // File is now on GCS — fire callback so callers can start parallel work
         // (e.g. transcription) without waiting for proxy encoding to finish.
-        try { onUploadComplete?.(destPath); } catch (_) {}
+        try { onUploadComplete?.(destPath); } catch (err) { console.warn('[proxyService] onUploadComplete threw:', err?.message || err); }
 
         // 3. Notify backend to process the file.
         // Re-build auth headers here — the GCS upload can take minutes for large
@@ -209,7 +255,7 @@ class ProxyService {
             const data = await response.json();
 
             // File is on the server — fire callback for parallel work before proxy polling
-            try { onUploadComplete?.(data.originalPath || data.videoPath || null); } catch (_) {}
+            try { onUploadComplete?.(data.originalPath || data.videoPath || null); } catch (err) { console.warn('[proxyService] onUploadComplete threw:', err?.message || err); }
 
             // If the backend queued a job, poll until it completes.
             if (data.jobId) {

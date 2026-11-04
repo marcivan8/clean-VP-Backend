@@ -5,6 +5,7 @@ import MobileSheet from './MobileSheet.jsx';
 import { startCheckout } from '../lib/checkout.js';
 import {
     PLAN_LABELS, PLAN_PRICES, nextPlan, nextUsageReset, getProjectLimit, aiOpsMeter,
+    FREE_TRIAL_AUTO_RUNS,
 } from '../lib/planLimits.js';
 
 /**
@@ -12,6 +13,7 @@ import {
  *   reason 'ai_ops'   → out of AI operations (editor, from QUOTA_EXCEEDED)
  *   reason 'projects' → project limit reached (dashboard)
  *   reason 'plans'    → "See plans" from the dashboard usage meter
+ *   reason 'auto_trial' → the free Auto edits are used up (mobile flow, R148)
  * Shows the next plan's price and first features (same copy as the pricing
  * page), Upgrade (Polar checkout) and Not now. Mobile-only callers.
  */
@@ -37,6 +39,9 @@ export default function PlanSheet({ open, reason = 'ai_ops', plan = 'free', upgr
         body = meter.unlimited
             ? t('planSheet.plansBodyUnlimited', { plan: planLabel })
             : t('planSheet.plansBody', { plan: planLabel, date: resetDate });
+    } else if (reason === 'auto_trial') {
+        title = t('planSheet.autoTrialTitle');
+        body = t('planSheet.autoTrialBody', { total: FREE_TRIAL_AUTO_RUNS });
     } else if (reason === 'paid_feature') {
         title = t('planSheet.paidFeatureTitle', 'Upgrade to unlock');
         body = t('planSheet.paidFeatureBody', 'Editing styles and Auto mode are available on Creator and Pro plans.');

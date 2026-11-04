@@ -34,6 +34,10 @@ export const EVENT_TYPES = {
     PHASE_EXECUTING: 'phase:executing',
     COMMANDS_COMPILED: 'commands:compiled',
     EXECUTION_PROGRESS: 'execution:progress',
+    // One per command as it runs and as it finishes, carrying the command's
+    // human label and the message it reported. This is what lets a progress
+    // screen show the real pipeline instead of a spinner.
+    EDIT_STEP: 'edit:step',                            // { jobId, index, total, action, label, state, message }
     EXECUTION_COMPLETE: 'execution:complete',
     EXECUTION_FAILED: 'execution:failed',
 

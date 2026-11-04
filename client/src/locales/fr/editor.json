@@ -1237,5 +1237,67 @@
       "title": "Le panneau est replié",
       "body": "Vos outils sont toujours là. Cliquez sur une icône pour le rouvrir, ou sur la même icône pour le replier."
     }
+  },
+  "mobileFlow": {
+    "skip": "Passer",
+    "title": "Vous faites quoi ?",
+    "subtitle": "Cela règle le rythme, les coupes et la durée.",
+    "workingEyebrow": "EN COURS",
+    "working": "Votre short se monte",
+    "starting": "Démarrage",
+    "editWhileWaiting": "Monter pendant ce temps",
+    "openEditor": "Ouvrir l'éditeur",
+    "outcome": {
+      "talking_head": "Face caméra",
+      "reel": "Reel",
+      "vlog": "Montage vlog",
+      "howto": "Tutoriel"
+    },
+    "resultTitle": "Votre short",
+    "share": "Partager",
+    "change": "Changer quelque chose",
+    "byHand": "Monter à la main",
+    "back": "Retour",
+    "send": "Envoyer",
+    "orSay": "OU DITES-LE AVEC VOS MOTS",
+    "askPlaceholder": "Garde seulement la partie sur les tarifs",
+    "changes": {
+      "shorter": "Plus court",
+      "punchier": "Plus punchy",
+      "captions": "Sous-titres plus grands",
+      "moment": "Un autre moment",
+      "music": "Ajouter de la musique",
+      "slower": "Plus lent"
+    },
+    "versions": "Vos versions",
+    "versionsBody": "Chaque changement en crée une. Rien ne se perd.",
+    "versionsCount_one": "{{count}} version",
+    "versionsCount_other": "{{count}} versions",
+    "goBack": "Revenir",
+    "now": "ACTUELLE",
+    "versionsFree": "Revenir est gratuit. Seul un nouveau montage compte."
+  },
+  "shareDestinations": {
+    "title": "PUBLIER SUR",
+    "connect": "Connecter",
+    "disconnect": "Déconnecter",
+    "reconnect": "Reconnecter",
+    "connected": "Connecté",
+    "notConnected": "Non connecté",
+    "notAvailable": "Pas encore disponible",
+    "needsReconnect": "Reconnectez-vous",
+    "connectedNotice": "{{provider}} est connecté.",
+    "reviewPending": "Connecter un compte fonctionne dès maintenant. Publier directement depuis Vibed demande l'approbation de chaque plateforme, utilisez donc Partager en attendant.",
+    "publishNote": "Choisissez une destination, ou utilisez Partager pour publier depuis votre téléphone.",
+    "error_GENERIC": "Cela n'a pas fonctionné. Réessayez.",
+    "error_declined": "Vous avez annulé la connexion.",
+    "error_expired": "Cela a pris trop de temps. Relancez la connexion.",
+    "error_no_code": "La plateforme n'a rien renvoyé. Réessayez.",
+    "error_exchange_failed": "La plateforme a refusé la connexion. Réessayez.",
+    "error_save_failed": "Connecté, mais l'enregistrement a échoué. Réessayez.",
+    "error_unknown_provider": "Cette destination n'existe pas.",
+    "error_PROVIDER_NOT_CONFIGURED": "Cette destination n'est pas encore configurée sur le serveur.",
+    "error_CONNECT_FAILED": "Impossible de lancer la connexion. Réessayez.",
+    "error_DISCONNECT_FAILED": "Impossible de se déconnecter. Réessayez."
   }
 }

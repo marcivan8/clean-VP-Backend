@@ -9,6 +9,8 @@
  */
 
 const { AssetType, EditingIntent, EmotionTag, TimelineEventType } = require('../types.js');
+const fs = require('fs');
+const path = require('path');
 
 /**
  * @type {Array<import('../types').SoundEffectAsset>}
@@ -926,8 +928,49 @@ const STARTER_SFX = [
     },
 ];
 
-// Fill optional fields with defaults for all entries
-const SFX_LIBRARY = STARTER_SFX.map((sfx, i) => ({
+// The bundled pack contains more sounds than the original hand-authored
+// metadata list. Register the requested creative families so DB search can
+// return the actual bundled files (with playable URLs), not just the old 33.
+const SFX_DIR = path.resolve(__dirname, '../../../client/public/sfx-library');
+const EXTRA_FAMILIES = [
+    { match: /^(?:ambient-tension|risers-|cinematic-riser)/i, category: 'suspense-risers', aliases: ['suspense', 'tension', 'riser', 'buildup', 'cinematic'] },
+    { match: /flash/i, category: 'flash', aliases: ['flash', 'camera flash', 'transition', 'accent'] },
+    { match: /camera|shutter/i, category: 'camera-shutters', aliases: ['camera', 'shutter', 'camera shutter', 'photo', 'click'] },
+    { match: /^(?:electronic-|tech-scan|risers-(?:alien|electronic))/i, category: 'digital', aliases: ['digital', 'electronic', 'glitch', 'technology', 'sci-fi'] },
+    { match: /pop/i, category: 'pops', aliases: ['pop', 'pops', 'bubble', 'accent', 'comic'] },
+    { match: /^(?:reveal-|tech-scan|electronic-)/i, category: 'digital-reveals', aliases: ['digital reveal', 'reveal', 'technology', 'electronic'] },
+    { match: /^(?:comedy-|comedy|vine)/i, category: 'comic', aliases: ['comic', 'comedy', 'cartoon', 'funny', 'meme'] },
+];
+const knownNames = new Set(STARTER_SFX.map(sfx => sfx.name));
+const extraSfx = fs.existsSync(SFX_DIR)
+    ? fs.readdirSync(SFX_DIR).filter(file => /\.mp3$/i.test(file)).map(file => {
+        const name = file.replace(/\.mp3$/i, '');
+        if (knownNames.has(name)) return null;
+        const families = EXTRA_FAMILIES.filter(family => family.match.test(name));
+        if (!families.length) return null;
+        const aliases = [...new Set(families.flatMap(family => family.aliases))];
+        const category = families[0].category;
+        const displayName = name.replace(/[-_]+/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+        const intents = [
+            ...(aliases.some(x => /riser|suspense|tension|buildup/.test(x)) ? [EditingIntent.BUILDUP, EditingIntent.SUSPENSE, EditingIntent.CINEMATIC] : []),
+            ...(aliases.some(x => /flash|shutter|camera|transition/.test(x)) ? [EditingIntent.TRANSITION, EditingIntent.FOLEY, EditingIntent.FASHION] : []),
+            ...(aliases.some(x => /digital|electronic|glitch|technology|sci-fi/.test(x)) ? [EditingIntent.TECHNOLOGY, EditingIntent.TECH, EditingIntent.REVEAL] : []),
+            ...(aliases.some(x => /pop|comic|comedy|cartoon|funny|meme/.test(x)) ? [EditingIntent.COMEDY, EditingIntent.COMEDY_MEME, EditingIntent.PUNCHLINE] : []),
+            ...(aliases.some(x => /reveal/.test(x)) ? [EditingIntent.REVEAL, EditingIntent.INTRO] : []),
+        ];
+        return {
+            name, displayName, description: `${displayName} sound effect`, type: AssetType.SOUND_EFFECT,
+            editingIntents: [...new Set(intents)], emotionTags: category === 'comic' ? [EmotionTag.FUNNY, EmotionTag.PLAYFUL] : [EmotionTag.MODERN],
+            energyLevel: 3, style: aliases, searchKeywords: [...new Set([name.replace(/-/g, ' '), ...aliases])],
+            bestUseCases: aliases, category, previewUrl: `/sfx-library/${encodeURIComponent(file)}`,
+            mimeType: 'audio/mpeg', license: 'royalty_free',
+        };
+    }).filter(Boolean)
+    : [];
+
+// Fill optional fields for curated and file-backed entries. Existing SFX get
+// the same static preview URL so they are playable immediately after seeding.
+const SFX_LIBRARY = [...STARTER_SFX, ...extraSfx].map((sfx) => ({
     // BaseAsset defaults
     gcsPath:                    null,
     previewUrl:                 null,
@@ -944,6 +987,7 @@ const SFX_LIBRARY = STARTER_SFX.map((sfx, i) => ({
     lastUsedAt:                 null,
     isSystem:                   true,
     isActive:                   true,
+    previewUrl:                 `/sfx-library/${encodeURIComponent(`${sfx.name}.mp3`)}`,
     sampleRate:                 44100,
     channels:                   2,
     bitDepth:                   24,

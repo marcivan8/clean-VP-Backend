@@ -28,8 +28,10 @@
 
 import { authFetch }  from '../utils/authFetch.js';
 import { pollJobResult } from '../utils/jobPoller.js';
+import { stepLabel } from './stepLabels.js';
 import useTimelineStore  from '../store/useTimelineStore.js';
 import { TimelineActions } from '../timeline/index.js';
+import { getMainVideoTrackId } from '../timeline/rippleDelete.js';
 import { mediaBunnyService } from '../services/MediaBunnyService.js';
 import useAIStore from '../store/useAIStore.js';
 import { EventBus, EVENT_TYPES } from './EventBus.js';
@@ -51,7 +53,6 @@ import { applyPresetToClip, AUTO_ANIMATE } from '../motion/ClipAdapter.js';
 import { composeMotion, planMotionFromBrief, COMPOSED } from '../motion/MotionComposer.js';
 import { normalizeMatte } from '../motion/MatteSettings.js';
 import { sfxLevel, sfxVolume, collectSfxCues, mergeSfxCues, SFX_QUERIES } from './sfxCues.js'; // R92 round A
-import { stickerQueryFromText } from './stickerQuery.js'; // R97
 import { buildStickerPlacement } from '../motion/StickerLibraryAdapter.js'; // R97
 import { pickMotionTargets, layersForPrompt, scriptFor } from './composeMotionTargets.js';
 import { selectAnimateMoments, sfxPlayableUrl, countMoments, CLUSTER_S } from './animateMoments.js';
@@ -68,6 +69,7 @@ import { fallbackShortScenePlan, polishShort } from './shortPolish.js'; // R92 r
 import { buildStyleReferencePlan } from '../motion/StyleReferenceAdapter.js';
 import { packSegments } from './segmentPacking.js';
 import { splitClipAtSpeakerSegments } from './virtualMulticamTimeline.js';
+import { quotaReason } from '../lib/quotaReason.js';
 
 // See _deriveAudioPeaksForClip below.
 const DERIVED_PEAK_DB_FLOOR = -8;
@@ -82,12 +84,13 @@ async function styleReferenceProfileFor(state, visualProfiles = [], signal) {
         && Number(profile.visualStyleProfile.profileVersion) >= 2
     )?.visualStyleProfile;
     if (cached) return cached;
-    const video = references.find(asset => asset?.type === 'video' && asset.id);
-    if (!video) return null;
+    const reference = references.find(asset => asset?.type === 'video' && asset.id)
+        || references.find(asset => asset?.type === 'image' && asset.id);
+    if (!reference) return null;
     try {
         const response = await authFetch('/api/brain/analyze-style-reference', {
             method: 'POST',
-            body: JSON.stringify({ assetId: video.id }),
+            body: JSON.stringify({ assetId: reference.id }),
             ...(signal ? { signal } : {}),
         });
         const result = await response.json().catch(() => ({}));
@@ -101,6 +104,29 @@ async function styleReferenceProfileFor(state, visualProfiles = [], signal) {
         console.warn('[reference-style] analysis unavailable; using the selected editing style:', err.message);
         return null;
     }
+}
+
+/** Resolve the editable source path while making assistant references unusable as footage. */
+function editableUploadPathFor(state) {
+    const assets = state?.assets || [];
+    const references = assets.filter(asset => asset?.assistantReference === true);
+    const isReferenceValue = value => typeof value === 'string' && (
+        value.startsWith('references/') || references.some(asset =>
+            [asset.gcsPath, asset.sourceUrl, asset.proxyUrl, asset.name, asset.file?.name]
+                .filter(Boolean).some(ref => ref === value || ref.endsWith(`/${value}`) || value.endsWith(`/${ref}`))
+        )
+    );
+    let path = isReferenceValue(state?.uploadedFilePath) ? null : state?.uploadedFilePath;
+    const sourceAsset = assets.find(asset => asset?.type === 'video' && asset.assistantReference !== true);
+    if (!path && sourceAsset) {
+        path = sourceAsset.gcsPath || sourceAsset.sourceUrl || sourceAsset.proxyUrl || null;
+        if (typeof path === 'string') {
+            const raw = path.match(/\/(raw\/[^?#]+)/);
+            if (raw) path = raw[1];
+        }
+    }
+    if (!path && !isReferenceValue(state?.uploadedFile?.name)) path = state?.uploadedFile?.name || null;
+    return path || null;
 }
 
 export const EXECUTION_STATES = {
@@ -236,6 +262,43 @@ function resolveAssetServerPath(asset) {
  */
 function groupWordsIntoCaptions(words, maxWords = 6, pauseThreshold = 0.4) {
     return groupWordsIntoSegments(words, maxWords, pauseThreshold);
+}
+
+/** Attach time-aligned cues from TimelineEventDetector to the spoken caption. */
+async function attachCaptionIntelligence(captions, words, tracks) {
+    if (!Array.isArray(captions) || !captions.length) return captions || [];
+    try {
+        const spoken = captions.map((cap, i) => ({
+            id: `caption-intelligence-${i}`,
+            type: 'text',
+            content: cap.text || '',
+            start: Number(cap.start) || 0,
+            duration: Math.max(0.1, (Number(cap.end) || 0) - (Number(cap.start) || 0)),
+        }));
+        const sourceTracks = (Array.isArray(tracks) ? tracks : []).filter(t => t?.type === 'video' || t?.type === 'audio');
+        const response = await authFetch('/api/audio/caption-cues', {
+            method: 'POST',
+            body: JSON.stringify({ projectState: { tracks: [...sourceTracks, { id: 'caption-intelligence', type: 'text', clips: spoken }], words } }),
+        });
+        if (!response.ok) return captions;
+        const { events = [] } = await response.json().catch(() => ({}));
+        if (!Array.isArray(events) || !events.length) return captions;
+        const priority = { PUNCHLINE_DETECTED: 5, EMPHASIS_MOMENT: 4, EMOTIONAL_BEAT: 3, REVEAL: 2 };
+        return captions.map(cap => {
+            const start = Number(cap.start) || 0;
+            const end = Number(cap.end) || start;
+            const nearby = events
+                .filter(event => Number(event.timelineTime) >= start - 0.35 && Number(event.timelineTime) <= end + 0.35)
+                .sort((a, b) => (priority[b.eventType] || 0) - (priority[a.eventType] || 0)
+                    || Math.abs(Number(a.timelineTime) - (start + end) / 2) - Math.abs(Number(b.timelineTime) - (start + end) / 2))[0];
+            if (!nearby) return cap;
+            const emotion = nearby.eventType === 'EMOTIONAL_BEAT' ? 'soft' : nearby.eventType === 'REVEAL' ? 'focus' : 'high';
+            return { ...cap, intelligenceCue: { eventType: nearby.eventType, timelineTime: nearby.timelineTime, emotion, metadata: nearby.metadata || {} } };
+        });
+    } catch (err) {
+        console.warn('[autoCaptions] caption intelligence unavailable; using neutral direction:', err.message);
+        return captions;
+    }
 }
 
 /**
@@ -423,8 +486,33 @@ export class MediaExecutionEngine {
             const desc = command.meta?.description || command.action || command.engine;
             console.log(`[MediaExecutionEngine] [${i + 1}/${total}] ${desc}`);
 
+            // A label of null marks housekeeping (seek, chat, undo) that no one
+            // needs narrated, so the progress list stays the real edit.
+            const label = stepLabel(command);
+            const startedAt = Date.now();
+            if (label) {
+                EventBus.emit(EVENT_TYPES.EDIT_STEP, {
+                    jobId: job.id, index: i, total,
+                    action: command.action || command.engine,
+                    label, state: 'running',
+                });
+            }
+
             const result = await this.executeCommand(command, job);
             job.results.push(result);
+
+            if (label) {
+                EventBus.emit(EVENT_TYPES.EDIT_STEP, {
+                    jobId: job.id, index: i, total,
+                    action: command.action || command.engine,
+                    label,
+                    state: result?.success === false ? 'failed' : 'done',
+                    // the handler's own sentence, which carries the real numbers
+                    message: result?.message || null,
+                    durationMs: Date.now() - startedAt,
+                });
+            }
+
             job.setProgress(((i + 1) / total) * 90);
         }
         return job.results;
@@ -462,12 +550,15 @@ export class MediaExecutionEngine {
                 }
             } else if (val === '$uploaded_file') {
                 // Prefer the server-side path stored after proxy upload
-                let serverPath = store.uploadedFilePath;
-                const fileName   = store.uploadedFile?.name;
+                let serverPath = editableUploadPathFor(store);
+                const referenceFile = (store.assets || []).some(asset => asset?.assistantReference === true
+                    && (asset.name === store.uploadedFile?.name || asset.file?.name === store.uploadedFile?.name));
+                const fileName = !serverPath && !referenceFile ? store.uploadedFile?.name : null;
+                const editableVideo = (store.assets || []).find(a => a.type === 'video' && a.assistantReference !== true);
 
                 // Fallback: recover GCS raw path from any URL format stored on the asset.
-                if (!serverPath && store.assets) {
-                    const videoAsset = store.assets.find(a => a.type === 'video');
+                if (!serverPath && editableVideo) {
+                    const videoAsset = editableVideo;
                     if (videoAsset) {
                         const toGcsRawPath = (url) => {
                             if (!url) return null;
@@ -525,7 +616,7 @@ export class MediaExecutionEngine {
     }
 
     // ── executeMediaBunnyCommand (unchanged from original) ────────────────────
-    async executeMediaBunnyCommand(command, job) {
+    async executeMediaBunnyCommand(command, _job) {
         const { action, args } = command;
         const desc = command.meta?.description || action;
         console.log(`[MediaExecutionEngine] 🐰 MediaBunny: ${desc}`);
@@ -1022,7 +1113,28 @@ export class MediaExecutionEngine {
                 return { action, success: styled !== false, message: styled !== false ? 'Applied caption style' : 'No caption clips to style' };
             }
             case 'trimClip':       this._callStore(store, 'trimClip', args.trackId, args.clipId, args.trimFrom, args.amount); return { action, success: true };
-            case 'rippleDelete':   this._callStore(store, 'rippleDelete', args.atTime); return { action, success: true };
+            // There is no `rippleDelete` on the timeline store, so this used to
+            // throw "Store method does not exist" and ripple_delete never worked
+            // from the assistant at all. The real implementation is
+            // rippleDeleteGap, which the timeline's own right-click menu uses;
+            // the compiler sends only a time, so the track is the main video
+            // track. rippleDeleteGap returns false when there is no gap there,
+            // which is reported rather than swallowed.
+            case 'rippleDelete': {
+                const gapTime = Number(args.atTime) || 0;
+                const trackId = args.trackId || getMainVideoTrackId(store.tracks);
+                if (!trackId) {
+                    return { action, success: false, message: 'No video track to close a gap on' };
+                }
+                const closed = this._callStore(store, 'rippleDeleteGap', trackId, gapTime);
+                return {
+                    action,
+                    success: closed !== false,
+                    message: closed !== false
+                        ? `Closed the gap at ${gapTime}s`
+                        : `No gap at ${gapTime}s to close`,
+                };
+            }
             case 'addTransition': {
                 if (args.clipId === '$ALL_CLIPS') {
                     // Every CUT: a transition sits at a clip's end, so the last
@@ -2519,8 +2631,8 @@ export class MediaExecutionEngine {
             //   4. Create one video track per speaker, fill it with their clips
             case 'split_speakers': {
                 const spStore      = useTimelineStore.getState();
-                const uploadedPath = spStore.uploadedFilePath;
-                const videoAsset   = (spStore.assets || []).find(a => a.type === 'video');
+                const uploadedPath = editableUploadPathFor(spStore);
+                const videoAsset   = (spStore.assets || []).find(a => a.type === 'video' && a.assistantReference !== true);
 
                 if (!uploadedPath) {
                     return { action, success: false, message: 'No uploaded file path found. Re-upload the video and try again.' };
@@ -2653,7 +2765,7 @@ export class MediaExecutionEngine {
                 const proxyUrl       = videoAsset.proxyUrl || videoAsset.url || '';
                 const existingVTrack = freshStore.tracks?.find(t => t.type === 'video');
 
-                speakerTracks.forEach(({ speaker, clips: spClips }, idx) => {
+                speakerTracks.forEach(({ clips: spClips }, idx) => {
                     const label = `Speaker ${String(idx + 1).padStart(2, '0')}`;
                     let trackId;
 
@@ -2665,8 +2777,6 @@ export class MediaExecutionEngine {
                         });
                         useTimelineStore.getState().renameTrack(trackId, label);
                     } else {
-                        // Track IDs before the new addTrack call
-                        const beforeIds = new Set(useTimelineStore.getState().tracks.map(t => t.id));
                         trackId = useTimelineStore.getState().addTrack('video');
                         // addTrack returns the id directly
                         useTimelineStore.getState().renameTrack(trackId, label);
@@ -2882,16 +2992,13 @@ export class MediaExecutionEngine {
                 if (!scTrack) return { action, success: false, message: 'No video track found.' };
 
                 const clipsInRange = scTrack.clips.filter(c => c.start < end && (c.start + c.duration) > start);
-                let cutCount = 0;
 
                 for (const clip of [...clipsInRange].reverse()) {
                     const clipEnd = clip.start + clip.duration;
                     if (clip.start >= start && clipEnd <= end) {
                         scStore.removeClip(scTrack.id, clip.id);
-                        cutCount++;
                     } else if (clip.start < start) {
                         scStore.updateClip(scTrack.id, clip.id, { duration: start - clip.start });
-                        cutCount++;
                     } else {
                         const newDur = clipEnd - end;
                         if (newDur > 0.1) {
@@ -2899,7 +3006,6 @@ export class MediaExecutionEngine {
                         } else {
                             scStore.removeClip(scTrack.id, clip.id);
                         }
-                        cutCount++;
                     }
                 }
 
@@ -3069,7 +3175,7 @@ export class MediaExecutionEngine {
                     : '';
 
                 const captions   = ocStore.captions ?? [];
-                const uploadedFP = ocStore.uploadedFilePath || null;
+                const uploadedFP = editableUploadPathFor(ocStore);
 
                 const clipPayload = allClips.map(clip => {
                     const asset      = ocAssets.find(a => a.id === clip.assetId);
@@ -3282,7 +3388,7 @@ export class MediaExecutionEngine {
 
                 // Send the GCS server-side path so the backend can extract frames
                 // for face-anchor detection (detectSceneLayout — GPT-4o-mini Vision).
-                const vmUploadedPath = vmStore.uploadedFilePath || null;
+                const vmUploadedPath = editableUploadPathFor(vmStore);
 
                 // Speaker roles from identify-speakers (stored in speakerMap after
                 // split_speakers) — lets the backend make the interviewer the host
@@ -3300,7 +3406,7 @@ export class MediaExecutionEngine {
                 // OWN asset's segments — otherwise one video's speaker turns get
                 // painted onto another's footage.
                 const vmBasename     = p => (p || '').split(/[\\/]/).pop();
-                const vmUploadedBase = vmBasename(vmStore.uploadedFilePath || '');
+                const vmUploadedBase = vmBasename(editableUploadPathFor(vmStore) || '');
                 const vmStrippedBase = vmUploadedBase.replace(/^\d+-/, '');
                 const vmAssetIds     = [...new Set(vmAllClips.map(c => c.assetId).filter(Boolean))];
 
@@ -3418,7 +3524,7 @@ export class MediaExecutionEngine {
 
                 // Headline numbers come from the primary asset (or the first analysed one)
                 const vmHeadline = vmAnalysisByAsset[vmPrimaryAssetId] || Object.values(vmAnalysisByAsset)[0];
-                const { hostSide, host, guest } = vmHeadline;
+                const { hostSide, host } = vmHeadline;
                 const vmMode = vmHeadline.mode || 'duo';
                 const vmTotalSegments = Object.values(vmAnalysisByAsset)
                     .reduce((n, d) => n + (d.segments?.length || 0), 0);
@@ -3659,7 +3765,6 @@ export class MediaExecutionEngine {
                         message: `Couldn't detect speakers on ${failed.join(', ')}.\n\nSpeaker detection needs the audio on the server — if you just uploaded, wait for processing to finish.`,
                     };
                 }
-                const total = done.reduce((n, d) => n + d.speakers, 0);
                 return {
                     action, success: true,
                     message:
@@ -3988,7 +4093,7 @@ export class MediaExecutionEngine {
                     const body = await response.json().catch(() => ({}));
                     if (response.status === 402 || body?.error === 'AI_OPS_LIMIT') {
                         EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
-                            reason: 'ai_ops',
+                            reason: quotaReason(body),
                             message: body?.message || "You've used all your AI operations this month.",
                             upgradeRequired: body?.upgradeRequired || 'creator',
                         });
@@ -4090,11 +4195,11 @@ export class MediaExecutionEngine {
         for (const [key, val] of Object.entries(resolvedPayload)) {
             if (val === '$uploaded_file') {
                 // Prefer server-side path; fall back to browser file name
-                let serverPath = store.uploadedFilePath;
-                
+                let serverPath = editableUploadPathFor(store);
+
                 // Fallback for page reloads where store.uploadedFilePath was lost
                 if (!serverPath && store.assets) {
-                    const videoAsset = store.assets.find(a => a.type === 'video');
+                    const videoAsset = store.assets.find(a => a.type === 'video' && a.assistantReference !== true);
                     if (videoAsset) {
                         // Prefer the asset's own gcsPath field — set directly at upload
                         // time (IDELayout.jsx: updateAsset(assetId, { gcsPath })) and
@@ -4123,7 +4228,9 @@ export class MediaExecutionEngine {
                     }
                 }
 
-                resolvedPayload[key] = serverPath || store.uploadedFile?.name || 'video.mp4';
+                const isReferenceFile = (store.assets || []).some(asset => asset?.assistantReference === true
+                    && (asset.name === store.uploadedFile?.name || asset.file?.name === store.uploadedFile?.name));
+                resolvedPayload[key] = serverPath || (!isReferenceFile ? store.uploadedFile?.name : null) || 'video.mp4';
                 console.log(`[MediaExecutionEngine] Resolved $uploaded_file → "${resolvedPayload[key]}"`);
             }
         }
@@ -4194,7 +4301,7 @@ export class MediaExecutionEngine {
 
             const bname = (p) => (p || '').split(/[\\/]/).pop();
             const processedFile = Object.entries(resolvedPayload).find(([, v]) => typeof v === 'string' && (v.startsWith('raw/') || v.startsWith('temp/')));
-            const processedBase = processedFile ? bname(processedFile[1]) : bname(store.uploadedFilePath);
+            const processedBase = processedFile ? bname(processedFile[1]) : bname(editableUploadPathFor(store));
 
             // Only reuse a transcript known to be in SOURCE time. `store.captions`
             // is no longer a fallback: after any edit it holds TIMELINE-time
@@ -4221,7 +4328,9 @@ export class MediaExecutionEngine {
                 // caption run / transcript view re-mapped already-mapped times.
                 if (store.setTimelineTranscript) store.setTimelineTranscript(words);
                 if (words.length > 0) {
-                    const captions = groupWordsIntoCaptions(words);
+                    const captions = await attachCaptionIntelligence(
+                        groupWordsIntoCaptions(words), words, this._tracksWithDerivedAudioPeaks(useTimelineStore.getState()),
+                    );
                     console.log(`[MediaExecutionEngine] 💬 autoCaptions (short-circuit): adding ${captions.length} caption clips`);
                     store.addCaptionClips(captions);
                 }
@@ -4240,7 +4349,7 @@ export class MediaExecutionEngine {
             // Identify the file being processed: prefer the already-resolved filename key,
             // then fall back to uploadedFilePath (single-clip projects).
             const processedFile = Object.entries(resolvedPayload).find(([, v]) => typeof v === 'string' && (v.startsWith('raw/') || v.startsWith('temp/')));
-            const processedBase = processedFile ? basename(processedFile[1]) : basename(store.uploadedFilePath);
+            const processedBase = processedFile ? basename(processedFile[1]) : basename(editableUploadPathFor(store));
 
             // Look up per-file transcript map first, fall back to legacy captions for older sessions
             const clipWords = (store.transcripts && processedBase && store.transcripts[processedBase])
@@ -4286,7 +4395,7 @@ export class MediaExecutionEngine {
         if (endpoint === '/api/ai/detect-repeated-takes') {
             const source = resolveRetakeSource(store, {
                 assetId:  command.args?.asset_id || null,
-                filePath: resolvedPayload.filename || store.uploadedFilePath || null,
+                filePath: resolvedPayload.filename || editableUploadPathFor(store),
             });
 
             if (!source.error && source.words.length > 0) {
@@ -4350,7 +4459,7 @@ export class MediaExecutionEngine {
                         const msg = errorBody.message || "You've used all your AI operations this month.";
                         const upgrade = errorBody.upgradeRequired ? ` Upgrade to ${errorBody.upgradeRequired} to continue.` : '';
                         EventBus.emit(EVENT_TYPES.QUOTA_EXCEEDED, {
-                            reason: 'ai_ops',
+                            reason: quotaReason(errorBody),
                             message: msg,
                             upgradeRequired: errorBody.upgradeRequired || 'creator',
                         });
@@ -4361,7 +4470,7 @@ export class MediaExecutionEngine {
                         return { action: command.action, success: true, skipped: true, message: `${endpoint} not implemented` };
                     }
                     errorMessage = errorBody.error || errorBody.message || errorMessage;
-                } catch (_) {}
+                } catch { /* the error body was not JSON; the status is enough */ }
                 throw new Error(`API error ${response.status}: ${errorMessage}`);
             }
 
@@ -4489,7 +4598,9 @@ export class MediaExecutionEngine {
                     // Keep store.captions on the timeline clock too (setCaptions
                     // above left it holding the raw source-time words).
                     if (timelineWords) useTimelineStore.getState().setTimelineTranscript?.(timelineWords);
-                    const captions = groupWordsIntoCaptions(words);
+                    const captions = await attachCaptionIntelligence(
+                        groupWordsIntoCaptions(words), words, this._tracksWithDerivedAudioPeaks(useTimelineStore.getState()),
+                    );
                     console.log(`[MediaExecutionEngine] 💬 autoCaptions: adding ${captions.length} caption clips`);
                     store.addCaptionClips(captions);
                 } else {
@@ -4913,7 +5024,7 @@ export class MediaExecutionEngine {
         }
 
         const basename = (p) => (p || '').split(/[\\/]/).pop();
-        const processedBase = basename(timelineStore.uploadedFilePath || '');
+        const processedBase = basename(editableUploadPathFor(timelineStore) || '');
         const strippedBase  = processedBase ? processedBase.replace(/^\d+-/, '') : '';
 
         // ── Resolve which clips to replace ───────────────────────────────────

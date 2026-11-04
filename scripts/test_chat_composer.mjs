@@ -123,10 +123,13 @@ await check('reference documents are parsed locally and included in edit prompts
     assert.ok(/documents=\{referenceDocuments\}[\s\S]*onDocumentsChange=\{setReferenceDocuments\}/.test(rp));
     assert.ok(/withAssistantDocuments\([\s\S]*referenceDocuments/.test(rp));
 });
-await check('chat attachment button imports images and videos into the Media Bin and carries their ids into the prompt', () => {
+await check('chat references use isolated storage and are never treated as editable source footage', () => {
     const cc = read('../client/src/components/Assistant/ChatComposer.jsx');
     const layout = read('../client/src/layouts/IDELayout.jsx');
     const uploadRoute = read('../routes/mediaAssetRoutes.js');
+    const proxyService = read('../client/src/services/proxyService.js');
+    const engine = read('../client/src/agent/MediaExecutionEngine.js');
+    const timelineStore = read('../client/src/store/useTimelineStore.js');
     const server = read('../index.js');
     assert.match(cc, /accept="[^"]*video\/\*,image\/\*"/);
     assert.match(cc, /file\.type\.startsWith\('video\/'\) \|\| file\.type\.startsWith\('image\/'\)/);
@@ -135,6 +138,16 @@ await check('chat attachment button imports images and videos into the Media Bin
     assert.match(rp, /withAssistantMedia\(commandWithDocuments, referenceMedia/);
     assert.match(layout, /onImportMedia=\{async \(files\) => handleFileImport\(\{ target: \{ files \}, deferTimelinePlacement: true, referenceMaterial: true \}\)\}/);
     assert.match(layout, /assistantReference: Boolean\(e\.referenceMaterial\)/);
+    assert.match(layout, /if \(e\.referenceMaterial\)[\s\S]*?ProxyService\.uploadReference\([\s\S]*?continue;/);
+    assert.match(layout, /visualAnalysisRequested: !e\.referenceMaterial/);
+    assert.match(proxyService, /\/api\/assets\/reference-upload-url/);
+    assert.match(proxyService, /\/api\/assets\/complete-reference-upload/);
+    assert.match(uploadRoute, /references\/\$\{userId\}\/\$\{assetId\}/);
+    assert.match(uploadRoute, /is_reference: true/);
+    assert.match(engine, /assistantReference !== true/);
+    assert.match(engine, /value\.startsWith\('references\/'\)/);
+    assert.match(timelineStore, /Ignored attempt to set an assistant reference as the editable source/);
+    assert.match(timelineStore, /editableUploadPath\(projectData\.uploadedFilePath, updates\.assets\)/);
     assert.match(uploadRoute, /router\.post\('\/image', authenticateUser, upload\.single\('image'\)/);
     assert.match(uploadRoute, /fileSize: 20 \* 1024 \* 1024/);
     assert.match(server, /app\.use\('\/api\/assets', uploadLimiter, require\('\.\/routes\/mediaAssetRoutes'\)\)/);

@@ -77,7 +77,9 @@ export function summarizeUploads(assets, tracks) {
 
     const items = [];
     for (const a of assetList) {
-        if (!a || a.type !== 'video') continue;
+        // Chat references are guidance assets; their upload must never block
+        // playback of the editable timeline or become the mobile upload preview.
+        if (!a || a.type !== 'video' || a.assistantReference === true) continue;
         const s = getAssetUploadStatus(a);
         if (s.phase === UPLOAD_PHASES.READY) continue;
         items.push({

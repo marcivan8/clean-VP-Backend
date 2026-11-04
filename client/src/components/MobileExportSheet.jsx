@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Share as ShareIcon, Download, AlertCircle, RotateCw, SlidersHorizontal } from 'lucide-react';
 import useTimelineStore from '../store/useTimelineStore';
 import { PLATFORMS, RESOLUTIONS, QUALITY_PROFILES } from './exportPresets.js';
 import MobileSheet, { SheetLabel } from './MobileSheet';
+import ShareDestinations from './ShareDestinations.jsx';
 
 /**
  * MobileExportSheet — export on phones (phase 7), as one bottom sheet:
@@ -55,6 +56,22 @@ export default function MobileExportSheet({ open, onClose, onExport, isExporting
     const [showOptions, setShowOptions] = useState(false);
     const [busy, setBusy] = useState(null); // 'save' | 'share' | null
     const [shareError, setShareError] = useState(null);
+    // The exported file, fetched BEFORE the user taps Share. See save().
+    const [readyFile, setReadyFile] = useState(null);
+
+    // iOS requires navigator.share() to be called while the tap is still the
+    // active user gesture. Awaiting a multi-MB download first spends that
+    // activation and share() then throws NotAllowedError, which is what the
+    // user saw: tap Share, get an error. Fetching the file as soon as the
+    // render lands means the tap handler can call share() synchronously.
+    useEffect(() => {
+        if (!open || !result?.url) { setReadyFile(null); return undefined; }
+        let cancelled = false;
+        fetchAsFile(result.url, result.filename)
+            .then((f) => { if (!cancelled) setReadyFile(f); })
+            .catch(() => { /* save() falls back to fetching on demand */ });
+        return () => { cancelled = true; };
+    }, [open, result?.url, result?.filename]);
 
     if (!open) return null;
 
@@ -67,25 +84,51 @@ export default function MobileExportSheet({ open, onClose, onExport, isExporting
     const start = () => { setShowOptions(false); setShareError(null); onExport(settings); };
     const canShareFiles = typeof navigator !== 'undefined' && typeof navigator.canShare === 'function';
 
-    const save = async (mode) => {
+    const shareFailed = (err, mode) => {
+        // Dismissing the share sheet is not a failure.
+        if (err?.name === 'AbortError') return;
+        console.error('[MobileExportSheet] save/share failed:', err);
+        if (mode === 'save') window.open(result.url, '_blank');
+        else setShareError(t('mobileExport.shareFailed'));
+    };
+
+    // Deliberately NOT async. On iOS the share sheet only opens if
+    // navigator.share() runs inside the tap's user activation, so when the
+    // file is already in hand it is called here with nothing awaited before
+    // it. The async path below is only for the case where the prefetch has
+    // not finished or failed, where a download is the outcome anyway.
+    const save = (mode) => {
         if (!result?.url) return;
-        setBusy(mode); setShareError(null);
+        setShareError(null);
+
+        if (readyFile && canShareFiles && navigator.canShare({ files: [readyFile] })) {
+            // iOS / Android share sheet: "Save video", TikTok, Instagram…
+            navigator.share({ files: [readyFile], title: readyFile.name })
+                .catch((err) => shareFailed(err, mode));
+            return;
+        }
+        if (readyFile && mode === 'save') {
+            downloadFile(readyFile);
+            return;
+        }
+        saveSlowPath(mode);
+    };
+
+    const saveSlowPath = async (mode) => {
+        setBusy(mode);
         try {
             const file = await fetchAsFile(result.url, result.filename);
-            if (canShareFiles && navigator.canShare({ files: [file] })) {
-                // iOS / Android share sheet: "Save video", TikTok, Instagram…
-                await navigator.share({ files: [file], title: file.name });
-            } else if (mode === 'save') {
+            if (mode === 'save') {
                 downloadFile(file);
+            } else if (canShareFiles && navigator.canShare({ files: [file] })) {
+                // Activation is likely already spent by the await above, so
+                // this can still be refused on iOS. It is the last resort.
+                await navigator.share({ files: [file], title: file.name });
             } else {
                 setShareError(t('mobileExport.shareUnsupported'));
             }
         } catch (err) {
-            if (err?.name !== 'AbortError') {
-                console.error('[MobileExportSheet] save/share failed:', err);
-                if (mode === 'save') window.open(result.url, '_blank');
-                else setShareError(t('mobileExport.shareFailed'));
-            }
+            shareFailed(err, mode);
         } finally {
             setBusy(null);
         }
@@ -205,6 +248,12 @@ export default function MobileExportSheet({ open, onClose, onExport, isExporting
                         </button>
                     )}
                     {shareError && <span style={{ fontSize: 12.5, color: 'var(--coral)' }}>{shareError}</span>}
+
+                    {/* Below Save and Share, not instead of them: the phone's
+                        own share sheet already reaches TikTok and Instagram
+                        and keeps working whatever the API review says. */}
+                    <ShareDestinations />
+
                     <button
                         type="button" onClick={() => setShowOptions(true)}
                         style={{ minHeight: 44, border: 0, background: 'transparent', color: 'var(--accent)', fontFamily: 'var(--f-sans)', fontSize: 14, fontWeight: 500 }}

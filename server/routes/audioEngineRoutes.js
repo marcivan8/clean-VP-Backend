@@ -130,6 +130,25 @@ router.post('/recommend/sfx', authenticateUser, async (req, res) => {
     }
 });
 
+// Caption art direction shares the existing time-aligned event intelligence,
+// without resolving animation presets or querying SFX.
+router.post('/caption-cues', authenticateUser, async (req, res) => {
+    const projectState = req.body?.projectState;
+    if (!projectState || !Array.isArray(projectState.tracks)) {
+        return res.status(400).json({ error: 'projectState.tracks is required' });
+    }
+    try {
+        const kinds = new Set(['EMOTIONAL_BEAT', 'PUNCHLINE_DETECTED', 'EMPHASIS_MOMENT', 'REVEAL']);
+        const events = timelineEventDetector.detect(projectState)
+            .filter(event => kinds.has(event.eventType))
+            .map(event => ({ eventType: event.eventType, timelineTime: event.timelineTime, metadata: event.metadata || {} }));
+        return res.json({ events });
+    } catch (err) {
+        console.error('[audioEngineRoutes POST /caption-cues] error:', err.message);
+        return res.status(500).json({ error: err.message });
+    }
+});
+
 // ── POST /api/audio/animate-automatically ─────────────────────────────────────
 // R68 — AI Animation Intelligence. "Brain chooses animations. Users don't."
 // One explicit command: detect the five semantic events heuristically

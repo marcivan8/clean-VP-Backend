@@ -169,11 +169,29 @@ export function buildAutopilotSteps(styleId, request, facts = {}) {
         return steps;
     }
     const steps = [];
-    if (style.id === 'reel') {
+    // R144 — the mobile flow asks for a short of a named length whatever the
+    // style, because its outcome cards ARE lengths ("Reel, 15-30s"). Only the
+    // Reel playbook cut a short before this; every other style cleaned and
+    // captioned the whole video, so a phone could not ask Talking head for a
+    // 40-second cut at all. Opt-in through facts, so desktop Auto, which never
+    // passes it, behaves exactly as it did.
+    //
+    // The seconds go into the PROMPT on purpose: EditPlanner reads a 2-3 digit
+    // number followed by s/sec/second from the request and sets explicit:true,
+    // which is what drops the one-minute floor (R106). Reusing that path means
+    // there is one rule for an explicit length, not two.
+    const shortTarget = Number(facts.shortTargetSeconds) || 0;
+    const wantsShort = shortTarget >= 10 && shortTarget <= 180;
+    if (style.id === 'reel' || wantsShort) {
         if (!facts.hasTranscript) steps.push({ key: 'transcript', prompt: 'Add captions' });
-        // No fixed number: the length should follow the source video, capped
-        // at maxDuration -- see EditPlanner.js/MediaExecutionEngine.js extract_short.
-        steps.push({ key: 'short', prompt: 'Extract a short of the strongest moment' });
+        // Without a named length the length follows the source video, capped at
+        // maxDuration -- see EditPlanner.js/MediaExecutionEngine.js extract_short.
+        steps.push({
+            key: 'short',
+            prompt: wantsShort
+                ? `Extract a ${shortTarget} second short of the strongest moment`
+                : 'Extract a short of the strongest moment',
+        });
         steps.push({ key: 'vertical', prompt: 'Set the aspect ratio to 9:16' });
     }
     if (style.id === 'vlog') {

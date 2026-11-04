@@ -257,7 +257,7 @@ class MediaIntelligencePipeline {
         }
     }
 
-    /** Analyze/cache the visual grammar for an existing video reference. */
+    /** Analyze/cache the visual grammar for an existing video or image reference. */
     async analyzeStyleReference(assetId, userId) {
         const { data: asset, error } = await supabaseAdmin
             .from('media_assets')
@@ -276,7 +276,10 @@ class MediaIntelligencePipeline {
         const { localPath, cleanupPath } = await this._resolveToLocalFile(asset.gcs_path, asset.id);
         if (!localPath) throw new Error('Reference video is not available for style analysis yet.');
         try {
-            const profile = await this.visualAnalyzer.analyze(localPath, null, { styleReference: true });
+            const isImage = /\.(?:jpe?g|png|webp|gif)$/i.test(asset.name || asset.gcs_path);
+            const profile = isImage
+                ? await this.visualAnalyzer.analyzeImageBase64(fs.readFileSync(localPath).toString('base64'), { styleReference: true })
+                : await this.visualAnalyzer.analyze(localPath, null, { styleReference: true });
             const styleProfile = profile?.visualStyleProfile || null;
             if (styleProfile) {
                 const { error: updateError } = await supabaseAdmin

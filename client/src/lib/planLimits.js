@@ -48,6 +48,12 @@ export const AI_OPS_LIMITS = {
 };
 
 // Monthly prices shown on the pricing page (HomePage.jsx).
+// Mirrors FREE_TRIAL_AUTO_RUNS in middleware/usageGate.js. The published free
+// plan locks editing styles and Auto mode; a brand new account gets this many
+// Auto runs with both unlocked so a beginner sees a finished short before the
+// wall. Server side is authoritative, this is for copy. R148.
+export const FREE_TRIAL_AUTO_RUNS = 3;
+
 export const PLAN_PRICES = {
     creator: '€15',
     pro:     '€35',

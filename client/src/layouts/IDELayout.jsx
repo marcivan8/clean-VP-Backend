@@ -62,7 +62,7 @@ import { computeDragSnap } from '../timeline/dragSnap.js';
 import { createClipCollisionDetection, getClipDropStart } from '../timeline/clipDrop.js';
 
 import { probeMedia, probeVideoUrlDimensions } from '../utils/mediaProbe';
-import { takePendingNewVideo } from '../utils/pendingNewVideo.js';
+import { takePendingNewVideoFiles } from '../utils/pendingNewVideo.js';
 import ProxyService from '../services/proxyService';
 import useAIStore from '../store/useAIStore';
 import useSessionStore from '../store/useSessionStore';
@@ -72,6 +72,8 @@ import MobileUploadStatus from '../components/MobileUploadStatus';
 import MobileTransportBar from '../components/MobileTransportBar';
 import MobileEditorMenu from '../components/MobileEditorMenu';
 import MobileRokaApproval from '../components/MobileRokaApproval';
+import MobileFlow from '../components/MobileFlow';
+import useMobileFlowStore from '../store/useMobileFlowStore';
 import MobileEditToast from '../components/MobileEditToast';
 import MobileCaptionSheets from '../components/MobileCaptionSheets';
 import MobileTranscriptSheet from '../components/MobileTranscriptSheet';
@@ -182,7 +184,7 @@ const CONTEXTUAL_SUGGESTION = {
     talking_head:      'make it more dynamic',
 };
 
-const IDELayout = ({ children, mode = 'editor' }) => {
+const IDELayout = ({ mode = 'editor' }) => {
     const { t } = useTranslation('editor');
     const previewStageRef = useRef(null);
     const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
@@ -308,7 +310,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         };
     }, []);
 
-    const { isPlaying, setUploadedFile, updateClip, uploadedFile, aspectRatio, assets, addAssets, zoomLevel, tracks, activeClipId, setActiveClip, past, future, duration, projectName, projectId, setProjectName } = useTimelineStore(useShallow(state => ({
+    const { isPlaying, updateClip, aspectRatio, assets, addAssets, tracks, activeClipId, setActiveClip, past, future, duration, projectName, projectId, setProjectName } = useTimelineStore(useShallow(state => ({
     isPlaying: state.isPlaying,
     setUploadedFile: state.setUploadedFile,
     updateClip: state.updateClip,
@@ -348,7 +350,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             const { renameProject } = await import('../lib/projectsApi.js');
             await renameProject(projectId, trimmed);
         }
-    }, [nameInput, projectName, projectId, setProjectName]);
+    }, [nameInput, projectName, projectId, setProjectName, t]);
 
     const { activeClip, activeTrackId, activeTrackType } = React.useMemo(() => {
         if (!activeClipId) return { activeClip: null, activeTrackId: null, activeTrackType: null };
@@ -532,7 +534,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         [],
     );
     const [showSidebar, setShowSidebar] = React.useState(false);
-    const [showAI, setShowAI] = React.useState(false);
     
     const { isMobile } = useDeviceType();
     useLayoutEffect(() => {
@@ -610,7 +611,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     }, []);
 
     const [isExporting, setIsExporting] = React.useState(false);
-    const [exportUrl, setExportUrl] = React.useState(null);
+    const [, setExportUrl] = React.useState(null);
     const [exportResult, setExportResult] = React.useState(null);
     // Real render progress (0-100) from the export job; null when unknown.
     const [exportProgress, setExportProgress] = React.useState(null);
@@ -639,14 +640,19 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     const [quotaModal, setQuotaModal] = React.useState(null); // null | { message, upgradeRequired, reason }
     useEffect(() => {
         const unsubscribe = EventBus.on(EVENT_TYPES.QUOTA_EXCEEDED, (payload) => {
+            if (!payload?.reason || payload.reason === 'ai_ops') {
+                useAIStore.getState().setAiOpsExhausted({ upgradeRequired: payload?.upgradeRequired || 'creator' });
+            }
+            // While the guided mobile flow is open it shows this refusal as a
+            // step of its own (MobileFlow -> PlanSheet), so a modal here too
+            // would be two upgrade prompts for one refusal. The AI bar state
+            // above still updates either way. R148.
+            if (useMobileFlowStore.getState().active) return;
             setQuotaModal({
                 message: payload?.message,
                 upgradeRequired: payload?.upgradeRequired || 'creator',
                 reason: payload?.reason || 'ai_ops',
             });
-            if (!payload?.reason || payload.reason === 'ai_ops') {
-                useAIStore.getState().setAiOpsExhausted({ upgradeRequired: payload?.upgradeRequired || 'creator' });
-            }
         });
         return unsubscribe;
     }, []);
@@ -825,7 +831,6 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         handleDeselect();
     }, [activeTrackId, activeClipId, handleDeselect]);
 
-    const [activeColorRange, setActiveColorRange] = React.useState('reds');
     const [openMenu, setOpenMenu] = React.useState(null);
 
     const projectLoaderRef = useRef(null);
@@ -867,6 +872,14 @@ const IDELayout = ({ children, mode = 'editor' }) => {
         }
     };
 
+    // Writes grading.selective for the active clip. Nothing in this component
+    // calls it yet: the per-range colour picker was never wired up. It is kept
+    // because the RENDER half is live (Player/VideoPlayer.jsx forwards
+    // activeClip.grading.selective, and PlaybackEngine holds selectiveHue/Sat/Lum
+    // uniforms for it), so this is the missing writer for a real feature rather
+    // than dead code, and scripts/test_lut_export.js pins the _manuallyAdjusted
+    // protection it applies.
+    // eslint-disable-next-line no-unused-vars
     const handleSelectiveGradingChange = (range, key, value) => {
         if (!activeClip || !activeTrackId) return;
         const currentGrading = activeClip.grading || {};
@@ -985,7 +998,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             // Mobile: show "Opening your video" while the files are probed
             // (reading metadata can take seconds on a phone before the asset,
             // and its upload progress, exist).
-            const firstVideo = files.find(f => f.type.startsWith('video'));
+            const firstVideo = e.referenceMaterial ? null : files.find(f => f.type.startsWith('video'));
             if (firstVideo) useAIStore.getState().setOpeningFile({ name: firstVideo.name, at: Date.now() });
 
             const processedAssets = [];
@@ -1058,7 +1071,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     source: 'user_upload',
                     assistantReference: Boolean(e.referenceMaterial),
                     type: isVideo ? 'video' : file.type.startsWith('image') ? 'image' : 'audio',
-                    visualAnalysisRequested: isVideo || imageAnalysisAllowed,
+                    visualAnalysisRequested: !e.referenceMaterial && (isVideo || imageAnalysisAllowed),
                     url: url,
                     file: file,
                     fileSize: file.size,
@@ -1077,6 +1090,45 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                     assetEntry.visualAnalysisRequested = requested;
                     useTimelineStore.getState().updateAsset(assetId, { visualAnalysisRequested: requested });
                 };
+
+                if (e.referenceMaterial) {
+                    // Guidance media has its own storage namespace and DB row.
+                    // It must never enter proxy generation, transcription, the
+                    // ordinary asset analyzer, or the active-source fields.
+                    if (!isVideo && !isImage) {
+                        processedAssets.splice(processedAssets.indexOf(assetEntry), 1);
+                        URL.revokeObjectURL(url);
+                        throw new Error('Only image and video files can be attached as chat references.');
+                    }
+                    try {
+                        const stored = await ProxyService.uploadReference(
+                            file,
+                            assetId,
+                            useTimelineStore.getState().projectId || null,
+                            progress => useTimelineStore.getState().updateAsset(assetId, { uploadProgress: progress }),
+                        );
+                        const persistedReference = {
+                            url: stored.mediaUrl,
+                            proxyUrl: stored.mediaUrl,
+                            sourceUrl: stored.sourceUrl,
+                            gcsPath: stored.gcsPath,
+                            mimeType: stored.mimeType,
+                            fileSize: stored.size || file.size,
+                            visualAnalysisRequested: false,
+                            isProxying: false,
+                            uploadPhase: 'ready',
+                            uploadError: null,
+                        };
+                        Object.assign(assetEntry, persistedReference);
+                        URL.revokeObjectURL(url);
+                    } catch (uploadError) {
+                        processedAssets.splice(processedAssets.indexOf(assetEntry), 1);
+                        URL.revokeObjectURL(url);
+                        console.warn(`[IDELayout] reference upload failed for "${file.name}":`, uploadError.message);
+                        throw uploadError;
+                    }
+                    continue;
+                }
 
                 if (isVideo) {
                     // After 5s with no response, assume upload is done and proxy is encoding
@@ -1542,7 +1594,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             addAssets(processedAssets);
             if (!e.referenceMaterial) triggerHint('first_upload');
 
-            if (processedAssets.length === 1 && !e.deferTimelinePlacement) {
+            if (processedAssets.length === 1 && !e.deferTimelinePlacement && !e.referenceMaterial) {
                 // Before auto-placing, evict ghost clips (stale segments from a
                 // previous session that have no URL). Without this the new clip
                 // overlaps them visually and `currentEnd` would push it far right
@@ -1617,11 +1669,17 @@ const IDELayout = ({ children, mode = 'editor' }) => {
     // project; start the normal upload once the session check is done (the
     // upload path uses the anonymous session id when there is one; signed-in
     // users have none, so this must not wait for sessionId itself).
-    // takePendingNewVideo returns the file only once.
+    // takePendingNewVideoFiles returns them only once. R145: a short is often
+    // several clips and a few stills, so this is a list; one file is a list of one.
     useEffect(() => {
         if (!projectId || !sessionChecked) return;
-        const file = takePendingNewVideo(projectId);
-        if (file) handleFileImport({ target: { files: [file] } });
+        const files = takePendingNewVideoFiles(projectId);
+        if (!files.length) return;
+        handleFileImport({ target: { files } });
+        // R145 — a phone arriving with fresh media is the beginner case: ask
+        // what they are making instead of dropping them on a timeline. Only
+        // here, so opening an existing project never gets the flow.
+        if (isMobile) useMobileFlowStore.getState().open();
         // eslint-disable-next-line react-hooks/exhaustive-deps -- handleFileImport is recreated every render
     }, [projectId, sessionChecked]);
 
@@ -2182,6 +2240,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
             />
             <ClarificationDialog />
             <ApprovalDialog />
+            {isMobile && <MobileFlow onShare={() => setShowMobileExport(true)} />}
             {isMobile && <MobileRokaApproval />}
             {isMobile && <MobileCaptionSheets />}
             {isMobile && <MobileTranscriptSheet />}

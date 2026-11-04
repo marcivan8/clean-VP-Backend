@@ -67,6 +67,22 @@ const SCENE_COMPONENTS_BY_KIND = Object.freeze({
     cta: ['CTAWidget', 'KineticTitle'],
     outro: ['TitleSequence', 'KineticTitle'],
 });
+const SCENE_BACKGROUND_KINDS = new Set(['gradient-wash', 'particles', 'light-sweep']);
+
+function cleanSceneBackground(raw) {
+    if (!raw || typeof raw !== 'object' || !SCENE_BACKGROUND_KINDS.has(raw.kind)) return null;
+    const color = value => /^#[\da-f]{6}$/i.test(String(value || '')) ? String(value) : null;
+    const background = { kind: raw.kind };
+    if (color(raw.color)) background.color = color(raw.color);
+    if (color(raw.color2)) background.color2 = color(raw.color2);
+    if (raw.kind === 'gradient-wash') background.opacity = Number.isFinite(Number(raw.opacity))
+        ? Math.max(0.08, Math.min(0.28, Number(raw.opacity))) : 0.18;
+    if (raw.kind === 'particles') {
+        background.count = Math.max(6, Math.min(24, Math.round(Number(raw.count) || 14)));
+        background.size = Math.max(2, Math.min(6, Number(raw.size) || 3));
+    }
+    return background;
+}
 
 function sceneVisualCatalog(looks = {}) {
     return Object.fromEntries(Object.entries(SCENE_COMPONENTS_BY_KIND).map(([kind, components]) => [
@@ -262,6 +278,7 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techni
         ...(visualLines.length ? visualLines : ['- No visual catalog is available; omit visual selections.']),
         'For each beat, add "visual":{"component":"...","preset":"..."} and a short "direction" describing the intended on-screen composition/action and how it advances the sequence.',
         'Make adjacent beats visibly distinct while keeping one visual identity. The selected component and preset are executed by the scene composer; never name options outside the catalog.',
+        'Optionally add one restrained full-frame background motion only when it improves the scene: {"kind":"gradient-wash"|"particles"|"light-sweep","color":"#RRGGBB","color2":"#RRGGBB","opacity":0.08..0.28,"count":6..24,"size":2..6}. Prefer a low-opacity gradient wash; particles or a light sweep should be sparse. Keep the speaker and readable text clear.',
     ];
     if (hasStructure) {
         // The caller already decided the structure (an explicit tone/beat
@@ -290,7 +307,7 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techni
             ...standardsLines,
             '',
             'Reply as JSON only:',
-            '{"title":"...","points":["...","..."],"cta":"...","stat":{"value":"...","label":"..."},"beats":[{"kind":"point","text":"...","visual":{"component":"KineticTitle","preset":"creator"},"direction":"The benefit builds as a compact two-line headline"}]}',
+            '{"title":"...","points":["...","..."],"cta":"...","stat":{"value":"...","label":"..."},"background":{"kind":"gradient-wash","color":"#00E5FF","color2":"#8A2BE2","opacity":0.16},"beats":[{"kind":"point","text":"...","visual":{"component":"KineticTitle","preset":"creator"},"direction":"The benefit builds as a compact two-line headline"}]}',
         ].filter(Boolean).join('\n');
     }
     // R101 PHASE 1 — no structure was handed in: decide the tone AND the
@@ -307,6 +324,7 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techni
         `Each beat has a "kind", one of: ${BEAT_KINDS.join(', ')}. Typical sequences open with "intro", use "point" for benefits, features or steps, "stat" for one figure worth a callout, "quote" for a testimonial, and close with "cta" when the brief implies a call to action.`,
         'Decide how many beats and which kinds actually fit the brief - do not force a shape it does not ask for.',
         ...visualDirection,
+        'Optionally add one restrained full-frame background motion only when it improves the scene: {"kind":"gradient-wash"|"particles"|"light-sweep","color":"#RRGGBB","color2":"#RRGGBB","opacity":0.08..0.28,"count":6..24,"size":2..6}. Prefer a low-opacity gradient wash; particles or a light sweep should be sparse. Keep the speaker and readable text clear.',
         '',
         'A beat MAY also suggest its own "motion" when the tone\'s usual treatment would undersell it (a standout number, the final call to action) - most beats should leave "motion" out and let the tone\'s own default carry them:',
         `  "enter" (required if "motion" is given): one of ${ENTER_VERBS.join(', ')}`,
@@ -327,7 +345,7 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techni
         ...standardsLines,
         '',
         'Reply as JSON only:',
-        '{"tone":"...","beats":[{"kind":"intro","text":"...","visual":{"component":"TitleSequence","preset":"cinematic"},"direction":"The title resolves from a dim outline into a clean hero lockup"},{"kind":"point","text":"...","kicker":"01","visual":{"component":"KineticTitle","preset":"creator"},"direction":"The key phrase lands as a single bold focal point","technique":"hook-slam-headline"},{"kind":"cta","text":"...","motion":{"enter":"slam-in","emphasis":"punch","energy":0.8}}]}',
+        '{"tone":"...","background":{"kind":"gradient-wash","color":"#00E5FF","color2":"#8A2BE2","opacity":0.16},"beats":[{"kind":"intro","text":"...","visual":{"component":"TitleSequence","preset":"cinematic"},"direction":"The title resolves from a dim outline into a clean hero lockup"},{"kind":"point","text":"...","kicker":"01","visual":{"component":"KineticTitle","preset":"creator"},"direction":"The key phrase lands as a single bold focal point","technique":"hook-slam-headline"},{"kind":"cta","text":"...","motion":{"enter":"slam-in","emphasis":"punch","energy":0.8}}]}',
     ].filter(Boolean).join('\n');
 }
 
@@ -454,6 +472,7 @@ function cleanScenePlan(raw, visualCatalog = {}) {
     const beats = Array.isArray(raw.beats) ? raw.beats.slice(0, 8).map(beat => cleanBeat(beat, visualCatalog)).filter(Boolean) : [];
     const toneRaw = typeof raw.tone === 'string' ? raw.tone.trim().toLowerCase() : '';
     const tone = TONE_KEYS.includes(toneRaw) ? toneRaw : '';
+    const background = cleanSceneBackground(raw.background);
 
     // A single word is a label, not a title; two words is the floor.
     const usableTitle = title.split(' ').length >= 2 ? title : '';
@@ -465,6 +484,7 @@ function cleanScenePlan(raw, visualCatalog = {}) {
         ...(stat ? { stat } : {}),
         ...(beats.length ? { beats } : {}),
         ...(tone ? { tone } : {}),
+        ...(background ? { background } : {}),
     };
 }
 
@@ -772,6 +792,7 @@ module.exports.buildShortPlanPrompt = buildShortPlanPrompt;
 module.exports.cleanShortPlan = cleanShortPlan;
 module.exports.buildScenePlanPrompt = buildScenePlanPrompt;
 module.exports.cleanScenePlan = cleanScenePlan;
+module.exports.cleanSceneBackground = cleanSceneBackground;
 module.exports.buildMotionPrompt = buildMotionPrompt;
 module.exports.cleanLayers = cleanLayers;
 module.exports.loadComposer = loadComposer;

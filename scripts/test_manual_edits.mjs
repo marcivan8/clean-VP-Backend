@@ -85,4 +85,52 @@ assert.equal(clip('k1').animations?.[0]?.id, 'pop-1');
 S.getState().updateClip('txt', 'k1', { animations: [] });
 assert.deepEqual(clip('k1').animations, []);
 console.log('✓ updateClip keeps animations (and clearing them)');
+// ── R150: ripple delete from the assistant ───────────────────────────────────
+//
+// The timeline store has rippleDeleteClip and rippleDeleteGap, but no
+// `rippleDelete`. MediaExecutionEngine called exactly that, and _callStore
+// throws on a method that does not exist, so ripple_delete was dead from the
+// assistant: the compiler emitted it (CommandCompiler ripple_delete ->
+// ENGINE.STORE 'rippleDelete'), and executing it threw "Store method
+// \"rippleDelete\" does not exist." A second, unreachable stub in
+// useEditorStore returned the state unchanged after taking a history snapshot.
+{
+    // MediaExecutionEngine imports '../store/useTimelineStore' without an
+    // extension, which Vite resolves and plain Node does not. The loader hook
+    // the other engine suites use handles it; registered here rather than at
+    // the top of the file so the rest of this suite stays dependency free.
+    const { register } = await import('module');
+    register('./lib/clientLoaderHooks.mjs', import.meta.url);
+
+    const { readFileSync } = await import('fs');
+    const engineSrc = readFileSync(new URL('../client/src/agent/MediaExecutionEngine.js', import.meta.url), 'utf8');
+    const editorSrc = readFileSync(new URL('../client/src/store/useEditorStore.js', import.meta.url), 'utf8');
+    assert.ok(!/_callStore\(store, 'rippleDelete'/.test(engineSrc),
+        'the engine must not call a store method that does not exist');
+    assert.ok(!/rippleDelete: \(atTime\)/.test(editorSrc),
+        'the unreachable useEditorStore stub must be gone');
+
+    const { MediaExecutionEngine } = await import('../client/src/agent/MediaExecutionEngine.js');
+    const engine = new MediaExecutionEngine();
+    const job = { id: 'test-ripple', signal: { aborted: false }, results: [] };
+
+    load();
+    // Shrink A so there is a real gap between 3 and 4.
+    S.getState().updateClip('track-default-video', 'A', { duration: 3 });
+    assert.equal(clip('B').start, 4, 'the gap exists before the command runs');
+
+    let r = await engine.executeCommand({ action: 'rippleDelete', args: { atTime: 3.5 } }, job);
+    assert.equal(r.success, true, 'the assistant path must close the gap, not throw');
+    assert.equal(clip('B').start, 3, 'B slid left by the gap length');
+    // Captions follow, the same as the right-click path.
+    assert.equal(clip('k2').start, 3.5, 'the caption after the gap moved with B');
+
+    // There is no gap at 1s, it is inside a clip. The old code would have
+    // reported success for doing nothing.
+    r = await engine.executeCommand({ action: 'rippleDelete', args: { atTime: 1 } }, job);
+    assert.equal(r.success, false, 'no gap must be reported as a failure');
+    assert.match(r.message, /no gap/i);
+    console.log('\u2713 ripple delete works from the assistant, and says so when there is no gap');
+}
+
 console.log('\nALL MANUAL-EDIT CHECKS PASSED');
