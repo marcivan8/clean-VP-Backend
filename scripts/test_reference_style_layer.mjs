@@ -135,7 +135,7 @@ const analyzer = read('server/brain/media/VisualAnalyzer.js');
 const pipeline = read('server/brain/media/MediaIntelligencePipeline.js');
 const routes = read('server/routes/brainRoutes.js');
 const worker = read('worker.js');
-assert.match(analyzer, /styleReference \? \[0\.08, 0\.28, 0\.5, 0\.72, 0\.92\]/);
+assert.match(analyzer, /\? \[0\.04, 0\.15, 0\.26, 0\.37, 0\.48, 0\.59, 0\.70, 0\.81, 0\.92\]/);
 assert.match(pipeline, /visual_style_profile: visualAnalysis\.visualStyleProfile/);
 assert.match(routes, /router\.post\('\/analyze-style-reference'/);
 assert.match(routes, /\.eq\('user_id', req\.user\.id\)/);
