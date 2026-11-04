@@ -227,19 +227,14 @@ await check('the A/B panel has an entry point in the app', () => {
     assert.match(layout, /'iterations'[,\]]/, "'iterations' is not in the tab list, so the button never appears");
 });
 
-await check('ScenePanel stays unmounted, because that was a decision', () => {
-    // Worth recording as its own check, because ScenePanel looks exactly like
-    // another unreachable panel and is not one. The Scene tab was removed on
-    // purpose: it rendered a raw "IDELAYOUT.TABS.SCENE" label (the
-    // translation was never added) and was not earning its place in the tab
-    // bar. The component is kept, unmounted, as the starting point for a
-    // future surface. test_scene_editor.mjs asserts the same thing from the
-    // other side; this one exists so anyone adding tabs here sees why.
-    // Assert on CODE patterns, not the component's name: a comment explaining
-    // why it is absent would otherwise read as the thing being present.
+await check('ScenePanel is mounted alongside MotionPanel', () => {
+    // Scene editing is part of the Motion panel, not a separate tab. Keep
+    // this reachability check aligned with test_scene_editor.mjs so the
+    // scene review and edit controls cannot silently become unreachable.
     const layout = readCode('client/src/layouts/IDELayout.jsx');
-    assert.ok(!/import\s+ScenePanel/.test(layout), 'the scene editor was imported — see test_scene_editor.mjs first');
-    assert.ok(!/activeTab === 'scene'/.test(layout), 'a scene tab was mounted — see test_scene_editor.mjs first');
+    assert.match(layout, /import ScenePanel from '\.\.\/components\/ScenePanel\.jsx'/, 'ScenePanel is not imported');
+    assert.match(layout, /activeTab === 'motion'[\s\S]*?<ScenePanel \/>[\s\S]*?<MotionPanel \/>/, 'ScenePanel is not mounted in Motion');
+    assert.ok(!/activeTab === 'scene'/.test(layout), 'ScenePanel should remain part of Motion rather than a separate tab');
 });
 
 await check('the new tab has a label in every locale', () => {
