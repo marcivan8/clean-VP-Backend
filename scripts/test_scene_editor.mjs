@@ -673,21 +673,14 @@ await check('an emptied box in the editor leaves the value alone instead of comm
     assert.doesNotMatch(panel, /onBlur=\{e => commit\(\{ style: \{ fontSize/, 'no raw numeric commit is left');
 });
 
-await check('the scene editor component is still wired to the store, and its words carry no em dashes', () => {
-    // The "Scene" tab was removed from the editor's sidebar (it showed up
-    // as a raw, untranslated "IDELAYOUT.TABS.SCENE" label — the translation
-    // was never added — and wasn't earning its place in the tab bar), but
-    // the AI command (design_scene) and the engine underneath it are
-    // unaffected: a designed scene still lands on the timeline and renders
-    // normally. ScenePanel.jsx itself is left in place, unmounted, rather
-    // than deleted, so a future surface for editing a scene's layers (e.g.
-    // from the player, or a re-added tab) is not starting from scratch.
+await check('the scene editor is mounted in the Motion panel and wired to the store', () => {
     const panel = read('client/src/components/ScenePanel.jsx');
     assert.match(panel, /editSceneNode\(sceneId, node\.id, patch\)/);
     assert.match(panel, /setSceneNodeHidden\(sceneId, node\.id/);
     assert.match(panel, /deleteSceneNode\(sceneId, node\.id\)/);
     const ide = read('client/src/layouts/IDELayout.jsx');
-    assert.doesNotMatch(ide, /ScenePanel/, 'the Scene tab was removed from the editor UI on purpose; ScenePanel should not be mounted there');
+    assert.match(ide, /import ScenePanel from '\.\.\/components\/ScenePanel\.jsx'/);
+    assert.match(ide, /activeTab === 'motion'[\s\S]*?<ScenePanel \/>[\s\S]*?<MotionPanel \/>/, 'scene editing and motion controls share the Motion panel');
     assert.doesNotMatch(ide, /'motion', 'scene', 'shorts'/, 'the scene tab should no longer be in the tab bar');
     for (const lang of ['en', 'fr']) {
         const words = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).scenePanel;

@@ -48,6 +48,26 @@ const BEAT_COMPONENT = {
     outro: { component: 'TitleSequence', share: 1 },
 };
 
+// The director may choose a different treatment per beat, but only among
+// components that understand that beat's data shape. This keeps a visual
+// suggestion executable without letting a model route a stat into a title
+// renderer that would silently drop its value.
+const BEAT_VISUAL_COMPONENTS = Object.freeze({
+    intro: ['TitleSequence', 'KineticTitle'],
+    point: ['KineticTitle', 'TitleSequence', 'LowerThird', 'Callout'],
+    stat: ['StatCallout'],
+    quote: ['QuoteCard', 'TitleSequence'],
+    cta: ['CTAWidget', 'KineticTitle'],
+    outro: ['TitleSequence', 'KineticTitle'],
+});
+
+function visualForBeat(beat) {
+    const visual = beat?.visual;
+    const allowed = BEAT_VISUAL_COMPONENTS[beat?.kind] || [];
+    if (!visual || !allowed.includes(visual.component) || !LOOKS[visual.component]?.[visual.preset]) return null;
+    return { component: visual.component, preset: visual.preset };
+}
+
 /**
  * Tone → art direction. The preset per beat kind is what gives a sequence one
  * voice: a premium launch opens cinematic and closes with a confident push,
@@ -170,6 +190,11 @@ export function planFromBrief(brief, opts = {}) {
                 kicker: typeof b?.kicker === 'string' ? b.kicker.trim() || null : null,
                 value: typeof b?.value === 'string' ? b.value.trim() || null : null,
                 label: typeof b?.label === 'string' ? b.label.trim() || null : null,
+                // Scene-plan directions are descriptive to the editor, while
+                // `visual` is a checked component/preset choice consumed by
+                // the composer below.
+                direction: typeof b?.direction === 'string' ? b.direction.trim().slice(0, 180) || null : null,
+                visual: visualForBeat({ kind, visual: b?.visual }),
                 // R101 — an AI-suggested motion for this one beat (verbs from
                 // MotionComposer's vocabulary), validated field-by-field
                 // against the look's own motion in SceneComposer.resolveLook,
@@ -368,11 +393,14 @@ export function composeSceneFromBrief(brief, opts = {}) {
         const share = (weights[i] / totalWeight) * total;
         const duration = round(asked > 0 ? share : Math.min(maxBeat * 1.6, Math.max(minBeat * 0.8, share)));
         const defaultSpec = BEAT_COMPONENT[beat.kind] || BEAT_COMPONENT.point;
+        const directedVisual = visualForBeat(beat);
         const referenceTitle = beat.kind === 'intro'
             && opts.titleComponent && opts.titlePreset
             && LOOKS[opts.titleComponent]?.[opts.titlePreset];
-        const spec = referenceTitle ? { ...defaultSpec, component: opts.titleComponent } : defaultSpec;
-        const presetSpec = referenceTitle ? opts.titlePreset : plan.tone.presets[beat.kind];
+        const spec = directedVisual
+            ? { ...defaultSpec, component: directedVisual.component }
+            : referenceTitle ? { ...defaultSpec, component: opts.titleComponent } : defaultSpec;
+        const presetSpec = directedVisual?.preset || (referenceTitle ? opts.titlePreset : plan.tone.presets[beat.kind]);
         const occurrence = kindOccurrence[beat.kind] || 0;
         kindOccurrence[beat.kind] = occurrence + 1;
         const preset = Array.isArray(presetSpec) && presetSpec.length
@@ -435,6 +463,12 @@ export function composeSceneFromBrief(brief, opts = {}) {
             pacing: plan.pacing,
             beats: plan.beats.map(b => b.kind),
             rationale: [...plan.rationale, placement.reason, ...(palette.notes || [])],
+            visualDirections: plan.beats.map((beat, index) => ({
+                beat: index + 1,
+                kind: beat.kind,
+                ...(visualForBeat(beat) || {}),
+                ...(beat.direction ? { direction: beat.direction } : {}),
+            })),
             placeholders: placeholders.length,
         },
     }));

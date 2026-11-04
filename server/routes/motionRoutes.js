@@ -19,7 +19,7 @@ const express = require('express');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { authenticateUser } = require('../../middleware/auth.js');
-const { getAIClient, isAIConfigured, resolveModel } = require('../../services/AIProvider');
+const { getAIClient, getAIFor, isAIConfigured, resolveModel } = require('../../services/AIProvider');
 const { sanitizeEditingStyle, isCalmStyle } = require('../brain/editingStyles');
 const { generateScenePlan, generateMotionScript } = require('../../services/motionProvider.js');
 // R103 — the Motion Design Knowledge Base. Retrieval is deterministic and
@@ -47,6 +47,32 @@ let composerPromise = null;
 function loadComposer() {
     if (!composerPromise) composerPromise = import(pathToFileURL(COMPOSER_PATH).href);
     return composerPromise;
+}
+
+// Scene plans name visual treatments from the same library the browser uses
+// to build them. Keep this lazy so unrelated motion routes do not load the
+// scene composition graph during server startup.
+const SCENE_COMPOSER_PATH = path.join(__dirname, '..', '..', 'client', 'src', 'motion', 'SceneComposer.js');
+let sceneComposerPromise = null;
+function loadSceneComposer() {
+    if (!sceneComposerPromise) sceneComposerPromise = import(pathToFileURL(SCENE_COMPOSER_PATH).href);
+    return sceneComposerPromise;
+}
+
+const SCENE_COMPONENTS_BY_KIND = Object.freeze({
+    intro: ['TitleSequence', 'KineticTitle'],
+    point: ['KineticTitle', 'TitleSequence', 'LowerThird', 'Callout'],
+    stat: ['StatCallout'],
+    quote: ['QuoteCard', 'TitleSequence'],
+    cta: ['CTAWidget', 'KineticTitle'],
+    outro: ['TitleSequence', 'KineticTitle'],
+});
+
+function sceneVisualCatalog(looks = {}) {
+    return Object.fromEntries(Object.entries(SCENE_COMPONENTS_BY_KIND).map(([kind, components]) => [
+        kind,
+        components.flatMap(component => Object.keys(looks[component] || {}).map(preset => ({ component, preset }))),
+    ]));
 }
 
 const MAX_LAYERS = 12;
@@ -199,7 +225,7 @@ const EXIT_VERBS = ['fade-out', 'sink-out', 'fly-out', 'shrink-out', 'blur-out',
  * placeholders, so the feature degrades to "structure only" rather than
  * breaking.
  */
-function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techniques = [], useVibedStandards = false }) {
+function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techniques = [], useVibedStandards = false, visualCatalog = {} }) {
     // R103 — the shortlist retrieved from the knowledge base for THIS brief.
     // Absent (an older caller, or nothing scored) means the block is simply
     // not in the prompt and the model free-forms verbs exactly as before.
@@ -226,6 +252,17 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techni
         : [];
 
     const hasStructure = Array.isArray(beats) && beats.length > 0;
+    const visualLines = Object.entries(visualCatalog).map(([kind, options]) =>
+        `- ${kind}: ${(options || []).map(option => `${option.component}/${option.preset}`).join(', ')}`
+    );
+    const visualDirection = [
+        '',
+        'DIRECT EACH BEAT AS A BUILDABLE SCENE, not just a line of copy.',
+        'Choose one visual treatment from this exact component/preset catalog for each beat:',
+        ...(visualLines.length ? visualLines : ['- No visual catalog is available; omit visual selections.']),
+        'For each beat, add "visual":{"component":"...","preset":"..."} and a short "direction" describing the intended on-screen composition/action and how it advances the sequence.',
+        'Make adjacent beats visibly distinct while keeping one visual identity. The selected component and preset are executed by the scene composer; never name options outside the catalog.',
+    ];
     if (hasStructure) {
         // The caller already decided the structure (an explicit tone/beat
         // list) — this is the original, narrower job: just write the words
@@ -240,6 +277,7 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techni
             transcript ? `What is said in the video (use it for the facts, do not quote it at length):\n"""${transcript}"""` : 'There is no transcript, so work from the brief alone.',
             '',
             `The sequence has these beats, in order: ${asked}.`,
+            ...visualDirection,
             '',
             'Rules:',
             '- A title of 2 to 7 words. No full stop. Never a hashtag or an emoji.',
@@ -252,7 +290,7 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techni
             ...standardsLines,
             '',
             'Reply as JSON only:',
-            '{"title":"...","points":["...","..."],"cta":"...","stat":{"value":"...","label":"..."}}',
+            '{"title":"...","points":["...","..."],"cta":"...","stat":{"value":"...","label":"..."},"beats":[{"kind":"point","text":"...","visual":{"component":"KineticTitle","preset":"creator"},"direction":"The benefit builds as a compact two-line headline"}]}',
         ].filter(Boolean).join('\n');
     }
     // R101 PHASE 1 — no structure was handed in: decide the tone AND the
@@ -268,6 +306,7 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techni
         `Pick ONE tone from: ${TONE_KEYS.join(', ')}.`,
         `Each beat has a "kind", one of: ${BEAT_KINDS.join(', ')}. Typical sequences open with "intro", use "point" for benefits, features or steps, "stat" for one figure worth a callout, "quote" for a testimonial, and close with "cta" when the brief implies a call to action.`,
         'Decide how many beats and which kinds actually fit the brief - do not force a shape it does not ask for.',
+        ...visualDirection,
         '',
         'A beat MAY also suggest its own "motion" when the tone\'s usual treatment would undersell it (a standout number, the final call to action) - most beats should leave "motion" out and let the tone\'s own default carry them:',
         `  "enter" (required if "motion" is given): one of ${ENTER_VERBS.join(', ')}`,
@@ -288,7 +327,7 @@ function buildScenePlanPrompt({ brief, transcript, beats, tone, platform, techni
         ...standardsLines,
         '',
         'Reply as JSON only:',
-        '{"tone":"...","beats":[{"kind":"intro","text":"...","technique":"hook-slam-headline"},{"kind":"point","text":"...","kicker":"01"},{"kind":"cta","text":"...","motion":{"enter":"slam-in","emphasis":"punch","energy":0.8}}]}',
+        '{"tone":"...","beats":[{"kind":"intro","text":"...","visual":{"component":"TitleSequence","preset":"cinematic"},"direction":"The title resolves from a dim outline into a clean hero lockup"},{"kind":"point","text":"...","kicker":"01","visual":{"component":"KineticTitle","preset":"creator"},"direction":"The key phrase lands as a single bold focal point","technique":"hook-slam-headline"},{"kind":"cta","text":"...","motion":{"enter":"slam-in","emphasis":"punch","energy":0.8}}]}',
     ].filter(Boolean).join('\n');
 }
 
@@ -351,7 +390,7 @@ function cleanMotion(raw) {
     return { enter, emphasis, exit, energy, anticipate };
 }
 
-function cleanBeat(raw) {
+function cleanBeat(raw, visualCatalog = {}) {
     if (!raw || typeof raw !== 'object') return null;
     const kind = BEAT_KINDS.includes(raw.kind) ? raw.kind : null;
     if (!kind) return null;
@@ -376,6 +415,12 @@ function cleanBeat(raw) {
         ? raw.technique
         : null;
     const motion = explicitMotion || (technique ? cleanMotion(motionForTechnique(technique)) : null);
+    const requestedVisual = raw.visual && typeof raw.visual === 'object' ? raw.visual : null;
+    const visualOptions = visualCatalog[kind] || [];
+    const visual = visualOptions.some(option => option.component === requestedVisual?.component && option.preset === requestedVisual?.preset)
+        ? { component: requestedVisual.component, preset: requestedVisual.preset }
+        : null;
+    const direction = cleanLine(raw.direction, { maxWords: 24, maxChars: 180 });
 
     return {
         kind,
@@ -385,10 +430,12 @@ function cleanBeat(raw) {
         ...(label ? { label } : {}),
         ...(technique ? { technique } : {}),
         ...(motion ? { motion } : {}),
+        ...(visual ? { visual } : {}),
+        ...(direction ? { direction } : {}),
     };
 }
 
-function cleanScenePlan(raw) {
+function cleanScenePlan(raw, visualCatalog = {}) {
     if (!raw || typeof raw !== 'object') return null;
     const title = cleanLine(raw.title, { maxWords: 7, maxChars: 70 });
     const cta = cleanLine(raw.cta, { maxWords: 5, maxChars: 40 });
@@ -404,7 +451,7 @@ function cleanScenePlan(raw) {
     // R101 PHASE 1 — when the model also decided the structure: an ordered
     // beat list and a tone word, both validated against the same vocabulary
     // SceneDirector.js itself uses.
-    const beats = Array.isArray(raw.beats) ? raw.beats.slice(0, 8).map(cleanBeat).filter(Boolean) : [];
+    const beats = Array.isArray(raw.beats) ? raw.beats.slice(0, 8).map(beat => cleanBeat(beat, visualCatalog)).filter(Boolean) : [];
     const toneRaw = typeof raw.tone === 'string' ? raw.tone.trim().toLowerCase() : '';
     const tone = TONE_KEYS.includes(toneRaw) ? toneRaw : '';
 
@@ -511,6 +558,16 @@ router.post('/scene-plan', authenticateUser, async (req, res) => {
         motion: technique.motion,
     }));
 
+    let visualCatalog = {};
+    try {
+        const { LOOKS } = await loadSceneComposer();
+        visualCatalog = sceneVisualCatalog(LOOKS);
+    } catch (err) {
+        // The scene plan remains usable with tone defaults if the optional
+        // visual catalogue cannot be loaded in this deployment.
+        console.warn('[motionRoutes /scene-plan] visual catalog unavailable:', err.message);
+    }
+
     try {
         const result = await generateScenePlan({
             brief: cleanBrief,
@@ -519,8 +576,8 @@ router.post('/scene-plan', authenticateUser, async (req, res) => {
             tone: cleanTone,
             platform: cleanPlatform,
             timeoutMs: sceneTimeoutMs,
-            buildPrompt: (args) => buildScenePlanPrompt({ ...args, techniques, useVibedStandards: true }),
-            cleanPlan: cleanScenePlan,
+            buildPrompt: (args) => buildScenePlanPrompt({ ...args, techniques, visualCatalog, useVibedStandards: true }),
+            cleanPlan: (raw) => cleanScenePlan(raw, visualCatalog),
         });
         return res.json({
             source: result.source,
@@ -552,6 +609,104 @@ router.post('/scene-plan', authenticateUser, async (req, res) => {
             failureCategory: 'route_error',
             provider: null,
         });
+    }
+});
+
+/**
+ * POST /api/motion/scene-review
+ * Review one rendered editor frame against the authored scene direction.
+ * The browser sends a bounded JPEG data URL and the scene's semantic layers;
+ * the vision model returns concise, beat-specific visual QA.
+ */
+router.post('/scene-review', authenticateUser, async (req, res) => {
+    const { frames, scene, reviewMode } = req.body || {};
+    const safeFrames = (Array.isArray(frames) ? frames : []).slice(0, 8).map(frame => ({
+        beat: Math.max(1, Math.min(12, Number(frame?.beat) || 1)),
+        label: String(frame?.label || '').slice(0, 80),
+        time: Math.max(0, Math.min(3600, Number(frame?.time) || 0)),
+        image: typeof frame?.image === 'string' ? frame.image : '',
+    }));
+    if (!safeFrames.length || safeFrames.some(frame => !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(frame.image))) {
+        return res.status(400).json({ error: 'One to eight base64 JPEG, PNG, or WebP preview frames are required.' });
+    }
+    if (safeFrames.some(frame => frame.image.length > 2_000_000)
+        || safeFrames.reduce((total, frame) => total + frame.image.length, 0) > 8_000_000) {
+        return res.status(413).json({ error: 'The scene contact sheet is too large.' });
+    }
+    const safeScene = {
+        name: String(scene?.name || 'Untitled scene').slice(0, 100),
+        tone: String(scene?.tone || '').slice(0, 80),
+        directions: (Array.isArray(scene?.directions) ? scene.directions : []).slice(0, 12).map(item => ({
+            beat: Math.max(1, Math.min(12, Number(item?.beat) || 1)),
+            kind: String(item?.kind || '').slice(0, 30),
+            component: String(item?.component || '').slice(0, 50),
+            preset: String(item?.preset || '').slice(0, 50),
+            direction: String(item?.direction || '').slice(0, 240),
+        })),
+        layers: (Array.isArray(scene?.layers) ? scene.layers : []).slice(0, 24).map(item => ({
+            id: String(item?.id || '').slice(0, 100),
+            type: String(item?.type || '').slice(0, 20),
+            name: String(item?.name || '').slice(0, 80),
+            text: String(item?.text || '').slice(0, 180),
+            x: Number.isFinite(Number(item?.x)) ? Number(item.x) : undefined,
+            y: Number.isFinite(Number(item?.y)) ? Number(item.y) : undefined,
+            duration: Number.isFinite(Number(item?.duration)) ? Number(item.duration) : undefined,
+        })),
+    };
+    if (!isAIConfigured({ capability: 'vision' })) return res.status(503).json({ error: 'Scene review needs a configured vision model.' });
+    try {
+        const vision = getAIFor('vision', 'gpt-4o');
+        if (!vision?.client) return res.status(503).json({ error: 'Scene review needs a configured vision model.' });
+        const completion = await vision.client.chat.completions.create({
+            model: vision.model,
+            messages: [{
+                role: 'user',
+                content: [
+                    { type: 'text', text: `Act as a senior motion-design art director reviewing a rendered scene. Scene intent and editable layers: ${JSON.stringify(safeScene)}. ${reviewMode === 'motion' ? 'Each image is a beat-specific motion strip, ordered by beat number. Its three labeled columns show enter, hold, and exit. Compare phases within each strip for timing, continuity, readable holds, and purposeful transitions.' : 'The image may contain one frame or a contact sheet; use its labels to understand beat order and time.'} Review progression, consistency, clarity, hierarchy, legibility, balance, and fidelity to the beat directions. Report only concrete issues visible in these frames; do not invent issues. For each issue propose a fix. When a safe, precise one-layer change is apparent, include an edit using only an existing layer id and one or more of: transform.x/transform.y (0-100), style.fontSize (8-400), or duration (0.2-12 seconds) for a non-group layer. Do not change content or invent copy. Return JSON: {"score":0-100,"summary":"one sentence","findings":[{"severity":"high|medium|low","beat":1,"issue":"specific visible issue","fix":"specific change to make","edit":{"nodeId":"existing layer id","transform":{"x":50,"y":50},"style":{"fontSize":48},"duration":3.5}}]}. Limit findings to 5. If it looks good, return an empty findings list.` },
+                    ...safeFrames.flatMap(frame => [
+                        { type: 'text', text: `Beat ${frame.beat} · ${frame.label || 'Scene beat'} · ${frame.time.toFixed(2)}s` },
+                        { type: 'image_url', image_url: { url: frame.image, detail: 'high' } },
+                    ]),
+                ],
+            }],
+            response_format: { type: 'json_object' },
+            temperature: 0.2,
+            max_tokens: 700,
+        });
+        const raw = JSON.parse(completion?.choices?.[0]?.message?.content || '{}');
+        const allowedNodeIds = new Set(safeScene.layers.map(layer => layer.id).filter(Boolean));
+        const layerTypes = new Map(safeScene.layers.map(layer => [layer.id, layer.type]));
+        const findings = (Array.isArray(raw.findings) ? raw.findings : []).slice(0, 5).map(item => {
+            const editRaw = item?.edit && typeof item.edit === 'object' && allowedNodeIds.has(String(item.edit.nodeId || '')) ? item.edit : null;
+            const transform = {};
+            for (const key of ['x', 'y']) {
+                const value = Number(editRaw?.transform?.[key]);
+                if (Number.isFinite(value)) transform[key] = Math.max(0, Math.min(100, value));
+            }
+            const fontSize = ['text', 'caption'].includes(layerTypes.get(String(editRaw?.nodeId || '')))
+                ? Number(editRaw?.style?.fontSize)
+                : NaN;
+            const duration = layerTypes.has(String(editRaw?.nodeId || '')) && layerTypes.get(String(editRaw?.nodeId || '')) !== 'group'
+                ? Number(editRaw?.duration)
+                : NaN;
+            const edit = editRaw && (Object.keys(transform).length || Number.isFinite(fontSize) || Number.isFinite(duration)) ? {
+                nodeId: String(editRaw.nodeId),
+                ...(Object.keys(transform).length ? { transform } : {}),
+                ...(Number.isFinite(fontSize) ? { style: { fontSize: Math.max(8, Math.min(400, fontSize)) } } : {}),
+                ...(Number.isFinite(duration) ? { duration: Math.max(0.2, Math.min(12, duration)) } : {}),
+            } : null;
+            return ({
+            severity: ['high', 'medium', 'low'].includes(item?.severity) ? item.severity : 'low',
+            beat: Math.max(1, Math.min(12, Number(item?.beat) || 1)),
+            issue: String(item?.issue || '').trim().slice(0, 240),
+            fix: String(item?.fix || '').trim().slice(0, 300),
+            ...(edit ? { edit } : {}),
+        });
+        }).filter(item => item.issue && item.fix);
+        return res.json({ score: Math.max(0, Math.min(100, Number(raw.score) || 0)), summary: String(raw.summary || '').slice(0, 240), findings });
+    } catch (err) {
+        console.warn('[motionRoutes /scene-review] vision review failed:', err.message);
+        return res.status(502).json({ error: 'The visual review could not be completed. Please try again.' });
     }
 });
 

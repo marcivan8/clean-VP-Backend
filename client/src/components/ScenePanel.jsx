@@ -17,18 +17,88 @@
  */
 import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useShallow } from 'zustand/react/shallow';
 import {
-    Layers, ChevronRight, ChevronDown, Eye, EyeOff, Trash2,
+    Layers, ChevronRight, ChevronDown, Eye, EyeOff, Trash2, ScanEye, LoaderCircle,
     Type, Square, Image as ImageIcon, Film, AlertTriangle, Wand2,
 } from 'lucide-react';
 
 import useTimelineStore from '../store/useTimelineStore';
 import { listNodes, NODE_TYPES } from '../motion/SceneSchema.js';
 import { validateScene, safeZoneForAspect, describeIssues } from '../motion/SceneValidator.js';
+import { authFetch } from '../utils/authFetch.js';
+import { captureReviewFrame } from '../motion/captureReviewFrame.js';
 
 const field = 'w-full bg-white/5 border border-border rounded px-2 py-1 text-xs text-foreground outline-none';
 const label = 'text-[10px] uppercase tracking-wider text-muted-foreground';
+
+async function motionContactSheets(frames) {
+    const beats = [...new Set(frames.map(frame => frame.beat))].sort((a, b) => a - b);
+    const cellWidth = 440;
+    const firstImage = new Image();
+    firstImage.src = frames[0]?.image;
+    await firstImage.decode();
+    const imageHeight = Math.max(180, Math.round(cellWidth * firstImage.height / firstImage.width));
+    const headerHeight = 30;
+    const rowHeight = imageHeight + headerHeight;
+    const phases = ['enter', 'hold', 'exit'];
+    const sheets = [];
+    for (const beat of beats) {
+        const canvas = document.createElement('canvas');
+        canvas.width = cellWidth * 3;
+        canvas.height = rowHeight;
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#0b0d12';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.font = '600 14px system-ui, sans-serif';
+        for (let column = 0; column < phases.length; column++) {
+            const frame = frames.find(item => item.beat === beat && item.phase === phases[column]);
+            const x = column * cellWidth;
+            context.fillStyle = '#11151d';
+            context.fillRect(x, 0, cellWidth, headerHeight);
+            context.fillStyle = '#cbd5e1';
+            context.fillText(`BEAT ${beat} · ${phases[column].toUpperCase()}`, x + 12, 20);
+            if (!frame) continue;
+            const image = new Image();
+            image.src = frame.image;
+            await image.decode();
+            context.drawImage(image, x, headerHeight, cellWidth, imageHeight);
+        }
+        const sample = frames.find(frame => frame.beat === beat);
+        sheets.push({ beat, label: sample?.label || '', time: sample?.time || 0, image: canvas.toDataURL('image/jpeg', 0.82) });
+    }
+    return sheets;
+}
+
+function waitForPreviewFrame(surface) {
+    return new Promise(resolve => {
+        const raf = window.requestAnimationFrame || (callback => setTimeout(callback, 16));
+        const timeout = setTimeout(resolve, 600);
+        const videos = Array.from(surface?.querySelectorAll('video') || [])
+            .filter(video => video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA);
+        let pending = videos.length;
+        const finish = () => {
+            if (pending > 0) pending--;
+            if (pending === 0) {
+                clearTimeout(timeout);
+                resolve();
+            }
+        };
+        // Let React apply the seek and the player paint its canvas before
+        // waiting for any HTML video overlays to present their decoded frame.
+        raf(() => raf(() => {
+            if (!videos.length) return finish();
+            videos.forEach(video => {
+                if (typeof video.requestVideoFrameCallback === 'function') {
+                    video.requestVideoFrameCallback(finish);
+                } else if (!video.seeking) {
+                    finish();
+                } else {
+                    video.addEventListener('seeked', finish, { once: true });
+                }
+            });
+        }));
+    });
+}
 
 const ICONS = {
     [NODE_TYPES.GROUP]: Layers,
@@ -175,16 +245,20 @@ function NodeEditor({ sceneId, node, t }) {
 
 export default function ScenePanel() {
     const { t } = useTranslation('editor');
-    const { scenes, tracks, activeClipId, aspectRatio, assets } = useTimelineStore(useShallow(state => ({
-        scenes: state.scenes,
-        tracks: state.tracks,
-        activeClipId: state.activeClipId,
-        aspectRatio: state.aspectRatio,
-        assets: state.assets,
-    })));
+    // Subscribe to the store fields independently. The panel can be mounted
+    // before a scene exists; it must re-render when `designScene` adds one.
+    const scenes = useTimelineStore(state => state.scenes || {});
+    const tracks = useTimelineStore(state => state.tracks || []);
+    const activeClipId = useTimelineStore(state => state.activeClipId);
+    const aspectRatio = useTimelineStore(state => state.aspectRatio);
+    const assets = useTimelineStore(state => state.assets || []);
     const [selectedId, setSelectedId] = useState(null);
     const [collapsed, setCollapsed] = useState({});
     const [pickedSceneId, setPickedSceneId] = useState(null);
+    const [reviewing, setReviewing] = useState(false);
+    const [review, setReview] = useState(null);
+    const [reviewSamples, setReviewSamples] = useState([]);
+    const [reviewError, setReviewError] = useState('');
 
     const sceneIds = useMemo(() => Object.keys(scenes || {}), [scenes]);
 
@@ -233,6 +307,93 @@ export default function ScenePanel() {
 
     const onToggle = useCallback((groupId) => setCollapsed(c => ({ ...c, [groupId]: !c[groupId] })), []);
 
+    const reviewCurrentFrame = useCallback(async () => {
+        if (!scene || reviewing) return;
+        setReviewing(true);
+        setReview(null);
+        setReviewError('');
+        const store = useTimelineStore.getState();
+        const initialTime = store.currentTime;
+        const wasPlaying = store.isPlaying;
+        try {
+            if (wasPlaying) store.setIsPlaying(false);
+            const beatGroups = (scene.nodes || []).filter(node => node?.type === 'group' && node.duration > 0).slice(0, 8);
+            const samples = (beatGroups.length ? beatGroups.map((group, index) => ({
+                beat: Number.isFinite(Number(group.origin?.index)) ? Number(group.origin.index) + 1 : index + 1,
+                label: group.name || group.origin?.beat || t('scenePanel.title'),
+                start: Math.max(0, Number(scene.meta?.placedAt || 0) + Number(group.start || 0)),
+                duration: Math.max(0.36, Number(group.duration || 0)),
+            })) : [{ beat: 1, label: scene.name || t('scenePanel.title'), start: initialTime, duration: Math.max(0.36, Number(scene.duration || 1)) }])
+                .flatMap(group => [
+                    { beat: group.beat, label: group.label, phase: 'enter', time: group.start + group.duration * 0.12 },
+                    { beat: group.beat, label: group.label, phase: 'hold', time: group.start + group.duration * 0.52 },
+                    { beat: group.beat, label: group.label, phase: 'exit', time: group.start + group.duration * 0.88 },
+                ]);
+            const frames = [];
+            for (const sample of samples) {
+                useTimelineStore.getState().seek(sample.time);
+                const player = useTimelineStore.getState().playerRef;
+                try { player?.requestRender?.(); } catch { /* the seek already requested a render */ }
+                const surface = document.querySelector('[data-scene-review-surface]');
+                await waitForPreviewFrame(surface);
+                const image = await captureReviewFrame(surface);
+                frames.push({ ...sample, image });
+            }
+            const contactSheets = await motionContactSheets(frames);
+            const groupedSamples = samples.map(sample => ({
+                beat: sample.beat,
+                label: sample.label,
+                phases: frames.filter(frame => frame.beat === sample.beat).map(({ phase, time, image }) => ({ phase, time, image })),
+            })).filter((sample, index, list) => list.findIndex(item => item.beat === sample.beat) === index);
+            setReviewSamples(groupedSamples);
+            const payload = {
+                name: scene.name,
+                tone: scene.meta?.tone,
+                directions: scene.meta?.visualDirections || [],
+                layers: listNodes(scene).map(({ node }) => ({
+                    id: node.id,
+                    type: node.type,
+                    name: node.name,
+                    text: node.content,
+                    x: node.transform?.x,
+                    y: node.transform?.y,
+                    duration: node.duration,
+                })),
+            };
+            const response = await authFetch('/api/motion/scene-review', {
+                method: 'POST',
+                body: JSON.stringify({ reviewMode: 'motion', frames: contactSheets, scene: payload }),
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || t('scenePanel.reviewFailed'));
+            setReview(result);
+        } catch (err) {
+            setReviewError(err.code === 'SCENE_REVIEW_CAPTURE_BLOCKED'
+                ? t('scenePanel.reviewCaptureBlocked')
+                : err.message || t('scenePanel.reviewFailed'));
+        } finally {
+            useTimelineStore.getState().seek(initialTime);
+            if (wasPlaying) useTimelineStore.getState().setIsPlaying(true);
+            setReviewing(false);
+        }
+    }, [scene, reviewing, t]);
+
+    const applySuggestedEdit = useCallback((finding, index) => {
+        if (!sceneId || !finding?.edit?.nodeId) return;
+        const patch = {};
+        if (finding.edit.transform && typeof finding.edit.transform === 'object') patch.transform = finding.edit.transform;
+        if (Number.isFinite(Number(finding.edit.style?.fontSize))) patch.style = { fontSize: Math.max(8, Math.min(400, Number(finding.edit.style.fontSize))) };
+        if (Number.isFinite(Number(finding.edit.duration))) patch.duration = Math.max(0.2, Math.min(12, Number(finding.edit.duration)));
+        if (!Object.keys(patch).length) return;
+        const result = useTimelineStore.getState().editSceneNode(sceneId, finding.edit.nodeId, patch);
+        if (!result?.success) { setReviewError(result?.error || t('scenePanel.reviewFailed')); return; }
+        setReview(current => current ? ({
+            ...current,
+            findings: current.findings.map((item, itemIndex) => itemIndex === index ? { ...item, applied: true } : item),
+        }) : current);
+        setReviewError('');
+    }, [sceneId, t]);
+
     if (sceneIds.length === 0) {
         return (
             <section className="p-4 border-b border-border/50">
@@ -278,6 +439,48 @@ export default function ScenePanel() {
                             <span>{scene.meta.rationale.slice(0, 2).join(' ')}</span>
                         </p>
                     )}
+
+                    {Array.isArray(scene.meta?.visualDirections) && scene.meta.visualDirections.some(item => item.direction) && (
+                        <div className="mb-3 rounded border border-border/60 bg-secondary/20 p-2 space-y-1.5">
+                            {scene.meta.visualDirections.filter(item => item.direction).map(item => (
+                                <p key={`${item.beat}-${item.kind}`} className="text-[10px] text-muted-foreground leading-relaxed">
+                                    <span className="text-foreground/80">{item.beat}. {item.component ? `${item.component} / ${item.preset}` : item.kind}</span>
+                                    <span> — {item.direction}</span>
+                                </p>
+                            ))}
+                        </div>
+                    )}
+
+                    <div className="mb-3">
+                        <button type="button" onClick={reviewCurrentFrame} disabled={reviewing}
+                            className="w-full flex items-center justify-center gap-2 rounded border border-primary/30 bg-primary/10 hover:bg-primary/15 disabled:opacity-60 px-2.5 py-2 text-[11px] font-medium text-foreground">
+                            {reviewing ? <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> : <ScanEye className="w-3.5 h-3.5" />}
+                            {reviewing ? t('scenePanel.reviewing') : t(review?.findings?.some(finding => finding.applied) ? 'scenePanel.reviewAgain' : 'scenePanel.reviewButton')}
+                        </button>
+                        {reviewError && <p className="mt-2 text-[10px] text-amber-400">{reviewError}</p>}
+                        {reviewSamples.length > 0 && <div className="mt-2 space-y-2">
+                            {reviewSamples.map(sample => <div key={sample.beat} className="rounded border border-border/60 bg-black/30 p-1.5">
+                                <p className="mb-1 truncate text-[9px] text-muted-foreground">{t('scenePanel.reviewFinding', { beat: sample.beat })} {sample.label}</p>
+                                <div className="grid grid-cols-3 gap-1">
+                                    {sample.phases.map(item => <figure key={item.phase} className="min-w-0">
+                                        <img src={item.image} alt={t('scenePanel.reviewPhaseAlt', { phase: t(`scenePanel.phase_${item.phase}`), beat: sample.beat })} className="block w-full aspect-video rounded object-contain bg-black" />
+                                        <figcaption className="pt-0.5 text-center text-[8px] uppercase text-muted-foreground">{t(`scenePanel.phase_${item.phase}`)} · {item.time.toFixed(1)}s</figcaption>
+                                    </figure>)}
+                                </div>
+                            </div>)}
+                        </div>}
+                        {review && <div className="mt-2 rounded border border-border/60 bg-secondary/20 p-2 space-y-1.5">
+                            <p className="text-[10px] text-foreground">{review.summary} <span className="text-muted-foreground">{t('scenePanel.reviewScore', { score: review.score })}</span></p>
+                            {review.findings.map((finding, index) => <p key={`${finding.beat}-${index}`} className="text-[10px] text-muted-foreground leading-relaxed">
+                                <span className={finding.severity === 'high' ? 'text-rose-400' : finding.severity === 'medium' ? 'text-amber-400' : 'text-primary'}>{t('scenePanel.reviewFinding', { beat: finding.beat })} </span>
+                                {finding.issue} <span className="text-foreground/80">{finding.fix}</span>
+                                {finding.edit && <button type="button" disabled={finding.applied} onClick={() => applySuggestedEdit(finding, index)} className="ml-1 text-primary hover:underline disabled:text-emerald-400 disabled:no-underline">
+                                    {finding.applied ? t('scenePanel.reviewApplied') : t('scenePanel.reviewApply')}
+                                </button>}
+                            </p>)}
+                            {!review.findings.length && <p className="text-[10px] text-muted-foreground">{t('scenePanel.reviewNoIssues')}</p>}
+                        </div>}
+                    </div>
 
                     <div className="space-y-0.5 mb-3 max-h-56 overflow-y-auto">
                         {rows.map(entry => (

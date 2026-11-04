@@ -38,6 +38,7 @@ import InterviewEditPanel from '../components/InterviewEditPanel';
 // old 'effects' branch did exactly that). Add both halves or the panel is dead
 // on arrival.
 import MotionPanel from '../components/MotionPanel';
+import ScenePanel from '../components/ScenePanel.jsx';
 import ABTestPanel from '../components/ABTestPanel.jsx';
 import TransformPanel from '../components/TransformPanel';
 import { PanelSection, ControlRow, TrackSlider } from '../components/ui/PanelControls.jsx';
@@ -2682,16 +2683,14 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             {/* Motion (R61) — presets + hand-authored keyframes.
                                 The tab button for this lives in the array above;
                                 both halves are required. */}
-                            {activeTab === 'motion' && <MotionPanel />}
+                            {activeTab === 'motion' && <>
+                                <ScenePanel />
+                                <MotionPanel />
+                            </>}
                             {/* Roadmap item 3 — the A/B panel had no entry point at all, so
                                 item 1's engine fix would have stayed invisible. Mounted as a
                                 tab here; the roadmap's "in the chat flow, with per-variation
-                                edit/export buttons" is the fuller version and is not this.
-                                NOTE: the scene-editor panel is deliberately NOT mounted
-                                beside it. That tab was removed on purpose (it rendered an
-                                untranslated label and was not earning its slot), and
-                                test_scene_editor.mjs asserts this file never references it
-                                again — by name, so do not name it here either. */}
+                                edit/export buttons" is the fuller version and is not this. */}
                             {activeTab === 'iterations' && <ABTestPanel />}
                             {activeTab === 'shorts' && <ShortsPanel onExport={(settings, override) => handleFfmpegExport(settings, override)} />}
 
@@ -2770,6 +2769,7 @@ const IDELayout = ({ children, mode = 'editor' }) => {
                             <ShortPreviewBar />
 
                             <div
+                                data-scene-review-surface="true"
                                 className="bg-black rounded-lg shadow-2xl relative border border-white/5 group overflow-hidden"
                                 style={{
                                     width: previewSize.width || undefined,
