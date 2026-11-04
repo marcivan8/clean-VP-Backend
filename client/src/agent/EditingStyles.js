@@ -111,7 +111,7 @@ const GENERIC_REQUEST = /^(please\s+)?(edit|edit it|edit this|edit this video|ed
 // Auto playbook. Previously this full sentence fell through as a bespoke
 // command, whose planner asked for clarification instead of editing:
 // "I want to edit my video just like this reference video".
-const REFERENCE_GUIDED_EDIT = /^(?:please\s+)?(?:(?:i|we)\s+(?:want|would like|need)\s+to\s+)?edit\s+(?:my|the|this|a)\s+(?:video|clip)\b.*\b(?:like|match|mimic|in the style of|based on|according to|inspired by)\b.*\b(?:reference|example|attached)\b/i;
+const REFERENCE_GUIDED_EDIT = /^(?:please\s+)?(?:(?:i|we)\s+(?:want|would like|need)\s+to\s+)?edit\s+(?:(?:my|the|this|a)\s+(?:video|clip)|it)\b.*\b(?:like|match|mimic|in the style of|based on|according to|inspired by)\b.*\b(?:reference|example|attached)\b/i;
 
 export function isGenericEditRequest(text) {
     const s = String(text || '').split(/\n\n(?:Reference documents supplied by the user|Media attached to this request and available in the project Media Bin|Reference media supplied by the user for guidance only \(not source footage\)):/i, 1)[0].trim();

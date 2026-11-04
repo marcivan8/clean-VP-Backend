@@ -69,6 +69,8 @@ await check('each editing style recipe can place transcript-matched vector illus
 await check('generic requests and questions', () => {
     for (const t of ['edit it', 'Edit the video', 'go', '', 'monte la vidéo', 'vas-y', 'fais le montage']) assert.ok(ES.isGenericEditRequest(t), t);
     assert.ok(ES.isGenericEditRequest('I want to edit my video just like this reference video'));
+    assert.ok(ES.isGenericEditRequest('Edit it like the reference video'));
+    assert.ok(ES.isReferenceGuidedEditRequest('Edit it like the reference video'));
     assert.ok(ES.isGenericEditRequest('I want to edit my video just like this reference video\n\nReference media supplied by the user for guidance only (not source footage):\n- ref.mp4 (video, reference asset id: ref-1)'));
     assert.ok(ES.isGenericEditRequest('edit it\n\nReference media supplied by the user for guidance only (not source footage):\n- rush.mp4 (video, reference asset id: asset-1)'));
     assert.ok(ES.isGenericEditRequest('Edit my video.\n\nReference media supplied by the user for guidance only (not source footage):\n- rush.mp4 (video, reference asset id: asset-1)'));
