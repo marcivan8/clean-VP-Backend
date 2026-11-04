@@ -39,6 +39,36 @@ try {
 const OpenAI = require('openai');
 
 const MAX_BUFFER = 1024 * 1024 * 50;
+const RETRYABLE_VISION_STATUSES = new Set([429, 500, 502, 503, 504]);
+const RETRYABLE_VISION_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'EAI_AGAIN']);
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function isRetryableVisionError(err) {
+    const status = Number(err?.status || err?.statusCode);
+    return RETRYABLE_VISION_STATUSES.has(status) || RETRYABLE_VISION_CODES.has(err?.code);
+}
+
+/** Retry only transient provider/network errors; invalid requests fail fast. */
+async function completeVisionWithRetry(client, payload, { attempts = 3 } = {}) {
+    let lastError;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+        try {
+            return await client.chat.completions.create(payload, { timeout: 60_000, maxRetries: 0 });
+        } catch (err) {
+            lastError = err;
+            const status = Number(err?.status || err?.statusCode);
+            if (!isRetryableVisionError(err) || attempt === attempts - 1) throw err;
+            const retryAfter = Number(err?.headers?.['retry-after']);
+            const delay = Number.isFinite(retryAfter) && retryAfter > 0
+                ? Math.min(5000, retryAfter * 1000)
+                : 400 * (2 ** attempt);
+            console.warn(`[VisualAnalyzer] Vision request returned ${status || err.code}; retry ${attempt + 2}/${attempts} in ${delay}ms`);
+            await sleep(delay);
+        }
+    }
+    throw lastError;
+}
 
 /** Default result returned on any error */
 const ERROR_RESULT = {
@@ -72,6 +102,7 @@ class VisualAnalyzer {
         const vision = getAIFor('vision', 'gpt-4o');
         this.openai = vision.client;
         this.visionModel = vision.model;
+        this.visionProvider = vision.provider;
     }
 
     /**
@@ -377,9 +408,10 @@ For captionTreatment, use these visual definitions: "boxed" means caption words 
 For fontFamily choose only from: Inter, Anton, Montserrat, Poppins, DM Sans, Playfair Display, Cormorant Garamond, Rajdhani, JetBrains Mono, Oswald, Bebas Neue. Describe the closest visual match, not a claimed exact font identification. Measure x/y as the text block's center in frame percentages (origin top-left); use null when it is not visible. Color values must be sampled visually and may be null. sceneDirections must correspond to the timestamped sampled frames, be chronological, and contain at most 9 entries. transitionAfter may only name a transition when adjacent samples show evidence; otherwise use unknown. Still frames cannot prove the exact animation or transition, so leave unknown when the evidence is weak. Do not infer story content or transcribe text. Motifs may describe visible patterns such as social proof metrics, comment or DM cards, product or document cards, archive-photo layouts, split-screen comparisons, large two-tone headlines, speaker cutouts, or phone frames. Do not claim to see sound effects from still frames.` : ''}
 Return ONLY the JSON object, no explanation.`;
 
-            const response = await this.openai.chat.completions.create({
+            const request = {
                 model: this.visionModel,
                 max_tokens: styleReference ? 1800 : 400,
+                temperature: 0,
                 response_format: { type: 'json_object' },
                 messages: [
                     {
@@ -395,7 +427,29 @@ Return ONLY the JSON object, no explanation.`;
                             : [{ type: 'text', text: prompt }, ...imageMessages],
                     },
                 ],
-            });
+            };
+
+            let response;
+            try {
+                response = await completeVisionWithRetry(this.openai, request);
+            } catch (primaryError) {
+                // A second Gemini model can absorb temporary capacity spikes
+                // without changing the prompt, sampled frames, or provider key.
+                // Invalid requests and auth/configuration failures still fail fast.
+                const fallbackModel = this.visionProvider === 'gemini'
+                    ? (process.env.GEMINI_VISION_FALLBACK_MODEL || 'gemini-3.1-flash-lite').trim()
+                    : '';
+                if (!fallbackModel || fallbackModel === this.visionModel || !isRetryableVisionError(primaryError)) {
+                    throw primaryError;
+                }
+
+                console.warn(
+                    `[VisualAnalyzer] ${this.visionModel} failed transiently (${describeAIError(primaryError)}); ` +
+                    `trying Gemini vision fallback ${fallbackModel}`
+                );
+                response = await completeVisionWithRetry(this.openai, { ...request, model: fallbackModel }, { attempts: 2 });
+                console.info(`[VisualAnalyzer] Vision analysis completed with fallback model ${fallbackModel}`);
+            }
 
             const raw = response.choices[0]?.message?.content;
             if (!raw) return ERROR_RESULT;
