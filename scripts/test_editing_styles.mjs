@@ -455,7 +455,7 @@ await check('talking styles anchor zoom on the face in preview', () => {
 log('wiring (static: these need the browser or the server)');
 await check('Auto mode is routed in the workflow, questions excluded, Stop and timeout stop it', () => {
     const wc = read('../client/src/agent/WorkflowController.js');
-    assert.ok(/editingMode === 'auto' && !isQuestion\(userPrompt\)/.test(wc));
+    assert.ok(/const auto = !isQuestion\(userPrompt\)\s*&& \(editingMode === 'auto' \|\| isReferenceGuidedEditRequest\(userPrompt\)\)/.test(wc));
     assert.ok(/runAutopilot\(userPrompt\)/.test(wc));
     assert.ok(/cancelCurrentJob\(\) \{\s*stopAutopilot\(\)/.test(wc));
     assert.ok(/phase: 'prompt' \}\);\s*stopAutopilot\(\)/.test(wc));
