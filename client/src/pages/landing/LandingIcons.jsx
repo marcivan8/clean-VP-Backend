@@ -27,6 +27,7 @@ const PATHS = {
     ),
     arrowRight: <path d="M4.3 12h15M13.2 6.2 19 12l-5.8 5.8" {...S} strokeWidth={1.9} />,
     play: <path d="M9.2 6.4v11.2L18.6 12z" fill="currentColor" />,
+    close: <path d="M6.4 6.4l11.2 11.2M17.6 6.4L6.4 17.6" {...S} strokeWidth={2} />,
     upload: (
         <>
             <path d="M12 15.8V4.2m0 0L7.9 8.3M12 4.2l4.1 4.1" {...S} strokeWidth={1.8} />

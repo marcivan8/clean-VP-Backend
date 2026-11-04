@@ -117,13 +117,21 @@ onConsentChange(syncAnalyticsWithConsent);
 // build's different content-hashed filenames. Vite emits 'vite:preloadError'
 // on window when that happens — reload once to pick up the current build
 // instead of leaving the user stuck on a broken shell.
-window.addEventListener('vite:preloadError', () => {
-    if (sessionStorage.getItem('vibed_stale_reload')) {
-        // Already tried once this session — don't loop forever if the
-        // fresh build also fails to load for some unrelated reason.
-        return;
+window.addEventListener('vite:preloadError', (event) => {
+    // Vite otherwise rethrows the failed import as an unhandled rejection.
+    event.preventDefault();
+    const now = Date.now();
+    let lastReload = 0;
+    try {
+        lastReload = Number(sessionStorage.getItem('vibed_stale_reload_at')) || 0;
+        // Stop an immediate reload loop, but allow a later deploy to recover
+        // in the same browser session.
+        if (lastReload && now - lastReload < 30_000) return;
+        sessionStorage.setItem('vibed_stale_reload_at', String(now));
+    } catch {
+        // Storage can be unavailable in hardened/private contexts. Still
+        // reload to recover from the missing chunk.
     }
-    sessionStorage.setItem('vibed_stale_reload', '1');
     if (SENTRY_DSN) {
         Sentry.captureMessage('Stale bundle reload (vite:preloadError)', 'info');
     }

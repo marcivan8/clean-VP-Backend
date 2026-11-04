@@ -295,3 +295,21 @@
     .vibed-landing .vl-h1 { font-size: 38px; }
     .vibed-landing .vl-h2 { font-size: 28px; }
 }
+
+/* ── Motion ────────────────────────────────────────────────────────────── */
+@keyframes vlPulse {
+      0%, 100% { opacity: 1;    box-shadow: 0 0 8px #28C840; }
+     50%       { opacity: 0.55; box-shadow: 0 0 2px #28C840; }
+}
+.vibed-landing .vl-pulse { animation: vlPulse 2.2s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+    .vibed-landing .vl-pulse { animation: none; }
+}
+
+/* ── Video overlay ─────────────────────────────────────────────────────── */
+@keyframes vlFadeIn { from { opacity: 0 } to { opacity: 1 } }
+
+@media (prefers-reduced-motion: reduce) {
+    .vibed-landing [role="dialog"] { animation: none !important; }
+}

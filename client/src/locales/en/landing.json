@@ -280,7 +280,8 @@
     },
     "cta": {
       "primary": "Start editing free",
-      "microcopy": "Start free · No credit card needed"
+      "microcopy": "Start free · No credit card needed",
+      "watch": "Watch how it works"
     },
     "card": {
       "autoMode": "AUTO MODE",
@@ -477,6 +478,11 @@
     "finalCta": {
       "title": "Your footage is already good.\nThe edit should not be the hard part.",
       "body": "Start free, run your first pass and see what comes back."
+    },
+    "video": {
+      "title": "How VIBED works",
+      "close": "Close video",
+      "note": "No sound. 44 seconds, start to export."
     }
   }
 }

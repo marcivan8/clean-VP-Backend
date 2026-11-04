@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Icon from './LandingIcons';
 import HeroObject from './HeroObject';
 import { goToSignup } from './checkout';
+import VideoModal from './VideoModal';
 
 
 /** One result line in the preview card: icon + what the pass did. */
@@ -155,6 +156,7 @@ const TRIAD = [
 
 const Hero = () => {
     const { t } = useTranslation('landing');
+    const [videoOpen, setVideoOpen] = useState(false);
 
     return (
         <section
@@ -204,6 +206,15 @@ const Hero = () => {
                             {t('v2.cta.primary')}
                             <Icon name="arrowRight" size={16} color="#05070B" />
                         </button>
+
+                        <button
+                            type="button"
+                            className="vl-btn vl-btn-ghost"
+                            onClick={() => setVideoOpen(true)}
+                        >
+                            <Icon name="play" size={14} />
+                            {t('v2.cta.watch')}
+                        </button>
                     </div>
 
                     <p className="vl-mono" style={{ fontSize: 12, color: 'var(--vl-ink-4)', margin: '0 0 10px' }}>
@@ -246,6 +257,7 @@ const Hero = () => {
                     </div>
                 ))}
             </div>
+            {videoOpen && <VideoModal onClose={() => setVideoOpen(false)} />}
         </section>
     );
 };

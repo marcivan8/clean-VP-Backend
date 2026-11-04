@@ -23,6 +23,11 @@ export default defineConfig(({ mode }) => {
   return {
     envDir: '../',
     plugins: [react(), sentryPlugin].filter(Boolean),
+    resolve: {
+      // Keep React hooks on the same dispatcher when Vite optimizes peers
+      // such as framer-motion across dependency graph generations.
+      dedupe: ['react', 'react-dom'],
+    },
 
     build: {
       // Emit source maps so Sentry can show original TypeScript/JSX lines in errors.

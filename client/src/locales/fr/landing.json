@@ -280,7 +280,8 @@
     },
     "cta": {
       "primary": "Commencer gratuitement",
-      "microcopy": "Gratuit pour commencer · Sans carte bancaire"
+      "microcopy": "Gratuit pour commencer · Sans carte bancaire",
+      "watch": "Voir comment ça marche"
     },
     "card": {
       "autoMode": "MODE AUTO",
@@ -477,6 +478,11 @@
     "finalCta": {
       "title": "Vos rushes sont déjà bons.\nLe montage ne devrait pas être le plus dur.",
       "body": "Commencez gratuitement, lancez votre première passe et voyez ce qui revient."
+    },
+    "video": {
+      "title": "Comment fonctionne VIBED",
+      "close": "Fermer la vidéo",
+      "note": "Sans son. 44 secondes, de l'import à l'export."
     }
   }
 }

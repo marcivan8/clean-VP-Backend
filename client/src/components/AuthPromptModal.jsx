@@ -46,6 +46,9 @@ const AuthPromptModal = ({ trigger = 'export', onDismiss, onSuccess }) => {
     const [password, setPassword] = useState('');
     const [status,   setStatus]   = useState('idle'); // 'idle' | 'loading' | 'done' | 'error'
     const [errorMsg, setErrorMsg] = useState('');
+    // true when sign-up succeeded but Supabase requires email confirmation
+    // before the account is usable (data.session is null in that case)
+    const [needsConfirmation, setNeedsConfirmation] = useState(false);
 
     const { migrateSession } = useSessionStore();
 
@@ -57,6 +60,7 @@ const AuthPromptModal = ({ trigger = 'export', onDismiss, onSuccess }) => {
 
         try {
             let userId;
+            let pendingConfirmation = false;
 
             if (mode === 'signup') {
                 const { data, error } = await supabase.auth.signUp({
@@ -66,6 +70,11 @@ const AuthPromptModal = ({ trigger = 'export', onDismiss, onSuccess }) => {
                 });
                 if (error) throw error;
                 userId = data.user?.id;
+                // No session back means Supabase is holding the account until
+                // the confirmation link is clicked — tell the person so they
+                // don't think sign-up silently failed.
+                pendingConfirmation = !data.session;
+                setNeedsConfirmation(pendingConfirmation);
             } else {
                 const { data, error } = await supabase.auth.signInWithPassword({ email, password });
                 if (error) throw error;
@@ -74,7 +83,7 @@ const AuthPromptModal = ({ trigger = 'export', onDismiss, onSuccess }) => {
 
             if (userId) await migrateSession(userId);
             setStatus('done');
-            setTimeout(() => onSuccess?.(), 1200);
+            setTimeout(() => onSuccess?.(), pendingConfirmation ? 2400 : 1200);
         } catch (err) {
             setStatus('error');
             setErrorMsg(err.message || 'Something went wrong. Try again.');
@@ -130,6 +139,17 @@ const AuthPromptModal = ({ trigger = 'export', onDismiss, onSuccess }) => {
                             <p style={{ fontFamily: 'var(--f-sans)', fontSize: 13, color: 'var(--fg-2)' }}>
                                 {mode === 'signup' ? t('prompt.saved.signup') : t('prompt.saved.signin')}
                             </p>
+                            {mode === 'signup' && needsConfirmation && (
+                                <p style={{
+                                    fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg-3)',
+                                    textAlign: 'center', lineHeight: 1.5, marginTop: -4,
+                                    padding: '8px 12px', borderRadius: 8,
+                                    background: 'color-mix(in oklch, var(--mint) 12%, transparent)',
+                                    border: '0.5px solid color-mix(in oklch, var(--mint) 26%, transparent)',
+                                }}>
+                                    {t('success.checkEmail')}
+                                </p>
+                            )}
                         </div>
                     ) : (
                         <form onSubmit={submit} className="flex flex-col gap-3">
@@ -177,7 +197,7 @@ const AuthPromptModal = ({ trigger = 'export', onDismiss, onSuccess }) => {
                                 {mode === 'signup' ? t('prompt.signinPrompt') + ' ' : t('prompt.signupPrompt') + ' '}
                                 <button
                                     type="button"
-                                    onClick={() => { setMode(mode === 'signup' ? 'signin' : 'signup'); setErrorMsg(''); }}
+                                    onClick={() => { setMode(mode === 'signup' ? 'signin' : 'signup'); setErrorMsg(''); setNeedsConfirmation(false); }}
                                     style={{ color: 'var(--fg-2)', textDecoration: 'underline' }}
                                 >
                                     {mode === 'signup' ? t('prompt.signinLabel') : t('prompt.signupLabel')}
