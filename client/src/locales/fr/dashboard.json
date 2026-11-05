@@ -51,10 +51,10 @@
     "upgradeTo": "Passer à {{plan}}"
   },
   "mobileHome": {
-    "newVideo": "Créer un short",
-    "newVideoSub": "Choisissez des photos ou vidéos pour commencer",
-    "makeShort": "Créer un short",
-    "makeShortSub": "Choisissez des clips et photos. On coupe, sous-titre et cadre pour vous.",
+    "newVideo": "Créer un projet",
+    "newVideoSub": "Nommez votre projet et commencez le montage",
+    "makeShort": "Créer un projet",
+    "makeShortSub": "Nommez votre projet et commencez le montage",
     "chooseMedia": "Choisir des photos ou vidéos",
     "chooseMediaSub": "Sélectionnez autant de fichiers que vous voulez",
     "selected": "SÉLECTIONNÉS",

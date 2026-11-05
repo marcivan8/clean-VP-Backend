@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Plus, Search, User, X, MoreHorizontal, Image as ImageIcon, Camera, FilePlus2, Palette, CreditCard, LogOut, Pencil, Copy, Trash2, Loader2, ArrowLeft, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Logo } from './Logo.jsx';
@@ -96,8 +96,13 @@ export default function MobileHome({
     const [accountOpen, setAccountOpen] = useState(false);
     const [rowMenu, setRowMenu] = useState(null); // project
     const [selectedFiles, setSelectedFiles] = useState([]);
-    const pickerRef = useRef(null);
     const [filePreviews, setFilePreviews] = useState([]);
+
+    const appendSelectedFiles = (input) => {
+        const files = Array.from(input.files || []);
+        input.value = '';
+        if (files.length) setSelectedFiles(current => [...current, ...files].slice(0, 20));
+    };
 
     useEffect(() => {
         const urls = selectedFiles.map(file => URL.createObjectURL(file));
@@ -121,11 +126,13 @@ export default function MobileHome({
                         <h1 style={{ margin: '0 0 5px', fontSize: 29, lineHeight: 1.12, letterSpacing: '-.04em', fontWeight: 750 }}>{t('mobileHome.makeShort', 'Make a short')}</h1>
                         <p style={{ margin: 0, color: 'var(--fg-2)', fontSize: 14, lineHeight: 1.5 }}>{t('mobileHome.makeShortSub', 'Pick clips and photos. We’ll cut, caption and frame them for you.')}</p>
                     </div>
-                    <button type="button" onClick={() => pickerRef.current?.click()} style={{ minHeight: 88, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 14, borderRadius: 18, border: '1px solid rgba(0,210,225,.55)', background: 'linear-gradient(110deg, rgba(0,190,205,.14), rgba(122,42,190,.18))', color: 'var(--fg)', textAlign: 'left' }}>
+                    <label style={{ position: 'relative', minHeight: 88, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 14, borderRadius: 18, border: '1px solid rgba(0,210,225,.55)', background: 'linear-gradient(110deg, rgba(0,190,205,.14), rgba(122,42,190,.18))', color: 'var(--fg)', textAlign: 'left', cursor: 'pointer' }}>
                         <span style={{ width: 50, height: 50, borderRadius: 14, display: 'grid', placeItems: 'center', color: '#66edf4', border: '1px solid rgba(0,210,225,.45)', background: 'rgba(0,210,225,.08)' }}><Plus size={23} /></span>
                         <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}><strong style={{ fontSize: 16 }}>{t('mobileHome.chooseMedia', 'Choose photos or videos')}</strong><span style={{ color: 'var(--fg-2)', fontSize: 12.5 }}>{t('mobileHome.chooseMediaSub', 'Pick as many as you want')}</span></span>
-                    </button>
-                    <input ref={pickerRef} type="file" accept="video/*,image/*" multiple aria-label={t('mobileHome.chooseMedia', 'Choose photos or videos')} onChange={e => { setSelectedFiles(current => [...current, ...Array.from(e.target.files || [])].slice(0, 20)); e.target.value = ''; }} style={{ display: 'none' }} />
+                        {/* Keep the native input tappable on iOS. A display:none input
+                            opened through ref.click() can silently fail in Safari. */}
+                        <input type="file" accept="video/*,image/*" multiple aria-label={t('mobileHome.chooseMedia', 'Choose photos or videos')} onChange={e => appendSelectedFiles(e.currentTarget)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }} />
+                    </label>
                     {selectedFiles.length > 0 && <>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: 'var(--f-mono)', fontSize: 10.5, letterSpacing: '.1em', color: 'var(--fg-3)' }}><span>{t('mobileHome.selected', 'SELECTED')}</span><span style={{ color: '#69e6ed' }}>{selectedFiles.length} {t('mobileHome.items', 'items')}</span></div>
                         <div style={{ display: 'flex', gap: 9, overflowX: 'auto', paddingBottom: 2 }}>
@@ -134,7 +141,7 @@ export default function MobileHome({
                                 <button type="button" aria-label={`${t('mobileHome.removeFile', 'Remove')} ${file.name}`} onClick={() => setSelectedFiles(files => files.filter((_, i) => i !== index))} style={{ position: 'absolute', top: 5, right: 5, width: 23, height: 23, display: 'grid', placeItems: 'center', borderRadius: 99, border: '1px solid rgba(255,255,255,.4)', background: 'rgba(0,0,0,.7)', color: 'white' }}><X size={14} /></button>
                                 <span style={{ position: 'absolute', left: 5, right: 5, bottom: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '3px 5px', borderRadius: 6, background: 'rgba(0,0,0,.68)', color: 'white', fontSize: 9 }}>{file.name}</span>
                             </div>)}
-                            {selectedFiles.length < 20 && <button type="button" onClick={() => pickerRef.current?.click()} aria-label={t('mobileHome.addMore', 'Add more media')} style={{ width: 76, height: 112, flex: 'none', display: 'grid', placeItems: 'center', borderRadius: 13, border: '1px dashed var(--line-strong)', background: 'rgba(255,255,255,.02)', color: 'var(--fg-3)' }}><Plus size={20} /></button>}
+                            {selectedFiles.length < 20 && <label aria-label={t('mobileHome.addMore', 'Add more media')} style={{ position: 'relative', width: 76, height: 112, flex: 'none', display: 'grid', placeItems: 'center', borderRadius: 13, border: '1px dashed var(--line-strong)', background: 'rgba(255,255,255,.02)', color: 'var(--fg-3)', cursor: 'pointer' }}><Plus size={20} /><input type="file" accept="video/*,image/*" multiple aria-label={t('mobileHome.addMore', 'Add more media')} onChange={e => appendSelectedFiles(e.currentTarget)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }} /></label>}
                         </div>
                     </>}
                     <button type="button" disabled={!selectedFiles.length || creating} onClick={() => onPickVideo(selectedFiles)} style={{ minHeight: 54, marginTop: 2, border: 0, borderRadius: 999, background: selectedFiles.length ? '#f7f8fb' : 'var(--bg-3)', color: selectedFiles.length ? '#090b10' : 'var(--fg-3)', fontSize: 16, fontWeight: 700, cursor: selectedFiles.length ? 'pointer' : 'default' }}>

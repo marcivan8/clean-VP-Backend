@@ -51,10 +51,10 @@
     "upgradeTo": "Upgrade to {{plan}}"
   },
   "mobileHome": {
-    "newVideo": "Make a short",
-    "newVideoSub": "Pick photos or videos to get started",
-    "makeShort": "Make a short",
-    "makeShortSub": "Pick clips and photos. We cut, caption and frame them for you.",
+    "newVideo": "Create a project",
+    "newVideoSub": "Name your project and start editing",
+    "makeShort": "Create a project",
+    "makeShortSub": "Name your project and start editing",
     "chooseMedia": "Choose photos or videos",
     "chooseMediaSub": "Pick as many as you want",
     "selected": "SELECTED",

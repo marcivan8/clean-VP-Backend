@@ -735,9 +735,6 @@ export default function DashboardPage() {
     function requestNewProject() {
         if (atLimit(plan, projects.length)) {
             setShowLimitModal(true);
-        } else if (window.innerWidth < 768) {
-            setCreateVideoError(false);
-            setNewVideoOpen(true);
         } else {
             setShowNew(true);
         }
