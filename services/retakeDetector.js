@@ -20,8 +20,8 @@
  *      near its timestamp), so cuts land exactly on word boundaries.
  *   4. A rejected attempt is cut from its first word up to where the next
  *      attempt starts (so the hesitation between them goes too). Guards: the
- *      kept take is never cut, one cut ≤ 60 s, a group spans ≤ 90 s, total
- *      cuts ≤ 60 % of the video.
+ *      kept take is never cut, one cut ≤ 20 s, a group spans ≤ 90 s, total
+ *      cuts ≤ 40 % of the video.
  * With no AI available it falls back to exact repeats only (3+ identical
  * words restarted), never guessing at reworded takes.
  *
@@ -34,9 +34,9 @@ const STOP = new Set(['le', 'la', 'les', 'un', 'une', 'des', 'de', 'du', 'que', 
     'the', 'a', 'an', 'of', 'to', 'is', 'it', 'in', 'on', 'and', 'that', 'this', 'i', 'you', 'je', 'tu',
     'il', 'elle', 'on', 'ce', 'cet', 'cette', 'en', 'dans', 'pour', 'pas', 'ne', 'se', 'sa', 'son']);
 
-const MAX_CUT_SEC = 60;
+const MAX_CUT_SEC = 20;
 const MAX_GROUP_SPAN_SEC = 90;
-const MAX_TOTAL_CUT_RATIO = 0.6;
+const MAX_TOTAL_CUT_RATIO = 0.4;
 const EDGE_PAD = 0.04;
 
 /** Comparable form of a word: lower case, no accents, letters/digits only. */
@@ -178,7 +178,7 @@ function lcs(a, b) {
  * Locate a quoted attempt in the words near `approxStart`.
  * @returns {{ from, to, score } | null} word indices (inclusive)
  */
-function alignQuote(words, tokens, quote, approxStart, { window = 8, minScore = 0.6 } = {}) {
+function alignQuote(words, tokens, quote, approxStart, { window = 4, minScore = 0.82 } = {}) {
     const q = String(quote || '').split(/\s+/).map(norm).filter(Boolean);
     if (!q.length) return null;
     const t0 = Number(approxStart);

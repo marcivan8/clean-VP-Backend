@@ -73,12 +73,13 @@ export const EDITING_STYLES = {
         // strongest content, not an arbitrary fixed number -- when the
         // source runs longer than that cap. See maxDuration below.
         targetDuration: 22,
-        // Hard ceiling regardless of source length or targetDuration above:
-        // Instagram's own Reels limit is a few minutes, but 2 minutes keeps
-        // the format tight. A source under this length is never force-cut
-        // down to a fixed duration -- see MediaExecutionEngine.js
-        // 'extract_short', which checks this cap, not targetDuration.
-        maxDuration: 120,
+        // Keep the Auto Reel ceiling aligned with PlatformProfiles.reels' 150s
+        // short-form ceiling. The previous 120s cap forced a four-minute
+        // source to lose half its runtime even when the content supported a
+        // longer Reel. A source below this ceiling is never cut to the soft
+        // target; extract_short only selects a window when the source exceeds
+        // the cap.
+        maxDuration: 150,
         guidance: 'Reel: lead with the strongest moment, use vertical 9:16, tight cuts, bold captions, fast relevant b-roll, kinetic motion, and varied topic-matched vector illustrations.',
     },
 };

@@ -173,7 +173,7 @@ function CaptionProgressCard({ files }) {
  *                              Replaces the desktop chat panel on phones.
  * @param {function} onCollapse Back to the editor.
  */
-export default function MobileAIBar({ onExpand, expanded = false, onCollapse }) {
+export default function MobileAIBar({ onExpand, expanded = false, onCollapse, flowMode = false }) {
     const { t } = useTranslation('editor');
     const inputRef      = useRef(null);
     const logEndRef     = useRef(null);
@@ -274,15 +274,23 @@ export default function MobileAIBar({ onExpand, expanded = false, onCollapse }) 
     return (
         <div
             className={expanded
-                ? "md:hidden fixed inset-x-0 z-40 flex flex-col"
-                : "md:hidden w-full flex-1 flex flex-col border-t min-h-0"}
+                ? `md:hidden fixed inset-x-0 ${flowMode ? 'z-[70]' : 'z-40'} flex flex-col`
+                : flowMode
+                    ? "md:hidden fixed inset-x-0 bottom-0 z-[60] flex flex-col border-t min-h-0"
+                    : "md:hidden w-full flex-1 flex flex-col border-t min-h-0"}
             role={expanded ? 'dialog' : undefined}
             aria-label={expanded ? t('mobileRoka.inputLabel') : undefined}
             style={{
                 background:   expanded ? 'var(--bg)' : 'var(--bg-2)',
                 borderColor:  'var(--line-soft)',
                 touchAction:  'manipulation',
-                ...(expanded ? { top: '2.75rem', bottom: 'calc(3.5rem + env(safe-area-inset-bottom))' } : {}),
+                ...(expanded
+                    ? (flowMode
+                        ? { top: 0, bottom: 0, paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }
+                        : { top: '2.75rem', bottom: 'calc(3.5rem + env(safe-area-inset-bottom))' })
+                    : flowMode
+                        ? { height: 'calc(clamp(154px, 22dvh, 190px) + env(safe-area-inset-bottom))', paddingBottom: 'env(safe-area-inset-bottom)', boxSizing: 'border-box' }
+                        : {}),
             }}
         >
             {expanded && <PreviewStrip uploadHeadline={uploadHeadline} />}

@@ -119,7 +119,7 @@ function applyPaddingToSegments(segments, padding, totalDuration) {
 
 // ── GPT-4o semantic filler analysis ──────────────────────────────────────────────────
 // Sends the full word-timestamp list to GPT-4o and gets back a list of ranges
-// to cut, with per-range confidence scores (0–1). Cuts with confidence >= 0.75
+// to cut, with per-range confidence scores (0–1). Cuts with confidence >= 0.8
 // are applied; lower-confidence cuts are silently skipped (conservative).
 async function gptSemanticFillerAnalysis(words, openai, language = 'en') {
     // Build a compact representation: index, start, end, word
@@ -144,7 +144,7 @@ async function gptSemanticFillerAnalysis(words, openai, language = 'en') {
 Your task: identify time ranges that should be CUT from the final video.
 
 Identify and mark as CUT:
-1. Genuine filler words/phrases that add NO meaning in context:
+1. Genuine filler words that add NO meaning in context:
    - "um", "uh", "ah", "er", "hmm" — almost always fillers
    - "like", "you know", "I mean", "kind of", "sort of", "basically", "literally" — ONLY when used as hesitation padding, not as meaningful content
      Example CUT: "you know, like, the thing is..."
@@ -153,9 +153,9 @@ Identify and mark as CUT:
    - "I I wanted" → CUT the duplicate "I"
    - "the the thing" → CUT the duplicate "the"
    - "really really important" → KEEP (intentional emphasis)
-3. Clear false starts where the speaker restarts a sentence:
-   - "I was going to — anyway, the point is" → CUT everything up to the restart
-4. Pauses between complete thoughts (gap >= 0.5s between words) that interrupt flow → CUT the gap${languageNote}
+3. Clear, short false starts where the speaker restarts the same thought:
+   - Only cut words that are clearly abandoned and immediately restarted.
+   - Do not cut pauses or gaps between words. Silence is reviewed by a separate pass.${languageNote}
 
 DO NOT CUT:
 - Content said only once, even if imperfect
@@ -169,7 +169,7 @@ ${JSON.stringify(wordList)}
 Respond ONLY with valid JSON:
 {
   "cuts": [
-    { "start": <float>, "end": <float>, "reason": "<short reason>", "confidence": <0.0-1.0> }
+            { "start": <float>, "end": <float>, "reason": "<short reason>", "confidence": <0.0-1.0> }
   ]
 }`;
 
@@ -183,12 +183,16 @@ Respond ONLY with valid JSON:
         }, { timeout: 45_000 });
 
         const parsed = JSON.parse(completion.choices[0].message.content);
-        const cuts = (parsed.cuts || []).filter(c =>
-            typeof c.start === 'number' &&
-            typeof c.end   === 'number' &&
-            c.end > c.start &&
-            (c.confidence ?? 1) >= 0.75
-        );
+        const cuts = (Array.isArray(parsed.cuts) ? parsed.cuts : []).flatMap(c => {
+            if (!Number.isFinite(c?.start) || !Number.isFinite(c?.end) || c.end <= c.start || (c.confidence ?? 1) < 0.8) return [];
+            const touched = words.filter(w => Number(w.start) < c.end && Number(w.end) > c.start);
+            if (!touched.length || c.end - c.start > 6) return [];
+            // Ground the model's range to actual transcript words; never let its
+            // timestamps expand into a neighboring pause or unrelated sentence.
+            const start = Math.max(c.start, Number(touched[0].start));
+            const end = Math.min(c.end, Number(touched[touched.length - 1].end));
+            return end > start ? [{ start, end, reason: String(c.reason || '').slice(0, 100), confidence: c.confidence }] : [];
+        });
         console.log(`[gptSemanticFiller] GPT-4o returned ${parsed.cuts?.length || 0} cuts, ${cuts.length} above confidence threshold`);
         return cuts;
     } catch (err) {
@@ -203,26 +207,14 @@ Respond ONLY with valid JSON:
 
 // ── Keyword-set fallback (original logic, preserved) ──────────────────────────────────────
 function keywordFillerSpans(words) {
-    // Single-token fillers only -- a multi-word string here was never
-    // reachable: the detection loop below tests one word's token at a time,
-    // so bigrams must be matched explicitly (see FILLER_PHRASES).
+    // Only unambiguous hesitation sounds are safe without semantic context.
     const FILLER_WORDS = new Set([
         'um', 'uh', 'ah', 'er', 'eh', 'hmm', 'hm',
-        'like', 'basically', 'literally',
-        // French disfluencies. "quoi" and "voilà" are only fillers as verbal
-        // tics (not as "what"/"there it is"), but the keyword path is a
-        // conservative last-resort fallback already, so the same one-word
-        // ambiguity risk the English list accepts for "like"/"literally" applies here.
-        'euh', 'heu', 'ben', 'bah', 'hein', 'genre', 'voilà', 'quoi', 'disons',
+        // Keep this fallback limited to unambiguous hesitation sounds. Semantic
+        // words such as "like", "hein" or "voilà" need context and are left in.
+        'euh', 'heu',
     ]);
-    // Multi-word filler phrases. These were previously listed inside
-    // FILLER_WORDS (a Set tested against single-word tokens), so "you know",
-    // "i mean", "kind of" and "sort of" never actually matched anything --
-    // fixed here by testing them as bigrams against each adjacent word pair.
-    const FILLER_PHRASES = new Set([
-        'you know', 'i mean', 'kind of', 'sort of',
-        'en fait', 'du coup', 'tu vois', 'tu sais',
-    ]);
+    const FILLER_PHRASES = new Set(); // context-dependent phrases require the semantic pass
     const MERGE_GAP = 0.15;
     const spans = [];
     let current = null;
@@ -289,7 +281,12 @@ async function detectFillerWords(inputPath, language = 'en', tempDir = null, pre
     if (preExistingTranscript && preExistingTranscript.length > 0) {
         console.log(`[detectFillerWords] Using provided transcript (${preExistingTranscript.length} words) — skipping Whisper`);
         words = preExistingTranscript;
-        totalDuration = words[words.length - 1].end || 0;
+        // Transcript timestamps often stop before the media ends. Preserve the
+        // full source duration so a cleanup pass cannot truncate the tail.
+        totalDuration = await new Promise(resolve => ffmpeg.ffprobe(inputPath, (err, metadata) => {
+            const probed = Number(metadata?.format?.duration);
+            resolve(!err && Number.isFinite(probed) && probed > 0 ? probed : (words[words.length - 1]?.end || 0));
+        }));
     } else {
         if (!tempDir) throw new Error('tempDir required to extract audio');
         console.log(`[detectFillerWords] Extracting audio for Whisper...`);

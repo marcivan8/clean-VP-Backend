@@ -19,6 +19,7 @@ const useMobileFlowStore = create((set, get) => ({
     active: false,
     step: 'outcome',
     outcomeId: null,
+    returnToEditor: false,
     /** The user's own words, from the "something else" card. */
     request: '',
     error: null,
@@ -26,19 +27,22 @@ const useMobileFlowStore = create((set, get) => ({
     limitInfo: null,
 
     /** Open on a brand new project. A project that already has an edit never gets this. */
-    open: () => set({ active: true, step: 'outcome', outcomeId: null, request: '', error: null, limitInfo: null }),
+    open: () => set({ active: true, step: 'outcome', outcomeId: null, request: '', error: null, limitInfo: null, returnToEditor: false }),
 
     /** Leave the flow and show the editor. Used by Skip and by the end of a run. */
-    close: () => set({ active: false, error: null }),
+    close: () => set({ active: false, error: null, returnToEditor: false }),
+
+    /** Reopen the saved variations over the editor, preserving the current project. */
+    openVersionsFromEditor: () => set({ active: true, step: 'versions', error: null, returnToEditor: true }),
 
     choose: (outcomeId, request = '') => set({ outcomeId, request, step: 'working', error: null }),
 
     /** A run ended: land on the result rather than dumping the user in the editor. */
     finished: () => set({ step: 'result', error: null }),
 
-    toChange: () => set({ step: 'change', error: null }),
-    toVersions: () => set({ step: 'versions', error: null }),
-    toResult: () => set({ step: 'result', error: null }),
+    toChange: () => set({ step: 'change', error: null, returnToEditor: false }),
+    toVersions: () => set({ step: 'versions', error: null, returnToEditor: false }),
+    toResult: () => set({ step: 'result', error: null, returnToEditor: false }),
 
     /**
      * The server refused the run on quota. This is its own step rather than a

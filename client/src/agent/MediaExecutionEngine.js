@@ -4497,6 +4497,9 @@ export class MediaExecutionEngine {
 
             // ── 4. Filler word removal ────────────────────────────────────
             if (command.action === 'fillerDetect' && result.activeSegments) {
+                if (!(Number(result.fillerCount) > 0)) {
+                    return { engine: 'api', success: true, endpoint, skipped: true, message: 'No high-confidence filler words or false starts found; the timeline was left unchanged.' };
+                }
                 console.log(`[MediaExecutionEngine] ✂️  fillerDetect: ${result.fillerCount} fillers removed, ${result.activeSegments.length} active segments`);
                 const fillerClipId  = command.args?.clip_id  || null;
                 const fillerAssetId = command.args?.asset_id || null;
@@ -4512,7 +4515,10 @@ export class MediaExecutionEngine {
                     fillerSegments = await this._refineCutPointFrames(fillerSegments, resolvedPayload?.filename || null, fillerAssetId);
                 }
 
-                this._applySegmentsToTimeline(fillerSegments, 'filler', fillerClipId, fillerAssetId);
+                const applied = this._applySegmentsToTimeline(fillerSegments, 'filler', fillerClipId, fillerAssetId);
+                if (!applied.applied) {
+                    return { engine: 'api', success: false, endpoint, skipped: true, message: `Filler removal was not applied: ${applied.reason}` };
+                }
 
                 // Re-derive timeline transcript — keep original in transcripts index,
                 // push derived words to store.captions via setTimelineTranscript.
@@ -4576,7 +4582,10 @@ export class MediaExecutionEngine {
                     }
                 }
                 console.log(`[MediaExecutionEngine] ✂️  detectRepeatedTakes: ${takeSegs.length} segments, ${result?.removedCount ?? '?'} take(s) cut`);
-                this._applySegmentsToTimeline(takeSegs, 'take', null, retakeAssetId);
+                const applied = this._applySegmentsToTimeline(takeSegs, 'take', null, retakeAssetId);
+                if (!applied.applied) {
+                    return { engine: 'api', success: false, endpoint, skipped: true, message: `Retake removal was not applied: ${applied.reason}` };
+                }
             }
 
             // ── 7. Auto captions ─────────────────────────────────────────
@@ -4647,10 +4656,18 @@ export class MediaExecutionEngine {
                 if (!activeSegments || activeSegments.length === 0) {
                     console.warn('[MediaExecutionEngine] ⚠️  silenceDetect returned no activeSegments — nothing to cut');
                 } else {
+                    const knownDuration = Number(result.videoDuration) || 0;
+                    const retainedDuration = activeSegments.reduce((sum, segment) => sum + Math.max(0, Number(segment.duration) || (Number(segment.end) - Number(segment.start)) || 0), 0);
+                    if (knownDuration > 0 && retainedDuration >= knownDuration - 0.05) {
+                        return { engine: 'api', success: true, endpoint, skipped: true, message: 'No removable silence found; the timeline was left unchanged.' };
+                    }
                     console.log(`[MediaExecutionEngine] ✂️  silenceDetect: applying ${activeSegments.length} segments`);
                     const clipId  = command.args?.clip_id  || null;
                     const assetId = command.args?.asset_id || null;
-                    this._applySegmentsToTimeline(activeSegments, 'silence', clipId, assetId);
+                    const applied = this._applySegmentsToTimeline(activeSegments, 'silence', clipId, assetId);
+                    if (!applied.applied) {
+                        return { engine: 'api', success: false, endpoint, skipped: true, message: `Silence removal was not applied: ${applied.reason}` };
+                    }
 
                     // Store original Whisper words indexed by filename (offset-based filtering
                     // in smartCleanup depends on source timestamps being preserved here).
@@ -4792,24 +4809,31 @@ export class MediaExecutionEngine {
             if (pauses.length === 0) return segments;
 
             // ── Get decisions: GPT endpoint first, heuristics as fallback ──────
-            let decisionByIdx = {};
+            const decisionByIdx = {};
             try {
-                const resp = await authFetch('/api/interview/classify-pauses', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        pauses: pauses.map(({ i, dur, before, after }) => ({ i, dur, before, after })),
-                    }),
-                });
-                const { decisions = [], fallback } = await resp.json();
-                decisions.forEach(d => { decisionByIdx[d.i] = d.action; });
-                console.log(`[MediaExecutionEngine] pause intelligence: ${decisions.length} decisions (${fallback ? 'editorial heuristics' : 'from GPT'})`);
+                // The server caps each classification request. Batch here and
+                // require valid indexed decisions; omitted/invalid items stay.
+                for (let offset = 0; offset < pauses.length; offset += 120) {
+                    const batch = pauses.slice(offset, offset + 120);
+                    const resp = await authFetch('/api/interview/classify-pauses', {
+                        method: 'POST',
+                        body: JSON.stringify({ pauses: batch.map(({ i, dur, before, after }) => ({ i, dur, before, after })) }),
+                    });
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    const { decisions = [], fallback } = await resp.json();
+                    decisions.forEach(d => {
+                        if (Number.isInteger(d?.i) && ['cut', 'keep', 'shorten'].includes(d.action)) decisionByIdx[d.i] = d.action;
+                    });
+                    console.log(`[MediaExecutionEngine] pause intelligence batch: ${decisions.length}/${batch.length} decisions (${fallback ? 'editorial heuristics' : 'from GPT'})`);
+                }
             } catch (apiErr) {
-                console.warn(`[MediaExecutionEngine] classify-pauses unavailable (${apiErr.message}) — using heuristics`);
+                console.warn(`[MediaExecutionEngine] classify-pauses unavailable (${apiErr.message}) — using conservative local decisions`);
                 for (const p of pauses) {
                     const endsMidSentence = p.before && !/[.!?…]\s*$/.test(p.before.trim());
-                    if (p.dur > 2.5)            decisionByIdx[p.i] = 'cut';
+                    if (p.dur > 2.5) decisionByIdx[p.i] = 'cut';
                     else if (endsMidSentence && p.dur < 1.5) decisionByIdx[p.i] = 'shorten';
-                    else                        decisionByIdx[p.i] = 'cut';
+                    else if (p.dur >= 1.5) decisionByIdx[p.i] = 'shorten';
+                    else decisionByIdx[p.i] = 'keep';
                 }
             }
 
@@ -4818,7 +4842,7 @@ export class MediaExecutionEngine {
             let keptCount = 0, shortenedCount = 0;
             for (const p of pauses) {
                 const nextSeg = sorted[p.i + 1];
-                const action  = decisionByIdx[p.i] || 'cut';
+                const action  = decisionByIdx[p.i] || 'keep';
                 const last    = refined[refined.length - 1];
 
                 if (action === 'keep' && p.dur <= MAX_KEEP_DUR) {
@@ -5012,7 +5036,7 @@ export class MediaExecutionEngine {
 
         if (videoTracks.length === 0) {
             console.warn(`[MediaExecutionEngine] _applySegmentsToTimeline: no video track found`);
-            return;
+            return { applied: false, reason: 'no video track found' };
         }
 
         const allVideoClips = videoTracks.flatMap(t =>
@@ -5020,7 +5044,7 @@ export class MediaExecutionEngine {
         );
         if (allVideoClips.length === 0) {
             console.warn(`[MediaExecutionEngine] _applySegmentsToTimeline: video track has no clips`);
-            return;
+            return { applied: false, reason: 'video track has no clips' };
         }
 
         const basename = (p) => (p || '').split(/[\\/]/).pop();
@@ -5041,14 +5065,14 @@ export class MediaExecutionEngine {
                 .sort((a, b) => a.start - b.start);
             if (baseClips.length === 0) {
                 console.warn(`[MediaExecutionEngine] _applySegmentsToTimeline: no clips found for asset "${targetAssetId}" — skipping`);
-                return;
+                return { applied: false, reason: 'target asset has no timeline clips' };
             }
             baseClip = baseClips[0];
         } else if (targetClipId) {
             baseClip = allVideoClips.find(c => c.id === targetClipId);
             if (!baseClip) {
                 console.warn(`[MediaExecutionEngine] _applySegmentsToTimeline: clip "${targetClipId}" not found — skipping`);
-                return;
+                return { applied: false, reason: 'target clip was not found' };
             }
             baseClips = [baseClip];
         } else if (allVideoClips.length === 1) {
@@ -5135,7 +5159,14 @@ export class MediaExecutionEngine {
         const lastBaseClip    = baseClips[baseClips.length - 1];
         const rangeStart      = baseClip.start;
         const rangeEnd        = lastBaseClip.start + (lastBaseClip.duration || 0);
-        const totalOriginalDuration = rangeEnd - rangeStart;
+        const durationByTrack = new Map();
+        baseClips.forEach(clip => {
+            const trackId = clip._trackId || videoTrack.id;
+            durationByTrack.set(trackId, (durationByTrack.get(trackId) || 0) + Math.max(0, Number(clip.duration) || 0));
+        });
+        // Speaker-split videos have synchronized parallel tracks; count the
+        // timeline once by using the fullest track, not the sum across tracks.
+        const totalOriginalDuration = Math.max(0, ...durationByTrack.values());
 
         // ── Close any gap that already exists BEFORE this range ────────────────
         // The "shift clips after" logic further down only ever accounts for
@@ -5171,7 +5202,7 @@ export class MediaExecutionEngine {
         const validSegs = segments.filter(s => s.duration > 0.05);
         if (validSegs.length === 0) {
             console.warn(`[MediaExecutionEngine] _applySegmentsToTimeline: all segments are too short, skipping`);
-            return;
+            return { applied: false, reason: 'all kept segments were too short' };
         }
 
         // ── Sanity guard (R122) ───────────────────────────────────────────────
@@ -5209,23 +5240,23 @@ export class MediaExecutionEngine {
         const { pieces: segOut, end: timelineEnd } = packSegments(validSegs, baseClips, effectiveRangeStart);
         const keptDuration = Math.max(0, timelineEnd - effectiveRangeStart);
         const wipedEverything = keptDuration < 0.1 && totalOriginalDuration > 0.5;
-        const wipedMostOfIt   = totalOriginalDuration > 3 && keptDuration < totalOriginalDuration * 0.10;
-        if (wipedEverything || wipedMostOfIt) {
+        const wipedMostOfIt   = totalOriginalDuration > 0.5 && keptDuration < totalOriginalDuration * 0.60;
+        if (wipedEverything || wipedMostOfIt || segOut.length === 0) {
             console.error(
                 `[MediaExecutionEngine] _applySegmentsToTimeline: REJECTED — kept duration ` +
-                `${keptDuration.toFixed(1)}s overlaps less than 10% of this clip's current ` +
+                `${keptDuration.toFixed(1)}s would survive, below the 60% safety floor for this clip's current ` +
                 `${totalOriginalDuration.toFixed(1)}s (the server's detection was run against the ` +
                 `whole source file and no longer lines up with what's left on the timeline).`
             );
             useAIStore.getState().addLog({
                 id: `step-sanity-${Date.now()}`,
                 type: 'error',
-                message: wipedEverything
+                message: wipedEverything || segOut.length === 0
                     ? `Detection result rejected — it would have removed this clip entirely (kept ${keptDuration.toFixed(1)}s of ${totalOriginalDuration.toFixed(1)}s). Nothing was changed.`
-                    : `Detection result rejected — only ${keptDuration.toFixed(1)}s would survive out of ${totalOriginalDuration.toFixed(1)}s. Nothing was changed. Try running again or adjusting settings.`,
+                    : `Detection result rejected — only ${keptDuration.toFixed(1)}s would survive out of ${totalOriginalDuration.toFixed(1)}s, below the 60% safety floor. Nothing was changed. Try reviewing the detected cuts or adjusting settings.`,
                 timestamp: new Date().toLocaleTimeString()
             });
-            return;
+            return { applied: false, reason: wipedEverything || segOut.length === 0 ? 'no detected kept footage overlaps the current clips' : 'the result would remove more than 40% of current timeline footage' };
         }
 
         const ts = Date.now();
@@ -5377,6 +5408,7 @@ export class MediaExecutionEngine {
         const freshStore = useTimelineStore.getState();
         freshStore.seek(effectiveRangeStart);
         freshStore.setIsPlaying(true);
+        return { applied: inserted > 0, inserted, keptDuration, originalDuration: totalOriginalDuration, reason: inserted > 0 ? null : 'no kept segment overlapped the current clips' };
     }
 
     async verifyExecution(job) {

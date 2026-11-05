@@ -271,10 +271,16 @@ const TextOverlay = ({ placementFilter = 'all' }) => {
     React.useLayoutEffect(() => {
         const el = containerRef.current;
         if (!el) return;
-        const { width: refWidth } = getPlayerDimensions(aspectRatio);
+        const { width: refWidth, height: refHeight } = getPlayerDimensions(aspectRatio);
         const recompute = () => {
             const rect = el.getBoundingClientRect();
-            if (rect.width > 0) setPreviewScale(rect.width / refWidth);
+            // Use the fitted frame's limiting dimension. The overlay can sit
+            // inside a responsive/letterboxed stage whose width and height do
+            // not quite share the project's aspect ratio; width-only scaling
+            // then makes captions larger than their export-size equivalents.
+            if (rect.width > 0 && rect.height > 0) {
+                setPreviewScale(Math.min(rect.width / refWidth, rect.height / refHeight));
+            }
         };
         recompute();
         const observer = new ResizeObserver(recompute);

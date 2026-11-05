@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Plus, Search, User, X, MoreHorizontal, Image as ImageIcon, Camera, FilePlus2, Palette, CreditCard, LogOut, Pencil, Copy, Trash2, Loader2 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Plus, Search, User, X, MoreHorizontal, Image as ImageIcon, Camera, FilePlus2, Palette, CreditCard, LogOut, Pencil, Copy, Trash2, Loader2, ArrowLeft, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Logo } from './Logo.jsx';
 import MobileSheet, { SheetRow } from './MobileSheet.jsx';
@@ -95,10 +95,62 @@ export default function MobileHome({
     const [searchOpen, setSearchOpen] = useState(false);
     const [accountOpen, setAccountOpen] = useState(false);
     const [rowMenu, setRowMenu] = useState(null); // project
+    const [selectedFiles, setSelectedFiles] = useState([]);
+    const pickerRef = useRef(null);
+    const [filePreviews, setFilePreviews] = useState([]);
+
+    useEffect(() => {
+        const urls = selectedFiles.map(file => URL.createObjectURL(file));
+        setFilePreviews(urls);
+        return () => urls.forEach(url => { if (url) URL.revokeObjectURL(url); });
+    }, [selectedFiles]);
 
     const query = search.trim().toLowerCase();
     const list = query ? projects.filter(p => p.name.toLowerCase().includes(query)) : projects;
     const meter = aiOpsMeter(aiOpsUsed, plan);
+
+    if (newVideoOpen) {
+        return (
+            <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', background: 'radial-gradient(100% 45% at 100% 50%, rgba(112,35,170,.16), transparent 70%), var(--bg)', color: 'var(--fg)', fontFamily: 'var(--f-sans)' }}>
+                <header style={{ height: 56, flexShrink: 0, display: 'flex', alignItems: 'center', padding: '0 16px', paddingTop: 'env(safe-area-inset-top)' }}>
+                    <button type="button" onClick={() => { setSelectedFiles([]); onNewVideoOpenChange(false); }} aria-label={t('mobileHome.back', 'Back')} style={{ ...iconBtn, width: 36 }}><ArrowLeft size={20} /></button>
+                    <span style={{ marginLeft: 10, display: 'flex', alignItems: 'center', gap: 8 }}><Logo size={21} variant="gradient" /><strong style={{ fontSize: 14, letterSpacing: '.02em' }}>VIBED</strong></span>
+                </header>
+                <main style={{ flex: 1, padding: '10px 20px 28px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <div>
+                        <h1 style={{ margin: '0 0 5px', fontSize: 29, lineHeight: 1.12, letterSpacing: '-.04em', fontWeight: 750 }}>{t('mobileHome.makeShort', 'Make a short')}</h1>
+                        <p style={{ margin: 0, color: 'var(--fg-2)', fontSize: 14, lineHeight: 1.5 }}>{t('mobileHome.makeShortSub', 'Pick clips and photos. We’ll cut, caption and frame them for you.')}</p>
+                    </div>
+                    <button type="button" onClick={() => pickerRef.current?.click()} style={{ minHeight: 88, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 14, borderRadius: 18, border: '1px solid rgba(0,210,225,.55)', background: 'linear-gradient(110deg, rgba(0,190,205,.14), rgba(122,42,190,.18))', color: 'var(--fg)', textAlign: 'left' }}>
+                        <span style={{ width: 50, height: 50, borderRadius: 14, display: 'grid', placeItems: 'center', color: '#66edf4', border: '1px solid rgba(0,210,225,.45)', background: 'rgba(0,210,225,.08)' }}><Plus size={23} /></span>
+                        <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}><strong style={{ fontSize: 16 }}>{t('mobileHome.chooseMedia', 'Choose photos or videos')}</strong><span style={{ color: 'var(--fg-2)', fontSize: 12.5 }}>{t('mobileHome.chooseMediaSub', 'Pick as many as you want')}</span></span>
+                    </button>
+                    <input ref={pickerRef} type="file" accept="video/*,image/*" multiple aria-label={t('mobileHome.chooseMedia', 'Choose photos or videos')} onChange={e => { setSelectedFiles(current => [...current, ...Array.from(e.target.files || [])].slice(0, 20)); e.target.value = ''; }} style={{ display: 'none' }} />
+                    {selectedFiles.length > 0 && <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: 'var(--f-mono)', fontSize: 10.5, letterSpacing: '.1em', color: 'var(--fg-3)' }}><span>{t('mobileHome.selected', 'SELECTED')}</span><span style={{ color: '#69e6ed' }}>{selectedFiles.length} {t('mobileHome.items', 'items')}</span></div>
+                        <div style={{ display: 'flex', gap: 9, overflowX: 'auto', paddingBottom: 2 }}>
+                            {selectedFiles.map((file, index) => <div key={`${file.name}-${file.lastModified}-${index}`} style={{ position: 'relative', width: 76, height: 112, flex: 'none', borderRadius: 13, overflow: 'hidden', border: '1px solid rgba(0,210,225,.55)', background: 'linear-gradient(145deg,#18242c,#24152d)', display: 'grid', placeItems: 'center' }}>
+                                {filePreviews[index] ? (file.type?.startsWith('image/') ? <img src={filePreviews[index]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <video src={filePreviews[index]} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />) : <span style={{ color: '#79eaf0' }}>{file.type?.startsWith('image/') ? <ImageIcon size={20} /> : <Camera size={20} />}</span>}
+                                <button type="button" aria-label={`${t('mobileHome.removeFile', 'Remove')} ${file.name}`} onClick={() => setSelectedFiles(files => files.filter((_, i) => i !== index))} style={{ position: 'absolute', top: 5, right: 5, width: 23, height: 23, display: 'grid', placeItems: 'center', borderRadius: 99, border: '1px solid rgba(255,255,255,.4)', background: 'rgba(0,0,0,.7)', color: 'white' }}><X size={14} /></button>
+                                <span style={{ position: 'absolute', left: 5, right: 5, bottom: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '3px 5px', borderRadius: 6, background: 'rgba(0,0,0,.68)', color: 'white', fontSize: 9 }}>{file.name}</span>
+                            </div>)}
+                            {selectedFiles.length < 20 && <button type="button" onClick={() => pickerRef.current?.click()} aria-label={t('mobileHome.addMore', 'Add more media')} style={{ width: 76, height: 112, flex: 'none', display: 'grid', placeItems: 'center', borderRadius: 13, border: '1px dashed var(--line-strong)', background: 'rgba(255,255,255,.02)', color: 'var(--fg-3)' }}><Plus size={20} /></button>}
+                        </div>
+                    </>}
+                    <button type="button" disabled={!selectedFiles.length || creating} onClick={() => onPickVideo(selectedFiles)} style={{ minHeight: 54, marginTop: 2, border: 0, borderRadius: 999, background: selectedFiles.length ? '#f7f8fb' : 'var(--bg-3)', color: selectedFiles.length ? '#090b10' : 'var(--fg-3)', fontSize: 16, fontWeight: 700, cursor: selectedFiles.length ? 'pointer' : 'default' }}>
+                        {creating ? t('mobileHome.creating', 'Creating…') : <>{t('mobileHome.continue', 'Continue')} <span style={{ marginLeft: 8 }}>→</span></>}
+                    </button>
+                    <div style={{ marginTop: -7, textAlign: 'center', color: 'var(--fg-3)', fontFamily: 'var(--f-mono)', fontSize: 10.5 }}>{meter.unlimited ? t('mobileHome.unlimited', 'Unlimited AI edits') : t('mobileHome.aiEditsLeft', { count: Math.max(0, meter.limit - meter.used), defaultValue: '{{count}} AI edits left' })}</div>
+                    {createError && <p role="alert" style={{ margin: 0, color: 'var(--coral)', fontSize: 13 }}>{t('mobileHome.createFailed')}</p>}
+                    {(loading || projects.length > 0) && <h2 style={{ margin: '8px 0 -5px', fontFamily: 'var(--f-mono)', fontSize: 10.5, fontWeight: 500, letterSpacing: '.14em', color: 'var(--fg-3)' }}>{t('mobileHome.recent')}</h2>}
+                    {!loading && projects.slice(0, 3).map(project => <button key={project.id} type="button" onClick={() => onOpen(project.id)} style={{ width: '100%', minHeight: 74, padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 11, border: '1px solid var(--line)', borderRadius: 14, background: 'var(--bg-2)', color: 'var(--fg)', textAlign: 'left' }}>
+                        <span style={{ width: 43, height: 56, flex: 'none', overflow: 'hidden', borderRadius: 8, background: 'var(--bg-3)' }}>{project.thumbnail_url ? <img src={project.thumbnail_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ height: '100%', display: 'grid', placeItems: 'center' }}><Logo size={18} variant="gradient" /></span>}</span>
+                        <span style={{ flex: 1, minWidth: 0 }}><strong style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>{project.name}</strong><small style={{ color: 'var(--fg-3)', fontFamily: 'var(--f-mono)' }}>{formatDuration(project.duration)} · {t('mobileHome.edited', { when: formatWhen(project.updated_at) })}</small></span><ChevronRight size={18} color="var(--fg-3)" />
+                    </button>)}
+                </main>
+            </div>
+        );
+    }
 
     return (
         <div style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', background: 'var(--bg)', color: 'var(--fg)', fontFamily: 'var(--f-sans)' }}>
@@ -142,15 +194,15 @@ export default function MobileHome({
             <main style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 18, padding: '8px 16px 24px' }}>
                 <button
                     type="button"
-                    onClick={() => onNewVideoOpenChange(true)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '18px 16px', borderRadius: 18, border: 0, background: 'var(--accent)', color: '#fff', textAlign: 'left', cursor: 'pointer' }}
+                    onClick={() => { setSelectedFiles([]); onNewVideoOpenChange(true); }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '18px 16px', borderRadius: 18, border: 0, background: '#f7f8fb', color: '#090b10', textAlign: 'left', cursor: 'pointer' }}
                 >
-                    <span aria-hidden="true" style={{ width: 48, height: 48, borderRadius: 14, background: 'rgba(255,255,255,0.16)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <span aria-hidden="true" style={{ width: 48, height: 48, borderRadius: 14, background: 'rgba(0,0,0,0.07)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                         <Plus size={24} strokeWidth={2.2} />
                     </span>
                     <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                         <span style={{ fontSize: 17, fontWeight: 600 }}>{t('mobileHome.newVideo')}</span>
-                        <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.88)' }}>{t('mobileHome.newVideoSub')}</span>
+                        <span style={{ fontSize: 13, color: '#4c5563' }}>{t('mobileHome.newVideoSub')}</span>
                     </span>
                 </button>
 

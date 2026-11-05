@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Menu, FolderOpen, Pencil, Settings } from 'lucide-react';
+import { Menu, FolderOpen, Pencil, Settings, History } from 'lucide-react';
 import useTimelineStore from '../store/useTimelineStore';
 import MobileSheet, { SheetRow } from './MobileSheet';
+import useVersionsStore from '../agent/projectVersions';
+import useMobileFlowStore from '../store/useMobileFlowStore';
 
 /**
  * MobileEditorMenu — the mobile header's ☰ button and its sheet.
@@ -19,6 +21,7 @@ export default function MobileEditorMenu({ onOpenSettings }) {
     const [renaming, setRenaming] = useState(false);
     const [name, setName] = useState('');
     const [saving, setSaving] = useState(false);
+    const versionCount = useVersionsStore(s => s.versions.length);
 
     const close = () => { setOpen(false); setRenaming(false); };
 
@@ -88,6 +91,7 @@ export default function MobileEditorMenu({ onOpenSettings }) {
                 ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                         <SheetRow icon={<FolderOpen size={20} />} label={t('mobileUi.myProjects')} sub={t('mobileUi.myProjectsSub')} onClick={() => { close(); navigate('/dashboard'); }} />
+                        {versionCount > 0 && <SheetRow icon={<History size={20} />} label={t('mobileFlow.versions', 'Your versions')} sub={t('mobileFlow.versionsCount', { count: versionCount, defaultValue: '{{count}} versions' })} onClick={() => { close(); useMobileFlowStore.getState().openVersionsFromEditor(); }} />}
                         <SheetRow icon={<Pencil size={20} />} label={t('mobileUi.rename')} onClick={startRename} />
                         <SheetRow icon={<Settings size={20} />} label={t('mobileUi.settings')} sub={t('mobileUi.settingsSub')} onClick={() => { close(); onOpenSettings?.(); }} />
                     </div>

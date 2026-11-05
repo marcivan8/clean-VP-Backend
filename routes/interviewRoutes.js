@@ -2391,8 +2391,10 @@ function classifyPausesHeuristically(pauses) {
             action = 'cut';
         } else if (endsMidSentence && dur < 1.5) {
             action = 'shorten';
+        } else if (dur >= 1.5) {
+            action = 'shorten';
         } else {
-            action = 'cut';
+            action = 'keep';
         }
         return { i: p.i, action };
     });
@@ -2451,7 +2453,7 @@ Pauses: ${JSON.stringify(compact)}`,
             const parsed = JSON.parse(completion.choices[0].message.content);
             decisions = (parsed.d || []).map(d => ({
                 i:      d.i,
-                action: ['cut', 'keep', 'shorten'].includes(d.a) ? d.a : 'cut',
+                action: ['cut', 'keep', 'shorten'].includes(d.a) ? d.a : 'keep',
             }));
         } catch (parseErr) {
             console.warn(`[interviewRoutes] classify-pauses: parse failure (${parseErr.message}) — falling back to heuristics`);

@@ -1239,6 +1239,11 @@
     }
   },
   "mobileFlow": {
+    "newShortEyebrow": "NEW SHORT",
+    "uploading": "Uploading your video",
+    "uploadNote": "Pick a style now. Your short starts as soon as the upload finishes.",
+    "somethingElse": "Something else — describe it",
+    "timeLeft": "About {{count}} seconds left",
     "skip": "Skip",
     "title": "What are you making?",
     "subtitle": "This sets the pacing, how it cuts, and how long it runs.",
@@ -1254,9 +1259,15 @@
       "howto": "How-to"
     },
     "resultTitle": "Your short",
+    "watchIt": "Watch it",
+    "changeSubtitle": "Tap one. It redoes the edit and keeps everything else.",
+    "changeCost": "Each change uses one AI edit",
+    "tryAnotherChange": "Try another change",
+    "justNow": "just now",
+    "minutesAgo": "{{count}} minutes ago",
     "share": "Share it",
     "change": "Change something",
-    "byHand": "Edit by hand",
+    "byHand": "Edit on timeline",
     "back": "Back",
     "send": "Send",
     "orSay": "OR SAY IT IN YOUR OWN WORDS",
@@ -1270,6 +1281,7 @@
       "slower": "Slower"
     },
     "versions": "Your versions",
+    "editTimeline": "Edit on timeline",
     "versionsBody": "Every change makes a new one. Nothing is lost.",
     "versionsCount_one": "{{count}} version",
     "versionsCount_other": "{{count}} versions",

@@ -1239,6 +1239,11 @@
     }
   },
   "mobileFlow": {
+    "newShortEyebrow": "NOUVEAU SHORT",
+    "uploading": "Envoi de votre vidéo",
+    "uploadNote": "Choisissez un style. Votre short démarre dès la fin de l’envoi.",
+    "somethingElse": "Autre chose — décrivez votre idée",
+    "timeLeft": "Encore environ {{count}} secondes",
     "skip": "Passer",
     "title": "Vous faites quoi ?",
     "subtitle": "Cela règle le rythme, les coupes et la durée.",
@@ -1254,9 +1259,15 @@
       "howto": "Tutoriel"
     },
     "resultTitle": "Votre short",
+    "watchIt": "Regarder",
+    "changeSubtitle": "Choisissez une option. Le montage est refait sans perdre le reste.",
+    "changeCost": "Chaque changement utilise un montage IA",
+    "tryAnotherChange": "Essayer un autre changement",
+    "justNow": "à l’instant",
+    "minutesAgo": "il y a {{count}} minutes",
     "share": "Partager",
     "change": "Changer quelque chose",
-    "byHand": "Monter à la main",
+    "byHand": "Modifier sur la timeline",
     "back": "Retour",
     "send": "Envoyer",
     "orSay": "OU DITES-LE AVEC VOS MOTS",
@@ -1270,6 +1281,7 @@
       "slower": "Plus lent"
     },
     "versions": "Vos versions",
+    "editTimeline": "Modifier sur la timeline",
     "versionsBody": "Chaque changement en crée une. Rien ne se perd.",
     "versionsCount_one": "{{count}} version",
     "versionsCount_other": "{{count}} versions",

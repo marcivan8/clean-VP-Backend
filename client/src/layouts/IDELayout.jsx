@@ -536,6 +536,9 @@ const IDELayout = ({ mode = 'editor' }) => {
     const [showSidebar, setShowSidebar] = React.useState(false);
     
     const { isMobile } = useDeviceType();
+    const mobileFlowActive = useMobileFlowStore(s => s.active);
+    const mobileFlowStep = useMobileFlowStore(s => s.step);
+    const mobileShortPreviewMode = isMobile && mobileFlowActive && (mobileFlowStep === 'result' || mobileFlowStep === 'change');
     useLayoutEffect(() => {
         const stage = previewStageRef.current;
         if (!stage) return undefined;
@@ -575,6 +578,10 @@ const IDELayout = ({ mode = 'editor' }) => {
     const mobileExportBlocked = useTimelineStore(s => isMobile && summarizeUploads(s.assets, s.tracks).exportBlocked);
     // null = nothing open; 'media' | 'ai' | 'audio' | 'more' = bottom sheet open
     const [mobileSheet, setMobileSheet] = React.useState(null);
+    const [mobileFlowChatOpen, setMobileFlowChatOpen] = React.useState(false);
+    useEffect(() => {
+        if (!mobileFlowActive || !['outcome', 'change'].includes(mobileFlowStep)) setMobileFlowChatOpen(false);
+    }, [mobileFlowActive, mobileFlowStep]);
 
     const fileInputRef = useRef(null);
 
@@ -1866,7 +1873,13 @@ const IDELayout = ({ mode = 'editor' }) => {
                     // both the frame itself and every caption's on-screen size
                     // against what the editor showed — see jobs/exportProcessor.js's
                     // getResolutionDimensions() for the server-side half of this fix.
-                    aspectRatio: projectAspectRatio || '16:9',
+                    // Use the same resolved ratio used to build the composition
+                    // and caption plans above. `projectAspectRatio` can be
+                    // temporarily empty while the editor already has the
+                    // selected ratio, so defaulting here to 16:9 made the
+                    // worker scale the same reference-pixel fonts against a
+                    // different frame than the preview.
+                    aspectRatio: planAspectRatio || projectAspectRatio || '16:9',
                     // The selected colour grade. Stored in the timeline store but
                     // never sent, so the export had no way to know a LUT was
                     // chosen — one half of why selecting a LUT changed no pixel
@@ -2314,7 +2327,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                     <div className="absolute rounded-full blur-[120px]" style={{ width: "40vw", height: "40vw", bottom: "-30vw", left: "-10vw", background: "var(--violet)", opacity: 0.10 }} />
                 </div>
                 {/* Top Bar */}
-                <header className="h-11 border-b flex items-center justify-start gap-6 px-4 z-40 shrink-0" style={{ background: "var(--glass)", borderColor: "var(--line-soft)", backdropFilter: "blur(20px) saturate(160%)" }}>
+                <header className="h-11 border-b flex items-center justify-start gap-6 px-4 z-40 shrink-0" style={{ display: mobileShortPreviewMode ? 'none' : undefined, background: "var(--glass)", borderColor: "var(--line-soft)", backdropFilter: "blur(20px) saturate(160%)" }}>
                     <div className="flex items-center gap-3">
 
                         {/* Mobile menu (My projects, Rename, Settings). It used to toggle an
@@ -2469,7 +2482,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                 </header>
 
                 {/* Main Workspace */}
-                <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative pb-14 md:pb-0">
+                <div className={classNames("flex-1 flex flex-col md:flex-row overflow-hidden relative", mobileShortPreviewMode ? "pb-0" : "pb-14 md:pb-0")}>
 
                     {/* R108 — the desktop panel switcher. Mounted instead of the
                         horizontal strip below, never alongside it, so only one
@@ -2820,7 +2833,8 @@ const IDELayout = ({ mode = 'editor' }) => {
                                 // 9:16 / 1:1 → 45vh (portrait/square capped to avoid overflowing timeline)
                                 // Using vh (not svh) for universal iOS/Android support
                                 ...(isMobile && {
-                                    height: (aspectRatio === '9:16' || aspectRatio === '1:1') ? '45vh' : '56.25vw',
+                                    height: mobileShortPreviewMode ? '100dvh' : ((aspectRatio === '9:16' || aspectRatio === '1:1') ? '45vh' : '56.25vw'),
+                                    ...(mobileShortPreviewMode ? { flex: 'none' } : {}),
                                 }),
                             }}
                         >
@@ -2919,11 +2933,11 @@ const IDELayout = ({ mode = 'editor' }) => {
                         </div>
 
                         {/* Mobile playback row: undo/redo, prev/play/next, time, More */}
-                        {isMobile && <MobileTransportBar />}
+                        {isMobile && !mobileShortPreviewMode && <MobileTransportBar />}
 
                         {/* Mobile timeline stays in the center column; the
                             desktop timeline is mounted as a full-width overlay. */}
-                        {mode === 'editor' && isMobile && (
+                        {mode === 'editor' && isMobile && !mobileShortPreviewMode && (
                             <div
                                 data-tour="timeline"
                                 data-hint="timeline-strip"
@@ -2935,11 +2949,12 @@ const IDELayout = ({ mode = 'editor' }) => {
                         )}
 
                         {/* Compact AI bar — always visible on mobile, between timeline and toolbar */}
-                        {isMobile && (
+                        {isMobile && (!mobileFlowActive || ['outcome', 'change'].includes(mobileFlowStep)) && (
                             <MobileAIBar
-                                expanded={mobileSheet === 'ai'}
-                                onExpand={() => setMobileSheet('ai')}
-                                onCollapse={() => setMobileSheet(null)}
+                                expanded={mobileFlowActive ? mobileFlowChatOpen : mobileSheet === 'ai'}
+                                onExpand={() => mobileFlowActive ? setMobileFlowChatOpen(true) : setMobileSheet('ai')}
+                                onCollapse={() => mobileFlowActive ? setMobileFlowChatOpen(false) : setMobileSheet(null)}
+                                flowMode={mobileFlowActive}
                             />
                         )}
                     </main>
@@ -2983,7 +2998,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                 </div>
                 
                 {/* Mobile Bottom Toolbar */}
-                <MobileToolbar
+                {!mobileShortPreviewMode && <MobileToolbar
                     activeSheet={mobileSheet}
                     onSheetChange={handleMobileSheet}
                     onImport={triggerImport}
@@ -2991,7 +3006,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                     onClipAction={handleClipAction}
                     onDeselect={handleDeselect}
                     onDeleteClip={handleDeleteClip}
-                />
+                />}
             </div>
 
         </DndContext>
