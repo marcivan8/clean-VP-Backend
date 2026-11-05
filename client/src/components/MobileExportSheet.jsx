@@ -5,6 +5,7 @@ import useTimelineStore from '../store/useTimelineStore';
 import { PLATFORMS, RESOLUTIONS, QUALITY_PROFILES } from './exportPresets.js';
 import MobileSheet, { SheetLabel } from './MobileSheet';
 import ShareDestinations from './ShareDestinations.jsx';
+import { SHARE_ROW, SHARE_ROW_LABEL, SHARE_LABEL } from './shareRow.js';
 
 /**
  * MobileExportSheet — export on phones (phase 7), as one bottom sheet:
@@ -192,7 +193,7 @@ export default function MobileExportSheet({ open, onClose, onExport, isExporting
 
                     <button
                         type="button" onClick={start}
-                        style={{ height: 52, marginTop: 4, borderRadius: 'var(--r-sm)', border: 0, background: 'var(--accent)', color: '#fff', fontFamily: 'var(--f-sans)', fontSize: 16, fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                        style={{ height: 56, marginTop: 4, borderRadius: 999, border: 0, background: 'var(--fg)', color: 'var(--bg)', fontFamily: 'var(--f-sans)', fontSize: 17, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer' }}
                     >
                         <ShareIcon size={18} /> {t('mobileExport.exportVideo')}
                     </button>
@@ -212,7 +213,7 @@ export default function MobileExportSheet({ open, onClose, onExport, isExporting
                         {platform ? t('mobileExport.exportingFor', { platform: platform.label }) : t('mobileExport.exporting')}
                     </span>
                     <div aria-hidden="true" style={{ width: '100%', height: 6, borderRadius: 3, background: 'var(--line-strong)', overflow: 'hidden' }}>
-                        <div style={{ width: `${Math.max(2, Math.round(progress || 0))}%`, height: '100%', borderRadius: 3, background: 'var(--accent)', transition: 'width .4s ease' }} />
+                        <div style={{ width: `${Math.max(2, Math.round(progress || 0))}%`, height: '100%', borderRadius: 3, background: 'linear-gradient(90deg, var(--accent-2), var(--accent))', transition: 'width .4s ease' }} />
                     </div>
                     <span style={{ fontFamily: 'var(--f-mono)', fontSize: 11.5, color: 'var(--fg-3)' }}>
                         {RESOLUTIONS.find(r => r.id === settings.resolution)?.label} · {qualityLabel}
@@ -222,41 +223,75 @@ export default function MobileExportSheet({ open, onClose, onExport, isExporting
             )}
 
             {view === 'done' && (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, textAlign: 'center' }}>
-                    <video
-                        src={result.url} controls playsInline preload="metadata"
-                        style={{ width: '100%', maxHeight: '36vh', borderRadius: 'var(--r-sm)', background: '#000' }}
-                    />
-                    <span style={{ fontSize: 17, fontWeight: 600 }}>{t('mobileExport.ready')}</span>
-                    {(result.metadata?.resolution || result.metadata?.sizeMB) && (
-                        <span style={{ marginTop: -6, fontFamily: 'var(--f-mono)', fontSize: 11.5, color: 'var(--fg-3)' }}>
-                            {[result.metadata?.resolution, result.metadata?.sizeMB ? `${result.metadata.sizeMB} MB` : null, 'MP4'].filter(Boolean).join(' · ')}
-                        </span>
-                    )}
-                    <button
-                        type="button" onClick={() => save('save')} disabled={!!busy}
-                        style={{ width: '100%', height: 52, borderRadius: 'var(--r-sm)', border: 0, background: 'var(--accent)', color: '#fff', fontFamily: 'var(--f-sans)', fontSize: 16, fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: busy ? 0.7 : 1 }}
-                    >
-                        <Download size={18} /> {busy === 'save' ? t('mobileExport.preparingFile') : t('mobileExport.save')}
-                    </button>
-                    {canShareFiles && (
-                        <button
-                            type="button" onClick={() => save('share')} disabled={!!busy}
-                            style={{ width: '100%', height: 48, borderRadius: 'var(--r-sm)', border: '1px solid var(--line-strong)', background: 'transparent', color: 'var(--fg)', fontFamily: 'var(--f-sans)', fontSize: 15, fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-                        >
-                            <ShareIcon size={17} /> {busy === 'share' ? t('mobileExport.preparingFile') : t('mobileExport.share')}
-                        </button>
-                    )}
-                    {shareError && <span style={{ fontSize: 12.5, color: 'var(--coral)' }}>{shareError}</span>}
+                /* Laid out from the design (Export.dc.html): a small poster
+                   with the title beside it, the destinations as cards, and one
+                   light primary button at the bottom. It used to be a full
+                   native video player, a violet download button and a plain
+                   list, which matched nothing else in the flow. */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
 
-                    {/* Below Save and Share, not instead of them: the phone's
-                        own share sheet already reaches TikTok and Instagram
-                        and keeps working whatever the API review says. */}
-                    <ShareDestinations />
+                    <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                        {/* The poster, not a player: the result screen is where
+                            the short is watched. Muted and controls-free so it
+                            shows a frame and nothing else. */}
+                        <video
+                            src={result.url} muted playsInline preload="metadata"
+                            aria-hidden="true" tabIndex={-1}
+                            style={{ width: 86, height: 134, flex: 'none', borderRadius: 14, objectFit: 'cover', border: '1px solid var(--line)', background: '#000' }}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            <h2 style={{ margin: '0 0 8px', fontFamily: 'var(--f-display)', fontWeight: 800, fontSize: 22, letterSpacing: '-0.02em', lineHeight: 1.15 }}>
+                                {t('mobileExport.ready')}
+                            </h2>
+                            <p style={{ margin: 0, fontFamily: 'var(--f-mono)', fontSize: 12.5, lineHeight: 1.7, color: 'var(--fg-3)' }}>
+                                {[result.metadata?.resolution, result.metadata?.sizeMB ? `${result.metadata.sizeMB} MB` : null].filter(Boolean).join(' · ')}
+                                <br />
+                                {`MP4 · ${t('mobileExport.noWatermark')}`}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div>
+                        <span style={SHARE_LABEL}>{t('mobileExport.sendTo')}</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                            {canShareFiles && (
+                                <button
+                                    type="button"
+                                    onClick={() => save('share')}
+                                    // Until the file is in hand the only route is the
+                                    // awaiting one, and iOS refuses a share that is not
+                                    // inside the tap. Saying "preparing" beats failing.
+                                    disabled={!readyFile}
+                                    style={{ ...SHARE_ROW, opacity: readyFile ? 1 : 0.55 }}
+                                >
+                                    <ShareIcon size={21} style={{ color: 'var(--accent-2)', flex: 'none' }} />
+                                    <span style={SHARE_ROW_LABEL}>
+                                        {readyFile ? t('mobileExport.saveToPhotos') : t('mobileExport.preparingFile')}
+                                    </span>
+                                </button>
+                            )}
+                            <ShareDestinations />
+                        </div>
+                        {shareError && (
+                            <p role="alert" style={{ margin: '10px 0 0', fontSize: 12.5, color: 'var(--coral)' }}>{shareError}</p>
+                        )}
+                    </div>
+
+                    <div>
+                        <button
+                            type="button" onClick={() => save('save')} disabled={!!busy}
+                            style={{ width: '100%', height: 56, borderRadius: 999, border: 0, background: 'var(--fg)', color: 'var(--bg)', fontFamily: 'var(--f-sans)', fontSize: 17, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: busy ? 0.7 : 1, cursor: 'pointer' }}
+                        >
+                            <Download size={18} /> {busy === 'save' ? t('mobileExport.preparingFile') : t('mobileExport.save')}
+                        </button>
+                        <p style={{ margin: '13px 0 0', textAlign: 'center', fontFamily: 'var(--f-mono)', fontSize: 12, color: 'var(--fg-3)' }}>
+                            {t('mobileExport.freeNote')}
+                        </p>
+                    </div>
 
                     <button
                         type="button" onClick={() => setShowOptions(true)}
-                        style={{ minHeight: 44, border: 0, background: 'transparent', color: 'var(--accent)', fontFamily: 'var(--f-sans)', fontSize: 14, fontWeight: 500 }}
+                        style={{ minHeight: 44, border: 0, background: 'transparent', color: 'var(--fg-2)', fontFamily: 'var(--f-sans)', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}
                     >
                         {t('mobileExport.exportAgain')}
                     </button>
@@ -272,7 +307,7 @@ export default function MobileExportSheet({ open, onClose, onExport, isExporting
                     <span style={{ fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.5, wordBreak: 'break-word' }}>{error}</span>
                     <button
                         type="button" onClick={() => setShowOptions(true)}
-                        style={{ width: '100%', height: 48, borderRadius: 'var(--r-sm)', border: 0, background: 'var(--accent)', color: '#fff', fontFamily: 'var(--f-sans)', fontSize: 15, fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                        style={{ width: '100%', height: 56, borderRadius: 999, border: 0, background: 'var(--fg)', color: 'var(--bg)', fontFamily: 'var(--f-sans)', fontSize: 17, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer' }}
                     >
                         <RotateCw size={17} /> {t('mobileExport.tryAgain')}
                     </button>

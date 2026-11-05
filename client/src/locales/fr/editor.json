@@ -874,7 +874,11 @@
     "failed": "L'export n'a pas abouti",
     "tryAgain": "Réessayer",
     "keepsFormat": "Garde le format de votre vidéo : {{ratio}}",
-    "formatMismatch": "{{platform}} est en {{platformRatio}}. Votre vidéo est en {{ratio}}, elle sera ajustée avec des bandes noires."
+    "formatMismatch": "{{platform}} est en {{platformRatio}}. Votre vidéo est en {{ratio}}, elle sera ajustée avec des bandes noires.",
+    "sendTo": "ENVOYER VERS",
+    "saveToPhotos": "Enregistrer dans Photos",
+    "noWatermark": "sans filigrane",
+    "freeNote": "L'export est gratuit et n'utilise pas de montage IA"
   },
   "retakes": {
     "title": "Prises multiples trouvées",
@@ -1274,6 +1278,8 @@
     "change": "Changer quelque chose",
     "byHand": "Modifier sur la timeline",
     "back": "Retour",
+    "play": "Lire",
+    "pause": "Pause",
     "send": "Envoyer",
     "orSay": "OU DITES-LE AVEC VOS MOTS",
     "askPlaceholder": "Garde seulement la partie sur les tarifs",
@@ -1316,5 +1322,9 @@
     "error_PROVIDER_NOT_CONFIGURED": "Cette destination n'est pas encore configurée sur le serveur.",
     "error_CONNECT_FAILED": "Impossible de lancer la connexion. Réessayez.",
     "error_DISCONNECT_FAILED": "Impossible de se déconnecter. Réessayez."
+  },
+  "aiErrors": {
+    "quota": "Vous avez utilisé toutes vos opérations IA.",
+    "signedOut": "Votre session a expiré. Reconnectez-vous pour continuer."
   }
 }

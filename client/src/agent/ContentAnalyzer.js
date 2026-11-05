@@ -9,6 +9,7 @@
 
 import { authFetch } from '../utils/authFetch.js';
 import useTimelineStore from '../store/useTimelineStore.js';
+import { describeAiFailure } from '../lib/aiRequestError.js';
 
 export const SEGMENT_TYPES = {
     HOOK: 'hook',
@@ -219,9 +220,11 @@ export class ContentAnalyzer {
             clearTimeout(timeoutId);
 
             if (!response.ok) {
-                const err = await response.text();
-                console.error('[ContentAnalyzer] Backend error:', err);
-                return { success: false, error: err };
+                // Was the raw response body, so a quota refusal read as a wall
+                // of JSON and never reached the upgrade sheet.
+                const message = await describeAiFailure(response, 'Content analysis did not respond.');
+                console.error(`[ContentAnalyzer] Backend error (${response.status}):`, message);
+                return { success: false, error: message };
             }
 
             return await response.json();

@@ -10,6 +10,7 @@
  */
 
 import { authFetch } from '../utils/authFetch.js';
+import { describeAiFailure } from '../lib/aiRequestError.js';
 import { ContextGenerator } from './ContextGenerator.js';
 import useTimelineStore from '../store/useTimelineStore.js';
 import { ClarificationGenerator } from './ClarificationGenerator.js';
@@ -537,7 +538,7 @@ export class EditPlanner {
 
     // ── Plan Generators ───────────────────────────────────────────────────────
 
-    static planSplit(planId, clip, track, constraints, state) {
+    static planSplit(planId, clip, track, constraints, _state) {
         if (!clip || !track) return this.errorPlan(planId, 'No clip selected for split');
 
         const steps = [];
@@ -561,7 +562,7 @@ export class EditPlanner {
         return this.buildPlan(planId, 'split_clip', steps);
     }
 
-    static planCutAtPlayhead(planId, clip, track, state) {
+    static planCutAtPlayhead(planId, clip, track, _state) {
         return this.buildPlan(planId, 'cut_at_playhead', [
             { step_id: 'step_1', action: ACTIONS.GET_PLAYHEAD_POSITION, output: 'cut_timestamp' },
             { step_id: 'step_2', action: ACTIONS.SPLIT_CLIP, clip_id: clip?.id, track_id: track?.id, use_computed: 'cut_timestamp' }
@@ -1266,7 +1267,7 @@ export class EditPlanner {
         ]);
     }
 
-    static planOrganizeClips(planId, state, constraints) {
+    static planOrganizeClips(planId, state, _constraints) {
         // Collect all video clips across all video tracks with their track id
         const videoTracks = (state.tracks || []).filter(t => t.type === 'video');
         const allClips = videoTracks.flatMap(t => (t.clips || []).map(c => ({ ...c, trackId: t.id })));
@@ -1383,7 +1384,10 @@ export class EditPlanner {
             clearTimeout(timeoutId);
 
             if (!response.ok) {
-                return { success: false, error: 'API planning failed' };
+                // "API planning failed" was the same sentence for a missing
+                // provider key, an expired session and a spent quota, so the
+                // screen never said which and neither did the logs.
+                return { success: false, error: await describeAiFailure(response, 'The planner did not respond.') };
             }
 
             const result = await response.json();

@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Send, ChevronUp, ChevronDown, Loader2, Check, Undo2, Clock, Zap, Play, Pause } from 'lucide-react';
+import { ArrowRight, ChevronUp, ChevronDown, Loader2, Check, Undo2, Clock, Zap, Play, Pause } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
 import useAIStore from '../store/useAIStore';
@@ -164,7 +164,7 @@ function CaptionProgressCard({ files }) {
  * Mobile additions (phase 3): requests sent while the video uploads are queued
  * and run once it's ready (agent/rokaPromptQueue.js); applied edits show as a
  * card with Undo / Keep; suggestion chips follow the project (useAIStore
- * quickChips); 44px send button.
+ * 44px send button.
  *
  * @param {function} onExpand   Opens the full Roka screen (AI tab).
  * @param {boolean}  expanded   Full Roka screen (mockup "Ask Roka"): fixed
@@ -183,7 +183,6 @@ export default function MobileAIBar({ onExpand, expanded = false, onCollapse, fl
     const isAnalyzing    = useAIStore(s => s.isAnalyzing);
     const addLog         = useAIStore(s => s.addLog);
     const setIsAnalyzing = useAIStore(s => s.setIsAnalyzing);
-    const quickChips     = useAIStore(s => s.quickChips);
     const queuedCount    = useAIStore(s => s.queuedPrompts.length);
     const captionProgress = useAIStore(s => s.captionProgress);
     const clearQueued    = useAIStore(s => s.clearQueuedPrompts);
@@ -339,28 +338,6 @@ export default function MobileAIBar({ onExpand, expanded = false, onCollapse, fl
                         <p style={{ margin: 0, fontFamily: 'var(--f-sans)', fontSize: 14, color: 'var(--fg-2)', textAlign: 'center' }}>
                             {expanded && !uploadHeadline ? t('mobileRoka.readyTitle') : t('mobileRoka.emptyTitle')}
                         </p>
-                        {/* Suggestion chips — follow the project (SuggestionEngine) */}
-                        <div className="flex flex-wrap gap-2 justify-center">
-                            {(quickChips || []).slice(0, expanded ? 6 : 4).map(s => (
-                                <button
-                                    key={s}
-                                    type="button"
-                                    onClick={() => handleSubmit(s)}
-                                    className="rounded-full transition-opacity active:opacity-60"
-                                    style={{
-                                        minHeight:  36,
-                                        padding:    '0 14px',
-                                        border:     '1px solid var(--line-strong)',
-                                        background: 'var(--bg-3)',
-                                        fontFamily: 'var(--f-sans)',
-                                        fontSize:   13,
-                                        color:      'var(--fg)',
-                                    }}
-                                >
-                                    {s}
-                                </button>
-                            ))}
-                        </div>
                         {expanded && (
                             <p style={{ margin: '8px 0 0', fontFamily: 'var(--f-sans)', fontSize: 12, color: 'var(--fg-3)', textAlign: 'center' }}>
                                 {t('mobileRoka.footnote')}
@@ -452,48 +429,62 @@ export default function MobileAIBar({ onExpand, expanded = false, onCollapse, fl
                 </div>
             )}
 
-            {/* ── Input row ── */}
-            <div className="flex items-end gap-2 px-3 pb-3 pt-1 shrink-0">
+            {/* ── Composer ──
+                One pill holding the field and the send button, which is how the
+                design draws it and how the flow's own "say it in your own words"
+                already looks. It used to be a separate rounded box plus a violet
+                circle, so the two asking-Roka surfaces did not match. */}
+            <div className="px-3 pb-3 pt-1 shrink-0">
                 <label htmlFor="mobile-roka-input" className="sr-only">{t('mobileRoka.inputLabel')}</label>
-                <textarea
-                    id="mobile-roka-input"
-                    ref={inputRef}
-                    rows={1}
-                    placeholder={waitReason ? t('mobileRoka.placeholderWaiting') : t('mobileRoka.placeholder')}
-                    onKeyDown={handleKeyDown}
-                    onChange={(e) => {
-                        e.target.style.height = 'auto';
-                        e.target.style.height = Math.min(e.target.scrollHeight, 88) + 'px';
-                    }}
-                    className="flex-1 resize-none outline-none"
+                <div
+                    className="flex items-end"
                     style={{
-                        background:  'var(--bg-3)',
-                        border:      '1px solid var(--line-strong)',
-                        borderRadius: 22,
-                        color:       'var(--fg)',
-                        fontFamily:  'var(--f-sans)',
-                        // iOS Safari auto-zooms the whole page on focus for any text
-                        // input/textarea whose computed font-size is below 16px.
-                        // 16px is the documented Safari threshold.
-                        fontSize:    16,
-                        lineHeight:  1.45,
-                        padding:     '10px 16px',
-                        minHeight:   '44px',
-                        maxHeight:   '88px',
+                        gap: 10,
+                        padding: '6px 6px 6px 16px',
+                        borderRadius: 999,
+                        background: 'var(--glass)',
+                        border: '1px solid var(--line)',
                     }}
-                />
-                <button
-                    type="button"
-                    onClick={() => handleSubmit()}
-                    aria-label={t('mobileRoka.send')}
-                    className="shrink-0 rounded-full flex items-center justify-center transition-opacity active:opacity-70"
-                    style={{ width: 44, height: 44, background: 'var(--accent)', color: '#fff' }}
                 >
-                    {isAnalyzing
-                        ? <Loader2 className="w-4 h-4 animate-spin" />
-                        : <Send    className="w-4 h-4" />
-                    }
-                </button>
+                    <textarea
+                        id="mobile-roka-input"
+                        ref={inputRef}
+                        rows={1}
+                        placeholder={waitReason ? t('mobileRoka.placeholderWaiting') : t('mobileRoka.placeholder')}
+                        onKeyDown={handleKeyDown}
+                        onChange={(e) => {
+                            e.target.style.height = 'auto';
+                            e.target.style.height = Math.min(e.target.scrollHeight, 88) + 'px';
+                        }}
+                        className="flex-1 resize-none outline-none"
+                        style={{
+                            background:  'transparent',
+                            border:      'none',
+                            color:       'var(--fg)',
+                            fontFamily:  'var(--f-sans)',
+                            // The design draws this at 14.5px, but iOS Safari zooms
+                            // the whole page on focus for any field under 16px, and
+                            // a zoomed page costs more than half a pixel of type.
+                            fontSize:    16,
+                            lineHeight:  1.45,
+                            padding:     '10px 0',
+                            minHeight:   '32px',
+                            maxHeight:   '88px',
+                        }}
+                    />
+                    <button
+                        type="button"
+                        onClick={() => handleSubmit()}
+                        aria-label={t('mobileRoka.send')}
+                        className="shrink-0 rounded-full flex items-center justify-center transition-opacity active:opacity-70"
+                        style={{ width: 44, height: 44, background: 'var(--fg)', color: 'var(--bg)', border: 'none' }}
+                    >
+                        {isAnalyzing
+                            ? <Loader2 className="w-4 h-4 animate-spin" />
+                            : <ArrowRight className="w-[18px] h-[18px]" />
+                        }
+                    </button>
+                </div>
             </div>
         </div>
     );

@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, X, Loader2, Share2, Sparkles, SlidersHorizontal, History, UserRound, Smartphone, Video, MonitorPlay, ArrowLeft, Minus, Zap, Type, MessageCircle, Music2, Clock, ArrowRight, Film } from 'lucide-react';
+import { Check, X, Loader2, Share2, Sparkles, SlidersHorizontal, History, UserRound, Smartphone, Video, MonitorPlay, ArrowLeft, Minus, Zap, Type, MessageCircle, Music2, Clock, ArrowRight, Film, Play, Pause } from 'lucide-react';
 import useMobileFlowStore from '../store/useMobileFlowStore';
 import useEditStepsStore from '../store/useEditStepsStore';
 import { OUTCOMES, OUTCOME_BY_ID, startOutcome } from '../agent/mobileOutcomes';
@@ -9,6 +9,7 @@ import { editJobManager } from '../agent/EditJobManager';
 import useVersionsStore from '../agent/projectVersions';
 import PlanSheet from './PlanSheet.jsx';
 import { EventBus, EVENT_TYPES } from '../agent/EventBus';
+import { contentEnd, togglePreview } from '../timeline/previewPlayback.js';
 
 /* The flow covers the editor while it is open; the editor keeps running
    underneath, which is what makes "Skip" instant. */
@@ -208,6 +209,79 @@ function WorkingStep() {
 /* The editor's own preview is behind this sheet, already showing the result, so
    the player is not rebuilt here — it would mean duplicating the derived project
    and variables IDELayout computes for it. */
+/* ── Playing the short ────────────────────────────────────────────────────── */
+
+/* The result screen is where someone watches what the AI made, so it has to
+   play. The editor's own transport (MobileTransportBar) sits under the preview
+   and this sheet covers it, and reusing it here would bring undo, redo, clip
+   skip and the More sheet back into a flow built to keep them out. A review
+   screen wants one thing: tap to play. The logic lives in
+   timeline/previewPlayback.js, because this file may only export components. */
+
+/* The playhead, written straight to the DOM every frame. Subscribing React to
+   currentTime would re-render this whole sheet sixty times a second. Same
+   reason MobileTransportBar keeps its clock in a ref. */
+function Scrubber() {
+    const barRef = useRef(null);
+    const fillRef = useRef(null);
+    const timeRef = useRef(null);
+    const draggingRef = useRef(false);
+
+    React.useEffect(() => {
+        let raf;
+        const tick = () => {
+            const st = useTimelineStore.getState();
+            const end = contentEnd(st);
+            const at = Math.min(Math.max(0, Number(st.currentTime) || 0), end);
+            if (fillRef.current) fillRef.current.style.width = end > 0 ? `${(at / end) * 100}%` : '0%';
+            if (timeRef.current) timeRef.current.textContent = fmt(at);
+            // A short loops, the way it will wherever it gets posted.
+            if (st.isPlaying && !draggingRef.current && end > 0 && at >= end - 0.05) st.seek(0);
+            raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(raf);
+    }, []);
+
+    const seekFrom = (clientX) => {
+        const el = barRef.current;
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        if (r.width <= 0) return;
+        const frac = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+        const st = useTimelineStore.getState();
+        st.seek(frac * contentEnd(st));
+    };
+
+    return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <div
+                ref={barRef}
+                role="presentation"
+                onPointerDown={(e) => {
+                    draggingRef.current = true;
+                    e.currentTarget.setPointerCapture?.(e.pointerId);
+                    seekFrom(e.clientX);
+                }}
+                onPointerMove={(e) => { if (draggingRef.current) seekFrom(e.clientX); }}
+                onPointerUp={(e) => {
+                    draggingRef.current = false;
+                    e.currentTarget.releasePointerCapture?.(e.pointerId);
+                }}
+                onPointerCancel={() => { draggingRef.current = false; }}
+                // A 3px line is impossible to hit with a thumb, so the padding
+                // is the touch target and the line inside it is the visual.
+                style={{ flex: 1, padding: '14px 0', cursor: 'pointer', touchAction: 'none' }}
+            >
+                <div style={{ height: 3, borderRadius: 3, background: 'var(--line-strong)', overflow: 'hidden' }}>
+                    <div ref={fillRef} style={{ width: '0%', height: '100%', borderRadius: 3, background: 'var(--accent-2, #00E5FF)' }} />
+                </div>
+            </div>
+            <span ref={timeRef} style={{ fontFamily: 'var(--f-mono)', fontSize: 11.5, color: 'var(--fg-3)', minWidth: 34, textAlign: 'right' }}>0:00</span>
+        </div>
+    );
+}
+
 function ResultStep({ onShare }) {
     const { t } = useTranslation('editor');
     const close = useMobileFlowStore(s => s.close);
@@ -218,6 +292,28 @@ function ResultStep({ onShare }) {
     const aspect = useTimelineStore(s => s.aspectRatio);
     const toVersions = useMobileFlowStore(s => s.toVersions);
     const versionCount = useVersionsStore(s => s.versions.length);
+
+    const isPlaying = useTimelineStore(s => s.isPlaying);
+
+    // The sheet's height varies with its content, so the tappable video area is
+    // measured rather than guessed: a fixed percentage would either swallow the
+    // top of the sheet or leave a dead strip above it.
+    const sheetRef = useRef(null);
+    const [sheetH, setSheetH] = React.useState(0);
+    React.useEffect(() => {
+        const el = sheetRef.current;
+        if (!el || typeof ResizeObserver === 'undefined') return undefined;
+        const ro = new ResizeObserver(([entry]) => setSheetH(entry.contentRect.height));
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
+
+    // Leaving the result with the short still talking is not what anyone means
+    // by "change something", so playback stops when this screen goes away.
+    React.useEffect(() => () => {
+        const st = useTimelineStore.getState();
+        if (st.isPlaying) st.setIsPlaying(false);
+    }, []);
 
     const outcome = OUTCOME_BY_ID[outcomeId];
     const chip = {
@@ -233,10 +329,43 @@ function ResultStep({ onShare }) {
 
     return (
         <div style={{ position: 'fixed', inset: 0, zIndex: Z, pointerEvents: 'none' }}>
+            {/* Tap the short to play or pause it. Covers the visible video and
+                stops short of the sheet, so the buttons below still work. It is
+                also what keeps a tap from reaching the editor underneath and
+                selecting a clip. */}
+            <button
+                type="button"
+                onClick={togglePreview}
+                aria-label={isPlaying ? t('mobileFlow.pause', 'Pause') : t('mobileFlow.play', 'Play')}
+                style={{
+                    pointerEvents: 'auto', position: 'absolute', top: 0, left: 0, right: 0,
+                    bottom: sheetH, border: 0, background: 'transparent', padding: 0,
+                    cursor: 'pointer', display: 'grid', placeItems: 'center',
+                }}
+            >
+                {/* Shown while paused, the way every short does it. While it
+                    plays, nothing sits on top of the picture. */}
+                <span
+                    aria-hidden="true"
+                    style={{
+                        width: 62, height: 62, borderRadius: 999, display: 'grid', placeItems: 'center',
+                        background: 'rgba(5,7,11,.56)', border: '1px solid rgba(255,255,255,.22)',
+                        backdropFilter: 'blur(10px)', color: 'white',
+                        opacity: isPlaying ? 0 : 1,
+                        transform: isPlaying ? 'scale(.86)' : 'scale(1)',
+                        transition: 'opacity .18s ease, transform .18s ease',
+                    }}
+                >
+                    {isPlaying ? <Pause size={24} /> : <Play size={24} style={{ marginLeft: 3 }} />}
+                </span>
+            </button>
+
             <button type="button" onClick={close} aria-label={t('mobileFlow.back', 'Back')} style={{ pointerEvents: 'auto', position: 'absolute', top: 'calc(14px + env(safe-area-inset-top))', left: 14, width: 42, height: 42, display: 'grid', placeItems: 'center', border: '1px solid rgba(255,255,255,.18)', borderRadius: 999, background: 'rgba(5,7,11,.72)', color: 'white', backdropFilter: 'blur(10px)' }}><ArrowLeft size={19} /></button>
             <span style={{ position: 'absolute', top: 'calc(18px + env(safe-area-inset-top))', right: 14, padding: '8px 12px', borderRadius: 99, border: '1px solid rgba(255,255,255,.2)', background: 'rgba(5,7,11,.72)', color: 'white', fontFamily: 'var(--f-mono)', fontSize: 11, pointerEvents: 'none' }}>{fmt(duration)}</span>
-            <div style={{ ...panel, pointerEvents: 'auto', zIndex: Z + 1, maxHeight: '53dvh', overflowY: 'auto', borderRadius: '20px 20px 0 0', paddingBottom: 'calc(22px + env(safe-area-inset-bottom))' }} role="region" aria-label={t('mobileFlow.resultTitle', 'Your short')}>
-            <div aria-hidden="true" style={{ width: 40, height: 4, borderRadius: 4, background: 'var(--line-strong)', margin: '-8px auto 16px' }} />
+            <div ref={sheetRef} style={{ ...panel, pointerEvents: 'auto', zIndex: Z + 1, maxHeight: '53dvh', overflowY: 'auto', borderRadius: '20px 20px 0 0', paddingBottom: 'calc(22px + env(safe-area-inset-bottom))' }} role="region" aria-label={t('mobileFlow.resultTitle', 'Your short')}>
+            <div aria-hidden="true" style={{ width: 40, height: 4, borderRadius: 4, background: 'var(--line-strong)', margin: '-8px auto 12px' }} />
+
+            <Scrubber />
 
             {error && (
                 <p role="alert" style={{ margin: '0 0 14px', fontSize: 14, color: 'var(--coral)' }}>{error}</p>
@@ -364,7 +493,10 @@ function ChangeStep() {
                     style={{
                         flex: 1, minWidth: 0, minHeight: 48, padding: '0 16px', borderRadius: 999,
                         background: 'var(--glass)', border: '1px solid var(--line)', color: 'var(--fg)',
-                        fontSize: 14.5, fontFamily: 'var(--f-sans)', outline: 'none',
+                        // The design draws this at 14.5px. iOS Safari zooms the whole
+                        // page on focus for any field under 16px, which on a phone is
+                        // a worse trade than half a pixel of type.
+                        fontSize: 16, fontFamily: 'var(--f-sans)', outline: 'none',
                     }}
                 />
                 <button
@@ -406,6 +538,21 @@ function VersionsStep() {
     const assets = useTimelineStore(s => s.assets) || [];
     const thumb = assets.find(a => a.thumbnailUrl || a.thumbnail_url)?.thumbnailUrl || assets.find(a => a.thumbnailUrl || a.thumbnail_url)?.thumbnail_url;
 
+    // "just now" and "3 min ago" were read straight off Date.now() while
+    // rendering, so the label changed whenever React happened to re-render and
+    // never changed when it did not. Read once when the list opens instead.
+    // Deliberately not a ticking timer: this screen is looked at for a few
+    // seconds, and MobileFlow must stay free of intervals so the guard against
+    // a faked progress bar on the working screen can keep being a simple one.
+    const [now] = React.useState(() => Date.now());
+    const ageLabel = (createdAt) => {
+        if (!createdAt) return '';
+        const elapsed = now - createdAt;
+        return elapsed < 60_000
+            ? t('mobileFlow.justNow', 'just now')
+            : t('mobileFlow.minutesAgo', { count: Math.max(1, Math.floor(elapsed / 60_000)), defaultValue: '{{count}} min ago' });
+    };
+
     const row = (isCurrent) => ({
         display: 'flex', alignItems: 'center', gap: 13, padding: '12px 13px', borderRadius: 14,
         background: isCurrent ? 'rgba(0,205,220,.10)' : 'var(--glass)',
@@ -430,7 +577,7 @@ function VersionsStep() {
                             <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
                                 <span style={{ fontSize: 15, fontWeight: 650, color: 'var(--fg)' }}>{v.label}</span>
                                 <span style={{ fontFamily: 'var(--f-mono)', fontSize: 11.5, color: 'var(--fg-3)' }}>
-                                    {fmt(v.duration)} · {v.createdAt ? (Date.now() - v.createdAt < 60_000 ? t('mobileFlow.justNow', 'just now') : t('mobileFlow.minutesAgo', { count: Math.max(1, Math.floor((Date.now() - v.createdAt) / 60_000)), defaultValue: '{{count}} min ago' })) : ''}
+                                    {fmt(v.duration)} · {ageLabel(v.createdAt)}
                                 </span>
                             </span>
                             {isCurrent ? (

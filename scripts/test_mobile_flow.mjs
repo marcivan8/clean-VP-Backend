@@ -550,4 +550,113 @@ check('the plan sheet has copy for a spent trial, in both languages', () => {
     }
 });
 
+/* ── R151: playing the short from the result screen ──────────────────────── */
+
+realLog('\n  playing the short\n');
+
+const PB = await import('../client/src/timeline/previewPlayback.js');
+const TL = (await import('../client/src/store/useTimelineStore.js')).default;
+
+const withClips = (endAt) => {
+    TL.setState({
+        tracks: [{ id: 'v', type: 'video', clips: [{ id: 'a', start: 0, duration: endAt }] }],
+        duration: endAt + 5,   // the project is longer than the picture, as it is after a cut
+        currentTime: 0,
+        isPlaying: false,
+    });
+};
+
+check('the end of the picture is the last clip, not the project length', () => {
+    withClips(8);
+    // Playing to store.duration would run past the last frame into dead air.
+    assert.equal(PB.contentEnd(TL.getState()), 8);
+    assert.equal(TL.getState().duration, 13, 'the project really is longer');
+});
+
+check('an empty timeline falls back to the project duration', () => {
+    TL.setState({ tracks: [], duration: 4, currentTime: 0 });
+    assert.equal(PB.contentEnd(TL.getState()), 4);
+    assert.equal(PB.contentEnd({}), 0, 'and nothing at all is zero, not NaN');
+});
+
+check('play starts the short', () => {
+    withClips(8);
+    PB.togglePreview();
+    assert.equal(TL.getState().isPlaying, true);
+    PB.togglePreview();
+    assert.equal(TL.getState().isPlaying, false, 'and tapping again pauses it');
+});
+
+check('pressing play at the end replays instead of doing nothing', () => {
+    // Without this the playhead is already at the last frame, so play looks
+    // broken: the button changes and the picture does not.
+    withClips(8);
+    TL.setState({ currentTime: 8 });
+    PB.togglePreview();
+    assert.equal(TL.getState().currentTime, 0, 'it rewound');
+    assert.equal(TL.getState().isPlaying, true, 'and it is playing');
+});
+
+check('pause never moves the playhead, wherever it is', () => {
+    withClips(8);
+    TL.setState({ currentTime: 3, isPlaying: true });
+    PB.togglePreview();
+    assert.equal(TL.getState().isPlaying, false);
+    assert.equal(TL.getState().currentTime, 3, 'pause must hold position');
+
+    // The rewind is for PLAY at the end. Pausing at the end must not also
+    // jump back, or the last frame becomes impossible to stop on and look at.
+    TL.setState({ currentTime: 8, isPlaying: true });
+    PB.togglePreview();
+    assert.equal(TL.getState().isPlaying, false);
+    assert.equal(TL.getState().currentTime, 8, 'pausing at the end holds the last frame');
+});
+
+check('the result screen has a play control wired to it', () => {
+    const src = read('client/src/components/MobileFlow.jsx');
+    assert.match(src, /togglePreview/, 'the tap target calls the shared toggle');
+    assert.match(src, /mobileFlow\.pause/, 'the control is labelled for both states');
+    assert.match(src, /<Scrubber \/>/, 'the sheet shows where the playhead is');
+    // Covering the whole screen would swallow the buttons below; a fixed
+    // percentage would leave a dead strip or eat the top of the sheet.
+    assert.match(src, /bottom: sheetH/, 'the tap area stops at the measured sheet');
+    assert.match(src, /ResizeObserver/, 'the sheet height is measured, not guessed');
+});
+
+check('leaving the result stops the audio', () => {
+    const src = read('client/src/components/MobileFlow.jsx');
+    const result = src.slice(src.indexOf('function ResultStep'));
+    const cleanup = result.slice(0, result.indexOf('const outcome ='));
+    assert.match(cleanup, /setIsPlaying\(false\)/,
+        'going to "change something" with the short still talking is not going back');
+});
+
+check('the scrubber does not re-render the sheet every frame', () => {
+    const src = read('client/src/components/MobileFlow.jsx');
+    const scrubber = src.slice(src.indexOf('function Scrubber()'), src.indexOf('function ResultStep'));
+    assert.match(scrubber, /requestAnimationFrame/, 'it ticks on animation frames');
+    assert.ok(!/useTimelineStore\(\s*s\s*=>\s*s\.currentTime/.test(scrubber),
+        'subscribing React to currentTime would re-render this sheet 60 times a second');
+    assert.match(scrubber, /cancelAnimationFrame/, 'and it stops when the screen goes');
+});
+
+check('the version ages do not read the clock while rendering', () => {
+    const src = read('client/src/components/MobileFlow.jsx');
+    const versions = src.slice(src.indexOf('function VersionsStep'));
+    // A clock read during render changes the label whenever React happens to
+    // re-render, and never when it does not.
+    assert.ok(!/Date\.now\(\)\s*-\s*v\.createdAt/.test(versions), 'no inline clock read');
+    assert.match(versions, /React\.useState\(\(\) => Date\.now\(\)\)/, 'the clock is read once, into state');
+});
+
+check('play and pause are labelled in both languages', () => {
+    for (const lang of ['en', 'fr']) {
+        const mf = JSON.parse(read(`client/src/locales/${lang}/editor.json`)).mobileFlow;
+        for (const k of ['play', 'pause']) {
+            assert.ok(mf[k], `${lang} mobileFlow.${k} missing`);
+            assert.ok(!/\u2014/.test(mf[k]), `${lang} mobileFlow.${k} has an em dash`);
+        }
+    }
+});
+
 realLog(`\n${n} checks passed\n`);

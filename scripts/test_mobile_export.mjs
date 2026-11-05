@@ -62,4 +62,65 @@ console.log('✓ server sizes the frame from the project aspect ratio when no pl
     console.log('\u2713 Save to Photos calls share() inside the tap, so iOS does not refuse it');
 }
 
+// ── R153: the share screen matches the design ───────────────────────────────
+//
+// It had drifted a long way: a full native video player, a violet download
+// button and a plain text list of destinations. The design (Export.dc.html) is
+// a small poster beside the title, destinations as soft cards, and ONE light
+// primary button at the bottom.
+{
+    const { readFileSync } = await import('fs');
+    const dest = readFileSync(new URL('../client/src/components/ShareDestinations.jsx', import.meta.url), 'utf8');
+    const rowStyle = readFileSync(new URL('../client/src/components/shareRow.js', import.meta.url), 'utf8');
+    const code = sheet.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/[^\n]*$/gm, '');
+    const done = code.slice(code.indexOf("view === 'done'"), code.indexOf("view === 'error'"));
+
+    // The colour Marc called out. The design's primary is the light pill.
+    assert.match(done, /background: 'var\(--fg\)', color: 'var\(--bg\)'/, 'the primary button is the light pill');
+    assert.ok(!/background: 'var\(--accent\)'/.test(done), 'the violet download button is gone');
+    assert.match(done, /borderRadius: 999/, 'and it is a pill, not a soft rectangle');
+    assert.match(done, /height: 56/, 'at the design height');
+
+    // A poster, not a player: the result screen is where the short is watched.
+    assert.ok(!/<video[\s\S]{0,120}controls/.test(done), 'no native player on the share screen');
+    assert.match(done, /width: 86, height: 134/, 'the design poster size');
+
+    // Destinations are cards, shared with ShareDestinations so the two cannot
+    // drift apart.
+    assert.match(rowStyle, /borderRadius: 15/);
+    assert.match(rowStyle, /padding: '15px 16px'/);
+    assert.match(done, /SHARE_ROW/);
+    assert.match(dest, /SHARE_ROW/, 'the destination rows use the same card');
+    assert.ok(!/borderTop: '1px solid var\(--line\)'/.test(dest), 'the old plain list is gone');
+    assert.match(done, /SHARE_LABEL/, 'the section carries the mono heading');
+
+    // The share control must not be tappable before the file exists: that path
+    // awaits a download and iOS then refuses the share. This is the error Marc
+    // saw, "Impossible d'ouvrir le menu de partage".
+    assert.match(done, /disabled=\{!readyFile\}/, 'share waits until the file is in hand');
+    assert.match(done, /readyFile \? t\('mobileExport\.saveToPhotos'\) : t\('mobileExport\.preparingFile'\)/,
+        'and says it is preparing rather than failing');
+
+    for (const lang of ['en', 'fr']) {
+        const me = JSON.parse(readFileSync(new URL(`../client/src/locales/${lang}/editor.json`, import.meta.url), 'utf8')).mobileExport;
+        for (const k of ['sendTo', 'saveToPhotos', 'noWatermark', 'freeNote']) {
+            assert.ok(me[k], `${lang} mobileExport.${k} missing`);
+            assert.ok(!/\u2014/.test(me[k]), `${lang} mobileExport.${k} has an em dash`);
+        }
+    }
+    // Every artboard in the design uses the light pill for its primary action;
+    // there is no violet primary anywhere in it. That holds for the options and
+    // error views of this sheet too, not just the finished one.
+    // Plain string checks: the escaping needed to put this CSS in a regex is
+    // what made an earlier version of this assertion silently match nothing.
+    assert.ok(!code.includes("background: 'var(--accent)', color: '#fff'"),
+        'no violet primary button anywhere in the share sheet');
+    assert.ok(code.includes('linear-gradient(90deg, var(--accent-2), var(--accent))'),
+        'the progress bar is the cyan to violet sweep the design draws, not flat violet');
+    assert.match(code, /linear-gradient\(90deg, var\(--accent-2\), var\(--accent\)\)/,
+        'the progress bar is the cyan to violet sweep the design draws, not flat violet');
+
+    console.log('\u2713 share screen matches the design, light primary, no premature share');
+}
+
 console.log('\nALL MOBILE-EXPORT CHECKS PASSED');

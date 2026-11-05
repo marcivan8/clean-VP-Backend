@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link2, Check, Loader2, AlertCircle } from 'lucide-react';
+import { SHARE_ROW, SHARE_ROW_LABEL, SHARE_ROW_NOTE } from './shareRow.js';
 import {
     fetchDestinations, connectDestination, disconnectDestination, takeConnectOutcome,
 } from '../lib/socialDestinations';
@@ -64,34 +65,21 @@ export default function ShareDestinations() {
     if (destinations === null) return null;
     if (destinations.length === 0) return null;
 
-    const row = {
-        display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0',
-        borderTop: '1px solid var(--line)',
-    };
     const action = {
-        minHeight: 36, padding: '8px 14px', borderRadius: 999, cursor: 'pointer',
+        minHeight: 36, padding: '8px 14px', borderRadius: 999, cursor: 'pointer', flex: 'none',
         border: '1px solid var(--line-strong)', background: 'transparent',
         color: 'var(--fg)', fontFamily: 'var(--f-sans)', fontSize: 13.5, fontWeight: 600,
     };
 
     return (
-        <div style={{ width: '100%', marginTop: 4 }}>
-            <div style={{
-                display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8,
-                marginBottom: 2,
-            }}>
-                <span style={{ fontFamily: 'var(--f-mono)', fontSize: 11, letterSpacing: '0.14em', color: 'var(--fg-3)' }}>
-                    {t('shareDestinations.title', 'PUBLISH TO')}
-                </span>
-            </div>
-
+        <>
             {notice?.connected && (
-                <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--mint, var(--fg-2))' }}>
+                <p style={{ margin: '0 0 2px', fontSize: 12.5, color: 'var(--fg-2)' }}>
                     {t('shareDestinations.connectedNotice', { provider: notice.connected })}
                 </p>
             )}
             {notice?.error && (
-                <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--coral)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <p role="alert" style={{ margin: '0 0 2px', fontSize: 12.5, color: 'var(--coral)', display: 'flex', alignItems: 'center', gap: 6 }}>
                     <AlertCircle size={13} /> {t(`shareDestinations.error_${notice.error}`, t('shareDestinations.error_GENERIC'))}
                 </p>
             )}
@@ -99,50 +87,46 @@ export default function ShareDestinations() {
             {destinations.map((d) => {
                 const connected = d.connection && !d.connection.needsReconnect;
                 const stale = d.connection?.needsReconnect;
-                return (
-                    <div key={d.id} style={row}>
-                        <span style={{ flex: 1, minWidth: 0 }}>
-                            <span style={{ display: 'block', fontSize: 14.5, fontWeight: 600 }}>{d.label}</span>
-                            <span style={{ display: 'block', fontSize: 11.5, color: 'var(--fg-3)' }}>
-                                {!d.configured
-                                    ? t('shareDestinations.notAvailable', 'Not available yet')
-                                    : stale
-                                        ? t('shareDestinations.needsReconnect', 'Sign in again')
-                                        : connected
-                                            ? (d.connection.handle || t('shareDestinations.connected', 'Connected'))
-                                            : t('shareDestinations.notConnected', 'Not connected')}
-                            </span>
-                        </span>
+                const note = !d.configured
+                    ? t('shareDestinations.notAvailable', 'Not available yet')
+                    : stale
+                        ? t('shareDestinations.needsReconnect', 'Sign in again')
+                        : connected
+                            ? (d.connection.handle || t('shareDestinations.connected', 'Connected'))
+                            : null;
 
-                        {!d.configured ? null : busy === d.id ? (
-                            <Loader2 size={16} style={{ color: 'var(--fg-3)' }} />
-                        ) : connected ? (
-                            <button type="button" style={action} onClick={() => onDisconnect(d.id)}>
-                                {t('shareDestinations.disconnect', 'Disconnect')}
-                            </button>
-                        ) : (
-                            <button
-                                type="button"
-                                style={{ ...action, display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                                onClick={() => onConnect(d.id)}
-                            >
-                                {stale ? null : <Link2 size={14} />}
-                                {stale
-                                    ? t('shareDestinations.reconnect', 'Reconnect')
-                                    : t('shareDestinations.connect', 'Connect')}
-                            </button>
+                // A destination with no credentials on the server cannot be
+                // connected, so its row is a statement rather than a button
+                // that would go nowhere.
+                const Tag = d.configured ? 'button' : 'div';
+                return (
+                    <Tag
+                        key={d.id}
+                        {...(d.configured ? { type: 'button', onClick: () => (connected ? onDisconnect(d.id) : onConnect(d.id)) } : {})}
+                        style={{ ...SHARE_ROW, cursor: d.configured ? 'pointer' : 'default', opacity: d.configured ? 1 : 0.6 }}
+                    >
+                        {connected
+                            ? <Check size={20} style={{ color: 'var(--accent-2)', flex: 'none' }} />
+                            : <Link2 size={20} style={{ color: 'var(--fg-3)', flex: 'none' }} />}
+                        <span style={SHARE_ROW_LABEL}>{d.label}</span>
+                        {busy === d.id
+                            ? <Loader2 size={16} style={{ color: 'var(--fg-3)', flex: 'none' }} />
+                            : note && <span style={SHARE_ROW_NOTE}>{note}</span>}
+                        {d.configured && !connected && !busy && (
+                            <span style={action}>
+                                {stale ? t('shareDestinations.reconnect', 'Reconnect') : t('shareDestinations.connect', 'Connect')}
+                            </span>
                         )}
-                        {connected && <Check size={15} style={{ color: 'var(--mint, var(--fg-2))', flex: 'none' }} />}
-                    </div>
+                    </Tag>
                 );
             })}
 
-            {/* Said once, under the list, rather than on every row. */}
-            <p style={{ margin: '10px 0 0', fontSize: 11.5, lineHeight: 1.5, color: 'var(--fg-3)' }}>
+            {/* Said once, under the list. */}
+            <p style={{ margin: '2px 0 0', fontSize: 11.5, lineHeight: 1.5, color: 'var(--fg-3)' }}>
                 {destinations.some((d) => d.publishReady)
                     ? t('shareDestinations.publishNote')
                     : t('shareDestinations.reviewPending')}
             </p>
-        </div>
+        </>
     );
 }
