@@ -92,8 +92,10 @@ check('the camera stays single — a take is one take', () => {
         'multiple must be suppressed when capture is set, or the camera row lies about what it does');
 });
 
-check('the dashboard hands over the whole selection, not the first file', () => {
-    assert.ok(/setPendingNewVideo\(id, files\)/.test(dash));
+check('the dashboard hands the whole selection to the named draft project', () => {
+    assert.ok(/const draft = draftVideoProject/.test(dash), 'selected media reuses the project created by the naming step');
+    assert.ok(/setPendingNewVideo\(draft\.id, files\)/.test(dash));
+    assert.ok(/setDraftVideoProject\(\{ id, name, skeleton \}\)/.test(dash), 'mobile project creation retains its ID and name for media selection');
     assert.ok(/Array\.isArray\(picked\)/.test(dash), 'a single file must still be accepted');
 });
 
