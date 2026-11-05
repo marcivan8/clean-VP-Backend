@@ -17,7 +17,10 @@ const proc = readFileSync(new URL('../jobs/exportProcessor.js', import.meta.url)
 assert.match(proc, /const resolvedDims = platform \|\| getResolutionDimensions\(settings\.aspectRatio, settings\.resolution\);/,
     'server: no platform → frame from the project aspect ratio');
 const ide = readFileSync(new URL('../client/src/layouts/IDELayout.jsx', import.meta.url), 'utf8');
-assert.match(ide, /aspectRatio: projectAspectRatio \|\| '16:9'/, 'client sends the project aspect ratio');
+assert.match(ide, /const planAspectRatio = override\?\.aspectRatio \|\| live\.aspectRatio \|\| aspectRatio;/,
+    'client resolves the aspect ratio from the exported project or short override');
+assert.match(ide, /aspectRatio: planAspectRatio \|\| projectAspectRatio \|\| '16:9'/,
+    'client sends the resolved aspect ratio to the server');
 console.log('✓ server sizes the frame from the project aspect ratio when no platform is picked');
 // ── R149: Save to Photos must survive iOS ────────────────────────────────────
 //
