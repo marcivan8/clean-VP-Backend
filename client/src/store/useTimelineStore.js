@@ -47,6 +47,7 @@ import { computeSpeedChange, remapWordsForSpeed } from '../timeline/speedChange.
 import { mapTranscriptToTimeline } from '../timeline/transcriptMap.js';
 import { LEGACY_PACK_MOTION } from '../motion/CaptionModel.js';
 import { retimeWordsForText, splitCaption, mergeCaptions, shiftWords as shiftCaptionWords } from '../motion/captionEdits.js';
+import { contentEndOf, visualEndOf } from '../timeline/contentEnd.js';
 
 // Same breakpoint as hooks/useDeviceType.js (isMobile = width < 768). Used by
 // deleteClipWithMagnet: the main-track magnet is always on for mobile.
@@ -362,6 +363,15 @@ const useTimelineStore = create(
             // PLAYBACK ACTIONS
             // ==============================================================
             togglePlay: () => {
+                // Pressing play with the playhead at the end does nothing at
+                // all, which reads as a broken player: there is no time left to
+                // play. Every other player restarts, and the mobile flow
+                // already does (timeline/previewPlayback.js togglePreview).
+                const state = get();
+                if (!state.isPlaying) {
+                    const end = contentEndOf(state.tracks, state.duration);
+                    if (end > 0 && state.currentTime >= end - 0.08) get().seek(0);
+                }
                 const newIsPlaying = !get().isPlaying;
                 set({ isPlaying: newIsPlaying });
                 // Drive the Revideo core Player directly — the React prop chain
@@ -458,8 +468,26 @@ const useTimelineStore = create(
             },
 
             setDuration: (duration) => {
-                set({ duration });
-                timelineManager.dispatch(TimelineActions.setDuration(duration));
+                const next = Math.max(0, Number(duration) || 0);
+                set({ duration: next });
+                timelineManager.dispatch(TimelineActions.setDuration(next));
+
+                // An edit that SHORTENS the timeline used to leave the playhead
+                // where it was. VideoPlayer picks the clip whose range contains
+                // currentTime, so with the playhead past the new end there is no
+                // active clip, no media URL resolves, and the canvas stays black
+                // while the controls still look alive: the editor appears to
+                // break the moment an edit succeeds. Every shrinking path (trim,
+                // ripple delete, extract short, auto mode) ends up here, so this
+                // is the one place that has to hold the invariant.
+                // Aim at the end of the VIDEO, not of the timeline. A cut
+                // shrinks the footage while a remapped caption can still run
+                // past it, and parking the playhead over caption-only time is
+                // just as black as leaving it past the end.
+                const { currentTime, tracks } = get();
+                const visual = visualEndOf(tracks, next);
+                const target = visual > 0 ? Math.min(next, visual) : next;
+                if (target > 0 && currentTime > target) get().seek(target);
             },
 
             setPreviewQuality: (quality) => set({ previewQuality: quality }),

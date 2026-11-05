@@ -133,4 +133,79 @@ console.log('✓ updateClip keeps animations (and clearing them)');
     console.log('\u2713 ripple delete works from the assistant, and says so when there is no gap');
 }
 
+// ── R155: an edit that shortens the timeline must not strand the playhead ───
+//
+// VideoPlayer renders the clip whose range contains currentTime. After a cut
+// the playhead used to stay where it was, so with nothing under it there was no
+// active clip, no media URL, and the canvas went black while the controls still
+// looked alive. Reported as "after an edit the preview gets dark and does not
+// play the edited video".
+{
+    const contentEnd = (st) => (st.tracks || []).reduce((m, t) =>
+        Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
+    const clipUnderPlayhead = (st) => (st.tracks || [])
+        .filter(t => t.type === 'video')
+        .flatMap(t => t.clips || [])
+        .find(c => st.currentTime >= c.start - 0.001 && st.currentTime < c.start + c.duration + 0.001) || null;
+
+    // rippleDeleteClip, the path an "extract a short" style cut takes.
+    load();
+    S.setState({ currentTime: 6.5 });
+    assert.ok(clipUnderPlayhead(S.getState()), 'the playhead starts over real footage');
+    S.getState().rippleDeleteClip('track-default-video', 'B');
+    let st = S.getState();
+    assert.ok(st.currentTime <= contentEnd(st) + 0.001,
+        `playhead ${st.currentTime} is past the end ${contentEnd(st)}: the preview would be black`);
+    assert.ok(clipUnderPlayhead(st), 'there must still be a clip to draw');
+
+    // cutTimelineRange, used by the phrase-level cuts auto mode makes.
+    load();
+    S.setState({ currentTime: 7.9 });
+    S.getState().cutTimelineRange(2, 7);
+    st = S.getState();
+    assert.ok(st.currentTime <= contentEnd(st) + 0.001, 'cutting a range must not strand the playhead either');
+
+    // Shortening directly, which is where every one of those paths ends up.
+    load();
+    S.setState({ currentTime: 6.9 });
+    S.getState().setDuration(3);
+    st = S.getState();
+    assert.ok(st.currentTime <= 3 + 0.001, `setDuration left the playhead at ${st.currentTime}`);
+
+    // Growing the timeline must leave the playhead alone: the user's position
+    // is still over real footage and moving it would be the annoying kind of
+    // helpful.
+    load();
+    S.setState({ currentTime: 2 });
+    S.getState().setDuration(60);
+    assert.equal(S.getState().currentTime, 2, 'a longer timeline must not move the playhead');
+
+    console.log('\u2713 a shortening edit keeps the playhead over the footage');
+}
+
+// ── R155: play at the very end restarts instead of doing nothing ────────────
+{
+    load();
+    const end = (S.getState().tracks || []).reduce((m, t) =>
+        Math.max(m, ...(t.clips || []).map(c => (Number(c.start) || 0) + (Number(c.duration) || 0))), 0);
+
+    S.setState({ currentTime: end, isPlaying: false });
+    S.getState().togglePlay();
+    assert.equal(S.getState().isPlaying, true);
+    assert.equal(S.getState().currentTime, 0, 'play at the end restarts rather than stalling');
+
+    // Mid-timeline play must not rewind.
+    S.setState({ currentTime: 2, isPlaying: false });
+    S.getState().togglePlay();
+    assert.equal(S.getState().currentTime, 2, 'play in the middle keeps its place');
+
+    // Pause never moves the playhead, wherever it is.
+    S.setState({ currentTime: end, isPlaying: true });
+    S.getState().togglePlay();
+    assert.equal(S.getState().isPlaying, false);
+    assert.equal(S.getState().currentTime, end, 'pausing at the end holds the last frame');
+
+    console.log('\u2713 play restarts at the end, and pause never moves the playhead');
+}
+
 console.log('\nALL MANUAL-EDIT CHECKS PASSED');

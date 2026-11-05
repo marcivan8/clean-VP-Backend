@@ -11,6 +11,7 @@
  */
 
 import useTimelineStore from '../store/useTimelineStore';
+import { contentEndOf } from './contentEnd.js';
 
 /**
  * The real end of the edit.
@@ -20,13 +21,7 @@ import useTimelineStore from '../store/useTimelineStore';
  * The last clip end is what the viewer actually sees.
  */
 export function contentEnd(state) {
-    let end = 0;
-    for (const track of state?.tracks || []) {
-        for (const clip of track.clips || []) {
-            end = Math.max(end, (Number(clip.start) || 0) + (Number(clip.duration) || 0));
-        }
-    }
-    return end > 0 ? end : Number(state?.duration) || 0;
+    return contentEndOf(state?.tracks, state?.duration);
 }
 
 /** Whether the playhead has reached the end of the picture. */
