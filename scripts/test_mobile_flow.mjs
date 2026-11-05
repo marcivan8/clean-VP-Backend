@@ -204,8 +204,9 @@ check('the step list is announced to a screen reader', () => {
     assert.ok(/aria-live="polite"/.test(flow));
 });
 
-check('the user can always leave, running or not', () => {
-    assert.ok(/mobileFlow\.editWhileWaiting/.test(flow));
+check('the progress screen stays until completion while the setup screen remains skippable', () => {
+    assert.ok(/mobileFlow\.workingUntilDone/.test(flow));
+    assert.ok(!/mobileFlow\.editWhileWaiting/.test(flow));
     assert.ok(/mobileFlow\.skip/.test(flow));
 });
 
@@ -221,10 +222,10 @@ check('the flow sits BELOW the sheets that open on top of it', () => {
         'the plan-first approval and the export sheet are MobileSheets: hiding an Apply button behind the flow would strand a run');
 });
 
-check('a change goes through the normal pipeline, approval gate and all', () => {
-    assert.ok(/editJobManager\.processEditRequest\(text\)/.test(flow));
-    assert.ok(!/processEditRequest\([^)]*autoApprove/.test(flow),
-        'plan-first was a deliberate decision (planFirst.js); the flow does not get to skip it');
+check('a change uses the normal pipeline and applies the requested edit from the visible flow', () => {
+    assert.ok(/editJobManager\.processEditRequest\(text,\s*\{\s*autoApprove:\s*true\s*\}\)/.test(flow),
+        'the mobile flow has no visible approval sheet, so a sent change must not wait behind one');
+    assert.ok(/changeNotApplied/.test(flow), 'a conversational response must not be presented as an applied edit');
 });
 
 check('every change chip has copy in both languages', () => {

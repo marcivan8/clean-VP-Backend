@@ -1252,6 +1252,11 @@
     "starting": "Démarrage",
     "editWhileWaiting": "Monter pendant ce temps",
     "openEditor": "Ouvrir l'éditeur",
+    "workingUntilDone": "Chaque étape s’affiche ici jusqu’à la fin du montage.",
+    "applyingChange": "Application de votre modification",
+    "changeFailed": "La modification n’a pas pu être appliquée.",
+    "changeNotApplied": "Roka n’a pas modifié la vidéo. Décrivez la modification souhaitée.",
+    "editFailed": "Le montage n’a pas pu être terminé.",
     "outcome": {
       "talking_head": "Face caméra",
       "reel": "Reel",

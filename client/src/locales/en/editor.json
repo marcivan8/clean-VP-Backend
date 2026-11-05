@@ -1252,6 +1252,11 @@
     "starting": "Getting started",
     "editWhileWaiting": "Edit while it works",
     "openEditor": "Open the editor",
+    "workingUntilDone": "Working through each step. This screen will stay open until the edit is complete.",
+    "applyingChange": "Apply your change",
+    "changeFailed": "The change could not be applied.",
+    "changeNotApplied": "Roka did not apply an edit. Try describing the change you want to make.",
+    "editFailed": "The edit could not be completed.",
     "outcome": {
       "talking_head": "Talking head",
       "reel": "Reel",
