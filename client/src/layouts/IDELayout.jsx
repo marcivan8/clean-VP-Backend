@@ -2927,6 +2927,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                                     onRetry={handleRetryUpload}
                                     onRemove={handleRemoveUpload}
                                     onUploadAgain={handleUploadAgain}
+                                    guidedFlowActive={mobileFlowActive}
                                 />
                             )}
                             {isMobile && <MobileEditToast />}
@@ -2949,7 +2950,7 @@ const IDELayout = ({ mode = 'editor' }) => {
                         )}
 
                         {/* Compact AI bar — always visible on mobile, between timeline and toolbar */}
-                        {isMobile && (!mobileFlowActive || ['outcome', 'change'].includes(mobileFlowStep)) && (
+                        {isMobile && (!mobileFlowActive || mobileFlowStep === 'outcome') && (
                             <MobileAIBar
                                 expanded={mobileFlowActive ? mobileFlowChatOpen : mobileSheet === 'ai'}
                                 onExpand={() => mobileFlowActive ? setMobileFlowChatOpen(true) : setMobileSheet('ai')}

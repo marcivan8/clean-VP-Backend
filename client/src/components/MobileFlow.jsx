@@ -46,6 +46,8 @@ const fmt = (secs) => {
 function OutcomeStep() {
     const { t } = useTranslation('editor');
     const choose = useMobileFlowStore(s => s.choose);
+    const beginProgress = useMobileFlowStore(s => s.beginProgress);
+    const updateProgress = useMobileFlowStore(s => s.updateProgress);
     const toChange = useMobileFlowStore(s => s.toChange);
     const close = useMobileFlowStore(s => s.close);
     const error = useMobileFlowStore(s => s.error);
@@ -56,8 +58,12 @@ function OutcomeStep() {
         choose(id);
         // The run is fired and watched here rather than in the store: a store
         // that starts work is a store you cannot reason about in a test.
-        startOutcome(id)
-            .then(() => {
+        startOutcome(id, {
+            onPlan: beginProgress,
+            onStep: ({ index, state, message }) => updateProgress(index, state, message),
+        })
+            .then((result) => {
+                if (!result?.success) throw new Error(result?.message || t('mobileFlow.editFailed', 'The edit could not be completed.'));
                 // A version per finished run is what makes "go back" possible
                 // without asking a beginner to count undo steps.
                 useVersionsStore.getState().capture(t(`mobileFlow.outcome.${id}`, id));
@@ -129,16 +135,17 @@ function OutcomeStep() {
 function WorkingStep() {
     const { t } = useTranslation('editor');
     const steps = useEditStepsStore(s => s.steps);
-    const close = useMobileFlowStore(s => s.close);
     const liveRef = useRef(null);
     const startedAt = useEditStepsStore(s => s.startedAt);
-    const total = useEditStepsStore(s => s.total);
-    const doneCount = steps.filter(s => s.state === 'done').length;
-    const progress = Math.min(96, Math.round((doneCount / Math.max(total || 6, 6)) * 100));
+    const flowSteps = useMobileFlowStore(s => s.progressSteps);
+    const flowStartedAt = useMobileFlowStore(s => s.progressStartedAt);
+    const visibleSteps = flowSteps.length ? flowSteps : steps;
+    const doneCount = visibleSteps.filter(s => s.state === 'done').length;
+    const progress = visibleSteps.length ? Math.round((doneCount / visibleSteps.length) * 100) : 0;
 
     // Only the finished steps carry a sentence; the running one is the heading
     // of the list, not a line in it.
-    const running = steps.find(s => s.state === 'running');
+    const progressTime = flowStartedAt || startedAt;
 
     return (
         <div style={sheet}>
@@ -156,14 +163,16 @@ function WorkingStep() {
                 aria-live="polite"
                 style={{ listStyle: 'none', margin: 0, padding: '24px 20px 0', flex: 1, minHeight: 0, overflowY: 'auto' }}
             >
-                {steps.map(s => (
+                {visibleSteps.map(s => (
                     <li key={s.index} style={{ display: 'flex', gap: 13, padding: '11px 0', alignItems: 'flex-start' }}>
                         <span aria-hidden="true" style={{ flex: 'none', marginTop: 2 }}>
                             {s.state === 'running'
                                 ? <Loader2 size={18} className="animate-spin" style={{ color: '#62e5ed' }} />
                                 : s.state === 'failed'
                                     ? <X size={18} style={{ color: 'var(--fg-4)' }} />
-                                    : <span style={{ width: 26, height: 26, border: '1px solid rgba(0,215,225,.7)', background: 'rgba(0,215,225,.1)', color: '#62e5ed', borderRadius: 999, display: 'grid', placeItems: 'center' }}><Check size={14} /></span>}
+                                    : s.state === 'done'
+                                        ? <span style={{ width: 26, height: 26, border: '1px solid rgba(0,215,225,.7)', background: 'rgba(0,215,225,.1)', color: '#62e5ed', borderRadius: 999, display: 'grid', placeItems: 'center' }}><Check size={14} /></span>
+                                        : <span style={{ width: 26, height: 26, border: '1px solid var(--line-strong)', borderRadius: 999, display: 'inline-block' }} />}
                         </span>
                         <span style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
                             <span style={{ fontSize: 15.5, color: s.state === 'running' ? 'var(--fg)' : 'var(--fg-2)', fontWeight: s.state === 'running' ? 600 : 400 }}>
@@ -177,7 +186,7 @@ function WorkingStep() {
                     </li>
                 ))}
 
-                {!steps.length && (
+                {!visibleSteps.length && (
                     <li style={{ display: 'flex', gap: 13, padding: '11px 0', alignItems: 'center', color: 'var(--fg-3)' }}>
                             <Loader2 size={18} className="animate-spin" style={{ color: '#62e5ed' }} />
                         <span style={{ fontSize: 15.5 }}>{t('mobileFlow.starting', 'Getting started')}</span>
@@ -187,16 +196,7 @@ function WorkingStep() {
 
             <div style={{ padding: '0 20px 26px' }}>
                 <div aria-label={`${progress}%`} style={{ height: 4, marginBottom: 10, background: 'var(--line)', borderRadius: 8, overflow: 'hidden' }}><div style={{ width: `${progress}%`, height: '100%', background: 'linear-gradient(90deg,#05d8e7,#872de3)', transition: 'width .35s ease' }} /></div>
-                <p style={{ margin: '0 0 14px', color: 'var(--fg-3)', fontFamily: 'var(--f-mono)', fontSize: 11.5 }}>{startedAt ? t('mobileFlow.timeLeft', { count: Math.max(1, 8 - Math.floor((Date.now() - startedAt) / 1000)), defaultValue: 'About {{count}} seconds left' }) : t('mobileFlow.starting', 'Getting started')}</p>
-                <button
-                    type="button"
-                    onClick={close}
-                    style={{ width: '100%', minHeight: 48, background: 'none', border: 'none', color: 'var(--fg-3)', fontSize: 14.5, cursor: 'pointer', fontFamily: 'var(--f-sans)' }}
-                >
-                    {running
-                        ? t('mobileFlow.editWhileWaiting', 'Edit while it works')
-                        : t('mobileFlow.openEditor', 'Open the editor')}
-                </button>
+                <p style={{ margin: '0 0 14px', color: 'var(--fg-3)', fontFamily: 'var(--f-mono)', fontSize: 11.5 }}>{progressTime ? t('mobileFlow.workingUntilDone', 'Working through each step. This screen will stay open until the edit is complete.') : t('mobileFlow.starting', 'Getting started')}</p>
             </div>
         </div>
     );
@@ -275,10 +275,9 @@ function ResultStep({ onShare }) {
 
 /* ── Change something ─────────────────────────────────────────────────────── */
 
-/* Each chip is a plain request through the normal pipeline — NOT auto-approved,
-   so the plan-first gate (planFirst.js) still shows its Apply step for anything
-   that removes content. That was a deliberate decision and the flow does not
-   get to skip it. */
+/* Each chip and typed request goes through the normal edit pipeline. Sending
+   from this guided change screen authorizes Roka to apply that requested edit,
+   so the mobile flow does not wait for an approval sheet hidden underneath. */
 const CHANGES = [
     { id: 'shorter', prompt: 'make it shorter', icon: Minus },
     { id: 'punchier', prompt: 'make it punchier', icon: Zap },
@@ -294,18 +293,30 @@ function ChangeStep() {
     const choose = useMobileFlowStore(s => s.choose);
     const outcomeId = useMobileFlowStore(s => s.outcomeId);
     const [typed, setTyped] = React.useState('');
+    const beginProgress = useMobileFlowStore(s => s.beginProgress);
+    const updateProgress = useMobileFlowStore(s => s.updateProgress);
 
     const run = (prompt, label) => {
         const text = String(prompt || '').trim();
         if (!text) return;
         // Back to the working screen so the change is narrated like the first run.
         choose(outcomeId, text);
-        editJobManager.processEditRequest(text)
-            .then(() => {
+        beginProgress([{ label: t('mobileFlow.applyingChange', 'Apply your change') }]);
+        updateProgress(0, 'running');
+        editJobManager.processEditRequest(text, { autoApprove: true })
+            .then((result) => {
+                if (!result?.success) throw new Error(result?.message || t('mobileFlow.changeFailed', 'The change could not be applied.'));
+                if (['chat', 'query_session_summary'].includes(result.operation)) {
+                    throw new Error(t('mobileFlow.changeNotApplied', 'Roka did not apply an edit. Try describing the change you want to make.'));
+                }
+                updateProgress(0, 'done', result.message || null);
                 useVersionsStore.getState().capture(label || text);
                 useMobileFlowStore.getState().finished();
             })
-            .catch((err) => useMobileFlowStore.getState().failed(err?.message));
+            .catch((err) => {
+                updateProgress(0, 'failed', err?.message || null);
+                useMobileFlowStore.getState().failed(err?.message);
+            });
     };
 
     const chip = {
@@ -317,7 +328,7 @@ function ChangeStep() {
     return (
         <>
         <button type="button" tabIndex={-1} aria-label={t('mobileFlow.back', 'Back')} onClick={toResult} style={{ position: 'fixed', inset: 0, zIndex: Z, border: 0, background: 'rgba(0,0,0,.62)', backdropFilter: 'blur(3px)' }} />
-        <div style={{ ...panel, zIndex: Z + 1, bottom: 'calc(clamp(154px, 22dvh, 190px) + env(safe-area-inset-bottom))', maxHeight: 'calc(100dvh - clamp(154px, 22dvh, 190px) - env(safe-area-inset-bottom))', overflowY: 'auto', paddingBottom: 20 }} role="region" aria-label={t('mobileFlow.change', 'Change something')}>
+        <div style={{ ...panel, zIndex: Z + 1, bottom: 0, maxHeight: '100dvh', overflowY: 'auto', paddingBottom: 'max(20px, env(safe-area-inset-bottom))' }} role="region" aria-label={t('mobileFlow.change', 'Change something')}>
             <div aria-hidden="true" style={{ width: 40, height: 4, borderRadius: 4, background: 'var(--line-strong)', margin: '-8px auto 18px' }} />
 
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>

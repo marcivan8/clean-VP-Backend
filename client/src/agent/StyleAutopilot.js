@@ -80,6 +80,15 @@ export async function runAutopilot(request, opts = {}) {
             prompt: videoOnly ? 'Create a video from the uploaded video clips only' : 'Create a video from the uploaded images and event footage',
         }, ...steps];
     }
+    try {
+        opts.onPlan?.(steps.map((step, index) => ({
+            index,
+            label: STEP_LABEL[step.key] || step.key,
+            prompt: step.prompt,
+        })));
+    } catch (err) {
+        console.warn('[StyleAutopilot] progress plan callback failed:', err);
+    }
     const intro = getEditingStyle(chosen) ? '' : 'No style picked, so Talking head was used. ';
 
     stopRequested = false;
@@ -98,10 +107,14 @@ export async function runAutopilot(request, opts = {}) {
                 const remaining = steps.slice(i);
                 skipped.push(...remaining.map(s => `${STEP_LABEL[s.key] || s.key} (stopped)`));
                 stepReports.push(...remaining.map(s => ({ key: s.key, label: STEP_LABEL[s.key] || s.key, status: 'stopped' })));
+                for (let stoppedIndex = i; stoppedIndex < steps.length; stoppedIndex++) {
+                    try { opts.onStep?.({ index: stoppedIndex, state: 'failed', label: STEP_LABEL[steps[stoppedIndex].key] || steps[stoppedIndex].key, message: 'Stopped' }); } catch (err) { console.warn('[StyleAutopilot] progress callback failed:', err); }
+                }
                 break;
             }
             const step = steps[i];
             progress(`Auto ${i + 1}/${steps.length}: ${step.prompt}`);
+            try { opts.onStep?.({ index: i, state: 'running', label: STEP_LABEL[step.key] || step.key }); } catch (err) { console.warn('[StyleAutopilot] progress callback failed:', err); }
             let res = null;
             try {
                 res = await run(step.prompt);
@@ -119,6 +132,7 @@ export async function runAutopilot(request, opts = {}) {
                 const label = STEP_LABEL[step.key] || step.key;
                 skipped.push(`${label} (needed a clarification)`);
                 stepReports.push({ key: step.key, label, status: 'skipped', message: 'Needed a clarification.' });
+                try { opts.onStep?.({ index: i, state: 'failed', label, message: 'Needed a clarification.' }); } catch (err) { console.warn('[StyleAutopilot] progress callback failed:', err); }
                 continue;
             }
             const label = STEP_LABEL[step.key] || step.key;
@@ -154,6 +168,16 @@ export async function runAutopilot(request, opts = {}) {
                 ...(res?.message ? { message: String(res.message).slice(0, 240) } : {}),
                 ...(details ? { details } : {}),
             });
+            try {
+                opts.onStep?.({
+                    index: i,
+                    state: res?.success ? 'done' : 'failed',
+                    label,
+                    message: res?.message || null,
+                });
+            } catch (err) {
+                console.warn('[StyleAutopilot] progress callback failed:', err);
+            }
         }
     } finally {
         useTimelineStore.getState().endHistoryGroup();

@@ -245,7 +245,7 @@ function Pill({ items, onRetry }) {
     );
 }
 
-export default function MobileUploadStatus({ onRetry, onRemove, onUploadAgain }) {
+export default function MobileUploadStatus({ onRetry, onRemove, onUploadAgain, guidedFlowActive = false }) {
     const { t } = useTranslation('editor');
     const { assets, tracks } = useTimelineStore(useShallow(s => ({ assets: s.assets, tracks: s.tracks })));
     const summary = useMemo(() => summarizeUploads(assets, tracks), [assets, tracks]);
@@ -287,13 +287,15 @@ export default function MobileUploadStatus({ onRetry, onRemove, onUploadAgain })
     // Cards the user collapsed to the pill ("Show the preview meanwhile").
     const [minimized, setMinimized] = useState(() => new Set());
     const showCard = summary.blocking && summary.primary
-        && (isProblemPhase(summary.primary.phase) || !minimized.has(summary.primary.id));
-    const showPill = !showCard && summary.items.length > 0;
+        && (isProblemPhase(summary.primary.phase) || (!guidedFlowActive && !minimized.has(summary.primary.id)));
+    // The guided flow has its own upload progress card. Keep the editor's
+    // preview overlay out of its way, while preserving the failure recovery UI.
+    const showPill = !guidedFlowActive && !showCard && summary.items.length > 0;
 
     return (
         <>
             <style>{STYLE}</style>
-            {openingFile && !showCard && <OpeningCard name={openingFile.name} />}
+            {openingFile && !guidedFlowActive && !showCard && <OpeningCard name={openingFile.name} />}
             {showCard && (
                 <FullCard
                     item={summary.primary} onRetry={onRetry} onRemove={onRemove} onUploadAgain={onUploadAgain}
@@ -301,7 +303,7 @@ export default function MobileUploadStatus({ onRetry, onRemove, onUploadAgain })
                 />
             )}
             {showPill && <Pill items={summary.items} onRetry={onRetry} />}
-            {toast && !showCard && (
+            {toast && !guidedFlowActive && !showCard && (
                 <div
                     role="status"
                     style={{

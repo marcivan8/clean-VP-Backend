@@ -23,11 +23,23 @@ const useMobileFlowStore = create((set, get) => ({
     /** The user's own words, from the "something else" card. */
     request: '',
     error: null,
+    progressSteps: [],
+    progressStartedAt: null,
     /** Set when the server refuses on quota. { reason, message, upgradeRequired } */
     limitInfo: null,
 
     /** Open on a brand new project. A project that already has an edit never gets this. */
-    open: () => set({ active: true, step: 'outcome', outcomeId: null, request: '', error: null, limitInfo: null, returnToEditor: false }),
+    open: () => set({ active: true, step: 'outcome', outcomeId: null, request: '', error: null, limitInfo: null, returnToEditor: false, progressSteps: [], progressStartedAt: null }),
+
+    beginProgress: (steps = []) => set({
+        progressSteps: steps.map((item, index) => ({ index, label: item.label, state: 'waiting', message: null })),
+        progressStartedAt: Date.now(),
+        step: 'working',
+        error: null,
+    }),
+    updateProgress: (index, state, message = null) => set((s) => ({
+        progressSteps: s.progressSteps.map((item) => item.index === index ? { ...item, state, message } : item),
+    })),
 
     /** Leave the flow and show the editor. Used by Skip and by the end of a run. */
     close: () => set({ active: false, error: null, returnToEditor: false }),
@@ -35,7 +47,7 @@ const useMobileFlowStore = create((set, get) => ({
     /** Reopen the saved variations over the editor, preserving the current project. */
     openVersionsFromEditor: () => set({ active: true, step: 'versions', error: null, returnToEditor: true }),
 
-    choose: (outcomeId, request = '') => set({ outcomeId, request, step: 'working', error: null }),
+    choose: (outcomeId, request = '') => set({ outcomeId, request, step: 'working', error: null, progressSteps: [], progressStartedAt: Date.now() }),
 
     /** A run ended: land on the result rather than dumping the user in the editor. */
     finished: () => set({ step: 'result', error: null }),
