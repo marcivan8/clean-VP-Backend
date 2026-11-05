@@ -43,6 +43,32 @@ jobs:
             client/package-lock.json
 
       # ── Install server deps ───────────────────────────────────────────────
+      # ffmpeg-static's postinstall downloads the binary AND its README and
+      # LICENSE from a GitHub release on every single install, and its error
+      # handler tolerates only a 404:
+      #
+      #   const exitOnErrorOrWarnWith = (msg) => (err) => {
+      #     if (err.statusCode === 404) console.warn(msg)
+      #     else exitOnError(err)          // process.exit(1)
+      #   }
+      #
+      # So a transient 5xx on linux-x64.LICENSE, a text file nothing runs,
+      # fails the whole install. That is exactly what happened on 2026-11-05:
+      # the binary downloaded fine and a 504 on the LICENSE killed the job.
+      #
+      # install.js exits 0 the moment it sees a binary already in place, and
+      # FFMPEG_BIN is what it checks, so pointing it at the runner's own ffmpeg
+      # means the release download never happens and cannot break anything.
+      # CI only: production resolves ffmpeg-static the normal way, and the
+      # server tests mock it through jest's moduleNameMapper regardless.
+      - name: Use the runner's ffmpeg rather than downloading one
+        run: |
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
+          echo "FFMPEG_BIN=$(command -v ffmpeg)" >> "$GITHUB_ENV"
+
       - name: Install server dependencies
         run: npm ci
 
