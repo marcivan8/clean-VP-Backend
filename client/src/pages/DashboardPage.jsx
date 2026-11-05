@@ -38,7 +38,7 @@ import {
 } from '../lib/projectsApi.js';
 import useTimelineStore from '../store/useTimelineStore.js';
 import { useUserPlan } from '../hooks/useUserPlan.js';
-import { atLimit, planLimitLabel, getProjectLimit, projectNameFromFile } from '../lib/planLimits.js';
+import { atLimit, planLimitLabel, getProjectLimit } from '../lib/planLimits.js';
 import MobileHome from '../components/MobileHome.jsx';
 import PlanSheet from '../components/PlanSheet.jsx';
 import { useAiOpsUsage } from '../hooks/useAiOpsUsage.js';
@@ -665,6 +665,7 @@ export default function DashboardPage() {
     const [newVideoOpen,  setNewVideoOpen]  = useState(false);
     const [creatingVideo, setCreatingVideo] = useState(false);
     const [createVideoError, setCreateVideoError] = useState(false);
+    const [draftVideoProject, setDraftVideoProject] = useState(null);
     const [plansSheetOpen, setPlansSheetOpen] = useState(false);
 
     // ── responsive ────────────────────────────────────────────────────────────
@@ -736,39 +737,38 @@ export default function DashboardPage() {
         if (atLimit(plan, projects.length)) {
             setShowLimitModal(true);
         } else {
+            setDraftVideoProject(null);
+            setNewVideoOpen(false);
             setShowNew(true);
         }
     }
 
     /**
-     * Mobile "New video": create a project named after the picked file, open
-     * the editor, and let it start the normal upload (pendingNewVideo).
+     * Mobile media is selected after project naming. Reuse that newly-created
+     * project, then hand the picked files to the editor's normal upload path.
      */
     async function handlePickVideo(picked) {
-        // R145: the picker is multi-select now. The project is named after the
-        // first file; the rest ride along and land on the same timeline.
+        // R145: the picker is multi-select; all chosen media lands in the
+        // already-named project on the same timeline.
         const files = Array.isArray(picked) ? picked.filter(Boolean) : (picked ? [picked] : []);
-        const file = files[0];
-        if (!file || creatingVideo) return;
-        if (atLimit(plan, projects.length)) {
+        if (!files.length || creatingVideo) return;
+        const draft = draftVideoProject;
+        if (!draft?.id) {
             setNewVideoOpen(false);
-            setShowLimitModal(true);
+            setShowNew(true);
             return;
         }
         setCreateVideoError(false);
         setCreatingVideo(true);
         try {
-            const name = projectNameFromFile(file.name) || t('mobileHome.untitled');
-            const skeleton = blankProjectSkeleton();
-            const id = await createProject(name, skeleton);
-            if (!id) { setCreateVideoError(true); return; }
-            loadProject(skeleton);
-            setProjectId(id);
-            setProjectName(name);
-            try { localStorage.setItem('vp_autosave', JSON.stringify(skeleton)); } catch { /* storage full */ }
-            setPendingNewVideo(id, files);
+            loadProject(draft.skeleton);
+            setProjectId(draft.id);
+            setProjectName(draft.name);
+            try { localStorage.setItem('vp_autosave', JSON.stringify(draft.skeleton)); } catch { /* storage full */ }
+            setPendingNewVideo(draft.id, files);
+            setDraftVideoProject(null);
             setNewVideoOpen(false);
-            navigate(`/editor/${id}`);
+            navigate(`/editor/${draft.id}`);
         } catch (err) {
             console.error('[Dashboard] new video failed:', err);
             setCreateVideoError(true);
@@ -790,6 +790,17 @@ export default function DashboardPage() {
 
         const id = await createProject(name, skeleton);
         if (!id) { alert('Failed to create project — please try again.'); return; }
+
+        // On phones, project naming comes first. Keep the project context while
+        // the person chooses media on the dedicated short-creation screen; once
+        // they continue, the same project opens in the editor for upload.
+        if (isPhone) {
+            setDraftVideoProject({ id, name, skeleton });
+            setCreateVideoError(false);
+            setShowNew(false);
+            setNewVideoOpen(true);
+            return;
+        }
 
         // Clear old editor state, set new project context, navigate to editor
         loadProject(skeleton);
@@ -907,9 +918,12 @@ export default function DashboardPage() {
                     creating={creatingVideo}
                     createError={createVideoError}
                     newVideoOpen={newVideoOpen}
-                    onNewVideoOpenChange={(open) => { if (open) requestNewProject(); else setNewVideoOpen(false); }}
+                    onNewVideoOpenChange={(open) => {
+                        if (open) requestNewProject();
+                        else { setNewVideoOpen(false); setDraftVideoProject(null); }
+                    }}
                     onPickVideo={handlePickVideo}
-                    onEmptyProject={() => { setNewVideoOpen(false); setShowNew(true); }}
+                    onEmptyProject={() => { setNewVideoOpen(false); setDraftVideoProject(null); setShowNew(true); }}
                     onOpen={handleOpen}
                     onRename={(id, name) => setRenameModal({ id, name })}
                     onDuplicate={handleDuplicate}
