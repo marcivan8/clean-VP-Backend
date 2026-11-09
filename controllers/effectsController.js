@@ -178,6 +178,10 @@ const beatSync = async (req, res) => {
  * POST /api/effects/emotion-frame
  */
 const emotionFrame = async (req, res) => {
+    const hasMedia = Boolean(req.body?.videoUrl || req.body?.videoPath || req.body?.clips?.length);
+    if (!hasMedia) {
+        return res.status(400).json({ success: false, error: 'videoUrl or clips is required' });
+    }
     return res.status(501).json({ success: false, error: 'Emotion-based framing is unavailable until real visual analysis is enabled.' });
 };
 
