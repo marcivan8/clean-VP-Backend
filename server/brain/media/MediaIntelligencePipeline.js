@@ -579,34 +579,24 @@ class MediaIntelligencePipeline {
         };
     }
 
-    /**
-     * Build an organize plan for the current media bin.
-     * Only call when user explicitly requests bin organization.
-     *
-     * @param {Object[]} mediaBin
-     * @param {string}   platform
-     * @returns {Promise<{ commands: string[], explanation: string, suggestions: Object[] }>}
-     */
-    async buildOrganizePlan(mediaBin, platform) {
-        const summary = this.getSummary(mediaBin);
-
-        // Select strategy based on project type
-        let strategy;
-        try {
-            switch (summary.projectType) {
-                case 'interview':    strategy = new (require('../strategies/InterviewStrategy'))();    break;
-                case 'vlog':         strategy = new (require('../strategies/VlogStrategy'))();         break;
-                case 'podcast':      strategy = new (require('../strategies/PodcastStrategy'))();      break;
-                case 'talking_head': strategy = new (require('../strategies/TalkingHeadStrategy'))();  break;
-                default:             strategy = new (require('../strategies/TalkingHeadStrategy'))();  break;
-            }
-        } catch (err) {
-            console.error('[MediaPipeline] buildOrganizePlan: failed to load strategy:', err.message);
-            return { commands: [], explanation: 'Strategy unavailable.', suggestions: [] };
-        }
-
-        return strategy.buildTimeline(mediaBin, { platform, summary });
-    }
+    // R157 — buildOrganizePlan() and server/brain/strategies/ were removed.
+    //
+    // Four per-content-type strategies emitted command strings that DO NOT
+    // EXIST: `remove_silence`, `generate_captions`, `apply_smart_zoom`,
+    // `add_clip_to_track`, `add_music_bed`, `set_track_volume` — the real ids
+    // are `silence_removal`, `auto_captions`, `rhythm_zoom`. Seven of the
+    // eight commands they produced would never have routed, so the plan could
+    // only ever have been a list of no-ops presented as a plan. There was also
+    // no ReelStrategy: `default:` sent reel to the talking-head strategy,
+    // which contradicts every reel rule in editingStyles.js.
+    //
+    // Its only caller was POST /api/brain/organize, which no client code ever
+    // called. Organising the bin is served by the real `organize_clips`
+    // command through the normal pipeline.
+    //
+    // test_capability_graph.mjs now asserts that no server brain module emits
+    // a command string missing from the generated catalogue, so this class of
+    // drift fails a test instead of shipping.
 
     /** @private */
     async _updateAssetStatus(assetId, status) {

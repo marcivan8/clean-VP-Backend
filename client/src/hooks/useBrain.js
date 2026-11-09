@@ -26,6 +26,7 @@ import {
 import { useState, useCallback, useRef } from 'react';
 import useTimelineStore from '../store/useTimelineStore';
 import { authFetch } from '../utils/authFetch';
+import useAIStore from '../store/useAIStore.js';
 
 const ASSET_ANALYSIS_STATUS_REQUEST_TIMEOUT_MS = 5_000;
 
@@ -397,7 +398,17 @@ export function useBrain() {
                     // the raw maps to derive proposals, so they have to survive here.
                     projectMap: data.projectMap ?? null,
                     storyMap:   data.storyMap   ?? null,
+                    // R157 — the judge's scores for the suggestions above, as
+                    // id → { confidence, why }, or null when no judgement was
+                    // available. SuggestionEngine blends these into its own
+                    // deterministic ranking; a null simply means it keeps it.
+                    judgeVerdicts: data.judgeVerdicts ?? null,
                 }));
+                // Also published to useAIStore so the non-React consumers
+                // (WorkflowController's next-action and prompt chips) pick it
+                // up without threading it through the component tree.
+                try { useAIStore.getState().setJudgeVerdicts?.(data.judgeVerdicts ?? null); }
+                catch (err) { console.warn('[useBrain] could not publish judge verdicts:', err.message); }
             }
             return data;
 

@@ -24,6 +24,24 @@ const useAIStore = create((set) => ({
     setQuickChips: (chips) => set(state =>
         Array.isArray(chips) && chips.length ? { quickChips: chips } : state
     ),
+
+    // R157 — the judge's scores for the last analysed suggestion set, as
+    // id → { confidence, why }, or null when no judgement was available.
+    //
+    // Kept in the store rather than passed down because the consumers are not
+    // all in React: WorkflowController resolves the next action and the prompt
+    // chips after every completed edit, outside the component tree, and
+    // SuggestionEngine reads this by default so that path benefits without
+    // threading an argument through it.
+    judgeVerdicts: null,
+    setJudgeVerdicts: (verdicts) => set(() => ({
+        // A null is meaningful: it means "no judgement", and the blend treats
+        // it as no opinion. Anything that is not a plain object is discarded
+        // so a bad payload cannot poison the ranking.
+        judgeVerdicts: (verdicts && typeof verdicts === 'object' && !Array.isArray(verdicts))
+            ? verdicts
+            : null,
+    })),
     setIsAnalyzing: (status) => set((state) => ({
         isAnalyzing: status,
         // When a job finishes, mark pending step logs as done so they switch from
