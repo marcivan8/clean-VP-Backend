@@ -29,6 +29,28 @@
 
 import useTimelineStore from '../store/useTimelineStore';
 import { getEditingStyle } from './EditingStyles.js';
+// The pure blend only — importing EditPolicy here would be circular, since it
+// imports deriveFacts from this file.
+import { blendJudge } from './judgeBlend.js';
+import useAIStore from '../store/useAIStore.js';
+
+/**
+ * Spacing between adjacent suggestions when they are handed to the judge.
+ *
+ * The deterministic order is already correct (brain suggestions first, then
+ * rules by priority), so each position simply gets a score this far below the
+ * one above it. The spacing is what BOUNDS the judge's influence.
+ *
+ * `JUDGE_SPAN` is 24, so one verdict moves a suggestion by at most ±24 and the
+ * widest gap between two verdicts is 48. At 16 points per position that is a
+ * reach of about three places: enough that a confident "this is the wrong move
+ * for this video" can actually demote something, and far too little to turn
+ * the last suggestion in a list into the first. 32 was tried first and was
+ * strictly worse — a maximally confident candidate could not overtake a
+ * maximally doubted one two places above it, so the judge could never change
+ * anything a user would notice.
+ */
+const RANK_STEP = 16;
 
 /**
  * Derive the facts the rules reason over.
@@ -263,8 +285,19 @@ const resolve = (v, f) => (typeof v === 'function' ? v(f) : v);
  * @param {object}   [opts.state]              pre-read store state
  * @returns {Array<{id,label,prompt,tab,reason,source}>}
  */
-export function getNextActions({ justCompleted = null, brainSuggestions = [], limit = 4, state = null } = {}) {
+export function getNextActions({ justCompleted = null, brainSuggestions = [], limit = 4, state = null, judgeVerdicts = undefined } = {}) {
     const facts = deriveFacts(state);
+
+    // Default to whatever the last /api/brain/analyze returned. `undefined`
+    // means "not specified, read the store"; an explicit `null` means "ignore
+    // any judgement", which is what the tests use to pin the deterministic
+    // order. WorkflowController calls this outside React and gets the
+    // verdicts for free this way.
+    let verdicts = judgeVerdicts;
+    if (verdicts === undefined) {
+        try { verdicts = useAIStore.getState().judgeVerdicts || null; }
+        catch { verdicts = null; }
+    }
 
     const ruleActions = RULES
         .filter(r => {
@@ -301,9 +334,35 @@ export function getNextActions({ justCompleted = null, brainSuggestions = [], li
         if (!key || seen.has(key)) continue;
         seen.add(key);
         merged.push(a);
-        if (merged.length >= limit) break;
     }
-    return merged;
+
+    // ── Arbitration (R157) ───────────────────────────────────────────────────
+    // `merged` is already in the right deterministic order, so each position
+    // is scored from its index and the judge's verdicts are blended against
+    // that. With no verdicts — no judge configured, or it failed closed —
+    // blendJudge sorts by those scores alone and returns EXACTLY this order,
+    // so the whole layer is a no-op unless a judge actually spoke.
+    //
+    // Note the slice happens AFTER blending, not before: capping to `limit`
+    // first would have thrown away the suggestions the judge might have
+    // promoted, which is most of the point.
+    const scored = merged.map((a, i) => ({
+        ...a,
+        score: (merged.length - i) * RANK_STEP,
+        // A suggestion with no stable id cannot be matched to a verdict; give
+        // it a key so blendJudge's tie-break stays deterministic anyway.
+        id: a.id || `label:${(a.label || '').toLowerCase()}`,
+    }));
+
+    const ranked = blendJudge(scored, verdicts);
+
+    // Restore the original id so callers and feedback keep working: a
+    // synthesised `label:` key must not leak into sendFeedback.
+    return ranked.slice(0, limit).map((a, i) => ({
+        ...a,
+        id: merged.find(m => (m.id || `label:${(m.label || '').toLowerCase()}`) === a.id)?.id ?? null,
+        rank: i,
+    }));
 }
 
 /** Convenience: the single best next action, or null. */

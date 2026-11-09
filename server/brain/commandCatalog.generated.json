@@ -1,0 +1,1166 @@
+{
+  "$generatedBy": "scripts/generate_capability_catalog.mjs",
+  "$source": "client/src/agent/CommandRegistry.js + client/src/agent/CapabilityGraph.js",
+  "$doNotEdit": true,
+  "resources": [
+    "assets",
+    "blurZone",
+    "brandKit",
+    "captionClips",
+    "clips",
+    "colorGrade",
+    "diarization",
+    "history",
+    "keywordEmphasis",
+    "sceneAnalysis",
+    "selection",
+    "shadow",
+    "transcript"
+  ],
+  "commandCount": 63,
+  "registryDeclaredCount": 61,
+  "supplementCount": 2,
+  "commands": [
+    {
+      "id": "detect_scene",
+      "executes": "detect_scene",
+      "phrase": "analyze the framing",
+      "category": "analysis",
+      "registryDeclared": true,
+      "label": "Analyse framing",
+      "summary": "Vision pass: where faces are, how many people are on camera. Changes nothing.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [
+        "sceneAnalysis"
+      ],
+      "destructive": false,
+      "readOnly": true,
+      "macro": null
+    },
+    {
+      "id": "detect_speakers",
+      "executes": "detect_speakers",
+      "phrase": "Detect speakers",
+      "category": "analysis",
+      "registryDeclared": true,
+      "label": "Detect speakers",
+      "summary": "Runs diarization and stores who speaks when. Changes nothing on the timeline.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [
+        "diarization"
+      ],
+      "destructive": false,
+      "readOnly": true,
+      "macro": null
+    },
+    {
+      "id": "add_sfx",
+      "executes": "add_sfx",
+      "phrase": "Add a sound effect",
+      "category": "asset",
+      "registryDeclared": true,
+      "label": "Add a sound effect",
+      "summary": "Places a sound effect from the library.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "add_sticker",
+      "executes": "add_sticker",
+      "phrase": "Add an icon or emoji",
+      "category": "asset",
+      "registryDeclared": true,
+      "label": "Add an icon or emoji",
+      "summary": "Places an icon, emoji or sticker overlay from the library.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "adjust_volume",
+      "executes": "adjust_volume",
+      "phrase": "lower the volume",
+      "category": "audio",
+      "registryDeclared": true,
+      "label": "Change volume",
+      "summary": "Sets clip or track volume.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "denoise_audio",
+      "executes": "denoise_audio",
+      "phrase": "Reduce noise",
+      "category": "audio",
+      "registryDeclared": true,
+      "label": "Reduce noise",
+      "summary": "Removes background hiss and hum.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "enhance_audio",
+      "executes": "enhance_audio",
+      "phrase": "Enhance the voice",
+      "category": "audio",
+      "registryDeclared": true,
+      "label": "Enhance the voice",
+      "summary": "Less background noise, even level and standard loudness, in one pass.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "normalize_audio",
+      "executes": "normalize_audio",
+      "phrase": "Normalise audio",
+      "category": "audio",
+      "registryDeclared": true,
+      "label": "Normalise audio",
+      "summary": "Evens out loudness across clips.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "create_video_from_assets",
+      "executes": "create_video_from_assets",
+      "phrase": "create a video from the attached images and video clips",
+      "category": "edit",
+      "registryDeclared": true,
+      "label": "Create a video from images and footage",
+      "summary": "Builds a visual montage from uploaded images and event footage, with gentle motion on stills and transitions between shots.",
+      "requires": [
+        "assets"
+      ],
+      "prefers": [],
+      "provides": [
+        "clips"
+      ],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "create_video_from_script",
+      "executes": "create_video_from_script",
+      "phrase": "create a video from this script",
+      "category": "edit",
+      "registryDeclared": true,
+      "label": "Create a video from a script",
+      "summary": "Builds a cartoonish-style video from a plain-text script — no footage needed — using Vecteezy vector/video/photo stock per shot, captioned from the script itself.",
+      "requires": [],
+      "prefers": [],
+      "provides": [
+        "clips"
+      ],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "extract_short",
+      "executes": "extract_short",
+      "phrase": "Extract a short",
+      "category": "edit",
+      "registryDeclared": true,
+      "label": "Extract a short",
+      "summary": "Keeps the strongest 15-60 s of the talk, starting on a hook, and cuts the rest.",
+      "requires": [
+        "clips",
+        "transcript"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": true,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "remove_filler_words",
+      "executes": "remove_filler_words",
+      "phrase": "Remove filler words",
+      "category": "edit",
+      "registryDeclared": true,
+      "label": "Remove filler words",
+      "summary": "Cuts ums, uhs and hesitations.",
+      "requires": [
+        "clips",
+        "transcript"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": true,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "remove_repetition",
+      "executes": "remove_repetition",
+      "phrase": "Remove repetition",
+      "category": "edit",
+      "registryDeclared": true,
+      "label": "Remove repetition",
+      "summary": "Cuts repeated takes and restated points.",
+      "requires": [
+        "clips",
+        "transcript"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": true,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "remove_speaker",
+      "executes": "remove_speaker",
+      "phrase": "remove the interviewer",
+      "category": "edit",
+      "label": "Remove a speaker",
+      "summary": "Removes every utterance of one speaker (interviewer, host or guest).",
+      "requires": [
+        "clips",
+        "diarization"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": true,
+      "readOnly": false,
+      "macro": null,
+      "registryDeclared": false
+    },
+    {
+      "id": "repurpose_shorts",
+      "executes": "repurpose_shorts",
+      "phrase": "Repurpose into shorts",
+      "category": "edit",
+      "registryDeclared": true,
+      "label": "Repurpose into shorts",
+      "summary": "Finds the strongest moments and makes several shorts -- more for a longer video -- across platforms (TikTok, Reels, YouTube Shorts) without changing the main edit.",
+      "requires": [
+        "clips",
+        "transcript"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "resume_failed_job",
+      "executes": "resume_failed_job",
+      "phrase": "Continue the edit",
+      "category": "edit",
+      "registryDeclared": true,
+      "label": "Continue the edit",
+      "summary": "Picks up the last complete edit from wherever it stopped or failed.",
+      "requires": [],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "semantic_cut",
+      "executes": "semantic_cut",
+      "phrase": "remove the part where",
+      "category": "edit",
+      "label": "Cut a described moment",
+      "summary": "Cuts a transcript range described in words (\"where I hesitate\").",
+      "requires": [
+        "clips",
+        "transcript"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": true,
+      "readOnly": false,
+      "macro": null,
+      "registryDeclared": false
+    },
+    {
+      "id": "silence_removal",
+      "executes": "silence_removal",
+      "phrase": "Remove silences",
+      "category": "edit",
+      "registryDeclared": true,
+      "label": "Remove silences",
+      "summary": "Cuts dead air between words, keeping intentional pauses.",
+      "requires": [
+        "clips",
+        "transcript"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": true,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "split_by_speaker",
+      "executes": "split_speakers",
+      "phrase": "split at speaker changes",
+      "category": "edit",
+      "registryDeclared": true,
+      "label": "Split at speaker turns",
+      "summary": "Cuts clips at speaker changes. No angles applied.",
+      "requires": [
+        "clips",
+        "diarization"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": true,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "sync_cutaways",
+      "executes": "sync_cutaways",
+      "phrase": "sync b roll to the words",
+      "category": "edit",
+      "registryDeclared": true,
+      "label": "Sync cutaways to the words",
+      "summary": "Places b-roll on the words it illustrates and number pops on spoken prices and figures.",
+      "requires": [
+        "clips",
+        "transcript"
+      ],
+      "prefers": [
+        "assets",
+        "sceneAnalysis"
+      ],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "queue_export",
+      "executes": "queue_export",
+      "phrase": "Export",
+      "category": "export",
+      "registryDeclared": true,
+      "label": "Export",
+      "summary": "Renders the final video.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "apply_style_recipe",
+      "executes": "apply_style_recipe",
+      "phrase": "Apply a style recipe",
+      "category": "macro",
+      "registryDeclared": true,
+      "label": "Apply a style recipe",
+      "summary": "Applies a bundled style: captions, key words, transitions, zoom rhythm and automatic placements.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [
+        "transcript",
+        "captionClips"
+      ],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "macro_clean_and_polish",
+      "executes": "compound_clean_dynamic",
+      "phrase": "clean it up and make it dynamic",
+      "category": "macro",
+      "registryDeclared": true,
+      "label": "Clean up and polish",
+      "summary": "Remove silences → remove fillers → add zoom rhythm.",
+      "requires": [
+        "clips",
+        "transcript"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": true,
+      "readOnly": false,
+      "macro": [
+        "silence_removal",
+        "remove_filler_words",
+        "rhythm_zoom"
+      ]
+    },
+    {
+      "id": "macro_multicam",
+      "executes": "virtual_multicam",
+      "phrase": "Full multicam pass",
+      "category": "macro",
+      "registryDeclared": true,
+      "label": "Full multicam pass",
+      "summary": "Detect speakers → analyse framing → split at turns → apply angles.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [
+        "diarization",
+        "sceneAnalysis"
+      ],
+      "destructive": true,
+      "readOnly": false,
+      "macro": [
+        "detect_speakers",
+        "detect_scene",
+        "split_by_speaker",
+        "apply_angle"
+      ]
+    },
+    {
+      "id": "add_motion_component",
+      "executes": "add_motion_component",
+      "phrase": "add a title sequence",
+      "category": "text",
+      "registryDeclared": true,
+      "label": "Add motion title / composition",
+      "summary": "Adds an editable multi-layer motion graphics component (Title Sequence, Kinetic Title, Stat Callout, Lower Third).",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "add_template",
+      "executes": "add_template",
+      "phrase": "add an underline",
+      "category": "text",
+      "registryDeclared": true,
+      "label": "Add an animated template",
+      "summary": "Adds a flip counter, a number/price pop, a logo card or a code window at the playhead.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "add_text_overlay",
+      "executes": "add_text_overlay",
+      "phrase": "Add text",
+      "category": "text",
+      "registryDeclared": true,
+      "label": "Add text",
+      "summary": "Places a text overlay on the timeline.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "auto_captions",
+      "executes": "auto_captions",
+      "phrase": "Add captions",
+      "category": "text",
+      "registryDeclared": true,
+      "label": "Add captions",
+      "summary": "Transcribes and adds word-timed captions.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [
+        "transcript",
+        "captionClips"
+      ],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "clear_keywords",
+      "executes": "clear_keywords",
+      "phrase": "Remove key word highlights",
+      "category": "text",
+      "registryDeclared": true,
+      "label": "Remove key word highlights",
+      "summary": "Removes keyword emphasis from every caption.",
+      "requires": [
+        "keywordEmphasis"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "design_scene",
+      "executes": "design_scene",
+      "phrase": "Design a graphics sequence",
+      "category": "text",
+      "registryDeclared": true,
+      "label": "Design a graphics sequence",
+      "summary": "Reads a brief for its tone and beats, then designs the titles, points and call to action as one editable sequence.",
+      "requires": [],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "emphasize_keywords",
+      "executes": "emphasize_keywords",
+      "phrase": "Highlight key words",
+      "category": "text",
+      "registryDeclared": true,
+      "label": "Highlight key words",
+      "summary": "Picks the key word of each caption and emphasises it in the caption style.",
+      "requires": [
+        "captionClips"
+      ],
+      "prefers": [],
+      "provides": [
+        "keywordEmphasis"
+      ],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "place_contextual_illustrations",
+      "executes": "place_contextual_illustrations",
+      "phrase": "Add contextual vector illustrations",
+      "category": "text",
+      "registryDeclared": true,
+      "label": "Add contextual vector illustrations",
+      "summary": "Adds a few animated vector illustrations when a spoken phrase matches a supported subject.",
+      "requires": [
+        "clips",
+        "transcript"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "set_brand_kit",
+      "executes": "set_brand_kit",
+      "phrase": "Set the brand colours and fonts",
+      "category": "text",
+      "registryDeclared": true,
+      "label": "Set the brand colours and fonts",
+      "summary": "Stores a brand kit — accent colour, text colour, fonts — that every new graphic takes automatically.",
+      "requires": [],
+      "prefers": [],
+      "provides": [
+        "brandKit"
+      ],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "storyboard_video",
+      "executes": "storyboard_video",
+      "phrase": "Storyboard the whole video",
+      "category": "text",
+      "registryDeclared": true,
+      "label": "Storyboard the whole video",
+      "summary": "Reads the transcript for the moments worth showing, plans a graphic for each one, and places them across the whole timeline.",
+      "requires": [
+        "clips",
+        "transcript"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "add_transition",
+      "executes": "add_transition",
+      "phrase": "add a transition",
+      "category": "timeline",
+      "registryDeclared": true,
+      "label": "Add transition",
+      "summary": "Adds a transition at a cut: flash, dip to black, whip, zoom punch, glitch or speed lines.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "organize_clips",
+      "executes": "organize_clips",
+      "phrase": "Organise clips",
+      "category": "timeline",
+      "registryDeclared": true,
+      "label": "Organise clips",
+      "summary": "Places and orders bin clips on the timeline.",
+      "requires": [
+        "assets"
+      ],
+      "prefers": [],
+      "provides": [
+        "clips"
+      ],
+      "destructive": true,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "remove_clip",
+      "executes": "remove_clip",
+      "phrase": "delete the selected clip",
+      "category": "timeline",
+      "registryDeclared": true,
+      "label": "Delete clip",
+      "summary": "Removes the selected clip.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": true,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "set_aspect_ratio",
+      "executes": "set_aspect_ratio",
+      "phrase": "change the aspect ratio",
+      "category": "timeline",
+      "registryDeclared": true,
+      "label": "Change aspect ratio",
+      "summary": "Reframes the project for a platform.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "set_clip_speed",
+      "executes": "set_clip_speed",
+      "phrase": "change the speed",
+      "category": "timeline",
+      "registryDeclared": true,
+      "label": "Change speed",
+      "summary": "Speeds up or slows down a clip.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "split_clip",
+      "executes": "split_clip",
+      "phrase": "Split at playhead",
+      "category": "timeline",
+      "registryDeclared": true,
+      "label": "Split at playhead",
+      "summary": "Cuts the clip under the playhead in two.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": true,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "undo_action",
+      "executes": "undo_action",
+      "phrase": "Undo",
+      "category": "timeline",
+      "registryDeclared": true,
+      "label": "Undo",
+      "summary": "Reverts the last change.",
+      "requires": [
+        "history"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "add_blur_zone",
+      "executes": "add_blur_zone",
+      "phrase": "add a blur zone",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Blur a zone",
+      "summary": "Blurs a rectangular region of the frame (a logo, watermark or stray face) for the clip's full duration.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [
+        "blurZone"
+      ],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "add_shadow",
+      "executes": "add_shadow",
+      "phrase": "Add a shadow",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Add a shadow",
+      "summary": "Adds a drop shadow to the selected sticker, icon, shape or graphic.",
+      "requires": [
+        "selection"
+      ],
+      "prefers": [],
+      "provides": [
+        "shadow"
+      ],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "animate_automatically",
+      "executes": "animate_automatically",
+      "phrase": "Animate automatically",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Animate automatically",
+      "summary": "Detects reveal/punchline/emphasis/emotional-beat moments and applies animations + SFX — no manual picks.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [
+        "transcript"
+      ],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "apply_angle",
+      "executes": "apply_angle",
+      "phrase": "Apply camera angles",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Apply camera angles",
+      "summary": "Assigns wide/mid/close (or per-speaker) framing to existing clips.",
+      "requires": [
+        "clips",
+        "diarization"
+      ],
+      "prefers": [
+        "sceneAnalysis"
+      ],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "apply_lut",
+      "executes": "apply_lut",
+      "phrase": "Apply a LUT",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Apply a LUT",
+      "summary": "Applies a curated LUT look, resolved from a text description, to the timeline.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [
+        "colorGrade"
+      ],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "clear_lut",
+      "executes": "clear_lut",
+      "phrase": "clear the lut",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Clear LUT",
+      "summary": "Removes the applied LUT look from the timeline.",
+      "requires": [
+        "colorGrade"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "color_grade",
+      "executes": "color_grade",
+      "phrase": "Colour grade",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Colour grade",
+      "summary": "Applies a colour look across clips.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [
+        "colorGrade"
+      ],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "compose_motion",
+      "executes": "compose_motion",
+      "phrase": "Design the motion",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Design the motion",
+      "summary": "Writes custom motion for titles, captions and graphics from a description (slam in, float, glitch, elegant…).",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "crop_clip",
+      "executes": "crop_clip",
+      "phrase": "Crop / punch in",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Crop / punch in",
+      "summary": "Crops the frame in (spatially) on a clip, speaker or the whole timeline.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "layout_fullscreen",
+      "executes": "layout_fullscreen",
+      "phrase": "Full-screen cutaway",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Full-screen cutaway",
+      "summary": "Makes the b-roll cover the whole frame.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [
+        "assets"
+      ],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "layout_picture_in_picture",
+      "executes": "layout_picture_in_picture",
+      "phrase": "Picture in picture",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Picture in picture",
+      "summary": "Puts the b-roll small in a corner over the speaker.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [
+        "assets"
+      ],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "layout_split_screen",
+      "executes": "layout_split_screen",
+      "phrase": "Split screen",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Split screen",
+      "summary": "Speaker in the top half, the b-roll or screen recording in the bottom half.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [
+        "assets"
+      ],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "polish_short",
+      "executes": "polish_short",
+      "phrase": "Pro short finish",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Pro short finish",
+      "summary": "Platform captions with key words and camera punch-ins on the strongest moments. (R158: the hook title, CTA outro, number pops and transitions are off by default.)",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [
+        "transcript",
+        "captionClips"
+      ],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "recommend_luts",
+      "executes": "recommend_luts",
+      "phrase": "Recommend LUTs",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Recommend LUTs",
+      "summary": "Suggests LUTs that fit the footage — content-aware, not just format-based.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": true,
+      "macro": null
+    },
+    {
+      "id": "remove_background",
+      "executes": "remove_background",
+      "phrase": "Remove the background",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Remove the background",
+      "summary": "Blurs, darkens or replaces the background behind the person, with a free on-device model.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [
+        "sceneAnalysis"
+      ],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "remove_blur_zone",
+      "executes": "remove_blur_zone",
+      "phrase": "Remove the blur zone",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Remove the blur zone",
+      "summary": "Removes a previously added zone blur from the selected clip.",
+      "requires": [
+        "blurZone"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "remove_shadow",
+      "executes": "remove_shadow",
+      "phrase": "Remove the shadow",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Remove the shadow",
+      "summary": "Removes the drop shadow from the selected sticker, icon, shape or graphic.",
+      "requires": [
+        "shadow"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "reset_crop",
+      "executes": "reset_crop",
+      "phrase": "Reset framing",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Reset framing",
+      "summary": "Clears any crop/zoom back to the full frame.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "rhythm_zoom",
+      "executes": "rhythm_zoom",
+      "phrase": "Add zoom rhythm",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Add zoom rhythm",
+      "summary": "Push-ins and punch-ins timed to emphasised words.",
+      "requires": [
+        "clips",
+        "transcript"
+      ],
+      "prefers": [],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "sandwich_text",
+      "executes": "sandwich_text",
+      "phrase": "Place text behind speaker",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Place text behind speaker",
+      "summary": "Sandwiches animated text or titles behind the speaker in a depth layer.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [
+        "sceneAnalysis"
+      ],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "track_speaker",
+      "executes": "track_speaker",
+      "phrase": "Track the speaker",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Track the speaker",
+      "summary": "Keeps the person framed as they move, re-centring the crop when they drift.",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [
+        "sceneAnalysis"
+      ],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    },
+    {
+      "id": "zoom_speaker",
+      "executes": "zoom_speaker",
+      "phrase": "Zoom to the speaker",
+      "category": "transform",
+      "registryDeclared": true,
+      "label": "Zoom to the speaker",
+      "summary": "Frames the person with one steady crop (finds them with the free background model).",
+      "requires": [
+        "clips"
+      ],
+      "prefers": [
+        "sceneAnalysis"
+      ],
+      "provides": [],
+      "destructive": false,
+      "readOnly": false,
+      "macro": null
+    }
+  ]
+}

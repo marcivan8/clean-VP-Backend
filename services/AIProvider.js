@@ -96,6 +96,13 @@ const CAPABILITY_PROVIDERS = {
     vision:     ['openai', 'ollama', 'gemini'],
     audio:      ['openai', 'groq'],
     embeddings: ['openai'],
+    // 'judge' is text-only arbitration: score a handful of already-generated
+    // candidates against a short rubric and return numbers. It gets its own
+    // lane rather than riding on 'chat' because it wants the OPPOSITE trade:
+    // smallest and fastest available, run on every candidate on every turn,
+    // where chat wants the most capable model for one call. Any chat-capable
+    // provider can serve it.
+    judge:      ['openai', 'ollama', 'groq', 'gemini', 'gemma-local'],
 };
 
 /**
@@ -119,6 +126,7 @@ let _clientCache = new Map();
  * @param {string}  [opts.capability]  - when 'vision', AI_VISION_PROVIDER
  *                                       (if set and valid) wins over AI_PROVIDER.
  *                                       when 'motion', AI_MOTION_PROVIDER wins.
+ *                                       when 'judge', AI_JUDGE_PROVIDER wins.
  * @param {Object}  [opts.env]         - defaults to process.env
  */
 function resolveProvider(opts = {}) {
@@ -134,6 +142,9 @@ function resolveProvider(opts = {}) {
     } else if (capability === 'motion' && env.AI_MOTION_PROVIDER) {
         raw = env.AI_MOTION_PROVIDER;
         source = 'AI_MOTION_PROVIDER';
+    } else if (capability === 'judge' && env.AI_JUDGE_PROVIDER) {
+        raw = env.AI_JUDGE_PROVIDER;
+        source = 'AI_JUDGE_PROVIDER';
     }
 
     raw = String(raw || 'openai').toLowerCase().trim();
@@ -205,7 +216,7 @@ function effectiveProvider(opts = {}) {
  * impossible to get a client from one provider and a model name from another,
  * which is the one mistake this module makes easy and expensive.
  *
- * @param {string} capability      - 'chat' | 'vision' | 'motion' | 'audio' | 'embeddings'
+ * @param {string} capability      - 'chat' | 'vision' | 'motion' | 'audio' | 'embeddings' | 'judge'
  * @param {string} requestedModel  - the OpenAI model name the call site wants
  * @param {Object} [opts]          - passed through to getAIClient (timeout, maxRetries)
  * @returns {{ client: Object|null, model: string, provider: string }}
@@ -225,7 +236,7 @@ function getAIFor(capability, requestedModel, opts = {}) {
  * @param {Object}  [opts]
  * @param {number}  [opts.timeout]     - per-request timeout, ms
  * @param {number}  [opts.maxRetries]
- * @param {string}  [opts.capability]  - 'chat' | 'vision' | 'audio' | 'embeddings'
+ * @param {string}  [opts.capability]  - 'chat' | 'vision' | 'audio' | 'embeddings' | 'judge'
  * @returns {Object|null} client, or null when no API key is configured
  */
 function getAIClient(opts = {}) {
@@ -366,6 +377,14 @@ function resolveModel(requestedModel, capabilityOrOpts) {
         if (capability === 'motion') {
             return process.env.GROQ_MOTION_MODEL || process.env.GROQ_CHAT_MODEL || 'openai/gpt-oss-120b';
         }
+        // Judging wants the SMALLEST capable model, not the best one: it runs
+        // over every candidate on every turn, so latency and cost dominate.
+        // Defaults to the chat model so there is one name to keep current if
+        // no judge model is named — the same reasoning as 'motion' above,
+        // which is why a hardcoded second model name is avoided here.
+        if (capability === 'judge') {
+            return process.env.GROQ_JUDGE_MODEL || process.env.GROQ_CHAT_MODEL || 'openai/gpt-oss-120b';
+        }
         // gpt-oss-120b (not the smaller -20b) — OpenAI's own open-weight
         // flagship, still served free by Groq: 117B params, Apache 2.0,
         // 128K context, built for structured outputs/agentic/function-
@@ -388,6 +407,9 @@ function resolveModel(requestedModel, capabilityOrOpts) {
         }
         if (capability === 'motion') {
             return process.env.GEMINI_MOTION_MODEL || process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+        }
+        if (capability === 'judge') {
+            return process.env.GEMINI_JUDGE_MODEL || process.env.GEMINI_MODEL || 'gemini-3.8-flash';
         }
         return process.env.GEMINI_MODEL || 'gemini-3.8-flash';
     }

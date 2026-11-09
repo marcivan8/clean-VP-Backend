@@ -21,7 +21,6 @@ import { IntentValidator } from './IntentValidator.js';
 import { INTENT_TYPES, OPERATIONS } from './CommandConstants.js';
 import { CaptionBriefParser } from './CaptionBriefParser.js';
 import { VisualBriefParser } from './VisualBriefParser.js';
-import { extractEditIntent } from '../utils/nlpFallback.js';
 import useAIStore from '../store/useAIStore.js';
 
 /**
@@ -1081,11 +1080,6 @@ export class IntentParser {
         const clips = context?.clips || [];
         const activeClip = clips.find(c => c.isActive);
         
-        const nlpParsed = extractEditIntent(prompt);
-        if (nlpParsed.verbs.length > 0) {
-            console.log('[IntentParser] localParse (compromise nlp fallback) detected:', nlpParsed);
-        }
-
         const matches = (category) =>
             NLP_MAP[category]?.some(phrase => lower.includes(phrase)) ?? false;
 
